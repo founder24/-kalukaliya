@@ -34,6 +34,14 @@
 
 set -euo pipefail
 
+# ---- Temp Directory & Cleanup Trap ----
+
+AUDIT_TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/audit-XXXXXXXXXX")
+cleanup_audit_tmpdir() {
+    rm -rf "$AUDIT_TMPDIR"
+}
+trap cleanup_audit_tmpdir EXIT INT TERM
+
 # ---- Configuration ----
 
 BASE_URL="${BASE_URL:-https://api.syrabit.ai}"
@@ -257,10 +265,8 @@ check_critical() {
     local msg="$1"
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
     TOTAL_CRITICAL=$((TOTAL_CRITICAL + 1))
-    TOTAL_FAIL=$((TOTAL_FAIL + 1))
     local idx=$((CURRENT_SECTION - 1))
     SECTION_CRITICAL[$idx]=$(( ${SECTION_CRITICAL[$idx]} + 1 ))
-    SECTION_FAIL[$idx]=$(( ${SECTION_FAIL[$idx]} + 1 ))
     SECTION_TOTAL[$idx]=$(( ${SECTION_TOTAL[$idx]} + 1 ))
     echo -e "    ${RED}${BOLD}[CRITICAL]${NC} $msg"
     add_json_result "CRITICAL" "$msg"
@@ -276,9 +282,12 @@ add_json_result() {
     local status="$1"
     local message="$2"
     local escaped_msg
-    escaped_msg=$(echo "$message" | sed 's/"/\\"/g' | tr -d '\n')
+    # Proper JSON escaping: backslashes first, then quotes, then control chars
+    escaped_msg=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' | tr -d '\n' | tr -dc '[:print:]')
     JSON_RESULTS=$(echo "$JSON_RESULTS" | jq --arg s "$status" --arg m "$escaped_msg" --arg sec "${SECTION_NAMES[$((CURRENT_SECTION-1))]:-unknown}" \
-        '. += [{"section": $sec, "status": $s, "message": $m}]' 2>/dev/null || echo "$JSON_RESULTS")
+        '. += [{"section": $sec, "status": $s, "message": $m}]' 2>/dev/null) || {
+        echo "  [warn] Failed to record JSON result: ${status} - ${message}" >&2
+    }
 }
 
 # Curl helper - performs request and sets globals
@@ -290,8 +299,8 @@ perform_request() {
 
     local timing_format='{"ttfb":%{time_starttransfer},"total":%{time_total},"status":%{http_code},"size":%{size_download}}'
     local tmpbody tmpheaders
-    tmpbody=$(mktemp)
-    tmpheaders=$(mktemp)
+    tmpbody="${AUDIT_TMPDIR}/body_$$_${RANDOM}"
+    tmpheaders="${AUDIT_TMPDIR}/headers_$$_${RANDOM}"
 
     local curl_cmd=(curl -sS -w "$timing_format" -o "$tmpbody" -D "$tmpheaders" --max-time 30 --connect-timeout 10)
     if [[ ${#extra_args[@]} -gt 0 ]]; then
@@ -330,11 +339,11 @@ get_header() {
     echo "$result"
 }
 
-# Check if response body contains string
+# Check if response body contains string (uses extended regex for portability)
 body_contains() {
     local needle="$1"
     local body="${2:-$RESP_BODY}"
-    if echo "$body" | grep -qi "$needle" 2>/dev/null; then
+    if echo "$body" | grep -Eqi "$needle" 2>/dev/null; then
         return 0
     fi
     return 1
@@ -614,7 +623,7 @@ run_section_1() {
         # Key size
         local key_info
         key_info=$(echo "$cert_info" | openssl x509 -noout -text 2>/dev/null | grep "Public-Key:" || echo "")
-        if echo "$key_info" | grep -q "256\|384\|2048\|4096"; then
+        if echo "$key_info" | grep -Eq "256|384|2048|4096"; then
             check_pass "Key strength acceptable: ${key_info}"
         elif [[ -n "$key_info" ]]; then
             check_warn "Key info: ${key_info}"
@@ -632,7 +641,7 @@ run_section_1() {
         # Check TLS 1.0/1.1 disabled
         local tls10
         tls10=$(echo | openssl s_client -servername "$FRONTEND_DOMAIN" -connect "${FRONTEND_DOMAIN}:443" -tls1 2>&1 || echo "failed")
-        if echo "$tls10" | grep -qi "alert\|error\|wrong version\|no protocols"; then
+        if echo "$tls10" | grep -Eqi "alert|error|wrong version|no protocols"; then
             check_pass "TLS 1.0 disabled (good)"
         else
             check_warn "TLS 1.0 may still be accepted"
@@ -640,7 +649,7 @@ run_section_1() {
 
         local tls11
         tls11=$(echo | openssl s_client -servername "$FRONTEND_DOMAIN" -connect "${FRONTEND_DOMAIN}:443" -tls1_1 2>&1 || echo "failed")
-        if echo "$tls11" | grep -qi "alert\|error\|wrong version\|no protocols"; then
+        if echo "$tls11" | grep -Eqi "alert|error|wrong version|no protocols"; then
             check_pass "TLS 1.1 disabled (good)"
         else
             check_warn "TLS 1.1 may still be accepted"
@@ -953,7 +962,7 @@ run_section_2() {
     local refpol
     refpol=$(get_header "referrer-policy")
     if [[ -n "$refpol" ]]; then
-        if echo "$refpol" | grep -qi "strict-origin\|no-referrer\|same-origin"; then
+        if echo "$refpol" | grep -Eqi "strict-origin|no-referrer|same-origin"; then
             check_pass "Referrer-Policy: ${refpol}"
         else
             check_warn "Referrer-Policy: ${refpol} (consider stricter)"
@@ -1114,7 +1123,7 @@ run_section_2() {
         fi
         if echo "$set_cookies" | grep -qi "SameSite"; then
             check_pass "Cookies have SameSite attribute"
-            if echo "$set_cookies" | grep -qi "SameSite=Strict\|SameSite=Lax"; then
+            if echo "$set_cookies" | grep -Eqi "SameSite=Strict|SameSite=Lax"; then
                 check_pass "SameSite is Strict or Lax"
             elif echo "$set_cookies" | grep -qi "SameSite=None"; then
                 check_warn "SameSite=None (cross-site allowed)"
@@ -1125,7 +1134,7 @@ run_section_2() {
         if echo "$set_cookies" | grep -qi "Path=/"; then
             check_pass "Cookie Path attribute set"
         fi
-        if echo "$set_cookies" | grep -qi "__Host-\|__Secure-"; then
+        if echo "$set_cookies" | grep -Eqi "__Host-|__Secure-"; then
             check_pass "Using cookie name prefix (__Host- or __Secure-)"
         else
             check_warn "Not using cookie name prefixes"
@@ -1200,7 +1209,9 @@ run_section_2() {
 
     local evil_acao
     evil_acao=$(get_header "access-control-allow-origin")
-    if [[ "$evil_acao" == "https://evil-site.com" ]]; then
+    if [[ "$RESP_STATUS" == "405" ]]; then
+        check_warn "CORS evil origin test inconclusive (endpoint returns 405 for OPTIONS)"
+    elif [[ "$evil_acao" == "https://evil-site.com" ]]; then
         check_fail "CORS reflects arbitrary origin (security risk!)"
     elif [[ "$evil_acao" == "*" ]]; then
         check_warn "CORS wildcard allows any origin"
@@ -1243,7 +1254,7 @@ run_section_2() {
         check_pass "Server header not exposed"
     elif echo "$srv" | grep -qi "cloudflare"; then
         check_pass "Server: cloudflare (acceptable, no version info)"
-    elif echo "$srv" | grep -qi "nginx/[0-9]\|apache/[0-9]\|gunicorn"; then
+    elif echo "$srv" | grep -Eqi "nginx/[0-9]|apache/[0-9]|gunicorn"; then
         check_fail "Server header exposes version: ${srv}"
     else
         check_warn "Server header: ${srv}"
@@ -1262,7 +1273,7 @@ run_section_2() {
     perform_request "$BASE_URL/health"
     local api_srv
     api_srv=$(get_header "server")
-    if echo "$api_srv" | grep -qi "uvicorn\|gunicorn\|python"; then
+    if echo "$api_srv" | grep -Eqi "uvicorn|gunicorn|python"; then
         check_fail "API server exposes technology: ${api_srv}"
     elif [[ -z "$api_srv" || "$api_srv" == "cloudflare" ]]; then
         check_pass "API server header safe: ${api_srv:-not set}"
@@ -1388,13 +1399,13 @@ run_section_2() {
     subsection "Bot Protection"
 
     perform_request "$FRONTEND_URL"
-    if body_contains "turnstile\|cf-turnstile\|challenges.cloudflare.com"; then
+    if body_contains "turnstile|cf-turnstile|challenges.cloudflare.com"; then
         check_pass "Cloudflare Turnstile references found in HTML"
     else
         check_warn "No Turnstile references in HTML (may be lazy-loaded)"
     fi
 
-    if body_contains "captcha\|recaptcha\|hcaptcha"; then
+    if body_contains "captcha|recaptcha|hcaptcha"; then
         check_pass "CAPTCHA mechanism detected"
     fi
 
@@ -1402,7 +1413,7 @@ run_section_2() {
     subsection "CSRF Protection"
 
     perform_request "$FRONTEND_URL"
-    if body_contains "csrf\|_csrf\|csrftoken\|xsrf"; then
+    if body_contains "csrf|_csrf|csrftoken|xsrf"; then
         check_pass "CSRF token references found"
     else
         check_warn "No CSRF token references in HTML (SPA may handle differently)"
@@ -1441,7 +1452,7 @@ run_section_2() {
     local dir_paths=("/api/" "/static/" "/assets/" "/js/" "/css/" "/images/")
     for dpath in "${dir_paths[@]}"; do
         perform_request "${FRONTEND_URL}${dpath}"
-        if body_contains "Index of\|Directory listing\|Parent Directory"; then
+        if body_contains "Index of|Directory listing|Parent Directory"; then
             check_fail "Directory listing enabled at ${dpath}"
         else
             check_pass "No directory listing at ${dpath}"
@@ -1539,7 +1550,7 @@ run_section_2() {
     local traversal_payloads=("/../../../etc/passwd" "/..%2F..%2F..%2Fetc%2Fpasswd" "/....//....//etc/passwd" "/%2e%2e/%2e%2e/etc/passwd")
     for payload in "${traversal_payloads[@]}"; do
         perform_request "${BASE_URL}${payload}"
-        if ! body_contains "root:.*:0:0\|daemon:"; then
+        if ! body_contains "root:.*:0:0|daemon:"; then
             check_pass "Path traversal blocked: ${payload}"
         else
             check_critical "Path traversal succeeded: ${payload}"
@@ -1631,7 +1642,7 @@ run_section_2() {
     perform_request "$FRONTEND_URL"
     local full_csp
     full_csp=$(get_header "content-security-policy")
-    if echo "$full_csp" | grep -qi "frame-ancestors.*'none'\|frame-ancestors.*'self'"; then
+    if echo "$full_csp" | grep -Eqi "frame-ancestors.*'none'|frame-ancestors.*'self'"; then
         check_pass "CSP frame-ancestors properly restrictive"
     elif echo "$full_csp" | grep -qi "frame-ancestors"; then
         check_warn "CSP frame-ancestors present but check restrictiveness"
@@ -1852,7 +1863,7 @@ run_section_3() {
     fe_cache=$(get_header "cache-control")
     if [[ -n "$fe_cache" ]]; then
         check_pass "Frontend Cache-Control: ${fe_cache}"
-        if echo "$fe_cache" | grep -qi "no-cache\|no-store"; then
+        if echo "$fe_cache" | grep -Eqi "no-cache|no-store"; then
             check_pass "HTML not cached (dynamic content)"
         fi
     else
@@ -1912,7 +1923,8 @@ run_section_3() {
     local pids=()
     local concurrent_results=()
     local tmpdir
-    tmpdir=$(mktemp -d)
+    tmpdir="${AUDIT_TMPDIR}/concurrent_s3_$$"
+    mkdir -p "$tmpdir"
 
     # Fire 10 parallel requests
     for i in $(seq 1 10); do
@@ -2068,13 +2080,13 @@ run_section_3() {
         check_pass "Preconnect hints found"
     fi
 
-    if body_contains "defer\|async"; then
+    if body_contains "defer|async"; then
         check_pass "Deferred/async script loading detected"
     else
         check_warn "No defer/async scripts detected"
     fi
 
-    if body_contains "loading=\"lazy\"\|data-lazy"; then
+    if body_contains "loading=\"lazy\"|data-lazy"; then
         check_pass "Lazy loading detected"
     fi
 
@@ -2091,14 +2103,14 @@ run_section_3() {
     fi
 
     # Preconnect to API
-    if body_contains "preconnect.*api\|preconnect.*syrabit"; then
+    if body_contains "preconnect.*api|preconnect.*syrabit"; then
         check_pass "Preconnect to API domain found"
     else
         check_warn "No preconnect to API domain"
     fi
 
     # Module/nomodule pattern
-    if body_contains "type=\"module\"\|type='module'"; then
+    if body_contains "type=\"module\"|type='module'"; then
         check_pass "ES modules used"
     fi
 
@@ -2491,7 +2503,7 @@ run_section_4() {
         else
             check_warn "Sitemap Content-Type: ${ct} (expected XML)"
         fi
-        if body_contains "<sitemapindex\|<urlset\|<sitemap"; then
+        if body_contains "<sitemapindex|<urlset|<sitemap"; then
             check_pass "Sitemap has valid XML structure"
         else
             check_warn "Sitemap may not have standard XML structure"
@@ -2597,7 +2609,7 @@ run_section_4() {
     perform_request "$BASE_URL/docs"
     if [[ "$RESP_STATUS" == "200" ]]; then
         check_pass "GET /docs: 200 OK (Swagger UI)"
-        if body_contains "swagger\|openapi\|redoc"; then
+        if body_contains "swagger|openapi|redoc"; then
             check_pass "Docs page contains API documentation"
         fi
     elif [[ "$RESP_STATUS" == "404" ]]; then
@@ -2809,7 +2821,7 @@ run_section_4() {
     perform_request "$BASE_URL/api/content/boards"
     local ct
     ct=$(get_header "content-type")
-    if echo "$ct" | grep -qi "charset=utf-8\|charset=UTF-8"; then
+    if echo "$ct" | grep -Eqi "charset=utf-8|charset=UTF-8"; then
         check_pass "API Content-Type includes charset: ${ct}"
     elif echo "$ct" | grep -qi "application/json"; then
         check_pass "API Content-Type: application/json"
@@ -3316,7 +3328,7 @@ run_section_5() {
     perform_request "$BASE_URL/api/content/boards?id=1%27%20OR%201=1--"
     if [[ "$RESP_STATUS" == "400" || "$RESP_STATUS" == "403" || "$RESP_STATUS" == "200" || "$RESP_STATUS" == "404" ]]; then
         check_pass "SQL injection attempt handled: ${RESP_STATUS}"
-        if [[ "$RESP_STATUS" == "200" ]] && ! body_contains "error\|sql\|syntax"; then
+        if [[ "$RESP_STATUS" == "200" ]] && ! body_contains "error|sql|syntax"; then
             check_pass "No SQL error in response to injection attempt"
         fi
     fi
@@ -3452,7 +3464,7 @@ run_section_5() {
     # Knowledge graph should reference correct site
     perform_request "$BASE_URL/api/seo/knowledge-graph"
     if [[ "$RESP_STATUS" == "200" ]] && echo "$RESP_BODY" | jq . >/dev/null 2>&1; then
-        if body_contains "${FRONTEND_DOMAIN}\|syrabit"; then
+        if body_contains "${FRONTEND_DOMAIN}|syrabit"; then
             check_pass "Knowledge graph references correct domain"
         fi
         if echo "$RESP_BODY" | jq -e '.["@context"]' >/dev/null 2>&1; then
@@ -3507,7 +3519,8 @@ run_section_6() {
     # Verify concurrency handling (containerConcurrency=80)
     local concurrency_pids=()
     local concurrency_dir
-    concurrency_dir=$(mktemp -d)
+    concurrency_dir="${AUDIT_TMPDIR}/concurrent_s6_$$"
+    mkdir -p "$concurrency_dir"
     for i in $(seq 1 15); do
         curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$BASE_URL/health" > "${concurrency_dir}/c_${i}" 2>/dev/null &
         concurrency_pids+=($!)
@@ -3542,14 +3555,14 @@ run_section_6() {
 
     # Check that APP_ENV is not leaked in responses
     perform_request "$BASE_URL/health"
-    if body_contains "APP_ENV\|ENVIRONMENT=\|ENV=production\|NODE_ENV"; then
+    if body_contains "APP_ENV|ENVIRONMENT=|ENV=production|NODE_ENV"; then
         check_fail "Environment variables may be exposed in response"
     else
         check_pass "No environment variable leakage in health response"
     fi
 
     # Check debug mode not exposed
-    if body_contains "debug.*true\|DEBUG.*true\|\"debug\":true"; then
+    if body_contains "debug.*true|DEBUG.*true|\"debug\":true"; then
         check_fail "Debug mode appears to be enabled"
     else
         check_pass "No debug mode indicators in response"
@@ -3557,21 +3570,21 @@ run_section_6() {
 
     # Check for stack traces
     perform_request "$BASE_URL/api/nonexistent-path-trigger-error"
-    if body_contains "Traceback\|traceback\|stack trace\|at .*\.py\|at .*\.js"; then
+    if body_contains "Traceback|traceback|stack trace|at .*\.py|at .*\.js"; then
         check_fail "Stack trace exposed in error response"
     else
         check_pass "No stack trace in error response"
     fi
 
     # Check for database connection strings
-    if body_contains "mongodb://\|redis://\|postgresql://\|mysql://"; then
+    if body_contains "mongodb://|redis://|postgresql://|mysql://"; then
         check_critical "Database connection string exposed!"
     else
         check_pass "No database URLs in responses"
     fi
 
     # Check for API keys
-    if body_contains "sk-\|api_key.*=\|GOOGLE_.*KEY\|RAZORPAY_.*KEY"; then
+    if body_contains "sk-|api_key.*=|GOOGLE_.*KEY|RAZORPAY_.*KEY"; then
         check_critical "API keys potentially exposed!"
     else
         check_pass "No API key patterns in responses"
@@ -3633,12 +3646,12 @@ run_section_6() {
     fi
 
     # Check for SPA indicators
-    if body_contains "id=\"app\"\|id=\"root\"\|<div id="; then
+    if body_contains "id=\"app\"|id=\"root\"|<div id="; then
         check_pass "SPA mount point found in HTML"
     fi
 
     # Check for asset paths
-    if body_contains "/assets/\|/static/\|\.js\"\|\.css\""; then
+    if body_contains "/assets/|/static/|\.js\"|\.css\""; then
         check_pass "Static asset references in HTML"
     fi
 
@@ -3742,20 +3755,20 @@ run_section_6() {
 
     # Check for version disclosure in headers
     local all_headers="$RESP_HEADERS"
-    if echo "$all_headers" | grep -qi "x-aspnetmvc-version\|x-aspnet-version"; then
+    if echo "$all_headers" | grep -Eqi "x-aspnetmvc-version|x-aspnet-version"; then
         check_fail "ASP.NET version disclosed in headers"
     else
         check_pass "No ASP.NET version disclosure"
     fi
 
-    if echo "$all_headers" | grep -qi "x-runtime\|x-request-runtime"; then
+    if echo "$all_headers" | grep -Eqi "x-runtime|x-request-runtime"; then
         check_warn "Runtime timing information in headers"
     else
         check_pass "No runtime timing disclosure"
     fi
 
     # Check for common proxy headers that shouldn't be forwarded
-    if echo "$all_headers" | grep -qi "x-forwarded-for\|x-real-ip"; then
+    if echo "$all_headers" | grep -Eqi "x-forwarded-for|x-real-ip"; then
         check_warn "Proxy headers visible in response"
     else
         check_pass "No proxy headers leaked to client"
@@ -3875,14 +3888,14 @@ run_section_6() {
     perform_request "$FRONTEND_URL"
 
     # Check for Cloudflare Web Analytics
-    if body_contains "cloudflareinsights\|cf-beacon\|static.cloudflareinsights.com"; then
+    if body_contains "cloudflareinsights|cf-beacon|static.cloudflareinsights.com"; then
         check_pass "Cloudflare Web Analytics detected"
     else
         check_warn "No Cloudflare Web Analytics"
     fi
 
     # Check for Cloudflare challenge page (should not appear for normal requests)
-    if body_contains "cf-challenge\|cf-chl-bypass\|Ray ID:.*challenge"; then
+    if body_contains "cf-challenge|cf-chl-bypass|Ray ID:.*challenge"; then
         check_fail "Cloudflare challenge page showing for normal request"
     else
         check_pass "No Cloudflare challenge for normal requests"
@@ -3973,7 +3986,7 @@ run_section_7() {
         fi
 
         # Check for blocking of sensitive paths
-        if body_contains "/api/\|/admin"; then
+        if body_contains "/api/|/admin"; then
             check_pass "robots.txt blocks sensitive paths"
         else
             check_warn "robots.txt may not block sensitive paths"
@@ -4049,7 +4062,7 @@ run_section_7() {
     subsection "Structured Data (ld+json)"
 
     perform_request "$FRONTEND_URL"
-    if body_contains "application/ld+json\|ld\\+json"; then
+    if body_contains "application/ld+json|ld\\+json"; then
         check_pass "Structured data (ld+json) found in HTML"
 
         if body_contains "\"@type\""; then
@@ -4058,7 +4071,7 @@ run_section_7() {
         if body_contains "\"@context\""; then
             check_pass "Structured data has @context"
         fi
-        if body_contains "Organization\|WebApplication\|WebSite\|SoftwareApplication"; then
+        if body_contains "Organization|WebApplication|WebSite|SoftwareApplication"; then
             check_pass "Structured data type recognized"
         fi
         if body_contains "\"name\""; then
@@ -4080,38 +4093,38 @@ run_section_7() {
     perform_request "$FRONTEND_URL"
 
     # og:title
-    if body_contains "og:title\|property=\"og:title\""; then
+    if body_contains "og:title|property=\"og:title\""; then
         check_pass "og:title meta tag present"
     else
         check_warn "Missing og:title"
     fi
 
     # og:description
-    if body_contains "og:description\|property=\"og:description\""; then
+    if body_contains "og:description|property=\"og:description\""; then
         check_pass "og:description meta tag present"
     else
         check_warn "Missing og:description"
     fi
 
     # og:image
-    if body_contains "og:image\|property=\"og:image\""; then
+    if body_contains "og:image|property=\"og:image\""; then
         check_pass "og:image meta tag present"
     else
         check_warn "Missing og:image"
     fi
 
     # og:url
-    if body_contains "og:url\|property=\"og:url\""; then
+    if body_contains "og:url|property=\"og:url\""; then
         check_pass "og:url meta tag present"
     fi
 
     # og:type
-    if body_contains "og:type\|property=\"og:type\""; then
+    if body_contains "og:type|property=\"og:type\""; then
         check_pass "og:type meta tag present"
     fi
 
     # twitter:card
-    if body_contains "twitter:card\|name=\"twitter:card\""; then
+    if body_contains "twitter:card|name=\"twitter:card\""; then
         check_pass "twitter:card meta tag present"
     else
         check_warn "Missing twitter:card"
@@ -4128,7 +4141,7 @@ run_section_7() {
     fi
 
     # Standard meta description
-    if body_contains "name=\"description\"\|name='description'"; then
+    if body_contains "name=\"description\"|name='description'"; then
         check_pass "Meta description tag present"
     else
         check_warn "Missing meta description"
@@ -4137,7 +4150,7 @@ run_section_7() {
     # ---- Canonical URL ----
     subsection "Canonical URL"
 
-    if body_contains "rel=\"canonical\"\|rel='canonical'"; then
+    if body_contains "rel=\"canonical\"|rel='canonical'"; then
         check_pass "Canonical URL (rel=canonical) present"
     else
         check_warn "Missing canonical URL link"
@@ -4146,7 +4159,7 @@ run_section_7() {
     # ---- Mobile & Viewport ----
     subsection "Mobile & Viewport"
 
-    if body_contains "name=\"viewport\"\|name='viewport'"; then
+    if body_contains "name=\"viewport\"|name='viewport'"; then
         check_pass "Viewport meta tag present"
         if body_contains "width=device-width"; then
             check_pass "Viewport has width=device-width"
@@ -4171,21 +4184,21 @@ run_section_7() {
     perform_request "$FRONTEND_URL"
 
     # lang attribute on html
-    if body_contains "<html.*lang=\|<html lang"; then
+    if body_contains "<html.*lang=|<html lang"; then
         check_pass "HTML lang attribute present"
     else
         check_fail "Missing HTML lang attribute"
     fi
 
     # Check for ARIA attributes
-    if body_contains "aria-\|role="; then
+    if body_contains "aria-|role="; then
         check_pass "ARIA attributes or role detected"
     else
         check_warn "No ARIA attributes detected in initial HTML"
     fi
 
     # Check for skip navigation
-    if body_contains "skip.*nav\|skip.*content\|skiplink"; then
+    if body_contains "skip.*nav|skip.*content|skiplink"; then
         check_pass "Skip navigation link detected"
     fi
 
@@ -4211,7 +4224,7 @@ run_section_7() {
     # ---- PWA / Manifest ----
     subsection "PWA & Manifest"
 
-    if body_contains "manifest.json\|manifest.webmanifest\|rel=\"manifest\""; then
+    if body_contains "manifest.json|manifest.webmanifest|rel=\"manifest\""; then
         check_pass "Web manifest referenced in HTML"
 
         # Try to fetch manifest
@@ -4246,7 +4259,7 @@ run_section_7() {
 
     perform_request "$FRONTEND_URL"
 
-    if body_contains "cookie.*consent\|cookie.*banner\|cookie.*policy\|gdpr\|CookieConsent"; then
+    if body_contains "cookie.*consent|cookie.*banner|cookie.*policy|gdpr|CookieConsent"; then
         check_pass "Cookie consent mechanism detected"
     else
         check_warn "No cookie consent mechanism detected"
@@ -4291,7 +4304,7 @@ run_section_7() {
     fi
 
     # Check charset
-    if body_contains "charset=utf-8\|charset=UTF-8"; then
+    if body_contains "charset=utf-8|charset=UTF-8"; then
         check_pass "UTF-8 charset declared"
     else
         check_warn "UTF-8 charset not explicitly declared"
@@ -4308,7 +4321,7 @@ run_section_7() {
         check_fail "Missing <title> tag"
     fi
 
-    if body_contains "<h1\|<H1"; then
+    if body_contains "<h1|<H1"; then
         check_pass "H1 heading found"
     else
         check_warn "No H1 heading in initial HTML (SPA may render dynamically)"
@@ -4348,7 +4361,7 @@ run_section_7() {
         check_pass "og:locale present"
     fi
 
-    if body_contains "twitter:site\|twitter:creator"; then
+    if body_contains "twitter:site|twitter:creator"; then
         check_pass "Twitter site/creator tag present"
     fi
 
@@ -4359,13 +4372,13 @@ run_section_7() {
     # ---- PWA Readiness ----
     subsection "PWA Readiness"
 
-    if body_contains "theme-color\|name=\"theme-color\""; then
+    if body_contains "theme-color|name=\"theme-color\""; then
         check_pass "Theme color meta tag present"
     else
         check_warn "No theme-color meta tag"
     fi
 
-    if body_contains "apple-mobile-web-app-capable\|mobile-web-app-capable"; then
+    if body_contains "apple-mobile-web-app-capable|mobile-web-app-capable"; then
         check_pass "Mobile web app capable meta tag"
     fi
 
@@ -4374,7 +4387,7 @@ run_section_7() {
     fi
 
     # Service worker registration
-    if body_contains "serviceWorker\|service-worker\|sw.js"; then
+    if body_contains "serviceWorker|service-worker|sw.js"; then
         check_pass "Service worker reference detected"
     else
         check_warn "No service worker reference"
@@ -4673,7 +4686,7 @@ run_section_8() {
     perform_request "$BASE_URL/health"
 
     # Check for verbose error in production
-    if body_contains "\"log_level\"\|\"logging\""; then
+    if body_contains "\"log_level\"|\"logging\""; then
         check_warn "Logging config may be exposed in response"
     else
         check_pass "No logging config exposed"

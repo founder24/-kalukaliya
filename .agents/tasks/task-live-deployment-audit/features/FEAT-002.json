@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Fix 6 bugs found in code review of live-deployment-audit.sh: check_critical double-counting, JSON escaping, grep portability, temp file cleanup, CORS test logic, concurrent dir leaks",
+  "status": "completed",
+  "steps": [
+    "Fix check_critical double-counting: remove TOTAL_FAIL and SECTION_FAIL increments so critical and fail counts are separate",
+    "Fix add_json_result: add proper JSON escaping for backslashes, tabs, control chars; replace silent fallback with stderr warning",
+    "Fix body_contains: use grep -E (extended regex) instead of grep BRE with GNU \\| extension; convert all \\| patterns to ERE |",
+    "Fix temp file leaks: add AUDIT_TMPDIR with trap on EXIT/INT/TERM; use AUDIT_TMPDIR for perform_request temp files",
+    "Fix CORS test logic gap: check for 405 status before asserting origin rejection",
+    "Fix concurrent test dirs: use AUDIT_TMPDIR subdirectories instead of standalone mktemp -d"
+  ],
+  "acceptance_criteria": [
+    "bash -n syntax check passes",
+    "--quick mode runs successfully",
+    "FAIL and CRITICAL counts are independent in summary",
+    "No \\| patterns remain in body_contains calls or grep calls without -E",
+    "All temp files go into AUDIT_TMPDIR which is cleaned on exit/interrupt",
+    "CORS test reports inconclusive when endpoint returns 405"
+  ],
+  "verification": [
+    "Run: bash -n scripts/live-deployment-audit.sh",
+    "Run: ./scripts/live-deployment-audit.sh --quick"
+  ],
+  "blocked_reason": null,
+  "findings": "All 6 fixes applied successfully. The --quick run shows Failed: 1 and Critical: 2 as separate counts (previously would have shown Failed: 3). The trap cleanup works correctly (no audit temp dirs persist). All 53 body_contains and 14 inline grep calls converted from BRE \\| to ERE |."
+}
