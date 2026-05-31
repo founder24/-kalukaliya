@@ -237,6 +237,23 @@ async def chat(
                 message_hash = ChatService._make_cache_hash(
                     sanitized_message, detected_lang
                 )
+
+            # Fast-path for greetings: return instant response without LLM
+            if skip_rag:
+                greeting = ChatService.get_greeting_response(sanitized_message, detected_lang)
+                if greeting:
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    # Cache it for consistency
+                    asyncio.create_task(
+                        ChatService.set_cached_response(message_hash, greeting, "cache")
+                    )
+                    return ChatResponse(
+                        response=greeting,
+                        model_used="cache",
+                        latency_ms=latency_ms,
+                        sources=[],
+                    )
+
             if cached:
                 latency_ms = int((time.time() - start_time) * 1000)
                 logger.info(
@@ -439,8 +456,8 @@ async def chat_stream(
     - Authenticated: rate limited by user_id (monthly quota)
     - Anonymous: rate limited by IP (same monthly quota for free tier)
 
-    Sends normalized chunks: data: {"text": "...", "done": false}
-    Final event includes: {"text": "", "done": true, "latency_ms": ..., "model": ..., "lang": ...}
+    Sends normalized chunks: data: {"content": "...", "done": false}
+    Final event includes: {"content": "", "done": true, "latency_ms": ..., "model": ..., "lang": ...}
 
     Features:
     - Explicit lang param (en/as) or auto-detection fallback
@@ -492,6 +509,33 @@ async def chat_stream(
     detected_lang, target_model = ChatService.resolve_language_and_model(
         sanitized_message, request.lang
     )
+
+    # Fast-path for greetings in stream mode
+    greeting = ChatService.get_greeting_response(sanitized_message, detected_lang)
+    if greeting:
+        async def greeting_stream():
+            yield f"data: {json.dumps({'content': greeting, 'done': False})}\n\n"
+            latency_ms = int((time.time() - start_time) * 1000)
+            yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': 'cache', 'lang': detected_lang})}\n\n"
+            # Fire-and-forget save
+            task = asyncio.create_task(
+                ChatService.save_chat(
+                    user_id=user_id,
+                    session_id=request.session_id,
+                    user_message=sanitized_message,
+                    assistant_response=greeting,
+                    target_model="cache",
+                    latency_ms=latency_ms,
+                    context_chunks=[],
+                    detected_lang=detected_lang,
+                )
+            )
+            task.add_done_callback(_log_task_exception)
+        return StreamingResponse(
+            greeting_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "Connection": "keep-alive", "X-Content-Type-Options": "nosniff", "X-Accel-Buffering": "no"},
+        )
 
     # -- RAG retrieval (with OTel span) --
     from app.core.telemetry import get_tracer

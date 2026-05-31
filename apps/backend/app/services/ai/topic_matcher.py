@@ -94,6 +94,19 @@ class TopicMatcher:
         self._load_failed = False
         logger.info(f"Loaded {len(self._embeddings)} topic embeddings into cache")
 
+    async def has_topics(self) -> bool:
+        """Check whether any topic embeddings are loaded in the cache.
+
+        Ensures the cache is loaded (acquiring the lock if needed) before checking.
+        Returns True if at least one embedding exists, False otherwise.
+        """
+        if not self._is_cache_valid():
+            async with self._load_lock:
+                if not self._is_cache_valid():
+                    await self._load_embeddings()
+
+        return self._embeddings is not None and len(self._embeddings) > 0
+
     def invalidate_cache(self) -> None:
         """Force reload on next match call."""
         self._embeddings = None

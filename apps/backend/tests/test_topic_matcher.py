@@ -220,6 +220,35 @@ class TestTopicMatcher:
         matcher.invalidate_cache()
         assert not matcher._is_cache_valid()
 
+    @pytest.mark.anyio
+    async def test_has_topics_empty_cache(self):
+        from app.services.ai.topic_matcher import TopicMatcher
+
+        matcher = TopicMatcher()
+        with patch("app.services.ai.topic_matcher.TopicEmbedding.find_all") as mock_find:
+            mock_find.return_value.to_list = AsyncMock(return_value=[])
+            result = await matcher.has_topics()
+        assert result is False
+
+    @pytest.mark.anyio
+    async def test_has_topics_with_data(self, sample_embeddings):
+        from app.services.ai.topic_matcher import TopicMatcher
+
+        matcher = TopicMatcher()
+        mock_doc = MagicMock()
+        mock_doc.topic_id = "topic-1"
+        mock_doc.topic_title = "Test"
+        mock_doc.chapter_id = "ch-1"
+        mock_doc.chapter_title = "Ch"
+        mock_doc.subject_slug = "s"
+        mock_doc.board_slug = "b"
+        mock_doc.class_level = "c"
+        mock_doc.embedding = sample_embeddings["similar"]
+        with patch("app.services.ai.topic_matcher.TopicEmbedding.find_all") as mock_find:
+            mock_find.return_value.to_list = AsyncMock(return_value=[mock_doc])
+            result = await matcher.has_topics()
+        assert result is True
+
 
 class TestChatServiceTopicMatch:
     """Test ChatService.check_topic_match integration."""
@@ -241,6 +270,11 @@ class TestChatServiceTopicMatch:
         }
 
         with (
+            patch(
+                "app.services.ai.topic_matcher.topic_matcher.has_topics",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch(
                 "app.services.ai.embedder.generate_embedding_vector",
                 new_callable=AsyncMock,
@@ -266,6 +300,11 @@ class TestChatServiceTopicMatch:
 
         with (
             patch(
+                "app.services.ai.topic_matcher.topic_matcher.has_topics",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
                 "app.services.ai.embedder.generate_embedding_vector",
                 new_callable=AsyncMock,
                 return_value=mock_embedding,
@@ -284,12 +323,39 @@ class TestChatServiceTopicMatch:
     async def test_check_topic_match_handles_error(self):
         from app.services.chat_service import ChatService
 
-        with patch(
-            "app.services.ai.embedder.generate_embedding_vector",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("API unavailable"),
+        with (
+            patch(
+                "app.services.ai.topic_matcher.topic_matcher.has_topics",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "app.services.ai.embedder.generate_embedding_vector",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("API unavailable"),
+            ),
         ):
             result = await ChatService.check_topic_match("What is photosynthesis?")
 
         # Should return None on error, not raise
         assert result is None
+
+    @pytest.mark.anyio
+    async def test_check_topic_match_skips_when_no_topics(self):
+        from app.services.chat_service import ChatService
+
+        with (
+            patch(
+                "app.services.ai.topic_matcher.topic_matcher.has_topics",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(
+                "app.services.ai.embedder.generate_embedding_vector",
+                new_callable=AsyncMock,
+            ) as mock_embed,
+        ):
+            result = await ChatService.check_topic_match("What is photosynthesis?")
+
+        assert result is None
+        mock_embed.assert_not_called()

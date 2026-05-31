@@ -150,3 +150,53 @@ async def test_stream_llm_uses_content_field():
                     break
         else:
             pytest.fail("No event with 'content' field found")
+
+
+@pytest.mark.anyio
+async def test_check_topic_match_skips_when_no_topics():
+    """Test that check_topic_match skips embedding when no topics exist."""
+    from app.services.chat_service import ChatService
+
+    with (
+        patch(
+            "app.services.ai.topic_matcher.topic_matcher.has_topics",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "app.services.ai.embedder.generate_embedding_vector",
+            new_callable=AsyncMock,
+        ) as mock_embed,
+    ):
+        result = await ChatService.check_topic_match("What is photosynthesis?")
+    assert result is None
+    mock_embed.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_get_greeting_response_english():
+    """Test greeting response for English."""
+    from app.services.chat_service import ChatService
+
+    result = ChatService.get_greeting_response("hello", "en")
+    assert result is not None
+    assert "Syrabit" in result
+
+
+@pytest.mark.anyio
+async def test_get_greeting_response_assamese():
+    """Test greeting response for Assamese."""
+    from app.services.chat_service import ChatService
+
+    result = ChatService.get_greeting_response("hi", "as")
+    assert result is not None
+    assert "\u099b\u09bf\u09f0\u09be\u09ac\u09bf\u099f" in result
+
+
+@pytest.mark.anyio
+async def test_get_greeting_response_non_greeting():
+    """Test that non-greeting messages return None."""
+    from app.services.chat_service import ChatService
+
+    result = ChatService.get_greeting_response("What is photosynthesis?", "en")
+    assert result is None

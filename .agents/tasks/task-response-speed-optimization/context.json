@@ -1,0 +1,25 @@
+{
+  "project_type": "Python FastAPI backend with React frontend (monorepo)",
+  "language": "Python (backend), JavaScript/React (frontend)",
+  "build_system": "pip with requirements.txt, Node.js frontend with npm",
+  "test_framework": "pytest with anyio marker, conftest.py fixtures with httpx AsyncClient",
+  "build_command": "cd apps/backend && pip install -r requirements.txt",
+  "test_command": "cd apps/backend && python -m pytest tests/ -x -q",
+  "verification_instructions": "Run pytest on backend tests, verify topic_matcher and chat tests pass",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pip install -r apps/backend/requirements.txt",
+  "environment_constraints": "OPEN_INTERNET network mode. Python 3.11 available. No Docker daemon needed for validation.",
+  "contribution_requirements": "Feature branch: feat/topic-embedding-and-security-fixes",
+  "key_patterns": "ChatService is a static-method-based class in chat_service.py. TopicMatcher is a singleton in topic_matcher.py. Tests use unittest.mock patches. SSE streaming uses 'content' field (not 'text'). Generic queries skip RAG via is_generic_query regex pattern.",
+  "relevant_files": [
+    "apps/backend/app/services/ai/topic_matcher.py",
+    "apps/backend/app/services/chat_service.py",
+    "apps/backend/app/api/v1/chat.py",
+    "apps/backend/app/services/ai/embedder.py",
+    "apps/backend/tests/test_topic_matcher.py",
+    "apps/backend/tests/test_chat.py",
+    "apps/backend/tests/conftest.py",
+    "apps/frontend/src/pages/ChatPage.jsx"
+  ],
+  "directory_structure": "apps/backend/ - FastAPI backend with app/services/ai/ for AI logic, app/api/v1/ for endpoints, tests/ for tests. apps/frontend/ - React frontend."
+}

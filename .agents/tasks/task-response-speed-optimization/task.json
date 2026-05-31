@@ -1,0 +1,7 @@
+{
+  "task_id": "task-response-speed-optimization",
+  "task_description": "Optimize chat response speed to under 3-4 seconds by short-circuiting topic matching when no embeddings exist, adding instant greeting responses, and fixing the SSE docstring",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

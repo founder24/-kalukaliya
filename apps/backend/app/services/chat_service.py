@@ -126,6 +126,11 @@ class ChatService:
             from app.services.ai.embedder import generate_embedding_vector
             from app.services.ai.topic_matcher import topic_matcher
 
+            # Short-circuit: skip expensive embedding call when no topics exist
+            if not await topic_matcher.has_topics():
+                logger.debug("topic_match_skipped_empty_cache")
+                return None
+
             # Bound the embedding call to 0.5s to avoid eating into
             # the 0.8s RAG budget when Vertex AI is slow.
             query_embedding = await asyncio.wait_for(
@@ -138,6 +143,19 @@ class ChatService:
         except Exception as e:
             logger.warning(f"Topic match check failed: {e}")
             return None
+
+    # ------------------------------------------------------------------
+    # Greeting fast-path
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_greeting_response(message: str, lang: str) -> Optional[str]:
+        """Return instant hardcoded response for greeting queries, bypassing LLM."""
+        if not ChatService.is_generic_query(message):
+            return None
+        if lang == "as":
+            return "\u09a8\u09ae\u09b8\u09cd\u0995\u09be\u09f0! \u09ae\u0987 \u099b\u09bf\u09f0\u09be\u09ac\u09bf\u099f, \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be \u099b\u09be\u09a4\u09cd\u09f0-\u099b\u09be\u09a4\u09cd\u09f0\u09c0\u09f0 \u09ac\u09be\u09ac\u09c7 \u09b6\u09c8\u0995\u09cd\u09b7\u09bf\u0995 \u09b8\u09b9\u09be\u09af\u09bc\u0995\u0964 \u0986\u09aa\u09cb\u09a8\u09be\u0995 \u0995\u09c7\u09a8\u09c7\u0995\u09c8 \u09b8\u09b9\u09be\u09af\u09bc \u0995\u09f0\u09bf\u09ac \u09aa\u09be\u09f0\u09cb\u0981? \u0986\u09aa\u09cb\u09a8\u09be\u09f0 \u09aa\u09be\u09a0\u09cd\u09af\u0995\u09cd\u09f0\u09ae\u09f0 \u09af\u09bf\u0995\u09cb\u09a8\u09cb \u09ac\u09bf\u09b7\u09af\u09bc\u09f0 \u09ac\u09bf\u09b7\u09af\u09bc\u09c7 \u09b8\u09c1\u09a7\u09bf\u09ac \u09aa\u09be\u09f0\u09c7\u0964"
+        return "Hello! I'm Syrabit, your educational assistant for Assamese students. How can I help you today? Ask me about any topic from your syllabus!"
 
     # ------------------------------------------------------------------
     # RAG retrieval
