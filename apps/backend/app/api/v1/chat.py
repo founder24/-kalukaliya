@@ -505,23 +505,21 @@ async def chat_stream(
                     ChatService.load_conversation_history(request.session_id),
                 )
             else:
-                # Topic embedding match: only proceed with RAG if query matches a topic
-                topic_match = await ChatService.check_topic_match(sanitized_message)
+                # Issue #2: Run topic match in parallel with history load
+                # so that embedding latency overlaps with history I/O.
+                topic_match, history = await asyncio.gather(
+                    ChatService.check_topic_match(sanitized_message),
+                    ChatService.load_conversation_history(request.session_id),
+                )
                 if topic_match is None:
                     logger.info("no_topic_match_stream", extra={"user_id": user_id, "query": sanitized_message[:30]})
-                    context_chunks, history = await asyncio.gather(
-                        _noop_context(),
-                        ChatService.load_conversation_history(request.session_id),
-                    )
+                    context_chunks = []
                 else:
                     logger.info(
                         "topic_matched_stream",
                         extra={"user_id": user_id, "topic": topic_match.get("topic_title"), "score": topic_match.get("score")},
                     )
-                    context_chunks, history = await asyncio.gather(
-                        ChatService.retrieve_context(sanitized_message, user_tier),
-                        ChatService.load_conversation_history(request.session_id),
-                    )
+                    context_chunks = await ChatService.retrieve_context(sanitized_message, user_tier)
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
                 "rag.top_score", context_chunks[0]["score"] if context_chunks else 0.0

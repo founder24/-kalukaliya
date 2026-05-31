@@ -1,10 +1,31 @@
+import asyncio
 import logging
+import time as _time
 
 import httpx
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# --- Module-level token cache (Issue #1: mirrors vertex_client.py pattern) ---
+_token_lock = asyncio.Lock()
+_cached_token: str | None = None
+_token_expiry: float = 0
+
+# --- Module-level httpx client for connection reuse (Issue #3) ---
+_http_client: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Return a module-level httpx.AsyncClient for connection pooling."""
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=3.0),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _http_client
 
 
 async def generate_embedding(text: str) -> str:
@@ -53,7 +74,7 @@ async def generate_embedding_vector(text: str) -> list[float]:
     if not project_id:
         raise RuntimeError("VERTEX_PROJECT_ID is not configured")
 
-    # Get access token (same pattern as vertex_client.py)
+    # Get access token (cached with 60s-before-expiry check)
     token = await _get_embedding_access_token()
 
     url = (
@@ -66,25 +87,25 @@ async def generate_embedding_vector(text: str) -> list[float]:
         "instances": [{"content": sanitized}],
     }
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=3.0)) as client:
-        response = await client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
+    client = _get_http_client()
+    response = await client.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+    )
+
+    if response.status_code != 200:
+        logger.error(
+            f"Embedding API error: {response.status_code} - {response.text[:200]}"
+        )
+        raise RuntimeError(
+            f"Vertex AI embedding API failed with status {response.status_code}"
         )
 
-        if response.status_code != 200:
-            logger.error(
-                f"Embedding API error: {response.status_code} - {response.text[:200]}"
-            )
-            raise RuntimeError(
-                f"Vertex AI embedding API failed with status {response.status_code}"
-            )
-
-        data = response.json()
+    data = response.json()
 
     try:
         embedding = data["predictions"][0]["embeddings"]["values"]
@@ -96,8 +117,8 @@ async def generate_embedding_vector(text: str) -> list[float]:
 
 
 async def _get_embedding_access_token() -> str:
-    """Get OAuth2 access token for Vertex AI embedding API."""
-    import asyncio
+    """Get OAuth2 access token for Vertex AI embedding API with caching and lock."""
+    global _cached_token, _token_expiry
 
     if not settings.google_credentials:
         raise RuntimeError(
@@ -105,26 +126,39 @@ async def _get_embedding_access_token() -> str:
             "Set GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_APPLICATION_CREDENTIALS_JSON."
         )
 
-    from google.oauth2 import service_account
+    # Return cached token if still valid (with 60s buffer before expiry)
+    if _cached_token and _time.time() < _token_expiry - 60:
+        return _cached_token
 
-    creds = service_account.Credentials.from_service_account_info(
-        settings.google_credentials,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-    )
+    async with _token_lock:
+        # Double-check after acquiring lock
+        if _cached_token and _time.time() < _token_expiry - 60:
+            return _cached_token
 
-    try:
-        from google.auth.transport._aiohttp_requests import Request as AiohttpRequest
+        from google.oauth2 import service_account
 
-        aiohttp_request = AiohttpRequest()
+        creds = service_account.Credentials.from_service_account_info(
+            settings.google_credentials,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+
         try:
-            await creds.refresh(aiohttp_request)
-        finally:
-            await aiohttp_request.close()
-    except (ImportError, AttributeError):
-        import google.auth.transport.requests
+            from google.auth.transport._aiohttp_requests import Request as AiohttpRequest
 
-        request = google.auth.transport.requests.Request()
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, creds.refresh, request)
+            aiohttp_request = AiohttpRequest()
+            try:
+                await creds.refresh(aiohttp_request)
+            finally:
+                await aiohttp_request.close()
+        except (ImportError, AttributeError):
+            import google.auth.transport.requests
 
-    return creds.token
+            request = google.auth.transport.requests.Request()
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, creds.refresh, request)
+
+        _cached_token = creds.token
+        # Token typically valid for 1 hour
+        _token_expiry = _time.time() + 3600
+
+        return _cached_token
