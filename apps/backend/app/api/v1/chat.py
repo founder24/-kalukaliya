@@ -514,10 +514,8 @@ async def chat_stream(
     greeting = ChatService.get_greeting_response(sanitized_message, detected_lang)
     if greeting:
         async def greeting_stream():
-            yield f"data: {json.dumps({'content': greeting, 'done': False})}\n\n"
             latency_ms = int((time.time() - start_time) * 1000)
-            yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': 'cache', 'lang': detected_lang})}\n\n"
-            # Fire-and-forget save
+            # Fire-and-forget save before yields (so client disconnect doesn't skip it)
             task = asyncio.create_task(
                 ChatService.save_chat(
                     user_id=user_id,
@@ -531,6 +529,8 @@ async def chat_stream(
                 )
             )
             task.add_done_callback(_log_task_exception)
+            yield f"data: {json.dumps({'content': greeting, 'done': False})}\n\n"
+            yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': 'cache', 'lang': detected_lang})}\n\n"
         return StreamingResponse(
             greeting_stream(),
             media_type="text/event-stream",
