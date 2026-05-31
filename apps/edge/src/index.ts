@@ -39,14 +39,22 @@ export default {
     sanitizedHeaders.delete('X-Edge-Secret');
     request = new Request(request, { headers: sanitizedHeaders });
 
+    // ── Generate Request ID for all requests ──
+    const requestId = crypto.randomUUID();
+    const reqIdHeaders = new Headers(request.headers);
+    reqIdHeaders.set('X-Request-ID', requestId);
+    request = new Request(request, { headers: reqIdHeaders });
+
     // ── Production safety: reject if backend URL is localhost in production ──
     const isProduction = !env.ALLOWED_ORIGIN?.includes('localhost');
     const isLocalBackend = env.BACKEND_URL?.includes('localhost') || env.BACKEND_URL?.includes('127.0.0.1');
     if (isProduction && isLocalBackend && (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/'))) {
-      return new Response(JSON.stringify({ error: 'Backend URL misconfiguration detected' }), {
+      const errResponse = new Response(JSON.stringify({ error: 'Backend URL misconfiguration detected' }), {
         status: 503,
         headers: { 'Content-Type': 'application/json' },
       });
+      errResponse.headers.set('X-Request-ID', requestId);
+      return errResponse;
     }
 
     // ── 2. JWT Verification (all /api/ routes except public) ──
@@ -55,13 +63,14 @@ export default {
 
       if (!jwtResult.valid && jwtResult.error !== 'Missing or invalid Authorization header') {
         // Token was provided but is invalid/expired — reject
-        return jsonResponse(401, { error: jwtResult.error || 'Unauthorized' });
+        const errResp = jsonResponse(401, { error: jwtResult.error || 'Unauthorized' });
+        errResp.headers.set('X-Request-ID', requestId);
+        return errResp;
       }
 
       // Inject authenticated user ID (or 'anonymous') for downstream backend
       const headers = new Headers(request.headers);
       headers.set('X-User-ID', jwtResult.userId || 'anonymous');
-      headers.set('X-Request-ID', crypto.randomUUID());
       if (jwtResult.valid && env.EDGE_SHARED_SECRET) {
         headers.set('X-Edge-Secret', env.EDGE_SHARED_SECRET);
       }
@@ -101,7 +110,7 @@ export default {
 
       const rl = await checkRateLimit(env.RATE_LIMIT_KV, userId, lang);
       if (!rl.allowed) {
-        return new Response(
+        const rlResponse = new Response(
           JSON.stringify({ error: 'Rate limit exceeded' }),
           {
             status: 429,
@@ -111,6 +120,8 @@ export default {
             },
           }
         );
+        rlResponse.headers.set('X-Request-ID', requestId);
+        return rlResponse;
       }
 
       // Signal to backend that edge already performed rate limiting
@@ -123,7 +134,9 @@ export default {
 
     // Robots.txt
     if (url.pathname === '/robots.txt') {
-      return handleRobots(env);
+      const robotsResponse = await handleRobots(env);
+      robotsResponse.headers.set('X-Request-ID', requestId);
+      return robotsResponse;
     }
 
     // Sitemap proxy → backend (rewrite path to /api/v1/seo prefix)
@@ -131,7 +144,9 @@ export default {
       const rewrittenUrl = new URL(request.url);
       rewrittenUrl.pathname = `/api/v1/seo${url.pathname}`;
       const rewrittenRequest = new Request(rewrittenUrl.toString(), request);
-      return proxyRequest(rewrittenRequest, env.BACKEND_URL, env);
+      const sitemapResponse = await proxyRequest(rewrittenRequest, env.BACKEND_URL, env);
+      sitemapResponse.headers.set('X-Request-ID', requestId);
+      return sitemapResponse;
     }
 
     /**
@@ -183,7 +198,9 @@ export default {
           headers: { 'Content-Type': 'application/json' },
         }
       );
-      return addSecurityHeaders(healthResponse);
+      const securedHealth = addSecurityHeaders(healthResponse);
+      securedHealth.headers.set('X-Request-ID', requestId);
+      return securedHealth;
     }
 
     /**
@@ -232,7 +249,9 @@ export default {
           headers: { 'Content-Type': 'application/json' },
         }
       );
-      return addSecurityHeaders(fullHealthResponse);
+      const securedFull = addSecurityHeaders(fullHealthResponse);
+      securedFull.headers.set('X-Request-ID', requestId);
+      return securedFull;
     }
 
     // API routes → proxy to backend
@@ -243,6 +262,7 @@ export default {
       const secured = addSecurityHeaders(response);
       const origin = request.headers.get('Origin') || '';
       applyCorsHeaders(secured.headers, origin);
+      secured.headers.set('X-Request-ID', requestId);
       return secured;
     }
 
@@ -252,13 +272,16 @@ export default {
       const object = await env.R2_BUCKET.get(key);
 
       if (!object) {
-        return new Response('Not Found', { status: 404 });
+        const notFoundResp = new Response('Not Found', { status: 404 });
+        notFoundResp.headers.set('X-Request-ID', requestId);
+        return notFoundResp;
       }
 
       const headers = new Headers();
       object.writeHttpMetadata(headers);
       headers.set('Cache-Control', 'public, max-age=31536000, immutable');
       headers.set('Access-Control-Allow-Origin', env.ALLOWED_ORIGIN || 'https://syrabit.ai');
+      headers.set('X-Request-ID', requestId);
 
       return new Response(object.body, { headers });
     }
@@ -266,6 +289,7 @@ export default {
     // ISR fallback for bot traffic (before 404)
     const isrResponse = await handleISR(request, env, ctx);
     if (isrResponse) {
+      isrResponse.headers.set('X-Request-ID', requestId);
       return isrResponse;
     }
 
@@ -275,14 +299,18 @@ export default {
       const cache = caches.default;
       const cached = await cache.match(request);
       if (cached) {
-        return cached;
+        const cachedResp = new Response(cached.body, cached);
+        cachedResp.headers.set('X-Request-ID', requestId);
+        return cachedResp;
       }
 
       const frontendOrigin = env.ALLOWED_ORIGIN || 'https://syrabit.ai';
       // Guard: if the edge worker IS the frontend origin, return 404 to prevent infinite redirect loop
       const frontendHost = new URL(frontendOrigin).host;
       if (url.host === frontendHost) {
-        return new Response('Not Found', { status: 404 });
+        const loopResp = new Response('Not Found', { status: 404 });
+        loopResp.headers.set('X-Request-ID', requestId);
+        return loopResp;
       }
       const redirectUrl = frontendOrigin + url.pathname + url.search;
       const redirectResponse = new Response(null, {
@@ -290,13 +318,16 @@ export default {
         headers: {
           'Location': redirectUrl,
           'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+          'X-Request-ID': requestId,
         },
       });
       ctx.waitUntil(cache.put(request, redirectResponse.clone()));
       return redirectResponse;
     }
 
-    return new Response('Not Found', { status: 404 });
+    const finalResp = new Response('Not Found', { status: 404 });
+    finalResp.headers.set('X-Request-ID', requestId);
+    return finalResp;
   },
 };
 

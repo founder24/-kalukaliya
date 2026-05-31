@@ -3,11 +3,13 @@ Public Content API - Renders and serves educational content pages.
 Supports ISR (Incremental Static Regeneration) via Cache-Control headers.
 """
 
+import hashlib
 import logging
 import re
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.responses import Response
 
 from app.models.knowledge import KnowledgeObject
 from app.services.content.renderer import content_renderer, PAGE_TYPES
@@ -35,6 +37,7 @@ def _validate_path_params(**params: str) -> None:
     summary="Render chapter notes page (default page type)",
 )
 async def render_chapter(
+    request: Request,
     board: str,
     class_level: str,
     subject: str,
@@ -70,9 +73,14 @@ async def render_chapter(
         except Exception as e:
             logger.warning(f"Failed to cache rendered HTML: {e}")
 
+    etag = f'W/"{hashlib.md5(html.encode()).hexdigest()}"'
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+
     return HTMLResponse(
         content=html,
-        headers={"Cache-Control": ISR_CACHE_HEADER},
+        headers={"Cache-Control": ISR_CACHE_HEADER, "ETag": etag},
     )
 
 
@@ -82,6 +90,7 @@ async def render_chapter(
     summary="Render chapter page by type",
 )
 async def render_chapter_page_type(
+    request: Request,
     board: str,
     class_level: str,
     subject: str,
@@ -124,9 +133,14 @@ async def render_chapter_page_type(
         except Exception as e:
             logger.warning(f"Failed to cache rendered HTML: {e}")
 
+    etag = f'W/"{hashlib.md5(html.encode()).hexdigest()}"'
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+
     return HTMLResponse(
         content=html,
-        headers={"Cache-Control": ISR_CACHE_HEADER},
+        headers={"Cache-Control": ISR_CACHE_HEADER, "ETag": etag},
     )
 
 
@@ -169,13 +183,18 @@ async def list_chapters(
         .to_list()
     )
 
-    return {
-        "board": board,
-        "class_level": class_level,
-        "subject": subject,
-        "chapters": chapters,
-        "count": len(chapters),
-    }
+    return JSONResponse(
+        content={
+            "board": board,
+            "class_level": class_level,
+            "subject": subject,
+            "chapters": chapters,
+            "count": len(chapters),
+        },
+        headers={
+            "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+        },
+    )
 
 
 @router.get(
@@ -198,4 +217,9 @@ async def get_by_slug(slug: str):
             "search_impressions",
         }
     )
-    return data
+    return JSONResponse(
+        content=data,
+        headers={
+            "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+        },
+    )
