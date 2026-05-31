@@ -77,6 +77,34 @@ class VertexSearchService:
         )
         self._initialized = True
 
+    def _extract_score(self, result, content: str, index: int) -> float:
+        """Extract relevance score from a Discovery Engine result.
+
+        Uses model_scores when available, falls back to a heuristic based on
+        content length.
+        """
+        score = None
+        if hasattr(result, "model_scores") and result.model_scores:
+            try:
+                for key, score_val in result.model_scores.items():
+                    if hasattr(score_val, "values") and score_val.values:
+                        score = float(score_val.values[0])
+                        break
+            except (IndexError, TypeError, ValueError):
+                pass
+
+        if score is None:
+            # Heuristic fallback based on content quality
+            if len(content) > 50:
+                score = 0.65
+            else:
+                score = 0.3
+            logger.debug(
+                f"Using heuristic score for result {index}: content_len={len(content)}, score={score}"
+            )
+
+        return score
+
     async def warm_up(self) -> None:
         """Warm up the search client connection during startup."""
         if not self._initialized:
@@ -216,26 +244,7 @@ class VertexSearchService:
                 if not content:
                     content = struct_data.get("content", "")
 
-                # Extract real relevance score from Discovery Engine
-                score = None
-                if hasattr(result, "model_scores") and result.model_scores:
-                    try:
-                        for key, score_val in result.model_scores.items():
-                            if hasattr(score_val, "values") and score_val.values:
-                                score = float(score_val.values[0])
-                                break
-                    except (IndexError, TypeError, ValueError):
-                        pass
-
-                if score is None:
-                    # Heuristic fallback based on content quality
-                    if len(content) > 50:
-                        score = 0.85
-                    else:
-                        score = 0.3
-                    logger.debug(
-                        f"Using heuristic score for result {i}: content_len={len(content)}, score={score}"
-                    )
+                score = self._extract_score(result, content, i)
 
                 chunk = {
                     "id": doc_data.id or f"result_{i}",
@@ -280,26 +289,7 @@ class VertexSearchService:
                         if not content:
                             content = struct_data.get("content", "")
 
-                        # Extract real relevance score from Discovery Engine
-                        score = None
-                        if hasattr(result, "model_scores") and result.model_scores:
-                            try:
-                                for key, score_val in result.model_scores.items():
-                                    if hasattr(score_val, "values") and score_val.values:
-                                        score = float(score_val.values[0])
-                                        break
-                            except (IndexError, TypeError, ValueError):
-                                pass
-
-                        if score is None:
-                            # Heuristic fallback based on content quality
-                            if len(content) > 50:
-                                score = 0.85
-                            else:
-                                score = 0.3
-                            logger.debug(
-                                f"Using heuristic score for fallback result {i}: content_len={len(content)}, score={score}"
-                            )
+                        score = self._extract_score(result, content, i)
 
                         chunk = {
                             "id": doc_data.id or f"result_{i}",
