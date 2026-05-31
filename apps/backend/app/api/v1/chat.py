@@ -168,11 +168,18 @@ async def chat(
                 # Topic embedding match: only proceed with RAG if query matches a topic
                 topic_match = await ChatService.check_topic_match(sanitized_message)
                 if topic_match is None:
-                    logger.info("no_topic_match", extra={"user_id": user_id, "query": sanitized_message[:30]})
+                    logger.info(
+                        "no_topic_match",
+                        extra={"user_id": user_id, "query": sanitized_message[:30]},
+                    )
                     return []
                 logger.info(
                     "topic_matched",
-                    extra={"user_id": user_id, "topic": topic_match.get("topic_title"), "score": topic_match.get("score")},
+                    extra={
+                        "user_id": user_id,
+                        "topic": topic_match.get("topic_title"),
+                        "score": topic_match.get("score"),
+                    },
                 )
                 return await ChatService.retrieve_context(sanitized_message, user_tier)
 
@@ -518,14 +525,23 @@ async def chat_stream(
                     ChatService.load_conversation_history(request.session_id),
                 )
                 if topic_match is None:
-                    logger.info("no_topic_match_stream", extra={"user_id": user_id, "query": sanitized_message[:30]})
+                    logger.info(
+                        "no_topic_match_stream",
+                        extra={"user_id": user_id, "query": sanitized_message[:30]},
+                    )
                     context_chunks = []
                 else:
                     logger.info(
                         "topic_matched_stream",
-                        extra={"user_id": user_id, "topic": topic_match.get("topic_title"), "score": topic_match.get("score")},
+                        extra={
+                            "user_id": user_id,
+                            "topic": topic_match.get("topic_title"),
+                            "score": topic_match.get("score"),
+                        },
                     )
-                    context_chunks = await ChatService.retrieve_context(sanitized_message, user_tier)
+                    context_chunks = await ChatService.retrieve_context(
+                        sanitized_message, user_tier
+                    )
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
                 "rag.top_score", context_chunks[0]["score"] if context_chunks else 0.0

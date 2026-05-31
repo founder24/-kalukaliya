@@ -143,7 +143,9 @@ async def _get_embedding_access_token() -> str:
         )
 
         try:
-            from google.auth.transport._aiohttp_requests import Request as AiohttpRequest
+            from google.auth.transport._aiohttp_requests import (
+                Request as AiohttpRequest,
+            )
 
             aiohttp_request = AiohttpRequest()
             try:

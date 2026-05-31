@@ -333,7 +333,9 @@ class ContentPublisherService:
 
         # 8. Generate and store topic embeddings for cosine similarity matching
         hierarchy = await self._resolve_hierarchy(chapter)
-        topic_embedding_result = await self._generate_topic_embeddings(chapter, hierarchy)
+        topic_embedding_result = await self._generate_topic_embeddings(
+            chapter, hierarchy
+        )
 
         return {
             "chapter_id": chapter_id,
@@ -346,7 +348,9 @@ class ContentPublisherService:
             "topic_embeddings": topic_embedding_result,
         }
 
-    async def _generate_topic_embeddings(self, chapter: Chapter, hierarchy: dict) -> dict:
+    async def _generate_topic_embeddings(
+        self, chapter: Chapter, hierarchy: dict
+    ) -> dict:
         """Generate and upsert TopicEmbedding documents for each topic in a chapter."""
         from app.models.content import TopicEmbedding
         from app.services.ai.embedder import generate_embedding_vector
@@ -397,7 +401,9 @@ class ContentPublisherService:
                     await doc.insert()
                 generated += 1
             except Exception as e:
-                logger.error(f"Failed to generate embedding for topic '{topic.title}': {e}")
+                logger.error(
+                    f"Failed to generate embedding for topic '{topic.title}': {e}"
+                )
                 errors += 1
 
         # Invalidate topic matcher cache so new embeddings are picked up

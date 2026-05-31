@@ -72,15 +72,17 @@ class TopicMatcher:
         for doc in docs:
             if not doc.embedding:
                 continue
-            self._embeddings.append({
-                "topic_id": doc.topic_id,
-                "topic_title": doc.topic_title,
-                "chapter_id": str(doc.chapter_id),
-                "chapter_title": doc.chapter_title,
-                "subject_slug": doc.subject_slug,
-                "board_slug": doc.board_slug,
-                "class_level": doc.class_level,
-            })
+            self._embeddings.append(
+                {
+                    "topic_id": doc.topic_id,
+                    "topic_title": doc.topic_title,
+                    "chapter_id": str(doc.chapter_id),
+                    "chapter_title": doc.chapter_title,
+                    "subject_slug": doc.subject_slug,
+                    "board_slug": doc.board_slug,
+                    "class_level": doc.class_level,
+                }
+            )
             vectors.append(doc.embedding)
 
         if vectors:
@@ -131,9 +133,8 @@ class TopicMatcher:
         valid_mask = norms > 0
         similarities = np.zeros(len(self._embeddings), dtype=np.float32)
         if valid_mask.any():
-            similarities[valid_mask] = (
-                np.dot(self._vectors[valid_mask], query_vec)
-                / (norms[valid_mask] * query_norm)
+            similarities[valid_mask] = np.dot(self._vectors[valid_mask], query_vec) / (
+                norms[valid_mask] * query_norm
             )
 
         best_idx = int(np.argmax(similarities))

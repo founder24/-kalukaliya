@@ -75,7 +75,9 @@ async def main():
         # Resolve hierarchy for metadata
         subject = await Subject.get(chapter.subject_id) if chapter.subject_id else None
         stream = (
-            await Stream.get(subject.stream_id) if subject and subject.stream_id else None
+            await Stream.get(subject.stream_id)
+            if subject and subject.stream_id
+            else None
         )
         cls = await Class.get(stream.class_id) if stream and stream.class_id else None
         board = await Board.get(cls.board_id) if cls and cls.board_id else None
