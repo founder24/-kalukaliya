@@ -156,8 +156,16 @@ async def chat(
                         user.last_reset_date = now
 
             # Using return_exceptions=True so one failure does not cancel others
+            skip_rag = ChatService.is_generic_query(sanitized_message)
+
+            async def _maybe_retrieve():
+                if skip_rag:
+                    logger.info("generic_query_detected", extra={"user_id": user_id, "query": sanitized_message[:30]})
+                    return []
+                return await ChatService.retrieve_context(sanitized_message, user_tier)
+
             results = await asyncio.gather(
-                ChatService.retrieve_context(sanitized_message, user_tier),
+                _maybe_retrieve(),
                 ChatService.load_conversation_history(request.session_id),
                 check_rate_limit(user_id, user_tier, client_ip, request=http_request),
                 return_exceptions=True,
@@ -478,10 +486,15 @@ async def chat_stream(
             rag_span.set_attribute("user.tier", user_tier)
             rag_span.set_attribute("user.id", user_id)
 
-            context_chunks, history = await asyncio.gather(
-                ChatService.retrieve_context(sanitized_message, user_tier),
-                ChatService.load_conversation_history(request.session_id),
-            )
+            if ChatService.is_generic_query(sanitized_message):
+                logger.info("generic_query_skip_rag", extra={"user_id": user_id, "query": sanitized_message[:30]})
+                context_chunks = []
+                history = await ChatService.load_conversation_history(request.session_id)
+            else:
+                context_chunks, history = await asyncio.gather(
+                    ChatService.retrieve_context(sanitized_message, user_tier),
+                    ChatService.load_conversation_history(request.session_id),
+                )
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
                 "rag.top_score", context_chunks[0]["score"] if context_chunks else 0.0
@@ -553,7 +566,7 @@ async def chat_stream(
 
         # -- Final event --
         latency_ms = int((time.time() - start_time) * 1000)
-        yield f"data: {json.dumps({'text': '', 'done': True, 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'route_trace': {'decision': 'sarvam' if ('sarvam' in target_model.lower() or 'openhathi' in target_model.lower()) else 'vertex', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model}})}\n\n"
+        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'route_trace': {'decision': 'sarvam' if ('sarvam' in target_model.lower() or 'openhathi' in target_model.lower()) else 'vertex', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model}})}\n\n"
 
         # Record final metrics in OTel span
         with tracer.start_as_current_span("chat.stream.complete") as final_span:

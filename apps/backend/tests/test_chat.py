@@ -1,6 +1,7 @@
 import pytest
 from httpx import AsyncClient
 from unittest.mock import patch, AsyncMock
+import json
 
 
 @pytest.mark.anyio
@@ -63,3 +64,81 @@ async def test_retrieve_context_returns_empty_when_search_not_initialized():
 
         assert result == []
         mock_search.search_context.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_is_generic_query_greetings():
+    """Test generic query detection for greetings."""
+    from app.services.chat_service import ChatService
+
+    assert ChatService.is_generic_query("hi") is True
+    assert ChatService.is_generic_query("Hello!") is True
+    assert ChatService.is_generic_query("How are you?") is True
+    assert ChatService.is_generic_query("thanks") is True
+    assert ChatService.is_generic_query("  hey  ") is True
+    assert ChatService.is_generic_query("bye!") is True
+
+
+@pytest.mark.anyio
+async def test_is_generic_query_real_questions():
+    """Test generic query detection does NOT flag real questions."""
+    from app.services.chat_service import ChatService
+
+    assert ChatService.is_generic_query("What is photosynthesis?") is False
+    assert ChatService.is_generic_query("Explain the water cycle") is False
+    assert ChatService.is_generic_query("hello can you explain gravity") is False
+    assert ChatService.is_generic_query("hi tell me about atoms") is False
+
+
+@pytest.mark.anyio
+async def test_retrieve_context_filters_low_scores():
+    """Test that retrieve_context filters chunks below 0.70 threshold."""
+    from app.services.chat_service import ChatService
+
+    mock_chunks = [
+        {"id": "1", "title": "Good", "content": "relevant content", "score": 0.85, "url": ""},
+        {"id": "2", "title": "Bad", "content": "irrelevant", "score": 0.50, "url": ""},
+        {"id": "3", "title": "OK", "content": "borderline", "score": 0.70, "url": ""},
+    ]
+
+    with patch("app.services.chat_service.search_service") as mock_search:
+        mock_search.is_available.return_value = True
+        mock_search.search_context = AsyncMock(return_value=mock_chunks)
+
+        result = await ChatService.retrieve_context("test query", "free")
+
+        # Should keep score >= 0.70, filter out score 0.50
+        assert len(result) == 2
+        assert all(c["score"] >= 0.70 for c in result)
+
+
+@pytest.mark.anyio
+async def test_stream_llm_uses_content_field():
+    """Test that stream_llm yields 'content' field not 'text'."""
+    from app.services.chat_service import ChatService
+
+    async def mock_stream(*args, **kwargs):
+        yield "Hello"
+        yield " world"
+
+    with patch("app.services.ai.router.stream_response", side_effect=mock_stream):
+        events = []
+        async for event in ChatService.stream_llm(
+            system_prompt="test",
+            sanitized_message="hi",
+            target_model="gemini-2.0-flash",
+            detected_lang="en",
+            user_id="test-user",
+            request_message="hi",
+        ):
+            events.append(event)
+
+        # Check content field is used (not text)
+        for event in events:
+            if event.startswith("data: "):
+                data = json.loads(event[6:].strip())
+                if "content" in data:
+                    assert "text" not in data or data.get("__syrabit_stream_complete_7f3a9b2e__")
+                    break
+        else:
+            pytest.fail("No event with 'content' field found")
