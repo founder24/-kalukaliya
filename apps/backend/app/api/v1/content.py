@@ -75,8 +75,8 @@ async def render_chapter(
 
     etag = f'W/"{hashlib.md5(html.encode()).hexdigest()}"'
     if_none_match = request.headers.get("if-none-match")
-    if if_none_match == etag:
-        return Response(status_code=304, headers={"ETag": etag})
+    if if_none_match and etag in [v.strip() for v in if_none_match.split(",")]:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": ISR_CACHE_HEADER})
 
     return HTMLResponse(
         content=html,
@@ -135,8 +135,8 @@ async def render_chapter_page_type(
 
     etag = f'W/"{hashlib.md5(html.encode()).hexdigest()}"'
     if_none_match = request.headers.get("if-none-match")
-    if if_none_match == etag:
-        return Response(status_code=304, headers={"ETag": etag})
+    if if_none_match and etag in [v.strip() for v in if_none_match.split(",")]:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": ISR_CACHE_HEADER})
 
     return HTMLResponse(
         content=html,

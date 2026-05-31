@@ -104,11 +104,17 @@ async def deep_health_check():
     - Vertex AI Search service
     - Vertex AI configuration
     """
+    results = await asyncio.gather(
+        _safe_check(mongo_ping()),
+        _safe_check(redis_ping()),
+        _safe_check(vertex_search_ping()),
+        _safe_check(vertex_ping()),
+    )
     checks = {
-        "mongodb": await _safe_check(mongo_ping()),
-        "redis": await _safe_check(redis_ping()),
-        "vertex_search": await _safe_check(vertex_search_ping()),
-        "vertex_ai": await _safe_check(vertex_ping()),
+        "mongodb": results[0],
+        "redis": results[1],
+        "vertex_search": results[2],
+        "vertex_ai": results[3],
     }
 
     # Determine overall status

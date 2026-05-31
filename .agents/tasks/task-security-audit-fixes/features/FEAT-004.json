@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-004",
+  "type": "fix",
+  "description": "Address code review findings: multi-value ETag comparison, concurrent health probes with asyncio.gather, and X-XSS-Protection header consistency.",
+  "status": "in_progress",
+  "steps": [
+    "Fix ETag comparison in content.py to handle multi-value If-None-Match headers (two places)",
+    "Add Cache-Control to 304 response headers in content.py (two places)",
+    "Change health probes in health.py from sequential to concurrent execution using asyncio.gather",
+    "Change X-XSS-Protection in _headers from '1; mode=block' to '0' for consistency with edge worker"
+  ],
+  "acceptance_criteria": [
+    "ETag comparison splits on commas and strips whitespace before matching",
+    "304 responses include both ETag and Cache-Control headers",
+    "Health probes run concurrently via asyncio.gather",
+    "X-XSS-Protection is consistently set to 0 across frontend _headers and edge worker"
+  ],
+  "verification": [
+    "Run: python -c \"import ast; ast.parse(open('app/api/v1/health.py').read()); ast.parse(open('app/api/v1/content.py').read()); print('OK')\" from apps/backend",
+    "Run: npx vitest run from apps/edge"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

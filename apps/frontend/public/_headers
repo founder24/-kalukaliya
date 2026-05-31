@@ -6,7 +6,7 @@
   Cross-Origin-Opener-Policy: same-origin
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: geolocation=(), microphone=(), camera=()
-  X-XSS-Protection: 1; mode=block
+  X-XSS-Protection: 0
   X-DNS-Prefetch-Control: on
   X-Download-Options: noopen
   X-Permitted-Cross-Domain-Policies: none
