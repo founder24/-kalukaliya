@@ -23,7 +23,7 @@ async def list_conversations(
     search: str = "",
 ):
     """Paginated list of chat sessions."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     limit = min(limit, 100)
 
     try:
@@ -90,7 +90,7 @@ async def list_conversations(
 @router.get("/conversations/{session_id}")
 async def get_conversation(request: Request, session_id: str):
     """Get full messages for a specific chat session."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         client = get_mongo_client()

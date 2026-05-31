@@ -26,7 +26,7 @@ async def list_users(
     search: str = "",
 ):
     """Paginated user list with optional search."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     limit = min(limit, 100)
 
     try:
@@ -87,7 +87,7 @@ async def list_users(
 @router.patch("/users/{user_id}/status")
 async def update_user_status(request: Request, user_id: str):
     """Update user status (active/suspended/banned)."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     body = await request.json()
@@ -125,7 +125,7 @@ async def update_user_status(request: Request, user_id: str):
 @router.patch("/users/{user_id}/plan")
 async def update_user_plan(request: Request, user_id: str):
     """Update user subscription tier (free/pro)."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     body = await request.json()
@@ -162,7 +162,7 @@ async def update_user_plan(request: Request, user_id: str):
 @router.patch("/users/{user_id}/role")
 async def update_user_role(request: Request, user_id: str):
     """Update user role (student/educator/admin)."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     body = await request.json()
@@ -194,7 +194,7 @@ async def update_user_role(request: Request, user_id: str):
 @router.patch("/users/{user_id}/credits")
 async def adjust_user_credits(request: Request, user_id: str):
     """Adjust user credits (add/deduct/reset)."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     body = await request.json()

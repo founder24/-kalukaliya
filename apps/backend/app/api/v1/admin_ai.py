@@ -17,7 +17,7 @@ router = APIRouter(tags=["Admin AI"])
 @router.get("/ai/providers")
 async def ai_providers(request: Request):
     """AI provider config and health."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     providers = []
 
@@ -49,7 +49,7 @@ async def ai_providers(request: Request):
 @router.get("/ai/status")
 async def ai_status(request: Request):
     """Current AI system status."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     vertex_ok = bool(settings.VERTEX_PROJECT_ID)
     sarvam_ok = bool(settings.SARVAM_API_KEY)

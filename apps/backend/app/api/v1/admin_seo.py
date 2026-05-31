@@ -39,7 +39,7 @@ class GenerateSEORequest(BaseModel):
 @router.get("/seo/entity/status")
 async def seo_entity_status(request: Request):
     """SEO entity health from Chapter collection."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         total = await Chapter.count()
@@ -62,7 +62,7 @@ async def seo_entity_status(request: Request):
 @router.get("/seo/entity/history")
 async def seo_entity_history(request: Request):
     """In-memory scan history."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     return {"history": _scan_history[-50:], "total": len(_scan_history)}
 
@@ -70,7 +70,7 @@ async def seo_entity_history(request: Request):
 @router.get("/seo/pipeline-status")
 async def seo_pipeline_status(request: Request):
     """Generation/publish status per subject."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         subjects = await Subject.find_all().to_list()
@@ -134,7 +134,7 @@ async def seo_pipeline_status(request: Request):
 @router.post("/seo/bulk-generate")
 async def seo_bulk_generate(request: Request, body: BulkGenerateRequest):
     """Generate SEO pages for given topic_ids."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     # Collect topics from chapters
@@ -170,7 +170,7 @@ async def seo_bulk_generate(request: Request, body: BulkGenerateRequest):
 @router.get("/seo/coverage")
 async def seo_coverage(request: Request, subject_id: Optional[str] = Query(None)):
     """Published vs draft vs generated coverage per subject."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         query = {}
@@ -199,7 +199,7 @@ async def seo_coverage(request: Request, subject_id: Optional[str] = Query(None)
 @router.post("/seo/entity/refresh")
 async def seo_entity_refresh(request: Request):
     """Re-probe entity health signals and record scan."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     try:
@@ -224,7 +224,7 @@ async def seo_entity_refresh(request: Request):
 @router.get("/seo/deep-scan-history")
 async def seo_deep_scan_history(request: Request):
     """Full history of entity scans."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     return {"scans": _scan_history, "total": len(_scan_history)}
 
@@ -232,7 +232,7 @@ async def seo_deep_scan_history(request: Request):
 @router.post("/seo/extract")
 async def seo_extract_topics(request: Request, body: ExtractRequest):
     """AI-extract topics from chapter content."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     try:
@@ -250,7 +250,7 @@ async def seo_extract_topics(request: Request, body: ExtractRequest):
 @router.post("/seo/generate")
 async def seo_generate_pages(request: Request, body: GenerateSEORequest):
     """Generate SEO page variations for topics."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     try:
@@ -264,7 +264,7 @@ async def seo_generate_pages(request: Request, body: GenerateSEORequest):
 @router.post("/seo/regenerate-sitemap")
 async def seo_regenerate_sitemap(request: Request):
     """Rebuild sitemaps from published chapters."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     try:

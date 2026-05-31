@@ -16,7 +16,7 @@ async def get_dead_letters(
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
 ):
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     result = await list_dead_letters(
         page=page, page_size=page_size, status_filter=status
     )
@@ -25,7 +25,7 @@ async def get_dead_letters(
 
 @router.post("/dead-letters/{dead_letter_id}/replay")
 async def replay(request: Request, dead_letter_id: str):
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
     try:
         result = await replay_dead_letter(dead_letter_id)

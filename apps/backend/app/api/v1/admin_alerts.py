@@ -18,7 +18,7 @@ router = APIRouter(tags=["Admin Alerts"])
 @router.get("/alerts/unacknowledged/count")
 async def unacknowledged_alerts_count(request: Request):
     """Count of unacknowledged alerts."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         client = get_mongo_client()
@@ -34,7 +34,7 @@ async def unacknowledged_alerts_count(request: Request):
 @router.get("/alerts/cooldowns")
 async def alert_cooldowns(request: Request):
     """Active alert cooldowns."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         client = get_mongo_client()
