@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Add QuestionPaper MongoDB model, backend API endpoint, frontend hook, and library section to display question paper cards with links to R2-stored images",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1: Create a QuestionPaper Beanie Document model in apps/backend/app/models/content.py. Fields: title (str), slug (str), r2_key (str - the R2 object key), board (str - e.g. SEBA, AHSEC, CBSE), class_level (str - e.g. 10, 12), subject (str), year (optional int), status (str, default 'published'), created_at (datetime), updated_at (datetime). The collection name should be 'question_papers'. Add a compound index on (board, class_level, subject, year).",
     "Step 2: Register the QuestionPaper model in apps/backend/app/db/mongo.py by importing it and adding it to the document_models list in init_beanie(). Also add an index creation call for the question_papers collection.",
@@ -29,5 +29,5 @@
     "Run: grep -c 'QuestionPapersSection' /projects/sandbox/-kalukaliya/apps/frontend/src/pages/LibraryPage.jsx"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All verifications passed: QuestionPaper model collection name is 'question_papers', /question-papers route exists in router, frontend builds without errors (vite build --mode development completes in ~20s), LibraryPage.jsx references QuestionPapersSection twice (lazy import + render). Installed beanie and fastapi via pip for backend verification since they were not pre-installed."
 }
