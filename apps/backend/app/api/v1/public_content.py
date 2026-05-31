@@ -188,7 +188,13 @@ async def get_question_papers(
         if subject:
             query["subject"] = subject
 
-        papers = await QuestionPaper.find(query).sort("-year").skip(skip).limit(limit).to_list()
+        papers = (
+            await QuestionPaper.find(query)
+            .sort("-year")
+            .skip(skip)
+            .limit(limit)
+            .to_list()
+        )
     except Exception as e:
         logger.warning(f"Question papers DB query failed: {e}")
         return []

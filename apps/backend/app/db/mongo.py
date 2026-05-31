@@ -138,7 +138,12 @@ async def create_indexes() -> None:
 
     # Question papers indexes
     await db.question_papers.create_index(
-        [("board", ASCENDING), ("class_level", ASCENDING), ("subject", ASCENDING), ("year", ASCENDING)]
+        [
+            ("board", ASCENDING),
+            ("class_level", ASCENDING),
+            ("subject", ASCENDING),
+            ("year", ASCENDING),
+        ]
     )
     await db.question_papers.create_index([("status", ASCENDING)])
 
