@@ -96,7 +96,13 @@ async def test_retrieve_context_filters_low_scores():
     from app.services.chat_service import ChatService
 
     mock_chunks = [
-        {"id": "1", "title": "Good", "content": "relevant content", "score": 0.85, "url": ""},
+        {
+            "id": "1",
+            "title": "Good",
+            "content": "relevant content",
+            "score": 0.85,
+            "url": "",
+        },
         {"id": "2", "title": "Bad", "content": "irrelevant", "score": 0.50, "url": ""},
         {"id": "3", "title": "OK", "content": "borderline", "score": 0.70, "url": ""},
     ]
@@ -138,7 +144,9 @@ async def test_stream_llm_uses_content_field():
             if event.startswith("data: "):
                 data = json.loads(event[6:].strip())
                 if "content" in data:
-                    assert "text" not in data or data.get("__syrabit_stream_complete_7f3a9b2e__")
+                    assert "text" not in data or data.get(
+                        "__syrabit_stream_complete_7f3a9b2e__"
+                    )
                     break
         else:
             pytest.fail("No event with 'content' field found")

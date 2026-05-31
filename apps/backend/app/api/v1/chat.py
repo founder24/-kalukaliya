@@ -160,7 +160,10 @@ async def chat(
 
             async def _maybe_retrieve():
                 if skip_rag:
-                    logger.info("generic_query_detected", extra={"user_id": user_id, "query": sanitized_message[:30]})
+                    logger.info(
+                        "generic_query_detected",
+                        extra={"user_id": user_id, "query": sanitized_message[:30]},
+                    )
                     return []
                 return await ChatService.retrieve_context(sanitized_message, user_tier)
 
@@ -490,7 +493,10 @@ async def chat_stream(
                 return []
 
             if ChatService.is_generic_query(sanitized_message):
-                logger.info("generic_query_skip_rag", extra={"user_id": user_id, "query": sanitized_message[:30]})
+                logger.info(
+                    "generic_query_skip_rag",
+                    extra={"user_id": user_id, "query": sanitized_message[:30]},
+                )
                 context_chunks, history = await asyncio.gather(
                     _noop_context(),
                     ChatService.load_conversation_history(request.session_id),

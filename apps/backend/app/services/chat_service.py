@@ -36,8 +36,8 @@ SIMILARITY_THRESHOLD = 0.70
 
 # Pattern for detecting generic/greeting queries that should skip RAG
 GENERIC_QUERY_PATTERN = re.compile(
-    r'^(hi|hello|hey|thanks|thank you|ok|okay|bye|good morning|good evening|good night|how are you|what can you do|who are you|what are you)[\s!?.]*$',
-    re.IGNORECASE
+    r"^(hi|hello|hey|thanks|thank you|ok|okay|bye|good morning|good evening|good night|how are you|what can you do|who are you|what are you)[\s!?.]*$",
+    re.IGNORECASE,
 )
 
 
@@ -129,7 +129,11 @@ class ChatService:
                     limit=settings.MAX_CONTEXT_DOCS,
                 )
                 # Filter chunks below similarity threshold
-                context_chunks = [c for c in context_chunks if c.get("score", 0) >= SIMILARITY_THRESHOLD]
+                context_chunks = [
+                    c
+                    for c in context_chunks
+                    if c.get("score", 0) >= SIMILARITY_THRESHOLD
+                ]
                 return truncate_chunks_to_budget(context_chunks, max_tokens=3000)
 
             return await asyncio.wait_for(_do_retrieval(), timeout=0.8)
