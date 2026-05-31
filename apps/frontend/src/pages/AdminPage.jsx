@@ -157,7 +157,7 @@ export default function AdminPage() {
 
   const [adminEmail, setAdminEmail] = useState('');
   const [adminName,  setAdminName]  = useState('Admin');
-  const [adminToken, setAdminToken] = useState(null);
+  const adminToken = verifying ? null : 'cookie';
   const [unackAlertCount, setUnackAlertCount] = useState(0);
   const alertPollRef = useRef(null);
 
@@ -180,7 +180,6 @@ export default function AdminPage() {
       .then((res) => {
         if (res.data?.name) setAdminName(res.data.name);
         if (res.data?.email) setAdminEmail(res.data.email);
-        setAdminToken('verified');
         setVerifying(false);
       })
       .catch(() => {
@@ -193,7 +192,6 @@ export default function AdminPage() {
     const id = setInterval(() => {
       adminVerify()
         .catch(() => {
-          setAdminToken(null);
           toast.error('Session expired. Please log in again.');
           navigate('/admin/login');
         });
@@ -233,7 +231,6 @@ export default function AdminPage() {
 
   const handleLogout = async () => {
     await adminLogout().catch(() => {});
-    setAdminToken(null);
     toast.success('Logged out');
     navigate('/admin/login');
   };

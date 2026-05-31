@@ -50,8 +50,8 @@ export async function withRefresh(requestFn) {
     const status = err?.response?.status;
     const detail = err?.response?.data?.detail;
     if (status === 401 && (detail === 'token_expired' || detail === 'jwt_expired')) {
-      const newToken = await silentRefresh();
-      return await requestFn(newToken);
+      await silentRefresh();
+      return await requestFn();
     }
     throw err;
   }
