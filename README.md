@@ -49,8 +49,8 @@ Syrabit uses a **9-Pillar Hybrid Architecture**:
 | Pillar | Provider | Service | Purpose |
 |--------|----------|---------|---------|
 | P1 | Cloudflare | Workers, Turnstile, R2 | Edge shield, bot protection, static assets |
-| P2 | Google Cloud | Cloud Run (asia-south1, min-instances=1) | FastAPI backend, orchestration |
-| P3 | Vertex AI | Vertex AI Search (Discovery Engine) - Hybrid RAG | BM25 + Vector + Semantic Rerank |
+| P2 | Google Cloud | Cloud Run | FastAPI backend, orchestration |
+| P3 | Vertex AI | Search (Discovery Engine) | Hybrid RAG (BM25 + Vector + Rerank) |
 | P4 | MongoDB | Atlas M10 | User profiles, chat history, subscriptions |
 | P5 | Upstash | Redis Global | Rate limiting, real-time counters |
 | P6 | Vertex AI | Gemini 2.5 Flash | English chat + RAG grounding |
@@ -75,25 +75,22 @@ Syrabit uses a **9-Pillar Hybrid Architecture**:
 ```
 Browser (syrabit.ai)
   |
-  |-- Static pages --> Cloudflare Pages (syrabit.ai)
+  |-- Static pages --> Cloudflare Pages
   |
-  +-- API calls --> api.syrabit.ai
-                    |
-                    +-- Cloudflare Worker (syrabitworker-prod)
-                         |-- JWT verification
-                         |-- Rate limiting (KV)
-                         |-- Bot detection
-                         +-- Proxy --> Cloud Run (IAM auth via service account)
-                              |
-                              |-- Vertex AI Search (RAG retrieval)
-                              |-- Vertex AI Gemini 2.5 Flash (English)
-                              +-- Sarvam AI sarvam-m (Assamese)
+  +-- API calls --> Cloudflare Worker
+                    |-- JWT verification
+                    |-- Rate limiting (KV)
+                    |-- Bot detection
+                    +-- Proxy --> Cloud Run (IAM-protected)
+                         |-- Vertex AI Search (RAG retrieval)
+                         |-- Vertex AI Gemini (English)
+                         +-- Sarvam AI (Assamese)
 ```
 
 **Production URLs:**
 - Frontend: `https://syrabit.ai` (Cloudflare Pages)
 - API/Edge: `https://api.syrabit.ai` (Cloudflare Worker)
-- Backend: `https://syrabit-backend-851687450401.asia-south1.run.app` (Cloud Run, IAM-protected)
+- Backend: Cloud Run (IAM-protected, not publicly accessible)
 
 ## Content Hierarchy
 
@@ -150,23 +147,15 @@ syrabit-monorepo/
 
 ## Configuration
 
-All environment variables are documented in `.env.shared`:
+All environment variables are documented in `.env.shared`. Key categories:
 
-```bash
-# Example required variables
-CF_ACCOUNT_ID=acct_xxx
-GCP_PROJECT_ID=your-gcp-project
-GCP_REGION=asia-south1
-BACKEND_URL=https://syrabit-backend-xxxxx.run.app
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net
-UPSTASH_REDIS_REST_URL=https://xxx.upstash.io
-VERTEX_PROJECT_ID=your-gcp-project
-SARVAM_API_KEY=sk_sarvam_xxx
-RAZORPAY_KEY_ID=rzp_live_xxx
-JWT_SECRET=super_secret_jwt_key_32_chars_min
-```
+- **Cloud providers**: Cloudflare, GCP, MongoDB Atlas, Upstash
+- **AI services**: Vertex AI, Sarvam AI
+- **Payments**: Razorpay
+- **Auth**: JWT secrets, admin credentials
+- **Observability**: Sentry, PostHog
 
-See `.env.shared` for complete list with descriptions.
+See `.env.shared` for the complete list with descriptions. Never commit actual secrets to the repository.
 
 ## Deployment
 
@@ -174,30 +163,23 @@ See `.env.shared` for complete list with descriptions.
 
 ```bash
 # Automated via GitHub Actions (deploy-all.yml)
-# Push to main triggers:
-# 1. Build Docker image
-# 2. Push to Artifact Registry
-# 3. Deploy to Cloud Run (min-instances=1)
-# 4. Health check verification
+# Push to main triggers: build, push to registry, deploy, health check
 ```
 
-- `min-instances=1` is set on Cloud Run (no cold starts)
-- Cloud Run requires IAM auth: only `syrabit-edge-invoker` service account can invoke
-- Edge worker authenticates via `GOOGLE_SA_KEY` (service account JSON)
-- Backend deployed via `gcloud run deploy` or GitHub Actions `deploy-all.yml`
+- Always-on (min-instances=1, no cold starts)
+- IAM-protected (only authorized service accounts can invoke)
+- Deployed via GitHub Actions or `gcloud run deploy`
 
 ### Frontend (Cloudflare Pages)
 
-- Deployed via Cloudflare Pages (project: `syrabitfrontend`)
+- Deployed via Cloudflare Pages
 - Production URL: `https://syrabit.ai`
 
 ### Edge (Cloudflare Workers)
 
 ```bash
 # Automated via GitHub Actions
-# Push to main triggers:
-# 1. Install Wrangler
-# 2. Deploy Worker to production
+# Push to main triggers deploy
 ```
 
 - Deployed via `wrangler deploy --env production`
@@ -206,12 +188,10 @@ See `.env.shared` for complete list with descriptions.
 
 ```bash
 # Backend
-gcloud builds submit --tag REGION-docker.pkg.dev/PROJECT_ID/syrabit/backend:latest apps/backend
-gcloud run deploy syrabit-backend --image REGION-docker.pkg.dev/PROJECT_ID/syrabit/backend:latest --region REGION
+gcloud run deploy syrabit-backend --source=apps/backend --region=REGION --min-instances=1
 
 # Edge
-cd apps/edge
-wrangler deploy --env production
+cd apps/edge && wrangler deploy --env production
 ```
 
 ## Testing
@@ -230,10 +210,10 @@ python infra/scripts/test-rag-quality.py
 
 ## Monitoring
 
-- **Errors**: Sentry (`SENTRY_DSN`)
-- **Analytics**: PostHog (`POSTHOG_API_KEY`)
+- **Errors**: Sentry
+- **Analytics**: PostHog
 - **Logs**: Cloud Run logs via Cloud Logging
-- **Metrics**: Upstash dashboard, GCP Cloud Monitoring
+- **Uptime**: GitHub Actions monitor (every 15 min, auto-creates incident issues)
 
 ### Key Alerts
 
@@ -263,28 +243,7 @@ python infra/scripts/test-rag-quality.py
 
 ## Troubleshooting
 
-### Common Issues
-
-**1. Vertex AI Search connection failed**
-```bash
-# Verify GOOGLE_APPLICATION_CREDENTIALS_JSON is set correctly
-# Check that the service account has Discovery Engine permissions
-# Test: gcloud ai-platform operations list --project=PROJECT_ID
-```
-
-**2. Rate limiting not working**
-```bash
-# Check Upstash connection
-# Verify UPSTASH_REDIS_REST_TOKEN
-# Test: redis-cli -u $UPSTASH_REDIS_REST_URL ping
-```
-
-**3. High latency**
-```bash
-# Check Vertex Search reranker configuration
-# Verify embedding dimensions match (1536)
-# Monitor Upstash latency (<20ms target)
-```
+See internal documentation for common issues and resolution steps.
 
 ## License
 
