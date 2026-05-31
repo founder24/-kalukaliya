@@ -1,7 +1,14 @@
 {
   "task_id": "task-topic-embedding-matching",
   "task_description": "Implement topic embedding matching for the chat RAG pipeline. Topic embeddings are stored in MongoDB (not Vertex). At chat time, generate a query embedding via Vertex AI text-embedding-005, compare against stored topic embeddings using cosine similarity, and only proceed with RAG if a match >= 0.70 is found.",
-  "status": "in_progress",
+  "status": "completed",
   "feature_order": ["FEAT-001"],
-  "blocked_reason": null
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "All 218 tests pass (including 13 new topic matcher tests). Imports verified. Review issues (token caching, stream parallelism, httpx reuse, cache lock, timeout, error TTL) all addressed."
+  }
 }
