@@ -118,13 +118,23 @@ class ChatService:
 
         Returns match info dict (with score, topic metadata) if a topic matches
         above the 0.70 threshold, otherwise None.
+
+        Uses a 0.5s timeout to fail fast if Vertex AI is slow, so that the
+        total RAG phase stays within the intended latency budget.
         """
         try:
             from app.services.ai.embedder import generate_embedding_vector
             from app.services.ai.topic_matcher import topic_matcher
 
-            query_embedding = await generate_embedding_vector(query)
+            # Issue #5: Bound the embedding call to 0.5s to avoid eating into
+            # the 0.8s RAG budget when Vertex AI is slow.
+            query_embedding = await asyncio.wait_for(
+                generate_embedding_vector(query), timeout=0.5
+            )
             return await topic_matcher.match_topic(query_embedding)
+        except asyncio.TimeoutError:
+            logger.warning("Topic match embedding call timed out (0.5s)")
+            return None
         except Exception as e:
             logger.warning(f"Topic match check failed: {e}")
             return None

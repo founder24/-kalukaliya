@@ -5,6 +5,7 @@ Loads all TopicEmbedding documents from MongoDB on first access, caches them in 
 and provides fast cosine similarity lookup for incoming user queries.
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -20,6 +21,9 @@ MATCH_THRESHOLD = 0.70
 
 # Cache TTL in seconds (5 minutes)
 _CACHE_TTL = 300
+
+# Shorter TTL when a load fails (10 seconds), so we retry quickly
+_ERROR_CACHE_TTL = 10
 
 
 def cosine_similarity(vec_a: list[float], vec_b: np.ndarray) -> float:
@@ -39,12 +43,15 @@ class TopicMatcher:
         self._embeddings: Optional[list[dict]] = None
         self._vectors: Optional[np.ndarray] = None
         self._last_load: float = 0
+        self._load_lock = asyncio.Lock()
+        self._load_failed: bool = False
 
     def _is_cache_valid(self) -> bool:
         """Check if the in-memory cache is still fresh."""
         if self._embeddings is None:
             return False
-        return (time.time() - self._last_load) < _CACHE_TTL
+        ttl = _ERROR_CACHE_TTL if self._load_failed else _CACHE_TTL
+        return (time.time() - self._last_load) < ttl
 
     async def _load_embeddings(self) -> None:
         """Load all TopicEmbedding documents from MongoDB into memory."""
@@ -52,9 +59,11 @@ class TopicMatcher:
             docs = await TopicEmbedding.find_all().to_list()
         except Exception as e:
             logger.error(f"Failed to load topic embeddings from MongoDB: {e}")
+            # Issue #6: Use short TTL on error so we retry quickly
             self._embeddings = []
             self._vectors = np.array([], dtype=np.float32)
             self._last_load = time.time()
+            self._load_failed = True
             return
 
         self._embeddings = []
@@ -80,6 +89,7 @@ class TopicMatcher:
             self._vectors = np.array([], dtype=np.float32)
 
         self._last_load = time.time()
+        self._load_failed = False
         logger.info(f"Loaded {len(self._embeddings)} topic embeddings into cache")
 
     def invalidate_cache(self) -> None:
@@ -87,6 +97,7 @@ class TopicMatcher:
         self._embeddings = None
         self._vectors = None
         self._last_load = 0
+        self._load_failed = False
 
     async def match_topic(self, query_embedding: list[float]) -> Optional[dict]:
         """
@@ -99,7 +110,11 @@ class TopicMatcher:
             Dict with topic metadata and score if best match >= threshold, else None.
         """
         if not self._is_cache_valid():
-            await self._load_embeddings()
+            # Issue #4: Use lock to prevent concurrent cache reloads
+            async with self._load_lock:
+                # Double-check after acquiring lock
+                if not self._is_cache_valid():
+                    await self._load_embeddings()
 
         if not self._embeddings or self._vectors is None or self._vectors.size == 0:
             return None
