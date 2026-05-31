@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time as _time
+from typing import Optional
 
 import httpx
 
@@ -10,11 +11,11 @@ logger = logging.getLogger(__name__)
 
 # --- Module-level token cache (Issue #1: mirrors vertex_client.py pattern) ---
 _token_lock = asyncio.Lock()
-_cached_token: str | None = None
+_cached_token: Optional[str] = None
 _token_expiry: float = 0
 
 # --- Module-level httpx client for connection reuse (Issue #3) ---
-_http_client: httpx.AsyncClient | None = None
+_http_client: Optional[httpx.AsyncClient] = None
 
 
 def _get_http_client() -> httpx.AsyncClient:
