@@ -2,11 +2,11 @@
 
 **Version**: 3.0 | **Classification**: Production Ready | **Target Scale**: 100k DAU
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Python 3.11+
-- Node.js 18+
+- Node.js 22+
 - Docker & Docker Compose
 - Cloudflare Account
 - GCP Project
@@ -42,32 +42,86 @@ npx wrangler dev
 
 Visit `http://localhost:8000/docs` for API documentation.
 
-## 🏗️ Architecture
+## Architecture
 
 Syrabit uses a **9-Pillar Hybrid Architecture**:
 
 | Pillar | Provider | Service | Purpose |
 |--------|----------|---------|---------|
 | P1 | Cloudflare | Workers, Turnstile, R2 | Edge shield, bot protection, static assets |
-| P2 | Google Cloud | Cloud Run | FastAPI backend, orchestration |
-| P3 | Vertex AI | Search (Discovery Engine) | Hybrid RAG (BM25 + Vector + Semantic Rerank) |
+| P2 | Google Cloud | Cloud Run (asia-south1, min-instances=1) | FastAPI backend, orchestration |
+| P3 | Vertex AI | Vertex AI Search (Discovery Engine) - Hybrid RAG | BM25 + Vector + Semantic Rerank |
 | P4 | MongoDB | Atlas M10 | User profiles, chat history, subscriptions |
 | P5 | Upstash | Redis Global | Rate limiting, real-time counters |
-| P6 | Vertex AI | Gemini 1.5 Pro | English language reasoning |
-| P7 | Sarvam AI | OpenHathi 7B | Assamese native understanding |
+| P6 | Vertex AI | Gemini 2.5 Flash | English chat + RAG grounding |
+| P7 | Sarvam AI | Sarvam-m | Assamese chat (with Vertex fallback) |
 | P8 | Razorpay | Payment Gateway | INR transactions, subscriptions |
 | P9 | Resend | Email API | Transactional emails |
 
 ### Key Features
 
-✅ **Hybrid RAG**: +35% quality gain over vector-only search  
-✅ **Sub-400ms TTFB**: Optimized pipeline with streaming  
-✅ **Multi-language**: Automatic Assamese/English detection  
-✅ **Rate Limiting**: Token bucket algorithm via Upstash  
-✅ **Bot Protection**: Cloudflare Turnstile integration  
-✅ **Payment Ready**: Razorpay subscription management  
+- **Hybrid RAG**: +35% quality gain over vector-only search
+- **Sub-2s TTFB**: Streaming responses with min-instances=1
+- **Multi-language**: Automatic Assamese/English detection
+- **Rate Limiting**: Token bucket algorithm via Upstash
+- **Bot Protection**: Cloudflare Turnstile integration
+- **Payment Ready**: Razorpay subscription management
+- **SEO Score 99/100**: Triple-stack structured data, Knowledge Graph linking, RSS/JSON feeds
+- **Always-on backend**: min-instances=1, no cold starts
+- **Vertex Search RAG**: Hybrid retrieval with Discovery Engine
 
-## 📁 Project Structure
+## Request Flow & Deployment Topology
+
+```
+Browser (syrabit.ai)
+  |
+  |-- Static pages --> Cloudflare Pages (syrabit.ai)
+  |
+  +-- API calls --> api.syrabit.ai
+                    |
+                    +-- Cloudflare Worker (syrabitworker-prod)
+                         |-- JWT verification
+                         |-- Rate limiting (KV)
+                         |-- Bot detection
+                         +-- Proxy --> Cloud Run (IAM auth via service account)
+                              |
+                              |-- Vertex AI Search (RAG retrieval)
+                              |-- Vertex AI Gemini 2.5 Flash (English)
+                              +-- Sarvam AI sarvam-m (Assamese)
+```
+
+**Production URLs:**
+- Frontend: `https://syrabit.ai` (Cloudflare Pages)
+- API/Edge: `https://api.syrabit.ai` (Cloudflare Worker)
+- Backend: `https://syrabit-backend-851687450401.asia-south1.run.app` (Cloud Run, IAM-protected)
+
+## Content Hierarchy
+
+```
+Board (SEBA, AHSEC, CBSE)
+  +-- Class (Class 9, Class 10, Class 11, Class 12, Degree)
+       +-- Stream (Science, Commerce, Arts) [optional, for Class 11+]
+            +-- Subject (Physics, Chemistry, Mathematics, etc.)
+                 +-- Chapter (e.g., "Chemical Reactions and Equations")
+                      +-- Topic (e.g., "Balancing Chemical Equations")
+```
+
+Content types per chapter: Notes, MCQs, Definitions, Important Questions, PYQs, Summary
+
+API: `GET /api/v1/content/boards` -> `classes` -> `streams` -> `subjects` -> `chapters/{subjectId}`
+
+MongoDB model: `KnowledgeObject` with `metadata.board`, `metadata.class_level`, `metadata.subject`, `metadata.chapter`, `metadata.topic`
+
+## SEO / GEO / AEO Infrastructure
+
+- **Structured Data**: JSON-LD + Microdata + RDFa triple-stack on all pages
+- **Knowledge Graph**: Entity linking to Wikidata/DBpedia for AHSEC, SEBA, CBSE, subjects
+- **Sitemaps**: Dynamic sitemap index at `/sitemap.xml` with sub-sitemaps (static, subjects, chapters, topics)
+- **Feeds**: RSS 2.0 (`/feed.xml`) + JSON Feed v1.1 (`/feed.json`) for AI crawlers
+- **AI Discovery**: `ai.txt`, `llms.txt`, `robots.txt` with GPTBot/PerplexityBot/ClaudeBot directives
+- **Performance**: Lighthouse score 99/100, LCP 972ms, TBT 0ms, CLS 0.028
+
+## Project Structure
 
 ```
 syrabit-monorepo/
@@ -94,7 +148,7 @@ syrabit-monorepo/
 └── docker-compose.yml     # Local development
 ```
 
-## 🔧 Configuration
+## Configuration
 
 All environment variables are documented in `.env.shared`:
 
@@ -114,18 +168,28 @@ JWT_SECRET=super_secret_jwt_key_32_chars_min
 
 See `.env.shared` for complete list with descriptions.
 
-## 🚢 Deployment
+## Deployment
 
 ### Backend (Google Cloud Run)
 
 ```bash
-# Automated via GitHub Actions
+# Automated via GitHub Actions (deploy-all.yml)
 # Push to main triggers:
 # 1. Build Docker image
 # 2. Push to Artifact Registry
-# 3. Deploy to Cloud Run
+# 3. Deploy to Cloud Run (min-instances=1)
 # 4. Health check verification
 ```
+
+- `min-instances=1` is set on Cloud Run (no cold starts)
+- Cloud Run requires IAM auth: only `syrabit-edge-invoker` service account can invoke
+- Edge worker authenticates via `GOOGLE_SA_KEY` (service account JSON)
+- Backend deployed via `gcloud run deploy` or GitHub Actions `deploy-all.yml`
+
+### Frontend (Cloudflare Pages)
+
+- Deployed via Cloudflare Pages (project: `syrabitfrontend`)
+- Production URL: `https://syrabit.ai`
 
 ### Edge (Cloudflare Workers)
 
@@ -136,6 +200,8 @@ See `.env.shared` for complete list with descriptions.
 # 2. Deploy Worker to production
 ```
 
+- Deployed via `wrangler deploy --env production`
+
 ### Manual Deployment
 
 ```bash
@@ -145,10 +211,10 @@ gcloud run deploy syrabit-backend --image REGION-docker.pkg.dev/PROJECT_ID/syrab
 
 # Edge
 cd apps/edge
-wrangler deploy --prod
+wrangler deploy --env production
 ```
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Backend tests
@@ -162,7 +228,7 @@ locust --host=http://localhost:8000
 python infra/scripts/test-rag-quality.py
 ```
 
-## 📊 Monitoring
+## Monitoring
 
 - **Errors**: Sentry (`SENTRY_DSN`)
 - **Analytics**: PostHog (`POSTHOG_API_KEY`)
@@ -172,23 +238,11 @@ python infra/scripts/test-rag-quality.py
 ### Key Alerts
 
 - Error rate > 1%
-- P95 latency > 400ms
+- P95 latency > 2s
 - Rate limit violations > 100/min
 - Payment webhook failures
 
-## 💰 Cost Optimization
-
-This architecture eliminates redundant services:
-
-| Service | Old Cost | New Cost | Savings |
-|---------|----------|----------|---------|
-| Pinecone | $70/mo | $0 (Vertex Search) | 100% |
-| Separate Compute | $200/mo | Consolidated | 40% |
-| Rate Limiting | $50/mo | Upstash Free | 100% |
-
-**Estimated monthly cost at 100k DAU**: ~$400-600
-
-## 🔒 Security & Compliance
+## Security & Compliance
 
 - **Data Residency**: All data in India regions (GCP asia-south1, MongoDB Mumbai)
 - **GDPR/DPDP**: Right to delete, data portability
@@ -196,16 +250,18 @@ This architecture eliminates redundant services:
 - **Bot Mitigation**: Turnstile verification
 - **Secrets Management**: GCP Secret Manager
 
-## 📈 Performance Targets
+## Performance Targets
 
 | Metric | Target | Current |
 |--------|--------|---------|
-| TTFB | <400ms | ~350ms |
-| Recall@5 (RAG) | >90% | ~92% |
-| Uptime | 99.9% | - |
-| Rate Limit Accuracy | 100% | - |
+| Chat TTFB | <2s | ~2s (streaming) |
+| Lighthouse Score | >90 | 99 |
+| LCP | <2500ms | 972ms |
+| CLS | <0.1 | 0.028 |
+| Uptime | 99.9% | Monitored every 15min |
+| RAG Recall@5 | >85% | Vertex Search hybrid |
 
-## 🛠️ Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -230,16 +286,16 @@ This architecture eliminates redundant services:
 # Monitor Upstash latency (<20ms target)
 ```
 
-## 📝 License
+## License
 
 Proprietary - All rights reserved
 
-## 🤝 Contributing
+## Contributing
 
 This is a private repository. Contact the founding team for access.
 
 ---
 
-**Built with ❤️ for Assamese students**
+**Built for Assamese students**
 
 *For detailed architecture, see [docs/architecture.md](docs/architecture.md)*
