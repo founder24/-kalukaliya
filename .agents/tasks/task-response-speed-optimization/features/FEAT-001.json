@@ -27,5 +27,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_topic_matcher.py tests/test_chat.py -x -q"
   ],
   "blocked_reason": null,
-  "findings": "All 29 tests pass on Python 3.11. Required pyenv global 3.11.15 and installing deps from requirements.txt (stripped hashes). Existing check_topic_match tests needed has_topics mock added since the new short-circuit runs before generate_embedding_vector."
+  "findings": "All 29 tests pass on Python 3.11. Required pyenv global 3.11.15 and installing deps from requirements.txt (stripped hashes). Existing check_topic_match tests needed has_topics mock added since the new short-circuit runs before generate_embedding_vector. Review fix applied: moved save_chat before yields in streaming greeting_stream() to prevent chat persistence loss on client disconnect. Rate-limit bypass (Issue 1) was verified to NOT be an issue - greeting fast-path is already correctly placed after rate-limit enforcement."
 }
