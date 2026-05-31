@@ -78,15 +78,11 @@ async def _validate_admin_session(request: Request) -> dict:
                             "type": "admin",
                             "role": "admin",
                         }
-                raise HTTPException(
-                    status_code=403, detail="Insufficient permissions"
-                )
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
             except HTTPException:
                 raise
             except InvalidTokenError:
-                raise HTTPException(
-                    status_code=401, detail="Invalid or expired token"
-                )
+                raise HTTPException(status_code=401, detail="Invalid or expired token")
         raise HTTPException(status_code=401, detail="No admin session")
     try:
         # RS256 requires the public key for verification, not the private key

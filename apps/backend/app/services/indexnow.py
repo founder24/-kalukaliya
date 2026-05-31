@@ -58,9 +58,13 @@ async def push_indexnow(urls: list[str]) -> dict:
                     "ok": response.status_code in (200, 202),
                 }
                 if response.status_code in (200, 202):
-                    logger.info(f"IndexNow push success to {endpoint}: {len(urls)} URLs")
+                    logger.info(
+                        f"IndexNow push success to {endpoint}: {len(urls)} URLs"
+                    )
                 else:
-                    logger.warning(f"IndexNow push to {endpoint}: HTTP {response.status_code}")
+                    logger.warning(
+                        f"IndexNow push to {endpoint}: HTTP {response.status_code}"
+                    )
             except Exception as e:
                 logger.error(f"IndexNow push failed for {endpoint}: {e}")
                 results[endpoint] = {"status": "error", "detail": str(e)}
