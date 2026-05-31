@@ -331,6 +331,10 @@ class ContentPublisherService:
                 await chapter.save()
                 wikidata_result = {t: u for t, u in wikidata_uris.items() if u}
 
+        # 8. Generate and store topic embeddings for cosine similarity matching
+        hierarchy = await self._resolve_hierarchy(chapter)
+        topic_embedding_result = await self._generate_topic_embeddings(chapter, hierarchy)
+
         return {
             "chapter_id": chapter_id,
             "status": "published",
@@ -339,7 +343,72 @@ class ContentPublisherService:
             "cloudflare": cf_result,
             "indexnow": indexnow_result,
             "wikidata": wikidata_result,
+            "topic_embeddings": topic_embedding_result,
         }
+
+    async def _generate_topic_embeddings(self, chapter: Chapter, hierarchy: dict) -> dict:
+        """Generate and upsert TopicEmbedding documents for each topic in a chapter."""
+        from app.models.content import TopicEmbedding
+        from app.services.ai.embedder import generate_embedding_vector
+
+        if not chapter.published_topics:
+            return {"status": "no_topics"}
+
+        subject = hierarchy.get("subject")
+        board = hierarchy.get("board")
+        cls = hierarchy.get("cls")
+
+        subject_slug = subject.name.lower().replace(" ", "-") if subject else ""
+        board_slug = board.slug if board else ""
+        class_level = cls.name if cls else ""
+
+        generated = 0
+        errors = 0
+
+        for topic in chapter.published_topics:
+            try:
+                embedding = await generate_embedding_vector(topic.title)
+
+                # Upsert by topic_id
+                existing = await TopicEmbedding.find_one(
+                    TopicEmbedding.topic_id == topic.id
+                )
+                if existing:
+                    existing.topic_title = topic.title
+                    existing.chapter_id = chapter.id
+                    existing.chapter_title = chapter.title
+                    existing.subject_slug = subject_slug
+                    existing.board_slug = board_slug
+                    existing.class_level = class_level
+                    existing.embedding = embedding
+                    existing.updated_at = datetime.now(timezone.utc)
+                    await existing.save()
+                else:
+                    doc = TopicEmbedding(
+                        topic_id=topic.id,
+                        topic_title=topic.title,
+                        chapter_id=chapter.id,
+                        chapter_title=chapter.title,
+                        subject_slug=subject_slug,
+                        board_slug=board_slug,
+                        class_level=class_level,
+                        embedding=embedding,
+                    )
+                    await doc.insert()
+                generated += 1
+            except Exception as e:
+                logger.error(f"Failed to generate embedding for topic '{topic.title}': {e}")
+                errors += 1
+
+        # Invalidate topic matcher cache so new embeddings are picked up
+        try:
+            from app.services.ai.topic_matcher import topic_matcher
+
+            topic_matcher.invalidate_cache()
+        except Exception:
+            pass
+
+        return {"status": "generated", "count": generated, "errors": errors}
 
     async def regenerate_sitemap(self) -> str:
         """Generate sitemap XML from all published chapters."""
