@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Add ETag support to the content API endpoints and extend X-Request-ID in the edge worker to all requests (not just /api/ routes) and include it in response headers.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/api/v1/content.py: Add hashlib import. For render_chapter and render_chapter_page_type, compute an ETag from the HTML content using hashlib.md5(html.encode()).hexdigest(), add it to the response headers as ETag (weak: W/\"hash\"), and check the incoming If-None-Match request header. If it matches, return 304 Not Modified. Import Request from fastapi and add it as a parameter to the affected endpoints.",
     "In apps/backend/app/api/v1/content.py: For the list_chapters and get_by_slug endpoints, add Cache-Control headers (e.g. 'public, max-age=60, s-maxage=300, stale-while-revalidate=600') using JSONResponse with explicit headers.",
@@ -22,5 +22,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/edge && npx vitest run to confirm tests pass"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 77 edge vitest tests pass. Python syntax validated with ast.parse. TypeScript compiles cleanly with tsc --noEmit. The handleRobots response needed to be assigned to a variable before setting X-Request-ID header since it returns a new Response directly."
 }
