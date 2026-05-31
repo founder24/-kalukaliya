@@ -162,7 +162,9 @@ class Settings(BaseSettings):
         # Enforce edge secret when trust is enabled
         if self.TRUST_EDGE_AUTH and not self.EDGE_SHARED_SECRET:
             if self.APP_ENV in ("production", "staging"):
-                raise ValueError("EDGE_SHARED_SECRET must be set when TRUST_EDGE_AUTH is True")
+                raise ValueError(
+                    "EDGE_SHARED_SECRET must be set when TRUST_EDGE_AUTH is True"
+                )
             else:
                 logger.warning(
                     "TRUST_EDGE_AUTH is True but EDGE_SHARED_SECRET is not set. "

@@ -686,9 +686,13 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
                     from app.db.redis import get_redis
 
                     redis = get_redis()
-                    await redis.set(f"blacklisted_token:{old_hash}", "1", ex=remaining_ttl, nx=True)
+                    await redis.set(
+                        f"blacklisted_token:{old_hash}", "1", ex=remaining_ttl, nx=True
+                    )
             except Exception as e:
-                logger.warning(f"Failed to blacklist old access token during refresh: {e}")
+                logger.warning(
+                    f"Failed to blacklist old access token during refresh: {e}"
+                )
 
         return TokenResponse(
             access_token=new_access_token, refresh_token=new_refresh_token
