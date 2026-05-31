@@ -66,6 +66,7 @@ RUN_LAYER=""
 # Token storage (populated during auth layer)
 AUTH_TOKEN=""
 ADMIN_TOKEN=""
+ADMIN_COOKIE=""
 
 # Temp file tracking
 GLOBAL_TMPFILES=()
@@ -1691,6 +1692,29 @@ test_layer_4_authentication() {
             assert_warn "Admin login rate limited (429)"
         else
             assert_warn "Admin login returned HTTP $CURL_STATUS"
+        fi
+
+        # 4.2.8 Admin panel login (cookie-based session for admin endpoints)
+        local admin_cookie_jar
+        admin_cookie_jar=$(mktemp)
+        GLOBAL_TMPFILES+=("$admin_cookie_jar")
+        local admin_login_resp
+        admin_login_resp=$(curl -s -o /dev/null -w "%{http_code}" \
+            -c "$admin_cookie_jar" \
+            -X POST "${BASE_URL}/api/v1/admin/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASSWORD}\"}" 2>/dev/null)
+        if [[ "$admin_login_resp" -eq 200 ]]; then
+            ADMIN_COOKIE=$(grep "syrabit_admin_session" "$admin_cookie_jar" 2>/dev/null | awk '{print $NF}')
+            if [[ -n "$ADMIN_COOKIE" ]]; then
+                assert_pass "Admin panel login successful (cookie obtained)"
+            else
+                assert_warn "Admin login 200 but no session cookie set"
+            fi
+        elif [[ "$admin_login_resp" -eq 429 ]]; then
+            assert_warn "Admin panel login rate limited (429)"
+        else
+            assert_warn "Admin panel login returned HTTP $admin_login_resp"
         fi
     else
         assert_skip "Admin login skipped (no credentials)"
@@ -4220,10 +4244,12 @@ test_layer_12_admin() {
 
     subsection "12.3 Admin with Valid Token"
 
-    if [[ -n "$ADMIN_TOKEN" ]]; then
+    if [[ -n "$ADMIN_COOKIE" ]]; then
+        # Use cookie-based admin auth (primary method used by admin panel)
+
         # 12.3.1 Dashboard
         perform_request "${BASE_URL}/api/v1/admin/dashboard" \
-            -H "Authorization: Bearer ${ADMIN_TOKEN}"
+            -b "syrabit_admin_session=${ADMIN_COOKIE}"
         if [[ "$CURL_STATUS" -eq 200 ]]; then
             assert_pass "Admin dashboard returns 200"
             if is_json; then
@@ -4241,7 +4267,7 @@ test_layer_12_admin() {
 
         # 12.3.2 Users list
         perform_request "${BASE_URL}/api/v1/admin/users" \
-            -H "Authorization: Bearer ${ADMIN_TOKEN}"
+            -b "syrabit_admin_session=${ADMIN_COOKIE}"
         if [[ "$CURL_STATUS" -eq 200 ]]; then
             assert_pass "Admin users returns 200"
             if is_json; then
@@ -4259,7 +4285,7 @@ test_layer_12_admin() {
 
         # 12.3.3 Analytics
         perform_request "${BASE_URL}/api/v1/admin/analytics" \
-            -H "Authorization: Bearer ${ADMIN_TOKEN}"
+            -b "syrabit_admin_session=${ADMIN_COOKIE}"
         if [[ "$CURL_STATUS" -eq 200 ]]; then
             assert_pass "Admin analytics returns 200"
         elif [[ "$CURL_STATUS" -eq 404 ]]; then
@@ -4270,7 +4296,7 @@ test_layer_12_admin() {
 
         # 12.3.4 Content management
         perform_request "${BASE_URL}/api/v1/admin/content" \
-            -H "Authorization: Bearer ${ADMIN_TOKEN}"
+            -b "syrabit_admin_session=${ADMIN_COOKIE}"
         if [[ "$CURL_STATUS" -eq 200 ]]; then
             assert_pass "Admin content returns 200"
         elif [[ "$CURL_STATUS" -eq 404 ]]; then
@@ -4281,7 +4307,7 @@ test_layer_12_admin() {
 
         # 12.3.5 Settings
         perform_request "${BASE_URL}/api/v1/admin/settings" \
-            -H "Authorization: Bearer ${ADMIN_TOKEN}"
+            -b "syrabit_admin_session=${ADMIN_COOKIE}"
         if [[ "$CURL_STATUS" -eq 200 ]]; then
             assert_pass "Admin settings returns 200"
         elif [[ "$CURL_STATUS" -eq 404 ]]; then
@@ -4292,7 +4318,7 @@ test_layer_12_admin() {
 
         # 12.3.6 Security
         perform_request "${BASE_URL}/api/v1/admin/security" \
-            -H "Authorization: Bearer ${ADMIN_TOKEN}"
+            -b "syrabit_admin_session=${ADMIN_COOKIE}"
         if [[ "$CURL_STATUS" -eq 200 ]]; then
             assert_pass "Admin security returns 200"
         elif [[ "$CURL_STATUS" -eq 404 ]]; then
@@ -4303,7 +4329,7 @@ test_layer_12_admin() {
 
         # 12.3.7 Revenue
         perform_request "${BASE_URL}/api/v1/admin/revenue" \
-            -H "Authorization: Bearer ${ADMIN_TOKEN}"
+            -b "syrabit_admin_session=${ADMIN_COOKIE}"
         if [[ "$CURL_STATUS" -eq 200 ]]; then
             assert_pass "Admin revenue returns 200"
         elif [[ "$CURL_STATUS" -eq 404 ]]; then
@@ -4314,7 +4340,7 @@ test_layer_12_admin() {
 
         # 12.3.8 Knowledge
         perform_request "${BASE_URL}/api/v1/admin/knowledge" \
-            -H "Authorization: Bearer ${ADMIN_TOKEN}"
+            -b "syrabit_admin_session=${ADMIN_COOKIE}"
         if [[ "$CURL_STATUS" -eq 200 ]]; then
             assert_pass "Admin knowledge returns 200"
         elif [[ "$CURL_STATUS" -eq 404 ]]; then
@@ -4322,17 +4348,35 @@ test_layer_12_admin() {
         else
             assert_warn "Admin knowledge returned HTTP $CURL_STATUS"
         fi
+    elif [[ -n "$ADMIN_TOKEN" ]]; then
+        # Fallback: use Bearer token
+        assert_warn "No admin cookie available, using Bearer token (may fail)"
+        perform_request "${BASE_URL}/api/v1/admin/dashboard" \
+            -H "Authorization: Bearer ${ADMIN_TOKEN}"
+        if [[ "$CURL_STATUS" -eq 200 ]]; then
+            assert_pass "Admin dashboard returns 200 (Bearer)"
+        else
+            assert_warn "Admin dashboard returned HTTP $CURL_STATUS (Bearer fallback)"
+        fi
+        assert_skip "Admin users (Bearer fallback)"
+        assert_skip "Users JSON (Bearer fallback)"
+        assert_skip "Admin analytics (Bearer fallback)"
+        assert_skip "Admin content (Bearer fallback)"
+        assert_skip "Admin settings (Bearer fallback)"
+        assert_skip "Admin security (Bearer fallback)"
+        assert_skip "Admin revenue (Bearer fallback)"
+        assert_skip "Admin knowledge (Bearer fallback)"
     else
-        assert_skip "Admin dashboard (no admin token)"
-        assert_skip "Dashboard JSON (no admin token)"
-        assert_skip "Admin users (no admin token)"
-        assert_skip "Users JSON (no admin token)"
-        assert_skip "Admin analytics (no admin token)"
-        assert_skip "Admin content (no admin token)"
-        assert_skip "Admin settings (no admin token)"
-        assert_skip "Admin security (no admin token)"
-        assert_skip "Admin revenue (no admin token)"
-        assert_skip "Admin knowledge (no admin token)"
+        assert_skip "Admin dashboard (no admin token/cookie)"
+        assert_skip "Dashboard JSON (no admin token/cookie)"
+        assert_skip "Admin users (no admin token/cookie)"
+        assert_skip "Users JSON (no admin token/cookie)"
+        assert_skip "Admin analytics (no admin token/cookie)"
+        assert_skip "Admin content (no admin token/cookie)"
+        assert_skip "Admin settings (no admin token/cookie)"
+        assert_skip "Admin security (no admin token/cookie)"
+        assert_skip "Admin revenue (no admin token/cookie)"
+        assert_skip "Admin knowledge (no admin token/cookie)"
     fi
 
     subsection "12.4 Admin Security Probes"
