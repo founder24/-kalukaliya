@@ -66,7 +66,7 @@ Syrabit uses a **9-Pillar Hybrid Architecture**:
 - **Rate Limiting**: Token bucket algorithm via Upstash
 - **Bot Protection**: Cloudflare Turnstile integration
 - **Payment Ready**: Razorpay subscription management
-- **SEO Score 99/100**: Triple-stack structured data, Knowledge Graph linking, RSS/JSON feeds
+- **SEO Score 100/100**: Triple-stack structured data, Knowledge Graph linking, RSS/JSON feeds
 - **Always-on backend**: min-instances=1, no cold starts
 - **Vertex Search RAG**: Hybrid retrieval with Discovery Engine
 
@@ -116,7 +116,7 @@ MongoDB model: `KnowledgeObject` with `metadata.board`, `metadata.class_level`, 
 - **Sitemaps**: Dynamic sitemap index at `/sitemap.xml` with sub-sitemaps (static, subjects, chapters, topics)
 - **Feeds**: RSS 2.0 (`/feed.xml`) + JSON Feed v1.1 (`/feed.json`) for AI crawlers
 - **AI Discovery**: `ai.txt`, `llms.txt`, `robots.txt` with GPTBot/PerplexityBot/ClaudeBot directives
-- **Performance**: Lighthouse score 99/100, LCP 972ms, TBT 0ms, CLS 0.028
+- **Performance**: PageSpeed Insights mobile 93/100, Accessibility 94, Best Practices 92, SEO 100/100
 
 ## Project Structure
 
@@ -235,9 +235,10 @@ python infra/scripts/test-rag-quality.py
 | Metric | Target | Current |
 |--------|--------|---------|
 | Chat TTFB | <2s | ~2s (streaming) |
-| Lighthouse Score | >90 | 99 |
-| LCP | <2500ms | 972ms |
-| CLS | <0.1 | 0.028 |
+| PSI Performance (mobile) | >90 | 93 |
+| PSI Accessibility | >90 | 94 |
+| PSI Best Practices | >90 | 92 |
+| PSI SEO | >95 | 100 |
 | Uptime | 99.9% | Monitored every 15min |
 | RAG Recall@5 | >85% | Vertex Search hybrid |
 
