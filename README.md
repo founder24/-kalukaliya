@@ -2,11 +2,11 @@
 
 **Version**: 3.0 | **Classification**: Production Ready | **Target Scale**: 100k DAU
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Python 3.11+
-- Node.js 18+
+- Node.js 22+
 - Docker & Docker Compose
 - Cloudflare Account
 - GCP Project
@@ -42,7 +42,7 @@ npx wrangler dev
 
 Visit `http://localhost:8000/docs` for API documentation.
 
-## 🏗️ Architecture
+## Architecture
 
 Syrabit uses a **9-Pillar Hybrid Architecture**:
 
@@ -50,24 +50,75 @@ Syrabit uses a **9-Pillar Hybrid Architecture**:
 |--------|----------|---------|---------|
 | P1 | Cloudflare | Workers, Turnstile, R2 | Edge shield, bot protection, static assets |
 | P2 | Google Cloud | Cloud Run | FastAPI backend, orchestration |
-| P3 | Vertex AI | Search (Discovery Engine) | Hybrid RAG (BM25 + Vector + Semantic Rerank) |
+| P3 | Vertex AI | Search (Discovery Engine) | Hybrid RAG (BM25 + Vector + Rerank) |
 | P4 | MongoDB | Atlas M10 | User profiles, chat history, subscriptions |
 | P5 | Upstash | Redis Global | Rate limiting, real-time counters |
-| P6 | Vertex AI | Gemini 1.5 Pro | English language reasoning |
-| P7 | Sarvam AI | OpenHathi 7B | Assamese native understanding |
+| P6 | Vertex AI | Gemini 2.5 Flash | English chat + RAG grounding |
+| P7 | Sarvam AI | Sarvam-m | Assamese chat (with Vertex fallback) |
 | P8 | Razorpay | Payment Gateway | INR transactions, subscriptions |
 | P9 | Resend | Email API | Transactional emails |
 
 ### Key Features
 
-✅ **Hybrid RAG**: +35% quality gain over vector-only search  
-✅ **Sub-400ms TTFB**: Optimized pipeline with streaming  
-✅ **Multi-language**: Automatic Assamese/English detection  
-✅ **Rate Limiting**: Token bucket algorithm via Upstash  
-✅ **Bot Protection**: Cloudflare Turnstile integration  
-✅ **Payment Ready**: Razorpay subscription management  
+- **Hybrid RAG**: +35% quality gain over vector-only search
+- **Sub-2s TTFB**: Streaming responses with min-instances=1
+- **Multi-language**: Automatic Assamese/English detection
+- **Rate Limiting**: Token bucket algorithm via Upstash
+- **Bot Protection**: Cloudflare Turnstile integration
+- **Payment Ready**: Razorpay subscription management
+- **SEO Score 100/100**: Triple-stack structured data, Knowledge Graph linking, RSS/JSON feeds
+- **Always-on backend**: min-instances=1, no cold starts
+- **Vertex Search RAG**: Hybrid retrieval with Discovery Engine
 
-## 📁 Project Structure
+## Request Flow & Deployment Topology
+
+```
+Browser (syrabit.ai)
+  |
+  |-- Static pages --> Cloudflare Pages
+  |
+  +-- API calls --> Cloudflare Worker
+                    |-- JWT verification
+                    |-- Rate limiting (KV)
+                    |-- Bot detection
+                    +-- Proxy --> Cloud Run (IAM-protected)
+                         |-- Vertex AI Search (RAG retrieval)
+                         |-- Vertex AI Gemini (English)
+                         +-- Sarvam AI (Assamese)
+```
+
+**Production URLs:**
+- Frontend: `https://syrabit.ai` (Cloudflare Pages)
+- API/Edge: `https://api.syrabit.ai` (Cloudflare Worker)
+- Backend: Cloud Run (IAM-protected, not publicly accessible)
+
+## Content Hierarchy
+
+```
+Board (SEBA, AHSEC, CBSE)
+  +-- Class (Class 9, Class 10, Class 11, Class 12, Degree)
+       +-- Stream (Science, Commerce, Arts) [optional, for Class 11+]
+            +-- Subject (Physics, Chemistry, Mathematics, etc.)
+                 +-- Chapter (e.g., "Chemical Reactions and Equations")
+                      +-- Topic (e.g., "Balancing Chemical Equations")
+```
+
+Content types per chapter: Notes, MCQs, Definitions, Important Questions, PYQs, Summary
+
+API: `GET /api/v1/content/boards` -> `classes` -> `streams` -> `subjects` -> `chapters/{subjectId}`
+
+MongoDB model: `KnowledgeObject` with `metadata.board`, `metadata.class_level`, `metadata.subject`, `metadata.chapter`, `metadata.topic`
+
+## SEO / GEO / AEO Infrastructure
+
+- **Structured Data**: JSON-LD + Microdata + RDFa triple-stack on all pages
+- **Knowledge Graph**: Entity linking to Wikidata/DBpedia for AHSEC, SEBA, CBSE, subjects
+- **Sitemaps**: Dynamic sitemap index at `/sitemap.xml` with sub-sitemaps (static, subjects, chapters, topics)
+- **Feeds**: RSS 2.0 (`/feed.xml`) + JSON Feed v1.1 (`/feed.json`) for AI crawlers
+- **AI Discovery**: `ai.txt`, `llms.txt`, `robots.txt` with GPTBot/PerplexityBot/ClaudeBot directives
+- **Performance**: PageSpeed Insights mobile 93/100, Accessibility 94, Best Practices 92, SEO 100/100
+
+## Project Structure
 
 ```
 syrabit-monorepo/
@@ -94,61 +145,56 @@ syrabit-monorepo/
 └── docker-compose.yml     # Local development
 ```
 
-## 🔧 Configuration
+## Configuration
 
-All environment variables are documented in `.env.shared`:
+All environment variables are documented in `.env.shared`. Key categories:
 
-```bash
-# Example required variables
-CF_ACCOUNT_ID=acct_xxx
-GCP_PROJECT_ID=your-gcp-project
-GCP_REGION=asia-south1
-BACKEND_URL=https://syrabit-backend-xxxxx.run.app
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net
-UPSTASH_REDIS_REST_URL=https://xxx.upstash.io
-VERTEX_PROJECT_ID=your-gcp-project
-SARVAM_API_KEY=sk_sarvam_xxx
-RAZORPAY_KEY_ID=rzp_live_xxx
-JWT_SECRET=super_secret_jwt_key_32_chars_min
-```
+- **Cloud providers**: Cloudflare, GCP, MongoDB Atlas, Upstash
+- **AI services**: Vertex AI, Sarvam AI
+- **Payments**: Razorpay
+- **Auth**: JWT secrets, admin credentials
+- **Observability**: Sentry, PostHog
 
-See `.env.shared` for complete list with descriptions.
+See `.env.shared` for the complete list with descriptions. Never commit actual secrets to the repository.
 
-## 🚢 Deployment
+## Deployment
 
 ### Backend (Google Cloud Run)
 
 ```bash
-# Automated via GitHub Actions
-# Push to main triggers:
-# 1. Build Docker image
-# 2. Push to Artifact Registry
-# 3. Deploy to Cloud Run
-# 4. Health check verification
+# Automated via GitHub Actions (deploy-all.yml)
+# Push to main triggers: build, push to registry, deploy, health check
 ```
+
+- Always-on (min-instances=1, no cold starts)
+- IAM-protected (only authorized service accounts can invoke)
+- Deployed via GitHub Actions or `gcloud run deploy`
+
+### Frontend (Cloudflare Pages)
+
+- Deployed via Cloudflare Pages
+- Production URL: `https://syrabit.ai`
 
 ### Edge (Cloudflare Workers)
 
 ```bash
 # Automated via GitHub Actions
-# Push to main triggers:
-# 1. Install Wrangler
-# 2. Deploy Worker to production
+# Push to main triggers deploy
 ```
+
+- Deployed via `wrangler deploy --env production`
 
 ### Manual Deployment
 
 ```bash
 # Backend
-gcloud builds submit --tag REGION-docker.pkg.dev/PROJECT_ID/syrabit/backend:latest apps/backend
-gcloud run deploy syrabit-backend --image REGION-docker.pkg.dev/PROJECT_ID/syrabit/backend:latest --region REGION
+gcloud run deploy syrabit-backend --source=apps/backend --region=REGION --min-instances=1
 
 # Edge
-cd apps/edge
-wrangler deploy --prod
+cd apps/edge && wrangler deploy --env production
 ```
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Backend tests
@@ -162,33 +208,21 @@ locust --host=http://localhost:8000
 python infra/scripts/test-rag-quality.py
 ```
 
-## 📊 Monitoring
+## Monitoring
 
-- **Errors**: Sentry (`SENTRY_DSN`)
-- **Analytics**: PostHog (`POSTHOG_API_KEY`)
+- **Errors**: Sentry
+- **Analytics**: PostHog
 - **Logs**: Cloud Run logs via Cloud Logging
-- **Metrics**: Upstash dashboard, GCP Cloud Monitoring
+- **Uptime**: GitHub Actions monitor (every 15 min, auto-creates incident issues)
 
 ### Key Alerts
 
 - Error rate > 1%
-- P95 latency > 400ms
+- P95 latency > 2s
 - Rate limit violations > 100/min
 - Payment webhook failures
 
-## 💰 Cost Optimization
-
-This architecture eliminates redundant services:
-
-| Service | Old Cost | New Cost | Savings |
-|---------|----------|----------|---------|
-| Pinecone | $70/mo | $0 (Vertex Search) | 100% |
-| Separate Compute | $200/mo | Consolidated | 40% |
-| Rate Limiting | $50/mo | Upstash Free | 100% |
-
-**Estimated monthly cost at 100k DAU**: ~$400-600
-
-## 🔒 Security & Compliance
+## Security & Compliance
 
 - **Data Residency**: All data in India regions (GCP asia-south1, MongoDB Mumbai)
 - **GDPR/DPDP**: Right to delete, data portability
@@ -196,50 +230,32 @@ This architecture eliminates redundant services:
 - **Bot Mitigation**: Turnstile verification
 - **Secrets Management**: GCP Secret Manager
 
-## 📈 Performance Targets
+## Performance Targets
 
 | Metric | Target | Current |
 |--------|--------|---------|
-| TTFB | <400ms | ~350ms |
-| Recall@5 (RAG) | >90% | ~92% |
-| Uptime | 99.9% | - |
-| Rate Limit Accuracy | 100% | - |
+| Chat TTFB | <2s | ~2s (streaming) |
+| PSI Performance (mobile) | >90 | 93 |
+| PSI Accessibility | >90 | 94 |
+| PSI Best Practices | >90 | 92 |
+| PSI SEO | >95 | 100 |
+| Uptime | 99.9% | Monitored every 15min |
+| RAG Recall@5 | >85% | Vertex Search hybrid |
 
-## 🛠️ Troubleshooting
+## Troubleshooting
 
-### Common Issues
+See internal documentation for common issues and resolution steps.
 
-**1. Vertex AI Search connection failed**
-```bash
-# Verify GOOGLE_APPLICATION_CREDENTIALS_JSON is set correctly
-# Check that the service account has Discovery Engine permissions
-# Test: gcloud ai-platform operations list --project=PROJECT_ID
-```
-
-**2. Rate limiting not working**
-```bash
-# Check Upstash connection
-# Verify UPSTASH_REDIS_REST_TOKEN
-# Test: redis-cli -u $UPSTASH_REDIS_REST_URL ping
-```
-
-**3. High latency**
-```bash
-# Check Vertex Search reranker configuration
-# Verify embedding dimensions match (1536)
-# Monitor Upstash latency (<20ms target)
-```
-
-## 📝 License
+## License
 
 Proprietary - All rights reserved
 
-## 🤝 Contributing
+## Contributing
 
 This is a private repository. Contact the founding team for access.
 
 ---
 
-**Built with ❤️ for Assamese students**
+**Built for Assamese students**
 
 *For detailed architecture, see [docs/architecture.md](docs/architecture.md)*
