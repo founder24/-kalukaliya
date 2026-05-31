@@ -36,7 +36,7 @@ DEFAULT_SETTINGS = {
 @router.get("/settings")
 async def get_settings(request: Request):
     """Get site-wide settings."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         client = get_mongo_client()
@@ -57,7 +57,7 @@ async def get_settings(request: Request):
 @router.put("/settings")
 async def update_settings(request: Request):
     """Update site-wide settings."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     body = await request.json()
@@ -87,7 +87,7 @@ ROADMAP_ALLOWED_FIELDS = {"title", "description", "status", "priority", "target_
 @router.get("/diagnostics")
 async def get_diagnostics(request: Request):
     """Get system diagnostics."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     return {
         "status": "healthy",
         "version": "3.0.0",
@@ -99,7 +99,7 @@ async def get_diagnostics(request: Request):
 @router.post("/break-glass/disable")
 async def break_glass_disable(request: Request):
     """Emergency disable of features (break-glass)."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
     return {"status": "ok", "message": "Break-glass activated"}
 
@@ -107,7 +107,7 @@ async def break_glass_disable(request: Request):
 @router.get("/roadmap")
 async def get_roadmap(request: Request):
     """Get roadmap items."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
@@ -123,7 +123,7 @@ async def get_roadmap(request: Request):
 @router.post("/roadmap")
 async def create_roadmap_item(request: Request):
     """Create a roadmap item."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
     body = await request.json()
 
@@ -144,7 +144,7 @@ async def create_roadmap_item(request: Request):
 @router.patch("/roadmap/{item_id}")
 async def update_roadmap_item(item_id: str, request: Request):
     """Update a roadmap item."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
     body = await request.json()
 
@@ -167,7 +167,7 @@ async def update_roadmap_item(item_id: str, request: Request):
 @router.delete("/roadmap/{item_id}")
 async def delete_roadmap_item(item_id: str, request: Request):
     """Delete a roadmap item."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     try:
@@ -185,7 +185,7 @@ async def delete_roadmap_item(item_id: str, request: Request):
 @router.get("/plan-config")
 async def get_plan_config(request: Request):
     """Get plan configuration."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
@@ -202,7 +202,7 @@ async def get_plan_config(request: Request):
 @router.put("/plan-config")
 async def update_plan_config(request: Request):
     """Update plan configuration."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
     body = await request.json()
 
@@ -222,7 +222,7 @@ async def update_plan_config(request: Request):
 @router.get("/api-config")
 async def get_api_config(request: Request):
     """Get API configuration."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
@@ -239,7 +239,7 @@ async def get_api_config(request: Request):
 @router.put("/api-config")
 async def update_api_config(request: Request):
     """Update API configuration."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
     body = await request.json()
 
@@ -259,7 +259,7 @@ async def update_api_config(request: Request):
 @router.get("/activity-log")
 async def get_activity_log(request: Request):
     """Get admin activity log."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
@@ -275,6 +275,6 @@ async def get_activity_log(request: Request):
 @router.post("/cache/purge-all")
 async def cache_purge_all(request: Request):
     """Purge all caches."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
     return {"status": "ok", "message": "All caches purged"}

@@ -63,14 +63,18 @@ async def create_order(
     client = razorpay.Client(
         auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
     )
-    order = client.order.create(
-        {
-            "amount": amount,
-            "currency": "INR",
-            "receipt": f"user_{user.id}_{body.plan}",
-            "notes": {"user_id": str(user.id), "plan": body.plan},
-        }
-    )
+    try:
+        order = client.order.create(
+            {
+                "amount": amount,
+                "currency": "INR",
+                "receipt": f"user_{user.id}_{body.plan}",
+                "notes": {"user_id": str(user.id), "plan": body.plan},
+            }
+        )
+    except Exception as e:
+        logger.error(f"Razorpay order creation failed: {e}")
+        raise HTTPException(status_code=503, detail="Payment gateway unavailable")
 
     # Store amount for later verification (resilient payment record)
     try:
@@ -170,18 +174,22 @@ async def create_credit_topup(
     client = razorpay.Client(
         auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
     )
-    order = client.order.create(
-        {
-            "amount": amount,
-            "currency": "INR",
-            "receipt": f"credit_{user.id}_{body.credits}",
-            "notes": {
-                "user_id": str(user.id),
-                "credits": str(body.credits),
-                "type": "credit_topup",
-            },
-        }
-    )
+    try:
+        order = client.order.create(
+            {
+                "amount": amount,
+                "currency": "INR",
+                "receipt": f"credit_{user.id}_{body.credits}",
+                "notes": {
+                    "user_id": str(user.id),
+                    "credits": str(body.credits),
+                    "type": "credit_topup",
+                },
+            }
+        )
+    except Exception as e:
+        logger.error(f"Razorpay credit topup order creation failed: {e}")
+        raise HTTPException(status_code=503, detail="Payment gateway unavailable")
 
     # Store credits locally for verification resilience
     try:

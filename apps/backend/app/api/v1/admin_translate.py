@@ -55,7 +55,7 @@ async def cron_translate(request: Request):
 @router.post("/content/translate/bulk")
 async def bulk_translate(request: Request, background_tasks: BackgroundTasks):
     """Trigger bulk translation. Body: {board?, subject?, limit?, skip_existing?}"""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     body = await request.json() if await request.body() else {}
@@ -90,7 +90,7 @@ async def bulk_translate(request: Request, background_tasks: BackgroundTasks):
 @router.get("/content/translate/status")
 async def get_translate_status(request: Request):
     """Get current translation job status."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     status = getattr(request.app.state, "translation_status", None)
     if not status:
         return {"running": False, "message": "No translation job has been run"}
@@ -100,7 +100,7 @@ async def get_translate_status(request: Request):
 @router.post("/content/translate/{slug}")
 async def translate_single(request: Request, slug: str):
     """Translate a single knowledge object. Runs synchronously."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     ko = await KnowledgeObject.find_one({"slug": slug})

@@ -20,7 +20,7 @@ router = APIRouter(tags=["Admin Notifications"])
 @router.get("/notifications")
 async def list_notifications(request: Request):
     """List all notifications."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         client = get_mongo_client()
@@ -54,7 +54,7 @@ async def list_notifications(request: Request):
 @router.post("/notifications")
 async def create_notification(request: Request):
     """Create a new notification."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     body = await request.json()

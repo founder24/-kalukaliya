@@ -40,7 +40,7 @@ class BulkPublishRequest(BaseModel):
 @router.post("/content/knowledge")
 async def create_or_update_knowledge(request: Request, body: KnowledgeCreateRequest):
     """Create or update a knowledge object."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     existing = await KnowledgeObject.find_one({"slug": body.slug})
@@ -84,7 +84,7 @@ async def create_or_update_knowledge(request: Request, body: KnowledgeCreateRequ
 @router.post("/content/knowledge/{slug}/publish")
 async def publish_knowledge(request: Request, slug: str):
     """Trigger the content pipeline for a knowledge object."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     obj = await KnowledgeObject.find_one({"slug": slug})
@@ -107,7 +107,7 @@ async def bulk_publish_knowledge(
     background_tasks: BackgroundTasks,
 ):
     """Trigger the content pipeline for multiple knowledge objects in background."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     await _csrf_check(request)
 
     if not body.slugs:
@@ -143,7 +143,7 @@ async def list_knowledge(
     status: Optional[str] = None,
 ):
     """List knowledge objects with pagination."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     limit = min(limit, 100)
 
     query = {}
@@ -185,7 +185,7 @@ async def list_knowledge(
 @router.get("/content/knowledge/{slug}")
 async def get_knowledge(request: Request, slug: str):
     """Get a single knowledge object by slug (admin view - all fields)."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     obj = await KnowledgeObject.find_one({"slug": slug})
     if not obj:

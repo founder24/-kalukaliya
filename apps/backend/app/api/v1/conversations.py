@@ -17,16 +17,17 @@ from app.api.v1.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
-_ANON_ID_PATTERN = re.compile(r"^anon_[a-f0-9]{32}$")
+_ANON_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{7,63}$")
 
 ANON_HISTORY_LIMIT = 5
 
 
 def _validate_anon_id(anon_id: str) -> str:
-    """Validate the anonymous ID format (must match frontend's getAnonId pattern)."""
+    """Validate the anonymous ID format (8-64 chars, starts with lowercase letter)."""
     if not anon_id or not _ANON_ID_PATTERN.match(anon_id):
         raise HTTPException(
-            status_code=400, detail="Invalid anonymous identifier format"
+            status_code=400,
+            detail="Invalid anonymous identifier format. Must be 8-64 characters, start with a lowercase letter, and contain only lowercase alphanumeric, underscore, or hyphen.",
         )
     return anon_id
 

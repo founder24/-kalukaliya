@@ -20,7 +20,7 @@ router = APIRouter(tags=["Admin Dashboard"])
 @router.get("/dashboard")
 async def admin_dashboard(request: Request):
     """Aggregate stats for the admin dashboard overview."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         client = get_mongo_client()
@@ -102,7 +102,7 @@ async def admin_dashboard(request: Request):
 @router.get("/health")
 async def admin_health(request: Request):
     """Detailed dependency health check for admin panel."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     health = {"mongo": "unknown", "redis": "unknown"}
 
@@ -131,7 +131,7 @@ async def admin_health(request: Request):
 @router.get("/cf-overview")
 async def admin_cf_overview(request: Request):
     """Placeholder Cloudflare stats."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     return {
         "source": "placeholder",

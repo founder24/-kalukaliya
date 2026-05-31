@@ -18,7 +18,7 @@ router = APIRouter(tags=["Admin Revenue"])
 @router.get("/revenue/overview")
 async def revenue_overview(request: Request):
     """Revenue overview: pro users, monthly revenue estimate."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         client = get_mongo_client()
@@ -51,7 +51,7 @@ async def revenue_overview(request: Request):
 @router.get("/revenue/subscriptions")
 async def list_subscriptions(request: Request):
     """List active subscriptions."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         client = get_mongo_client()

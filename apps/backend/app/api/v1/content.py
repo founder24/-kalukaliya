@@ -154,6 +154,7 @@ async def list_chapters(
         )
         .project(
             {
+                "_id": 0,
                 "slug": 1,
                 "title": 1,
                 "description": 1,
