@@ -139,7 +139,7 @@ async def admin_login(request: Request):
         value=admin_token,
         httponly=True,
         secure=True,
-        samesite="strict",
+        samesite="none",
         max_age=28800,  # 8 hours
         path="/api/",
     )
@@ -155,6 +155,6 @@ async def admin_logout(request: Request):
         key="syrabit_admin_session",
         path="/api/",
         secure=True,
-        samesite="strict",
+        samesite="none",
     )
     return response
