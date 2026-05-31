@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Implement topic embedding matching for the chat RAG pipeline. This includes: (1) TopicEmbedding MongoDB model, (2) Vertex AI text-embedding-005 embedding generation in embedder.py, (3) Topic matching logic in ChatService before RAG retrieval, (4) Embedding generation during content publish, (5) Backfill script, (6) Tests.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - TopicEmbedding model: Create a new Beanie Document class TopicEmbedding in apps/backend/app/models/content.py with fields: topic_id (str), topic_title (str), chapter_id (PydanticObjectId), chapter_title (str), subject_slug (str), board_slug (str), class_level (str), embedding (list[float], 768 dims for text-embedding-005), created_at (datetime), updated_at (datetime). Settings.name = 'topic_embeddings'. Add index on topic_id.",
     "Step 2 - Register model in DB init: Add TopicEmbedding to the document_models list in apps/backend/app/db/mongo.py init_beanie() call, and import it.",
@@ -35,5 +35,5 @@
     "python -c \"from app.services.ai.topic_matcher import TopicMatcher; print('OK')\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 218 tests pass (including 13 new topic matcher tests). Embeddings stored in MongoDB (not Vertex AI). numpy installed successfully. The 0.02 perturbation factor is needed for 768-dim vectors to achieve >0.70 similarity in tests. APP_ENV=test required for standalone imports due to production JWT validation."
 }
