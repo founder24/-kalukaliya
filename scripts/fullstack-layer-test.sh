@@ -225,6 +225,7 @@ skip() {
 verbose_log() {
     if [[ "$VERBOSE" == "1" ]]; then
         local msg="$1"
+        # Redact bearer tokens to avoid leaking credentials in debug output
         msg=$(echo "$msg" | sed -E 's/(Authorization: Bearer )[^ "]*/\1[REDACTED]/gi')
         echo -e "    [DEBUG] $msg"
     fi
@@ -252,6 +253,7 @@ perform_request() {
     local tmpfile header_file
     tmpfile=$(mktemp)
     header_file=$(mktemp)
+    # Ensure temp files are cleaned up when this function returns
     trap "rm -f '$tmpfile' '$header_file'" RETURN
 
     local curl_cmd=(curl -sS -w "$timing_format" -o "$tmpfile" -D "$header_file" --max-time 30)
@@ -286,6 +288,7 @@ perform_stream_request() {
     local tmpfile header_file
     tmpfile=$(mktemp)
     header_file=$(mktemp)
+    # Ensure temp files are cleaned up when this function returns
     trap "rm -f '$tmpfile' '$header_file'" RETURN
 
     local curl_cmd=(curl -sS --no-buffer -o "$tmpfile" -D "$header_file" --max-time 30 -w '%{http_code}')
@@ -1492,14 +1495,14 @@ test_layer_4_authentication() {
 
     # Oversized body
     local big_name
-    big_name=$(head -c 1048576 /dev/urandom | base64 | head -c 1000000)
+    big_name=$(head -c 65536 /dev/urandom | base64 | head -c 64000)
     perform_request "$BASE_URL/api/v1/auth/signup" \
         -X POST -H "Content-Type: application/json" \
         -d "{\"email\":\"big@test.com\",\"password\":\"ValidPass123!\",\"name\":\"$big_name\"}"
     if [[ "$CURL_STATUS" == "413" || "$CURL_STATUS" == "422" || "$CURL_STATUS" == "400" ]]; then
         pass "Signup rejects oversized body ($CURL_STATUS)"
     else
-        pass "Signup oversized body returned $CURL_STATUS"
+        warn "Signup oversized body returned $CURL_STATUS"
     fi
 
     # Extra unexpected fields
@@ -1611,7 +1614,7 @@ test_layer_4_authentication() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "403" ]]; then
         pass "Bearer with extra spaces rejected ($CURL_STATUS)"
     else
-        pass "Bearer with extra spaces returned $CURL_STATUS"
+        warn "Bearer with extra spaces returned $CURL_STATUS"
     fi
 
     # Empty token
@@ -1629,7 +1632,7 @@ test_layer_4_authentication() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "403" ]]; then
         pass "BEARER uppercase handled ($CURL_STATUS)"
     else
-        pass "BEARER uppercase returned $CURL_STATUS"
+        warn "BEARER uppercase returned $CURL_STATUS"
     fi
 
     # Token with spaces inside
@@ -1638,7 +1641,7 @@ test_layer_4_authentication() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "403" ]]; then
         pass "Token with spaces rejected ($CURL_STATUS)"
     else
-        pass "Token with spaces returned $CURL_STATUS"
+        warn "Token with spaces returned $CURL_STATUS"
     fi
 
     # 4.5 Refresh token
@@ -1736,21 +1739,21 @@ test_layer_4_authentication() {
     if [[ "$CURL_STATUS" == "405" || "$CURL_STATUS" == "404" ]]; then
         pass "GET /auth/signup rejected ($CURL_STATUS)"
     else
-        pass "GET /auth/signup returned $CURL_STATUS"
+        warn "GET /auth/signup returned $CURL_STATUS"
     fi
 
     perform_request "$BASE_URL/api/v1/auth/login" -X GET
     if [[ "$CURL_STATUS" == "405" || "$CURL_STATUS" == "404" ]]; then
         pass "GET /auth/login rejected ($CURL_STATUS)"
     else
-        pass "GET /auth/login returned $CURL_STATUS"
+        warn "GET /auth/login returned $CURL_STATUS"
     fi
 
     perform_request "$BASE_URL/api/v1/auth/login" -X DELETE
     if [[ "$CURL_STATUS" == "405" || "$CURL_STATUS" == "404" ]]; then
         pass "DELETE /auth/login rejected ($CURL_STATUS)"
     else
-        pass "DELETE /auth/login returned $CURL_STATUS"
+        warn "DELETE /auth/login returned $CURL_STATUS"
     fi
 
     # 4.10 Error response format
@@ -1779,7 +1782,7 @@ test_layer_4_authentication() {
     if [[ "$CURL_STATUS" == "415" || "$CURL_STATUS" == "422" || "$CURL_STATUS" == "400" ]]; then
         pass "Auth rejects XML content-type ($CURL_STATUS)"
     else
-        pass "Auth with XML content-type returned $CURL_STATUS"
+        warn "Auth with XML content-type returned $CURL_STATUS"
     fi
 
     perform_request "$BASE_URL/api/v1/auth/login" \
@@ -1788,7 +1791,7 @@ test_layer_4_authentication() {
     if [[ "$CURL_STATUS" == "422" || "$CURL_STATUS" == "400" || "$CURL_STATUS" == "415" ]]; then
         pass "Auth rejects form-data content-type ($CURL_STATUS)"
     else
-        pass "Auth with form-data content-type returned $CURL_STATUS"
+        warn "Auth with form-data content-type returned $CURL_STATUS"
     fi
 
     # 4.12 Authenticated endpoint without auth
@@ -2186,7 +2189,7 @@ test_layer_5_chat() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "403" ]]; then
         pass "Chat history requires auth ($CURL_STATUS)"
     else
-        pass "Chat history without auth returned $CURL_STATUS"
+        warn "Chat history without auth returned $CURL_STATUS"
     fi
 
     LAYER_RESULTS+=("Layer 5: Chat Endpoints OK")
@@ -2674,7 +2677,7 @@ test_layer_8_payments() {
                 fi
             fi
         else
-            pass "Subscription status returned $CURL_STATUS"
+            warn "Subscription status returned $CURL_STATUS"
         fi
     else
         skip "Subscription status (no auth token)"
@@ -2699,7 +2702,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" == "200" || "$CURL_STATUS" == "201" || "$CURL_STATUS" == "400" || "$CURL_STATUS" == "422" ]]; then
             pass "Create order handled ($CURL_STATUS)"
         else
-            pass "Create order returned $CURL_STATUS"
+            warn "Create order returned $CURL_STATUS"
         fi
 
         # Invalid plan
@@ -2710,7 +2713,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" == "400" || "$CURL_STATUS" == "404" || "$CURL_STATUS" == "422" ]]; then
             pass "Create order rejects invalid plan ($CURL_STATUS)"
         else
-            pass "Create order invalid plan returned $CURL_STATUS"
+            warn "Create order invalid plan returned $CURL_STATUS"
         fi
 
         # Empty plan
@@ -2721,7 +2724,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" == "400" || "$CURL_STATUS" == "422" ]]; then
             pass "Create order rejects empty plan ($CURL_STATUS)"
         else
-            pass "Create order empty plan returned $CURL_STATUS"
+            warn "Create order empty plan returned $CURL_STATUS"
         fi
 
         # XSS in plan
@@ -2732,7 +2735,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" == "400" || "$CURL_STATUS" == "422" || "$CURL_STATUS" == "404" ]]; then
             pass "Create order handles XSS in plan ($CURL_STATUS)"
         else
-            pass "Create order XSS plan returned $CURL_STATUS"
+            warn "Create order XSS plan returned $CURL_STATUS"
         fi
     else
         skip "Payment order creation (no auth)"
@@ -2762,7 +2765,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" == "400" || "$CURL_STATUS" == "422" || "$CURL_STATUS" == "402" ]]; then
             pass "Verify rejects invalid signature ($CURL_STATUS)"
         else
-            pass "Verify invalid signature returned $CURL_STATUS"
+            warn "Verify invalid signature returned $CURL_STATUS"
         fi
 
         # Empty signature
@@ -2773,7 +2776,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" == "400" || "$CURL_STATUS" == "422" ]]; then
             pass "Verify rejects empty signature ($CURL_STATUS)"
         else
-            pass "Verify empty signature returned $CURL_STATUS"
+            warn "Verify empty signature returned $CURL_STATUS"
         fi
 
         # Short signature
@@ -2784,7 +2787,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" == "400" || "$CURL_STATUS" == "422" ]]; then
             pass "Verify rejects short signature ($CURL_STATUS)"
         else
-            pass "Verify short signature returned $CURL_STATUS"
+            warn "Verify short signature returned $CURL_STATUS"
         fi
     else
         skip "Payment verification tests (no auth)"
@@ -2813,7 +2816,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" == "400" || "$CURL_STATUS" == "422" ]]; then
             pass "Credit topup rejects 0 credits ($CURL_STATUS)"
         else
-            pass "Credit topup 0 credits returned $CURL_STATUS"
+            warn "Credit topup 0 credits returned $CURL_STATUS"
         fi
 
         # Credits negative
@@ -2824,7 +2827,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" == "400" || "$CURL_STATUS" == "422" ]]; then
             pass "Credit topup rejects negative credits ($CURL_STATUS)"
         else
-            pass "Credit topup negative returned $CURL_STATUS"
+            warn "Credit topup negative returned $CURL_STATUS"
         fi
 
         # Credits very large
@@ -2835,7 +2838,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" -ge 200 && "$CURL_STATUS" -lt 500 ]]; then
             pass "Credit topup large amount handled ($CURL_STATUS)"
         else
-            pass "Credit topup large amount returned $CURL_STATUS"
+            warn "Credit topup large amount returned $CURL_STATUS"
         fi
 
         # Non-integer credits
@@ -2846,7 +2849,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" == "422" || "$CURL_STATUS" == "400" ]]; then
             pass "Credit topup rejects non-integer ($CURL_STATUS)"
         else
-            pass "Credit topup non-integer returned $CURL_STATUS"
+            warn "Credit topup non-integer returned $CURL_STATUS"
         fi
 
         # Credit topup verify
@@ -2857,7 +2860,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" -ge 400 ]]; then
             pass "Credit topup verify rejects invalid ($CURL_STATUS)"
         else
-            pass "Credit topup verify returned $CURL_STATUS"
+            warn "Credit topup verify returned $CURL_STATUS"
         fi
     else
         skip "Credit topup tests (no auth)"
@@ -2879,7 +2882,7 @@ test_layer_8_payments() {
                 pass "Payment history is JSON"
             fi
         else
-            pass "Payment history returned $CURL_STATUS"
+            warn "Payment history returned $CURL_STATUS"
         fi
 
         # Pagination
@@ -2888,7 +2891,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Payment history pagination works"
         else
-            pass "Payment history pagination returned $CURL_STATUS"
+            warn "Payment history pagination returned $CURL_STATUS"
         fi
     else
         skip "Payment history (no auth)"
@@ -2913,7 +2916,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" -ge 200 && "$CURL_STATUS" -lt 500 ]]; then
             pass "Refund request handled ($CURL_STATUS)"
         else
-            pass "Refund request returned $CURL_STATUS"
+            warn "Refund request returned $CURL_STATUS"
         fi
     else
         skip "Refund request (no auth)"
@@ -2929,7 +2932,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" -ge 200 && "$CURL_STATUS" -lt 500 ]]; then
             pass "Subscription create-order handled ($CURL_STATUS)"
         else
-            pass "Subscription create-order returned $CURL_STATUS"
+            warn "Subscription create-order returned $CURL_STATUS"
         fi
     else
         skip "Subscription create-order (no auth)"
@@ -2945,7 +2948,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" -ge 200 && "$CURL_STATUS" -lt 500 ]]; then
             pass "Subscription cancel handled ($CURL_STATUS)"
         else
-            pass "Subscription cancel returned $CURL_STATUS"
+            warn "Subscription cancel returned $CURL_STATUS"
         fi
     else
         skip "Subscription cancel (no auth)"
@@ -2983,7 +2986,7 @@ test_layer_8_payments() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "415" || "$CURL_STATUS" == "422" || "$CURL_STATUS" == "400" ]]; then
         pass "Payment endpoint enforces content-type ($CURL_STATUS)"
     else
-        pass "Payment endpoint text/plain returned $CURL_STATUS"
+        warn "Payment endpoint text/plain returned $CURL_STATUS"
     fi
 
     # Recover endpoint
@@ -2995,7 +2998,7 @@ test_layer_8_payments() {
         if [[ "$CURL_STATUS" -ge 200 && "$CURL_STATUS" -lt 500 ]]; then
             pass "Payment recover endpoint handled ($CURL_STATUS)"
         else
-            pass "Payment recover returned $CURL_STATUS"
+            warn "Payment recover returned $CURL_STATUS"
         fi
     else
         skip "Payment recover (no auth)"
@@ -3057,7 +3060,7 @@ test_layer_9_webhooks() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "400" || "$CURL_STATUS" == "403" ]]; then
         pass "Webhook rejects truncated signature ($CURL_STATUS)"
     else
-        pass "Webhook truncated signature returned $CURL_STATUS"
+        warn "Webhook truncated signature returned $CURL_STATUS"
     fi
 
     # 9.5 Valid HMAC (if secret available)
@@ -3074,7 +3077,7 @@ test_layer_9_webhooks() {
         if [[ "$CURL_STATUS" == "200" || "$CURL_STATUS" == "202" ]]; then
             pass "Webhook with valid HMAC accepted ($CURL_STATUS)"
         else
-            pass "Webhook valid HMAC returned $CURL_STATUS (may reject test payload)"
+            warn "Webhook valid HMAC returned $CURL_STATUS (may reject test payload)"
         fi
     else
         skip "Webhook valid HMAC (no RAZORPAY_WEBHOOK_SECRET or openssl)"
@@ -3115,7 +3118,7 @@ test_layer_9_webhooks() {
     if [[ "$CURL_STATUS" -ge 400 ]]; then
         pass "Webhook rejects missing event field ($CURL_STATUS)"
     else
-        pass "Webhook missing event field returned $CURL_STATUS"
+        warn "Webhook missing event field returned $CURL_STATUS"
     fi
 
     perform_request "$webhook_url" \
@@ -3125,7 +3128,7 @@ test_layer_9_webhooks() {
     if [[ "$CURL_STATUS" -ge 200 && "$CURL_STATUS" -lt 500 ]]; then
         pass "Webhook missing payload handled ($CURL_STATUS)"
     else
-        pass "Webhook missing payload returned $CURL_STATUS"
+        warn "Webhook missing payload returned $CURL_STATUS"
     fi
 
     # Extra fields
@@ -3136,7 +3139,7 @@ test_layer_9_webhooks() {
     if [[ "$CURL_STATUS" -ge 200 && "$CURL_STATUS" -lt 500 ]]; then
         pass "Webhook with extra fields handled ($CURL_STATUS)"
     else
-        pass "Webhook extra fields returned $CURL_STATUS"
+        warn "Webhook extra fields returned $CURL_STATUS"
     fi
 
     # 9.8 Empty/invalid body
@@ -3148,7 +3151,7 @@ test_layer_9_webhooks() {
     if [[ "$CURL_STATUS" -ge 400 ]]; then
         pass "Webhook rejects empty body ($CURL_STATUS)"
     else
-        pass "Webhook empty body returned $CURL_STATUS"
+        warn "Webhook empty body returned $CURL_STATUS"
     fi
 
     perform_request "$webhook_url" \
@@ -3158,7 +3161,7 @@ test_layer_9_webhooks() {
     if [[ "$CURL_STATUS" -ge 400 ]]; then
         pass "Webhook rejects non-JSON body ($CURL_STATUS)"
     else
-        pass "Webhook non-JSON body returned $CURL_STATUS"
+        warn "Webhook non-JSON body returned $CURL_STATUS"
     fi
 
     # Oversized body
@@ -3171,7 +3174,7 @@ test_layer_9_webhooks() {
     if [[ "$CURL_STATUS" -ge 200 && "$CURL_STATUS" -le 413 ]]; then
         pass "Webhook oversized body handled ($CURL_STATUS)"
     else
-        pass "Webhook oversized body returned $CURL_STATUS"
+        warn "Webhook oversized body returned $CURL_STATUS"
     fi
 
     # 9.9 Idempotency (same event_id twice)
@@ -3202,7 +3205,7 @@ test_layer_9_webhooks() {
     if [[ "$CURL_STATUS" == "415" || "$CURL_STATUS" == "422" || "$CURL_STATUS" == "400" ]]; then
         pass "Webhook enforces JSON content-type ($CURL_STATUS)"
     else
-        pass "Webhook text/plain content-type returned $CURL_STATUS"
+        warn "Webhook text/plain content-type returned $CURL_STATUS"
     fi
 
     # 9.11 Method enforcement
@@ -3211,14 +3214,14 @@ test_layer_9_webhooks() {
     if [[ "$CURL_STATUS" == "405" || "$CURL_STATUS" == "404" ]]; then
         pass "GET on webhook rejected ($CURL_STATUS)"
     else
-        pass "GET on webhook returned $CURL_STATUS"
+        warn "GET on webhook returned $CURL_STATUS"
     fi
 
     perform_request "$webhook_url" -X PUT
     if [[ "$CURL_STATUS" == "405" || "$CURL_STATUS" == "404" ]]; then
         pass "PUT on webhook rejected ($CURL_STATUS)"
     else
-        pass "PUT on webhook returned $CURL_STATUS"
+        warn "PUT on webhook returned $CURL_STATUS"
     fi
 
     # 9.12 Response time
@@ -3489,7 +3492,7 @@ test_layer_10_conversations() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "403" ]]; then
         pass "DELETE conversation requires auth ($CURL_STATUS)"
     else
-        pass "DELETE conversation without auth returned $CURL_STATUS"
+        warn "DELETE conversation without auth returned $CURL_STATUS"
     fi
 
     perform_request "$BASE_URL/api/v1/conversations/some-id" \
@@ -3498,7 +3501,7 @@ test_layer_10_conversations() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "403" ]]; then
         pass "PATCH conversation requires auth ($CURL_STATUS)"
     else
-        pass "PATCH conversation without auth returned $CURL_STATUS"
+        warn "PATCH conversation without auth returned $CURL_STATUS"
     fi
 
     LAYER_RESULTS+=("Layer 10: Conversations OK")
@@ -3733,7 +3736,7 @@ test_layer_11_feedback() {
         if [[ "$CURL_STATUS" == "403" ]]; then
             pass "Feedback stats forbidden for non-admin (403)"
         else
-            pass "Feedback stats for non-admin returned $CURL_STATUS"
+            warn "Feedback stats for non-admin returned $CURL_STATUS"
         fi
     else
         skip "Feedback stats non-admin check"
@@ -3744,7 +3747,7 @@ test_layer_11_feedback() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "403" ]]; then
         pass "Feedback stats requires auth ($CURL_STATUS)"
     else
-        pass "Feedback stats without auth returned $CURL_STATUS"
+        warn "Feedback stats without auth returned $CURL_STATUS"
     fi
 
     LAYER_RESULTS+=("Layer 11: Feedback OK")
@@ -3827,7 +3830,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin health returns 200"
         else
-            pass "Admin health returned $CURL_STATUS"
+            warn "Admin health returned $CURL_STATUS"
         fi
 
         # CF overview
@@ -3836,7 +3839,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin CF overview returns 200"
         else
-            pass "Admin CF overview returned $CURL_STATUS"
+            warn "Admin CF overview returned $CURL_STATUS"
         fi
 
         # Users list
@@ -3848,7 +3851,7 @@ test_layer_12_admin() {
                 pass "Admin users list is JSON"
             fi
         else
-            pass "Admin users list returned $CURL_STATUS"
+            warn "Admin users list returned $CURL_STATUS"
         fi
 
         # Users with pagination
@@ -3857,7 +3860,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin users pagination works"
         else
-            pass "Admin users pagination returned $CURL_STATUS"
+            warn "Admin users pagination returned $CURL_STATUS"
         fi
 
         # Analytics daily
@@ -3866,7 +3869,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin analytics daily returns 200"
         else
-            pass "Admin analytics daily returned $CURL_STATUS"
+            warn "Admin analytics daily returned $CURL_STATUS"
         fi
 
         # Analytics revenue
@@ -3875,7 +3878,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin analytics revenue returns 200"
         else
-            pass "Admin analytics revenue returned $CURL_STATUS"
+            warn "Admin analytics revenue returned $CURL_STATUS"
         fi
 
         # Analytics predictor
@@ -3884,7 +3887,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin analytics predictor returns 200"
         else
-            pass "Admin analytics predictor returned $CURL_STATUS"
+            warn "Admin analytics predictor returned $CURL_STATUS"
         fi
 
         # Analytics CF status
@@ -3893,7 +3896,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin analytics CF status returns 200"
         else
-            pass "Admin analytics CF status returned $CURL_STATUS"
+            warn "Admin analytics CF status returned $CURL_STATUS"
         fi
 
         # Analytics bot traffic
@@ -3902,7 +3905,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin analytics bot-traffic returns 200"
         else
-            pass "Admin analytics bot-traffic returned $CURL_STATUS"
+            warn "Admin analytics bot-traffic returned $CURL_STATUS"
         fi
 
         # Analytics hydrate stats
@@ -3911,7 +3914,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin analytics hydrate-stats returns 200"
         else
-            pass "Admin analytics hydrate-stats returned $CURL_STATUS"
+            warn "Admin analytics hydrate-stats returned $CURL_STATUS"
         fi
 
         # Analytics review-prompt-stats
@@ -3920,7 +3923,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin analytics review-prompt-stats returns 200"
         else
-            pass "Admin analytics review-prompt-stats returned $CURL_STATUS"
+            warn "Admin analytics review-prompt-stats returned $CURL_STATUS"
         fi
 
         # Analytics content-card-views
@@ -3929,7 +3932,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin analytics content-card-views returns 200"
         else
-            pass "Admin analytics content-card-views returned $CURL_STATUS"
+            warn "Admin analytics content-card-views returned $CURL_STATUS"
         fi
 
         # Settings
@@ -3941,7 +3944,7 @@ test_layer_12_admin() {
                 pass "Admin settings is JSON"
             fi
         else
-            pass "Admin settings returned $CURL_STATUS"
+            warn "Admin settings returned $CURL_STATUS"
         fi
 
         # Diagnostics
@@ -3950,7 +3953,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin diagnostics returns 200"
         else
-            pass "Admin diagnostics returned $CURL_STATUS"
+            warn "Admin diagnostics returned $CURL_STATUS"
         fi
 
         # Roadmap
@@ -3959,7 +3962,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin roadmap returns 200"
         else
-            pass "Admin roadmap returned $CURL_STATUS"
+            warn "Admin roadmap returned $CURL_STATUS"
         fi
 
         # Plan config
@@ -3968,7 +3971,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin plan-config returns 200"
         else
-            pass "Admin plan-config returned $CURL_STATUS"
+            warn "Admin plan-config returned $CURL_STATUS"
         fi
 
         # API config
@@ -3977,7 +3980,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin api-config returns 200"
         else
-            pass "Admin api-config returned $CURL_STATUS"
+            warn "Admin api-config returned $CURL_STATUS"
         fi
 
         # Activity log
@@ -3986,7 +3989,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin activity-log returns 200"
         else
-            pass "Admin activity-log returned $CURL_STATUS"
+            warn "Admin activity-log returned $CURL_STATUS"
         fi
 
         # Security endpoints
@@ -3995,7 +3998,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin security spoofed-bots returns 200"
         else
-            pass "Admin security spoofed-bots returned $CURL_STATUS"
+            warn "Admin security spoofed-bots returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/security/blocked-ips" \
@@ -4003,7 +4006,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin security blocked-ips returns 200"
         else
-            pass "Admin security blocked-ips returned $CURL_STATUS"
+            warn "Admin security blocked-ips returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/security/block-trends" \
@@ -4011,7 +4014,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin security block-trends returns 200"
         else
-            pass "Admin security block-trends returned $CURL_STATUS"
+            warn "Admin security block-trends returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/security/ttl-monitor" \
@@ -4019,7 +4022,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin security ttl-monitor returns 200"
         else
-            pass "Admin security ttl-monitor returned $CURL_STATUS"
+            warn "Admin security ttl-monitor returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/security/collection-size-history" \
@@ -4027,7 +4030,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin security collection-size-history returns 200"
         else
-            pass "Admin security collection-size-history returned $CURL_STATUS"
+            warn "Admin security collection-size-history returned $CURL_STATUS"
         fi
 
         # SEO endpoints
@@ -4036,7 +4039,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin SEO entity status returns 200"
         else
-            pass "Admin SEO entity status returned $CURL_STATUS"
+            warn "Admin SEO entity status returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/seo/entity/history" \
@@ -4044,7 +4047,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin SEO entity history returns 200"
         else
-            pass "Admin SEO entity history returned $CURL_STATUS"
+            warn "Admin SEO entity history returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/seo/pipeline-status" \
@@ -4052,7 +4055,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin SEO pipeline-status returns 200"
         else
-            pass "Admin SEO pipeline-status returned $CURL_STATUS"
+            warn "Admin SEO pipeline-status returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/seo/coverage" \
@@ -4060,7 +4063,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin SEO coverage returns 200"
         else
-            pass "Admin SEO coverage returned $CURL_STATUS"
+            warn "Admin SEO coverage returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/seo/deep-scan-history" \
@@ -4068,7 +4071,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin SEO deep-scan-history returns 200"
         else
-            pass "Admin SEO deep-scan-history returned $CURL_STATUS"
+            warn "Admin SEO deep-scan-history returned $CURL_STATUS"
         fi
 
         # Revenue endpoints
@@ -4077,7 +4080,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin revenue overview returns 200"
         else
-            pass "Admin revenue overview returned $CURL_STATUS"
+            warn "Admin revenue overview returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/revenue/subscriptions" \
@@ -4085,7 +4088,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin revenue subscriptions returns 200"
         else
-            pass "Admin revenue subscriptions returned $CURL_STATUS"
+            warn "Admin revenue subscriptions returned $CURL_STATUS"
         fi
 
         # AI endpoints
@@ -4094,7 +4097,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin AI providers returns 200"
         else
-            pass "Admin AI providers returned $CURL_STATUS"
+            warn "Admin AI providers returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/ai/status" \
@@ -4102,7 +4105,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin AI status returns 200"
         else
-            pass "Admin AI status returned $CURL_STATUS"
+            warn "Admin AI status returned $CURL_STATUS"
         fi
 
         # Alerts
@@ -4111,7 +4114,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin alerts unacknowledged count returns 200"
         else
-            pass "Admin alerts count returned $CURL_STATUS"
+            warn "Admin alerts count returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/alerts/cooldowns" \
@@ -4119,7 +4122,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin alerts cooldowns returns 200"
         else
-            pass "Admin alerts cooldowns returned $CURL_STATUS"
+            warn "Admin alerts cooldowns returned $CURL_STATUS"
         fi
 
         # Dead letters
@@ -4128,7 +4131,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin dead-letters returns 200"
         else
-            pass "Admin dead-letters returned $CURL_STATUS"
+            warn "Admin dead-letters returned $CURL_STATUS"
         fi
 
         # Knowledge
@@ -4137,7 +4140,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin knowledge list returns 200"
         else
-            pass "Admin knowledge list returned $CURL_STATUS"
+            warn "Admin knowledge list returned $CURL_STATUS"
         fi
 
         # Notifications
@@ -4146,7 +4149,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin notifications returns 200"
         else
-            pass "Admin notifications returned $CURL_STATUS"
+            warn "Admin notifications returned $CURL_STATUS"
         fi
 
         # Translate status
@@ -4155,7 +4158,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin translate status returns 200"
         else
-            pass "Admin translate status returned $CURL_STATUS"
+            warn "Admin translate status returned $CURL_STATUS"
         fi
 
         # Admin conversations
@@ -4164,7 +4167,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin conversations returns 200"
         else
-            pass "Admin conversations returned $CURL_STATUS"
+            warn "Admin conversations returned $CURL_STATUS"
         fi
 
         # Admin verify
@@ -4173,7 +4176,7 @@ test_layer_12_admin() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "Admin verify returns 200"
         else
-            pass "Admin verify returned $CURL_STATUS"
+            warn "Admin verify returned $CURL_STATUS"
         fi
 
     else
@@ -4922,7 +4925,7 @@ test_layer_16_streaming() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "403" ]]; then
         pass "Stream rejects invalid token ($CURL_STATUS)"
     else
-        pass "Stream with invalid token returned $CURL_STATUS"
+        warn "Stream with invalid token returned $CURL_STATUS"
     fi
 
     # Stream without auth
@@ -4932,7 +4935,7 @@ test_layer_16_streaming() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "403" ]]; then
         pass "Stream requires auth ($CURL_STATUS)"
     else
-        pass "Stream without auth returned $CURL_STATUS"
+        warn "Stream without auth returned $CURL_STATUS"
     fi
 
     # 16.5 Stream with empty message
@@ -5054,7 +5057,7 @@ test_layer_17_workflows() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "WF1: Profile accessible with new token"
         else
-            pass "WF1: Profile returned $CURL_STATUS"
+            warn "WF1: Profile returned $CURL_STATUS"
         fi
 
         # Chat
@@ -5097,7 +5100,7 @@ test_layer_17_workflows() {
         if [[ "$CURL_STATUS" == "200" || "$CURL_STATUS" == "204" ]]; then
             pass "WF1: Logout successful"
         else
-            pass "WF1: Logout returned $CURL_STATUS"
+            warn "WF1: Logout returned $CURL_STATUS"
         fi
     else
         skip "WF1: Profile (no token from signup/login)"
@@ -5223,7 +5226,7 @@ test_layer_17_workflows() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "WF5: Admin users list accessible"
         else
-            pass "WF5: Admin users returned $CURL_STATUS"
+            warn "WF5: Admin users returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/admin/analytics" \
@@ -5415,7 +5418,7 @@ test_layer_18_cross_cutting() {
     if [[ "$CURL_STATUS" == "415" || "$CURL_STATUS" == "422" || "$CURL_STATUS" == "400" ]]; then
         pass "POST /auth/login rejects XML ($CURL_STATUS)"
     else
-        pass "POST /auth/login with XML returned $CURL_STATUS"
+        warn "POST /auth/login with XML returned $CURL_STATUS"
     fi
 
     perform_request "$BASE_URL/api/v1/auth/login" \
@@ -5424,7 +5427,7 @@ test_layer_18_cross_cutting() {
     if [[ "$CURL_STATUS" == "415" || "$CURL_STATUS" == "422" || "$CURL_STATUS" == "400" || "$CURL_STATUS" == "401" ]]; then
         pass "POST /auth/login rejects form-urlencoded ($CURL_STATUS)"
     else
-        pass "POST /auth/login form-urlencoded returned $CURL_STATUS"
+        warn "POST /auth/login form-urlencoded returned $CURL_STATUS"
     fi
 
     # 18.5 Method not allowed
@@ -5512,7 +5515,7 @@ test_layer_18_cross_cutting() {
 
     # Oversized request body
     local big_body
-    big_body=$(head -c 5242880 /dev/urandom | base64 | head -c 5000000)
+    big_body=$(head -c 102400 /dev/urandom | base64 | head -c 100000)
     perform_request "$BASE_URL/api/v1/auth/login" \
         -X POST -H "Content-Type: application/json" \
         -d "{\"email\":\"$big_body\"}"
@@ -5617,19 +5620,25 @@ test_layer_18_cross_cutting() {
     echo "  18.12 Concurrent requests"
     local pids=()
     local concurrent_ok=0
+    local l18_tmp_dir
+    l18_tmp_dir=$(mktemp -d)
     for i in $(seq 1 5); do
-        curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$BASE_URL/health" &
+        (curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$BASE_URL/health" > "$l18_tmp_dir/result_$i" 2>/dev/null) &
         pids+=($!)
     done
     for pid in "${pids[@]}"; do
-        local result
-        result=$(wait "$pid" 2>/dev/null) || true
-        concurrent_ok=$((concurrent_ok + 1))
+        wait "$pid" 2>/dev/null || true
     done
+    for i in $(seq 1 5); do
+        if [[ -f "$l18_tmp_dir/result_$i" ]] && [[ "$(cat "$l18_tmp_dir/result_$i")" == "200" ]]; then
+            concurrent_ok=$((concurrent_ok + 1))
+        fi
+    done
+    rm -rf "$l18_tmp_dir"
     if [[ "$concurrent_ok" -ge 3 ]]; then
-        pass "Concurrent requests handled ($concurrent_ok/5 completed)"
+        pass "Concurrent requests handled ($concurrent_ok/5 succeeded)"
     else
-        warn "Concurrent requests: only $concurrent_ok/5 completed"
+        warn "Concurrent requests: only $concurrent_ok/5 succeeded"
     fi
 
     # 18.13 GET idempotency
@@ -5747,7 +5756,7 @@ test_layer_19_users() {
     if [[ "$CURL_STATUS" == "401" || "$CURL_STATUS" == "403" ]]; then
         pass "GET /users/me rejects expired token ($CURL_STATUS)"
     else
-        pass "GET /users/me expired token returned $CURL_STATUS"
+        warn "GET /users/me expired token returned $CURL_STATUS"
     fi
 
     # 19.2 GET /users/me with auth
@@ -5797,7 +5806,7 @@ test_layer_19_users() {
         if [[ "$CURL_STATUS" == "200" ]]; then
             pass "PUT /users/me successful (200)"
         else
-            pass "PUT /users/me returned $CURL_STATUS"
+            warn "PUT /users/me returned $CURL_STATUS"
         fi
 
         # XSS in name
@@ -5808,7 +5817,7 @@ test_layer_19_users() {
         if [[ "$CURL_STATUS" -ge 200 && "$CURL_STATUS" -lt 500 ]]; then
             pass "PUT /users/me XSS in name handled ($CURL_STATUS)"
         else
-            pass "PUT /users/me XSS returned $CURL_STATUS"
+            warn "PUT /users/me XSS returned $CURL_STATUS"
         fi
 
         # Empty name
@@ -5819,7 +5828,7 @@ test_layer_19_users() {
         if [[ "$CURL_STATUS" == "422" || "$CURL_STATUS" == "400" || "$CURL_STATUS" == "200" ]]; then
             pass "PUT /users/me empty name handled ($CURL_STATUS)"
         else
-            pass "PUT /users/me empty name returned $CURL_STATUS"
+            warn "PUT /users/me empty name returned $CURL_STATUS"
         fi
 
         # Very long name
@@ -5832,7 +5841,7 @@ test_layer_19_users() {
         if [[ "$CURL_STATUS" == "422" || "$CURL_STATUS" == "400" || "$CURL_STATUS" == "200" ]]; then
             pass "PUT /users/me oversized name handled ($CURL_STATUS)"
         else
-            pass "PUT /users/me oversized name returned $CURL_STATUS"
+            warn "PUT /users/me oversized name returned $CURL_STATUS"
         fi
 
         # SQL injection in name
@@ -5843,7 +5852,7 @@ test_layer_19_users() {
         if [[ "$CURL_STATUS" -ge 200 && "$CURL_STATUS" -lt 500 ]]; then
             pass "PUT /users/me SQL injection handled ($CURL_STATUS)"
         else
-            pass "PUT /users/me SQL injection returned $CURL_STATUS"
+            warn "PUT /users/me SQL injection returned $CURL_STATUS"
         fi
 
         # Invalid fields
@@ -5854,7 +5863,7 @@ test_layer_19_users() {
         if [[ "$CURL_STATUS" -ge 200 && "$CURL_STATUS" -lt 500 ]]; then
             pass "PUT /users/me ignores unauthorized fields ($CURL_STATUS)"
         else
-            pass "PUT /users/me unauthorized fields returned $CURL_STATUS"
+            warn "PUT /users/me unauthorized fields returned $CURL_STATUS"
         fi
 
         # 19.4 Onboarding
@@ -5866,7 +5875,7 @@ test_layer_19_users() {
         if [[ "$CURL_STATUS" == "200" || "$CURL_STATUS" == "201" || "$CURL_STATUS" == "400" || "$CURL_STATUS" == "409" ]]; then
             pass "Onboarding handled ($CURL_STATUS)"
         else
-            pass "Onboarding returned $CURL_STATUS"
+            warn "Onboarding returned $CURL_STATUS"
         fi
 
         # Invalid onboarding data
@@ -5877,7 +5886,7 @@ test_layer_19_users() {
         if [[ "$CURL_STATUS" == "422" || "$CURL_STATUS" == "400" || "$CURL_STATUS" == "200" || "$CURL_STATUS" == "409" ]]; then
             pass "Onboarding empty data handled ($CURL_STATUS)"
         else
-            pass "Onboarding empty data returned $CURL_STATUS"
+            warn "Onboarding empty data returned $CURL_STATUS"
         fi
 
         # 19.5 Credits
@@ -5897,7 +5906,7 @@ test_layer_19_users() {
                 fi
             fi
         else
-            pass "GET /users/credits returned $CURL_STATUS"
+            warn "GET /users/credits returned $CURL_STATUS"
         fi
 
         # 19.6 Method enforcement
@@ -5907,7 +5916,7 @@ test_layer_19_users() {
         if [[ "$CURL_STATUS" == "405" || "$CURL_STATUS" == "404" || "$CURL_STATUS" == "422" ]]; then
             pass "POST /users/me rejected ($CURL_STATUS)"
         else
-            pass "POST /users/me returned $CURL_STATUS"
+            warn "POST /users/me returned $CURL_STATUS"
         fi
 
         perform_request "$BASE_URL/api/v1/users/credits" \
@@ -5915,7 +5924,7 @@ test_layer_19_users() {
         if [[ "$CURL_STATUS" == "405" || "$CURL_STATUS" == "404" || "$CURL_STATUS" == "422" ]]; then
             pass "POST /users/credits rejected ($CURL_STATUS)"
         else
-            pass "POST /users/credits returned $CURL_STATUS"
+            warn "POST /users/credits returned $CURL_STATUS"
         fi
 
     else
@@ -6087,9 +6096,10 @@ test_layer_20_performance() {
     local start_concurrent
     start_concurrent=$(date +%s)
     local concurrent_pids=()
-    local concurrent_results=""
+    local l20_tmp_dir
+    l20_tmp_dir=$(mktemp -d)
     for i in $(seq 1 5); do
-        curl -sS -o /dev/null -w '%{http_code}\n' --max-time 15 "$BASE_URL/health" >> /tmp/concurrent_results_$$ 2>/dev/null &
+        (curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$BASE_URL/health" > "$l20_tmp_dir/result_$i" 2>/dev/null) &
         concurrent_pids+=($!)
     done
     for pid in "${concurrent_pids[@]}"; do
@@ -6099,17 +6109,17 @@ test_layer_20_performance() {
     end_concurrent=$(date +%s)
     local concurrent_duration=$((end_concurrent - start_concurrent))
 
-    if [[ -f /tmp/concurrent_results_$$ ]]; then
-        local concurrent_success
-        concurrent_success=$(grep -c "200" /tmp/concurrent_results_$$ 2>/dev/null || echo "0")
-        rm -f /tmp/concurrent_results_$$
-        if [[ "$concurrent_success" -ge 3 ]]; then
-            pass "Concurrent load: $concurrent_success/5 succeeded in ${concurrent_duration}s"
-        else
-            warn "Concurrent load: only $concurrent_success/5 succeeded"
+    local concurrent_success=0
+    for i in $(seq 1 5); do
+        if [[ -f "$l20_tmp_dir/result_$i" ]] && [[ "$(cat "$l20_tmp_dir/result_$i")" == "200" ]]; then
+            concurrent_success=$((concurrent_success + 1))
         fi
+    done
+    rm -rf "$l20_tmp_dir"
+    if [[ "$concurrent_success" -ge 3 ]]; then
+        pass "Concurrent load: $concurrent_success/5 succeeded in ${concurrent_duration}s"
     else
-        pass "Concurrent load test completed (${concurrent_duration}s)"
+        warn "Concurrent load: only $concurrent_success/5 succeeded"
     fi
 
     if [[ "$concurrent_duration" -lt 15 ]]; then
