@@ -1,0 +1,7 @@
+{
+  "task_id": "task-1000-test-expansion",
+  "task_description": "Replace scripts/fullstack-layer-test.sh with a comprehensive 1000+ test version covering all 9 architectural pillars, 21 layers, every API endpoint, security tests, performance assertions, and edge case coverage for the live deployment.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}
