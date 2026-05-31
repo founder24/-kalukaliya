@@ -1,3 +1,22 @@
+# Block sensitive paths - return 404 for common attack vectors
+/.env           /index.html  404
+/.env.*         /index.html  404
+/.git/*         /index.html  404
+/.htaccess      /index.html  404
+/.DS_Store      /index.html  404
+/.svn/*         /index.html  404
+/wp-admin       /index.html  404
+/wp-login.php   /index.html  404
+/server-status  /index.html  404
+/phpinfo.php    /index.html  404
+/web.config     /index.html  404
+/wrangler.toml  /index.html  404
+/package.json   /index.html  404
+/tsconfig.json  /index.html  404
+/Dockerfile     /index.html  404
+/docker-compose.yml  /index.html  404
+/.dockerignore  /index.html  404
+
 # Trailing-slash normalisation — strip trailing slash from all SPA routes
 # so browsers and crawlers always land on the canonical (no-slash) URL.
 # CF Pages serves these before the Worker runs.

@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Add ETag support to the content API endpoints and extend X-Request-ID in the edge worker to all requests (not just /api/ routes) and include it in response headers.",
+  "status": "completed",
+  "steps": [
+    "In apps/backend/app/api/v1/content.py: Add hashlib import. For render_chapter and render_chapter_page_type, compute an ETag from the HTML content using hashlib.md5(html.encode()).hexdigest(), add it to the response headers as ETag (weak: W/\"hash\"), and check the incoming If-None-Match request header. If it matches, return 304 Not Modified. Import Request from fastapi and add it as a parameter to the affected endpoints.",
+    "In apps/backend/app/api/v1/content.py: For the list_chapters and get_by_slug endpoints, add Cache-Control headers (e.g. 'public, max-age=60, s-maxage=300, stale-while-revalidate=600') using JSONResponse with explicit headers.",
+    "In apps/edge/src/index.ts: Move the X-Request-ID generation to happen for ALL requests (not just /api/ routes). Currently it is set inside the 'if (url.pathname.startsWith('/api/'))' block at line 66. Add a request ID generation at the top of the fetch handler (after CORS preflight and header sanitization), and include it in ALL responses. Add the request ID to the response via a new helper or by modifying the return path to always set X-Request-ID on outgoing responses.",
+    "In apps/edge/src/index.ts: Remove the existing 'headers.set('X-Request-ID', crypto.randomUUID())' from inside the /api/ JWT block since it will now be set earlier for all requests."
+  ],
+  "acceptance_criteria": [
+    "Content render endpoints return an ETag header and respond with 304 when If-None-Match matches",
+    "list_chapters and get_by_slug return Cache-Control headers",
+    "Every response from the edge worker includes an X-Request-ID header (UUID format)",
+    "The X-Request-ID is forwarded to the backend on all proxied requests",
+    "Edge vitest tests still pass (or are updated to accommodate the new header)"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/api/v1/content.py').read())\" to confirm syntax",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/edge && npx tsc --noEmit to confirm TypeScript compiles",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/edge && npx vitest run to confirm tests pass"
+  ],
+  "blocked_reason": null,
+  "findings": "All 77 edge vitest tests pass. Python syntax validated with ast.parse. TypeScript compiles cleanly with tsc --noEmit. The handleRobots response needed to be assigned to a variable before setting X-Request-ID header since it returns a new Response directly."
+}
