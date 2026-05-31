@@ -18,7 +18,7 @@ router = APIRouter(tags=["Admin Analytics"])
 @router.get("/analytics")
 async def analytics_overview(request: Request):
     """Analytics overview: total users, chats, messages, feedback stats."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
 
     try:
         client = get_mongo_client()
@@ -81,28 +81,28 @@ async def analytics_overview(request: Request):
 @router.get("/analytics/daily")
 async def analytics_daily(request: Request):
     """Daily analytics breakdown."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     return {"days": [], "total_users": 0, "total_chats": 0}
 
 
 @router.get("/analytics/revenue")
 async def analytics_revenue(request: Request):
     """Revenue analytics."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     return {"total_revenue": 0, "monthly_revenue": 0, "transactions": []}
 
 
 @router.get("/analytics/predictor")
 async def analytics_predictor(request: Request):
     """Growth predictor analytics."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     return {"predicted_users_30d": 0, "predicted_revenue_30d": 0, "confidence": 0}
 
 
 @router.get("/analytics/cf-status")
 async def analytics_cf_status(request: Request):
     """Cloudflare analytics token health status."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     return {
         "configured": False,
         "auth_ok": False,
@@ -118,40 +118,40 @@ async def analytics_cf_status(request: Request):
 @router.post("/analytics/cf-recheck")
 async def analytics_cf_recheck(request: Request):
     """Recheck Cloudflare analytics token."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     return {"status": "ok", "message": "Recheck triggered"}
 
 
 @router.get("/analytics/cf-overview")
 async def analytics_cf_overview(request: Request):
     """Cloudflare traffic overview."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     return {"requests": 0, "bandwidth": 0, "threats": 0, "page_views": 0}
 
 
 @router.get("/analytics/bot-traffic")
 async def analytics_bot_traffic(request: Request):
     """Bot traffic analytics."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     return {"total_bot_requests": 0, "bot_types": [], "blocked": 0}
 
 
 @router.get("/analytics/hydrate-stats")
 async def analytics_hydrate_stats(request: Request):
     """Hydration lifecycle stats."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     return {"total_hydrations": 0, "stale_builds": 0, "avg_hydration_ms": 0}
 
 
 @router.get("/analytics/review-prompt-stats")
 async def analytics_review_prompt_stats(request: Request):
     """Review prompt funnel stats."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     return {"total_shown": 0, "total_clicked": 0, "ctr": 0, "by_reason": []}
 
 
 @router.get("/analytics/content-card-views")
 async def analytics_content_card_views(request: Request):
     """Content card view analytics."""
-    _validate_admin_session(request)
+    await _validate_admin_session(request)
     return {"total_views": 0, "by_card": [], "by_day": []}

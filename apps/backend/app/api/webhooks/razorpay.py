@@ -64,7 +64,7 @@ async def handle_razorpay_webhook(request: Request):
     payload = event.get("payload", {})
 
     # Idempotency check: skip duplicate events
-    event_id = event.get("id")
+    event_id = event.get("id") or event.get("event_id")
     if not event_id:
         raise HTTPException(status_code=400, detail="Missing event_id")
 

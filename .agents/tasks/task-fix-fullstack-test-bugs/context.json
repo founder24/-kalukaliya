@@ -1,0 +1,27 @@
+{
+  "project_type": "Python FastAPI monorepo with educational content platform",
+  "language": "Python 3.11",
+  "build_system": "pip with requirements.txt (no Makefile, no build step beyond install)",
+  "test_framework": "bash fullstack-layer-test.sh (integration tests via curl against live API)",
+  "build_command": "pip install -r requirements.txt (in apps/backend/)",
+  "test_command": "python -c \"import app; print('imports ok')\" from apps/backend/",
+  "verification_instructions": "Run python -c to validate syntax, then check each modified file for correct logic",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd apps/backend && pip install -r requirements.txt",
+  "environment_constraints": "OPEN_INTERNET network. No running MongoDB/Redis available in sandbox, so verification is limited to static analysis and import checks.",
+  "contribution_requirements": "No CONTRIBUTING.md found. Follow existing patterns in codebase.",
+  "key_patterns": "Admin auth uses httponly cookie (syrabit_admin_session), not Bearer token. Circuit breaker pattern with OPEN/CLOSED/HALF_OPEN states. Beanie ODM for MongoDB. Razorpay SDK for payments. JWT with HS256 default, RS256 in production.",
+  "relevant_files": [
+    "apps/backend/app/core/circuit_breaker.py",
+    "apps/backend/app/api/v1/content.py",
+    "apps/backend/app/api/v1/payments.py",
+    "apps/backend/app/api/v1/admin.py",
+    "apps/backend/app/api/v1/admin_dashboard.py",
+    "apps/backend/app/api/webhooks/razorpay.py",
+    "apps/backend/app/api/v1/conversations.py",
+    "apps/backend/app/services/search/vertex_search.py",
+    "apps/backend/app/api/v1/health.py",
+    "scripts/fullstack-layer-test.sh"
+  ],
+  "directory_structure": "apps/backend/app/ contains: api/v1/ (route handlers), api/webhooks/ (webhook handlers), core/ (circuit breaker, security), services/ (search, chat, payment), models/ (Beanie documents), config.py (settings), main.py (FastAPI app)"
+}

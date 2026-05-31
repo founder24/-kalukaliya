@@ -1,0 +1,7 @@
+{
+  "task_id": "task-fix-fullstack-test-bugs",
+  "task_description": "Fix 6 bugs/warnings discovered by the fullstack layer test script: circuit breaker stuck OPEN, content endpoint 500, credit topup 500, admin auth rejection, webhook 400, and anon conversations 400",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

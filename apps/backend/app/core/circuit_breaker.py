@@ -176,13 +176,22 @@ class CircuitBreaker:
         """Get circuit breaker status for monitoring"""
         return {
             "name": self.name,
-            "state": self._state.value,
+            "state": self.state.value,
             "failure_count": self._failure_count,
             "success_count": self._success_count,
             "failure_threshold": self.failure_threshold,
             "reset_timeout": self.reset_timeout,
             "last_failure_time": self._last_failure_time,
         }
+
+    def reset(self):
+        """Manually reset the circuit breaker to CLOSED state."""
+        self._state = CircuitState.CLOSED
+        self._failure_count = 0
+        self._success_count = 0
+        self._last_failure_time = None
+        self._half_open_calls = 0
+        logger.info(f"Circuit '{self.name}' manually reset to CLOSED")
 
     def allow_request(self) -> bool:
         """Check if a request should be allowed through the circuit breaker."""
