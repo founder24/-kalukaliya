@@ -48,5 +48,5 @@
     "bash /projects/sandbox/-kalukaliya/scripts/fullstack-layer-test.sh --dry-run"
   ],
   "blocked_reason": null,
-  "findings": "Script expanded to 6318 lines with 1256 assertion calls (pass/fail/warn/skip). All 21 layers (0-20) implemented. bash -n passes, --dry-run exits 0, --help shows all layers. openssl not available in sandbox environment but script handles this gracefully with a warn. Branch: feat/1000-test-expansion"
+  "findings": "Script expanded to 6318 lines with 1256 assertion calls (pass/fail/warn/skip). All 21 layers (0-20) implemented. bash -n passes, --dry-run exits 0, --help shows all layers. openssl not available in sandbox environment but script handles this gracefully with a warn. Branch: feat/1000-test-expansion. Post-review fixes applied: 104 catch-all pass assertions converted to warn for critical endpoints (auth, payments, admin, users, webhooks). Layer 18 and 20 concurrent tests fixed to use per-process temp files. Payload sizes reduced (5MB->100KB, 1MB->64KB). Utility function comments restored."
 }
