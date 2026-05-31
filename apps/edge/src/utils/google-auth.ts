@@ -140,11 +140,27 @@ export async function getIdentityToken(env: Env): Promise<string | null> {
 
   const now = Math.floor(Date.now() / 1000);
 
-  // Return cached token if still valid (refresh 5 min before expiry)
+  // Layer 1: Module-level memory cache (instant, per-isolate)
   if (cachedToken && cachedToken.expiresAt - now > 300) {
     return cachedToken.token;
   }
 
+  // Layer 2: KV cache (5-10ms, shared across all isolates globally)
+  try {
+    const kvCached = await env.ISR_CACHE_KV.get('edge:identity-token');
+    if (kvCached) {
+      const parsed = JSON.parse(kvCached) as CachedToken;
+      if (parsed.expiresAt - now > 300) {
+        // Refresh module cache from KV
+        cachedToken = parsed;
+        return parsed.token;
+      }
+    }
+  } catch {
+    // KV read failed - proceed to fresh fetch
+  }
+
+  // Layer 3: Fresh token exchange (1-2s, only on cold start with empty KV)
   try {
     const saKey: ServiceAccountKey = JSON.parse(env.GOOGLE_SA_KEY);
     const targetAudience = env.BACKEND_URL;
@@ -162,6 +178,17 @@ export async function getIdentityToken(env: Env): Promise<string | null> {
       token: idToken,
       expiresAt: now + 3600,
     };
+
+    // Store in KV for other isolates (50 min TTL, refresh 10 min before expiry)
+    try {
+      await env.ISR_CACHE_KV.put(
+        'edge:identity-token',
+        JSON.stringify(cachedToken),
+        { expirationTtl: 3000 }
+      );
+    } catch {
+      // KV write failed - token still works from module cache
+    }
 
     return idToken;
   } catch (error) {
