@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Add QuestionPaper MongoDB model, backend API endpoint, frontend hook, and library section to display question paper cards with links to R2-stored images",
+  "status": "in_progress",
+  "steps": [
+    "Step 1: Create a QuestionPaper Beanie Document model in apps/backend/app/models/content.py. Fields: title (str), slug (str), r2_key (str - the R2 object key), board (str - e.g. SEBA, AHSEC, CBSE), class_level (str - e.g. 10, 12), subject (str), year (optional int), status (str, default 'published'), created_at (datetime), updated_at (datetime). The collection name should be 'question_papers'. Add a compound index on (board, class_level, subject, year).",
+    "Step 2: Register the QuestionPaper model in apps/backend/app/db/mongo.py by importing it and adding it to the document_models list in init_beanie(). Also add an index creation call for the question_papers collection.",
+    "Step 3: Add a new GET /question-papers endpoint in apps/backend/app/api/v1/public_content.py that queries the question_papers collection (status='published'), returns a list of objects with id, title, slug, r2_key, image_url (constructed as https://api.syrabit.ai/assets/<r2_key>), board, class_level, subject, year. Accept optional query params: board, class_level, subject for filtering. Set Cache-Control header similar to library-bundle.",
+    "Step 4: Add a frontend React Query hook in apps/frontend/src/hooks/useContent.jsx: fetchQuestionPapers fetches from /content/question-papers, and export useQuestionPapers() hook with 30-minute staleTime.",
+    "Step 5: Create a new component apps/frontend/src/pages/library/QuestionPaperCard.jsx following the CmsDocCard.jsx pattern. It should render a card with: the paper title, board badge, year badge, subject name, and a link that opens the R2 image URL (image_url field) in a new tab. Use an external link icon (from lucide-react) to indicate it opens externally.",
+    "Step 6: Create a new section component apps/frontend/src/pages/library/QuestionPapersSection.jsx following the CmsDocsSection.jsx pattern. It should use the useQuestionPapers hook, display a heading 'Question Papers' (with Assamese translation for 'as' lang), show a count badge, and render QuestionPaperCard items in a responsive grid (1-2-3 columns). Include a 'View All' link if there are more than 6 papers.",
+    "Step 7: Import and render <QuestionPapersSection /> in apps/frontend/src/pages/LibraryPage.jsx as a lazy-loaded section (using the existing LazyOnVisible + Suspense pattern), placed AFTER the subject grid and BEFORE the existing LazyCmsDocsSection. Add the lazy import at the top of the file."
+  ],
+  "acceptance_criteria": [
+    "QuestionPaper model exists in content.py with correct fields and Settings.name = 'question_papers'",
+    "QuestionPaper is registered in mongo.py document_models list",
+    "GET /api/v1/content/question-papers endpoint exists and returns a list with image_url constructed from r2_key",
+    "useQuestionPapers hook exists in useContent.jsx and fetches from /content/question-papers",
+    "QuestionPaperCard.jsx renders title, board, year, and external link to image_url",
+    "QuestionPapersSection.jsx uses the hook and renders cards in a grid",
+    "LibraryPage.jsx includes the QuestionPapersSection as a lazy-loaded section",
+    "Frontend builds successfully without TypeScript/import errors"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/frontend && npx tsc --noEmit 2>/dev/null; npx vite build --mode development 2>&1 | tail -5",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.models.content import QuestionPaper; print(QuestionPaper.Settings.name)'",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c 'from app.api.v1.public_content import router; routes = [r.path for r in router.routes]; assert \"/question-papers\" in routes, f\"Missing route. Found: {routes}\"'",
+    "Run: grep -c 'QuestionPapersSection' /projects/sandbox/-kalukaliya/apps/frontend/src/pages/LibraryPage.jsx"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

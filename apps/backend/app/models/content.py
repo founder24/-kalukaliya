@@ -82,3 +82,19 @@ class Chapter(Document):
 
     class Settings:
         name = "chapters"
+
+
+class QuestionPaper(Document):
+    title: str
+    slug: str
+    r2_key: str
+    board: str
+    class_level: str
+    subject: str
+    year: Optional[int] = None
+    status: str = "published"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    class Settings:
+        name = "question_papers"

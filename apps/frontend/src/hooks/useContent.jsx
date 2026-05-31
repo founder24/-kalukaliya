@@ -214,3 +214,17 @@ export const useCmsLibrary = () =>
     gcTime: 60 * 60 * 1000,
   });
 
+const fetchQuestionPapers = () =>
+  apiClient().get('/content/question-papers').then((r) => {
+    const d = r.data;
+    return Array.isArray(d) ? d : [];
+  });
+
+export const useQuestionPapers = () =>
+  useQuery({
+    queryKey: ['question-papers'],
+    queryFn: fetchQuestionPapers,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+
