@@ -486,10 +486,15 @@ async def chat_stream(
             rag_span.set_attribute("user.tier", user_tier)
             rag_span.set_attribute("user.id", user_id)
 
+            async def _noop_context():
+                return []
+
             if ChatService.is_generic_query(sanitized_message):
                 logger.info("generic_query_skip_rag", extra={"user_id": user_id, "query": sanitized_message[:30]})
-                context_chunks = []
-                history = await ChatService.load_conversation_history(request.session_id)
+                context_chunks, history = await asyncio.gather(
+                    _noop_context(),
+                    ChatService.load_conversation_history(request.session_id),
+                )
             else:
                 context_chunks, history = await asyncio.gather(
                     ChatService.retrieve_context(sanitized_message, user_tier),
