@@ -1,11 +1,10 @@
 /**
  * Task #266 — AdminHealth startup credit burn panel tests.
  *
- * Covers the four startup credit panels added in Task #263
+ * Covers the three startup credit panels added in Task #263
  * (AdminHealth.jsx lines 3316–3738):
  *
  *   - AWS Activate     (/admin/billing/aws-activate)
- *   - Azure Startups   (/admin/billing/azure-startups)
  *   - Axiom Log Explorer (/admin/billing/axiom)
  *   - Sentry           (/admin/billing/sentry)
  *   - Startup Credits summary row (static — always rendered)
@@ -216,105 +215,6 @@ describe('AdminHealth — AWS Activate credit panel', () => {
     await waitFor(() => expect(screen.getByText(/90d remaining/)).toBeInTheDocument());
     expect(screen.getByText(/90d remaining/)).not.toHaveClass('text-red-500');
     expect(screen.getByText(/90d remaining/)).toHaveClass('text-gray-600');
-  });
-});
-
-/* ── Azure for Startups tests ───────────────────────────────────────────── */
-describe('AdminHealth — Azure for Startups credit panel', () => {
-  afterEach(() => vi.clearAllMocks());
-
-  it('shows "not configured" text and setup instructions when API returns configured: false', async () => {
-    axiosGet.mockImplementation(makeMock({
-      'billing/azure-startups': { configured: false },
-    }));
-    await renderAdmin();
-
-    const panel = await screen.findByTestId('azure-credit-panel');
-    expect(panel).toBeInTheDocument();
-    expect(screen.getByTestId('azure-credit-heading')).toHaveTextContent('Azure for Startups');
-    expect(screen.getByText('Azure Cost Management not configured')).toBeInTheDocument();
-    expect(screen.getByText(/Create an Azure service principal/)).toBeInTheDocument();
-  });
-
-  it('shows "not configured" state (not error banner) when API responds with 404', async () => {
-    axiosGet.mockImplementation((url) => {
-      if (url.includes('billing/azure-startups')) {
-        const err = new Error('Not Found');
-        err.response = { status: 404 };
-        return Promise.reject(err);
-      }
-      return Promise.resolve({ data: {} });
-    });
-    await renderAdmin();
-
-    await screen.findByTestId('azure-credit-panel');
-    // Should show "not configured" UI — NOT the generic error banner
-    expect(screen.getByText('Azure Cost Management not configured')).toBeInTheDocument();
-    expect(screen.getByText(/Create an Azure service principal/)).toBeInTheDocument();
-    expect(screen.queryByText(/Failed to load Azure credit data/)).not.toBeInTheDocument();
-  });
-
-  it('renders grant total, spend MTD, remaining, and runway values when configured', async () => {
-    axiosGet.mockImplementation(makeMock({
-      'billing/azure-startups': {
-        configured:             true,
-        grant_usd:              5000,
-        spend_mtd_usd:          87.60,
-        estimated_remaining_usd: 4500,
-        months_runway:          8.2,
-        credits_low:            false,
-        days_until_expiry:      200,
-        expiry_date:            '2027-01-31',
-        subscription_name:      'Syrabit-Startups',
-      },
-    }));
-    await renderAdmin();
-
-    await screen.findByTestId('azure-grant-usd');
-    expect(screen.getByTestId('azure-grant-usd')).toHaveTextContent('$5,000');
-    expect(screen.getByTestId('azure-spend-mtd')).toHaveTextContent('$87.60');
-    expect(screen.getByTestId('azure-remaining')).toHaveTextContent('$4,500.00');
-    expect(screen.getByTestId('azure-runway')).toHaveTextContent('8.2 mo');
-  });
-
-  it('shows "Credits Low" badge and applies red text when credits_low is true', async () => {
-    axiosGet.mockImplementation(makeMock({
-      'billing/azure-startups': {
-        configured:             true,
-        grant_usd:              5000,
-        spend_mtd_usd:          4900,
-        estimated_remaining_usd: 100,
-        months_runway:          0.1,
-        credits_low:            true,
-        days_until_expiry:      200,
-        expiry_date:            '2027-01-31',
-      },
-    }));
-    await renderAdmin();
-
-    await screen.findByTestId('azure-credit-panel');
-    expect(screen.getByText('Credits Low')).toBeInTheDocument();
-    expect(screen.getByTestId('azure-remaining')).toHaveClass('text-red-600');
-    expect(screen.getByTestId('azure-spend-mtd')).toHaveClass('text-red-600');
-  });
-
-  it('shows red days-remaining text when expiry is within 60 days', async () => {
-    axiosGet.mockImplementation(makeMock({
-      'billing/azure-startups': {
-        configured:             true,
-        grant_usd:              5000,
-        spend_mtd_usd:          100,
-        estimated_remaining_usd: 4500,
-        months_runway:          10,
-        credits_low:            false,
-        days_until_expiry:      30,
-        expiry_date:            '2025-06-01',
-      },
-    }));
-    await renderAdmin();
-
-    await waitFor(() => expect(screen.getByText(/30d remaining/)).toBeInTheDocument());
-    expect(screen.getByText(/30d remaining/)).toHaveClass('text-red-500');
   });
 });
 
