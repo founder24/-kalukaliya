@@ -1,0 +1,46 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create comprehensive live deployment audit script at scripts/live-deployment-audit.sh with 500+ individual checks across 8 audit sections targeting the live syrabit.ai deployment",
+  "status": "in_progress",
+  "steps": [
+    "Create scripts/live-deployment-audit.sh as an executable bash script using the same style conventions as scripts/fullstack-layer-test.sh and scripts/live-deployment-test.sh",
+    "Implement argument parsing supporting: --help (usage info), --quick (reduced check set), --section N (run only section N), --export-json (output JSON report), --export-html (output HTML report)",
+    "Implement color output with terminal detection (same pattern as existing scripts: RED, GREEN, YELLOW, BLUE, BOLD, NC)",
+    "Implement scoring system: each check gets PASS (1 point), WARN (0.5 points), FAIL (0 points), CRITICAL (0 points + flags). Calculate final Production Readiness Score as percentage.",
+    "Section 1 - Infrastructure & DNS (60+ checks): DNS resolution for syrabit.ai and api.syrabit.ai (A/AAAA/CNAME/NS/MX/TXT/SOA records via dig), SSL/TLS certificate validation (expiry date, chain verification, CN/SAN match, protocol versions via openssl s_client), HSTS header analysis (max-age, includeSubDomains, preload), CDN detection (Cloudflare headers: cf-ray, cf-cache-status, server), DNS propagation check against multiple public resolvers (8.8.8.8, 1.1.1.1, 9.9.9.9)",
+    "Section 2 - Security Audit (100+ checks): Full OWASP security headers checklist (X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, Permissions-Policy, Content-Security-Policy, Cross-Origin-Opener-Policy, Cross-Origin-Resource-Policy, Cross-Origin-Embedder-Policy), CSP directive analysis (script-src, style-src, img-src, connect-src, frame-ancestors, upgrade-insecure-requests), Cookie security flags check on Set-Cookie headers (HttpOnly, Secure, SameSite, Path, Domain), CORS testing (preflight with various origins - valid origin syrabit.ai, invalid origins, null origin), Open redirect detection (test Location header injection), Information disclosure (Server header stripping, X-Powered-By removal, debug headers), Rate limiting verification (X-RateLimit headers), Bot protection (Turnstile references in HTML), CSRF token detection, JWT algorithm confusion test (send alg:none), Directory listing prevention (test /api/, /.env, /.git/config, /admin/)",
+    "Section 3 - Performance Audit (80+ checks): TTFB benchmarks with multiple sequential requests to detect cold starts, Page load time for frontend, Asset optimization (check Content-Encoding for br/gzip on JS/CSS, check Cache-Control headers for static assets with max-age, check for immutable flag), Image optimization (check Content-Type for webp/avif, check content-length is reasonable), Core Web Vitals proxy metrics (measure TTFB as LCP indicator, check for render-blocking resources, check cumulative transfer size), Cold start detection (5 rapid requests to /health checking variance), Concurrent request handling (10 parallel requests via background curl), Connection keep-alive verification",
+    "Section 4 - API Completeness Audit (80+ checks): Test every known endpoint responds (GET /health, GET /health/deep, GET /health/circuit-breakers, GET /api/content/boards, GET /api/content/classes, GET /api/seo/sitemap-index.xml, GET /api/seo/knowledge-graph, GET /api/changelog, POST /api/auth/login validation, POST /api/chat/message validation, GET /api/subscription/plans, GET /docs, GET /openapi.json), API versioning consistency (all endpoints under /api/ prefix), Error response format (check all error responses have consistent JSON structure with detail field), Content-Type negotiation (Accept header handling), Request ID tracing (check X-Request-ID in responses)",
+    "Section 5 - Data Integrity & Service Connectivity (50+ checks): Test /health/deep for MongoDB status, Redis status, Vertex AI Search status, Sarvam AI availability. Test webhook endpoint exists (POST /api/webhooks/razorpay returns 400/401 not 404). Test that content endpoints return actual data (boards list is non-empty array). Verify data consistency (boards response has expected fields: id, name, slug).",
+    "Section 6 - Deployment Configuration Audit (60+ checks): Cloud Run indicators (check response times for min-instances=1 warmth, check X-Cloud-Trace-Context header, verify containerConcurrency via concurrent requests), Environment indicators (APP_ENV not exposed in responses, no debug=true in responses), Cloudflare Worker indicators (cf-ray header present, cf-cache-status present, server: cloudflare), Frontend deployment (Pages indicators: content-type for HTML, cache headers for static assets, _headers file rules applied), Check that sensitive paths return 403/404 (/.env, /.git, /admin without auth, /api/admin without auth)",
+    "Section 7 - Compliance & SEO Audit (70+ checks): robots.txt validation (fetch and parse, check Disallow directives, check Sitemap reference), Sitemap validity (fetch sitemap-index.xml, verify XML structure, check lastmod dates), Structured data (check for ld+json in HTML), Meta tags (og:title, og:description, og:image, twitter:card), Canonical URL (rel=canonical in HTML), Mobile viewport (meta viewport tag), Accessibility basics (lang attribute on html tag, check for alt attributes pattern), Cookie consent indicators (check for cookie consent banner/script references), GDPR/DPDP indicators (privacy-policy page exists), Hreflang detection, Favicon/icons (check apple-touch-icon, favicon.ico)",
+    "Section 8 - Monitoring & Observability (40+ checks): Health endpoint response pattern validation (JSON with status field), Circuit breaker state check (/health/circuit-breakers returns valid states), Error rate indicator (no 5xx from any health endpoint), PII leak prevention (scan responses for email/phone patterns in error messages), Uptime simulation (3 rapid health checks all return 200), Response time consistency (standard deviation check across 5 requests)",
+    "Implement JSON export (--export-json): Write results to live-deployment-audit-results.json with timestamp, all section results, individual check results, and summary score",
+    "Implement HTML export (--export-html): Write results to live-deployment-audit-report.html with styled HTML table showing all results with color-coded status",
+    "Implement final summary with: total checks count, pass/warn/fail/critical counts per section, overall Production Readiness Score (X/100), and recommendation (PRODUCTION READY / NEEDS ATTENTION / NOT READY)"
+  ],
+  "acceptance_criteria": [
+    "Script passes bash -n syntax check",
+    "Script is executable (chmod +x)",
+    "--help flag prints comprehensive usage with section descriptions",
+    "--quick flag runs a reduced subset of checks and completes",
+    "--section N runs only the specified section",
+    "--export-json produces valid JSON output file",
+    "--export-html produces valid HTML output file",
+    "Script targets 500+ individual checks across 8 sections",
+    "Each check outputs PASS/WARN/FAIL/CRITICAL with descriptive messages",
+    "Final summary shows Production Readiness Score as percentage",
+    "Script uses only bash, curl, jq, openssl, dig (no external dependencies)",
+    "Script runs against live https://syrabit.ai and https://api.syrabit.ai",
+    "Color output matches existing script conventions",
+    "GCP project ID blissful-acumen-495019-t6 and region asia-south1 are configurable via env vars"
+  ],
+  "verification": [
+    "Run: bash -n /projects/sandbox/-kalukaliya/scripts/live-deployment-audit.sh",
+    "Run: chmod +x /projects/sandbox/-kalukaliya/scripts/live-deployment-audit.sh && /projects/sandbox/-kalukaliya/scripts/live-deployment-audit.sh --help",
+    "Run: /projects/sandbox/-kalukaliya/scripts/live-deployment-audit.sh --quick 2>&1 | tail -30 (verify it produces output with scores)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
