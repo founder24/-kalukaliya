@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from typing import AsyncGenerator, Optional
 
 from app.config import settings
@@ -30,9 +31,27 @@ _HISTORY_CACHE_TTL = 30 * 60
 # Redis cache TTL for chat responses (10 minutes)
 _RESPONSE_CACHE_TTL = 10 * 60
 
+# Similarity threshold for filtering low-relevance RAG chunks
+SIMILARITY_THRESHOLD = 0.70
+
+# Pattern for detecting generic/greeting queries that should skip RAG
+GENERIC_QUERY_PATTERN = re.compile(
+    r"^(hi|hello|hey|thanks|thank you|ok|okay|bye|good morning|good evening|good night|how are you|what can you do|who are you|what are you)[\s!?.]*$",
+    re.IGNORECASE,
+)
+
 
 class ChatService:
     """Encapsulates all chat business logic: RAG, LLM routing, persistence."""
+
+    # ------------------------------------------------------------------
+    # Generic query detection
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def is_generic_query(message: str) -> bool:
+        """Detect generic/greeting queries that should skip RAG entirely."""
+        return bool(GENERIC_QUERY_PATTERN.match(message.strip()))
 
     # ------------------------------------------------------------------
     # Language & model resolution
@@ -109,6 +128,12 @@ class ChatService:
                     user_tier=user_tier,
                     limit=settings.MAX_CONTEXT_DOCS,
                 )
+                # Filter chunks below similarity threshold
+                context_chunks = [
+                    c
+                    for c in context_chunks
+                    if c.get("score", 0) >= SIMILARITY_THRESHOLD
+                ]
                 return truncate_chunks_to_budget(context_chunks, max_tokens=3000)
 
             return await asyncio.wait_for(_do_retrieval(), timeout=0.8)
@@ -233,7 +258,7 @@ class ChatService:
                 model=target_model,
             ):
                 full_response += chunk
-                yield f"data: {json.dumps({'text': chunk, 'done': False})}\n\n"
+                yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
 
         except Exception as e:
             if detected_lang == "as":
@@ -256,7 +281,7 @@ class ChatService:
                         system_prompt, sanitized_message
                     ):
                         full_response += chunk
-                        yield f"data: {json.dumps({'text': chunk, 'done': False})}\n\n"
+                        yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
                 except Exception as fallback_err:
                     logger.error(f"Vertex fallback also failed: {fallback_err}")
                     from app.services.dead_letter import store_dead_letter

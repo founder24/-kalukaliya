@@ -77,6 +77,34 @@ class VertexSearchService:
         )
         self._initialized = True
 
+    def _extract_score(self, result, content: str, index: int) -> float:
+        """Extract relevance score from a Discovery Engine result.
+
+        Uses model_scores when available, falls back to a heuristic based on
+        content length.
+        """
+        score = None
+        if hasattr(result, "model_scores") and result.model_scores:
+            try:
+                for key, score_val in result.model_scores.items():
+                    if hasattr(score_val, "values") and score_val.values:
+                        score = float(score_val.values[0])
+                        break
+            except (IndexError, TypeError, ValueError):
+                pass
+
+        if score is None:
+            # Heuristic fallback based on content quality
+            if len(content) > 50:
+                score = 0.65
+            else:
+                score = 0.3
+            logger.debug(
+                f"Using heuristic score for result {index}: content_len={len(content)}, score={score}"
+            )
+
+        return score
+
     async def warm_up(self) -> None:
         """Warm up the search client connection during startup."""
         if not self._initialized:
@@ -216,12 +244,14 @@ class VertexSearchService:
                 if not content:
                     content = struct_data.get("content", "")
 
+                score = self._extract_score(result, content, i)
+
                 chunk = {
                     "id": doc_data.id or f"result_{i}",
                     "title": struct_data.get("title", ""),
                     "content": content,
-                    "score": round(1.0 - i * 0.1, 2) if i < 10 else 0.01,
-                    "reranker_score": round(1.0 - i * 0.1, 2) if i < 10 else 0.01,
+                    "score": round(score, 2),
+                    "reranker_score": round(score, 2),
                     "url": struct_data.get("source_url", ""),
                 }
                 context_chunks.append(chunk)
@@ -259,14 +289,14 @@ class VertexSearchService:
                         if not content:
                             content = struct_data.get("content", "")
 
+                        score = self._extract_score(result, content, i)
+
                         chunk = {
                             "id": doc_data.id or f"result_{i}",
                             "title": struct_data.get("title", ""),
                             "content": content,
-                            "score": round(1.0 - i * 0.1, 2) if i < 10 else 0.01,
-                            "reranker_score": round(1.0 - i * 0.1, 2)
-                            if i < 10
-                            else 0.01,
+                            "score": round(score, 2),
+                            "reranker_score": round(score, 2),
                             "url": struct_data.get("source_url", ""),
                             "unfiltered": True,
                         }
