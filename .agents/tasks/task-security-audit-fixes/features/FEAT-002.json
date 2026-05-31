@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Add timeout wrapping and degraded status logic to /health/deep endpoint in the backend. Currently, slow probes (especially vertex_search warm_up) can make the entire deep health check timeout. Add asyncio.wait_for with 5s timeout to each probe, and implement degraded logic: only return 503 if core services (mongodb, redis) are down; if only non-critical services (vertex_search, vertex_ai) are unhealthy, return 200 with status 'degraded'.",
+  "status": "in_progress",
+  "steps": [
+    "In apps/backend/app/api/v1/health.py, add 'import asyncio' at the top",
+    "Add a helper function '_safe_check(coro, timeout=5.0)' that wraps a coroutine with asyncio.wait_for. On TimeoutError, return {'status': 'unhealthy', 'error': 'timeout'}. On other exceptions, return {'status': 'unhealthy', 'error': str(e)}.",
+    "In the deep_health_check function, replace the direct await calls with _safe_check wrappers: e.g. 'mongodb': await _safe_check(mongo_ping()), 'redis': await _safe_check(redis_ping()), etc.",
+    "Change the overall status logic: define CORE_SERVICES = {'mongodb', 'redis'} and NON_CRITICAL_SERVICES = {'vertex_search', 'vertex_ai'}. If any core service is unhealthy, return 503 with status 'unhealthy'. If only non-critical services are unhealthy, return 200 with status 'degraded'. If all healthy, return 200 with status 'healthy'.",
+    "Keep the response format compatible: still return {'status': ..., 'checks': {...}}"
+  ],
+  "acceptance_criteria": [
+    "Each health probe is wrapped with a 5-second asyncio timeout",
+    "A single slow probe no longer blocks the entire endpoint indefinitely",
+    "If only vertex_search or vertex_ai is unhealthy/timed out, HTTP 200 is returned with status 'degraded'",
+    "If mongodb or redis is unhealthy, HTTP 503 is returned with status 'unhealthy'",
+    "If all services are healthy, HTTP 200 is returned with status 'healthy'",
+    "Existing test test_health_deep_endpoint_accessible still passes (it checks status != 500)"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_endpoints_audit.py -x -v to confirm health tests pass",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"import ast; ast.parse(open('app/api/v1/health.py').read())\" to confirm syntax is valid"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

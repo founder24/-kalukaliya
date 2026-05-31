@@ -2,6 +2,8 @@
 Health Check Endpoints: Basic and Deep Dependency Checks
 """
 
+import asyncio
+
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
@@ -10,6 +12,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Health"])
+
+
+async def _safe_check(coro, timeout: float = 5.0) -> Dict[str, Any]:
+    """Run a health check coroutine with a timeout."""
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        return {"status": "unhealthy", "error": "timeout"}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
 
 
 async def mongo_ping() -> Dict[str, Any]:
@@ -93,22 +105,35 @@ async def deep_health_check():
     - Vertex AI configuration
     """
     checks = {
-        "mongodb": await mongo_ping(),
-        "redis": await redis_ping(),
-        "vertex_search": await vertex_search_ping(),
-        "vertex_ai": await vertex_ping(),
+        "mongodb": await _safe_check(mongo_ping()),
+        "redis": await _safe_check(redis_ping()),
+        "vertex_search": await _safe_check(vertex_search_ping()),
+        "vertex_ai": await _safe_check(vertex_ping()),
     }
 
     # Determine overall status
-    all_healthy = all(check.get("status") == "healthy" for check in checks.values())
+    CORE_SERVICES = {"mongodb", "redis"}
 
-    status_code = (
-        status.HTTP_200_OK if all_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+    core_healthy = all(
+        checks[svc].get("status") == "healthy" for svc in CORE_SERVICES
     )
+    all_healthy = all(
+        check.get("status") == "healthy" for check in checks.values()
+    )
+
+    if not core_healthy:
+        overall_status = "unhealthy"
+        status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    elif not all_healthy:
+        overall_status = "degraded"
+        status_code = status.HTTP_200_OK
+    else:
+        overall_status = "healthy"
+        status_code = status.HTTP_200_OK
 
     return JSONResponse(
         status_code=status_code,
-        content={"status": "healthy" if all_healthy else "degraded", "checks": checks},
+        content={"status": overall_status, "checks": checks},
     )
 
 
