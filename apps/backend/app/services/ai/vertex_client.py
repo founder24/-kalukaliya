@@ -2,7 +2,7 @@ import asyncio
 import httpx
 import json
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from app.config import settings
 from app.core.circuit_breaker import (
@@ -42,7 +42,7 @@ class VertexAIClient:
         # HF-075: Token lock queueing concern - consider background refresh
         # as a future improvement to avoid lock contention under high concurrency
         self._token_lock = asyncio.Lock()
-        self._cached_token: str | None = None
+        self._cached_token: Optional[str] = None
         self._token_expiry: float = 0
 
     @property
@@ -317,7 +317,7 @@ class VertexAIClient:
         - On 5xx or timeout: retries up to max_retries times
         - If all retries exhausted, raises to let caller handle fallback
         """
-        last_error: Exception | None = None
+        last_error: Optional[Exception] = None
 
         for attempt in range(max_retries + 1):
             try:

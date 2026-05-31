@@ -7,6 +7,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
+from typing import Dict, Optional, Tuple
 
 from fastapi import APIRouter
 from fastapi.responses import Response
@@ -19,11 +20,11 @@ router = APIRouter()
 
 BASE_URL = "https://syrabit.ai"
 
-_sitemap_cache: dict[str, tuple[float, str]] = {}
+_sitemap_cache: Dict[str, Tuple[float, str]] = {}
 SITEMAP_CACHE_TTL = 600  # 10 minutes
 
 
-def _get_cached_sitemap(key: str) -> str | None:
+def _get_cached_sitemap(key: str) -> Optional[str]:
     if key in _sitemap_cache:
         ts, content = _sitemap_cache[key]
         if time.time() - ts < SITEMAP_CACHE_TTL:

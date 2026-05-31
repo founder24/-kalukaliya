@@ -3,7 +3,7 @@ import json
 import asyncio
 import logging
 import re
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from app.config import settings
 from app.core.circuit_breaker import (
@@ -205,7 +205,7 @@ class SarvamAIClient:
         - If all retries exhausted, raises to let caller handle fallback
         - HF-078: If chunks were already sent to client, cannot retry
         """
-        last_error: Exception | None = None
+        last_error: Optional[Exception] = None
         chunks_yielded = False
 
         for attempt in range(max_retries + 1):

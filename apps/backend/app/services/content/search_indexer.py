@@ -4,6 +4,7 @@ SearchIndexer - Chunks content and upserts to Vertex AI Search (Discovery Engine
 
 import logging
 import re
+from typing import Optional
 
 from app.config import settings
 
@@ -23,7 +24,7 @@ class SearchIndexer:
 
     def __init__(self):
         self._client = None
-        self._parent: str | None = None
+        self._parent: Optional[str] = None
 
         if (
             settings.VERTEX_PROJECT_ID
