@@ -82,3 +82,26 @@ class Chapter(Document):
 
     class Settings:
         name = "chapters"
+
+
+class TopicEmbedding(Document):
+    """Stores pre-computed embeddings for topic titles (text-embedding-005, 768 dims).
+
+    Used for fast cosine-similarity matching in the chat pipeline to decide
+    whether a user query is related to any published topic before invoking RAG.
+    """
+
+    topic_id: str
+    topic_title: str
+    chapter_id: PydanticObjectId
+    chapter_title: str
+    subject_slug: str
+    board_slug: str
+    class_level: str
+    embedding: list[float] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    class Settings:
+        name = "topic_embeddings"
+        indexes = [[("topic_id", 1)]]

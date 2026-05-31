@@ -1,0 +1,39 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Implement topic embedding matching for the chat RAG pipeline. This includes: (1) TopicEmbedding MongoDB model, (2) Vertex AI text-embedding-005 embedding generation in embedder.py, (3) Topic matching logic in ChatService before RAG retrieval, (4) Embedding generation during content publish, (5) Backfill script, (6) Tests.",
+  "status": "in_progress",
+  "steps": [
+    "Step 1 - TopicEmbedding model: Create a new Beanie Document class TopicEmbedding in apps/backend/app/models/content.py with fields: topic_id (str), topic_title (str), chapter_id (PydanticObjectId), chapter_title (str), subject_slug (str), board_slug (str), class_level (str), embedding (list[float], 768 dims for text-embedding-005), created_at (datetime), updated_at (datetime). Settings.name = 'topic_embeddings'. Add index on topic_id.",
+    "Step 2 - Register model in DB init: Add TopicEmbedding to the document_models list in apps/backend/app/db/mongo.py init_beanie() call, and import it.",
+    "Step 3 - Embedding generation service: Replace the placeholder in apps/backend/app/services/ai/embedder.py. Keep the existing generate_embedding() function for Vertex Search compatibility. Add a new async function generate_embedding_vector(text: str) -> list[float] that calls Vertex AI text-embedding-005 via the REST API (similar pattern to vertex_client.py using httpx + OAuth2 token or API key). Use the endpoint: POST https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/text-embedding-005:predict with the text input. Return the 768-dim vector. Add error handling and logging.",
+    "Step 4 - Topic embedding cache and matching in ChatService: Add a new class TopicMatcher in apps/backend/app/services/ai/topic_matcher.py. It should: (a) load all TopicEmbedding documents from MongoDB on first call and cache them in memory (with a TTL or manual invalidation), (b) provide an async method match_topic(query_embedding: list[float]) -> Optional[dict] that computes cosine similarity between the query vector and all stored topic vectors, returning the best match if score >= 0.70 (with topic metadata), (c) use a simple dot-product/numpy approach for cosine similarity (add numpy to requirements.in).",
+    "Step 5 - Integrate topic matching into ChatService: Modify apps/backend/app/services/chat_service.py to add a new static/class method that: (a) generates an embedding for the user query using generate_embedding_vector(), (b) calls TopicMatcher.match_topic() to check if any topic matches >= 0.70, (c) if match found -> proceed with existing RAG retrieval (Vertex Search), (d) if no match -> skip RAG entirely, use LLM only. This replaces the current flow where retrieve_context is always called.",
+    "Step 6 - Wire into chat endpoints: Update apps/backend/app/api/v1/chat.py in both the POST / and POST /stream endpoints. Replace the current _maybe_retrieve() logic with the new flow: is_generic_query -> skip RAG; else -> topic_match check -> if matched proceed with RAG, else skip RAG. Keep the 0.8s timeout budget in mind.",
+    "Step 7 - Generate embeddings during content publish: In apps/backend/app/services/content_publisher.py publish_chapter() method, after step 7 (wikidata enrichment), add step 8 that generates and stores TopicEmbedding documents for each topic in chapter.published_topics. Use generate_embedding_vector() for each topic title. Upsert by topic_id to handle republishes.",
+    "Step 8 - Backfill script: Create apps/backend/scripts/backfill_topic_embeddings.py that connects to MongoDB, loads all published chapters with their topics, generates embeddings for each topic title, and upserts TopicEmbedding documents. Include progress logging and error handling.",
+    "Step 9 - Add numpy to requirements.in: Add 'numpy' to the requirements.in file for cosine similarity computation.",
+    "Step 10 - Tests: Add tests in apps/backend/tests/test_topic_matcher.py covering: (a) cosine_similarity computation correctness, (b) TopicMatcher.match_topic returns best match above threshold, (c) TopicMatcher.match_topic returns None below threshold, (d) ChatService integration with topic matching (mock the embedding generation). Follow existing test patterns using pytest.mark.anyio and unittest.mock."
+  ],
+  "acceptance_criteria": [
+    "TopicEmbedding model is defined in content.py and registered in mongo.py init_beanie",
+    "generate_embedding_vector() in embedder.py calls Vertex AI text-embedding-005 and returns a 768-dim list[float]",
+    "TopicMatcher loads embeddings from MongoDB, caches them, and computes cosine similarity",
+    "ChatService skips RAG when no topic matches >= 0.70 threshold",
+    "ChatService proceeds with RAG when a topic matches >= 0.70",
+    "Content publisher generates topic embeddings on publish",
+    "Backfill script exists at apps/backend/scripts/backfill_topic_embeddings.py",
+    "numpy is added to requirements.in",
+    "All new tests pass with: cd apps/backend && python -m pytest tests/test_topic_matcher.py -x -q",
+    "Existing tests still pass: cd apps/backend && python -m pytest tests/ -x -q"
+  ],
+  "verification": [
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_topic_matcher.py -x -q",
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/ -x -q",
+    "python -c \"from app.models.content import TopicEmbedding; print(TopicEmbedding.Settings.name)\"",
+    "python -c \"from app.services.ai.embedder import generate_embedding_vector; print('OK')\"",
+    "python -c \"from app.services.ai.topic_matcher import TopicMatcher; print('OK')\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

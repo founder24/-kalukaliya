@@ -108,6 +108,28 @@ class ChatService:
             logger.debug(f"Response cache write failed: {e}")
 
     # ------------------------------------------------------------------
+    # Topic embedding match
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def check_topic_match(query: str) -> Optional[dict]:
+        """
+        Generate an embedding for the user query and check against TopicMatcher.
+
+        Returns match info dict (with score, topic metadata) if a topic matches
+        above the 0.70 threshold, otherwise None.
+        """
+        try:
+            from app.services.ai.embedder import generate_embedding_vector
+            from app.services.ai.topic_matcher import topic_matcher
+
+            query_embedding = await generate_embedding_vector(query)
+            return await topic_matcher.match_topic(query_embedding)
+        except Exception as e:
+            logger.warning(f"Topic match check failed: {e}")
+            return None
+
+    # ------------------------------------------------------------------
     # RAG retrieval
     # ------------------------------------------------------------------
 

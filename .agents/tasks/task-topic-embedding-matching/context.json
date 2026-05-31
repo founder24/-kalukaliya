@@ -1,0 +1,29 @@
+{
+  "project_type": "Python FastAPI monorepo with backend at apps/backend/",
+  "language": "Python 3.11",
+  "build_system": "pip-compile (requirements.in -> requirements.txt with hashes). Dockerfile at apps/backend/Dockerfile. No Makefile.",
+  "test_framework": "pytest with pytest-asyncio (asyncio_mode=auto), conftest.py for fixtures, APP_ENV=test, mocks for Redis/MongoDB",
+  "build_command": "pip install -r apps/backend/requirements.txt (or docker build for validation)",
+  "test_command": "cd apps/backend && python -m pytest tests/ -x -q",
+  "verification_instructions": "Run pytest from apps/backend/ directory. Tests mock all external services. No real MongoDB/Redis needed.",
+  "snapshot_or_generated_files": "requirements.txt is generated from requirements.in via pip-compile --generate-hashes. Do NOT regenerate it - just update requirements.in for new deps.",
+  "setup_instructions": "cd apps/backend && pip install -r requirements.txt",
+  "environment_constraints": "OPEN_INTERNET - full network access. google-cloud-aiplatform is already in requirements.in. numpy is NOT in requirements but can be added to requirements.in.",
+  "contribution_requirements": "Follow existing patterns: Beanie Document models, singleton service instances, async/await throughout, unittest.mock for tests",
+  "key_patterns": "1) Models use Beanie Document with Settings.name for collection. 2) Services are singletons (e.g., content_publisher_service, search_service). 3) DB init in app/db/mongo.py registers all Document models. 4) Config uses pydantic-settings with Optional fields. 5) Tests use httpx AsyncClient with ASGITransport, mock external services. 6) Redis is Upstash HTTP-based (upstash_redis.asyncio). 7) Vertex AI client uses httpx for API calls with circuit breaker.",
+  "relevant_files": [
+    "apps/backend/app/models/content.py",
+    "apps/backend/app/services/ai/embedder.py",
+    "apps/backend/app/services/chat_service.py",
+    "apps/backend/app/services/content_publisher.py",
+    "apps/backend/app/services/ai/vertex_client.py",
+    "apps/backend/app/api/v1/chat.py",
+    "apps/backend/app/db/mongo.py",
+    "apps/backend/app/config.py",
+    "apps/backend/requirements.in",
+    "apps/backend/tests/test_chat.py",
+    "apps/backend/tests/test_content_publisher.py",
+    "apps/backend/tests/conftest.py"
+  ],
+  "directory_structure": "apps/backend/app/models/ - Beanie models, apps/backend/app/services/ai/ - AI clients (vertex, sarvam, cloudflare, embedder, router), apps/backend/app/services/ - business logic services, apps/backend/app/api/v1/ - FastAPI routers, apps/backend/app/db/ - MongoDB/Redis init, apps/backend/tests/ - pytest tests, apps/backend/scripts/ - admin scripts"
+}
