@@ -1,0 +1,26 @@
+{
+  "project_type": "Full-stack web app: Python FastAPI backend + React (Vite) frontend",
+  "language": "Python (backend), JavaScript/JSX (frontend)",
+  "build_system": "pip (backend, requirements.txt), npm/vite (frontend, package.json)",
+  "test_framework": "pytest (backend), vitest (frontend)",
+  "build_command": "cd apps/frontend && npm run build",
+  "test_command": "cd apps/frontend && npm run test",
+  "verification_instructions": "1. Frontend: npm run build in apps/frontend (checks for syntax errors). 2. Backend: python -c 'import ast; ast.parse(open(file).read())' for each changed Python file. 3. Frontend tests: cd apps/frontend && npm run test.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "Backend: cd apps/backend && pip install -r requirements.txt. Frontend: cd apps/frontend && npm install.",
+  "environment_constraints": "OPEN_INTERNET network mode. Python 3.11 and Node 22 available. No MongoDB or Redis running locally - use AST validation for backend.",
+  "contribution_requirements": "Follow existing code patterns. Backend uses inline imports for redis (from app.db.redis import get_redis). Frontend uses axios with withCredentials. Admin auth uses httponly cookies.",
+  "key_patterns": "Backend: rate limiting via _check_rate_limit with fail-closed (503). Redis accessed via lazy inline imports. JWT signing/verification via _get_signing_key()/_get_verification_key() returning (key, algorithm) tuples. Frontend: AuthContext provides token/authHeader. Admin API uses adminHeaders(token) + withCredentials:true. Analytics imported from @/utils/analytics.",
+  "relevant_files": [
+    "apps/backend/app/api/v1/admin.py",
+    "apps/backend/app/api/v1/auth.py",
+    "apps/backend/app/config.py",
+    "apps/backend/app/models/user.py",
+    "apps/frontend/src/context/AuthContext.jsx",
+    "apps/frontend/src/hooks/useAuthRefresh.js",
+    "apps/frontend/src/components/StaffGuard.jsx",
+    "apps/frontend/src/pages/AdminPage.jsx",
+    "apps/frontend/src/utils/api.jsx"
+  ],
+  "directory_structure": "apps/backend/app/ - FastAPI app with api/v1/ routes, models/, services/, db/. apps/frontend/src/ - React app with context/, hooks/, components/, pages/, utils/."
+}

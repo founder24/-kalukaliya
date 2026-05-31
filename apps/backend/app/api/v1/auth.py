@@ -91,6 +91,7 @@ class MessageResponse(BaseModel):
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
+    access_token: Optional[str] = None
 
 
 class LogoutRequest(BaseModel):
@@ -360,6 +361,18 @@ async def get_current_user_optional(
         if not user_id or token_type != "access":
             return None
 
+        # Check token blacklist
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        try:
+            from app.db.redis import get_redis
+
+            redis = get_redis()
+            is_blacklisted = await redis.get(f"blacklisted_token:{token_hash}")
+            if is_blacklisted:
+                return None  # treat as anonymous
+        except Exception:
+            pass  # fail-open acceptable for optional auth
+
         user = await User.get(user_id)
         return user
     except InvalidTokenError:
@@ -522,7 +535,7 @@ async def forgot_password(request_body: ForgotPasswordRequest, request: Request)
 
 
 @router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(request: ResetPasswordRequest):
+async def reset_password(body: ResetPasswordRequest):
     """
     Reset password using the token from the email link.
     Token is a JWT with type=reset, 1 hour expiry.
@@ -531,14 +544,14 @@ async def reset_password(request: ResetPasswordRequest):
     try:
         if settings.RESET_TOKEN_SECRET:
             payload = jwt.decode(
-                request.token,
+                body.token,
                 settings.RESET_TOKEN_SECRET,
                 algorithms=["HS256"],
             )
         else:
             key, algorithm = _get_verification_key()
             payload = jwt.decode(
-                request.token,
+                body.token,
                 key,
                 algorithms=[algorithm],
             )
@@ -554,7 +567,7 @@ async def reset_password(request: ResetPasswordRequest):
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
 
     # SEC-C4: Check if reset token has already been used
-    token_hash = hashlib.sha256(request.token.encode()).hexdigest()
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
     try:
         from app.db.redis import get_redis
 
@@ -586,14 +599,14 @@ async def reset_password(request: ResetPasswordRequest):
         )
 
     # HF-003: Prevent password reuse
-    if user.verify_password(request.new_password):
+    if user.verify_password(body.new_password):
         raise HTTPException(
             status_code=400,
             detail="New password must be different from current password",
         )
 
     # Update password
-    user.hashed_password = User.hash_password(request.new_password)
+    user.hashed_password = User.hash_password(body.new_password)
     user.updated_at = datetime.now(timezone.utc)
     await user.save()
 
@@ -659,6 +672,23 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
                 raise HTTPException(
                     status_code=503, detail="Token validation service unavailable"
                 )
+
+        # Blacklist the old access token if provided (token rotation)
+        if body.access_token:
+            try:
+                old_hash = hashlib.sha256(body.access_token.encode()).hexdigest()
+                key_v, alg_v = _get_verification_key()
+                old_payload = jwt.decode(body.access_token, key_v, algorithms=[alg_v])
+                old_exp = old_payload.get("exp", 0)
+                now_ts = int(datetime.now(timezone.utc).timestamp())
+                remaining_ttl = max(old_exp - now_ts, 0)
+                if remaining_ttl > 0:
+                    from app.db.redis import get_redis
+
+                    redis = get_redis()
+                    await redis.set(f"blacklisted_token:{old_hash}", "1", ex=remaining_ttl, nx=True)
+            except Exception as e:
+                logger.warning(f"Failed to blacklist old access token during refresh: {e}")
 
         return TokenResponse(
             access_token=new_access_token, refresh_token=new_refresh_token

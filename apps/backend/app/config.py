@@ -159,6 +159,10 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_production_secrets(self):
         """Validate critical secrets are properly configured in production."""
+        # This check applies in ALL environments
+        if self.TRUST_EDGE_AUTH and not self.EDGE_SHARED_SECRET:
+            raise ValueError("EDGE_SHARED_SECRET must be set when TRUST_EDGE_AUTH is True")
+
         KNOWN_PLACEHOLDER_SECRETS = {
             "super_secret_jwt_key_32_chars_min",
             "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG",

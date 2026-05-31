@@ -1,21 +1,33 @@
 {
   "id": "FEAT-001",
   "type": "fix",
-  "description": "Add sensitive path blocking rules to _redirects and missing security headers to _headers. These are static file changes for Cloudflare Pages.",
-  "status": "completed",
+  "description": "Fix all backend security issues (C-1, C-2, H-1, H-2, H-3, M-4, L-1) across admin.py, auth.py, config.py, and user.py",
+  "status": "in_progress",
   "steps": [
-    "In apps/frontend/public/_redirects, add a new comment block '# Block sensitive paths - return 404 for common attack vectors' BEFORE the existing trailing-slash rules, followed by rules for: /.env, /.env.*, /.git/*, /.htaccess, /.DS_Store, /.svn/*, /wp-admin, /wp-login.php, /server-status, /phpinfo.php, /web.config, /wrangler.toml, /package.json, /tsconfig.json, /Dockerfile, /docker-compose.yml, /.dockerignore. Each rule format: '/path /index.html 404'",
-    "In apps/frontend/public/_headers, add six new headers to the existing /* block (after the existing Permissions-Policy line): X-XSS-Protection: 1; mode=block, X-DNS-Prefetch-Control: on, X-Download-Options: noopen, X-Permitted-Cross-Domain-Policies: none, Cross-Origin-Resource-Policy: same-origin, Cross-Origin-Embedder-Policy: credentialless"
+    "C-1: In apps/backend/app/api/v1/admin.py admin_login endpoint, change the rate-limit exception handling to raise HTTPException(status_code=503) when Redis is unavailable (same fail-closed pattern as _check_rate_limit). Currently it catches broad Exception and logs a warning then continues. Fix: re-raise 503 HTTPException if the exception is not a 429 HTTPException. Remove the fail-open comment.",
+    "C-2: In apps/backend/app/api/v1/auth.py get_current_user_optional function, after decoding the JWT and confirming token_type == 'access', add a blacklist check using Redis. Pattern: token_hash = hashlib.sha256(token.encode()).hexdigest(), then try get_redis() and check f'blacklisted_token:{token_hash}'. If blacklisted, return None. If Redis fails, pass (fail-open is acceptable for optional auth routes since they allow anonymous).",
+    "H-1: In apps/backend/app/api/v1/auth.py, update RefreshTokenRequest to add: access_token: Optional[str] = None. In refresh_token_endpoint, after generating new tokens (after new_refresh_token = create_refresh_token...), if body.access_token is provided: compute old_hash = hashlib.sha256(body.access_token.encode()).hexdigest(), decode the old access token to get its exp claim (wrap in try/except to handle invalid tokens gracefully), compute remaining_ttl = max(exp - now, 0), then if remaining_ttl > 0: await redis.set(f'blacklisted_token:{old_hash}', '1', ex=remaining_ttl, nx=True). Use the same redis import pattern as elsewhere in the file.",
+    "H-2: In apps/backend/app/api/v1/admin.py _validate_admin_session function, replace the inline algorithm logic. Currently it uses settings.JWT_ALGORITHM directly. Create a helper function _get_admin_verification_key() that returns (key, algorithm) tuple - same pattern as _get_verification_key() in auth.py. Logic: if JWT_ALGORITHM == 'RS256' and JWT_PUBLIC_KEY exists, return (JWT_PUBLIC_KEY, 'RS256'). Otherwise return (ADMIN_JWT_SECRET or JWT_SECRET, 'HS256'). Update _validate_admin_session to use this helper everywhere it decodes a JWT. Also update admin_login to use a corresponding _get_admin_signing_key() that returns the signing key and algorithm (ADMIN_JWT_SECRET or JWT_SECRET for HS256, JWT_PRIVATE_KEY for RS256).",
+    "H-3: In apps/backend/app/config.py, add a validator on TRUST_EDGE_AUTH. Use @model_validator(mode='after') pattern (since pydantic v2 with pydantic-settings). In the existing validate_production_secrets method, add a check: if self.TRUST_EDGE_AUTH and not self.EDGE_SHARED_SECRET, raise ValueError('EDGE_SHARED_SECRET must be set when TRUST_EDGE_AUTH is True'). This should apply in ALL environments, not just production.",
+    "M-4: In apps/backend/app/models/user.py, change the role field default from None to 'student': role: Optional[Literal['student', 'educator', 'staff', 'admin']] = 'student'",
+    "L-1: In apps/backend/app/api/v1/auth.py reset_password endpoint, rename the parameter from 'request' to 'body' (the function signature is: async def reset_password(request: ResetPasswordRequest)). Change to async def reset_password(body: ResetPasswordRequest). Update all references to request.token and request.new_password inside the function to body.token and body.new_password."
   ],
   "acceptance_criteria": [
-    "apps/frontend/public/_redirects starts with the sensitive path blocking rules followed by trailing-slash rules",
-    "apps/frontend/public/_headers /* block contains all 6 new security headers in addition to the existing ones",
-    "The existing Cache-Control blocks and route-specific headers remain unchanged"
+    "admin_login rate-limit block raises 503 HTTPException when Redis is unavailable (not a 429)",
+    "get_current_user_optional checks token blacklist and returns None for blacklisted tokens",
+    "RefreshTokenRequest has optional access_token field; refresh endpoint blacklists old access token when provided",
+    "_get_admin_verification_key() and _get_admin_signing_key() helpers exist and are used in admin.py",
+    "Settings validation rejects TRUST_EDGE_AUTH=True when EDGE_SHARED_SECRET is not set",
+    "User model defaults role to 'student'",
+    "reset_password uses 'body' parameter name instead of 'request'",
+    "All Python files parse without syntax errors"
   ],
   "verification": [
-    "Visually inspect _redirects to confirm 17 blocking rules appear before the 12 trailing-slash rules",
-    "Visually inspect _headers to confirm the /* block has all original headers plus the 6 new ones"
+    "python3 -c \"import ast; ast.parse(open('apps/backend/app/api/v1/admin.py').read())\"",
+    "python3 -c \"import ast; ast.parse(open('apps/backend/app/api/v1/auth.py').read())\"",
+    "python3 -c \"import ast; ast.parse(open('apps/backend/app/config.py').read())\"",
+    "python3 -c \"import ast; ast.parse(open('apps/backend/app/models/user.py').read())\""
   ],
   "blocked_reason": null,
-  "findings": "Static config files only - no build/test needed. Both files verified visually correct."
+  "findings": ""
 }
