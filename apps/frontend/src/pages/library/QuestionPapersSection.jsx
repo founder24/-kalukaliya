@@ -1,13 +1,15 @@
-import { FileText } from 'lucide-react';
+import { useState } from 'react';
+import { FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import QuestionPaperCard from './QuestionPaperCard';
 import { useQuestionPapers } from '@/hooks/useContent';
 
 export default function QuestionPapersSection() {
   const { data: papers = [], isLoading } = useQuestionPapers();
+  const [showAll, setShowAll] = useState(false);
 
   if (isLoading || papers.length === 0) return null;
 
-  const displayed = papers.slice(0, 6);
+  const displayed = showAll ? papers : papers.slice(0, 6);
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 md:px-6 pb-8">
@@ -27,10 +29,20 @@ export default function QuestionPapersSection() {
         ))}
       </div>
       {papers.length > 6 && (
-        <div className="mt-4 text-center">
-          <span className="text-xs text-muted-foreground">
-            Showing 6 of {papers.length} papers
-          </span>
+        <div className="mt-4 flex justify-center">
+          <button
+            onClick={() => setShowAll(v => !v)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium transition-all duration-200 active:scale-95"
+            style={{
+              background: 'rgba(139,92,246,0.08)',
+              color: '#a78bfa',
+              border: '1px solid rgba(139,92,246,0.15)',
+            }}
+          >
+            {showAll
+              ? <><ChevronUp size={13} /> Show less</>
+              : <><ChevronDown size={13} /> Show all {papers.length} papers</>}
+          </button>
         </div>
       )}
     </div>

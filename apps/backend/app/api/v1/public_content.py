@@ -9,6 +9,7 @@ import re
 from beanie import PydanticObjectId
 from fastapi import APIRouter, HTTPException, Query, Response
 
+from app.config import settings
 from app.models.content import Board, Chapter, Class, Stream, Subject, QuestionPaper
 
 logger = logging.getLogger(__name__)
@@ -168,10 +169,13 @@ async def get_question_papers(
     board: str = Query(None),
     class_level: str = Query(None),
     subject: str = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    skip: int = Query(0, ge=0),
 ):
     """
     Return published question papers with R2 image URLs.
     Supports optional filtering by board, class_level, and subject.
+    Results are sorted by year (newest first) and paginated via limit/skip.
     """
     response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
 
@@ -184,10 +188,12 @@ async def get_question_papers(
         if subject:
             query["subject"] = subject
 
-        papers = await QuestionPaper.find(query).to_list()
+        papers = await QuestionPaper.find(query).sort("-year").skip(skip).limit(limit).to_list()
     except Exception as e:
         logger.warning(f"Question papers DB query failed: {e}")
         return []
+
+    asset_base = settings.CF_WORKER_URL.rstrip("/")
 
     return [
         {
@@ -195,7 +201,7 @@ async def get_question_papers(
             "title": paper.title,
             "slug": paper.slug,
             "r2_key": paper.r2_key,
-            "image_url": f"https://api.syrabit.ai/assets/{paper.r2_key}",
+            "image_url": f"{asset_base}/assets/{paper.r2_key}",
             "board": paper.board,
             "class_level": paper.class_level,
             "subject": paper.subject,

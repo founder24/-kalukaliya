@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Address review findings: unbounded query pagination, Show More button, and configurable R2 asset URL",
+  "status": "in_progress",
+  "steps": [
+    "Step 1: In apps/backend/app/api/v1/public_content.py - import settings from app.config, add limit/skip query params (default limit=100, skip=0), add .sort('-year').limit(limit).skip(skip) to the QuestionPaper query",
+    "Step 2: In apps/backend/app/api/v1/public_content.py - replace hardcoded 'https://api.syrabit.ai/assets/' with settings.CF_WORKER_URL based URL construction",
+    "Step 3: In apps/frontend/src/pages/library/QuestionPapersSection.jsx - replace static 'Showing 6 of N' text with a state-driven Show More/Show Less toggle button following existing patterns"
+  ],
+  "acceptance_criteria": [
+    "Backend query uses .sort('-year').limit(limit).skip(skip) with configurable params",
+    "Image URL is constructed using settings.CF_WORKER_URL instead of hardcoded domain",
+    "Frontend shows a Show More button that expands to show all papers, and a Show Less button to collapse",
+    "Frontend builds without errors"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/frontend && npx vite build --mode development 2>&1 | tail -5",
+    "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"from app.api.v1.public_content import router; print('OK')\"",
+    "Run: grep -c 'settings.CF_WORKER_URL' /projects/sandbox/-kalukaliya/apps/backend/app/api/v1/public_content.py",
+    "Run: grep -c 'showAll\\|setShowAll' /projects/sandbox/-kalukaliya/apps/frontend/src/pages/library/QuestionPapersSection.jsx"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}
