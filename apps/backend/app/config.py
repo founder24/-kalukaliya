@@ -159,9 +159,15 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_production_secrets(self):
         """Validate critical secrets are properly configured in production."""
-        # This check applies in ALL environments
+        # Enforce edge secret when trust is enabled
         if self.TRUST_EDGE_AUTH and not self.EDGE_SHARED_SECRET:
-            raise ValueError("EDGE_SHARED_SECRET must be set when TRUST_EDGE_AUTH is True")
+            if self.APP_ENV in ("production", "staging"):
+                raise ValueError("EDGE_SHARED_SECRET must be set when TRUST_EDGE_AUTH is True")
+            else:
+                logger.warning(
+                    "TRUST_EDGE_AUTH is True but EDGE_SHARED_SECRET is not set. "
+                    "Edge auth trust is effectively disabled in this environment."
+                )
 
         KNOWN_PLACEHOLDER_SECRETS = {
             "super_secret_jwt_key_32_chars_min",

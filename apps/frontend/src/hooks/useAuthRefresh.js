@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { API_BASE } from '@/utils/api';
-import { getRefreshToken, storeToken, storeRefreshToken } from './useTokenManager';
+import { getToken, getRefreshToken, storeToken, storeRefreshToken } from './useTokenManager';
 
 // Module-level promise deduplication: only one refresh in-flight at a time
 let _refreshPromise = null;
@@ -28,9 +28,10 @@ async function _doRefresh() {
   if (!refreshToken) {
     throw new Error('No refresh token available');
   }
+  const currentToken = getToken();
   const res = await axios.post(
     `${API_BASE}/auth/refresh`,
-    { refresh_token: refreshToken },
+    { refresh_token: refreshToken, access_token: currentToken },
     { withCredentials: true },
   );
   const newToken = res?.data?.access_token;

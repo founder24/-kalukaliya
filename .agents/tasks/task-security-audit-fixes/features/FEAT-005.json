@@ -1,0 +1,20 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Address two code review issues: (1) Include current access token in frontend refresh request for token rotation blacklist, (2) Downgrade TRUST_EDGE_AUTH validator to warning in non-production environments to avoid breaking local dev.",
+  "status": "in_progress",
+  "steps": [
+    "In apps/frontend/src/hooks/useAuthRefresh.js: Add getToken to the import from ./useTokenManager. In _doRefresh(), before the axios.post call, get the current token via getToken() and include it as access_token in the request body.",
+    "In apps/backend/app/config.py: Change the TRUST_EDGE_AUTH + EDGE_SHARED_SECRET check in validate_production_secrets to only raise ValueError in production/staging. In other environments, log a warning instead."
+  ],
+  "acceptance_criteria": [
+    "Frontend _doRefresh sends { refresh_token, access_token } in the refresh request body",
+    "Backend validate_production_secrets only raises ValueError for missing EDGE_SHARED_SECRET in production/staging, and logs a warning in other environments",
+    "Both files have no syntax errors"
+  ],
+  "verification": [
+    "Python AST parse on apps/backend/app/config.py",
+    "Babel parse or acorn parse on apps/frontend/src/hooks/useAuthRefresh.js"
+  ],
+  "blocked_reason": null
+}
