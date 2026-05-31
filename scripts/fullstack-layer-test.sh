@@ -222,7 +222,10 @@ skip() {
 
 verbose_log() {
     if [[ "$VERBOSE" == "1" ]]; then
-        echo -e "    [DEBUG] $1"
+        # Redact bearer tokens from debug output
+        local msg="$1"
+        msg=$(echo "$msg" | sed -E 's/(Authorization: Bearer )[^ "]*/\1[REDACTED]/gi')
+        echo -e "    [DEBUG] $msg"
     fi
 }
 
@@ -238,13 +241,18 @@ section_header() {
 perform_request() {
     local url="$1"
     shift
-    local extra_args=("$@")
+    local extra_args=()
+    if [[ $# -gt 0 ]]; then
+        extra_args=("$@")
+    fi
 
     local timing_format='{"dns":%{time_namelookup},"tls":%{time_appconnect},"ttfb":%{time_starttransfer},"total":%{time_total},"status":%{http_code},"size":%{size_download}}'
 
     local tmpfile header_file
     tmpfile=$(mktemp)
     header_file=$(mktemp)
+    # Ensure temp files are cleaned up on exit from this function
+    trap "rm -f '$tmpfile' '$header_file'" RETURN
 
     local curl_cmd=(curl -sS -w "$timing_format" -o "$tmpfile" -D "$header_file" --max-time 30)
 
@@ -264,19 +272,22 @@ perform_request() {
     CURL_TOTAL=$(echo "$timing_json" | jq -r '(.total * 1000) | floor')
     CURL_BODY=$(cat "$tmpfile" 2>/dev/null || echo "")
     CURL_HEADERS=$(cat "$header_file" 2>/dev/null || echo "")
-
-    rm -f "$tmpfile" "$header_file"
 }
 
 # Perform a streaming request (no buffer)
 perform_stream_request() {
     local url="$1"
     shift
-    local extra_args=("$@")
+    local extra_args=()
+    if [[ $# -gt 0 ]]; then
+        extra_args=("$@")
+    fi
 
     local tmpfile header_file
     tmpfile=$(mktemp)
     header_file=$(mktemp)
+    # Ensure temp files are cleaned up on exit from this function
+    trap "rm -f '$tmpfile' '$header_file'" RETURN
 
     local curl_cmd=(curl -sS --no-buffer -o "$tmpfile" -D "$header_file" --max-time 30 -w '%{http_code}')
 
@@ -289,8 +300,6 @@ perform_stream_request() {
     CURL_STATUS=$("${curl_cmd[@]}" 2>/dev/null) || CURL_STATUS="0"
     CURL_BODY=$(cat "$tmpfile" 2>/dev/null || echo "")
     CURL_HEADERS=$(cat "$header_file" 2>/dev/null || echo "")
-
-    rm -f "$tmpfile" "$header_file"
 }
 
 has_header() {
@@ -1972,6 +1981,16 @@ main() {
     # Run specific layer or all
     if [[ -n "$RUN_LAYER" ]]; then
         test_layer_0_prerequisites
+        # Auto-run auth layer if targeting layers 5-18 with credentials but no token
+        if [[ "$RUN_LAYER" -ge 5 && "$RUN_LAYER" -le 18 && -z "$AUTH_TOKEN" ]]; then
+            if [[ -n "$TEST_JWT_TOKEN" ]]; then
+                AUTH_TOKEN="$TEST_JWT_TOKEN"
+                verbose_log "Using TEST_JWT_TOKEN for authenticated tests"
+            elif [[ -n "$ADMIN_EMAIL" && -n "$ADMIN_PASSWORD" ]]; then
+                verbose_log "Auto-running layer 4 (auth) because credentials are available and AUTH_TOKEN is empty"
+                test_layer_4_authentication
+            fi
+        fi
         case "$RUN_LAYER" in
             0) ;; # Already ran
             1) test_layer_1_frontend ;;
@@ -2047,9 +2066,11 @@ main() {
 
     # Layer breakdown
     echo "  Layer Results:"
-    for result in "${LAYER_RESULTS[@]}"; do
-        echo "    - $result"
-    done
+    if [[ ${#LAYER_RESULTS[@]} -gt 0 ]]; then
+        for result in "${LAYER_RESULTS[@]}"; do
+            echo "    - $result"
+        done
+    fi
     echo ""
 
     if [[ "$CRITICAL_FAILED" -eq 0 ]]; then
@@ -2068,20 +2089,29 @@ main() {
         if [[ "$CRITICAL_FAILED" -gt 0 ]]; then
             success_val="false"
         fi
-        cat > "$json_file" << JSONEOF
-{
-  "timestamp": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
-  "base_url": "$BASE_URL",
-  "frontend_url": "$FRONTEND_URL",
-  "total_tests": $TOTAL_TESTS,
-  "passed": $PASSED_TESTS,
-  "failed": $FAILED_TESTS,
-  "warnings": $WARNING_TESTS,
-  "skipped": $SKIPPED_TESTS,
-  "critical_failures": $CRITICAL_FAILED,
-  "success": $success_val
-}
-JSONEOF
+        jq -n \
+            --arg timestamp "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+            --arg base_url "$BASE_URL" \
+            --arg frontend_url "$FRONTEND_URL" \
+            --argjson total_tests "$TOTAL_TESTS" \
+            --argjson passed "$PASSED_TESTS" \
+            --argjson failed "$FAILED_TESTS" \
+            --argjson warnings "$WARNING_TESTS" \
+            --argjson skipped "$SKIPPED_TESTS" \
+            --argjson critical_failures "$CRITICAL_FAILED" \
+            --argjson success "$success_val" \
+            '{
+                timestamp: $timestamp,
+                base_url: $base_url,
+                frontend_url: $frontend_url,
+                total_tests: $total_tests,
+                passed: $passed,
+                failed: $failed,
+                warnings: $warnings,
+                skipped: $skipped,
+                critical_failures: $critical_failures,
+                success: $success
+            }' > "$json_file"
         echo "  Results exported to: $json_file"
         echo ""
     fi
