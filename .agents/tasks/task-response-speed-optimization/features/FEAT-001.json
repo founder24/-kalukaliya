@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Short-circuit topic matching when no embeddings exist, add instant greeting responses, and fix SSE docstring. When the TopicMatcher cache is empty (no topic embeddings loaded from MongoDB), skip the expensive embedding generation call (0.5s) entirely. Also, for generic greeting queries, return a hardcoded response immediately without calling the LLM (saving 2-3s). Fix the misleading docstring in chat.py that references 'text' field instead of 'content'.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/services/ai/topic_matcher.py: Add a `has_topics()` method to the TopicMatcher class that returns True only when the cache is loaded AND has at least one embedding. This should check `self._embeddings is not None and len(self._embeddings) > 0`. Also ensure cache is loaded before checking (call _load_embeddings if needed, using the lock).",
     "In apps/backend/app/services/chat_service.py: In the `check_topic_match` static method, before calling `generate_embedding_vector`, first check `topic_matcher.has_topics()`. If it returns False, log a debug message 'topic_match_skipped_empty_cache' and return None immediately. This avoids the 0.5s embedding API call when there are no topics to match against.",
@@ -27,5 +27,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_topic_matcher.py tests/test_chat.py -x -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 29 tests pass on Python 3.11. Required pyenv global 3.11.15 and installing deps from requirements.txt (stripped hashes). Existing check_topic_match tests needed has_topics mock added since the new short-circuit runs before generate_embedding_vector."
 }
