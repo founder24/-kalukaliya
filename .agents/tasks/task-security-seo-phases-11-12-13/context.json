@@ -1,0 +1,24 @@
+{
+  "project_type": "Full-stack React SPA (Vite) + FastAPI backend + Cloudflare Edge Worker",
+  "language": "JavaScript/TypeScript (frontend), Python (backend)",
+  "build_system": "Vite for frontend build, npm scripts. Backend uses FastAPI with uvicorn.",
+  "test_framework": "vitest for frontend unit tests, pytest for backend",
+  "build_command": "cd apps/frontend && npm run build:client",
+  "test_command": "cd apps/frontend && npx vitest run --passWithNoTests",
+  "verification_instructions": "1. Run frontend build (vite build). 2. Run vitest for frontend. 3. Check that cookie consent component renders. 4. Validate _redirects file syntax. 5. Validate seo.py has lastmod in SITEMAP_STATIC_XML.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd apps/frontend && npm install",
+  "environment_constraints": "OPEN_INTERNET network mode. Node.js 22 available via nvm. Python 3.11 available via pyenv.",
+  "contribution_requirements": "Follow existing Tailwind CSS patterns, use lazy loading for new components, follow existing localStorage key naming convention (syrabit_ prefix)",
+  "key_patterns": "Components use functional React with hooks. Lazy-loaded via React.lazy(). PWAInstallPrompt is the closest pattern match for a banner component (fixed position, localStorage dismiss, animation). Analytics uses window.posthog directly. _redirects uses Cloudflare Pages syntax. Backend uses FastAPI APIRouter with Response objects for XML output.",
+  "relevant_files": [
+    "apps/frontend/src/App.jsx",
+    "apps/frontend/src/components/PWAInstallPrompt.jsx",
+    "apps/frontend/src/utils/analytics.jsx",
+    "apps/frontend/public/_redirects",
+    "apps/frontend/public/_routes.json",
+    "apps/backend/app/api/v1/seo.py",
+    "apps/frontend/package.json"
+  ],
+  "directory_structure": "apps/frontend/src/components/ - shared components. apps/frontend/src/pages/ - page components. apps/frontend/public/ - static assets and CF Pages config. apps/backend/app/api/v1/ - backend API routes. apps/edge/src/ - Cloudflare Edge Worker."
+}

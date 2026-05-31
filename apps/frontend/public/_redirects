@@ -17,6 +17,13 @@
 /docker-compose.yml  /index.html  404
 /.dockerignore  /index.html  404
 
+# SPA rewrites — serve index.html for SEO-critical pages to prevent 308 redirects
+/login      /index.html  200
+/signup     /index.html  200
+/about      /index.html  200
+/privacy    /index.html  200
+/terms      /index.html  200
+
 # Trailing-slash normalisation — strip trailing slash from all SPA routes
 # so browsers and crawlers always land on the canonical (no-slash) URL.
 # CF Pages serves these before the Worker runs.
