@@ -120,12 +120,8 @@ async def deep_health_check():
     # Determine overall status
     CORE_SERVICES = {"mongodb", "redis"}
 
-    core_healthy = all(
-        checks[svc].get("status") == "healthy" for svc in CORE_SERVICES
-    )
-    all_healthy = all(
-        check.get("status") == "healthy" for check in checks.values()
-    )
+    core_healthy = all(checks[svc].get("status") == "healthy" for svc in CORE_SERVICES)
+    all_healthy = all(check.get("status") == "healthy" for check in checks.values())
 
     if not core_healthy:
         overall_status = "unhealthy"
