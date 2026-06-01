@@ -19,7 +19,7 @@ from app.core.security import sanitize_user_input
 from app.services.chat_service import ChatService
 from app.api.deps.rate_limit import check_rate_limit
 from app.utils.tracking import track_chat_completed
-from app.services.ai.cloudflare_client import cloudflare_client
+from app.services.ai.vertex_client import vertex_client
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -866,8 +866,8 @@ async def analyze_image(
         raise HTTPException(status_code=400, detail="Image must be less than 4MB")
 
     try:
-        result = await cloudflare_client.vision_analyze(image_bytes, sanitized_prompt)
-        return ImageAnalysisResponse(text=result, model=settings.CF_AI_VISION_MODEL)
+        result = await vertex_client.vision_analyze(image_bytes, sanitized_prompt)
+        return ImageAnalysisResponse(text=result, model=settings.VERTEX_VISION_MODEL)
     except RuntimeError as e:
         logger.error(f"Vision analysis failed: {e}")
         raise HTTPException(
@@ -905,7 +905,7 @@ async def text_to_speech(
         raise HTTPException(status_code=429, detail="Rate limit exceeded.")
 
     try:
-        audio_bytes = await cloudflare_client.text_to_speech(request.text, request.lang)
+        audio_bytes = await vertex_client.text_to_speech(request.text, request.lang)
         return StreamingResponse(
             io.BytesIO(audio_bytes),
             media_type="audio/wav",
