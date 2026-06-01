@@ -29,5 +29,5 @@
     "Run `cd /projects/sandbox/-kalukaliya/apps/backend && grep 'google-cloud-texttospeech' requirements.in` and confirm it appears"
   ],
   "blocked_reason": null,
-  "findings": "Pre-existing test failures (39 failed, 59 errors) unrelated to changes - confirmed by stash/pop comparison. The Settings class requires APP_ENV=development and TRUST_EDGE_AUTH=false for local dev import validation. All AI router tests (6) pass. cloudflare_client.py preserved as required."
+  "findings": "Pre-existing test failures (39 failed, 59 errors) unrelated to changes - confirmed by stash/pop comparison. The Settings class requires APP_ENV=development and TRUST_EDGE_AUTH=false for local dev import validation. All AI router tests (6) pass. cloudflare_client.py preserved as required. Review fix applied: text_to_speech now wrapped in vertex_circuit_breaker.call() matching vision_analyze pattern (review-v1 issue #1)."
 }
