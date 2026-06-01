@@ -139,34 +139,39 @@ class TestLifespanProductionBehavior:
             mock_settings.SENTRY_DSN = None
             mock_settings.POSTHOG_API_KEY = None
 
-            with patch(
-                "app.main.init_mongo",
-                new_callable=AsyncMock,
-                side_effect=ConnectionFailure("connection refused"),
-            ), patch(
-                "app.main.init_redis", new_callable=AsyncMock
-            ), patch(
-                "app.main.close_mongo", new_callable=AsyncMock
-            ), patch(
-                "app.main.close_redis", new_callable=AsyncMock
-            ), patch(
-                "app.services.search.vertex_search.search_service.warm_up",
-                new_callable=AsyncMock,
-            ), patch(
-                "app.services.ai.vertex_client.vertex_client._get_access_token",
-                new_callable=AsyncMock,
-            ), patch(
-                "app.services.ai.vertex_client.vertex_client.close",
-                new_callable=AsyncMock,
-            ), patch(
-                "app.services.ai.sarvam_client.sarvam_client.close",
-                new_callable=AsyncMock,
-            ), patch(
-                "app.services.payment.razorpay_client.razorpay_client.close",
-                new_callable=AsyncMock,
-            ), patch(
-                "app.services.comms.resend_client.close_resend_client",
-                new_callable=AsyncMock,
+            with (
+                patch(
+                    "app.main.init_mongo",
+                    new_callable=AsyncMock,
+                    side_effect=ConnectionFailure("connection refused"),
+                ),
+                patch("app.main.init_redis", new_callable=AsyncMock),
+                patch("app.main.close_mongo", new_callable=AsyncMock),
+                patch("app.main.close_redis", new_callable=AsyncMock),
+                patch(
+                    "app.services.search.vertex_search.search_service.warm_up",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.ai.vertex_client.vertex_client._get_access_token",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.ai.vertex_client.vertex_client.close",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.ai.sarvam_client.sarvam_client.close",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.payment.razorpay_client.razorpay_client.close",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.comms.resend_client.close_resend_client",
+                    new_callable=AsyncMock,
+                ),
             ):
                 # Should not raise - the error is swallowed in dev mode
                 async with lifespan(mock_app):
@@ -188,34 +193,39 @@ class TestLifespanProductionBehavior:
             mock_settings.SENTRY_DSN = None
             mock_settings.POSTHOG_API_KEY = None
 
-            with patch(
-                "app.main.init_mongo",
-                new_callable=AsyncMock,
-                side_effect=ConnectionFailure("connection refused"),
-            ), patch(
-                "app.main.init_redis", new_callable=AsyncMock
-            ), patch(
-                "app.main.close_mongo", new_callable=AsyncMock
-            ), patch(
-                "app.main.close_redis", new_callable=AsyncMock
-            ), patch(
-                "app.services.search.vertex_search.search_service.warm_up",
-                new_callable=AsyncMock,
-            ), patch(
-                "app.services.ai.vertex_client.vertex_client._get_access_token",
-                new_callable=AsyncMock,
-            ), patch(
-                "app.services.ai.vertex_client.vertex_client.close",
-                new_callable=AsyncMock,
-            ), patch(
-                "app.services.ai.sarvam_client.sarvam_client.close",
-                new_callable=AsyncMock,
-            ), patch(
-                "app.services.payment.razorpay_client.razorpay_client.close",
-                new_callable=AsyncMock,
-            ), patch(
-                "app.services.comms.resend_client.close_resend_client",
-                new_callable=AsyncMock,
+            with (
+                patch(
+                    "app.main.init_mongo",
+                    new_callable=AsyncMock,
+                    side_effect=ConnectionFailure("connection refused"),
+                ),
+                patch("app.main.init_redis", new_callable=AsyncMock),
+                patch("app.main.close_mongo", new_callable=AsyncMock),
+                patch("app.main.close_redis", new_callable=AsyncMock),
+                patch(
+                    "app.services.search.vertex_search.search_service.warm_up",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.ai.vertex_client.vertex_client._get_access_token",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.ai.vertex_client.vertex_client.close",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.ai.sarvam_client.sarvam_client.close",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.payment.razorpay_client.razorpay_client.close",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.comms.resend_client.close_resend_client",
+                    new_callable=AsyncMock,
+                ),
             ):
                 # Should not raise - the error is swallowed in test mode
                 async with lifespan(mock_app):
@@ -232,7 +242,9 @@ class TestHealthCheckBeanieAware:
 
         with patch(
             "app.db.mongo.get_mongo_client",
-            side_effect=RuntimeError("MongoDB not initialized. Call init_mongo() first."),
+            side_effect=RuntimeError(
+                "MongoDB not initialized. Call init_mongo() first."
+            ),
         ):
             result = await mongo_ping()
             assert result["status"] == "unhealthy"
@@ -254,7 +266,10 @@ class TestHealthCheckBeanieAware:
             ):
                 result = await mongo_ping()
                 assert result["status"] == "unhealthy"
-                assert "CollectionWasNotInitialized" in result["error"] or "unhealthy" == result["status"]
+                assert (
+                    "CollectionWasNotInitialized" in result["error"]
+                    or "unhealthy" == result["status"]
+                )
 
     @pytest.mark.anyio
     async def test_mongo_ping_healthy_when_fully_initialized(self):
