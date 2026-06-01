@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Audit and document the frontend Library page and Chat page content display for issues that would surface when the backend is in a degraded state (e.g., Vertex AI unavailable, MongoDB not initialized). The frontend already has good error handling patterns, but we need to verify and fix any gaps: (1) Library page must gracefully handle backend returning errors or empty data from /content/library-bundle. (2) Chat page must handle Vertex AI unavailability and Sarvam AI unavailability appropriately per the existing error card pattern. (3) Ensure the chat uses the correct AI providers: Vertex AI for English, Sarvam AI for Assamese - NOT Cloudflare Worker AI.",
+  "status": "completed",
+  "steps": [
+    "Review apps/frontend/src/pages/chat/MessageBubble.jsx to confirm the Assamese unavailable error card renders correctly and offers a 'Switch to English' escape. Verify no references to Cloudflare Worker AI for chat functionality (CF_AI_MODEL should only be used for OCR/TTS, not chat).",
+    "Review apps/frontend/src/pages/chat/ModelSelector.jsx to ensure the model list does not include any Cloudflare AI models for chat. If any CF models are present in the selector, remove them. The only valid chat models should route to Vertex AI (English) or Sarvam AI (Assamese).",
+    "Review apps/frontend/src/pages/LibraryPage.jsx error state - confirm the bundleError path renders a user-friendly error with a retry button (already looks correct from code review). Verify the loading skeleton (LibrarySkeleton) is shown during initial load.",
+    "Review apps/frontend/src/hooks/useContent.jsx to confirm the static-first pattern falls back to the API endpoint correctly, and that the retry configuration (retry: 4, retryDelay with exponential backoff) is properly set on the slim bundle fetch which is the critical first-paint data.",
+    "In apps/frontend/src/pages/chat/ModelSelector.jsx, ensure MODELS array only contains models that route to Vertex AI or Sarvam AI. Remove or comment out any model entries that reference Cloudflare Worker AI (cf/ prefix models) for chat purposes. Add a code comment clarifying the provider routing."
+  ],
+  "acceptance_criteria": [
+    "ModelSelector.jsx MODELS array does not include any Cloudflare Worker AI models for chat (no @cf/ prefixed models in chat model list)",
+    "MessageBubble.jsx correctly renders the Assamese unavailable error card with switch-to-English option",
+    "LibraryPage.jsx handles loading, error, and empty states gracefully",
+    "Frontend vitest tests pass without regressions"
+  ],
+  "verification": [
+    "cd apps/frontend && npx vitest run --reporter=verbose 2>&1 | tail -30",
+    "grep -rn '@cf/' apps/frontend/src/pages/chat/ to confirm no Cloudflare AI model references in chat components"
+  ],
+  "blocked_reason": null,
+  "findings": "Audit confirmed: (1) ModelSelector MODELS array has no @cf/ models - only openai/gpt-oss-20b and openai/gpt-oss-120b which route to Vertex AI/Sarvam AI via backend. (2) MessageBubble Assamese unavailable card renders correctly with switch-to-English escape. (3) LibraryPage handles loading/error/empty states gracefully with retry. (4) useContent slim bundle has retry:4 with exponential backoff. Added provider routing documentation comment. 5 pre-existing test failures in AdminHealth.credits.test.jsx unrelated to this change."
+}
