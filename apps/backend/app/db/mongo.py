@@ -85,6 +85,7 @@ async def init_mongo() -> None:
             logger.info("MongoDB connection initialized successfully")
             return
         except ConnectionFailure as e:
+            _client = None
             if attempt < max_retries - 1:
                 wait_time = 2**attempt
                 logger.warning(
@@ -96,6 +97,10 @@ async def init_mongo() -> None:
                     f"Failed to connect to MongoDB after {max_retries} attempts: {e}"
                 )
                 raise
+        except Exception as e:
+            _client = None
+            logger.error(f"Unexpected error during MongoDB initialization: {e}")
+            raise
 
 
 async def create_indexes() -> None:
