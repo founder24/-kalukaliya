@@ -58,6 +58,9 @@ async def lifespan(app: FastAPI):
         await init_mongo()
         logger.info("MongoDB initialized successfully")
     except Exception as e:
+        if settings.APP_ENV in ("production", "staging"):
+            logger.error(f"MongoDB initialization failed in {settings.APP_ENV}: {e}")
+            raise
         logger.warning(
             f"MongoDB initialization failed (expected in local dev without DB): {e}"
         )

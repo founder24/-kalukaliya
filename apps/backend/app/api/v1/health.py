@@ -25,13 +25,22 @@ async def _safe_check(coro, timeout: float = 5.0) -> Dict[str, Any]:
 
 
 async def mongo_ping() -> Dict[str, Any]:
-    """Ping MongoDB connection"""
+    """Ping MongoDB connection and verify Beanie ODM is initialized"""
     try:
         from app.db.mongo import get_mongo_client
 
         client = get_mongo_client()
         await client.admin.command("ping")
+
+        # Verify Beanie ODM is initialized
+        from app.models.content import Board
+
+        Board.get_pymongo_collection()
+
         return {"status": "healthy", "latency_ms": "N/A"}
+    except RuntimeError as e:
+        logger.error(f"MongoDB not initialized: {str(e)}")
+        return {"status": "unhealthy", "error": str(e)}
     except Exception as e:
         logger.error(f"MongoDB ping failed: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
