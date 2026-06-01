@@ -157,7 +157,7 @@ markdown==3.10.2
     # via -r apps/backend/requirements.in
 markupsafe==3.0.3
     # via jinja2
-motor==3.5.1
+motor==3.7.1
     # via -r apps/backend/requirements.in
 multidict==6.7.1
     # via
