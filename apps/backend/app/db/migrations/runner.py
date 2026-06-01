@@ -3,36 +3,36 @@ Database Migration Runner
 
 Simple forward-only migration system for MongoDB.
 Tracks applied migrations in a 'schema_versions' collection.
-Uses Motor directly (not Beanie) since migrations run at startup before Beanie init.
+Uses pymongo AsyncMongoClient directly (not Beanie) since migrations run at startup before Beanie init.
 """
 
 import logging
 from datetime import datetime, timezone
 from typing import Callable, Awaitable, Optional
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
 
 logger = logging.getLogger(__name__)
 
 
-async def get_current_version(db: AsyncIOMotorDatabase) -> Optional[str]:
+async def get_current_version(db: AsyncDatabase) -> Optional[str]:
     """Get the latest applied migration version."""
     doc = await db.schema_versions.find_one(sort=[("applied_at", -1)])
     return doc["version"] if doc else None
 
 
-async def get_applied_migrations(db: AsyncIOMotorDatabase) -> list[dict]:
+async def get_applied_migrations(db: AsyncDatabase) -> list[dict]:
     """Get all applied migrations sorted by applied_at."""
     cursor = db.schema_versions.find().sort("applied_at", 1)
     return await cursor.to_list(length=100)
 
 
 async def apply_migration(
-    db: AsyncIOMotorDatabase,
+    db: AsyncDatabase,
     version: str,
     description: str,
-    up_fn: Callable[[AsyncIOMotorDatabase], Awaitable[None]],
+    up_fn: Callable[[AsyncDatabase], Awaitable[None]],
 ) -> bool:
     """
     Apply a single migration if not already applied.
@@ -65,7 +65,7 @@ async def apply_migration(
         raise
 
 
-async def check_and_apply_migrations(db: AsyncIOMotorDatabase) -> None:
+async def check_and_apply_migrations(db: AsyncDatabase) -> None:
     """
     Run all pending migrations in order.
     Called during application startup after MongoDB connection is established.
@@ -89,7 +89,7 @@ async def check_and_apply_migrations(db: AsyncIOMotorDatabase) -> None:
         logger.info("All migrations are up to date")
 
 
-async def check_schema_version(db: AsyncIOMotorDatabase) -> str:
+async def check_schema_version(db: AsyncDatabase) -> str:
     """
     Verify and return current schema version.
     Useful for health checks and startup verification.

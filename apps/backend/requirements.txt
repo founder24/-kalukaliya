@@ -151,8 +151,6 @@ markdown==3.10.2
     # via -r apps/backend/requirements.in
 markupsafe==3.0.3
     # via jinja2
-motor==3.7.1
-    # via -r apps/backend/requirements.in
 multidict==6.7.1
     # via
     #   aiohttp
@@ -207,11 +205,10 @@ pydantic-settings==2.14.1
     # via -r apps/backend/requirements.in
 pyjwt==2.13.0
     # via -r apps/backend/requirements.in
-pymongo==4.9.2
+pymongo==4.17.0
     # via
     #   -r apps/backend/requirements.in
     #   beanie
-    #   motor
 python-dateutil==2.9.0.post0
     # via
     #   -r apps/backend/requirements.in

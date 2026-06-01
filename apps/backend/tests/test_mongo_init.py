@@ -52,7 +52,7 @@ class TestClientResetOnFailure:
             mock_settings.APP_ENV = "test"
 
             with patch(
-                "app.db.mongo.AsyncIOMotorClient",
+                "app.db.mongo.AsyncMongoClient",
                 side_effect=ConnectionFailure("connection refused"),
             ):
                 with patch("asyncio.sleep", new_callable=AsyncMock):
