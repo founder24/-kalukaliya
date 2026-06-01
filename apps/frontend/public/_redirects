@@ -17,13 +17,6 @@
 /docker-compose.yml  /index.html  404
 /.dockerignore  /index.html  404
 
-# SPA rewrites — serve index.html for SEO-critical pages to prevent 308 redirects
-/login      /index.html  200
-/signup     /index.html  200
-/about      /index.html  200
-/privacy    /index.html  200
-/terms      /index.html  200
-
 # Trailing-slash normalisation — strip trailing slash from all SPA routes
 # so browsers and crawlers always land on the canonical (no-slash) URL.
 # CF Pages serves these before the Worker runs.
@@ -39,3 +32,9 @@
 /privacy/    /privacy    301
 /dashboard/  /dashboard  301
 /settings/   /settings   301
+
+# SPA catch-all — serve index.html for all client-side routes.
+# This MUST be the last rule. Cloudflare Pages processes rules top-to-bottom
+# and the first match wins. The catch-all ensures React Router handles all
+# paths not matched by a static file or earlier rule.
+/*    /index.html  200
