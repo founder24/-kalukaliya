@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import httpx
 import json
 import logging
@@ -173,6 +174,128 @@ class VertexAIClient:
             self._token_expiry = _time.time() + 3600
 
             return self._cached_token
+
+    def _detect_mime_type(self, image_bytes: bytes) -> str:
+        """Detect image MIME type from magic bytes."""
+        if image_bytes[:3] == b"\xff\xd8\xff":
+            return "image/jpeg"
+        elif image_bytes[:4] == b"\x89PNG":
+            return "image/png"
+        elif image_bytes[:3] == b"GIF":
+            return "image/gif"
+        elif image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+            return "image/webp"
+        return "image/jpeg"  # default fallback
+
+    async def vision_analyze(
+        self, image_bytes: bytes, prompt: str = "Extract all text from this image"
+    ) -> str:
+        """Analyze an image using Gemini Vision API with base64 inline data."""
+        try:
+
+            async def _do_vision():
+                mime_type = self._detect_mime_type(image_bytes)
+                b64_data = base64.b64encode(image_bytes).decode("utf-8")
+
+                payload = {
+                    "contents": [
+                        {
+                            "parts": [
+                                {"text": prompt},
+                                {
+                                    "inline_data": {
+                                        "mime_type": mime_type,
+                                        "data": b64_data,
+                                    }
+                                },
+                            ]
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.1,
+                        "maxOutputTokens": 2048,
+                    },
+                }
+
+                if self._use_genai_api:
+                    url = f"{GENAI_BASE_URL}/{settings.VERTEX_VISION_MODEL}:generateContent?key={self._api_key}"
+                    headers = {"Content-Type": "application/json"}
+                else:
+                    url = f"{self.base_url}/{settings.VERTEX_VISION_MODEL}:generateContent"
+                    headers = {
+                        "Authorization": f"Bearer {await self._get_access_token()}",
+                        "Content-Type": "application/json",
+                    }
+
+                response = await self._client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+
+                if "candidates" in data and len(data["candidates"]) > 0:
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                return ""
+
+            result = await vertex_circuit_breaker.call(_do_vision)
+            return result
+        except CircuitBreakerError as e:
+            raise RuntimeError(f"Vertex AI Vision unavailable: {e}")
+        except Exception as e:
+            logger.error(f"Vertex AI Vision error: {str(e)}")
+            raise RuntimeError(f"Vertex AI Vision service failed: {e}")
+
+    async def text_to_speech(self, text: str, lang: str = "en") -> bytes:
+        """Convert text to speech using Google Cloud TTS REST API."""
+        TTS_BASE_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
+
+        # Map language codes
+        lang_map = {
+            "en": "en-IN",
+            "as": "bn-IN",  # Assamese fallback to Bengali
+        }
+        language_code = lang_map.get(lang, "en-IN")
+
+        payload = {
+            "input": {"text": text},
+            "voice": {
+                "languageCode": language_code,
+                "ssmlGender": "FEMALE",
+            },
+            "audioConfig": {
+                "audioEncoding": "LINEAR16",
+            },
+        }
+
+        try:
+            if self._use_genai_api:
+                url = f"{TTS_BASE_URL}?key={self._api_key}"
+                headers = {"Content-Type": "application/json"}
+            else:
+                url = TTS_BASE_URL
+                headers = {
+                    "Authorization": f"Bearer {await self._get_access_token()}",
+                    "Content-Type": "application/json",
+                }
+
+            response = await self._client.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            audio_content = data.get("audioContent", "")
+            if not audio_content:
+                raise RuntimeError("TTS returned empty audio content")
+
+            return base64.b64decode(audio_content)
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Google TTS HTTP error: {e.response.status_code}")
+            raise RuntimeError(f"Google TTS service failed: HTTP {e.response.status_code}")
+        except Exception as e:
+            logger.error(f"Google TTS error: {str(e)}")
+            raise RuntimeError(f"Google TTS service failed: {e}")
 
     async def stream_generate(
         self,

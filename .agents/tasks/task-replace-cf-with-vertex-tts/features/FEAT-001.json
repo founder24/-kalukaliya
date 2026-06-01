@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Add vision_analyze and text_to_speech methods to vertex_client.py, update chat.py to use them instead of cloudflare_client, and add google-cloud-texttospeech to requirements.in",
+  "status": "in_progress",
+  "steps": [
+    "Step 1: Add a `vision_analyze(self, image_bytes: bytes, prompt: str = 'Extract all text from this image') -> str` method to the VertexAIClient class in `apps/backend/app/services/ai/vertex_client.py`. It should: (a) detect MIME type from image bytes using magic bytes (JPEG=ff d8 ff, PNG=89 50 4e 47, GIF=47 49 46, WEBP=52 49 46 46...57 45 42 50), (b) base64-encode the image, (c) POST to `{GENAI_BASE_URL}/{settings.VERTEX_VISION_MODEL}:generateContent?key={api_key}` with payload containing parts=[{text: prompt}, {inline_data: {mime_type, data: b64}}] and generationConfig={temperature: 0.1, maxOutputTokens: 2048}, (d) if no API key, fall back to Vertex AI OAuth2 endpoint similarly, (e) return the text from candidates[0].content.parts[0].text. Wrap in circuit breaker like existing generate() method.",
+    "Step 2: Add a `text_to_speech(self, text: str, lang: str = 'en') -> bytes` method to the VertexAIClient class. It should: (a) map lang to language code ('en' -> 'en-IN', 'as' -> 'bn-IN' as Assamese fallback), (b) POST to `https://texttospeech.googleapis.com/v1/text:synthesize?key={api_key}` with payload {input: {text}, voice: {languageCode, ssmlGender: 'FEMALE'}, audioConfig: {audioEncoding: 'LINEAR16'}}, (c) if no API key, use OAuth2 token in Authorization header and POST to the same URL without ?key= param, (d) decode the base64 audioContent from the response JSON, (e) return raw audio bytes. Use the existing self._client httpx instance with a longer timeout (30s) for TTS.",
+    "Step 3: In `apps/backend/app/api/v1/chat.py`, change the import from `from app.services.ai.cloudflare_client import cloudflare_client` to `from app.services.ai.vertex_client import vertex_client`.",
+    "Step 4: In the `/image` endpoint in chat.py, replace `cloudflare_client.vision_analyze(image_bytes, sanitized_prompt)` with `vertex_client.vision_analyze(image_bytes, sanitized_prompt)`, and change `model=settings.CF_AI_VISION_MODEL` to `model=settings.VERTEX_VISION_MODEL` in the ImageAnalysisResponse.",
+    "Step 5: In the `/tts` endpoint in chat.py, replace `cloudflare_client.text_to_speech(request.text, request.lang)` with `vertex_client.text_to_speech(request.text, request.lang)`.",
+    "Step 6: Add `google-cloud-texttospeech` to `apps/backend/requirements.in` (after the existing google-cloud-storage line).",
+    "Step 7: Do NOT delete cloudflare_client.py - only remove its import from chat.py."
+  ],
+  "acceptance_criteria": [
+    "vertex_client.py has a vision_analyze method that uses Gemini Vision API with base64 inline image data",
+    "vertex_client.py has a text_to_speech method that uses Google Cloud TTS REST API",
+    "chat.py imports vertex_client instead of cloudflare_client",
+    "The /image endpoint calls vertex_client.vision_analyze and returns VERTEX_VISION_MODEL in response",
+    "The /tts endpoint calls vertex_client.text_to_speech",
+    "cloudflare_client.py still exists unmodified",
+    "google-cloud-texttospeech is listed in requirements.in",
+    "Running pytest on existing tests does not introduce import errors"
+  ],
+  "verification": [
+    "Run `cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"from app.services.ai.vertex_client import vertex_client; print('vision_analyze' in dir(vertex_client)); print('text_to_speech' in dir(vertex_client))\"` and confirm both print True",
+    "Run `cd /projects/sandbox/-kalukaliya/apps/backend && python -c \"from app.api.v1.chat import router; print('OK')\"` to confirm no import errors",
+    "Run `cd /projects/sandbox/-kalukaliya/apps/backend && grep -c 'cloudflare_client' app/api/v1/chat.py` and confirm output is 0",
+    "Run `cd /projects/sandbox/-kalukaliya/apps/backend && grep 'google-cloud-texttospeech' requirements.in` and confirm it appears"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
