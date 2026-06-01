@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Update fullstack-layer-test.sh to v3: handle degraded health status, fix provider routing in chat tests, add Layer 21 startup resilience, add library API assertions, add --cloudshell flag, bump version header",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - Bump version header: Change the header comment from 'v2 - 1000+ Assertions' to 'v3 - 1000+ Assertions'. Update the title in main() function header from 'v2' to 'v3'. Update print_help() title similarly. Keep all existing Layer descriptions but add Layer 21.",
     "Step 2 - Update Layer 3 health tests (around line 1218-1470): In subsection 3.1, update test 3.1.3 to accept 'degraded' as a valid (non-critical) health status. When status is 'degraded', add assertions: (a) config_error_count field exists, (b) config_error_count is an integer >= 0, (c) log a WARN with the error count. When status is 'healthy', assert_pass as before. Add a new subsection '3.5 Degraded Health Reporting' that: (a) checks if status=='degraded' then raw error messages (strings containing common error keywords like 'password', 'secret', 'key') are NOT in the response, (b) checks the response always has 'service' field equal to 'syrabit-backend'.",
@@ -30,5 +30,5 @@
     "grep -q 'v3' scripts/fullstack-layer-test.sh && echo 'PASS: v3 version found'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Script grew from 6738 to 7506 lines. Added 768 lines total. Assertion count went from ~1468 to 1671. All 7 steps implemented: version bump to v3, Layer 3 degraded health handling with subsection 3.5, Layer 5 provider routing (5.7) and streaming (5.8) subsections, Layer 7 library API alignment (7.1b) with 15 assertions, Layer 21 startup resilience with 25+ assertions, --cloudshell flag with gcloud hints, and main() dispatch updated to 0-21 range."
 }
