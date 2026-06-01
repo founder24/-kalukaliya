@@ -52,7 +52,7 @@ def _validate_admin_session(request: Request) -> dict:
         payload = jwt.decode(
             session_cookie,
             settings.ADMIN_JWT_SECRET or settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM],
+            algorithms=["HS256"],
         )
         if payload.get("type") != "admin" or payload.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -114,7 +114,7 @@ async def admin_login(request: Request):
     admin_token = jwt.encode(
         token_payload,
         settings.ADMIN_JWT_SECRET or settings.JWT_SECRET,
-        algorithm=settings.JWT_ALGORITHM,
+        algorithm="HS256",
     )
 
     response = JSONResponse(
