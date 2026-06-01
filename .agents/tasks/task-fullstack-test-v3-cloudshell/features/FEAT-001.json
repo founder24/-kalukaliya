@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Update fullstack-layer-test.sh to v3: handle degraded health status, fix provider routing in chat tests, add Layer 21 startup resilience, add library API assertions, add --cloudshell flag, bump version header",
+  "status": "in_progress",
+  "steps": [
+    "Step 1 - Bump version header: Change the header comment from 'v2 - 1000+ Assertions' to 'v3 - 1000+ Assertions'. Update the title in main() function header from 'v2' to 'v3'. Update print_help() title similarly. Keep all existing Layer descriptions but add Layer 21.",
+    "Step 2 - Update Layer 3 health tests (around line 1218-1470): In subsection 3.1, update test 3.1.3 to accept 'degraded' as a valid (non-critical) health status. When status is 'degraded', add assertions: (a) config_error_count field exists, (b) config_error_count is an integer >= 0, (c) log a WARN with the error count. When status is 'healthy', assert_pass as before. Add a new subsection '3.5 Degraded Health Reporting' that: (a) checks if status=='degraded' then raw error messages (strings containing common error keywords like 'password', 'secret', 'key') are NOT in the response, (b) checks the response always has 'service' field equal to 'syrabit-backend'.",
+    "Step 3 - Update Layer 5 chat tests: In the comments/doc for Layer 5 (around line 1945), clarify that English -> Vertex AI (Gemini 2.5 Flash), Assamese -> Sarvam AI (sarvam-m). Add subsection '5.7 Provider Routing Validation' with tests: (a) English chat response model_used field should contain 'gemini' (case-insensitive), NOT 'cloudflare' or 'llama'. (b) Assamese chat response model_used should contain 'sarvam' (case-insensitive). (c) Neither provider shows 'cloudflare' or 'worker' in model_used. These tests should be skipped if no AUTH_TOKEN is available (since model_used is only reliably returned with auth). Add subsection '5.8 Streaming Provider Check' with: (a) authenticated streaming English chat returns event-stream content-type and body contains data lines, (b) authenticated streaming Assamese chat similarly works.",
+    "Step 4 - Add Layer 21 Startup Resilience Verification: Add a new function test_layer_21_startup_resilience() after test_layer_20_performance(). Layer 21 tests: (a) /health returns HTTP 200 regardless of config state, (b) /health JSON has 'status' field that is either 'healthy' or 'degraded', (c) when degraded, config_error_count is present and is an integer, (d) when degraded, response body does NOT contain common secret keywords (password, secret_key, api_key, token, credentials), (e) /health/deep returns 200 or 503 (never 500), (f) /health/deep has 'checks' object with service names, (g) /health/deep checks object has mongodb, redis, vertex_search, vertex_ai sub-objects each with a 'status' field, (h) circuit-breakers endpoint returns proper state values (closed/open/half_open). Target: 25+ assertions in this layer.",
+    "Step 5 - Add Library API assertions in Layer 7: After existing subsection 7.1, add subsection '7.1b Library Bundle API Alignment' with: (a) GET /api/v1/content/library-bundle?slim=1 returns valid JSON with 'boards' array, (b) each board in slim response has 'id', 'name', 'slug', 'classes' fields, (c) GET /api/v1/content/library-bundle (full) returns boards with nested classes/streams/subjects/chapters, (d) GET /api/v1/content/library-bundle?boot=SEBA returns 200 (may return full bundle if boot param not yet implemented), (e) slim bundle response is smaller than or equal to full bundle, (f) verify Cache-Control header is present on bundle endpoints. Target: 15+ additional assertions.",
+    "Step 6 - Add --cloudshell flag: In argument parsing, add a --cloudshell option that: sets STRESS_TEST=0, sets EXPORT_JSON=1, sets QUICK_MODE=0 (run all layers), prints a Cloud Shell hint about gcloud auth and setting env vars. Add CLOUDSHELL_MODE=0 variable at top. In print_help, document the --cloudshell flag. In the main() header output, show 'Mode: cloudshell' when active.",
+    "Step 7 - Update main() execution: Add test_layer_21_startup_resilience to the layer dispatch case statement (case 21), to the sequential run-all block, and update the valid layer range message from '0-20' to '0-21'. Update header comment to say '22 Layers (0-21)'. Update the Layers list in print_help to include Layer 21."
+  ],
+  "acceptance_criteria": [
+    "bash -n scripts/fullstack-layer-test.sh passes (no syntax errors)",
+    "grep -c 'assert_pass\\|assert_fail\\|assert_warn\\|assert_skip' scripts/fullstack-layer-test.sh returns > 1400",
+    "The script --help output shows --cloudshell flag and Layer 21",
+    "Layer 3 properly handles 'degraded' status without marking it as a failure",
+    "Layer 5 has provider routing validation subsection",
+    "Layer 21 function exists with 25+ assertion calls",
+    "Layer 7 has library bundle API alignment tests",
+    "Header says v3 and 22 Layers (0-21)"
+  ],
+  "verification": [
+    "bash -n scripts/fullstack-layer-test.sh",
+    "grep -c 'assert_pass\\|assert_fail\\|assert_warn\\|assert_skip' scripts/fullstack-layer-test.sh | awk '{if ($1 > 1400) print \"PASS: \" $1 \" assertions\"; else print \"FAIL: only \" $1}'",
+    "grep -q 'cloudshell' scripts/fullstack-layer-test.sh && echo 'PASS: --cloudshell flag present'",
+    "grep -q 'test_layer_21_startup_resilience' scripts/fullstack-layer-test.sh && echo 'PASS: Layer 21 exists'",
+    "grep -q 'v3' scripts/fullstack-layer-test.sh && echo 'PASS: v3 version found'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
