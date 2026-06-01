@@ -10,7 +10,6 @@ google-auth[aiohttp]
 google-cloud-aiplatform
 google-cloud-discoveryengine
 google-cloud-storage
-google-cloud-texttospeech
 gunicorn
 httpx
 jinja2
@@ -31,3 +30,4 @@ sentry-sdk
 tenacity
 upstash-redis
 uvicorn
+motor
