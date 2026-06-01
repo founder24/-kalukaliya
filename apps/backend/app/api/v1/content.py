@@ -14,6 +14,11 @@ from starlette.responses import Response
 from app.models.knowledge import KnowledgeObject
 from app.services.content.renderer import content_renderer, PAGE_TYPES
 
+try:
+    from beanie.exceptions import CollectionWasNotInitialized
+except ImportError:  # pragma: no cover
+    CollectionWasNotInitialized = None
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -47,15 +52,23 @@ async def render_chapter(
     _validate_path_params(
         board=board, class_level=class_level, subject=subject, chapter=chapter
     )
-    obj = await KnowledgeObject.find_one(
-        {
-            "metadata.board": board,
-            "metadata.class_level": class_level,
-            "metadata.subject": subject,
-            "metadata.chapter": chapter,
-            "status": "published",
-        }
-    )
+    try:
+        obj = await KnowledgeObject.find_one(
+            {
+                "metadata.board": board,
+                "metadata.class_level": class_level,
+                "metadata.subject": subject,
+                "metadata.chapter": chapter,
+                "status": "published",
+            }
+        )
+    except Exception as e:
+        if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
+            raise HTTPException(status_code=503, detail="Database service unavailable")
+        logger.error(f"Failed to query content: {e}")
+        raise HTTPException(
+            status_code=503, detail="Content service temporarily unavailable"
+        )
     if not obj:
         raise HTTPException(status_code=404, detail="Content not found")
 
@@ -109,15 +122,24 @@ async def render_chapter_page_type(
             detail=f"Invalid page_type. Must be one of: {PAGE_TYPES}",
         )
 
-    obj = await KnowledgeObject.find_one(
-        {
-            "metadata.board": board,
-            "metadata.class_level": class_level,
-            "metadata.subject": subject,
-            "metadata.chapter": chapter,
-            "status": "published",
-        }
-    )
+    obj = None
+    try:
+        obj = await KnowledgeObject.find_one(
+            {
+                "metadata.board": board,
+                "metadata.class_level": class_level,
+                "metadata.subject": subject,
+                "metadata.chapter": chapter,
+                "status": "published",
+            }
+        )
+    except Exception as e:
+        if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
+            raise HTTPException(status_code=503, detail="Database service unavailable")
+        logger.error(f"Failed to query content: {e}")
+        raise HTTPException(
+            status_code=503, detail="Content service temporarily unavailable"
+        )
     if not obj:
         raise HTTPException(status_code=404, detail="Content not found")
 
