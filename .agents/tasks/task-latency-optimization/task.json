@@ -1,7 +1,0 @@
-{
-  "task_id": "task-latency-optimization",
-  "task_description": "Audit and fix latency issues to maximize page load speed and chat response speed. Key optimizations: (1) Cache HTML at Cloudflare edge using Cache API, (2) Cache /health in KV for 30s, (3) Add Early Hints preload headers, (4) Reduce RAG timeout from 1.5s to 0.8s, (5) Skip RAG entirely when content DB is empty/uninitialized. Frontend streaming is already in place - no changes needed there.",
-  "status": "in_progress",
-  "feature_order": ["FEAT-001", "FEAT-002"],
-  "blocked_reason": null
-}

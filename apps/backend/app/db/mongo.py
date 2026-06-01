@@ -1,5 +1,5 @@
 from typing import Optional
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import ConnectionFailure
 from beanie import init_beanie
@@ -22,7 +22,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_client: Optional[AsyncIOMotorClient] = None
+_client: Optional[AsyncMongoClient] = None
 
 
 async def init_mongo() -> None:
@@ -38,7 +38,7 @@ async def init_mongo() -> None:
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            _client = AsyncIOMotorClient(
+            _client = AsyncMongoClient(
                 settings.MONGODB_URI,
                 maxPoolSize=settings.MONGODB_MAX_POOL_SIZE,
                 minPoolSize=settings.MONGODB_MIN_POOL_SIZE,
@@ -164,7 +164,7 @@ async def create_indexes() -> None:
     logger.info("MongoDB indexes created/verified")
 
 
-def get_mongo_client() -> AsyncIOMotorClient:
+def get_mongo_client() -> AsyncMongoClient:
     """Get MongoDB client instance"""
     if _client is None:
         raise RuntimeError("MongoDB not initialized. Call init_mongo() first.")

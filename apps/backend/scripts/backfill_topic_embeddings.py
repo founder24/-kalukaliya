@@ -15,7 +15,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from beanie import init_beanie
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -43,7 +43,7 @@ async def main():
         sys.exit(1)
 
     # Connect to MongoDB
-    client = AsyncIOMotorClient(settings.MONGODB_URI)
+    client = AsyncMongoClient(settings.MONGODB_URI)
     await init_beanie(
         database=client[settings.MONGODB_DB_NAME],
         document_models=[

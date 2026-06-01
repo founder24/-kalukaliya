@@ -1,2 +1,0 @@
-- [Beanie/Motor version pinning](beanie-motor-versions.md) — beanie must stay at 1.30.0; beanie 2.x breaks with motor 3.7.1 (append_metadata), and motor 3.x breaks bool(db) checks.
-- [MongoDB index conflicts on existing cluster](mongo-index-conflicts.md) — create_indexes() wraps failures as non-fatal WARNINGs; critical unique email index is still enforced in prod/staging.

@@ -1,7 +1,0 @@
-{
-  "task_id": "task-workflow-pipeline-audit",
-  "task_description": "Comprehensive audit and fix of all 24 GitHub Actions workflow files, CI/CD pipeline structure, and package configurations. Primary goal: resolve startup_failure that prevents any workflow from running. Secondary goals: fix runtime issues, add proper permissions, validate packages.",
-  "status": "in_progress",
-  "feature_order": ["FEAT-001", "FEAT-002"],
-  "blocked_reason": null
-}

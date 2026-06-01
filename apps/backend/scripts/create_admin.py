@@ -74,11 +74,11 @@ async def main():
         admin_password.encode("utf-8"), bcrypt.gensalt()
     ).decode("utf-8")
 
-    # ── Connect via raw motor (no Beanie) ────────────────────────────────────
+    # ── Connect via raw pymongo (no Beanie) ────────────────────────────────────
     print(f"Connecting to MongoDB ({db_name})...")
-    import motor.motor_asyncio
+    from pymongo import AsyncMongoClient
 
-    client = motor.motor_asyncio.AsyncIOMotorClient(
+    client = AsyncMongoClient(
         mongodb_uri,
         serverSelectionTimeoutMS=10000,
         connectTimeoutMS=10000,

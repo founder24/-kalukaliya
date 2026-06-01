@@ -1,8 +1,0 @@
-{
-  "task_id": "task-remove-supabase-mongodb-auth",
-  "task_description": "Remove Supabase completely and rewire authentication to use MongoDB directly. Remove Google OAuth. Make email login/signup work with backend endpoints. Fix admin login to accept email/password.",
-  "status": "completed",
-  "feature_order": ["FEAT-001", "FEAT-002"],
-  "blocked_reason": null,
-  "review_fixes_applied": "2025-01-15-review-v1: Fixed consent_dpdp silently dropped (now sent in POST body and stored in User model), admin logout CSRF check added, admin login rate limiting added (5/min), hasattr role check simplified."
-}

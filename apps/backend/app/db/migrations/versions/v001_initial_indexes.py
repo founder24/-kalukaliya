@@ -6,10 +6,10 @@ This is a no-op migration since indexes are created by create_indexes() in mongo
 but it establishes the migration tracking system baseline.
 """
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 
-async def up(db: AsyncIOMotorDatabase) -> None:
+async def up(db: AsyncDatabase) -> None:
     """
     Baseline migration - indexes already managed by create_indexes().
     This migration exists to establish the schema_versions collection
