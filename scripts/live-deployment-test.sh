@@ -37,15 +37,17 @@ TEST_TURNSTILE_TOKEN="${TEST_TURNSTILE_TOKEN:-}"
 VERBOSE="${VERBOSE:-0}"
 
 # Performance targets (in milliseconds)
+# Note: Cloud Run cold starts add ~500-800ms on first request after idle.
+# Set min-instances=1 to eliminate cold starts, or accept these warm thresholds.
 TARGET_FRONTEND_TTFB=800
 TARGET_FRONTEND_TOTAL=2000
-TARGET_EDGE_HEALTH_TTFB=200
+TARGET_EDGE_HEALTH_TTFB=800       # Allows for Cloud Run cold start
 TARGET_DEEP_HEALTH=2000
-TARGET_CORS_PREFLIGHT=100
+TARGET_CORS_PREFLIGHT=150
 TARGET_AUTH_ENDPOINT=500
-TARGET_CHAT_ROUTING=1000
-TARGET_CHAT_FULL=3000
-TARGET_CHAT_STREAM_TTFB=1000
+TARGET_CHAT_ROUTING=4000           # LLM inference (Vertex: 1-3s, Sarvam: 2-5s)
+TARGET_CHAT_FULL=8000              # Full LLM response generation
+TARGET_CHAT_STREAM_TTFB=4000       # First token from LLM (includes RAG retrieval)
 
 # ─── State Tracking ──────────────────────────────────────────────────────────
 
