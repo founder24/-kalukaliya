@@ -30,4 +30,4 @@ sentry-sdk
 tenacity
 upstash-redis
 uvicorn
-motor
+motor<3.7
