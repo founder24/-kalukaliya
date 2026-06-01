@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Make backend startup resilient to config validation failures. Currently, validate_production_secrets in apps/backend/app/config.py raises ValueError for conditions like ADMIN_JWT_SECRET == JWT_PRIVATE_KEY or missing EDGE_SHARED_SECRET. This crashes Settings() instantiation at module level (line ~243: settings = Settings()), which prevents main.py from importing config, which prevents the FastAPI lifespan from ever running init_mongo() and init_redis(). The fix must ensure the app STARTS (so health checks return useful diagnostics) rather than crash silently.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/config.py, modify the validate_production_secrets model_validator (mode='after') to convert all ValueError raises into logger.error() calls instead. The validator should never prevent the app from starting. Specifically: (1) The EDGE_SHARED_SECRET check in production should log error instead of raising. (2) The JWT_SECRET placeholder check should log error instead of raising. (3) The JWT_SECRET length check should log error instead of raising. (4) The ADMIN_JWT_SECRET required check should log error instead of raising. (5) The ADMIN_JWT_SECRET == JWT_PRIVATE_KEY check should log error instead of raising. (6) The RS256 JWT_PRIVATE_KEY/JWT_PUBLIC_KEY checks should log error instead of raising. Always return self at the end.",
     "Add a new property or field to the Settings class called `startup_errors: list[str]` that collects all the validation errors that would have been raised. Initialize it as an empty list. In validate_production_secrets, instead of raising, append the error message to self.startup_errors and log it. This allows the health endpoint to report what went wrong.",
@@ -22,5 +22,5 @@
     "cd apps/backend && python -m pytest tests/ -x -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 227 existing tests pass. Required pytest-env plugin for pytest.ini env setting to work. The project requires Python 3.10+ (uses str | None syntax). pyenv local 3.11.15 was used. The requirements.txt has strict pinning that prevented direct pip install -r requirements.txt (aiohappyeyeballs==2.6.2 not available on system Python 3.9 but is on 3.11). Installed deps individually with relaxed versions instead."
 }
