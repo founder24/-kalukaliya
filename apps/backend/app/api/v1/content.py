@@ -66,7 +66,9 @@ async def render_chapter(
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
             raise HTTPException(status_code=503, detail="Database service unavailable")
         logger.error(f"Failed to query content: {e}")
-        raise HTTPException(status_code=503, detail="Content service temporarily unavailable")
+        raise HTTPException(
+            status_code=503, detail="Content service temporarily unavailable"
+        )
     if not obj:
         raise HTTPException(status_code=404, detail="Content not found")
 
@@ -135,7 +137,9 @@ async def render_chapter_page_type(
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
             raise HTTPException(status_code=503, detail="Database service unavailable")
         logger.error(f"Failed to query content: {e}")
-        raise HTTPException(status_code=503, detail="Content service temporarily unavailable")
+        raise HTTPException(
+            status_code=503, detail="Content service temporarily unavailable"
+        )
     if not obj:
         raise HTTPException(status_code=404, detail="Content not found")
 
