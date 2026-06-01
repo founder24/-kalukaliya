@@ -191,7 +191,11 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "ADMIN_JWT_SECRET is required in production for admin key isolation"
                 )
-            if self.ADMIN_JWT_SECRET and self.JWT_PRIVATE_KEY and self.ADMIN_JWT_SECRET == self.JWT_PRIVATE_KEY:
+            if (
+                self.ADMIN_JWT_SECRET
+                and self.JWT_PRIVATE_KEY
+                and self.ADMIN_JWT_SECRET == self.JWT_PRIVATE_KEY
+            ):
                 raise ValueError(
                     "ADMIN_JWT_SECRET must not be the same as JWT_PRIVATE_KEY. "
                     "Create a separate secret: openssl rand -base64 48"

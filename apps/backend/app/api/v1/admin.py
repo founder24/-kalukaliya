@@ -29,7 +29,7 @@ router = APIRouter(tags=["Admin"])
 
 def _get_admin_signing_key() -> tuple:
     """Get the key and algorithm for signing admin JWTs.
-    
+
     Admin tokens ALWAYS use HS256 with a dedicated secret for key isolation.
     They intentionally do NOT use the RS256 key pair (which is for user tokens).
     This ensures compromising one key type doesn't affect the other.
@@ -39,7 +39,7 @@ def _get_admin_signing_key() -> tuple:
 
 def _get_admin_verification_key() -> tuple:
     """Get the key and algorithm for verifying admin JWTs.
-    
+
     Admin tokens ALWAYS use HS256 with a dedicated secret for key isolation.
     They intentionally do NOT use the RS256 key pair (which is for user tokens).
     """
