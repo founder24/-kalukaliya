@@ -1,6 +1,10 @@
 import { ChevronDown, Plus, Globe } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
+// Provider routing: These model IDs are sent to the backend which routes them to:
+// - Vertex AI (Google Gemini) for English language chat
+// - Sarvam AI for Assamese language chat
+// Cloudflare Worker AI (@cf/ models) is NOT used for chat - only for OCR/TTS.
 const MODELS = [
   { value: 'openai/gpt-oss-20b',  label: 'Syrabit SLM', badge: '⚡ Fast'         },
   { value: 'openai/gpt-oss-120b', label: 'Syrabit MLM', badge: '🔜 Coming Soon', disabled: true },

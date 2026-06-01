@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from typing import Optional
 import json
 import logging
@@ -143,6 +143,9 @@ class Settings(BaseSettings):
     MAX_CONTEXT_DOCS: int = 5
     STREAM_CHUNK_SIZE: int = 128
 
+    # --- Startup validation errors (populated by validate_production_secrets) ---
+    startup_errors: list = Field(default_factory=list)
+
     @model_validator(mode="before")
     @classmethod
     def empty_strings_to_none(cls, values):
@@ -158,13 +161,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_secrets(self):
-        """Validate critical secrets are properly configured in production."""
+        """Validate critical secrets are properly configured in production.
+
+        Instead of raising ValueError (which would crash the app at import time),
+        errors are collected in self.startup_errors and logged. This allows the
+        app to start and health endpoints to report useful diagnostics.
+        """
         # Enforce edge secret when trust is enabled
         if self.TRUST_EDGE_AUTH and not self.EDGE_SHARED_SECRET:
             if self.APP_ENV in ("production", "staging"):
-                raise ValueError(
-                    "EDGE_SHARED_SECRET must be set when TRUST_EDGE_AUTH is True"
-                )
+                msg = "EDGE_SHARED_SECRET must be set when TRUST_EDGE_AUTH is True"
+                self.startup_errors.append(msg)
+                logger.error(f"CONFIG ERROR: {msg}")
             else:
                 logger.warning(
                     "TRUST_EDGE_AUTH is True but EDGE_SHARED_SECRET is not set. "
@@ -180,26 +188,30 @@ class Settings(BaseSettings):
 
         if self.APP_ENV in ("production", "staging"):
             if self.JWT_SECRET in KNOWN_PLACEHOLDER_SECRETS:
-                raise ValueError(
-                    "JWT_SECRET is a known placeholder value and must be changed in production"
-                )
+                msg = "JWT_SECRET is a known placeholder value and must be changed in production"
+                self.startup_errors.append(msg)
+                logger.error(f"CONFIG ERROR: {msg}")
             if len(self.JWT_SECRET) < 32:
-                raise ValueError(
-                    "JWT_SECRET must be at least 32 characters long in production"
-                )
+                msg = "JWT_SECRET must be at least 32 characters long in production"
+                self.startup_errors.append(msg)
+                logger.error(f"CONFIG ERROR: {msg}")
             if not self.ADMIN_JWT_SECRET:
-                raise ValueError(
+                msg = (
                     "ADMIN_JWT_SECRET is required in production for admin key isolation"
                 )
+                self.startup_errors.append(msg)
+                logger.error(f"CONFIG ERROR: {msg}")
             if (
                 self.ADMIN_JWT_SECRET
                 and self.JWT_PRIVATE_KEY
                 and self.ADMIN_JWT_SECRET == self.JWT_PRIVATE_KEY
             ):
-                raise ValueError(
+                msg = (
                     "ADMIN_JWT_SECRET must not be the same as JWT_PRIVATE_KEY. "
                     "Create a separate secret: openssl rand -base64 48"
                 )
+                self.startup_errors.append(msg)
+                logger.error(f"CONFIG ERROR: {msg}")
             if not self.RESET_TOKEN_SECRET:
                 logger.warning(
                     "RESET_TOKEN_SECRET is not set — reset tokens use the shared JWT_SECRET. "
@@ -207,13 +219,13 @@ class Settings(BaseSettings):
                 )
             if self.JWT_ALGORITHM == "RS256":
                 if not self.JWT_PRIVATE_KEY:
-                    raise ValueError(
-                        "JWT_PRIVATE_KEY is required when JWT_ALGORITHM is RS256"
-                    )
+                    msg = "JWT_PRIVATE_KEY is required when JWT_ALGORITHM is RS256"
+                    self.startup_errors.append(msg)
+                    logger.error(f"CONFIG ERROR: {msg}")
                 if not self.JWT_PUBLIC_KEY:
-                    raise ValueError(
-                        "JWT_PUBLIC_KEY is required when JWT_ALGORITHM is RS256"
-                    )
+                    msg = "JWT_PUBLIC_KEY is required when JWT_ALGORITHM is RS256"
+                    self.startup_errors.append(msg)
+                    logger.error(f"CONFIG ERROR: {msg}")
             if not self.MONGODB_URI:
                 logger.warning("MONGODB_URI is not set in production")
             if not self.UPSTASH_REDIS_REST_URL:

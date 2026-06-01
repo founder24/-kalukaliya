@@ -88,7 +88,16 @@ async def basic_health_check():
     """
     Basic health check - returns 200 if app is running.
     Does not check dependencies.
+    Reports 'degraded' status if there are startup configuration errors.
     """
+    from app.config import settings
+
+    if settings.startup_errors:
+        return {
+            "status": "degraded",
+            "service": "syrabit-backend",
+            "config_error_count": len(settings.startup_errors),
+        }
     return {"status": "healthy", "service": "syrabit-backend"}
 
 
