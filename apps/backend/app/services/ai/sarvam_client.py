@@ -40,7 +40,7 @@ class SarvamAIClient:
     async def generate(
         self, system_prompt: str, user_message: str, stream: bool = False
     ) -> str:
-        """Generate response using Sarvam OpenHathi"""
+        """Generate response using Sarvam AI (sarvam-m model)"""
         if not self.api_key:
             raise RuntimeError("Sarvam AI not configured (SARVAM_API_KEY is empty)")
 
