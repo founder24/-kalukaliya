@@ -245,54 +245,58 @@ class VertexAIClient:
 
     async def text_to_speech(self, text: str, lang: str = "en") -> bytes:
         """Convert text to speech using Google Cloud TTS REST API."""
-        TTS_BASE_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
-
-        # Map language codes
-        lang_map = {
-            "en": "en-IN",
-            "as": "bn-IN",  # Assamese fallback to Bengali
-        }
-        language_code = lang_map.get(lang, "en-IN")
-
-        payload = {
-            "input": {"text": text},
-            "voice": {
-                "languageCode": language_code,
-                "ssmlGender": "FEMALE",
-            },
-            "audioConfig": {
-                "audioEncoding": "LINEAR16",
-            },
-        }
-
         try:
-            if self._use_genai_api:
-                url = f"{TTS_BASE_URL}?key={self._api_key}"
-                headers = {"Content-Type": "application/json"}
-            else:
-                url = TTS_BASE_URL
-                headers = {
-                    "Authorization": f"Bearer {await self._get_access_token()}",
-                    "Content-Type": "application/json",
+
+            async def _do_tts():
+                TTS_BASE_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
+
+                # Map language codes
+                lang_map = {
+                    "en": "en-IN",
+                    "as": "bn-IN",  # Assamese fallback to Bengali
+                }
+                language_code = lang_map.get(lang, "en-IN")
+
+                payload = {
+                    "input": {"text": text},
+                    "voice": {
+                        "languageCode": language_code,
+                        "ssmlGender": "FEMALE",
+                    },
+                    "audioConfig": {
+                        "audioEncoding": "LINEAR16",
+                    },
                 }
 
-            response = await self._client.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+                if self._use_genai_api:
+                    url = f"{TTS_BASE_URL}?key={self._api_key}"
+                    headers = {"Content-Type": "application/json"}
+                else:
+                    url = TTS_BASE_URL
+                    headers = {
+                        "Authorization": f"Bearer {await self._get_access_token()}",
+                        "Content-Type": "application/json",
+                    }
 
-            audio_content = data.get("audioContent", "")
-            if not audio_content:
-                raise RuntimeError("TTS returned empty audio content")
+                response = await self._client.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                data = response.json()
 
-            return base64.b64decode(audio_content)
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Google TTS HTTP error: {e.response.status_code}")
-            raise RuntimeError(f"Google TTS service failed: HTTP {e.response.status_code}")
+                audio_content = data.get("audioContent", "")
+                if not audio_content:
+                    raise RuntimeError("TTS returned empty audio content")
+
+                return base64.b64decode(audio_content)
+
+            result = await vertex_circuit_breaker.call(_do_tts)
+            return result
+        except CircuitBreakerError as e:
+            raise RuntimeError(f"Google TTS unavailable: {e}")
         except Exception as e:
             logger.error(f"Google TTS error: {str(e)}")
             raise RuntimeError(f"Google TTS service failed: {e}")
