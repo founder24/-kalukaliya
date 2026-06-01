@@ -1,7 +1,0 @@
-{
-  "task_id": "task-full-repo-audit",
-  "task_description": "Comprehensive audit of the entire Syrabit AI monorepo covering git hygiene, codebase quality, CI/CD workflows, infrastructure as code, cloud-native practices, security, configuration management, dependency management, and documentation accuracy. Output: single markdown report file.",
-  "status": "in_progress",
-  "feature_order": ["FEAT-001"],
-  "blocked_reason": null
-}

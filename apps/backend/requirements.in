@@ -20,7 +20,7 @@ pydantic[email]
 email-validator
 pydantic-settings
 pyjwt[crypto]
-pymongo<4.12
+pymongo>=4.11,<5
 python-dateutil
 python-dotenv
 python-multipart
@@ -30,4 +30,3 @@ sentry-sdk
 tenacity
 upstash-redis
 uvicorn
-motor<3.7

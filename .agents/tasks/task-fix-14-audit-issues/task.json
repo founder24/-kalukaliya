@@ -1,7 +1,0 @@
-{
-  "task_id": "task-fix-14-audit-issues",
-  "task_description": "Fix all 14 audit issues step by step, layer by layer from basic/low-priority tech debt through critical security fixes. Issues: #11 requirements.txt Python version, #12 Vertex AI async token refresh, #13 admin pagination, #14 OpenAPI versioning, #7 search cache key, #8 unicode sanitization, #9 React Router v7 compat, #10 E2E contract tests, #3 Azure Search timeout, #4 create_task exception handlers, #5 Vertex AI prompt format, #6 session_id validation, #1 delete cloudflare dead code, #2 RS256 JWT support.",
-  "status": "in_progress",
-  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
-  "blocked_reason": null
-}
