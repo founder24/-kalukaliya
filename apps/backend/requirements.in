@@ -20,7 +20,7 @@ pydantic[email]
 email-validator
 pydantic-settings
 pyjwt[crypto]
-pymongo
+pymongo>=4.9,<4.10
 python-dateutil
 python-dotenv
 python-multipart

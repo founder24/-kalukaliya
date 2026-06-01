@@ -207,7 +207,7 @@ pydantic-settings==2.14.1
     # via -r apps/backend/requirements.in
 pyjwt==2.13.0
     # via -r apps/backend/requirements.in
-pymongo==4.17.0
+pymongo==4.9.2
     # via
     #   -r apps/backend/requirements.in
     #   beanie
