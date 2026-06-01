@@ -140,17 +140,25 @@ async def lifespan(app: FastAPI):
         )
 
     # Initialize Sentry with FastAPI integration
-    if settings.SENTRY_DSN:
-        sentry_sdk.init(
-            dsn=settings.SENTRY_DSN,
-            environment=settings.SENTRY_ENVIRONMENT,
-            traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
-            profiles_sample_rate=0.1,
-            integrations=[
-                FastApiIntegration(transaction_style="endpoint"),
-            ],
+    if settings.SENTRY_DSN and settings.SENTRY_DSN.startswith("http"):
+        try:
+            sentry_sdk.init(
+                dsn=settings.SENTRY_DSN,
+                environment=settings.SENTRY_ENVIRONMENT,
+                traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+                profiles_sample_rate=0.1,
+                integrations=[
+                    FastApiIntegration(transaction_style="endpoint"),
+                ],
+            )
+            logger.info("Sentry initialized")
+        except Exception as e:
+            logger.warning(f"Sentry initialization failed (continuing without Sentry): {e}")
+    elif settings.SENTRY_DSN:
+        logger.warning(
+            "SENTRY_DSN is set but does not appear to be a valid URL (must start with http). "
+            "Skipping Sentry initialization."
         )
-        logger.info("Sentry initialized")
 
     # Initialize PostHog
     app.state.posthog = None
