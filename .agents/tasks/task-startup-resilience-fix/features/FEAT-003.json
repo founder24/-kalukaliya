@@ -1,0 +1,22 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address review feedback: (1) Remove raw config error messages from unauthenticated /health endpoint, exposing only a count. (2) Add health endpoint integration test verifying degraded status and absence of raw error messages.",
+  "status": "in_progress",
+  "steps": [
+    "In apps/backend/app/api/v1/health.py, change 'config_errors': settings.startup_errors to 'config_error_count': len(settings.startup_errors) to avoid exposing internal security config details to unauthenticated callers.",
+    "Add a health endpoint integration test in apps/backend/tests/test_config_resilience.py that monkeypatches settings.startup_errors and verifies the /health endpoint returns degraded status with config_error_count and does NOT expose raw error messages."
+  ],
+  "acceptance_criteria": [
+    "The /health endpoint returns config_error_count (integer) instead of config_errors (list of strings) when degraded",
+    "A test verifies the health endpoint degraded response structure",
+    "The test confirms raw error messages are not exposed in the response",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "cd apps/backend && python -m pytest tests/test_config_resilience.py -v",
+    "cd apps/backend && python -m pytest tests/ -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

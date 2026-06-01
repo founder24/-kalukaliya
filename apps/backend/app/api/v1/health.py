@@ -96,7 +96,7 @@ async def basic_health_check():
         return {
             "status": "degraded",
             "service": "syrabit-backend",
-            "config_errors": settings.startup_errors,
+            "config_error_count": len(settings.startup_errors),
         }
     return {"status": "healthy", "service": "syrabit-backend"}
 

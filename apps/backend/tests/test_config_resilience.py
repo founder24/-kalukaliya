@@ -5,6 +5,7 @@ Instead, errors are collected in startup_errors for health endpoint reporting.
 
 import os
 import pytest
+from httpx import AsyncClient, ASGITransport
 
 
 @pytest.fixture(autouse=True)
@@ -150,3 +151,39 @@ class TestConfigResilienceDevelopment:
 
         s = Settings()
         assert s.startup_errors == []
+
+
+class TestHealthEndpointDegraded:
+    """Health endpoint reports degraded status when startup_errors exist."""
+
+    @pytest.mark.anyio
+    async def test_health_reports_degraded_with_startup_errors(self, monkeypatch):
+        """Health endpoint returns degraded when config has startup errors."""
+        from app.config import settings
+        from app.main import app
+
+        monkeypatch.setattr(settings, "startup_errors", ["test error 1", "test error 2"])
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/health")
+            data = response.json()
+            assert data["status"] == "degraded"
+            assert data["config_error_count"] == 2
+            assert "config_errors" not in data  # Raw messages should NOT be exposed
+
+    @pytest.mark.anyio
+    async def test_health_reports_healthy_without_startup_errors(self, monkeypatch):
+        """Health endpoint returns healthy when no startup errors."""
+        from app.config import settings
+        from app.main import app
+
+        monkeypatch.setattr(settings, "startup_errors", [])
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/health")
+            data = response.json()
+            assert data["status"] == "healthy"
+            assert "config_error_count" not in data
+            assert "config_errors" not in data
