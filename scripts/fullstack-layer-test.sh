@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ===============================================================================
-# SYRABIT FULLSTACK LAYER-BY-LAYER CLOUD SHELL TEST (v2 - 1000+ Assertions)
+# SYRABIT FULLSTACK LAYER-BY-LAYER CLOUD SHELL TEST (v3 - 1000+ Assertions)
 # ===============================================================================
 #
-# Comprehensive test covering all 9 architectural pillars across 21 layers (0-20):
+# Comprehensive test covering all 9 architectural pillars across 22 layers (0-21):
 #   P1: Cloudflare (CDN + Workers + Turnstile + R2)
 #   P2: Cloud Run (FastAPI Backend)
 #   P3: Vertex AI Search (Discovery Engine - Hybrid RAG)
@@ -61,6 +61,7 @@ SKIP_ADMIN_TESTS="${SKIP_ADMIN_TESTS:-0}"
 # Runtime flags
 DRY_RUN=0
 QUICK_MODE=0
+CLOUDSHELL_MODE=0
 RUN_LAYER=""
 
 # Token storage (populated during auth layer)
@@ -97,7 +98,7 @@ trap cleanup EXIT INT TERM
 
 print_help() {
     cat << 'HELPEOF'
-SYRABIT FULLSTACK LAYER-BY-LAYER CLOUD SHELL TEST (v2 - 1000+ Assertions)
+SYRABIT FULLSTACK LAYER-BY-LAYER CLOUD SHELL TEST (v3 - 1000+ Assertions)
 
 Usage:
   ./scripts/fullstack-layer-test.sh [OPTIONS]
@@ -105,8 +106,9 @@ Usage:
 Options:
   --help        Print this help message and exit
   --dry-run     Validate configuration without making HTTP calls
-  --layer N     Run only layer N (0-20)
+  --layer N     Run only layer N (0-21)
   --quick       Skip stress tests and optional layers (14, 17, 20)
+  --cloudshell  Set Cloud Shell optimal defaults (no stress, auto JSON export, gcloud hints)
 
 Environment Variables:
   BASE_URL              Backend/edge URL (default: https://api.syrabit.ai)
@@ -123,7 +125,7 @@ Environment Variables:
   SKIP_AUTH_TESTS       Set to 1 to skip authentication layer
   SKIP_ADMIN_TESTS      Set to 1 to skip admin endpoint tests
 
-Layers (21 total):
+Layers (22 total):
    0  Prerequisites & Config Validation
    1  Frontend (Cloudflare CDN, compression, headers, assets)
    2  Edge Worker (Cloudflare Workers, CORS, bot detection)
@@ -145,6 +147,7 @@ Layers (21 total):
   18  Cross-Cutting Concerns (request ID, CORS, CSRF, versioning)
   19  Users API (profile, onboarding, credits)
   20  Performance & Timing (TTFB thresholds, concurrency)
+  21  Startup Resilience (degraded health, config errors, deep diagnostics)
 
 Examples:
   # Run all layers against production
@@ -182,6 +185,12 @@ while [[ $# -gt 0 ]]; do
         --quick)
             QUICK_MODE=1
             STRESS_TEST=0
+            shift
+            ;;
+        --cloudshell)
+            CLOUDSHELL_MODE=1
+            STRESS_TEST=0
+            EXPORT_JSON=1
             shift
             ;;
         *)
@@ -1245,6 +1254,18 @@ test_layer_3_backend_health() {
     health_status=$(json_field '.status // empty')
     if [[ "$health_status" == "healthy" || "$health_status" == "ok" || "$health_status" == "up" ]]; then
         assert_pass "/health status: $health_status"
+    elif [[ "$health_status" == "degraded" ]]; then
+        assert_warn "/health status: degraded (config errors present)"
+        # Check config_error_count when degraded
+        local config_err_count
+        config_err_count=$(json_field '.config_error_count // empty')
+        if [[ -n "$config_err_count" && "$config_err_count" =~ ^[0-9]+$ ]]; then
+            assert_pass "Degraded state has config_error_count: $config_err_count"
+        elif [[ -n "$config_err_count" ]]; then
+            assert_warn "config_error_count present but not integer: $config_err_count"
+        else
+            assert_warn "Degraded state missing config_error_count field"
+        fi
     elif [[ -n "$health_status" ]]; then
         assert_warn "/health status: $health_status"
     else
@@ -1465,6 +1486,84 @@ test_layer_3_backend_health() {
         assert_fail "Health response may contain sensitive data"
     else
         assert_pass "Health response has no obvious sensitive data"
+    fi
+
+    subsection "3.5 Degraded Health Reporting"
+
+    # 3.5.1 Re-fetch /health for degraded checks
+    perform_request "${BASE_URL}/health"
+    local degraded_status
+    degraded_status=$(json_field '.status // empty')
+
+    # 3.5.2 Status field value check
+    if [[ "$degraded_status" == "healthy" || "$degraded_status" == "degraded" || "$degraded_status" == "ok" || "$degraded_status" == "up" ]]; then
+        assert_pass "Health status is a valid value: $degraded_status"
+    elif [[ -n "$degraded_status" ]]; then
+        assert_warn "Health status unexpected value: $degraded_status"
+    else
+        assert_warn "Health status field missing"
+    fi
+
+    # 3.5.3 If degraded, verify config_error_count exists and is integer
+    if [[ "$degraded_status" == "degraded" ]]; then
+        local err_count
+        err_count=$(json_field '.config_error_count // empty')
+        if [[ -n "$err_count" && "$err_count" =~ ^[0-9]+$ ]]; then
+            assert_pass "Degraded: config_error_count is integer ($err_count)"
+        elif [[ -n "$err_count" ]]; then
+            assert_fail "Degraded: config_error_count not integer: $err_count"
+        else
+            assert_fail "Degraded: config_error_count field missing"
+        fi
+    else
+        assert_skip "Not degraded; config_error_count check skipped"
+    fi
+
+    # 3.5.4 No sensitive keywords in response body (password, secret, key, token, credentials)
+    if [[ "$degraded_status" == "degraded" ]]; then
+        if echo "$CURL_BODY" | grep -qi "password\|secret\|credentials"; then
+            assert_fail "Degraded response contains sensitive keywords"
+        else
+            assert_pass "Degraded response has no sensitive keywords (password/secret/credentials)"
+        fi
+    else
+        assert_skip "Not degraded; sensitive keyword check skipped"
+    fi
+
+    # 3.5.5 No raw token/key values exposed
+    if [[ "$degraded_status" == "degraded" ]]; then
+        if echo "$CURL_BODY" | grep -qi '"token"\s*:\s*"[^"]\{10,\}"\|"key"\s*:\s*"[^"]\{10,\}"'; then
+            assert_fail "Degraded response may expose raw token/key values"
+        else
+            assert_pass "Degraded response does not expose raw token/key values"
+        fi
+    else
+        assert_skip "Not degraded; token/key exposure check skipped"
+    fi
+
+    # 3.5.6 Service field is syrabit-backend
+    local svc_field
+    svc_field=$(json_field '.service // empty')
+    if [[ "$svc_field" == "syrabit-backend" ]]; then
+        assert_pass "Health service field: syrabit-backend"
+    elif [[ -n "$svc_field" ]]; then
+        assert_warn "Health service field: $svc_field (expected syrabit-backend)"
+    else
+        assert_warn "Health response missing service field"
+    fi
+
+    # 3.5.7 Response does NOT expose raw error message strings
+    if echo "$CURL_BODY" | grep -qi "traceback\|stacktrace\|exception.*at\|File.*line"; then
+        assert_fail "Health response exposes raw error messages/stacktraces"
+    else
+        assert_pass "Health response does not expose raw error messages"
+    fi
+
+    # 3.5.8 Response body is reasonable size even when degraded
+    if [[ ${#CURL_BODY} -lt 5000 ]]; then
+        assert_pass "Health response size reasonable for reporting (${#CURL_BODY} bytes)"
+    else
+        assert_warn "Health response unexpectedly large (${#CURL_BODY} bytes)"
     fi
 
     local layer_end=$TOTAL_TESTS
@@ -2454,6 +2553,155 @@ test_layer_5_chat() {
         assert_warn "DELETE /chat/ returned HTTP $CURL_STATUS"
     fi
 
+    subsection "5.7 Provider Routing Validation"
+
+    if [[ -n "$AUTH_TOKEN" ]]; then
+        # 5.7.1 English chat model should be Gemini (Vertex AI)
+        perform_request "${BASE_URL}/api/v1/chat/" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${AUTH_TOKEN}" \
+            -d '{"message":"What is photosynthesis?","language":"en"}'
+        if [[ "$CURL_STATUS" -eq 200 ]]; then
+            local en_model
+            en_model=$(json_field '.model_used // .model // empty')
+            if [[ -n "$en_model" ]]; then
+                # 5.7.2 English uses Gemini
+                if echo "$en_model" | grep -qi "gemini"; then
+                    assert_pass "English chat uses Gemini: $en_model"
+                else
+                    assert_warn "English chat model not Gemini: $en_model"
+                fi
+                # 5.7.3 English does NOT use Cloudflare/Llama/Worker
+                if echo "$en_model" | grep -qi "cloudflare\|llama\|worker"; then
+                    assert_fail "English chat should not use Cloudflare/Llama: $en_model"
+                else
+                    assert_pass "English chat does not use Cloudflare/Llama/Worker"
+                fi
+            else
+                assert_skip "English chat model_used field not returned"
+                assert_skip "English provider exclusion check (no model_used)"
+            fi
+        elif [[ "$CURL_STATUS" -eq 429 ]]; then
+            assert_skip "English provider check: rate limited"
+            assert_skip "English provider exclusion: rate limited"
+        else
+            assert_warn "English chat for provider check returned HTTP $CURL_STATUS"
+            assert_skip "English provider exclusion check skipped"
+        fi
+
+        # 5.7.4 Assamese chat model should be Sarvam
+        perform_request "${BASE_URL}/api/v1/chat/" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${AUTH_TOKEN}" \
+            -d '{"message":"পোহৰ সংশ্লেষণ কি?","language":"as"}'
+        if [[ "$CURL_STATUS" -eq 200 ]]; then
+            local as_model
+            as_model=$(json_field '.model_used // .model // empty')
+            if [[ -n "$as_model" ]]; then
+                # 5.7.5 Assamese uses Sarvam
+                if echo "$as_model" | grep -qi "sarvam"; then
+                    assert_pass "Assamese chat uses Sarvam: $as_model"
+                else
+                    assert_warn "Assamese chat model not Sarvam: $as_model"
+                fi
+                # 5.7.6 Assamese does NOT use Cloudflare/Worker
+                if echo "$as_model" | grep -qi "cloudflare\|worker"; then
+                    assert_fail "Assamese chat should not use Cloudflare: $as_model"
+                else
+                    assert_pass "Assamese chat does not use Cloudflare/Worker"
+                fi
+            else
+                assert_skip "Assamese chat model_used field not returned"
+                assert_skip "Assamese provider exclusion check (no model_used)"
+            fi
+        elif [[ "$CURL_STATUS" -eq 429 ]]; then
+            assert_skip "Assamese provider check: rate limited"
+            assert_skip "Assamese provider exclusion: rate limited"
+        else
+            assert_warn "Assamese chat for provider check returned HTTP $CURL_STATUS"
+            assert_skip "Assamese provider exclusion check skipped"
+        fi
+    else
+        assert_skip "5.7 Provider routing: no AUTH_TOKEN"
+        assert_skip "5.7 English Gemini check: no AUTH_TOKEN"
+        assert_skip "5.7 English exclusion check: no AUTH_TOKEN"
+        assert_skip "5.7 Assamese Sarvam check: no AUTH_TOKEN"
+        assert_skip "5.7 Assamese exclusion check: no AUTH_TOKEN"
+    fi
+
+    subsection "5.8 Streaming Provider Check"
+
+    if [[ -n "$AUTH_TOKEN" ]]; then
+        # 5.8.1 Authenticated streaming English chat
+        perform_stream_request "${BASE_URL}/api/v1/chat/stream" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${AUTH_TOKEN}" \
+            -d '{"message":"Explain gravity briefly","language":"en"}'
+        if [[ "$CURL_STATUS" -eq 200 ]]; then
+            assert_pass "Authenticated streaming English chat returns 200"
+            # 5.8.2 Content-Type is event-stream
+            if has_header "text/event-stream"; then
+                assert_pass "Streaming English: Content-Type is text/event-stream"
+            else
+                assert_warn "Streaming English: unexpected Content-Type"
+            fi
+            # 5.8.3 Body contains data lines
+            if echo "$CURL_BODY" | grep -q "^data:"; then
+                assert_pass "Streaming English: body contains data: lines"
+            else
+                assert_warn "Streaming English: no data: lines in body"
+            fi
+        elif [[ "$CURL_STATUS" -eq 429 ]]; then
+            assert_skip "Streaming English: rate limited"
+            assert_skip "Streaming English content-type: rate limited"
+            assert_skip "Streaming English data lines: rate limited"
+        else
+            assert_warn "Streaming English chat returned HTTP $CURL_STATUS"
+            assert_skip "Streaming English content-type check skipped"
+            assert_skip "Streaming English data lines check skipped"
+        fi
+
+        # 5.8.4 Authenticated streaming Assamese chat
+        perform_stream_request "${BASE_URL}/api/v1/chat/stream" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${AUTH_TOKEN}" \
+            -d '{"message":"মাধ্যাকর্ষণ কি?","language":"as"}'
+        if [[ "$CURL_STATUS" -eq 200 ]]; then
+            assert_pass "Authenticated streaming Assamese chat returns 200"
+            # 5.8.5 Content-Type is event-stream
+            if has_header "text/event-stream"; then
+                assert_pass "Streaming Assamese: Content-Type is text/event-stream"
+            else
+                assert_warn "Streaming Assamese: unexpected Content-Type"
+            fi
+            # 5.8.6 Body contains data lines
+            if echo "$CURL_BODY" | grep -q "^data:"; then
+                assert_pass "Streaming Assamese: body contains data: lines"
+            else
+                assert_warn "Streaming Assamese: no data: lines in body"
+            fi
+        elif [[ "$CURL_STATUS" -eq 429 ]]; then
+            assert_skip "Streaming Assamese: rate limited"
+            assert_skip "Streaming Assamese content-type: rate limited"
+            assert_skip "Streaming Assamese data lines: rate limited"
+        else
+            assert_warn "Streaming Assamese chat returned HTTP $CURL_STATUS"
+            assert_skip "Streaming Assamese content-type check skipped"
+            assert_skip "Streaming Assamese data lines check skipped"
+        fi
+    else
+        assert_skip "5.8 Streaming English: no AUTH_TOKEN"
+        assert_skip "5.8 Streaming English content-type: no AUTH_TOKEN"
+        assert_skip "5.8 Streaming English data: no AUTH_TOKEN"
+        assert_skip "5.8 Streaming Assamese: no AUTH_TOKEN"
+        assert_skip "5.8 Streaming Assamese content-type: no AUTH_TOKEN"
+        assert_skip "5.8 Streaming Assamese data: no AUTH_TOKEN"
+    fi
+
     local layer_end=$TOTAL_TESTS
     LAYER_RESULTS+=("Layer 5: Chat ($((layer_end - layer_start)) tests)")
 }
@@ -2764,6 +3012,183 @@ test_layer_7_content() {
         assert_pass "Library bundle has Cache-Control header"
     else
         assert_warn "Library bundle missing Cache-Control"
+    fi
+
+    subsection "7.1b Library Bundle API Alignment"
+
+    # 7.1b.1 Slim mode returns JSON with boards array
+    perform_request "${BASE_URL}/api/v1/content/library-bundle?slim=1"
+    local slim_status="$CURL_STATUS"
+    local slim_body="$CURL_BODY"
+    if [[ "$slim_status" -eq 200 ]] && is_json; then
+        assert_pass "Slim bundle returns valid JSON (200)"
+    elif [[ "$slim_status" -eq 200 ]]; then
+        assert_warn "Slim bundle returns 200 but not valid JSON"
+    else
+        assert_warn "Slim bundle returned HTTP $slim_status"
+    fi
+
+    # 7.1b.2 Slim bundle has boards array
+    local slim_boards_count
+    slim_boards_count=$(echo "$slim_body" | jq '.boards // [] | length' 2>/dev/null || echo "0")
+    if [[ "$slim_status" -eq 200 && "$slim_boards_count" -gt 0 ]]; then
+        assert_pass "Slim bundle has boards array ($slim_boards_count boards)"
+    elif [[ "$slim_status" -eq 200 ]]; then
+        assert_warn "Slim bundle has no boards"
+    else
+        assert_skip "Slim bundle boards check"
+    fi
+
+    # 7.1b.3 First board has id field
+    if [[ "$slim_status" -eq 200 && "$slim_boards_count" -gt 0 ]]; then
+        local board_id
+        board_id=$(echo "$slim_body" | jq -r '.boards[0].id // empty' 2>/dev/null || echo "")
+        if [[ -n "$board_id" ]]; then
+            assert_pass "First board has id field: $board_id"
+        else
+            assert_warn "First board missing id field"
+        fi
+    else
+        assert_skip "Board id field check"
+    fi
+
+    # 7.1b.4 First board has name field
+    if [[ "$slim_status" -eq 200 && "$slim_boards_count" -gt 0 ]]; then
+        local board_name
+        board_name=$(echo "$slim_body" | jq -r '.boards[0].name // empty' 2>/dev/null || echo "")
+        if [[ -n "$board_name" ]]; then
+            assert_pass "First board has name field: $board_name"
+        else
+            assert_warn "First board missing name field"
+        fi
+    else
+        assert_skip "Board name field check"
+    fi
+
+    # 7.1b.5 First board has slug field
+    if [[ "$slim_status" -eq 200 && "$slim_boards_count" -gt 0 ]]; then
+        local board_slug
+        board_slug=$(echo "$slim_body" | jq -r '.boards[0].slug // empty' 2>/dev/null || echo "")
+        if [[ -n "$board_slug" ]]; then
+            assert_pass "First board has slug field: $board_slug"
+        else
+            assert_warn "First board missing slug field"
+        fi
+    else
+        assert_skip "Board slug field check"
+    fi
+
+    # 7.1b.6 First board has classes field
+    if [[ "$slim_status" -eq 200 && "$slim_boards_count" -gt 0 ]]; then
+        local has_classes
+        has_classes=$(echo "$slim_body" | jq -r '.boards[0].classes // empty | type' 2>/dev/null || echo "")
+        if [[ "$has_classes" == "array" ]]; then
+            assert_pass "First board has classes array"
+        else
+            assert_warn "First board missing classes array"
+        fi
+    else
+        assert_skip "Board classes field check"
+    fi
+
+    # 7.1b.7 Full bundle returns boards with nested structure
+    perform_request "${BASE_URL}/api/v1/content/library-bundle"
+    local full_status="$CURL_STATUS"
+    local full_body="$CURL_BODY"
+    local full_size=${#full_body}
+    if [[ "$full_status" -eq 200 ]] && is_json; then
+        assert_pass "Full bundle returns valid JSON (200)"
+    elif [[ "$full_status" -eq 200 ]]; then
+        assert_warn "Full bundle returns 200 but not valid JSON"
+    else
+        assert_warn "Full bundle returned HTTP $full_status"
+    fi
+
+    # 7.1b.8 Full bundle subjects have chapters array
+    if [[ "$full_status" -eq 200 ]]; then
+        local has_chapters
+        has_chapters=$(echo "$full_body" | jq -r '[.boards[]?.classes[]?.streams[]?.subjects[]?.chapters // empty] | length' 2>/dev/null || echo "0")
+        if [[ "$has_chapters" -gt 0 ]]; then
+            assert_pass "Full bundle has subjects with chapters ($has_chapters)"
+        else
+            # Try alternative structure
+            local alt_chapters
+            alt_chapters=$(echo "$full_body" | jq -r '[.boards[]?.classes[]?.subjects[]?.chapters // empty] | length' 2>/dev/null || echo "0")
+            if [[ "$alt_chapters" -gt 0 ]]; then
+                assert_pass "Full bundle has subjects with chapters (alt structure: $alt_chapters)"
+            else
+                assert_warn "Full bundle subjects may not have chapters array"
+            fi
+        fi
+    else
+        assert_skip "Full bundle chapters check"
+    fi
+
+    # 7.1b.9 Boot param request returns 200
+    perform_request "${BASE_URL}/api/v1/content/library-bundle?boot=SEBA"
+    if [[ "$CURL_STATUS" -eq 200 ]]; then
+        assert_pass "Library bundle with boot=SEBA returns 200"
+    elif [[ "$CURL_STATUS" -eq 400 || "$CURL_STATUS" -eq 404 ]]; then
+        assert_warn "Library bundle boot param not supported ($CURL_STATUS)"
+    else
+        assert_warn "Library bundle boot=SEBA returned HTTP $CURL_STATUS"
+    fi
+
+    # 7.1b.10 Slim bundle size <= full bundle size
+    local slim_size=${#slim_body}
+    if [[ "$slim_status" -eq 200 && "$full_status" -eq 200 ]]; then
+        if [[ "$slim_size" -le "$full_size" ]]; then
+            assert_pass "Slim bundle ($slim_size bytes) <= full bundle ($full_size bytes)"
+        else
+            assert_warn "Slim bundle ($slim_size) larger than full ($full_size)"
+        fi
+    else
+        assert_skip "Slim vs full size comparison"
+    fi
+
+    # 7.1b.11 Cache-Control header on slim request
+    perform_request "${BASE_URL}/api/v1/content/library-bundle?slim=1"
+    if has_header "cache-control"; then
+        assert_pass "Slim bundle has Cache-Control header"
+    else
+        assert_warn "Slim bundle missing Cache-Control header"
+    fi
+
+    # 7.1b.12 Cache-Control header on full request
+    perform_request "${BASE_URL}/api/v1/content/library-bundle"
+    if has_header "cache-control"; then
+        assert_pass "Full bundle has Cache-Control header"
+    else
+        assert_warn "Full bundle missing Cache-Control header"
+    fi
+
+    # 7.1b.13 Full bundle boards count matches slim
+    if [[ "$slim_status" -eq 200 && "$full_status" -eq 200 ]]; then
+        local full_boards_count
+        full_boards_count=$(echo "$full_body" | jq '.boards // [] | length' 2>/dev/null || echo "0")
+        if [[ "$slim_boards_count" -eq "$full_boards_count" ]]; then
+            assert_pass "Slim and full bundle have same board count ($full_boards_count)"
+        else
+            assert_warn "Board count mismatch: slim=$slim_boards_count full=$full_boards_count"
+        fi
+    else
+        assert_skip "Board count comparison"
+    fi
+
+    # 7.1b.14 Slim response time
+    if [[ "$CURL_TTFB" -lt 5000 ]]; then
+        assert_pass "Slim bundle TTFB under 5s (${CURL_TTFB}ms)"
+    else
+        assert_warn "Slim bundle TTFB slow (${CURL_TTFB}ms)"
+    fi
+
+    # 7.1b.15 Bundle content-type is JSON
+    local bundle_ct
+    bundle_ct=$(get_header_value "content-type")
+    if [[ "$bundle_ct" == *"application/json"* ]]; then
+        assert_pass "Bundle Content-Type is application/json"
+    else
+        assert_warn "Bundle Content-Type: $bundle_ct"
     fi
 
     subsection "7.2 Content Render"
@@ -6527,6 +6952,335 @@ test_layer_20_performance() {
 
 
 # ===============================================================================
+# LAYER 21: Startup Resilience Verification (25+ tests)
+# ===============================================================================
+
+test_layer_21_startup_resilience() {
+    section_header "LAYER 21: Startup Resilience Verification"
+
+    local layer_start=$TOTAL_TESTS
+
+    subsection "21.1 Health Always Returns 200"
+
+    # 21.1.1 /health returns HTTP 200 (never 500)
+    perform_request "${BASE_URL}/health"
+    if [[ "$CURL_STATUS" -eq 200 ]]; then
+        assert_pass "/health returns 200 (not 500)"
+    elif [[ "$CURL_STATUS" -eq 500 ]]; then
+        assert_fail "/health returned 500 (should never happen)" "yes"
+    else
+        assert_warn "/health returned unexpected HTTP $CURL_STATUS"
+    fi
+
+    # 21.1.2 /health returns 200 on repeated calls (call 1)
+    perform_request "${BASE_URL}/health"
+    if [[ "$CURL_STATUS" -eq 200 ]]; then
+        assert_pass "/health repeated call 1: 200"
+    else
+        assert_fail "/health repeated call 1: HTTP $CURL_STATUS"
+    fi
+
+    # 21.1.3 /health returns 200 on repeated calls (call 2)
+    perform_request "${BASE_URL}/health"
+    if [[ "$CURL_STATUS" -eq 200 ]]; then
+        assert_pass "/health repeated call 2: 200"
+    else
+        assert_fail "/health repeated call 2: HTTP $CURL_STATUS"
+    fi
+
+    # 21.1.4 /health returns 200 on repeated calls (call 3)
+    perform_request "${BASE_URL}/health"
+    if [[ "$CURL_STATUS" -eq 200 ]]; then
+        assert_pass "/health repeated call 3: 200"
+    else
+        assert_fail "/health repeated call 3: HTTP $CURL_STATUS"
+    fi
+
+    # 21.1.5 /health response time < 2s
+    if [[ "$CURL_TTFB" -lt 2000 ]]; then
+        assert_pass "/health response time < 2s (${CURL_TTFB}ms)"
+    else
+        assert_warn "/health response time >= 2s (${CURL_TTFB}ms)"
+    fi
+
+    subsection "21.2 Status Field Contract"
+
+    # 21.2.1 Status field exists and is string
+    perform_request "${BASE_URL}/health"
+    local h_status
+    h_status=$(json_field '.status // empty')
+    if [[ -n "$h_status" ]]; then
+        assert_pass "/health has status field: $h_status"
+    else
+        assert_fail "/health missing status field"
+    fi
+
+    # 21.2.2 Status is exactly "healthy" or "degraded"
+    if [[ "$h_status" == "healthy" || "$h_status" == "degraded" ]]; then
+        assert_pass "/health status is valid contract value: $h_status"
+    elif [[ "$h_status" == "ok" || "$h_status" == "up" ]]; then
+        assert_warn "/health status is legacy value: $h_status (expected healthy/degraded)"
+    elif [[ -n "$h_status" ]]; then
+        assert_fail "/health status unexpected: $h_status"
+    else
+        assert_skip "Status contract check (no status field)"
+    fi
+
+    # 21.2.3 Service field equals syrabit-backend
+    local h_service
+    h_service=$(json_field '.service // empty')
+    if [[ "$h_service" == "syrabit-backend" ]]; then
+        assert_pass "/health service: syrabit-backend"
+    elif [[ -n "$h_service" ]]; then
+        assert_warn "/health service: $h_service (expected syrabit-backend)"
+    else
+        assert_warn "/health missing service field"
+    fi
+
+    subsection "21.3 Degraded State Reporting"
+
+    # 21.3.1 If degraded, config_error_count exists
+    if [[ "$h_status" == "degraded" ]]; then
+        local d_err_count
+        d_err_count=$(json_field '.config_error_count // empty')
+        if [[ -n "$d_err_count" ]]; then
+            assert_pass "Degraded: config_error_count present ($d_err_count)"
+        else
+            assert_fail "Degraded: config_error_count missing"
+        fi
+
+        # 21.3.2 config_error_count is integer >= 0
+        if [[ "$d_err_count" =~ ^[0-9]+$ ]]; then
+            assert_pass "Degraded: config_error_count is integer >= 0"
+        else
+            assert_fail "Degraded: config_error_count not a valid integer: $d_err_count"
+        fi
+
+        # 21.3.3 No raw error messages exposed
+        if echo "$CURL_BODY" | grep -qi "EDGE_SHARED_SECRET\|JWT_SECRET\|ADMIN_JWT_SECRET\|must be set\|required in production"; then
+            assert_fail "Degraded: raw config error messages exposed"
+        else
+            assert_pass "Degraded: no raw config error messages exposed"
+        fi
+    else
+        assert_skip "21.3 config_error_count check (not degraded)"
+        assert_skip "21.3 config_error_count integer check (not degraded)"
+        assert_skip "21.3 raw error message check (not degraded)"
+    fi
+
+    # 21.3.4 If healthy, config_error_count is absent or 0
+    if [[ "$h_status" == "healthy" ]]; then
+        local healthy_err
+        healthy_err=$(json_field '.config_error_count // empty')
+        if [[ -z "$healthy_err" || "$healthy_err" == "0" ]]; then
+            assert_pass "Healthy: config_error_count absent or 0"
+        else
+            assert_warn "Healthy but config_error_count=$healthy_err"
+        fi
+    else
+        assert_skip "21.3 healthy config_error_count check (not healthy)"
+    fi
+
+    subsection "21.4 Deep Health Diagnostics"
+
+    # 21.4.1 /health/deep returns 200 or 503 (NEVER 500)
+    perform_request "${BASE_URL}/health/deep"
+    if [[ "$CURL_STATUS" -eq 200 || "$CURL_STATUS" -eq 503 ]]; then
+        assert_pass "/health/deep returns $CURL_STATUS (valid)"
+    elif [[ "$CURL_STATUS" -eq 500 ]]; then
+        assert_fail "/health/deep returned 500 (should never happen)"
+    elif [[ "$CURL_STATUS" -eq 404 ]]; then
+        assert_warn "/health/deep not found (endpoint may not exist)"
+    else
+        assert_warn "/health/deep returned HTTP $CURL_STATUS"
+    fi
+
+    # 21.4.2 /health/deep has status field
+    local deep_status
+    deep_status=$(json_field '.status // empty')
+    if [[ "$deep_status" == "healthy" || "$deep_status" == "degraded" || "$deep_status" == "unhealthy" ]]; then
+        assert_pass "/health/deep status: $deep_status"
+    elif [[ -n "$deep_status" ]]; then
+        assert_warn "/health/deep status: $deep_status"
+    elif [[ "$CURL_STATUS" -eq 404 ]]; then
+        assert_skip "/health/deep status check (endpoint not found)"
+    else
+        assert_warn "/health/deep missing status field"
+    fi
+
+    # 21.4.3 /health/deep has checks object
+    local has_checks
+    has_checks=$(json_field '.checks // empty | type' 2>/dev/null)
+    if [[ -z "$has_checks" ]]; then
+        has_checks=$(echo "$CURL_BODY" | jq -r '.checks // empty | type' 2>/dev/null || echo "")
+    fi
+    if [[ "$has_checks" == "object" ]]; then
+        assert_pass "/health/deep has checks object"
+    elif [[ "$CURL_STATUS" -eq 404 ]]; then
+        assert_skip "/health/deep checks (endpoint not found)"
+    else
+        assert_warn "/health/deep missing or invalid checks object"
+    fi
+
+    # 21.4.4 checks.mongodb exists with status field
+    if [[ "$has_checks" == "object" ]]; then
+        local mongo_check
+        mongo_check=$(echo "$CURL_BODY" | jq -r '.checks.mongodb.status // empty' 2>/dev/null || echo "")
+        if [[ -n "$mongo_check" ]]; then
+            assert_pass "/health/deep checks.mongodb.status: $mongo_check"
+        else
+            assert_warn "/health/deep checks.mongodb.status not found"
+        fi
+    else
+        assert_skip "checks.mongodb (no checks object)"
+    fi
+
+    # 21.4.5 checks.redis exists with status field
+    if [[ "$has_checks" == "object" ]]; then
+        local redis_check
+        redis_check=$(echo "$CURL_BODY" | jq -r '.checks.redis.status // empty' 2>/dev/null || echo "")
+        if [[ -n "$redis_check" ]]; then
+            assert_pass "/health/deep checks.redis.status: $redis_check"
+        else
+            assert_warn "/health/deep checks.redis.status not found"
+        fi
+    else
+        assert_skip "checks.redis (no checks object)"
+    fi
+
+    # 21.4.6 checks.vertex_search exists with status field
+    if [[ "$has_checks" == "object" ]]; then
+        local vs_check
+        vs_check=$(echo "$CURL_BODY" | jq -r '.checks.vertex_search.status // empty' 2>/dev/null || echo "")
+        if [[ -n "$vs_check" ]]; then
+            assert_pass "/health/deep checks.vertex_search.status: $vs_check"
+        else
+            assert_warn "/health/deep checks.vertex_search.status not found"
+        fi
+    else
+        assert_skip "checks.vertex_search (no checks object)"
+    fi
+
+    # 21.4.7 checks.vertex_ai exists with status field
+    if [[ "$has_checks" == "object" ]]; then
+        local vai_check
+        vai_check=$(echo "$CURL_BODY" | jq -r '.checks.vertex_ai.status // empty' 2>/dev/null || echo "")
+        if [[ -n "$vai_check" ]]; then
+            assert_pass "/health/deep checks.vertex_ai.status: $vai_check"
+        else
+            assert_warn "/health/deep checks.vertex_ai.status not found"
+        fi
+    else
+        assert_skip "checks.vertex_ai (no checks object)"
+    fi
+
+    # 21.4.8 Each check status is one of: healthy, unhealthy
+    if [[ "$has_checks" == "object" ]]; then
+        local all_statuses
+        all_statuses=$(echo "$CURL_BODY" | jq -r '[.checks[]?.status // empty] | unique | .[]' 2>/dev/null || echo "")
+        local invalid_status=0
+        for s in $all_statuses; do
+            if [[ "$s" != "healthy" && "$s" != "unhealthy" ]]; then
+                invalid_status=1
+            fi
+        done
+        if [[ "$invalid_status" -eq 0 && -n "$all_statuses" ]]; then
+            assert_pass "/health/deep all check statuses valid (healthy/unhealthy)"
+        elif [[ -n "$all_statuses" ]]; then
+            assert_warn "/health/deep has non-standard check status values"
+        else
+            assert_warn "/health/deep no check statuses found"
+        fi
+    else
+        assert_skip "Check status validation (no checks object)"
+    fi
+
+    subsection "21.5 Circuit Breaker Consistency"
+
+    # 21.5.1 /health/circuit-breakers returns 200
+    perform_request "${BASE_URL}/health/circuit-breakers"
+    if [[ "$CURL_STATUS" -eq 200 ]]; then
+        assert_pass "/health/circuit-breakers returns 200"
+    elif [[ "$CURL_STATUS" -eq 404 ]]; then
+        assert_warn "Circuit breakers endpoint not found"
+    else
+        assert_warn "Circuit breakers returned HTTP $CURL_STATUS"
+    fi
+
+    # 21.5.2 Response has vertex_ai, sarvam_ai, vertex_search
+    if [[ "$CURL_STATUS" -eq 200 ]] && is_json; then
+        local cb_vai cb_sarvam cb_vsearch
+        cb_vai=$(json_field '.vertex_ai // empty')
+        cb_sarvam=$(json_field '.sarvam_ai // empty')
+        cb_vsearch=$(json_field '.vertex_search // empty')
+        if [[ -n "$cb_vai" ]]; then
+            assert_pass "Circuit breakers has vertex_ai entry"
+        else
+            assert_warn "Circuit breakers missing vertex_ai"
+        fi
+        if [[ -n "$cb_sarvam" ]]; then
+            assert_pass "Circuit breakers has sarvam_ai entry"
+        else
+            assert_warn "Circuit breakers missing sarvam_ai"
+        fi
+        if [[ -n "$cb_vsearch" ]]; then
+            assert_pass "Circuit breakers has vertex_search entry"
+        else
+            assert_warn "Circuit breakers missing vertex_search"
+        fi
+
+        # 21.5.3 Each has a state field
+        local vai_state sarvam_state vsearch_state
+        vai_state=$(json_field '.vertex_ai.state // empty')
+        sarvam_state=$(json_field '.sarvam_ai.state // empty')
+        vsearch_state=$(json_field '.vertex_search.state // empty')
+
+        if [[ -n "$vai_state" ]]; then
+            assert_pass "vertex_ai has state: $vai_state"
+        else
+            assert_warn "vertex_ai missing state field"
+        fi
+        if [[ -n "$sarvam_state" ]]; then
+            assert_pass "sarvam_ai has state: $sarvam_state"
+        else
+            assert_warn "sarvam_ai missing state field"
+        fi
+        if [[ -n "$vsearch_state" ]]; then
+            assert_pass "vertex_search has state: $vsearch_state"
+        else
+            assert_warn "vertex_search missing state field"
+        fi
+
+        # 21.5.4 State values are one of: closed, open, half_open
+        local valid_states=1
+        for st in "$vai_state" "$sarvam_state" "$vsearch_state"; do
+            if [[ -n "$st" && "$st" != "closed" && "$st" != "open" && "$st" != "half_open" ]]; then
+                valid_states=0
+            fi
+        done
+        if [[ "$valid_states" -eq 1 ]]; then
+            assert_pass "All circuit breaker states are valid (closed/open/half_open)"
+        else
+            assert_warn "Some circuit breaker states have unexpected values"
+        fi
+    else
+        assert_skip "Circuit breaker details not available"
+        assert_skip "Circuit breaker vertex_ai entry"
+        assert_skip "Circuit breaker sarvam_ai entry"
+        assert_skip "Circuit breaker vertex_search entry"
+        assert_skip "Circuit breaker vertex_ai state"
+        assert_skip "Circuit breaker sarvam_ai state"
+        assert_skip "Circuit breaker vertex_search state"
+        assert_skip "Circuit breaker state values validation"
+    fi
+
+    local layer_end=$TOTAL_TESTS
+    LAYER_RESULTS+=("Layer 21: Startup Resilience ($((layer_end - layer_start)) tests)")
+}
+
+
+
+# ===============================================================================
 # MAIN EXECUTION
 # ===============================================================================
 
@@ -6534,17 +7288,29 @@ main() {
     # Header
     echo ""
     echo -e "${BOLD}$(printf '%.0s=' {1..72})${NC}"
-    echo -e "${BOLD}  SYRABIT FULLSTACK LAYER-BY-LAYER CLOUD SHELL TEST (v2)${NC}"
-    echo -e "${BOLD}  1000+ Assertions | 21 Layers (0-20) | 9 Pillars${NC}"
+    echo -e "${BOLD}  SYRABIT FULLSTACK LAYER-BY-LAYER CLOUD SHELL TEST (v3)${NC}"
+    echo -e "${BOLD}  1000+ Assertions | 22 Layers (0-21) | 9 Pillars${NC}"
     echo -e "${BOLD}$(printf '%.0s=' {1..72})${NC}"
     echo -e "  Date:      $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
     echo -e "  Target:    ${BASE_URL}"
     echo -e "  Frontend:  ${FRONTEND_URL}"
     if [[ "$DRY_RUN" == "1" ]]; then echo -e "  Mode:      ${YELLOW}dry-run${NC}"; fi
     if [[ "$QUICK_MODE" == "1" ]]; then echo -e "  Mode:      ${YELLOW}quick${NC}"; fi
+    if [[ "$CLOUDSHELL_MODE" == "1" ]]; then echo -e "  Mode:      ${CYAN}cloudshell${NC}"; fi
     if [[ -n "$RUN_LAYER" ]]; then echo -e "  Layer:     $RUN_LAYER"; fi
     if [[ "$STRESS_TEST" == "1" ]]; then echo -e "  Stress:    ${YELLOW}enabled${NC}"; fi
     echo -e "${BOLD}$(printf '%.0s=' {1..72})${NC}"
+
+    # Cloud Shell hints
+    if [[ "$CLOUDSHELL_MODE" == "1" ]]; then
+        echo ""
+        echo -e "  ${CYAN}Cloud Shell Tips:${NC}"
+        echo "    - Authenticate: gcloud auth login"
+        echo "    - Set project: gcloud config set project YOUR_PROJECT_ID"
+        echo "    - Get JWT token: export TEST_JWT_TOKEN=\$(gcloud auth print-identity-token)"
+        echo "    - Results will be exported to fullstack-test-results.json"
+        echo ""
+    fi
 
     # Dry run mode
     if [[ "$DRY_RUN" == "1" ]]; then
@@ -6561,8 +7327,8 @@ main() {
     # Run specific layer or all
     if [[ -n "$RUN_LAYER" ]]; then
         test_layer_0_prerequisites
-        # Auto-run auth layer if targeting layers 5-20 with credentials but no token
-        if [[ "$RUN_LAYER" -ge 5 && "$RUN_LAYER" -le 20 && -z "$AUTH_TOKEN" ]]; then
+        # Auto-run auth layer if targeting layers 5-21 with credentials but no token
+        if [[ "$RUN_LAYER" -ge 5 && "$RUN_LAYER" -le 21 && -z "$AUTH_TOKEN" ]]; then
             if [[ -n "$TEST_JWT_TOKEN" ]]; then
                 AUTH_TOKEN="$TEST_JWT_TOKEN"
                 verbose_log "Using TEST_JWT_TOKEN for authenticated tests"
@@ -6593,7 +7359,8 @@ main() {
             18) test_layer_18_cross_cutting ;;
             19) test_layer_19_users ;;
             20) test_layer_20_performance ;;
-            *) echo "Invalid layer: $RUN_LAYER (valid: 0-20)"; exit 1 ;;
+            21) test_layer_21_startup_resilience ;;
+            *) echo "Invalid layer: $RUN_LAYER (valid: 0-21)"; exit 1 ;;
         esac
     else
         # Run all layers
@@ -6618,6 +7385,7 @@ main() {
         test_layer_18_cross_cutting
         test_layer_19_users
         test_layer_20_performance
+        test_layer_21_startup_resilience
     fi
 
     # ===================================================================
