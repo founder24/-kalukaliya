@@ -196,7 +196,9 @@ class Settings(BaseSettings):
                 self.startup_errors.append(msg)
                 logger.error(f"CONFIG ERROR: {msg}")
             if not self.ADMIN_JWT_SECRET:
-                msg = "ADMIN_JWT_SECRET is required in production for admin key isolation"
+                msg = (
+                    "ADMIN_JWT_SECRET is required in production for admin key isolation"
+                )
                 self.startup_errors.append(msg)
                 logger.error(f"CONFIG ERROR: {msg}")
             if (

@@ -3,7 +3,6 @@ Tests for startup resilience: Settings() should never crash on invalid config.
 Instead, errors are collected in startup_errors for health endpoint reporting.
 """
 
-import os
 import pytest
 from httpx import AsyncClient, ASGITransport
 
@@ -44,7 +43,9 @@ class TestConfigResilienceProduction:
     def test_missing_admin_jwt_secret_no_crash(self, monkeypatch):
         """Settings with missing ADMIN_JWT_SECRET does not raise ValueError."""
         monkeypatch.setenv("APP_ENV", "production")
-        monkeypatch.setenv("JWT_SECRET", "a-valid-production-secret-that-is-long-enough-32")
+        monkeypatch.setenv(
+            "JWT_SECRET", "a-valid-production-secret-that-is-long-enough-32"
+        )
         monkeypatch.setenv("TRUST_EDGE_AUTH", "False")
         monkeypatch.delenv("ADMIN_JWT_SECRET", raising=False)
 
@@ -57,7 +58,9 @@ class TestConfigResilienceProduction:
     def test_missing_edge_shared_secret_no_crash(self, monkeypatch):
         """Settings with TRUST_EDGE_AUTH=True and no EDGE_SHARED_SECRET does not raise."""
         monkeypatch.setenv("APP_ENV", "production")
-        monkeypatch.setenv("JWT_SECRET", "a-valid-production-secret-that-is-long-enough-32")
+        monkeypatch.setenv(
+            "JWT_SECRET", "a-valid-production-secret-that-is-long-enough-32"
+        )
         monkeypatch.setenv("ADMIN_JWT_SECRET", "admin-secret-value-here")
         monkeypatch.setenv("TRUST_EDGE_AUTH", "True")
         monkeypatch.delenv("EDGE_SHARED_SECRET", raising=False)
@@ -71,7 +74,9 @@ class TestConfigResilienceProduction:
     def test_placeholder_jwt_secret_no_crash(self, monkeypatch):
         """Settings with a known placeholder JWT_SECRET does not raise."""
         monkeypatch.setenv("APP_ENV", "production")
-        monkeypatch.setenv("JWT_SECRET", "dev-only-secret-not-for-production-use-32chars")
+        monkeypatch.setenv(
+            "JWT_SECRET", "dev-only-secret-not-for-production-use-32chars"
+        )
         monkeypatch.setenv("TRUST_EDGE_AUTH", "False")
 
         from app.config import Settings
@@ -83,7 +88,9 @@ class TestConfigResilienceProduction:
     def test_admin_jwt_equals_private_key_no_crash(self, monkeypatch):
         """Settings where ADMIN_JWT_SECRET == JWT_PRIVATE_KEY does not raise."""
         monkeypatch.setenv("APP_ENV", "production")
-        monkeypatch.setenv("JWT_SECRET", "a-valid-production-secret-that-is-long-enough-32")
+        monkeypatch.setenv(
+            "JWT_SECRET", "a-valid-production-secret-that-is-long-enough-32"
+        )
         monkeypatch.setenv("ADMIN_JWT_SECRET", "same-key-value")
         monkeypatch.setenv("JWT_PRIVATE_KEY", "same-key-value")
         monkeypatch.setenv("TRUST_EDGE_AUTH", "False")
@@ -92,12 +99,16 @@ class TestConfigResilienceProduction:
 
         s = Settings()
         assert isinstance(s, Settings)
-        assert any("ADMIN_JWT_SECRET must not be the same" in e for e in s.startup_errors)
+        assert any(
+            "ADMIN_JWT_SECRET must not be the same" in e for e in s.startup_errors
+        )
 
     def test_rs256_missing_keys_no_crash(self, monkeypatch):
         """Settings with RS256 algorithm but missing keys does not raise."""
         monkeypatch.setenv("APP_ENV", "production")
-        monkeypatch.setenv("JWT_SECRET", "a-valid-production-secret-that-is-long-enough-32")
+        monkeypatch.setenv(
+            "JWT_SECRET", "a-valid-production-secret-that-is-long-enough-32"
+        )
         monkeypatch.setenv("ADMIN_JWT_SECRET", "admin-secret-value-here")
         monkeypatch.setenv("JWT_ALGORITHM", "RS256")
         monkeypatch.setenv("TRUST_EDGE_AUTH", "False")
@@ -162,7 +173,9 @@ class TestHealthEndpointDegraded:
         from app.config import settings
         from app.main import app
 
-        monkeypatch.setattr(settings, "startup_errors", ["test error 1", "test error 2"])
+        monkeypatch.setattr(
+            settings, "startup_errors", ["test error 1", "test error 2"]
+        )
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
