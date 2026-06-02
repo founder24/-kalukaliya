@@ -1,0 +1,31 @@
+logsBucket: 'gs://blissful-acumen-495019-t6_cloudbuild_logs'
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$COMMIT_SHA'
+      - '-f'
+      - 'apps/backend/Dockerfile'
+      - 'apps/backend'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$COMMIT_SHA'
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'syrabit-backend'
+      - '--image=asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$COMMIT_SHA'
+      - '--region=asia-south1'
+      - '--port=8000'
+      - '--allow-unauthenticated'
+      - '--service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com'
+
+images:
+  - 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$COMMIT_SHA'
