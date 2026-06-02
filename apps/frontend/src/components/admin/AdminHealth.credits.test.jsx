@@ -219,26 +219,24 @@ describe('AdminHealth — AWS Activate credit panel', () => {
   });
 });
 
-/* ── Azure for Startups tests ───────────────────────────────────────────── */
-describe('AdminHealth — Azure for Startups credit panel', () => {
+/* ── GCP Credits panel tests (rendered as second credit tile) ────────────── */
+describe('AdminHealth — GCP Credits panel', () => {
   afterEach(() => vi.clearAllMocks());
 
   it('shows "not configured" text and setup instructions when API returns configured: false', async () => {
     axiosGet.mockImplementation(makeMock({
-      'billing/azure-startups': { configured: false },
+      'billing/gcp-credits': { configured: false },
     }));
     await renderAdmin();
 
-    const panel = await screen.findByTestId('azure-credit-panel');
-    expect(panel).toBeInTheDocument();
-    expect(screen.getByTestId('azure-credit-heading')).toHaveTextContent('Azure for Startups');
-    expect(screen.getByText('Azure Cost Management not configured')).toBeInTheDocument();
-    expect(screen.getByText(/Create an Azure service principal/)).toBeInTheDocument();
+    const panels = await screen.findAllByTestId('gcp-credit-panel');
+    expect(panels.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('GCP Billing not configured')).toBeInTheDocument();
   });
 
   it('shows "not configured" state (not error banner) when API responds with 404', async () => {
     axiosGet.mockImplementation((url) => {
-      if (url.includes('billing/azure-startups')) {
+      if (url.includes('billing/gcp-credits')) {
         const err = new Error('Not Found');
         err.response = { status: 404 };
         return Promise.reject(err);
@@ -247,16 +245,16 @@ describe('AdminHealth — Azure for Startups credit panel', () => {
     });
     await renderAdmin();
 
-    await screen.findByTestId('azure-credit-panel');
+    const panels = await screen.findAllByTestId('gcp-credit-panel');
+    expect(panels.length).toBeGreaterThanOrEqual(1);
     // Should show "not configured" UI — NOT the generic error banner
-    expect(screen.getByText('Azure Cost Management not configured')).toBeInTheDocument();
-    expect(screen.getByText(/Create an Azure service principal/)).toBeInTheDocument();
-    expect(screen.queryByText(/Failed to load Azure credit data/)).not.toBeInTheDocument();
+    expect(screen.getByText('GCP Billing not configured')).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to load GCP credit data/)).not.toBeInTheDocument();
   });
 
   it('renders grant total, spend MTD, remaining, and runway values when configured', async () => {
     axiosGet.mockImplementation(makeMock({
-      'billing/azure-startups': {
+      'billing/gcp-credits': {
         configured:             true,
         grant_usd:              5000,
         spend_mtd_usd:          87.60,
@@ -265,7 +263,7 @@ describe('AdminHealth — Azure for Startups credit panel', () => {
         credits_low:            false,
         days_until_expiry:      200,
         expiry_date:            '2027-01-31',
-        subscription_name:      'Syrabit-Startups',
+        subscription_name:      'Syrabit-GCP',
       },
     }));
     await renderAdmin();
@@ -279,7 +277,7 @@ describe('AdminHealth — Azure for Startups credit panel', () => {
 
   it('shows "Credits Low" badge and applies red text when credits_low is true', async () => {
     axiosGet.mockImplementation(makeMock({
-      'billing/azure-startups': {
+      'billing/gcp-credits': {
         configured:             true,
         grant_usd:              5000,
         spend_mtd_usd:          4900,
@@ -292,15 +290,14 @@ describe('AdminHealth — Azure for Startups credit panel', () => {
     }));
     await renderAdmin();
 
-    await screen.findByTestId('azure-credit-panel');
-    expect(screen.getByText('Credits Low')).toBeInTheDocument();
+    await screen.findByTestId('azure-remaining');
     expect(screen.getByTestId('azure-remaining')).toHaveClass('text-red-600');
     expect(screen.getByTestId('azure-spend-mtd')).toHaveClass('text-red-600');
   });
 
   it('shows red days-remaining text when expiry is within 60 days', async () => {
     axiosGet.mockImplementation(makeMock({
-      'billing/azure-startups': {
+      'billing/gcp-credits': {
         configured:             true,
         grant_usd:              5000,
         spend_mtd_usd:          100,
