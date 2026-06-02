@@ -221,21 +221,18 @@ async def chat(
                 )
 
             # 2b. Check response cache after rate limit enforcement.
-            # NOTE: Cache key is hash(message:lang) and intentionally ignores
-            # user/session identity. This is acceptable because cached responses
-            # are only stored when context_chunks is empty (no RAG context),
-            # meaning the response is generic and not personalized. If user-tier
-            # specific behavior diverges in the future, include user_tier in the key.
+            # NOTE: Cache key is hash(message:lang:user_tier) so free and pro
+            # users get separate cache entries when RAG results differ by tier.
             # HF-015: Only serve cached responses when no active conversation
             cached = None
             if not request.session_id:
                 message_hash = ChatService._make_cache_hash(
-                    sanitized_message, detected_lang
+                    sanitized_message, detected_lang, user_tier
                 )
                 cached = await ChatService.get_cached_response(message_hash)
             else:
                 message_hash = ChatService._make_cache_hash(
-                    sanitized_message, detected_lang
+                    sanitized_message, detected_lang, user_tier
                 )
             if cached:
                 latency_ms = int((time.time() - start_time) * 1000)
@@ -584,7 +581,15 @@ async def chat_stream(
     async def event_stream():
         full_response = ""
         actual_model = target_model
+        stream_start = time.time()
+        MAX_STREAM_DURATION = 60  # seconds
+        HEARTBEAT_INTERVAL = 15  # seconds
+        last_heartbeat = time.time()
 
+        # NOTE: The timeout check below fires between chunks only. If the upstream
+        # LLM connection stalls mid-chunk (never yields), this timeout will not
+        # trigger. In that scenario, the effective timeout is httpx's internal
+        # read timeout (configured via PROXY_TIMEOUT / connection pool settings).
         async for event in ChatService.stream_llm(
             system_prompt=system_prompt,
             sanitized_message=sanitized_message,
@@ -593,6 +598,21 @@ async def chat_stream(
             user_id=user_id,
             request_message=sanitized_message,
         ):
+            # Check stream timeout
+            elapsed = time.time() - stream_start
+            if elapsed > MAX_STREAM_DURATION:
+                logger.warning(
+                    f"Stream timeout after {elapsed:.1f}s for user {user_id}"
+                )
+                yield f"data: {json.dumps({'error': 'Stream timeout exceeded', 'done': True})}\n\n"
+                return
+
+            # Send heartbeat comment if no data sent recently
+            now = time.time()
+            if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                yield ": heartbeat\n\n"
+                last_heartbeat = now
+
             # Internal sentinel carries the full response and actual model.
             # Parse JSON structurally to avoid substring collision with user content.
             raw = event
@@ -610,6 +630,7 @@ async def chat_stream(
             except (json.JSONDecodeError, ValueError):
                 pass
             yield event
+            last_heartbeat = time.time()
 
         # -- Final event --
         latency_ms = int((time.time() - start_time) * 1000)

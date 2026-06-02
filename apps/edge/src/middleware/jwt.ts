@@ -25,7 +25,13 @@ interface JWTHeader {
   typ?: string;
 }
 
-/** Paths that do NOT require JWT authentication */
+/** Paths that do NOT require JWT authentication.
+ *
+ * IMPORTANT: This array must be kept in sync with the backend content router
+ * (apps/backend/app/api/v1/) when new endpoints are added. A new authenticated
+ * endpoint that is accidentally listed here will be publicly accessible without
+ * auth. Review both this file and the backend router together when adding routes.
+ */
 const PUBLIC_PATHS = [
   '/health',
   '/api/v1/auth/login',
@@ -36,7 +42,15 @@ const PUBLIC_PATHS = [
   '/api/v1/admin/login',
   '/api/v1/admin/logout',
   '/api/webhooks',
-  '/api/v1/content',
+  '/api/v1/content/public',
+  '/api/v1/content/boards',
+  '/api/v1/content/classes',
+  '/api/v1/content/streams',
+  '/api/v1/content/subjects',
+  '/api/v1/content/chapters',
+  '/api/v1/content/chunks',
+  '/api/v1/content/chapter-by-slug',
+  '/api/v1/content/topic',
 ];
 
 /**

@@ -31,7 +31,7 @@ def detect_language(text: str) -> str:
     # If >30% Assamese characters, consider it Assamese
     assamese_ratio = assamese_chars / total_chars
 
-    if assamese_ratio > 0.3 and assamese_chars >= 10:
+    if assamese_ratio > 0.3 and assamese_chars >= 3:
         return "as"
     return "en"
 

@@ -212,6 +212,13 @@ class Settings(BaseSettings):
                 )
                 self.startup_errors.append(msg)
                 logger.error(f"CONFIG ERROR: {msg}")
+            if self.ADMIN_JWT_SECRET and self.ADMIN_JWT_SECRET == self.JWT_SECRET:
+                msg = (
+                    "ADMIN_JWT_SECRET must not be the same as JWT_SECRET. "
+                    "Create a separate secret: openssl rand -base64 48"
+                )
+                self.startup_errors.append(msg)
+                logger.error(f"CONFIG ERROR: {msg}")
             if not self.RESET_TOKEN_SECRET:
                 logger.warning(
                     "RESET_TOKEN_SECRET is not set — reset tokens use the shared JWT_SECRET. "

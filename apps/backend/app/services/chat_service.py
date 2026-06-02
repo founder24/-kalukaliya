@@ -78,9 +78,11 @@ class ChatService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _make_cache_hash(sanitized_message: str, lang: str) -> str:
-        """Generate a cache key hash from message and language."""
-        cache_input = f"{sanitized_message}:{lang}"
+    def _make_cache_hash(
+        sanitized_message: str, lang: str, user_tier: str = "free"
+    ) -> str:
+        """Generate a cache key hash from message, language, and user tier."""
+        cache_input = f"{sanitized_message}:{lang}:{user_tier}"
         return hashlib.sha256(cache_input.encode()).hexdigest()
 
     @staticmethod
@@ -398,6 +400,16 @@ class ChatService:
                     await ChatService._invalidate_history_cache(session_id)
             except Exception as retry_err:
                 logger.error(f"Failed to save chat (attempt 2): {retry_err}")
+                # Log the lost message payload (truncated) for manual recovery
+                logger.error(
+                    "chat_message_lost",
+                    extra={
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "user_message_truncated": user_message[:200],
+                        "error": str(retry_err),
+                    },
+                )
                 # Store dead letter for later recovery
                 from app.services.dead_letter import store_dead_letter
 

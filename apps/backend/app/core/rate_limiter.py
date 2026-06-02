@@ -13,6 +13,18 @@ import warnings
 import time
 from typing import Tuple
 
+# Module-level deprecation warning: guarded to fire only once per process
+_deprecation_warned = False
+if not _deprecation_warned:
+    warnings.warn(
+        "app.core.rate_limiter is deprecated. Use app.api.deps.rate_limit for quota "
+        "enforcement and the edge worker for burst rate limiting. "
+        "This module will be removed in a future release.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    _deprecation_warned = True
+
 from upstash_redis.asyncio import Redis
 from app.config import settings
 

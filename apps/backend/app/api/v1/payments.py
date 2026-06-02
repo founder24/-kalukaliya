@@ -2,6 +2,7 @@
 Payments API - Razorpay integration for subscriptions and credit top-ups.
 """
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -64,13 +65,14 @@ async def create_order(
         auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
     )
     try:
-        order = client.order.create(
+        order = await asyncio.to_thread(
+            client.order.create,
             {
                 "amount": amount,
                 "currency": "INR",
                 "receipt": f"user_{user.id}_{body.plan}",
                 "notes": {"user_id": str(user.id), "plan": body.plan},
-            }
+            },
         )
     except Exception as e:
         logger.error(f"Razorpay order creation failed: {e}")
@@ -117,6 +119,17 @@ async def verify_payment(
             payment_amount = int(stored_amount)
     except Exception:
         pass
+
+    # Validate amount matches expected plan price
+    if payment_amount is not None:
+        plan_prices = {"pro": 29900, "premium": 59900}
+        expected_amounts = set(plan_prices.values())
+        if payment_amount not in expected_amounts:
+            logger.warning(
+                f"Payment amount mismatch: stored={payment_amount}, "
+                f"expected one of {expected_amounts}, order={body.razorpay_order_id}"
+            )
+            raise HTTPException(status_code=400, detail="Payment amount mismatch")
 
     await user.update(
         {
@@ -175,7 +188,8 @@ async def create_credit_topup(
         auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
     )
     try:
-        order = client.order.create(
+        order = await asyncio.to_thread(
+            client.order.create,
             {
                 "amount": amount,
                 "currency": "INR",
@@ -185,7 +199,7 @@ async def create_credit_topup(
                     "credits": str(body.credits),
                     "type": "credit_topup",
                 },
-            }
+            },
         )
     except Exception as e:
         logger.error(f"Razorpay credit topup order creation failed: {e}")
@@ -263,7 +277,7 @@ async def verify_credit_topup(
         client = razorpay.Client(
             auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
         )
-        order = client.order.fetch(body.razorpay_order_id)
+        order = await asyncio.to_thread(client.order.fetch, body.razorpay_order_id)
         credits = int(order.get("notes", {}).get("credits", 0))
 
     if credits <= 0:

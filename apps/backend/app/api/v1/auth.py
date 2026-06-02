@@ -286,7 +286,16 @@ async def get_current_user(
             raise
         except Exception as e:
             logger.error(f"Redis unavailable for token blacklist check: {e}")
-            pass  # Fail-open: JWT is still cryptographically valid
+            # Fail-closed for payment/subscription endpoints
+            req_path = str(request.url.path) if request else ""
+            if req_path.startswith("/api/v1/payments/") or req_path.startswith(
+                "/api/v1/credit-topup"
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Token validation service unavailable for payment operations",
+                )
+            # Fail-open for non-payment paths: JWT is still cryptographically valid
 
         user = await User.get(user_id)
         if not user:

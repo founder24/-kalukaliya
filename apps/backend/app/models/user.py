@@ -28,6 +28,7 @@ class User(Document):
         default_factory=lambda: datetime.now(timezone.utc)
     )
     total_lifetime_messages: int = 0
+    credits_remaining: int = 0
 
     # Profile
     name: Optional[str] = None

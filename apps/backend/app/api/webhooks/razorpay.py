@@ -15,6 +15,7 @@ router = APIRouter(tags=["Payments"])
 
 
 _RAZORPAY_SUBSCRIPTION_ID_RE = re.compile(r"^sub_[A-Za-z0-9_]+$")
+_RAZORPAY_ORDER_ID_RE = re.compile(r"^order_[A-Za-z0-9_]+$")
 
 
 def calculate_next_billing_date() -> datetime:
@@ -23,7 +24,12 @@ def calculate_next_billing_date() -> datetime:
 
 
 def _validate_subscription_id(value) -> str:
-    if not isinstance(value, str) or not _RAZORPAY_SUBSCRIPTION_ID_RE.fullmatch(value):
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail="Invalid subscription id")
+    if not (
+        _RAZORPAY_SUBSCRIPTION_ID_RE.fullmatch(value)
+        or _RAZORPAY_ORDER_ID_RE.fullmatch(value)
+    ):
         raise HTTPException(status_code=400, detail="Invalid subscription id")
     return value
 
@@ -105,6 +111,24 @@ async def handle_razorpay_webhook(request: Request):
 
         # Find User
         user = await User.find_one({"razorpay_subscription_id": sub_id})
+
+        # Fallback: try looking up by payment order_id if subscription lookup failed
+        if not user:
+            order_id = payload.get("payment", {}).get("order_id")
+            if order_id and _RAZORPAY_ORDER_ID_RE.fullmatch(order_id):
+                user = await User.find_one({"razorpay_subscription_id": order_id})
+                # Validate amount against user's plan tier before granting renewal
+                if user:
+                    expected_prices = {"pro": 29900, "premium": 59900}
+                    user_tier = getattr(user, "subscription_tier", "free")
+                    expected_amount = expected_prices.get(user_tier)
+                    if expected_amount and amount != expected_amount:
+                        logger.warning(
+                            f"Amount mismatch on order_id fallback: got {amount}, "
+                            f"expected {expected_amount} for tier '{user_tier}' "
+                            f"(user={user.email}, order_id={order_id})"
+                        )
+                        return {"status": "ignored", "reason": "amount_mismatch"}
 
         if not user:
             logger.error(f"User not found for sub {sub_id}")

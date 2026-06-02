@@ -126,6 +126,10 @@ async def create_indexes() -> None:
     await db.chats.create_index([("user_id", ASCENDING), ("updated_at", DESCENDING)])
     await db.chats.create_index([("session_id", ASCENDING)])
     await db.chats.create_index([("updated_at", DESCENDING)])
+    # TTL index: auto-delete chats older than 90 days
+    await db.chats.create_index(
+        [("created_at", ASCENDING)], expireAfterSeconds=90 * 24 * 60 * 60
+    )
 
     # Dead letters collection indexes
     await db.dead_letters.create_index(
@@ -160,6 +164,9 @@ async def create_indexes() -> None:
         ]
     )
     await db.question_papers.create_index([("status", ASCENDING)])
+
+    # Topic embeddings index for efficient lookup by topic_id
+    await db.topic_embeddings.create_index([("topic_id", ASCENDING)])
 
     logger.info("MongoDB indexes created/verified")
 

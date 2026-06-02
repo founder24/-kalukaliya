@@ -71,6 +71,19 @@ def sanitize_user_input(text: str) -> str:
         r"Human:",
         r"Assistant:",
         r"<<SYS>>",
+        # DAN/jailbreak variants
+        r"Do Anything Now",
+        r"DAN mode",
+        r"jailbreak",
+        r"(?:enter|activate|enable) developer mode",
+        r"Act as if you",
+        r"Pretend you are",
+        r"From now on you",
+        # HTML/script injection attempts
+        r"<script",
+        r"javascript:",
+        r"onerror\s*=",
+        r"onload\s*=",
     ]
 
     for pattern in injection_patterns:
