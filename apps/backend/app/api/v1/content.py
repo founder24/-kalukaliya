@@ -230,7 +230,13 @@ async def list_chapters(
 async def get_by_slug(slug: str):
     """Get a published knowledge object by slug (excludes derivatives and page_views)."""
     _validate_path_params(slug=slug)
-    obj = await KnowledgeObject.find_one({"slug": slug, "status": "published"})
+    try:
+        obj = await KnowledgeObject.find_one({"slug": slug, "status": "published"})
+    except Exception as e:
+        if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
+            raise HTTPException(status_code=503, detail="Database service unavailable")
+        logger.error(f"get_by_slug DB error: {e}")
+        raise HTTPException(status_code=503, detail="Database error")
     if not obj:
         raise HTTPException(status_code=404, detail="Content not found")
 

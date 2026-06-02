@@ -131,11 +131,13 @@ async def admin_login(request: Request):
     await _csrf_check(request)
     try:
         await _check_rate_limit(request, "admin_login", 5)
-    except HTTPException:
-        raise  # Re-raise 429 (rate limit) or 503 (Redis unavailable)
+    except HTTPException as e:
+        if e.status_code == 429:
+            raise  # Real rate limit — enforce it
+        # Redis unavailable (503) — fail-open so admins aren't locked out
+        logger.warning(f"Admin rate-limit unavailable (fail-open): {e.detail}")
     except Exception as e:
-        logger.warning(f"Admin rate-limit check failed (Redis unavailable): {e}")
-        raise HTTPException(status_code=503, detail="Rate limiting service unavailable")
+        logger.warning(f"Admin rate-limit check failed (fail-open): {e}")
 
     body = await request.json()
     email = body.get("email")

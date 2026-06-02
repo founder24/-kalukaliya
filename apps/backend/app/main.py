@@ -22,6 +22,7 @@ from app.api.v1 import (
     admin,
     edu,
     conversations,
+    analytics,
 )
 from app.api.v1 import (
     admin_dashboard,
@@ -334,6 +335,9 @@ def create_app() -> FastAPI:
         admin_security.router, prefix="/api/v1/admin", tags=["Admin Security"]
     )
     app.include_router(users.router, prefix="/api/v1/user", tags=["Users"])
+    app.include_router(
+        analytics.router, prefix="/api/v1/analytics", tags=["Analytics"]
+    )
 
     # CORS middleware — added last so it becomes the outermost layer and
     # handles OPTIONS preflight before any other middleware runs.

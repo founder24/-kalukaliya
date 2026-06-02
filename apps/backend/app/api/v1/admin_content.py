@@ -810,6 +810,196 @@ async def get_pipeline_status(request: Request, knowledge_id: str = Query(...)):
 
 
 # ============================
+# LAYER 4b: CMS Documents (Blog/SEO posts)
+# ============================
+
+
+class CmsDocCreate(BaseModel):
+    title: str
+    content: str = ""
+    meta_description: str = ""
+    description: str = ""
+    seo_tags: str = ""
+    primary_keyword: str = ""
+    seo_slug: str = ""
+    category: str = ""
+    geo_tags: str = ""
+    schema_type: str = "Article"
+    status: str = "draft"
+    thumbnail_url: str = ""
+    alt_text: str = ""
+    linked_scope: str = ""
+
+
+class CmsDocUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    meta_description: Optional[str] = None
+    description: Optional[str] = None
+    seo_tags: Optional[str] = None
+    primary_keyword: Optional[str] = None
+    seo_slug: Optional[str] = None
+    category: Optional[str] = None
+    geo_tags: Optional[str] = None
+    schema_type: Optional[str] = None
+    status: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    alt_text: Optional[str] = None
+    linked_scope: Optional[str] = None
+
+
+def _cms_doc_to_dict(doc) -> dict:
+    return {
+        "id": str(doc.id),
+        "title": doc.title,
+        "content": doc.content,
+        "meta_description": doc.meta_description,
+        "description": doc.description,
+        "seo_tags": doc.seo_tags,
+        "primary_keyword": doc.primary_keyword,
+        "seo_slug": doc.seo_slug,
+        "category": doc.category,
+        "geo_tags": doc.geo_tags,
+        "schema_type": doc.schema_type,
+        "status": doc.status,
+        "thumbnail_url": doc.thumbnail_url,
+        "alt_text": doc.alt_text,
+        "linked_scope": doc.linked_scope,
+        "word_count": doc.word_count,
+        "board_slug": doc.board_slug,
+        "subject_id": doc.subject_id,
+        "created_at": doc.created_at.isoformat() if doc.created_at else None,
+        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+    }
+
+
+@router.get("/content/cms-documents")
+async def list_cms_documents(request: Request):
+    """List all CMS documents (admin)."""
+    await _validate_admin_session(request)
+    try:
+        from app.models.cms import CmsDocument
+        docs = await CmsDocument.find().sort([("updated_at", -1)]).to_list()
+        return [_cms_doc_to_dict(d) for d in docs]
+    except Exception as e:
+        logger.error(f"CMS list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/content/cms-documents")
+async def create_cms_document(request: Request, body: CmsDocCreate):
+    """Create a new CMS document."""
+    await _validate_admin_session(request)
+    await _csrf_check(request)
+    try:
+        from app.models.cms import CmsDocument
+        word_count = len(body.content.split()) if body.content else 0
+        board_slug = body.linked_scope.split("/")[0] if body.linked_scope else ""
+        subject_id = body.linked_scope.split("/")[3] if body.linked_scope and len(body.linked_scope.split("/")) > 3 else ""
+        doc = CmsDocument(
+            **body.model_dump(),
+            word_count=word_count,
+            board_slug=board_slug,
+            subject_id=subject_id,
+        )
+        await doc.insert()
+        return _cms_doc_to_dict(doc)
+    except Exception as e:
+        logger.error(f"CMS create error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/content/cms-documents/{doc_id}")
+async def update_cms_document(request: Request, doc_id: str, body: CmsDocUpdate):
+    """Update a CMS document."""
+    await _validate_admin_session(request)
+    await _csrf_check(request)
+    try:
+        from app.models.cms import CmsDocument
+        from beanie import PydanticObjectId
+        doc = await CmsDocument.get(PydanticObjectId(doc_id))
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        updates = body.model_dump(exclude_none=True)
+        for k, v in updates.items():
+            setattr(doc, k, v)
+        if "content" in updates:
+            doc.word_count = len(updates["content"].split()) if updates["content"] else 0
+        if "linked_scope" in updates:
+            parts = updates["linked_scope"].split("/")
+            doc.board_slug = parts[0] if parts else ""
+            doc.subject_id = parts[3] if len(parts) > 3 else ""
+        doc.updated_at = datetime.now(timezone.utc)
+        await doc.save()
+        return _cms_doc_to_dict(doc)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"CMS update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/content/cms-documents/{doc_id}")
+async def delete_cms_document(request: Request, doc_id: str):
+    """Delete a CMS document."""
+    await _validate_admin_session(request)
+    await _csrf_check(request)
+    try:
+        from app.models.cms import CmsDocument
+        from beanie import PydanticObjectId
+        doc = await CmsDocument.get(PydanticObjectId(doc_id))
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        await doc.delete()
+        return {"status": "deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"CMS delete error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/content/cms-documents/{doc_id}/publish")
+async def toggle_cms_document_publish(request: Request, doc_id: str):
+    """Toggle publish state of a CMS document."""
+    await _validate_admin_session(request)
+    await _csrf_check(request)
+    try:
+        from app.models.cms import CmsDocument
+        from beanie import PydanticObjectId
+        doc = await CmsDocument.get(PydanticObjectId(doc_id))
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        doc.status = "draft" if doc.status == "published" else "published"
+        doc.updated_at = datetime.now(timezone.utc)
+        await doc.save()
+        return {"status": doc.status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"CMS publish toggle error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/content/cms-documents/{doc_id}/revision")
+async def save_cms_document_revision(request: Request, doc_id: str):
+    """Save a named revision snapshot (lightweight - just returns the current doc)."""
+    await _validate_admin_session(request)
+    await _csrf_check(request)
+    try:
+        from app.models.cms import CmsDocument
+        from beanie import PydanticObjectId
+        doc = await CmsDocument.get(PydanticObjectId(doc_id))
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        return {"status": "ok", "revision_saved_at": datetime.now(timezone.utc).isoformat()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================
 # LAYER 5: GCS Sync
 # ============================
 

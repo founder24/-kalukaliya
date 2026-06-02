@@ -685,3 +685,49 @@ async def get_question_papers(
         }
         for paper in papers
     ]
+
+
+@router.get("/cms/posts")
+async def get_cms_posts(
+    response: Response,
+    limit: int = Query(12, ge=1, le=50),
+    skip: int = Query(0, ge=0),
+    board: Optional[str] = Query(None),
+    class_slug: Optional[str] = Query(None),
+):
+    """
+    Public paginated listing of published CMS blog posts.
+    Used by the library page CmsPostsGrid component.
+    """
+    response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
+    try:
+        from app.models.cms import CmsDocument
+        query: dict = {"status": "published"}
+        if board:
+            query["board_slug"] = board
+        total = await CmsDocument.find(query).count()
+        docs = (
+            await CmsDocument.find(query)
+            .sort([("updated_at", -1)])
+            .skip(skip)
+            .limit(limit)
+            .to_list()
+        )
+        items = [
+            {
+                "id": str(d.id),
+                "title": d.title,
+                "word_count": d.word_count,
+                "board_slug": d.board_slug,
+                "subject_id": d.subject_id,
+                "seo_slug": d.seo_slug,
+                "meta_description": d.meta_description,
+                "thumbnail_url": d.thumbnail_url,
+                "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+            }
+            for d in docs
+        ]
+        return {"items": items, "total": total}
+    except Exception as e:
+        logger.warning(f"CMS posts query failed (DB may not be ready): {e}")
+        return {"items": [], "total": 0}
