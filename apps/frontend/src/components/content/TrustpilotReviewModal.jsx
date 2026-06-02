@@ -11,7 +11,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { X, Copy, Check, ExternalLink, Loader2 } from 'lucide-react';
 import { buildReviewScript } from '@/utils/trustpilotReviewScript';
-import { generateTrustpilotInvitationLink } from '@/utils/api';
 
 const FALLBACK_URL = 'https://www.trustpilot.com/review/syrabit.ai';
 
@@ -39,26 +38,8 @@ export default function TrustpilotReviewModal({
     setText(script);
     setCopied(false);
     setUrlError(null);
-
-    let cancelled = false;
-    setLoadingUrl(true);
+    setLoadingUrl(false);
     setInviteUrl(FALLBACK_URL);
-    generateTrustpilotInvitationLink()
-      .then((url) => {
-        if (!cancelled) {
-          setInviteUrl(url || FALLBACK_URL);
-          setUrlError(null);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setInviteUrl(FALLBACK_URL);
-          setUrlError(err?.response?.status === 401 ? 'auth' : 'api');
-        }
-      })
-      .finally(() => { if (!cancelled) setLoadingUrl(false); });
-
-    return () => { cancelled = true; };
   }, [open, subjectName, boardName, className]);
 
   useEffect(() => {

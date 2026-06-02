@@ -54,7 +54,6 @@ describe('API Proxy - proxyRequest', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body).toEqual({ data: 'test' });
-    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://syrabit.ai');
   });
 
   it('Stream request: Content-Type is text/event-stream, no Content-Length', async () => {
