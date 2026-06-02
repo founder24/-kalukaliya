@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Create comprehensive integration test file tests/test_pr358_chat_audit.py that audits the chat pipeline for PR 358: English mode, Assamese mode, RAG fallback, response speed, and lang field override behavior.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create apps/backend/tests/test_pr358_chat_audit.py with the following test classes/functions:",
     "",
@@ -51,5 +51,5 @@
     "cd apps/backend && eval \"$(pyenv init -)\" && pyenv shell 3.11.15 && python -m pytest tests/test_pr358_chat_audit.py -v --tb=short"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 17 tests pass in 1.09s. The async generator fallback test required using 'raise RuntimeError' before a 'yield' statement (unreachable but needed for Python to recognize the function as an async generator). The test file uses a shared _common_patches() helper to reduce repetition across the 5 test classes."
 }
