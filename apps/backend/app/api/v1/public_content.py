@@ -325,6 +325,255 @@ async def resolve_subject(
     }
 
 
+@router.get("/chapter-by-slug/{board}/{class_slug}/{subject_slug}/{chapter_slug}")
+async def get_chapter_by_slug(
+    board: str,
+    class_slug: str,
+    subject_slug: str,
+    chapter_slug: str,
+    response: Response,
+):
+    """
+    Resolve a chapter from URL slugs and return its full content payload.
+
+    Used by ChapterPage for direct-URL loads and prerendering.
+    URL pattern: /{board}/{classSlug}/{subjectSlug}/{chapterSlug}
+    No authentication required - chapter pages are publicly accessible.
+
+    Returns the chapter with breadcrumb context (board, class, stream, subject names/slugs),
+    content fields, and metadata for SEO/AEO structured data generation.
+    """
+    return await _resolve_chapter_by_slug(
+        board, class_slug, None, subject_slug, chapter_slug, response, use_slug_as=False
+    )
+
+
+@router.get("/chapter-by-slug/{board}/{class_slug}/{stream_slug}/{subject_slug}/{chapter_slug}")
+async def get_chapter_by_slug_with_stream(
+    board: str,
+    class_slug: str,
+    stream_slug: str,
+    subject_slug: str,
+    chapter_slug: str,
+    response: Response,
+):
+    """
+    Resolve a chapter from URL slugs including an explicit stream segment.
+
+    URL pattern: /{board}/{classSlug}/{streamSlug}/{subjectSlug}/{chapterSlug}
+    No authentication required.
+    """
+    return await _resolve_chapter_by_slug(
+        board, class_slug, stream_slug, subject_slug, chapter_slug, response, use_slug_as=False
+    )
+
+
+@router.get("/chapter-by-slug-as/{board}/{class_slug}/{subject_slug}/{chapter_slug}")
+async def get_chapter_by_slug_as(
+    board: str,
+    class_slug: str,
+    subject_slug: str,
+    chapter_slug: str,
+    response: Response,
+):
+    """
+    Resolve a chapter using Assamese slug (slug_as) with English slug fallback.
+
+    Used on /as/* routes where the URL may contain a translated Assamese slug.
+    No authentication required.
+    """
+    return await _resolve_chapter_by_slug(
+        board, class_slug, None, subject_slug, chapter_slug, response, use_slug_as=True
+    )
+
+
+@router.get("/chapter-by-slug-as/{board}/{class_slug}/{stream_slug}/{subject_slug}/{chapter_slug}")
+async def get_chapter_by_slug_as_with_stream(
+    board: str,
+    class_slug: str,
+    stream_slug: str,
+    subject_slug: str,
+    chapter_slug: str,
+    response: Response,
+):
+    """
+    Resolve a chapter using Assamese slug with stream segment.
+
+    Used on /as/* routes with explicit stream in the URL.
+    No authentication required.
+    """
+    return await _resolve_chapter_by_slug(
+        board, class_slug, stream_slug, subject_slug, chapter_slug, response, use_slug_as=True
+    )
+
+
+async def _resolve_chapter_by_slug(
+    board: str,
+    class_slug: str,
+    stream_slug: Optional[str],
+    subject_slug: str,
+    chapter_slug: str,
+    response: Response,
+    use_slug_as: bool = False,
+) -> dict:
+    """
+    Internal resolver for chapter-by-slug endpoints.
+
+    Resolution order:
+    1. Board by slug field
+    2. Class by _slugify(class.name) within that board
+    3. Stream by _slugify(stream.name) if stream_slug provided, else all streams
+    4. Subject by subject.slug or _slugify(subject.name) within resolved streams
+    5. Chapter by chapter.slug (and slug_as when use_slug_as=True) within subject
+    """
+    response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
+
+    # 1. Resolve board
+    board_doc = await Board.find_one({"slug": board, "status": "active"})
+    if not board_doc:
+        all_boards = await Board.find({"status": "active"}).to_list()
+        board_doc = next(
+            (b for b in all_boards if _slugify(b.name) == board or b.slug == board),
+            None,
+        )
+    if not board_doc:
+        raise HTTPException(status_code=404, detail=f"Board '{board}' not found")
+
+    # 2. Resolve class
+    classes = await Class.find({"board_id": board_doc.id, "status": "active"}).to_list()
+    matching_class = next(
+        (c for c in classes if _slugify(c.name) == class_slug),
+        None,
+    )
+    if not matching_class:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Class '{class_slug}' not found under board '{board}'",
+        )
+
+    # 3. Resolve streams
+    streams = await Stream.find(
+        {"class_id": matching_class.id, "status": "active"}
+    ).to_list()
+    if not streams:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No streams found for class '{class_slug}'",
+        )
+
+    if stream_slug:
+        target_streams = [s for s in streams if _slugify(s.name) == stream_slug]
+        if not target_streams:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Stream '{stream_slug}' not found under '{board}/{class_slug}'",
+            )
+    else:
+        target_streams = streams
+
+    # 4. Resolve subject
+    stream_id_list = [s.id for s in target_streams]
+    candidates = await Subject.find(
+        {"stream_id": {"$in": stream_id_list}, "status": "active"}
+    ).to_list()
+
+    subject_doc = next(
+        (s for s in candidates if (s.slug or _slugify(s.name)) == subject_slug),
+        None,
+    )
+    if not subject_doc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Subject '{subject_slug}' not found under '{board}/{class_slug}'",
+        )
+
+    # 5. Resolve chapter
+    chapters = await Chapter.find({"subject_id": subject_doc.id}).sort("+chapter_number").to_list()
+
+    chapter_doc = None
+    for ch in chapters:
+        if ch.slug == chapter_slug:
+            chapter_doc = ch
+            break
+        # For Assamese resolver, also check slug_as field if it exists
+        if use_slug_as and getattr(ch, "slug_as", None) == chapter_slug:
+            chapter_doc = ch
+            break
+
+    if not chapter_doc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Chapter '{chapter_slug}' not found under '{board}/{class_slug}/{subject_slug}'",
+        )
+
+    # Determine the stream that owns this subject
+    stream_doc = next((s for s in target_streams if s.id == subject_doc.stream_id), None)
+
+    # Build topic_title from first published topic or chapter title
+    topic_title = chapter_doc.title
+    if chapter_doc.published_topics:
+        topic_title = chapter_doc.published_topics[0].title
+
+    # Build content (frontend expects "content" key for English)
+    content_en = chapter_doc.content_en or ""
+    content_as = chapter_doc.content_as or ""
+    has_assamese = bool(content_as)
+
+    # Compute prev/next chapters for navigation
+    chapter_idx = next(
+        (i for i, ch in enumerate(chapters) if ch.id == chapter_doc.id), None
+    )
+    prev_chapter = None
+    next_chapter = None
+    if chapter_idx is not None:
+        if chapter_idx > 0:
+            prev_ch = chapters[chapter_idx - 1]
+            prev_chapter = {
+                "chapter_id": str(prev_ch.id),
+                "title": prev_ch.title,
+                "slug": prev_ch.slug,
+                "chapter_number": prev_ch.chapter_number,
+            }
+        if chapter_idx < len(chapters) - 1:
+            next_ch = chapters[chapter_idx + 1]
+            next_chapter = {
+                "chapter_id": str(next_ch.id),
+                "title": next_ch.title,
+                "slug": next_ch.slug,
+                "chapter_number": next_ch.chapter_number,
+            }
+
+    return {
+        "chapter_id": str(chapter_doc.id),
+        "title": chapter_doc.title,
+        "chapter_title": chapter_doc.title,
+        "chapter_slug": chapter_doc.slug,
+        "topic_title": topic_title,
+        "subject_name": subject_doc.name,
+        "subject_slug": subject_doc.slug or _slugify(subject_doc.name),
+        "board_name": board_doc.name,
+        "board_slug": board_doc.slug,
+        "class_name": matching_class.name,
+        "class_slug": _slugify(matching_class.name),
+        "stream_name": stream_doc.name if stream_doc else "",
+        "stream_slug": _slugify(stream_doc.name) if stream_doc else "",
+        "content": content_en,
+        "content_as": content_as,
+        "content_type": "chapter",
+        "has_assamese": has_assamese,
+        "meta_description": chapter_doc.meta_description or "",
+        "word_count": chapter_doc.word_count or len(content_en.split()) if content_en else 0,
+        "notes_generated": chapter_doc.notes_generated or bool(content_en or content_as),
+        "chapter_number": chapter_doc.chapter_number,
+        "topics": [t.model_dump() for t in chapter_doc.published_topics] if chapter_doc.published_topics else [],
+        "faq_jsonld": chapter_doc.faq_jsonld or [],
+        "prev_chapter": prev_chapter,
+        "next_chapter": next_chapter,
+        "generated_at": chapter_doc.created_at.isoformat() if chapter_doc.created_at else None,
+        "updated_at": chapter_doc.updated_at.isoformat() if chapter_doc.updated_at else None,
+    }
+
+
 @router.get("/chapters/{chapter_id}/faq-jsonld")
 async def get_faq_jsonld(chapter_id: str):
     """Get FAQ JSON-LD structured data for a chapter (no auth required)."""
