@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix JWT error handling in get_current_user and refresh_token_endpoint to return proper HTTP 401 responses instead of propagating unhandled exceptions as 500 Internal Server Errors",
+  "status": "completed",
+  "steps": [
+    "In apps/backend/app/api/v1/auth.py, in the get_current_user function (around line 310-313), change the final catch-all except clause from a bare 'raise' to raise HTTPException(status_code=401, detail='Not authenticated'). The current code is: 'except Exception as e: if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized): raise HTTPException(status_code=503, detail=\"Database service unavailable\") logger.error(f\"Unexpected database error: {e}\") raise'. The bare 'raise' must become 'raise HTTPException(status_code=401, detail=\"Not authenticated\")'.",
+    "In apps/backend/app/api/v1/auth.py, in the refresh_token_endpoint function (around line 636-711), add a catch-all except clause after the 'except InvalidTokenError' handler. Currently the function's try block only catches HTTPException and InvalidTokenError. Add: 'except Exception as e: if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized): raise HTTPException(status_code=503, detail=\"Database service unavailable\") logger.error(f\"Unexpected error during token refresh: {e}\") raise HTTPException(status_code=401, detail=\"Invalid or expired refresh token\")'. This ensures RuntimeError from _get_verification_key() or DB errors are converted to 401.",
+    "Add a test in apps/backend/tests/test_auth.py: test_protected_endpoint_with_invalid_token - sends GET /api/v1/users/me with 'Authorization: Bearer invalid.jwt.token' header and asserts response.status_code == 401 and response.json()['detail'] is a valid error message (not Internal Server Error).",
+    "Add a test in apps/backend/tests/test_auth.py: test_refresh_with_malformed_token - sends POST /api/v1/auth/refresh with body {'refresh_token': 'completely.invalid.token'} and asserts response.status_code == 401.",
+    "Add a test in apps/backend/tests/test_auth.py: test_subscription_create_order_with_invalid_token - sends POST /api/v1/subscription/create-order with 'Authorization: Bearer bad.token.here' header and asserts response.status_code == 401.",
+    "Ensure the existing tests in test_auth.py still pass (test_refresh_token_invalid, test_protected_endpoint_without_token, etc.)."
+  ],
+  "acceptance_criteria": [
+    "GET /api/v1/users/me with an invalid Bearer token returns 401 with JSON body containing 'detail' field (not 500)",
+    "POST /api/v1/auth/refresh with an invalid refresh_token returns 401 with JSON body (not 500)",
+    "POST /api/v1/subscription/create-order with an invalid Bearer token returns 401 with JSON body (not 500)",
+    "All existing tests in test_auth.py continue to pass",
+    "No bare 'raise' of non-HTTP exceptions in get_current_user or refresh_token_endpoint"
+  ],
+  "verification": [
+    "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_auth.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": "All 9 tests pass (6 pre-existing + 3 new). Dependencies needed: sentry-sdk, posthog, google-cloud-aiplatform, google-cloud-discoveryengine, google-cloud-storage, jinja2, markdown, numpy, razorpay, resend, tenacity, upstash-redis, email-validator, python-dateutil, aiohttp, gunicorn (beyond the basic fastapi/pyjwt/httpx/beanie stack). The pinned requirements.txt has a broken aiohappyeyeballs==2.6.2 pin so must install from requirements.in list directly."
+}

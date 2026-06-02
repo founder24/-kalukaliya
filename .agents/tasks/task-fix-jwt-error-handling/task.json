@@ -1,0 +1,14 @@
+{
+  "task_id": "task-fix-jwt-error-handling",
+  "task_description": "Fix critical JWT error handling in the backend so that invalid tokens return proper HTTP 401 JSON responses instead of 500 Internal Server Errors. Affects get_current_user dependency and refresh_token_endpoint.",
+  "status": "completed",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "All 11 auth tests pass (6 existing + 5 new). Semantic review passed after addressing feedback (RuntimeError->503 handling, corrected log message, added test coverage for misconfiguration path)."
+  }
+}

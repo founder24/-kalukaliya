@@ -307,11 +307,16 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="token_expired")
     except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+    except RuntimeError as e:
+        logger.error(f"Authentication service configuration error: {e}")
+        raise HTTPException(
+            status_code=503, detail="Authentication service misconfigured"
+        )
     except Exception as e:
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
             raise HTTPException(status_code=503, detail="Database service unavailable")
-        logger.error(f"Unexpected database error: {e}")
-        raise
+        logger.error(f"Unexpected error in authentication: {e}")
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
 
 async def get_current_user_optional(
@@ -714,6 +719,16 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         raise
     except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+    except RuntimeError as e:
+        logger.error(f"Authentication service configuration error: {e}")
+        raise HTTPException(
+            status_code=503, detail="Authentication service misconfigured"
+        )
+    except Exception as e:
+        if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
+            raise HTTPException(status_code=503, detail="Database service unavailable")
+        logger.error(f"Unexpected error during token refresh: {e}")
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
 
 @router.post("/logout", response_model=MessageResponse)

@@ -60,6 +60,9 @@ def set_webhook_secret():
     from app.config import settings
 
     original = settings.RAZORPAY_WEBHOOK_SECRET
+    original_env = settings.APP_ENV
     settings.RAZORPAY_WEBHOOK_SECRET = "test_webhook_secret"
+    settings.APP_ENV = "test"
     yield
     settings.RAZORPAY_WEBHOOK_SECRET = original
+    settings.APP_ENV = original_env
