@@ -3,6 +3,16 @@ name: Syrabit dev environment issues
 description: Root causes and fixes for library/auth/chat not working in Replit dev and production
 ---
 
+## Rule 17: Thumbnail URLs must be relative `/assets/...` paths, NOT absolute edge.syrabit.ai URLs
+`thumbnail_url` stored in MongoDB subjects must use relative paths (`/assets/og/chemistry.png`), not
+absolute `https://edge.syrabit.ai/assets/og/chemistry.png`. In dev, Vite proxies `/assets/*` to
+`https://api.syrabit.ai` with `headers: {origin:'https://syrabit.ai', referer:'https://syrabit.ai/'}`
+(required — the worker checks Origin and 403s without it). In production, `edge.syrabit.ai` serves
+`/assets/*` natively. `api.syrabit.ai` also resolves fine from Replit sandbox (unlike edge.syrabit.ai).
+The chapter URL API path is `/api/v1/content/chapter-by-slug/{boardSlug}/{classSlug}/{subjectSlug}/{chapterSlug}`
+(router prefix is `/api/v1/content`, NOT `/api/v1/public`). Chapter slugs are computed slugs from
+the title, e.g. "Introduction to Economics" → `introduction-to-economics`.
+
 ## Rule 16: BACKEND_PROXY_URL must use api.syrabit.ai (NOT edge.syrabit.ai) in Replit dev
 `edge.syrabit.ai` DNS does not resolve from Replit's sandbox container (ENOTFOUND).
 `api.syrabit.ai` resolves fine and returns HTTP 200. Set `BACKEND_PROXY_URL=https://api.syrabit.ai`

@@ -647,6 +647,11 @@ export default defineConfig(({ mode }) => ({
       '/health': { target: BACKEND_TARGET, changeOrigin: true },
       '/docs': { target: BACKEND_TARGET, changeOrigin: true },
       '/openapi.json': { target: BACKEND_TARGET, changeOrigin: true },
+      '/assets': {
+        target: 'https://api.syrabit.ai',
+        changeOrigin: true,
+        headers: { origin: 'https://syrabit.ai', referer: 'https://syrabit.ai/' },
+      },
     },
   },
 
