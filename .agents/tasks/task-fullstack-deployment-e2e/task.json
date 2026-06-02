@@ -1,0 +1,7 @@
+{
+  "task_id": "task-fullstack-deployment-e2e",
+  "task_description": "Create comprehensive end-to-end integration tests that verify the full deployment flow after PR 356: MongoDB content renders on the library page, chat pipeline works with auth headers, and auth flow completes correctly.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}
