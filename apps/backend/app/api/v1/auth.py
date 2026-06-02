@@ -309,7 +309,9 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid token")
     except RuntimeError as e:
         logger.error(f"Authentication service configuration error: {e}")
-        raise HTTPException(status_code=503, detail="Authentication service misconfigured")
+        raise HTTPException(
+            status_code=503, detail="Authentication service misconfigured"
+        )
     except Exception as e:
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
             raise HTTPException(status_code=503, detail="Database service unavailable")
@@ -715,7 +717,9 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     except RuntimeError as e:
         logger.error(f"Authentication service configuration error: {e}")
-        raise HTTPException(status_code=503, detail="Authentication service misconfigured")
+        raise HTTPException(
+            status_code=503, detail="Authentication service misconfigured"
+        )
     except Exception as e:
         if CollectionWasNotInitialized and isinstance(e, CollectionWasNotInitialized):
             raise HTTPException(status_code=503, detail="Database service unavailable")
