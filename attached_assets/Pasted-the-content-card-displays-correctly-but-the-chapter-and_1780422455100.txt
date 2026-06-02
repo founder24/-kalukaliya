@@ -1,0 +1,200 @@
+the content card displays correctly but the chapter and chapter notes are  missing even chapter url is also missing ,  i want you to seed each chapter with topic wise notes , acess the mongodb url to seed data AHSEC / ASSEB Division-II
+└── Arts
+└── Class 11 (HS First Year)
+└── Economics
+
+```
+        ├── PART A : INTRODUCTORY MICROECONOMICS
+        │
+        │   ├── UNIT I : Introduction
+        │   │
+        │   │   └── Introduction
+        │   │       ├── What is Economics
+        │   │       ├── Microeconomics
+        │   │       ├── Macroeconomics
+        │   │       ├── Positive Economics
+        │   │       ├── Normative Economics
+        │   │       ├── Central Problems of an Economy
+        │   │       ├── What is an Economy
+        │   │       ├── Production Possibility Frontier (PPF)
+        │   │       └── Opportunity Cost
+        │   │
+        │   ├── UNIT II : Consumer's Equilibrium and Demand
+        │   │
+        │   │   ├── Consumer's Equilibrium
+        │   │   │   ├── Utility
+        │   │   │   ├── Total Utility
+        │   │   │   ├── Marginal Utility
+        │   │   │   ├── Law of Diminishing Marginal Utility
+        │   │   │   └── Consumer's Equilibrium
+        │   │   │
+        │   │   ├── Consumer's Equilibrium using Indifference Curve
+        │   │   │   ├── Indifference Curve
+        │   │   │   ├── Indifference Map
+        │   │   │   ├── Budget Set
+        │   │   │   ├── Budget Line
+        │   │   │   └── Conditions of Consumer's Equilibrium
+        │   │   │
+        │   │   └── Demand
+        │   │       ├── Meaning of Demand
+        │   │       ├── Law of Demand
+        │   │       ├── Demand Curve
+        │   │       ├── Derivation of Demand Curve
+        │   │       ├── Budget Constraints
+        │   │       ├── Normal Goods
+        │   │       ├── Inferior Goods
+        │   │       ├── Giffen Goods
+        │   │       ├── Market Demand
+        │   │       ├── Movement Along Demand Curve
+        │   │       ├── Shift in Demand Curve
+        │   │       ├── Price Elasticity of Demand
+        │   │       ├── Measurement of Elasticity
+        │   │       ├── Percentage Method
+        │   │       ├── Geometric Method
+        │   │       ├── Factors Affecting Elasticity
+        │   │       └── Elasticity and Expenditure
+        │   │
+        │   ├── UNIT III : Producer Behaviour and Supply
+        │   │
+        │   │   ├── Production
+        │   │   │   ├── Meaning of Production
+        │   │   │   ├── Production Function
+        │   │   │   ├── Short Run
+        │   │   │   ├── Long Run
+        │   │   │   ├── Total Product
+        │   │   │   ├── Average Product
+        │   │   │   ├── Marginal Product
+        │   │   │   ├── Returns to Scale
+        │   │   │   ├── Law of Diminishing Marginal Product
+        │   │   │   └── Law of Variable Proportions
+        │   │   │
+        │   │   ├── Cost
+        │   │   │   ├── Short Run Cost
+        │   │   │   ├── Long Run Cost
+        │   │   │   ├── Total Cost
+        │   │   │   ├── Total Fixed Cost
+        │   │   │   ├── Total Variable Cost
+        │   │   │   ├── Average Cost
+        │   │   │   ├── Average Fixed Cost
+        │   │   │   ├── Average Variable Cost
+        │   │   │   ├── Marginal Cost
+        │   │   │   └── Cost Relationships
+        │   │   │
+        │   │   ├── Revenue
+        │   │   │   ├── Total Revenue
+        │   │   │   ├── Average Revenue
+        │   │   │   ├── Marginal Revenue
+        │   │   │   └── Revenue Relationships
+        │   │   │
+        │   │   ├── Profit Maximisation
+        │   │   │   └── Conditions of Profit Maximisation
+        │   │   │
+        │   │   └── Supply
+        │   │       ├── Meaning of Supply
+        │   │       ├── Determinants of Supply
+        │   │       ├── Law of Supply
+        │   │       ├── Supply Schedule
+        │   │       ├── Short Run Supply Curve
+        │   │       ├── Long Run Supply Curve
+        │   │       ├── Market Supply
+        │   │       ├── Price Elasticity of Supply
+        │   │       └── Measurement of Elasticity of Supply
+        │   │
+        │   └── UNIT IV : Market Equilibrium
+        │       │
+        │       ├── Market Equilibrium
+        │       │   ├── Equilibrium
+        │       │   ├── Excess Demand
+        │       │   ├── Excess Supply
+        │       │   ├── Market Equilibrium with Fixed Number of Firms
+        │       │   └── Market Equilibrium with Free Entry and Exit
+        │       │
+        │       └── Applications of Demand and Supply
+        │           ├── Price Ceiling
+        │           └── Price Floor
+        │
+        ├── PART B : STATISTICS FOR ECONOMICS
+        │
+        │   ├── UNIT I : Introduction
+        │   │
+        │   │   └── Statistics in Economics
+        │   │       ├── Meaning of Statistics
+        │   │       ├── Scope of Statistics
+        │   │       └── Importance of Statistics in Economics
+        │   │
+        │   ├── UNIT II : Collection, Organisation and Presentation of Data
+        │   │
+        │   │   ├── Collection of Data
+        │   │   │   ├── Primary Data
+        │   │   │   ├── Secondary Data
+        │   │   │   ├── Methods of Collection
+        │   │   │   ├── Census Method
+        │   │   │   ├── Sample Survey
+        │   │   │   ├── Census of India
+        │   │   │   └── National Sample Survey Organisation
+        │   │   │
+        │   │   ├── Organisation of Data
+        │   │   │   ├── Meaning of Organisation
+        │   │   │   ├── Variables
+        │   │   │   ├── Types of Variables
+        │   │   │   ├── Frequency
+        │   │   │   └── Frequency Distribution
+        │   │   │
+        │   │   └── Presentation of Data
+        │   │       ├── Tabular Presentation
+        │   │       ├── Diagrammatic Presentation
+        │   │       ├── Bar Diagram
+        │   │       ├── Pie Diagram
+        │   │       ├── Histogram
+        │   │       ├── Frequency Polygon
+        │   │       ├── Frequency Curve
+        │   │       ├── Ogive
+        │   │       └── Time Series Graph
+        │   │
+        │   └── UNIT III : Statistical Tools and Interpretation
+        │       │
+        │       ├── Measures of Central Tendency
+        │       │   ├── Arithmetic Mean
+        │       │   ├── Median
+        │       │   └── Mode
+        │       │
+        │       ├── Correlation
+        │       │   ├── Meaning of Correlation
+        │       │   ├── Properties of Correlation
+        │       │   ├── Scatter Diagram
+        │       │   ├── Karl Pearson's Method
+        │       │   └── Spearman's Rank Correlation
+        │       │
+        │       └── Index Numbers
+        │           ├── Meaning of Index Numbers
+        │           ├── Construction of Index Numbers
+        │           ├── Wholesale Price Index
+        │           ├── Consumer Price Index
+        │           ├── Index of Industrial Production
+        │           └── Uses of Index Numbers
+        │
+        └── PART C : Project Work
+            ├── Data Collection Project
+            ├── Survey-Based Study
+            ├── Statistical Analysis
+            ├── Diagrammatic Presentation
+            └── Economic Report Writing
+```
+
+This hierarchy follows the actual AHSEC HS First Year Economics syllabus structure with:
+
+**Board → Stream → Class → Subject → Part → Unit → Chapter → Topics**. It is based on the official AHSEC Economics syllabus units and topic distribution. ([thetreasurenotes.in][1])
+
+[1]: https://www.thetreasurenotes.in/2022/04/ahsec-class-11-economics-syllabus-2023.html?utm_source=chatgpt.com "AHSEC Class 11 Economics Syllabus 2024 [AHSEC HS 1ST Year Economics Syllabus ]"    use the below pdf links to extract all syllabus one after another https://ahsec.assam.gov.in/wp-content/uploads/2022/03/Economics.pdf  , https://ahsec.assam.gov.in/wp-content/uploads/2022/03/Political-Science.pdf  , https://ahsec.assam.gov.in/wp-content/uploads/2022/03/History.pdf , https://ahsec.assam.gov.in/wp-content/uploads/2022/03/Logic-and-Philosophy.pdf , https://ahsec.assam.gov.in/wp-content/uploads/2022/03/Psychology.pdf  , https://ahsec.assam.gov.in/wp-content/uploads/2022/03/Education-1st-Year.pdf , https://ahsec.assam.gov.in/wp-content/uploads/2022/03/Statistics.pdf , https://ahsec.assam.gov.in/wp-content/uploads/2022/03/Mathematics-1.pdf , https://ahsec.assam.gov.in/wp-content/uploads/2022/03/Home-Science.pdf , https://ahsec.assam.gov.in/wp-content/uploads/2022/03/Swadesh-Adhyayan.pdf     , Board
+
+ └── Stream
+
+      └── Class
+
+           └── Subject
+
+                └── Unit
+
+                     └── Chapter
+
+                          └── Topics

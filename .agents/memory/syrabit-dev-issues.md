@@ -3,6 +3,15 @@ name: Syrabit dev environment issues
 description: Root causes and fixes for library/auth/chat not working in Replit dev and production
 ---
 
+## Rule 16: BACKEND_PROXY_URL must use api.syrabit.ai (NOT edge.syrabit.ai) in Replit dev
+`edge.syrabit.ai` DNS does not resolve from Replit's sandbox container (ENOTFOUND).
+`api.syrabit.ai` resolves fine and returns HTTP 200. Set `BACKEND_PROXY_URL=https://api.syrabit.ai`
+in the Replit development environment secrets so the Vite dev proxy correctly forwards `/api/*`
+to the live backend. The `VITE_BACKEND_URL` (used at build time) stays `https://edge.syrabit.ai`
+in `.env.production` — only the dev proxy target needs to use `api.syrabit.ai`.
+**Why:** Replit sandbox cannot resolve Cloudflare-proxied custom hostnames that rely on specific
+Cloudflare edge routing (CNAME chains, proxied records). Direct Cloud Run / API hostnames work.
+
 # Syrabit Dev Environment Issues
 
 **Why:** These were all silent failures introduced by production-only config that doesn't suit the Replit dev environment. Record to avoid re-diagnosing.
