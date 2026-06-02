@@ -225,6 +225,105 @@ async def get_library_bundle(
     return result
 
 
+@router.get("/resolve-subject/{board}/{class_slug}/{subject_slug}")
+async def resolve_subject(
+    board: str,
+    class_slug: str,
+    subject_slug: str,
+    response: Response,
+):
+    """
+    Resolve a subject from URL slugs to its full document with breadcrumb context.
+
+    Used by SubjectLandingPage for direct-URL loads: /{board}/{classSlug}/{subjectSlug}
+    No authentication required — subject pages are publicly accessible.
+
+    Returns the subject with board_name, class_name, stream_name filled in so the
+    page can render breadcrumbs and metadata without a separate hierarchy fetch.
+    Chapters are NOT included — use GET /content/chapters/{subject_id} for those.
+    """
+    response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
+
+    # 1. Resolve board by stored slug field
+    board_doc = await Board.find_one({"slug": board, "status": "active"})
+    if not board_doc:
+        # Fallback: try case-insensitive slugify match on name
+        all_boards = await Board.find({"status": "active"}).to_list()
+        board_doc = next(
+            (b for b in all_boards if _slugify(b.name) == board or b.slug == board),
+            None,
+        )
+    if not board_doc:
+        raise HTTPException(status_code=404, detail=f"Board '{board}' not found")
+
+    # 2. Resolve class — Class has no stored slug, compute from name
+    classes = await Class.find({"board_id": board_doc.id, "status": "active"}).to_list()
+    matching_class = next(
+        (c for c in classes if _slugify(c.name) == class_slug),
+        None,
+    )
+    if not matching_class:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Class '{class_slug}' not found under board '{board}'",
+        )
+
+    # 3. Load all streams for this class
+    streams = await Stream.find(
+        {"class_id": matching_class.id, "status": "active"}
+    ).to_list()
+    if not streams:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No streams found for class '{class_slug}'",
+        )
+
+    # 4. Find the matching subject across all streams in this class
+    #    Subject.slug may be stored or must be derived from name.
+    stream_id_list = [s.id for s in streams]
+    candidates = await Subject.find(
+        {"stream_id": {"$in": stream_id_list}, "status": "active"}
+    ).to_list()
+
+    subject_doc = next(
+        (s for s in candidates if (s.slug or _slugify(s.name)) == subject_slug),
+        None,
+    )
+    if not subject_doc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Subject '{subject_slug}' not found under '{board}/{class_slug}'",
+        )
+
+    # 5. Find the stream that owns this subject (for breadcrumb stream_name)
+    stream_doc = next((s for s in streams if s.id == subject_doc.stream_id), None)
+
+    # 6. Chapter count — lightweight aggregate, no content payload
+    chapter_count = await Chapter.find({"subject_id": subject_doc.id}).count()
+
+    return {
+        "id": str(subject_doc.id),
+        "name": subject_doc.name,
+        "slug": subject_doc.slug or _slugify(subject_doc.name),
+        "description": subject_doc.description,
+        "tags": subject_doc.tags or [],
+        "icon": subject_doc.icon,
+        "gradient": subject_doc.gradient,
+        "thumbnailUrl": subject_doc.thumbnail_url,
+        "has_document": subject_doc.has_document,
+        "seo_stats": subject_doc.seo_stats,
+        "status": subject_doc.status,
+        # Breadcrumb context — avoids a second round-trip from the page component
+        "board_name": board_doc.name,
+        "board_slug": board_doc.slug,
+        "class_name": matching_class.name,
+        "class_slug": _slugify(matching_class.name),
+        "stream_name": stream_doc.name if stream_doc else "",
+        "stream_slug": _slugify(stream_doc.name) if stream_doc else "",
+        "chapter_count": chapter_count,
+    }
+
+
 @router.get("/chapters/{chapter_id}/faq-jsonld")
 async def get_faq_jsonld(chapter_id: str):
     """Get FAQ JSON-LD structured data for a chapter (no auth required)."""

@@ -53,6 +53,7 @@ const PUBLIC_PATHS = [
   '/api/v1/content/topic',
   '/api/v1/content/library-bundle',
   '/api/content/library-bundle',
+  '/api/v1/content/resolve-subject',
   '/api/v1/seo',
   '/api/v1/seo/page',
   '/api/v1/seo/page-bundle',

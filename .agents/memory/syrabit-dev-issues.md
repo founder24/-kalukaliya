@@ -49,6 +49,16 @@ becomes the outermost layer and handles OPTIONS preflight before other middlewar
 The `allow_origin_regex` param covers Cloudflare Pages preview domains:
 `r"^https://[a-z0-9-]+\.syrabitfrontend\.pages\.dev$"`
 
+## Rule 11: resolve-subject endpoint — slug resolution order
+`GET /content/resolve-subject/{board}/{classSlug}/{subjectSlug}` resolves in 4 sequential
+DB queries: Board by slug → Classes by board_id (slugify name to match) → Streams by class_id
+→ Subjects by stream_id list. Slug priority: `subj.slug` (stored) falls back to `_slugify(subj.name)`.
+Board uses stored `slug` field; Class and Stream have no stored slug (computed on the fly).
+Response includes breadcrumb fields `board_name/class_name/stream_name` so the page avoids a
+second hierarchy fetch. Chapters are NOT included — fetched separately via `/content/chapters/{id}`.
+Must be in edge worker `PUBLIC_PATHS` (`/api/v1/content/resolve-subject`) — subject pages are public.
+**Why:** SubjectLandingPage calls `useResolveSubject` on direct-URL load before any auth resolves.
+
 ## Rule 9: Subject display fields are Optional on the Pydantic model
 `slug`, `description`, `tags`, `icon`, `gradient`, `thumbnail_url`, `has_document`, `seo_stats`
 were added as `Optional[...]` to the `Subject` model. Old MongoDB documents without these fields
