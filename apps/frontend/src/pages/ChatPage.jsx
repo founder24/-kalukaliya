@@ -11,6 +11,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useContentLang } from '@/context/LanguageContext';
 import { getConversation, getAnonConversation, getSubject, getChapters, API_BASE, apiClient, getAnonId } from '@/utils/api';
+import { getToken } from '@/hooks/useTokenManager';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { toast } from 'sonner';
 
@@ -347,7 +348,10 @@ export default function ChatPage() {
       if (_tp && _tp.traceparent) {
         fetchHeaders['traceparent'] = _tp.traceparent;
       }
-      if (!user) {
+      const _chatToken = getToken();
+      if (_chatToken) {
+        fetchHeaders['Authorization'] = `Bearer ${_chatToken}`;
+      } else {
         fetchHeaders['x-anon-id'] = getAnonId();
       }
       const response = await fetch(`${API_BASE}/chat/stream`, {

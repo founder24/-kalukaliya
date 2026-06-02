@@ -49,6 +49,33 @@ becomes the outermost layer and handles OPTIONS preflight before other middlewar
 The `allow_origin_regex` param covers Cloudflare Pages preview domains:
 `r"^https://[a-z0-9-]+\.syrabitfrontend\.pages\.dev$"`
 
+## Rule 12: Library subjects invisible — status mismatch between backend and frontend
+Backend `library-bundle` queried `{"status": "active"}`. Frontend `LibraryPage.jsx` filtered with
+`status !== 'published'` — showing NOTHING (active ≠ published). Two-part fix required:
+1. Backend query: `{"status": {"$in": ["active", "published"]}}` for boards/classes/streams/subjects.
+2. Frontend filter: `!['published', 'active'].includes(sub.status)` to accept both values.
+**Why:** Default Subject Beanie doc status is `"active"`; admin publish sets it to `"published"`. Real DBs may have both.
+
+## Rule 13: setAuthToken must be called alongside storeToken in AuthContext
+`api.jsx` exposes `setAuthToken(token)` which sets a module-level `_authToken` consumed by `authConfig()`.
+`AuthContext` used `storeToken` (localStorage) but never called `setAuthToken` → `authConfig()` always
+returned requests WITHOUT `Authorization` header → all authenticated API calls in `api.jsx` helper
+functions sent no auth. Fix: call `setAuthToken(access_token)` in login, signup, on token hydration
+from storage, and `setAuthToken(null)` on logout.
+**Why:** `_authToken` is a separate module-level cache from localStorage — must be seeded explicitly.
+
+## Rule 14: Chat SSE fetch must explicitly add Authorization header
+`ChatPage.jsx` uses native `fetch()` (not `apiClient()`/`authConfig()`). The edge worker reads
+`Authorization: Bearer <token>` to identify users on `OPTIONAL_AUTH_PATHS`. Without it, chat is
+always anonymous even when the user is logged in. Fix: import `getToken` from `useTokenManager`
+and add `fetchHeaders['Authorization'] = \`Bearer ${token}\`` before the SSE fetch.
+**Why:** Cloudflare Workers cannot forward cookies to the backend — Bearer is the only channel.
+
+## Rule 15: Remove /static/library-bundle*.json before each deploy
+These static JSON files in `public/static/` are served by Cloudflare Pages as-is and take priority
+over the live API (staticFirst helper). Once stale, they freeze all subject data permanently.
+Delete before each production build: `rm apps/frontend/public/static/library-bundle*.json`.
+
 ## Rule 11: resolve-subject endpoint — slug resolution order
 `GET /content/resolve-subject/{board}/{classSlug}/{subjectSlug}` resolves in 4 sequential
 DB queries: Board by slug → Classes by board_id (slugify name to match) → Streams by class_id

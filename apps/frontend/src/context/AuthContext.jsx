@@ -15,6 +15,7 @@ import {
   clearTokens,
   hydrateTokensFromStorage,
 } from '@/hooks/useTokenManager';
+import { setAuthToken } from '@/utils/api';
 import { silentRefresh } from '@/hooks/useAuthRefresh';
 import { useAnonSync } from '@/hooks/useAnonSync';
 
@@ -90,6 +91,8 @@ export const AuthProvider = ({ children }) => {
     const { hasToken } = hydrateTokensFromStorage();
     setLoading(false);
     if (hasToken) {
+      const storedToken = getToken();
+      if (storedToken) setAuthToken(storedToken);
       fetchMe();
       return;
     }
@@ -123,6 +126,7 @@ export const AuthProvider = ({ children }) => {
       storeToken(access_token);
       storeRefreshToken(refresh_token);
       setToken(access_token);
+      setAuthToken(access_token);
       // Fetch user profile immediately
       const profileRes = await axios.get(`${API_BASE}/users/me`, {
         headers: { Authorization: `Bearer ${access_token}` },
@@ -151,6 +155,7 @@ export const AuthProvider = ({ children }) => {
       storeToken(access_token);
       storeRefreshToken(refresh_token);
       setToken(access_token);
+      setAuthToken(access_token);
       // Fetch user profile immediately
       const profileRes = await axios.get(`${API_BASE}/users/me`, {
         headers: { Authorization: `Bearer ${access_token}` },
@@ -180,6 +185,7 @@ export const AuthProvider = ({ children }) => {
       try { Analytics.track('logout_backend_error', { status: err?.response?.status }); } catch {}
     }
     clearTokens();
+    setAuthToken(null);
     setToken(null);
     justAuthenticated.current = false;
     localStorage.removeItem('syrabit:onboarding');
