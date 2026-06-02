@@ -5,6 +5,7 @@ and the library bundle used by the frontend library page.
 
 import logging
 import re
+from typing import Optional
 
 from beanie import PydanticObjectId
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -26,21 +27,32 @@ def _slugify(text: str) -> str:
 
 
 @router.get("/library-bundle")
-async def get_library_bundle(response: Response, slim: int = Query(0)):
+async def get_library_bundle(
+    response: Response,
+    slim: int = Query(0),
+    boot: Optional[str] = Query(None),
+):
     """
     Return the full content hierarchy for the library page.
 
     When slim=1, returns minimal data (titles, slugs, counts) without
     full chapter content. No authentication required.
+
+    When boot=<boardId>, returns slim metadata for all boards/classes/streams/subjects
+    but chapters are scoped to only that board — a lightweight first-paint payload
+    (~150-300KB vs ~1MB for the full bundle).
     """
     response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
+
+    is_boot = bool(boot)
+    is_slim = bool(slim) or is_boot
 
     try:
         boards = await Board.find({"status": "active"}).to_list()
         classes = await Class.find({"status": "active"}).to_list()
         streams = await Stream.find({"status": "active"}).to_list()
         subjects = await Subject.find({"status": "active"}).to_list()
-        chapters = await Chapter.find_all().to_list()
+        chapters = await Chapter.find().to_list()
     except Exception as e:
         logger.warning(f"Library bundle DB query failed (DB may not be ready): {e}")
         return {"boards": []}
@@ -72,6 +84,17 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
     flat_subjects = []
     flat_chapters = []
 
+    # Determine which subject IDs belong to the boot board (for chapter scoping)
+    boot_subject_ids: set[str] = set()
+    if is_boot:
+        for board in boards:
+            if str(board.id) != boot:
+                continue
+            for cls in classes_by_board.get(str(board.id), []):
+                for stream in streams_by_class.get(str(cls.id), []):
+                    for subj in subjects_by_stream.get(str(stream.id), []):
+                        boot_subject_ids.add(str(subj.id))
+
     for board in boards:
         board_id = str(board.id)
         board_classes = classes_by_board.get(board_id, [])
@@ -92,6 +115,14 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
                     subj_chapters = chapters_by_subject.get(subj_id, [])
                     subj_chapters.sort(key=lambda c: c.chapter_number)
 
+                    # Compute per-subject chapter stats from the chapter list
+                    notes_count = sum(
+                        1 for ch in subj_chapters
+                        if ch.notes_generated or ch.content_en or ch.content_as
+                    )
+                    chapter_count = len(subj_chapters)
+                    notes_pct = int(notes_count / chapter_count * 100) if chapter_count else 0
+
                     chapter_list = []
                     for ch in subj_chapters:
                         ch_data = {
@@ -101,23 +132,38 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
                             "subject_id": subj_id,
                             "order": ch.chapter_number,
                             "topic_count": len(ch.published_topics),
+                            "notes_generated": ch.notes_generated or bool(ch.content_en or ch.content_as),
+                            "status": ch.status,
                         }
                         chapter_list.append(ch_data)
-                        if not slim:
+
+                        # Include in flat_chapters when:
+                        #   full bundle (not slim, not boot): all chapters
+                        #   boot bundle: only this board's chapters
+                        if not is_slim:
+                            flat_chapters.append(ch_data)
+                        elif is_boot and subj_id in boot_subject_ids:
                             flat_chapters.append(ch_data)
 
+                    subj_slug = subj.slug or _slugify(subj.name)
                     subj_data = {
                         "id": subj_id,
                         "name": subj.name,
-                        "slug": _slugify(subj.name),
+                        "slug": subj_slug,
                         "stream_id": stream_id,
-                        "status": getattr(subj, "status", "published"),
-                        "description": getattr(subj, "description", None),
-                        "tags": getattr(subj, "tags", []),
-                        "seo_stats": getattr(subj, "seo_stats", None),
-                        "chapter_count": len(subj_chapters),
+                        "status": subj.status,
+                        "description": subj.description,
+                        "tags": subj.tags or [],
+                        "seo_stats": subj.seo_stats,
+                        "icon": subj.icon,
+                        "gradient": subj.gradient,
+                        "thumbnailUrl": subj.thumbnail_url,
+                        "has_document": subj.has_document,
+                        "chapter_count": chapter_count,
+                        "notes_count": notes_count,
+                        "notes_pct": notes_pct,
                     }
-                    if not slim:
+                    if not is_slim:
                         subj_data["chapters"] = chapter_list
 
                     result_subjects.append(subj_data)
@@ -172,7 +218,9 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
         "streams": flat_streams,
         "subjects": flat_subjects,
     }
-    if not slim:
+    if not is_slim:
+        result["chapters"] = flat_chapters
+    elif is_boot and flat_chapters:
         result["chapters"] = flat_chapters
     return result
 

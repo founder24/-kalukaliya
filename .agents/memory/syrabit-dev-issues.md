@@ -1,6 +1,6 @@
 ---
 name: Syrabit dev environment issues
-description: Root causes and fixes for library/auth/chat not working in Replit dev
+description: Root causes and fixes for library/auth/chat not working in Replit dev and production
 ---
 
 # Syrabit Dev Environment Issues
@@ -21,3 +21,42 @@ Frontend LibraryPage.jsx expects `{subjects, classes, streams, boards}` as flat 
 
 ## Rule 5: react/jsx-dev-runtime must be in resolve.dedupe
 Vite config had `['react','react-dom','react/jsx-runtime']` but not `react/jsx-dev-runtime`, risking multiple React copies in dev. Added the fourth entry.
+
+---
+
+# Production Deployment Requirements (June 2026 audit)
+
+## Rule 6: EDGE_SHARED_SECRET must be in BOTH Cloud Run AND Cloudflare Worker
+The edge worker signs every proxied request with HMAC (`X-Edge-Signature`). The backend
+verifies it when `TRUST_EDGE_AUTH=True`. Without it, all per-user auth (chat, conversations,
+user profile) fails with 401/403 — but library/content pages still work (public paths).
+
+**Required in Cloud Run env vars:** `EDGE_SHARED_SECRET=<same-value>`, `TRUST_EDGE_AUTH=True`
+**Required in Cloudflare Worker secrets:**
+  `npx wrangler secret put EDGE_SHARED_SECRET --env production`
+**How to apply:** Any time auth appears to work at the edge (JWT accepted) but backend returns
+401 for user-specific endpoints, check this pairing first.
+
+## Rule 7: VITE_BACKEND_URL must be set in Cloudflare Pages build env vars
+Frontend computes `API_BASE = ${VITE_BACKEND_URL}/api/v1`. If unset, it falls back to relative
+`/api/v1` which hits the Pages CDN origin (404 for API calls). Must be `https://edge.syrabit.ai`.
+Set in Cloudflare Pages dashboard → Settings → Environment Variables → Build variables.
+Also set `VITE_WORKER_API_URL=https://edge.syrabit.ai` for content-specific calls.
+
+## Rule 8: CORSMiddleware placement in FastAPI create_app()
+Must be added LAST in `create_app()` (after all routers, after `@app.middleware("http")`) so it
+becomes the outermost layer and handles OPTIONS preflight before other middleware runs.
+The `allow_origin_regex` param covers Cloudflare Pages preview domains:
+`r"^https://[a-z0-9-]+\.syrabitfrontend\.pages\.dev$"`
+
+## Rule 9: Subject display fields are Optional on the Pydantic model
+`slug`, `description`, `tags`, `icon`, `gradient`, `thumbnail_url`, `has_document`, `seo_stats`
+were added as `Optional[...]` to the `Subject` model. Old MongoDB documents without these fields
+return `None`/`False` defaults — the migration is safe. `public_content.py` library-bundle
+endpoint computes `notes_count`/`notes_pct` from chapters and passes all display fields through.
+
+## Rule 10: SSE streaming works through the edge worker without modification
+`api-proxy.ts` detects `/stream` in the path and passes `response.body` directly (unbuffered).
+CORS headers are added by `index.ts` after `proxyRequest()` returns — `applyCorsHeaders()`
+mutates the Response headers on the stream-wrapping Response object. Both work together. ✅
+The 30s HMAC timestamp tolerance is applied once at the start of the request, not per-chunk.

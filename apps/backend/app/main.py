@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
@@ -333,6 +334,34 @@ def create_app() -> FastAPI:
         admin_security.router, prefix="/api/v1/admin", tags=["Admin Security"]
     )
     app.include_router(users.router, prefix="/api/v1/user", tags=["Users"])
+
+    # CORS middleware — added last so it becomes the outermost layer and
+    # handles OPTIONS preflight before any other middleware runs.
+    # The edge worker already adds CORS headers for production browser traffic;
+    # this middleware covers direct backend access (health monitors, admin tools,
+    # internal tooling).
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_origins_list,
+        allow_origin_regex=r"^https://[a-z0-9-]+\.syrabitfrontend\.pages\.dev$",
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        allow_headers=[
+            "Content-Type",
+            "Authorization",
+            "x-anon-id",
+            "traceparent",
+            "X-Request-ID",
+        ],
+        expose_headers=[
+            "X-RateLimit-Limit",
+            "X-RateLimit-Remaining",
+            "X-RateLimit-Reset",
+            "X-Request-ID",
+            "X-API-Version",
+        ],
+        max_age=86400,
+    )
 
     # Legacy health probe redirects for backward compatibility.
     # The canonical health endpoint is /health (registered via health.router).

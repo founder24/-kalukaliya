@@ -50,9 +50,25 @@ preview_id = "26b91993d09b4ceeafb06bd9ad6e594c"
 binding = "R2_BUCKET"
 bucket_name = "syrabit-assets"
 
-# Secrets (set via: npx wrangler secret put <NAME> --env production):
-# - JWT_SECRET
-# - BACKEND_URL
+# ── Required Secrets ──────────────────────────────────────────────────────────
+# Set ALL of the following via Cloudflare Dashboard or Wrangler CLI:
+#   npx wrangler secret put <NAME> --env production
+#
+# REQUIRED:
+#   JWT_SECRET          — must exactly match backend JWT_SECRET (≥32 chars)
+#   EDGE_SHARED_SECRET  — must exactly match backend EDGE_SHARED_SECRET
+#                         Used for HMAC signing of X-Edge-Signature.
+#                         Backend TRUST_EDGE_AUTH=True requires this to be set.
+#                         Without it, per-user auth for chat/conversations fails.
+#
+# OPTIONAL:
+#   GOOGLE_SA_KEY       — Service account JSON for Cloud Run OIDC auth.
+#                         Only needed when the Cloud Run service is private
+#                         (requires IAM auth). If unset, Cloud Run must allow
+#                         unauthenticated invocations.
+#   JWT_PUBLIC_KEY      — RSA public key (PEM) if using RS256 algorithm.
+#                         Not needed for the default HS256 setup.
+# ──────────────────────────────────────────────────────────────────────────────
 
 [env.production.vars]
 ALLOWED_ORIGIN = "https://syrabit.ai"

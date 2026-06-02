@@ -48,6 +48,14 @@ class Subject(Document):
     name: str
     stream_id: PydanticObjectId
     status: str = "active"
+    slug: Optional[str] = None
+    description: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    icon: Optional[str] = None
+    gradient: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    has_document: bool = False
+    seo_stats: Optional[dict] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -75,6 +83,7 @@ class Chapter(Document):
     meta_description: Optional[str] = None
     keywords: Optional[str] = None
     word_count: Optional[int] = None
+    notes_generated: bool = False
     published_topics: list[Topic] = Field(default_factory=list)
     faq_jsonld: Optional[list[dict]] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
