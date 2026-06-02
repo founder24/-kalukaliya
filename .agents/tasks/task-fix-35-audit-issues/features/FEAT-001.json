@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix all 35 audit issues across backend, edge, and frontend. This is a single large feature because all fixes are independent code changes that can be batched.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "ISSUE 1 (CRITICAL): In apps/backend/app/api/v1/payments.py, the synchronous razorpay.Client calls at lines 47-48 (create_order), 128-130 (credit-topup), and 184-186 (credit-topup/verify: client.order.fetch) block the async event loop. Wrap all `client.order.create(...)` and `client.order.fetch(...)` calls in `await asyncio.to_thread(...)`. Add `import asyncio` at the top if not already present.",
     "ISSUE 2 (HIGH): In apps/backend/app/models/user.py, add `credits_remaining: int = 0` field to the User model class, in the Usage section after `total_lifetime_messages`.",
@@ -57,5 +57,5 @@
     "Run `cd apps/edge && npx tsc --noEmit 2>&1 | head -50` to verify TypeScript compiles"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 35 issues implemented successfully. Python syntax verified with py_compile on all modified files. TypeScript verified with tsc --noEmit (zero errors). Edge required npm install for type checking. No pre-existing test failures encountered. The api-proxy.ts getCorsHeaders import was kept because it is still used in error response handlers even though the main response CORS lines were removed."
 }
