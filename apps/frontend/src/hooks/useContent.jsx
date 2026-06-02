@@ -8,31 +8,26 @@ import { apiClient } from '@/utils/api';
 // ── Static-first helper ──────────────────────────────────────────────────────
 
 /**
- * Static-first fetcher: tries /static/<file>.json from CDN first,
- * falls back to the live API if the static file is unavailable.
+ * API fetcher: fetches content from the live API endpoint directly.
+ * Previously tried /static/<file>.json from CDN first, but those files
+ * froze permanently and served stale data. Now always uses the live API.
  */
-const staticFirst = (staticPath, apiPath) => async () => {
-  try {
-    const res = await fetch(staticPath);
-    if (res.ok) return res.json();
-  } catch {
-    // static file unavailable, fall through to API
-  }
+const apiFetcher = (_staticPath, apiPath) => async () => {
   return apiClient().get(apiPath).then((r) => r.data);
 };
 
 // ── Raw fetchers ────────────────────────────────────────────────────────────
-const fetchBoards = staticFirst('/static/boards.json', '/content/boards');
+const fetchBoards = apiFetcher('/static/boards.json', '/content/boards');
 
-const fetchClasses = staticFirst('/static/classes.json', '/content/classes');
+const fetchClasses = apiFetcher('/static/classes.json', '/content/classes');
 
-const fetchStreams = staticFirst('/static/streams.json', '/content/streams');
+const fetchStreams = apiFetcher('/static/streams.json', '/content/streams');
 
-const fetchSubjects = staticFirst('/static/subjects.json', '/content/subjects');
+const fetchSubjects = apiFetcher('/static/subjects.json', '/content/subjects');
 
-const fetchLibraryBundle = staticFirst('/static/library-bundle.json', '/content/library-bundle');
+const fetchLibraryBundle = apiFetcher('/static/library-bundle.json', '/content/library-bundle');
 
-const fetchLibraryBundleSlim = staticFirst('/static/library-bundle-slim.json', '/content/library-bundle?slim=1');
+const fetchLibraryBundleSlim = apiFetcher('/static/library-bundle-slim.json', '/content/library-bundle?slim=1');
 
 const fetchLibraryBundleBoot = (boardId) =>
   apiClient()

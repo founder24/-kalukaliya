@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 !.env.shared
+!.env.production
 
 # Python
 __pycache__/
