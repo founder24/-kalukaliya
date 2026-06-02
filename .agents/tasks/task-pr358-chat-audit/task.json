@@ -1,0 +1,7 @@
+{
+  "task_id": "task-pr358-chat-audit",
+  "task_description": "Create comprehensive integration tests auditing PR 358 chat pipeline: English mode, Assamese mode, RAG fallback to LLM base knowledge, chat response speed test, and lang field override behavior.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}
