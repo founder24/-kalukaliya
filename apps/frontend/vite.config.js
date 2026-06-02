@@ -9,7 +9,7 @@ import preloadHeadersInjectPlugin from './vite-plugins/preload-headers-inject.js
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
-const BACKEND_TARGET = process.env.VITE_BACKEND_URL || process.env.BACKEND_PROXY_URL || 'http://localhost:8080';
+const BACKEND_TARGET = process.env.VITE_BACKEND_URL || process.env.BACKEND_PROXY_URL || 'http://localhost:8000';
 
 // ─── CANONICAL BOT REGEX — DO NOT DRIFT ─────────────────────────────────────
 // This regex MUST stay aligned with three other locations:
@@ -807,6 +807,7 @@ export default defineConfig(({ mode }) => ({
       'react',
       'react-dom',
       'react/jsx-runtime',
+      'react/jsx-dev-runtime',
       'react-router-dom',
       '@tanstack/react-query',
       'react-markdown',
@@ -816,6 +817,7 @@ export default defineConfig(({ mode }) => ({
       'react',
       'react-dom',
       'react/jsx-runtime',
+      'react/jsx-dev-runtime',
     ],
     extensions: ['.js', '.jsx'],
   },

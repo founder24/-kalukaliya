@@ -34,7 +34,7 @@
     "web-vitals": "^5.2.0"
   },
   "scripts": {
-    "dev": "vite --port ${PORT:-25144} --host 0.0.0.0",
+    "dev": "vite --port 5000 --host 0.0.0.0",
     "build": "node scripts/build.mjs",
     "build:client": "vite build",
     "build:ssr": "vite build --ssr src/entry-server.jsx --outDir dist-ssr --emptyOutDir",

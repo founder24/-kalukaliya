@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Cookie, X } from 'lucide-react';
-import { Link } from 'react-router-dom';
 
 const CONSENT_KEY = 'syrabit_cookie_consent';
 
@@ -40,7 +39,7 @@ export default function CookieConsent() {
             <h3 className="text-foreground font-semibold text-sm">Cookie Notice</h3>
             <p className="text-muted-foreground text-xs mt-0.5 leading-relaxed">
               We use cookies to improve your experience and for analytics.{' '}
-              <Link to="/privacy" className="underline hover:text-foreground transition-colors">Learn more</Link>
+              <a href="/privacy" className="underline hover:text-foreground transition-colors">Learn more</a>
             </p>
             <div className="flex gap-2 mt-3">
               <button onClick={handleDecline} className="h-8 px-3 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground text-xs font-medium transition-colors">Decline</button>
