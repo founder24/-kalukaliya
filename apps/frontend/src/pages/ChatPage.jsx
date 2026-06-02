@@ -11,6 +11,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useContentLang } from '@/context/LanguageContext';
 import { getConversation, getAnonConversation, getSubject, getChapters, API_BASE, apiClient, getAnonId } from '@/utils/api';
+import { getToken } from '@/hooks/useTokenManager';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { toast } from 'sonner';
 
@@ -349,6 +350,12 @@ export default function ChatPage() {
       }
       if (!user) {
         fetchHeaders['x-anon-id'] = getAnonId();
+      }
+      // Add Authorization header for authenticated users so the edge
+      // worker can identify the user on the SSE chat endpoint.
+      const _chatToken = getToken();
+      if (_chatToken) {
+        fetchHeaders['Authorization'] = `Bearer ${_chatToken}`;
       }
       const response = await fetch(`${API_BASE}/chat/stream`, {
         method: 'POST', headers: fetchHeaders,

@@ -372,7 +372,7 @@ export default function LibraryPage() {
     return enrichedSubjects.filter((sub) => {
       if (seen.has(sub.id)) return false;
       seen.add(sub.id);
-      if (sub.status && sub.status !== 'published') return false;
+      if (sub.status && sub.status !== 'published' && sub.status !== 'active') return false;
       if (activeFilter === 'saved') {
         if (!savedSubjectsSet.has(sub.id)) return false;
       } else if (activeFilter !== 'all') {

@@ -36,10 +36,11 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
     response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
 
     try:
-        boards = await Board.find({"status": "active"}).to_list()
-        classes = await Class.find({"status": "active"}).to_list()
-        streams = await Stream.find({"status": "active"}).to_list()
-        subjects = await Subject.find({"status": "active"}).to_list()
+        _active_or_published = {"status": {"$in": ["active", "published"]}}
+        boards = await Board.find(_active_or_published).to_list()
+        classes = await Class.find(_active_or_published).to_list()
+        streams = await Stream.find(_active_or_published).to_list()
+        subjects = await Subject.find(_active_or_published).to_list()
         chapters = await Chapter.find_all().to_list()
     except Exception as e:
         logger.warning(f"Library bundle DB query failed (DB may not be ready): {e}")
