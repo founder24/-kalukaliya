@@ -118,11 +118,14 @@ async def get_library_bundle(
 
                     # Compute per-subject chapter stats from the chapter list
                     notes_count = sum(
-                        1 for ch in subj_chapters
+                        1
+                        for ch in subj_chapters
                         if ch.notes_generated or ch.content_en or ch.content_as
                     )
                     chapter_count = len(subj_chapters)
-                    notes_pct = int(notes_count / chapter_count * 100) if chapter_count else 0
+                    notes_pct = (
+                        int(notes_count / chapter_count * 100) if chapter_count else 0
+                    )
 
                     chapter_list = []
                     for ch in subj_chapters:
@@ -133,7 +136,8 @@ async def get_library_bundle(
                             "subject_id": subj_id,
                             "order": ch.chapter_number,
                             "topic_count": len(ch.published_topics),
-                            "notes_generated": ch.notes_generated or bool(ch.content_en or ch.content_as),
+                            "notes_generated": ch.notes_generated
+                            or bool(ch.content_en or ch.content_as),
                             "status": ch.status,
                         }
                         chapter_list.append(ch_data)
