@@ -1,0 +1,80 @@
+founder@syrabit.ai
+Dipak Rai	
+Dev Ops
+Editor
+Org policy recommender admin (beta)
+Organisation Administrator
+Organisation Policy Viewer
+OrgPolicy Simulator Admin (beta)
+Owner
+Principal Access Boundary Policy Viewer
+Security Auditor
+
+
+No inheritance, for role Dev Ops
+No inheritance, for role Editor
+No inheritance, for role Org policy recommender admin
+No inheritance, for role Organisation Administrator
+No inheritance, for role Organisation Policy Viewer
+No inheritance, for role OrgPolicy Simulator Admin
+No inheritance, for role Owner
+ syrabit.ai
+No inheritance, for role Security Auditor
+syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com
+Syrabit Backend Service Account	
+Agent Platform user
+Artifact Registry Writer
+Cloud Build Service Account
+Cloud Run Admin
+Cloud Run developer
+Cloud Translation API User
+Discovery Engine Editor
+Logs Writer
+Monitoring Metric Writer
+Secret Manager Secret Accessor
+Service Account User
+Storage Object Admin
+No inheritance, for role Agent Platform user
+No inheritance, for role Artifact Registry Writer
+No inheritance, for role Cloud Build Service Account
+No inheritance, for role Cloud Run Admin
+No inheritance, for role Cloud Run developer
+No inheritance, for role Cloud Translation API User
+No inheritance, for role Discovery Engine Editor
+No inheritance, for role Logs Writer
+No inheritance, for role Monitoring Metric Writer
+No inheritance, for role Secret Manager Secret Accessor
+No inheritance, for role Service Account User
+No inheritance, for role Storage Object Admin
+syrabit-backend@blissful-acumen-495019-t6.iam.gserviceaccount.com?uid=108416343213173379826
+Agent Platform user
+Cloud Scheduler Admin
+Cloud Speech Client
+Cloud Tasks Admin (beta)
+Cloud Translation API User
+Discovery Engine viewer
+Storage Object Admin
+No inheritance, for role Agent Platform user
+No inheritance, for role Cloud Scheduler Admin
+No inheritance, for role Cloud Speech Client
+No inheritance, for role Cloud Tasks Admin
+No inheritance, for role Cloud Translation API User
+No inheritance, for role Discovery Engine viewer
+No inheritance, for role Storage Object Admin
+syrabit-vertex-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com?uid=112444753853276861536
+Agent Platform user
+Cloud Scheduler Admin
+Cloud Tasks Admin (beta)
+Discovery Engine viewer
+Logs Writer
+Monitoring Metric Writer
+Service Usage Consumer
+Storage Object Admin
+No inheritance, for role Agent Platform user
+No inheritance, for role Cloud Scheduler Admin
+No inheritance, for role Cloud Tasks Admin
+No inheritance, for role Discovery Engine viewer
+No inheritance, for role Logs Writer
+No inheritance, for role Monitoring Metric Writer
+No inheritance, for role Service Usage Consumer
+No inheritance, for role Storage Object Admin
