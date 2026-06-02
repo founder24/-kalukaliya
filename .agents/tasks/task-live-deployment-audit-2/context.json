@@ -1,0 +1,28 @@
+{
+  "project_type": "Fullstack monorepo: Python FastAPI backend, TypeScript Cloudflare Workers edge proxy, React/Vite frontend",
+  "language": "Python (backend), TypeScript (edge), JavaScript/JSX (frontend)",
+  "build_system": "pnpm workspace for edge+frontend; pip for backend; Node >=22 required",
+  "test_framework": "pytest with pytest-asyncio (backend), vitest (edge + frontend)",
+  "build_command": "Backend: pip install -r requirements.txt (no build step); Edge: npx tsc --noEmit; Frontend: vite build",
+  "test_command": "Backend: cd apps/backend && pytest tests/; Edge: cd apps/edge && npx vitest run; Frontend: cd apps/frontend && npx vitest run",
+  "verification_instructions": "1. Install Python deps and run pytest for backend. 2. Install pnpm deps and run tsc --noEmit for edge. 3. Run vitest for edge tests. 4. Run vite build for frontend. 5. Run vitest for frontend tests.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "1. pyenv shell 3.11 && pip install -r apps/backend/requirements.txt -r apps/backend/requirements-dev.in; 2. corepack enable && pnpm install; 3. Each app has its own test runner",
+  "environment_constraints": "OPEN_INTERNET network mode - full access for package installs. No live MongoDB/Redis/Vertex AI - tests must mock external services. No Cloudflare account access - edge tests run via vitest mocks.",
+  "contribution_requirements": "pnpm-workspace.yaml defines apps/* as workspace packages. Root package.json specifies pnpm@10.26.1 and node>=22.",
+  "key_patterns": "Edge worker proxies all /api/ routes to backend. JWT verified at edge, user ID injected as X-User-ID. Backend uses Beanie ODM for MongoDB. Frontend uses axios with API_BASE from VITE_BACKEND_URL env var. Auth flow: frontend -> edge (JWT verify) -> backend (edge-trust or JWT decode). CORS validated at both edge and backend.",
+  "relevant_files": [
+    "apps/edge/src/index.ts",
+    "apps/edge/src/routes/api-proxy.ts",
+    "apps/edge/src/middleware/jwt.ts",
+    "apps/edge/src/middleware/cors.ts",
+    "apps/edge/src/middleware/rate-limit.ts",
+    "apps/backend/app/main.py",
+    "apps/backend/app/config.py",
+    "apps/backend/app/api/v1/auth.py",
+    "apps/frontend/src/utils/api.jsx",
+    "apps/backend/tests/conftest.py",
+    "apps/edge/tests/setup.ts"
+  ],
+  "directory_structure": "Root: pnpm workspace. apps/backend: Python FastAPI (app/ has api/v1 routers, core/, models/, services/, db/). apps/edge: Cloudflare Worker (src/ has index.ts entry, middleware/, routes/, utils/). apps/frontend: React SPA (src/ has components/, pages/, context/, utils/, hooks/, lib/)."
+}
