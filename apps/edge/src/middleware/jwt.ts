@@ -54,6 +54,10 @@ const PUBLIC_PATHS = [
   '/api/v1/content/library-bundle',
   '/api/content/library-bundle',
   '/api/v1/seo',
+  '/api/v1/seo/page',
+  '/api/v1/seo/page-bundle',
+  '/api/v1/seo/page-types',
+  '/api/v1/seo/related',
   '/sitemap',
   '/robots.txt',
 ];

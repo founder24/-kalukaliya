@@ -115,12 +115,9 @@ describe('CF Cache API - Frontend GET Redirect Caching', () => {
     expect(response.status).toBe(302);
     expect(response.headers.get('Location')).toBe('https://syrabit.ai/about');
     expect(response.headers.get('Cache-Control')).toBe('public, s-maxage=3600, stale-while-revalidate=86400');
-    // ctx.waitUntil should be called with the cache put
-    expect(ctx.waitUntil).toHaveBeenCalled();
-    expect(mockCachePut).toHaveBeenCalledTimes(1);
-    // Verify the put was called with a Response that has the right status
-    const putArgs = mockCachePut.mock.calls[0];
-    expect(putArgs[1]).toBeInstanceOf(Response);
+    // Redirect responses are not cached (per Issue #29 fix), so waitUntil and cachePut should NOT be called
+    expect(ctx.waitUntil).not.toHaveBeenCalled();
+    expect(mockCachePut).not.toHaveBeenCalled();
   });
 
   it('does not cache API routes via CF Cache API', async () => {

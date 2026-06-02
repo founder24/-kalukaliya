@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-002",
+  "type": "chore",
+  "description": "Cross-layer route consistency audit and critical path verification. Trace auth flow, content flow, and chat flow through edge->backend->frontend. Verify environment variable consistency. Produce a comprehensive audit report.",
+  "status": "completed",
+  "steps": [
+    "ROUTE CONSISTENCY AUDIT: Extract all API route paths from (1) frontend src/utils/api.jsx (all axios calls), (2) edge src/index.ts and src/middleware/jwt.ts PUBLIC_PATHS and OPTIONAL_AUTH_PATHS, (3) backend app/main.py router registrations. Cross-reference to identify any mismatches where frontend calls a path not routed by edge, or edge expects a path not registered in backend.",
+    "AUTH FLOW TRACE: Verify the complete auth flow: (a) Frontend login/signup calls POST /api/v1/auth/login and /api/v1/auth/signup, (b) Edge jwt.ts has these in PUBLIC_PATHS so JWT is skipped, (c) Backend auth.py router handles these at prefix /api/v1/auth, (d) Token refresh: frontend calls POST /api/v1/auth/refresh which is in PUBLIC_PATHS, (e) Authenticated requests: frontend sends Bearer token, edge verifies JWT and injects X-User-ID, backend reads X-User-ID via edge-trust or decodes JWT directly.",
+    "CHAT FLOW TRACE: Verify chat flow: (a) Frontend posts to /api/v1/chat/stream or /api/v1/ai/chat/stream, (b) Edge OPTIONAL_AUTH_PATHS includes /api/v1/chat and /api/v1/ai/chat so anon is allowed, (c) Edge rate-limits POST to these paths, (d) Backend main.py registers chat.router at both /api/v1/chat AND /api/v1/ai/chat prefixes, (e) Edge api-proxy.ts detects /stream in path and sets SSE headers.",
+    "CONTENT FLOW TRACE: Verify content/library flow: (a) Frontend calls WORKER_API /content/boards, /content/classes, /content/chapters etc, (b) Edge PUBLIC_PATHS includes /api/v1/content/public, /api/v1/content/boards, /api/v1/content/classes, /api/v1/content/streams, /api/v1/content/subjects, /api/v1/content/chapters, /api/v1/content/chunks, /api/v1/content/chapter-by-slug, /api/v1/content/topic, (c) Backend registers public_content.router at /api/v1/content.",
+    "ENVIRONMENT VARIABLE CONSISTENCY: Check that env vars referenced across layers are consistent: JWT_SECRET used in backend config.py and edge env.d.ts, EDGE_SHARED_SECRET in both, ALLOWED_ORIGIN/ALLOWED_ORIGINS match between edge CORS and backend config, BACKEND_URL in edge wrangler.toml matches the Cloud Run service URL pattern.",
+    "CORS CONSISTENCY: Verify that edge CORS middleware (cors.ts ALLOWED_ORIGINS array and PAGES_PREVIEW_REGEX) matches backend config.py ALLOWED_ORIGINS and is_origin_allowed() regex.",
+    "Write comprehensive audit report to /projects/sandbox/-kalukaliya/ROUTE_CONSISTENCY_AUDIT.md documenting: (a) all route mismatches found, (b) auth flow verification results, (c) chat flow verification results, (d) content flow verification results, (e) env var consistency results, (f) CORS consistency results, (g) any remaining bugs or inconsistencies discovered."
+  ],
+  "acceptance_criteria": [
+    "Route consistency audit identifies any frontend API calls that do not match edge routing or backend endpoints",
+    "Auth flow is traced end-to-end and any issues documented",
+    "Chat flow is traced end-to-end and any issues documented",
+    "Content flow is traced end-to-end and any issues documented",
+    "Environment variable consistency is verified across all three layers",
+    "CORS configuration is verified as consistent between edge and backend",
+    "ROUTE_CONSISTENCY_AUDIT.md exists with detailed findings"
+  ],
+  "verification": [
+    "cat /projects/sandbox/-kalukaliya/ROUTE_CONSISTENCY_AUDIT.md to confirm it was created with detailed cross-layer audit findings"
+  ],
+  "blocked_reason": null,
+  "findings": "Cross-layer route audit completed. Found 2 MEDIUM issues: (1) SEO public page paths (/seo/page, /seo/page-bundle, /seo/page-types, /seo/related) are called without auth by frontend but NOT listed in edge PUBLIC_PATHS - anonymous users on public SEO pages would get 401. (2) /trustpilot/invitation-link has no backend handler at all - confirmed missing from entire backend codebase, frontend falls back to hardcoded URL. Found 3 LOW issues: /seo/health and /seo/related-by-chapter not in PUBLIC_PATHS (admin-only context so non-critical), and edge CORS origins are hardcoded not env-configurable. Auth flow, chat flow, content flow all verified working correctly end-to-end. CORS config is fully consistent between edge and backend. Environment variables (JWT_SECRET, EDGE_SHARED_SECRET, ALLOWED_ORIGINS) are consistent across layers. HMAC timing attacks prevented via constant-time comparisons. No critical security vulnerabilities found."
+}

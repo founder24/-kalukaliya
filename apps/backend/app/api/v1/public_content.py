@@ -131,12 +131,14 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
                     "subjects": result_subjects,
                 }
                 result_streams.append(stream_entry)
-                flat_streams.append({
-                    "id": stream_id,
-                    "name": stream.name,
-                    "slug": _slugify(stream.name),
-                    "class_id": cls_id,
-                })
+                flat_streams.append(
+                    {
+                        "id": stream_id,
+                        "name": stream.name,
+                        "slug": _slugify(stream.name),
+                        "class_id": cls_id,
+                    }
+                )
 
             cls_entry = {
                 "id": cls_id,
@@ -146,12 +148,14 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
                 "streams": result_streams,
             }
             result_classes.append(cls_entry)
-            flat_classes.append({
-                "id": cls_id,
-                "name": cls.name,
-                "slug": _slugify(cls.name),
-                "board_id": board_id,
-            })
+            flat_classes.append(
+                {
+                    "id": cls_id,
+                    "name": cls.name,
+                    "slug": _slugify(cls.name),
+                    "board_id": board_id,
+                }
+            )
 
         result_boards.append(
             {
