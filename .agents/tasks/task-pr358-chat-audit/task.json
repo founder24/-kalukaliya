@@ -1,7 +1,14 @@
 {
   "task_id": "task-pr358-chat-audit",
   "task_description": "Create comprehensive integration tests auditing PR 358 chat pipeline: English mode, Assamese mode, RAG fallback to LLM base knowledge, chat response speed test, and lang field override behavior.",
-  "status": "in_progress",
+  "status": "completed",
   "feature_order": ["FEAT-001", "FEAT-002"],
-  "blocked_reason": null
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "All 36 tests pass (19 existing + 17 new) in 1.16s. New tests cover all 5 audit areas: English mode (SSE format, routing, prompt), Assamese mode (routing, Vertex fallback, script), RAG fallback (unavailable, empty, exception), speed (first chunk <200ms, total <500ms), and lang override (en/as/null/invalid). Each test exercises real code paths through the FastAPI endpoint stack with targeted mocks of external services."
+  }
 }
