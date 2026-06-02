@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "chore",
   "description": "Cross-layer route consistency audit and critical path verification. Trace auth flow, content flow, and chat flow through edge->backend->frontend. Verify environment variable consistency. Produce a comprehensive audit report.",
-  "status": "completed",
+  "status": "pending",
   "steps": [
     "ROUTE CONSISTENCY AUDIT: Extract all API route paths from (1) frontend src/utils/api.jsx (all axios calls), (2) edge src/index.ts and src/middleware/jwt.ts PUBLIC_PATHS and OPTIONAL_AUTH_PATHS, (3) backend app/main.py router registrations. Cross-reference to identify any mismatches where frontend calls a path not routed by edge, or edge expects a path not registered in backend.",
     "AUTH FLOW TRACE: Verify the complete auth flow: (a) Frontend login/signup calls POST /api/v1/auth/login and /api/v1/auth/signup, (b) Edge jwt.ts has these in PUBLIC_PATHS so JWT is skipped, (c) Backend auth.py router handles these at prefix /api/v1/auth, (d) Token refresh: frontend calls POST /api/v1/auth/refresh which is in PUBLIC_PATHS, (e) Authenticated requests: frontend sends Bearer token, edge verifies JWT and injects X-User-ID, backend reads X-User-ID via edge-trust or decodes JWT directly.",
@@ -25,5 +25,5 @@
     "cat /projects/sandbox/-kalukaliya/ROUTE_CONSISTENCY_AUDIT.md to confirm it was created with detailed cross-layer audit findings"
   ],
   "blocked_reason": null,
-  "findings": "Cross-layer route audit completed. Found 2 MEDIUM issues: (1) SEO public page paths (/seo/page, /seo/page-bundle, /seo/page-types, /seo/related) are called without auth by frontend but NOT listed in edge PUBLIC_PATHS - anonymous users on public SEO pages would get 401. (2) /trustpilot/invitation-link has no backend handler at all - confirmed missing from entire backend codebase, frontend falls back to hardcoded URL. Found 3 LOW issues: /seo/health and /seo/related-by-chapter not in PUBLIC_PATHS (admin-only context so non-critical), and edge CORS origins are hardcoded not env-configurable. Auth flow, chat flow, content flow all verified working correctly end-to-end. CORS config is fully consistent between edge and backend. Environment variables (JWT_SECRET, EDGE_SHARED_SECRET, ALLOWED_ORIGINS) are consistent across layers. HMAC timing attacks prevented via constant-time comparisons. No critical security vulnerabilities found."
+  "findings": ""
 }
