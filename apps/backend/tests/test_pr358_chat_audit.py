@@ -29,10 +29,12 @@ def _mock_redis():
     mock.delete = AsyncMock()
     mock.incr = AsyncMock(return_value=1)
     mock.expire = AsyncMock()
-    mock.pipeline = MagicMock(return_value=MagicMock(
-        delete=MagicMock(),
-        execute=AsyncMock(return_value=[]),
-    ))
+    mock.pipeline = MagicMock(
+        return_value=MagicMock(
+            delete=MagicMock(),
+            execute=AsyncMock(return_value=[]),
+        )
+    )
     return mock
 
 
@@ -230,7 +232,9 @@ class TestEnglishModeChatStream:
             patches["auth"],
             patches["topic_match"],
             patch("app.services.chat_service.search_service", mock_search),
-            patch("app.services.ai.router.stream_response", side_effect=_capture_stream),
+            patch(
+                "app.services.ai.router.stream_response", side_effect=_capture_stream
+            ),
             patches["posthog"],
             patches["token_budget"],
             patches["tracer"],
@@ -285,7 +289,9 @@ class TestAssameseModeChatStream:
             patches["auth"],
             patches["topic_match"],
             patch("app.services.chat_service.search_service", mock_search),
-            patch("app.services.ai.router.stream_response", side_effect=_capture_stream),
+            patch(
+                "app.services.ai.router.stream_response", side_effect=_capture_stream
+            ),
             patches["posthog"],
             patches["token_budget"],
             patches["tracer"],
@@ -311,7 +317,10 @@ class TestAssameseModeChatStream:
 
         # Verify the model was Sarvam
         assert len(called_models) == 1
-        assert "sarvam" in called_models[0].lower() or "openhathi" in called_models[0].lower()
+        assert (
+            "sarvam" in called_models[0].lower()
+            or "openhathi" in called_models[0].lower()
+        )
 
     @pytest.mark.asyncio
     async def test_assamese_fallback_to_vertex_on_sarvam_failure(self):
@@ -337,7 +346,9 @@ class TestAssameseModeChatStream:
             patch("app.services.chat_service.search_service", mock_search),
             patch(
                 "app.services.ai.router.stream_response",
-                side_effect=lambda *a, **kw: _raise_before_yield(RuntimeError("Sarvam API timeout")),
+                side_effect=lambda *a, **kw: _raise_before_yield(
+                    RuntimeError("Sarvam API timeout")
+                ),
             ),
             patch("app.services.ai.vertex_client.vertex_client", mock_vertex),
             patches["posthog"],
@@ -366,7 +377,9 @@ class TestAssameseModeChatStream:
         assert fallback_events[0].get("provider") == "vertex"
 
         # Should have content events from the vertex fallback
-        content_events = [e for e in events if "content" in e and e.get("done") is not True]
+        content_events = [
+            e for e in events if "content" in e and e.get("done") is not True
+        ]
         assert len(content_events) >= 1
         assert content_events[0]["content"] == "Fallback "
 
@@ -382,6 +395,7 @@ class TestAssameseModeChatStream:
         assert "You MUST respond in English only" not in prompt
         # Should contain Assamese Unicode characters (U+0980-U+09FF)
         import re
+
         assamese_chars = re.findall(r"[\u0980-\u09FF]", prompt)
         assert len(assamese_chars) > 0, "Assamese prompt should contain Assamese script"
 
@@ -433,7 +447,9 @@ class TestRAGUnavailableFallback:
         # Should have content events and a done event, no error events
         error_events = [e for e in events if "error" in e]
         done_events = [e for e in events if e.get("done") is True]
-        content_events = [e for e in events if "content" in e and e.get("done") is not True]
+        content_events = [
+            e for e in events if "content" in e and e.get("done") is not True
+        ]
 
         assert len(error_events) == 0
         assert len(done_events) == 1
@@ -520,7 +536,9 @@ class TestRAGUnavailableFallback:
         events = _parse_sse_events(response.text)
         error_events = [e for e in events if "error" in e]
         done_events = [e for e in events if e.get("done") is True]
-        content_events = [e for e in events if "content" in e and e.get("done") is not True]
+        content_events = [
+            e for e in events if "content" in e and e.get("done") is not True
+        ]
 
         assert len(error_events) == 0
         assert len(done_events) == 1
@@ -586,7 +604,7 @@ class TestChatResponseSpeed:
         # With all mocks returning instantly, first response should be fast
         # Threshold set to 1000ms to avoid flakiness under CI runner load
         assert first_chunk_time < 1.000, (
-            f"First chunk took {first_chunk_time*1000:.0f}ms, expected < 1000ms"
+            f"First chunk took {first_chunk_time * 1000:.0f}ms, expected < 1000ms"
         )
 
     @pytest.mark.asyncio
@@ -633,7 +651,7 @@ class TestChatResponseSpeed:
 
         # Threshold set to 2000ms to avoid flakiness under CI runner load
         assert total_time < 2.000, (
-            f"Total stream took {total_time*1000:.0f}ms, expected < 2000ms"
+            f"Total stream took {total_time * 1000:.0f}ms, expected < 2000ms"
         )
 
     @pytest.mark.asyncio
@@ -673,7 +691,7 @@ class TestChatResponseSpeed:
         assert data["latency_ms"] < 2000
         # Threshold set to 2000ms to avoid flakiness under CI runner load
         assert elapsed < 2.000, (
-            f"Non-streaming response took {elapsed*1000:.0f}ms, expected < 2000ms"
+            f"Non-streaming response took {elapsed * 1000:.0f}ms, expected < 2000ms"
         )
 
 
@@ -706,7 +724,9 @@ class TestLangFieldOverride:
             patches["auth"],
             patches["topic_match"],
             patch("app.services.chat_service.search_service", mock_search),
-            patch("app.services.ai.router.stream_response", side_effect=_capture_stream),
+            patch(
+                "app.services.ai.router.stream_response", side_effect=_capture_stream
+            ),
             patches["posthog"],
             patches["token_budget"],
             patches["tracer"],
@@ -750,7 +770,9 @@ class TestLangFieldOverride:
             patches["auth"],
             patches["topic_match"],
             patch("app.services.chat_service.search_service", mock_search),
-            patch("app.services.ai.router.stream_response", side_effect=_capture_stream),
+            patch(
+                "app.services.ai.router.stream_response", side_effect=_capture_stream
+            ),
             patches["posthog"],
             patches["token_budget"],
             patches["tracer"],
@@ -771,7 +793,10 @@ class TestLangFieldOverride:
         assert response.status_code == 200
         # Should route to Sarvam, not Vertex
         assert len(called_models) == 1
-        assert "sarvam" in called_models[0].lower() or "openhathi" in called_models[0].lower()
+        assert (
+            "sarvam" in called_models[0].lower()
+            or "openhathi" in called_models[0].lower()
+        )
 
     @pytest.mark.asyncio
     async def test_lang_null_falls_back_to_detection(self):
@@ -794,7 +819,9 @@ class TestLangFieldOverride:
             patches["auth"],
             patches["topic_match"],
             patch("app.services.chat_service.search_service", mock_search),
-            patch("app.services.ai.router.stream_response", side_effect=_capture_stream),
+            patch(
+                "app.services.ai.router.stream_response", side_effect=_capture_stream
+            ),
             patches["posthog"],
             patches["token_budget"],
             patches["tracer"],

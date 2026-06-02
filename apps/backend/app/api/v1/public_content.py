@@ -352,7 +352,9 @@ async def get_chapter_by_slug(
     )
 
 
-@router.get("/chapter-by-slug/{board}/{class_slug}/{stream_slug}/{subject_slug}/{chapter_slug}")
+@router.get(
+    "/chapter-by-slug/{board}/{class_slug}/{stream_slug}/{subject_slug}/{chapter_slug}"
+)
 async def get_chapter_by_slug_with_stream(
     board: str,
     class_slug: str,
@@ -368,7 +370,13 @@ async def get_chapter_by_slug_with_stream(
     No authentication required.
     """
     return await _resolve_chapter_by_slug(
-        board, class_slug, stream_slug, subject_slug, chapter_slug, response, use_slug_as=False
+        board,
+        class_slug,
+        stream_slug,
+        subject_slug,
+        chapter_slug,
+        response,
+        use_slug_as=False,
     )
 
 
@@ -391,7 +399,9 @@ async def get_chapter_by_slug_as(
     )
 
 
-@router.get("/chapter-by-slug-as/{board}/{class_slug}/{stream_slug}/{subject_slug}/{chapter_slug}")
+@router.get(
+    "/chapter-by-slug-as/{board}/{class_slug}/{stream_slug}/{subject_slug}/{chapter_slug}"
+)
 async def get_chapter_by_slug_as_with_stream(
     board: str,
     class_slug: str,
@@ -407,7 +417,13 @@ async def get_chapter_by_slug_as_with_stream(
     No authentication required.
     """
     return await _resolve_chapter_by_slug(
-        board, class_slug, stream_slug, subject_slug, chapter_slug, response, use_slug_as=True
+        board,
+        class_slug,
+        stream_slug,
+        subject_slug,
+        chapter_slug,
+        response,
+        use_slug_as=True,
     )
 
 
@@ -492,7 +508,11 @@ async def _resolve_chapter_by_slug(
         )
 
     # 5. Resolve chapter
-    chapters = await Chapter.find({"subject_id": subject_doc.id}).sort("+chapter_number").to_list()
+    chapters = (
+        await Chapter.find({"subject_id": subject_doc.id})
+        .sort("+chapter_number")
+        .to_list()
+    )
 
     chapter_doc = None
     for ch in chapters:
@@ -511,7 +531,9 @@ async def _resolve_chapter_by_slug(
         )
 
     # Determine the stream that owns this subject
-    stream_doc = next((s for s in target_streams if s.id == subject_doc.stream_id), None)
+    stream_doc = next(
+        (s for s in target_streams if s.id == subject_doc.stream_id), None
+    )
 
     # Build topic_title from first published topic or chapter title
     topic_title = chapter_doc.title
@@ -566,15 +588,24 @@ async def _resolve_chapter_by_slug(
         "content_type": "chapter",
         "has_assamese": has_assamese,
         "meta_description": chapter_doc.meta_description or "",
-        "word_count": chapter_doc.word_count or len(content_en.split()) if content_en else 0,
-        "notes_generated": chapter_doc.notes_generated or bool(content_en or content_as),
+        "word_count": chapter_doc.word_count or len(content_en.split())
+        if content_en
+        else 0,
+        "notes_generated": chapter_doc.notes_generated
+        or bool(content_en or content_as),
         "chapter_number": chapter_doc.chapter_number,
-        "topics": [t.model_dump() for t in chapter_doc.published_topics] if chapter_doc.published_topics else [],
+        "topics": [t.model_dump() for t in chapter_doc.published_topics]
+        if chapter_doc.published_topics
+        else [],
         "faq_jsonld": chapter_doc.faq_jsonld or [],
         "prev_chapter": prev_chapter,
         "next_chapter": next_chapter,
-        "generated_at": chapter_doc.created_at.isoformat() if chapter_doc.created_at else None,
-        "updated_at": chapter_doc.updated_at.isoformat() if chapter_doc.updated_at else None,
+        "generated_at": chapter_doc.created_at.isoformat()
+        if chapter_doc.created_at
+        else None,
+        "updated_at": chapter_doc.updated_at.isoformat()
+        if chapter_doc.updated_at
+        else None,
     }
 
 
