@@ -101,40 +101,62 @@ class LogoutRequest(BaseModel):
 # ─── Token Helpers ───────────────────────────────────────────────────────────
 
 
+_PLACEHOLDER_SECRETS = {
+    "dev-only-secret-not-for-production-use-32chars",
+    "changeme",
+    "secret",
+    "your-secret-key",
+}
+
+
 def _get_signing_key() -> tuple[str, str]:
     """Get the key and algorithm for signing JWTs.
     Returns (key, algorithm).
-    If RS256 is configured with a private key, use RS256.
-    In production, RS256 with JWT_PRIVATE_KEY is required.
-    In dev/test/local, fall back to HS256 with JWT_SECRET.
+
+    Priority order:
+    1. RS256 with JWT_PRIVATE_KEY — most secure, preferred for production
+    2. HS256 with JWT_SECRET — acceptable if JWT_SECRET is non-placeholder and ≥ 32 chars
+    3. RuntimeError — if neither is properly configured in production
     """
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PRIVATE_KEY:
         return settings.JWT_PRIVATE_KEY, "RS256"
-    if settings.APP_ENV == "production":
-        raise RuntimeError("RS256 JWT_PRIVATE_KEY required in production")
     if settings.JWT_ALGORITHM == "RS256":
         logger.warning(
             "JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set - falling back to HS256"
         )
-    return settings.JWT_SECRET, "HS256"
+    jwt_secret = settings.JWT_SECRET
+    if settings.APP_ENV == "production":
+        if not jwt_secret or jwt_secret in _PLACEHOLDER_SECRETS or len(jwt_secret) < 32:
+            raise RuntimeError(
+                "JWT configuration invalid in production: set JWT_PRIVATE_KEY (RS256) "
+                "or a strong JWT_SECRET (≥32 chars, non-placeholder) for HS256"
+            )
+    return jwt_secret, "HS256"
 
 
 def _get_verification_key() -> tuple[str, str]:
     """Get the key and algorithm for verifying JWTs.
     Returns (key, algorithm).
-    If RS256 is configured with a public key, use RS256.
-    In production, RS256 with JWT_PUBLIC_KEY is required.
-    In dev/test/local, fall back to HS256 with JWT_SECRET.
+
+    Priority order:
+    1. RS256 with JWT_PUBLIC_KEY — matches RS256 signing
+    2. HS256 with JWT_SECRET — matches HS256 signing
+    3. RuntimeError — if neither is properly configured in production
     """
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PUBLIC_KEY:
         return settings.JWT_PUBLIC_KEY, "RS256"
-    if settings.APP_ENV == "production":
-        raise RuntimeError("RS256 JWT_PUBLIC_KEY required in production")
     if settings.JWT_ALGORITHM == "RS256":
         logger.warning(
             "JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set - falling back to HS256"
         )
-    return settings.JWT_SECRET, "HS256"
+    jwt_secret = settings.JWT_SECRET
+    if settings.APP_ENV == "production":
+        if not jwt_secret or jwt_secret in _PLACEHOLDER_SECRETS or len(jwt_secret) < 32:
+            raise RuntimeError(
+                "JWT configuration invalid in production: set JWT_PUBLIC_KEY (RS256) "
+                "or a strong JWT_SECRET (≥32 chars, non-placeholder) for HS256"
+            )
+    return jwt_secret, "HS256"
 
 
 def create_access_token(user_id: str, expires_delta: timedelta = None) -> str:

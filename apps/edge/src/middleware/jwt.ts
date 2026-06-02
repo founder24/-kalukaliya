@@ -51,6 +51,11 @@ const PUBLIC_PATHS = [
   '/api/v1/content/chunks',
   '/api/v1/content/chapter-by-slug',
   '/api/v1/content/topic',
+  '/api/v1/content/library-bundle',
+  '/api/content/library-bundle',
+  '/api/v1/seo',
+  '/sitemap',
+  '/robots.txt',
 ];
 
 /**
