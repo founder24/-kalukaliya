@@ -395,7 +395,11 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
     """
     IP-based rate limiting using Upstash Redis.
     Raises HTTP 429 if limit exceeded. Raises HTTP 503 if Redis unavailable (fail-closed).
+    In development mode, rate limiting is skipped entirely so local/Replit dev works
+    without Redis configured.
     """
+    if settings.APP_ENV == "development":
+        return
     try:
         from app.db.redis import get_redis
 

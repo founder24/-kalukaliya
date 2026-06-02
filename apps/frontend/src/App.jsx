@@ -135,7 +135,7 @@ const PageFallbackContent = () => (
           className="w-14 h-14 rounded-2xl flex items-center justify-center pulse-glow overflow-hidden"
           aria-hidden="true"
         >
-          <img src="/logo-144.webp" alt="" width="56" height="56" fetchPriority="high" className="w-14 h-14 object-cover" />
+          <img src="/logo-144.webp" alt="" width="56" height="56" fetchpriority="high" className="w-14 h-14 object-cover" />
         </div>
         <div
           className="absolute orbit-ring"

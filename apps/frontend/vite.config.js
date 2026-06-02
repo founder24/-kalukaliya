@@ -635,7 +635,7 @@ export default defineConfig(({ mode }) => ({
       '@': path.resolve(__dirname, 'src'),
     },
     extensions: ['.js', '.jsx', '.ts', '.tsx'],
-    dedupe: ['react', 'react-dom', 'react/jsx-runtime'],
+    dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
   },
 
   server: {

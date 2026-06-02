@@ -67,6 +67,11 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
         chapters_by_subject.setdefault(key, []).append(ch)
 
     result_boards = []
+    flat_classes = []
+    flat_streams = []
+    flat_subjects = []
+    flat_chapters = []
+
     for board in boards:
         board_id = str(board.id)
         board_classes = classes_by_board.get(board_id, [])
@@ -93,39 +98,60 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
                             "id": str(ch.id),
                             "title": ch.title,
                             "slug": ch.slug,
+                            "subject_id": subj_id,
                             "order": ch.chapter_number,
                             "topic_count": len(ch.published_topics),
                         }
                         chapter_list.append(ch_data)
+                        if not slim:
+                            flat_chapters.append(ch_data)
 
                     subj_data = {
                         "id": subj_id,
                         "name": subj.name,
                         "slug": _slugify(subj.name),
+                        "stream_id": stream_id,
+                        "status": getattr(subj, "status", "published"),
+                        "description": getattr(subj, "description", None),
+                        "tags": getattr(subj, "tags", []),
+                        "seo_stats": getattr(subj, "seo_stats", None),
                         "chapter_count": len(subj_chapters),
                     }
                     if not slim:
                         subj_data["chapters"] = chapter_list
 
                     result_subjects.append(subj_data)
+                    flat_subjects.append(subj_data)
 
-                result_streams.append(
-                    {
-                        "id": stream_id,
-                        "name": stream.name,
-                        "slug": _slugify(stream.name),
-                        "subjects": result_subjects,
-                    }
-                )
-
-            result_classes.append(
-                {
-                    "id": cls_id,
-                    "name": cls.name,
-                    "slug": _slugify(cls.name),
-                    "streams": result_streams,
+                stream_entry = {
+                    "id": stream_id,
+                    "name": stream.name,
+                    "slug": _slugify(stream.name),
+                    "class_id": cls_id,
+                    "subjects": result_subjects,
                 }
-            )
+                result_streams.append(stream_entry)
+                flat_streams.append({
+                    "id": stream_id,
+                    "name": stream.name,
+                    "slug": _slugify(stream.name),
+                    "class_id": cls_id,
+                })
+
+            cls_entry = {
+                "id": cls_id,
+                "name": cls.name,
+                "slug": _slugify(cls.name),
+                "board_id": board_id,
+                "streams": result_streams,
+            }
+            result_classes.append(cls_entry)
+            flat_classes.append({
+                "id": cls_id,
+                "name": cls.name,
+                "slug": _slugify(cls.name),
+                "board_id": board_id,
+            })
 
         result_boards.append(
             {
@@ -136,7 +162,15 @@ async def get_library_bundle(response: Response, slim: int = Query(0)):
             }
         )
 
-    return {"boards": result_boards}
+    result = {
+        "boards": result_boards,
+        "classes": flat_classes,
+        "streams": flat_streams,
+        "subjects": flat_subjects,
+    }
+    if not slim:
+        result["chapters"] = flat_chapters
+    return result
 
 
 @router.get("/chapters/{chapter_id}/faq-jsonld")

@@ -202,11 +202,13 @@ def create_app() -> FastAPI:
                 request.url.path.startswith("/health")
                 or request.url.path.startswith("/api/health")
             ):
-                # Skip CSRF origin check in test environment and when no Origin
-                # header is present (API clients and test runners)
+                # Skip CSRF origin check in test/development and when no Origin
+                # header is present (API clients and test runners).
+                # Development mode allows any origin so the Replit preview
+                # domain (*.sisko.replit.dev) can reach auth/chat/analytics.
                 if (
                     origin
-                    and settings.APP_ENV != "test"
+                    and settings.APP_ENV not in ("test", "development")
                     and not settings.is_origin_allowed(origin)
                 ):
                     from fastapi.responses import JSONResponse

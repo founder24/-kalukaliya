@@ -1,0 +1,1 @@
+- [Syrabit dev environment issues](syrabit-dev-issues.md) — CORS/rate-limit/library-bundle/CookieConsent fixes needed for Replit dev to work
