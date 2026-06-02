@@ -1,0 +1,7 @@
+{
+  "task_id": "task-fix-jwt-error-handling",
+  "task_description": "Fix critical JWT error handling in the backend so that invalid tokens return proper HTTP 401 JSON responses instead of 500 Internal Server Errors. Affects get_current_user dependency and refresh_token_endpoint.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

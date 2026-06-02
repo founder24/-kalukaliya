@@ -1,0 +1,23 @@
+{
+  "project_type": "Python FastAPI backend (Syrabit educational AI app)",
+  "language": "Python",
+  "build_system": "pip with requirements.txt (compiled from requirements.in via pip-compile)",
+  "test_framework": "pytest with anyio async support, httpx AsyncClient for API tests, unittest.mock for mocking",
+  "build_command": "pip install -r apps/backend/requirements.txt",
+  "test_command": "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/ -x -q",
+  "verification_instructions": "Run pytest tests/ from the backend directory. All existing tests must pass. Specifically test_auth.py must pass including the refresh and protected endpoint tests.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pip install -r apps/backend/requirements.txt && pip install -r apps/backend/requirements-dev.in (or pytest httpx)",
+  "environment_constraints": "OPEN_INTERNET network mode. Python 3.11 available via pyenv. No Docker daemon needed for this task.",
+  "contribution_requirements": "No CONTRIBUTING.md found. Follow existing code patterns.",
+  "key_patterns": "Auth dependency is in app/api/v1/auth.py. get_current_user is a FastAPI Depends() used by all protected endpoints. JWT tokens use PyJWT (pyjwt). Exception handling pattern: catch HTTPException first and re-raise, then catch specific JWT errors, then catch-all. Tests use conftest.py fixtures with mocked rate limiting and mocked User model.",
+  "relevant_files": [
+    "apps/backend/app/api/v1/auth.py",
+    "apps/backend/app/api/v1/users.py",
+    "apps/backend/app/api/v1/subscription.py",
+    "apps/backend/app/config.py",
+    "apps/backend/tests/test_auth.py",
+    "apps/backend/tests/conftest.py"
+  ],
+  "directory_structure": "apps/backend/ is the Python backend. app/ has api/v1/ (route modules), core/ (security, logging), db/ (mongo, redis), models/, services/, config.py, main.py. tests/ has pytest test files and conftest.py."
+}
