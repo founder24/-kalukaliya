@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 from httpx import AsyncClient
 
@@ -88,3 +90,33 @@ async def test_subscription_create_order_with_invalid_token(client: AsyncClient)
         headers={"Authorization": "Bearer bad.token.here"},
     )
     assert response.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_users_me_returns_503_on_key_misconfiguration(client: AsyncClient):
+    """Test that RuntimeError from key misconfiguration returns 503, not 500"""
+    with patch(
+        "app.api.v1.auth._get_verification_key",
+        side_effect=RuntimeError("RS256 JWT_PUBLIC_KEY required in production"),
+    ):
+        response = await client.get(
+            "/api/v1/users/me",
+            headers={"Authorization": "Bearer some.valid.looking-token"},
+        )
+    assert response.status_code == 503
+    assert "misconfigured" in response.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+async def test_refresh_returns_503_on_key_misconfiguration(client: AsyncClient):
+    """Test that RuntimeError from key misconfiguration in refresh returns 503"""
+    with patch(
+        "app.api.v1.auth._get_verification_key",
+        side_effect=RuntimeError("RS256 JWT_PUBLIC_KEY required in production"),
+    ):
+        response = await client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": "some.refresh.token"},
+        )
+    assert response.status_code == 503
+    assert "misconfigured" in response.json()["detail"].lower()
