@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Address review feedback: fix misleading log message, add RuntimeError->503 handler for key misconfiguration, and add test coverage for the RuntimeError path",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In apps/backend/app/api/v1/auth.py, in get_current_user's final except block, change log message from 'Unexpected database error' to 'Unexpected error in authentication'",
     "In apps/backend/app/api/v1/auth.py, in get_current_user, add 'except RuntimeError as e' handler before the generic 'except Exception' that returns 503 with detail 'Authentication service misconfigured'",
@@ -21,5 +21,5 @@
     "cd /projects/sandbox/-kalukaliya/apps/backend && python -m pytest tests/test_auth.py -v"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "The test environment had APP_ENV=production by default, which caused _get_verification_key() to raise RuntimeError even before jwt.decode() could run. This meant the existing invalid-token tests were actually hitting the RuntimeError path, not the InvalidTokenError path. Fixed by setting APP_ENV=test in conftest's autouse fixture so that _get_verification_key() falls back to HS256 with JWT_SECRET, allowing invalid tokens to properly reach the jwt.decode() call and raise InvalidTokenError. The new RuntimeError tests use unittest.mock.patch to directly mock _get_verification_key raising RuntimeError."
 }
