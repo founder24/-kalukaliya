@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Create a comprehensive Playwright e2e test for the library page that verifies MongoDB content flows through the backend API and renders as subject cards on the frontend. Also add tests for the chat pipeline with auth headers and the login/auth flow end-to-end. This simulates the full deployment flow after PR 356.",
-  "status": "pending",
+  "status": "completed",
   "steps": [
     "Create a new Playwright test file at apps/frontend/e2e/library-deployment.spec.ts that tests the library page content rendering flow",
     "In the library test: mock the /api/v1/content/library-bundle endpoint to return realistic MongoDB-shaped data (boards, classes, streams, subjects with chapters) matching the schema from apps/backend/app/api/v1/public_content.py",
@@ -25,5 +25,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/frontend && npx playwright test e2e/library-deployment.spec.ts e2e/chat-deployment.spec.ts e2e/auth-deployment.spec.ts --reporter=list"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "1. SSE format uses 'content' field (not 'text') for streaming chunks, and final event uses 'event: syrabit_done' (not 'done: true' alone). 2. react-query has retry: 4 with exponential backoff for library-bundle-slim, so error state test needs 30s timeout to allow all retries to exhaust. 3. Library subject names appear multiple times on page (in trending rail + subject cards), so tests use h3 locators to target subject card headings specifically. 4. All 15 tests pass reliably in ~23s."
 }
