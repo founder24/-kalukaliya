@@ -322,6 +322,10 @@ export default function ChatPage() {
       // send it (not only when non-English). Backend's `chat_router`
       // collapses unknown codes to ``en`` deterministically.
       response_lang: responseLang || 'en',
+      // The backend ChatRequest model expects `lang` (not response_lang).
+      // Map the frontend language selection so the explicit override reaches
+      // the backend and is not silently dropped by Pydantic.
+      lang: responseLang || null,
     };
     // Task #610 — Firebase Performance custom traces + W3C trace propagation.
     // `chat_send_total` covers the full send→done lifecycle; `chat_send_first_token`
