@@ -1,0 +1,7 @@
+{
+  "task_id": "task-live-deployment-audit-2",
+  "task_description": "Comprehensive build verification and code consistency audit of the Syrabit monorepo. Builds all three layers, runs all tests, and traces critical paths (auth, chat, content) through edge->backend->frontend to verify correct wiring.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Environment setup: Install all dependencies across all three layers and verify baseline builds/tests pass.",
+  "status": "completed",
+  "steps": [
+    "Install Python 3.11 dependencies: cd apps/backend && pip install -r requirements.txt && pip install pytest pytest-asyncio pytest-cov pytest-env",
+    "Install pnpm workspace dependencies: cd /projects/sandbox/-kalukaliya && pnpm install",
+    "Run backend pytest: cd apps/backend && APP_ENV=test JWT_SECRET=test-secret-at-least-32-characters-long pytest tests/ -v --tb=short 2>&1 | tee /tmp/backend-test-results.txt",
+    "Run edge TypeScript check: cd apps/edge && npx tsc --noEmit 2>&1 | tee /tmp/edge-tsc-results.txt",
+    "Run edge vitest: cd apps/edge && npx vitest run 2>&1 | tee /tmp/edge-test-results.txt",
+    "Run frontend vite build: cd apps/frontend && npx vite build 2>&1 | tee /tmp/frontend-build-results.txt",
+    "Run frontend vitest: cd apps/frontend && npx vitest run 2>&1 | tee /tmp/frontend-test-results.txt",
+    "Create a summary report file at /projects/sandbox/-kalukaliya/AUDIT_BUILD_VERIFICATION.md with the results of all build and test steps, noting any failures, warnings, or errors encountered."
+  ],
+  "acceptance_criteria": [
+    "All three layers have dependencies installed successfully",
+    "Backend pytest runs (pass or fail with documented reasons)",
+    "Edge tsc --noEmit runs (pass or fail with documented reasons)",
+    "Edge vitest runs (pass or fail with documented reasons)",
+    "Frontend vite build runs (pass or fail with documented reasons)",
+    "Frontend vitest runs (pass or fail with documented reasons)",
+    "A summary report AUDIT_BUILD_VERIFICATION.md exists documenting all results"
+  ],
+  "verification": [
+    "cat /projects/sandbox/-kalukaliya/AUDIT_BUILD_VERIFICATION.md to confirm it was created with build/test results"
+  ],
+  "blocked_reason": null,
+  "findings": "All deps installed and builds pass. Backend: 244/244 tests pass. Edge: 75/77 pass (2 pre-existing failures in api-proxy and edge-caching tests - expectation drift). Frontend: vite build succeeds; 579/584 tests pass (5 pre-existing failures in AdminHealth.credits.test.jsx - component renders AWS panel where tests expect GCP credits content). Python 3.11 is required for backend requirements.txt."
+}
