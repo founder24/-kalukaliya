@@ -6,7 +6,7 @@ import { useState, useRef, useEffect } from 'react';
 // - Sarvam AI for Assamese language chat
 // Cloudflare Worker AI (@cf/ models) is NOT used for chat - only for OCR/TTS.
 const MODELS = [
-  { value: 'openai/gpt-oss-20b',  label: 'Syrabit SLM', badge: '⚡ Fast'         },
+  { value: 'gemini-2.5-flash',  label: 'Syrabit SLM', badge: '⚡ Fast'         },
   { value: 'openai/gpt-oss-120b', label: 'Syrabit MLM', badge: '🔜 Coming Soon', disabled: true },
 ];
 

@@ -162,6 +162,10 @@ export default {
       // Layer 1: Module-level in-memory cache (10s TTL, per-isolate)
       if (healthCache && (now - healthCache.timestamp) < HEALTH_CACHE_TTL_MS) {
         backendReachable = healthCache.backendReachable;
+      } else if (!env.ISR_CACHE_KV) {
+        // KV not bound - skip KV layer, fetch backend directly
+        backendReachable = await fetchBackendHealth(env.BACKEND_URL, env);
+        healthCache = { backendReachable, timestamp: now };
       } else {
         // Layer 2: KV cache (30s TTL, globally shared across all PoPs)
         try {
@@ -293,6 +297,20 @@ export default {
       return isrResponse;
     }
 
+    // ── Direct redirect for root path to /library ──
+    if (url.pathname === '/') {
+      const frontendOrigin = env.ALLOWED_ORIGIN || 'https://syrabit.ai';
+      const rootRedirect = new Response(null, {
+        status: 302,
+        headers: {
+          'Location': `${frontendOrigin}/library`,
+          'Cache-Control': 'public, s-maxage=3600',
+          'X-Request-ID': requestId,
+        },
+      });
+      return rootRedirect;
+    }
+
     // ── CF Cache API for non-API GET requests ──
     // Cache redirect responses so repeat visitors get them instantly from edge cache.
     if (request.method === 'GET' || request.method === 'HEAD') {
@@ -321,7 +339,7 @@ export default {
           'X-Request-ID': requestId,
         },
       });
-      ctx.waitUntil(cache.put(request, redirectResponse.clone()));
+      // Do not cache 302 redirects - only cache non-redirect responses
       return redirectResponse;
     }
 

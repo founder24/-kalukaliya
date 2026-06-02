@@ -36,7 +36,15 @@ const PUBLIC_PATHS = [
   '/api/v1/admin/login',
   '/api/v1/admin/logout',
   '/api/webhooks',
-  '/api/v1/content',
+  '/api/v1/content/public',
+  '/api/v1/content/boards',
+  '/api/v1/content/classes',
+  '/api/v1/content/streams',
+  '/api/v1/content/subjects',
+  '/api/v1/content/chapters',
+  '/api/v1/content/chunks',
+  '/api/v1/content/chapter-by-slug',
+  '/api/v1/content/topic',
 ];
 
 /**

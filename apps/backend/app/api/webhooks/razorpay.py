@@ -15,6 +15,7 @@ router = APIRouter(tags=["Payments"])
 
 
 _RAZORPAY_SUBSCRIPTION_ID_RE = re.compile(r"^sub_[A-Za-z0-9_]+$")
+_RAZORPAY_ORDER_ID_RE = re.compile(r"^order_[A-Za-z0-9_]+$")
 
 
 def calculate_next_billing_date() -> datetime:
@@ -23,7 +24,9 @@ def calculate_next_billing_date() -> datetime:
 
 
 def _validate_subscription_id(value) -> str:
-    if not isinstance(value, str) or not _RAZORPAY_SUBSCRIPTION_ID_RE.fullmatch(value):
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail="Invalid subscription id")
+    if not (_RAZORPAY_SUBSCRIPTION_ID_RE.fullmatch(value) or _RAZORPAY_ORDER_ID_RE.fullmatch(value)):
         raise HTTPException(status_code=400, detail="Invalid subscription id")
     return value
 
@@ -105,6 +108,12 @@ async def handle_razorpay_webhook(request: Request):
 
         # Find User
         user = await User.find_one({"razorpay_subscription_id": sub_id})
+
+        # Fallback: try looking up by payment order_id if subscription lookup failed
+        if not user:
+            order_id = payload.get("payment", {}).get("order_id")
+            if order_id and _RAZORPAY_ORDER_ID_RE.fullmatch(order_id):
+                user = await User.find_one({"razorpay_subscription_id": order_id})
 
         if not user:
             logger.error(f"User not found for sub {sub_id}")

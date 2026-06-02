@@ -34,6 +34,9 @@ import { probeImageResizer } from "@/utils/imageCdn";
 // see the symbol as missing due to a circular-import chain via
 // AuthContext/LanguageContext/ErrorBoundary etc. Re-exported for any
 // existing imports that still pull it from `./App`.
+// NOTE: This re-export is intentional for backward compatibility. External
+// consumers (tests, legacy code) may import { queryClient } from './App'.
+// Do not remove without updating all import sites.
 export { queryClient };
 
 // Seed React Query from data baked into the prerendered HTML so the

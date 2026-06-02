@@ -2,6 +2,13 @@ import axios from 'axios';
 import { toast } from 'sonner';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+if (!import.meta.env.VITE_BACKEND_URL) {
+  if (import.meta.env.PROD) {
+    throw new Error('VITE_BACKEND_URL is not set. API calls will fail in production.');
+  } else {
+    console.error('[Syrabit] VITE_BACKEND_URL is not set. API requests will use relative paths (/api/v1).');
+  }
+}
 export const API_BASE = `${BACKEND_URL}/api/v1`;
 
 const _RENDER_URL = (import.meta.env.VITE_RENDER_API_URL || '').replace(/\/+$/, '');

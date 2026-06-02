@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from typing import Optional
 
 from app.config import settings
@@ -38,8 +39,8 @@ class VertexSearchService:
 
         if (
             settings.VERTEX_PROJECT_ID
-            and settings.GOOGLE_APPLICATION_CREDENTIALS_JSON
             and settings.VERTEX_SEARCH_DATASTORE_ID
+            and (settings.GOOGLE_APPLICATION_CREDENTIALS_JSON or settings.GOOGLE_APPLICATION_CREDENTIALS or os.environ.get('K_SERVICE'))
         ):
             try:
                 self._init_client()
@@ -59,10 +60,20 @@ class VertexSearchService:
         from google.cloud import discoveryengine_v1
         from google.oauth2 import service_account
 
-        credentials = service_account.Credentials.from_service_account_info(
-            settings.google_credentials,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
+        creds_info = settings.google_credentials
+        if creds_info:
+            credentials = service_account.Credentials.from_service_account_info(
+                creds_info,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+        elif os.environ.get('K_SERVICE'):
+            # Running on Cloud Run with Workload Identity - use ADC
+            import google.auth
+            credentials, _ = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+        else:
+            raise RuntimeError("No credentials available for Vertex Search client")
 
         self._client = discoveryengine_v1.SearchServiceClient(
             credentials=credentials,

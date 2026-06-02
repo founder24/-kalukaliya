@@ -50,8 +50,14 @@ export async function checkRateLimit(
   // Increment counter (eventual consistency is acceptable for rate limiting)
   // TTL of 2 hours ensures cleanup even if window rolls over
   // Note: Read-then-write with KV eventual consistency means concurrent requests
-  // may both pass the check. This is an accepted trade-off for edge rate limiting.
-  // For strong consistency, use Cloudflare Durable Objects.
+  // may both pass the check. This is an accepted trade-off for edge rate limiting:
+  // - KV is eventually consistent across PoPs (100-200ms propagation)
+  // - Two concurrent requests from the same user may both read count=29 and both pass
+  // - Worst case: a user sends ~2x their limit in a single burst before convergence
+  // - For strong consistency guarantees, migrate to Cloudflare Durable Objects
+  //   (single-threaded per-user actor with transactional storage)
+  // The backend's monthly quota (apps/backend/app/api/deps/rate_limit.py) is the
+  // authoritative billing enforcement; this edge limit is only burst protection.
   await kv.put(key, String(count + 1), { expirationTtl: 7200 });
 
   return {

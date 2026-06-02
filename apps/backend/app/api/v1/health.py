@@ -3,6 +3,7 @@ Health Check Endpoints: Basic and Deep Dependency Checks
 """
 
 import asyncio
+import os
 
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
@@ -85,6 +86,9 @@ async def vertex_ping() -> Dict[str, Any]:
 
         if settings.VERTEX_PROJECT_ID and settings.GOOGLE_APPLICATION_CREDENTIALS_JSON:
             return {"status": "healthy", "project_id": settings.VERTEX_PROJECT_ID}
+        elif settings.VERTEX_PROJECT_ID and os.environ.get('K_SERVICE'):
+            # Running on Cloud Run with Workload Identity - ADC is available
+            return {"status": "healthy", "project_id": settings.VERTEX_PROJECT_ID, "auth": "workload_identity"}
         else:
             return {"status": "unhealthy", "error": "Missing credentials"}
     except Exception as e:
@@ -97,17 +101,34 @@ async def basic_health_check():
     """
     Basic health check - returns 200 if app is running.
     Does not check dependencies.
-    Reports 'degraded' status if there are startup configuration errors.
+    Returns 503 if there are startup configuration errors.
     """
     from app.config import settings
 
+    warnings = []
+
+    # Issue 12: Detect JWT algorithm mismatch
+    if settings.JWT_ALGORITHM == "RS256":
+        if not getattr(settings, 'JWT_PRIVATE_KEY', None):
+            warnings.append("JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set")
+        if not getattr(settings, 'JWT_PUBLIC_KEY', None):
+            warnings.append("JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set")
+
     if settings.startup_errors:
-        return {
-            "status": "degraded",
-            "service": "syrabit-backend",
-            "config_error_count": len(settings.startup_errors),
-        }
-    return {"status": "healthy", "service": "syrabit-backend"}
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "service": "syrabit-backend",
+                "config_error_count": len(settings.startup_errors),
+                "warnings": warnings,
+            },
+        )
+
+    response = {"status": "healthy", "service": "syrabit-backend"}
+    if warnings:
+        response["warnings"] = warnings
+    return response
 
 
 @router.get("/deep")

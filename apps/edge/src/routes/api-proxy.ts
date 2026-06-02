@@ -31,7 +31,6 @@ export async function proxyRequest(
 
   // Remove hop-by-hop headers that shouldn't be forwarded
   headers.delete('Host');
-  headers.delete('Content-Length');
   headers.delete('Connection');
 
   // Per-request HMAC signature (SEC-002 fix)
@@ -107,10 +106,6 @@ export async function proxyRequest(
     clearTimeout(timeout);
 
     const responseHeaders = new Headers(response.headers);
-    const requestOrigin = request.headers.get('Origin') || 'https://syrabit.ai';
-    const cors = getCorsHeaders(requestOrigin);
-    responseHeaders.set('Access-Control-Allow-Origin', cors['Access-Control-Allow-Origin']);
-    responseHeaders.set('Access-Control-Allow-Credentials', 'true');
 
     if (isStreamRequest) {
       // ── Stream-specific handling ──

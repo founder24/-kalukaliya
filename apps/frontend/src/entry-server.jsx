@@ -1,3 +1,37 @@
+/**
+ * SSR Entry Point - Server-Side Rendering for Prerendered Routes
+ *
+ * Architecture Overview:
+ * ---------------------
+ * This module is the server-side entry point used by the Vite SSR build.
+ * It is NOT a running server - it exports a `renderRoute()` function that
+ * the prerender scripts (scripts/prerender-library.mjs, scripts/prerender-routes.mjs)
+ * call at build time to generate static HTML snapshots.
+ *
+ * Prerendering Flow:
+ * 1. Build scripts call renderRoute({ url, seed }) for each route
+ * 2. React Query state is primed via seed.queries (queryClient.setQueryData)
+ * 3. Page-specific preloads (chapter, subject) are set on globalThis for
+ *    useState initializers that read them during SSR
+ * 4. The matching lazy page chunk is pre-awaited so React.lazy resolves
+ *    synchronously inside renderToString
+ * 5. renderToString produces the HTML string
+ * 6. react-helmet-async captures <head> tags (title, meta, canonical)
+ * 7. The static HTML is written to disk and served by Cloudflare Pages
+ *
+ * Client Hydration:
+ * - The client entry (index.jsx) reads `data-hydrate` from the root element
+ * - It calls preloadPageForKind(kind) to fetch the matching JS chunk
+ * - hydrateRoot() runs after the chunk resolves, ensuring React.lazy
+ *   resolves synchronously and the first render matches the SSR snapshot
+ * - window.__SSR_QUERIES__ seeds React Query on the client to match server state
+ *
+ * globalThis SSR Preloads:
+ * - __SSR_CHAPTER_PRELOAD__: ChapterPage uses this in its useState initializer
+ * - __SSR_SUBJECT_PRELOAD__: SubjectLandingPage uses this similarly
+ * - These are set just before renderToString and cleaned up in a finally block
+ *   to prevent leakage across concurrent renders in the prerender pipeline
+ */
 import { Suspense } from "react";
 import { renderToString } from "react-dom/server";
 import { StaticRouter } from "react-router-dom";

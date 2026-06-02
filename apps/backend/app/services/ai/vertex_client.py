@@ -365,9 +365,9 @@ class VertexAIClient:
                         text = part.get("text", "")
                         if text:
                             yield text
-            vertex_circuit_breaker._on_success()
+            vertex_circuit_breaker.record_success()
         except Exception as e:
-            vertex_circuit_breaker._on_failure()
+            vertex_circuit_breaker.record_failure()
             if isinstance(e, httpx.HTTPStatusError):
                 logger.error(f"Gemini API stream HTTP error: {e.response.status_code}")
                 raise RuntimeError(
@@ -420,9 +420,9 @@ class VertexAIClient:
                         text = part.get("text", "")
                         if text:
                             yield text
-            vertex_circuit_breaker._on_success()
+            vertex_circuit_breaker.record_success()
         except Exception as e:
-            vertex_circuit_breaker._on_failure()
+            vertex_circuit_breaker.record_failure()
             if isinstance(e, httpx.HTTPStatusError):
                 logger.error(f"Vertex AI stream HTTP error: {e.response.status_code}")
                 raise RuntimeError(
