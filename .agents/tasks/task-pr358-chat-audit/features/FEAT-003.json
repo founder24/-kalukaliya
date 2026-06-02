@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address 5 issues from the 2025-07-15 review of test_pr358_chat_audit.py: vertex mock assertion, latency thresholds, dead patches, _failing_stream helper, content correctness assertions.",
+  "status": "in_progress",
+  "steps": [
+    "Add mock_vertex.stream_generate_with_retry assert_called in fallback test",
+    "Increase latency thresholds from 200ms/500ms to 1000ms/2000ms",
+    "Remove stream_response and search_service from _common_patches, add comment noting callers must patch these",
+    "Extract _failing_stream to a reusable _raise_before_yield helper function",
+    "Add assertions verifying mocked chunk text appears in SSE event content values"
+  ],
+  "acceptance_criteria": [
+    "Fallback test explicitly asserts vertex mock was called",
+    "Latency thresholds are 1000ms and 2000ms to avoid CI flakiness",
+    "stream_response and search_service removed from _common_patches helper",
+    "A reusable _raise_before_yield helper exists and is used in the fallback test",
+    "English format test asserts content_events[0]['content'] == 'Photosynthesis'",
+    "All tests still pass"
+  ],
+  "verification": [
+    "cd apps/backend && eval \"$(pyenv init -)\" && pyenv shell 3.11.15 && python -m pytest tests/test_pr358_chat_audit.py -v --tb=short"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}
