@@ -14,9 +14,9 @@ test.describe('Chat Send/Receive', () => {
     // Mock chat stream endpoint with SSE
     await page.route('**/api/v1/chat/stream', async (route) => {
       const sseBody = [
-        'data: {"text": "Hello! ", "done": false}\n\n',
-        'data: {"text": "I can help you study.", "done": false}\n\n',
-        'data: {"text": "", "done": true, "latency_ms": 250, "model": "gemini-1.5-pro", "lang": "en"}\n\n',
+        'data: {"content": "Hello! ", "done": false}\n\n',
+        'data: {"content": "I can help you study.", "done": false}\n\n',
+        'data: {"content": "", "done": true, "event": "syrabit_done", "latency_ms": 250, "model": "gemini-1.5-pro", "lang": "en"}\n\n',
       ].join('');
 
       await route.fulfill({

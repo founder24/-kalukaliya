@@ -104,10 +104,15 @@ test.describe('Auth Flow - Deployment Verification', () => {
       'button[type="submit"], button:has-text("Log in"), button:has-text("Sign in")'
     );
     await expect(submitBtn).toBeVisible();
+
+    // Set up response listener before clicking to avoid race condition
+    const responsePromise = page.waitForResponse(
+      (resp) => resp.url().includes('/api/v1/auth/login') && resp.status() === 200
+    );
     await submitBtn.click();
 
-    // Wait for the API call to complete
-    await page.waitForTimeout(2000);
+    // Wait for the API call to complete deterministically
+    await responsePromise;
 
     expect(loginCalled).toBe(true);
     expect(loginPayload.email).toBe('student@example.com');
