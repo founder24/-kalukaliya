@@ -26,7 +26,10 @@ def calculate_next_billing_date() -> datetime:
 def _validate_subscription_id(value) -> str:
     if not isinstance(value, str):
         raise HTTPException(status_code=400, detail="Invalid subscription id")
-    if not (_RAZORPAY_SUBSCRIPTION_ID_RE.fullmatch(value) or _RAZORPAY_ORDER_ID_RE.fullmatch(value)):
+    if not (
+        _RAZORPAY_SUBSCRIPTION_ID_RE.fullmatch(value)
+        or _RAZORPAY_ORDER_ID_RE.fullmatch(value)
+    ):
         raise HTTPException(status_code=400, detail="Invalid subscription id")
     return value
 

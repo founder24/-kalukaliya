@@ -40,7 +40,11 @@ class VertexSearchService:
         if (
             settings.VERTEX_PROJECT_ID
             and settings.VERTEX_SEARCH_DATASTORE_ID
-            and (settings.GOOGLE_APPLICATION_CREDENTIALS_JSON or settings.GOOGLE_APPLICATION_CREDENTIALS or os.environ.get('K_SERVICE'))
+            and (
+                settings.GOOGLE_APPLICATION_CREDENTIALS_JSON
+                or settings.GOOGLE_APPLICATION_CREDENTIALS
+                or os.environ.get("K_SERVICE")
+            )
         ):
             try:
                 self._init_client()
@@ -66,9 +70,10 @@ class VertexSearchService:
                 creds_info,
                 scopes=["https://www.googleapis.com/auth/cloud-platform"],
             )
-        elif os.environ.get('K_SERVICE'):
+        elif os.environ.get("K_SERVICE"):
             # Running on Cloud Run with Workload Identity - use ADC
             import google.auth
+
             credentials, _ = google.auth.default(
                 scopes=["https://www.googleapis.com/auth/cloud-platform"],
             )

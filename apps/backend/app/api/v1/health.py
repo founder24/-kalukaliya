@@ -86,9 +86,13 @@ async def vertex_ping() -> Dict[str, Any]:
 
         if settings.VERTEX_PROJECT_ID and settings.GOOGLE_APPLICATION_CREDENTIALS_JSON:
             return {"status": "healthy", "project_id": settings.VERTEX_PROJECT_ID}
-        elif settings.VERTEX_PROJECT_ID and os.environ.get('K_SERVICE'):
+        elif settings.VERTEX_PROJECT_ID and os.environ.get("K_SERVICE"):
             # Running on Cloud Run with Workload Identity - ADC is available
-            return {"status": "healthy", "project_id": settings.VERTEX_PROJECT_ID, "auth": "workload_identity"}
+            return {
+                "status": "healthy",
+                "project_id": settings.VERTEX_PROJECT_ID,
+                "auth": "workload_identity",
+            }
         else:
             return {"status": "unhealthy", "error": "Missing credentials"}
     except Exception as e:
@@ -109,9 +113,9 @@ async def basic_health_check():
 
     # Issue 12: Detect JWT algorithm mismatch
     if settings.JWT_ALGORITHM == "RS256":
-        if not getattr(settings, 'JWT_PRIVATE_KEY', None):
+        if not getattr(settings, "JWT_PRIVATE_KEY", None):
             warnings.append("JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set")
-        if not getattr(settings, 'JWT_PUBLIC_KEY', None):
+        if not getattr(settings, "JWT_PUBLIC_KEY", None):
             warnings.append("JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set")
 
     if settings.startup_errors:

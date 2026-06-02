@@ -78,7 +78,9 @@ class ChatService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _make_cache_hash(sanitized_message: str, lang: str, user_tier: str = "free") -> str:
+    def _make_cache_hash(
+        sanitized_message: str, lang: str, user_tier: str = "free"
+    ) -> str:
         """Generate a cache key hash from message, language, and user tier."""
         cache_input = f"{sanitized_message}:{lang}:{user_tier}"
         return hashlib.sha256(cache_input.encode()).hexdigest()

@@ -72,7 +72,7 @@ async def create_order(
                 "currency": "INR",
                 "receipt": f"user_{user.id}_{body.plan}",
                 "notes": {"user_id": str(user.id), "plan": body.plan},
-            }
+            },
         )
     except Exception as e:
         logger.error(f"Razorpay order creation failed: {e}")
@@ -199,7 +199,7 @@ async def create_credit_topup(
                     "credits": str(body.credits),
                     "type": "credit_topup",
                 },
-            }
+            },
         )
     except Exception as e:
         logger.error(f"Razorpay credit topup order creation failed: {e}")
