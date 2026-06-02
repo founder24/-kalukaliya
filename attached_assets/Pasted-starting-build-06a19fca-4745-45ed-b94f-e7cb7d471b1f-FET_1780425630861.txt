@@ -1,0 +1,731 @@
+starting build "06a19fca-4745-45ed-b94f-e7cb7d471b1f"
+
+FETCHSOURCE
+From https://github.com/founder24/-kalukaliya
+ * branch            b2f2929b0d0421489f489296a30e3910d115dfb2 -> FETCH_HEAD
+HEAD is now at b2f2929 Update thumbnail URLs and improve development asset proxy configuration
+GitCommit:
+b2f2929b0d0421489f489296a30e3910d115dfb2
+BUILD
+Starting Step #0
+Step #0: Already have image (with digest): gcr.io/cloud-builders/docker
+Step #0: Sending build context to Docker daemon  644.6kB
+
+Step #0: Step 1/16 : FROM python:3.11-slim as builder
+Step #0: 3.11-slim: Pulling from library/python
+Step #0: 5b4d6ff92fc4: Already exists
+Step #0: 8649771fee17: Pulling fs layer
+Step #0: 797d495f2c68: Pulling fs layer
+Step #0: 45006ceeeea9: Pulling fs layer
+Step #0: 8649771fee17: Verifying Checksum
+Step #0: 8649771fee17: Download complete
+Step #0: 797d495f2c68: Verifying Checksum
+Step #0: 797d495f2c68: Download complete
+Step #0: 45006ceeeea9: Verifying Checksum
+Step #0: 45006ceeeea9: Download complete
+Step #0: 8649771fee17: Pull complete
+Step #0: 797d495f2c68: Pull complete
+Step #0: 45006ceeeea9: Pull complete
+Step #0: Digest: sha256:a3ab0b966bc4e91546a033e22093cb840908979487a9fc0e6e38295747e49ac0
+Step #0: Status: Downloaded newer image for python:3.11-slim
+Step #0:  ---> 1455a91ef4da
+Step #0: Step 2/16 : WORKDIR /app
+Step #0:  ---> Running in 8cf1438987dc
+Step #0: Removing intermediate container 8cf1438987dc
+Step #0:  ---> c957be14f02a
+Step #0: Step 3/16 : RUN apt-get update && apt-get install -y --no-install-recommends     gcc     libffi-dev     && rm -rf /var/lib/apt/lists/*
+Step #0:  ---> Running in d9c5af26ea90
+Step #0: Hit:1 http://deb.debian.org/debian trixie InRelease
+Step #0: Get:2 http://deb.debian.org/debian trixie-updates InRelease [47.3 kB]
+Step #0: Get:3 http://deb.debian.org/debian-security trixie-security InRelease [43.4 kB]
+Step #0: Get:4 http://deb.debian.org/debian trixie/main amd64 Packages [9671 kB]
+Step #0: Get:5 http://deb.debian.org/debian trixie-updates/main amd64 Packages [5412 B]
+Step #0: Get:6 http://deb.debian.org/debian-security trixie-security/main amd64 Packages [195 kB]
+Step #0: Fetched 9963 kB in 1s (6827 kB/s)
+Step #0: Reading package lists...
+Step #0: Reading package lists...
+Step #0: Building dependency tree...
+Step #0: Reading state information...
+Step #0: The following additional packages will be installed:
+Step #0:   binutils binutils-common binutils-x86-64-linux-gnu cpp cpp-14
+Step #0:   cpp-14-x86-64-linux-gnu cpp-x86-64-linux-gnu gcc-14 gcc-14-x86-64-linux-gnu
+Step #0:   gcc-x86-64-linux-gnu libasan8 libatomic1 libbinutils libcc1-0 libctf-nobfd0
+Step #0:   libctf0 libgcc-14-dev libgomp1 libgprofng0 libhwasan0 libisl23 libitm1
+Step #0:   libjansson4 liblsan0 libmpc3 libmpfr6 libquadmath0 libsframe1 libtsan2
+Step #0:   libubsan1
+Step #0: Suggested packages:
+Step #0:   binutils-doc gprofng-gui binutils-gold cpp-doc gcc-14-locales cpp-14-doc
+Step #0:   gcc-multilib make manpages-dev autoconf automake libtool flex bison gdb
+Step #0:   gcc-doc gcc-14-multilib gcc-14-doc gdb-x86-64-linux-gnu
+Step #0: Recommended packages:
+Step #0:   libc6-dev | libc-dev libc6-dev libc-dev
+Step #0: The following NEW packages will be installed:
+Step #0:   binutils binutils-common binutils-x86-64-linux-gnu cpp cpp-14
+Step #0:   cpp-14-x86-64-linux-gnu cpp-x86-64-linux-gnu gcc gcc-14
+Step #0:   gcc-14-x86-64-linux-gnu gcc-x86-64-linux-gnu libasan8 libatomic1 libbinutils
+Step #0:   libcc1-0 libctf-nobfd0 libctf0 libffi-dev libgcc-14-dev libgomp1 libgprofng0
+Step #0:   libhwasan0 libisl23 libitm1 libjansson4 liblsan0 libmpc3 libmpfr6
+Step #0:   libquadmath0 libsframe1 libtsan2 libubsan1
+Step #0: 0 upgraded, 32 newly installed, 0 to remove and 0 not upgraded.
+Step #0: Need to get 52.0 MB of archives.
+Step #0: After this operation, 192 MB of additional disk space will be used.
+Step #0: Get:1 http://deb.debian.org/debian trixie/main amd64 libsframe1 amd64 2.44-3 [78.4 kB]
+Step #0: Get:2 http://deb.debian.org/debian trixie/main amd64 binutils-common amd64 2.44-3 [2509 kB]
+Step #0: Get:3 http://deb.debian.org/debian trixie/main amd64 libbinutils amd64 2.44-3 [534 kB]
+Step #0: Get:4 http://deb.debian.org/debian trixie/main amd64 libgprofng0 amd64 2.44-3 [808 kB]
+Step #0: Get:5 http://deb.debian.org/debian trixie/main amd64 libctf-nobfd0 amd64 2.44-3 [156 kB]
+Step #0: Get:6 http://deb.debian.org/debian trixie/main amd64 libctf0 amd64 2.44-3 [88.6 kB]
+Step #0: Get:7 http://deb.debian.org/debian trixie/main amd64 libjansson4 amd64 2.14-2+b3 [39.8 kB]
+Step #0: Get:8 http://deb.debian.org/debian trixie/main amd64 binutils-x86-64-linux-gnu amd64 2.44-3 [1014 kB]
+Step #0: Get:9 http://deb.debian.org/debian trixie/main amd64 binutils amd64 2.44-3 [265 kB]
+Step #0: Get:10 http://deb.debian.org/debian trixie/main amd64 libisl23 amd64 0.27-1 [659 kB]
+Step #0: Get:11 http://deb.debian.org/debian trixie/main amd64 libmpfr6 amd64 4.2.2-1 [729 kB]
+Step #0: Get:12 http://deb.debian.org/debian trixie/main amd64 libmpc3 amd64 1.3.1-1+b3 [52.2 kB]
+Step #0: Get:13 http://deb.debian.org/debian trixie/main amd64 cpp-14-x86-64-linux-gnu amd64 14.2.0-19 [11.0 MB]
+Step #0: Get:14 http://deb.debian.org/debian trixie/main amd64 cpp-14 amd64 14.2.0-19 [1280 B]
+Step #0: Get:15 http://deb.debian.org/debian trixie/main amd64 cpp-x86-64-linux-gnu amd64 4:14.2.0-1 [4840 B]
+Step #0: Get:16 http://deb.debian.org/debian trixie/main amd64 cpp amd64 4:14.2.0-1 [1568 B]
+Step #0: Get:17 http://deb.debian.org/debian trixie/main amd64 libcc1-0 amd64 14.2.0-19 [42.8 kB]
+Step #0: Get:18 http://deb.debian.org/debian trixie/main amd64 libgomp1 amd64 14.2.0-19 [137 kB]
+Step #0: Get:19 http://deb.debian.org/debian trixie/main amd64 libitm1 amd64 14.2.0-19 [26.0 kB]
+Step #0: Get:20 http://deb.debian.org/debian trixie/main amd64 libatomic1 amd64 14.2.0-19 [9308 B]
+Step #0: Get:21 http://deb.debian.org/debian trixie/main amd64 libasan8 amd64 14.2.0-19 [2725 kB]
+Step #0: Get:22 http://deb.debian.org/debian trixie/main amd64 liblsan0 amd64 14.2.0-19 [1204 kB]
+Step #0: Get:23 http://deb.debian.org/debian trixie/main amd64 libtsan2 amd64 14.2.0-19 [2460 kB]
+Step #0: Get:24 http://deb.debian.org/debian trixie/main amd64 libubsan1 amd64 14.2.0-19 [1074 kB]
+Step #0: Get:25 http://deb.debian.org/debian trixie/main amd64 libhwasan0 amd64 14.2.0-19 [1488 kB]
+Step #0: Get:26 http://deb.debian.org/debian trixie/main amd64 libquadmath0 amd64 14.2.0-19 [145 kB]
+Step #0: Get:27 http://deb.debian.org/debian trixie/main amd64 libgcc-14-dev amd64 14.2.0-19 [2672 kB]
+Step #0: Get:28 http://deb.debian.org/debian trixie/main amd64 gcc-14-x86-64-linux-gnu amd64 14.2.0-19 [21.4 MB]
+Step #0: Get:29 http://deb.debian.org/debian trixie/main amd64 gcc-14 amd64 14.2.0-19 [540 kB]
+Step #0: Get:30 http://deb.debian.org/debian trixie/main amd64 gcc-x86-64-linux-gnu amd64 4:14.2.0-1 [1436 B]
+Step #0: Get:31 http://deb.debian.org/debian trixie/main amd64 gcc amd64 4:14.2.0-1 [5136 B]
+Step #0: Get:32 http://deb.debian.org/debian trixie/main amd64 libffi-dev amd64 3.4.8-2 [61.1 kB]
+Step #0: debconf: unable to initialize frontend: Dialog
+Step #0: debconf: (TERM is not set, so the dialog frontend is not usable.)
+Step #0: debconf: falling back to frontend: Readline
+Step #0: debconf: unable to initialize frontend: Readline
+Step #0: debconf: (Can't locate Term/ReadLine.pm in @INC (you may need to install the Term::ReadLine module) (@INC entries checked: /etc/perl /usr/local/lib/x86_64-linux-gnu/perl/5.40.1 /usr/local/share/perl/5.40.1 /usr/lib/x86_64-linux-gnu/perl5/5.40 /usr/share/perl5 /usr/lib/x86_64-linux-gnu/perl-base /usr/lib/x86_64-linux-gnu/perl/5.40 /usr/share/perl/5.40 /usr/local/lib/site_perl) at /usr/share/perl5/Debconf/FrontEnd/Readline.pm line 8, <STDIN> line 32.)
+Step #0: debconf: falling back to frontend: Teletype
+Step #0: debconf: unable to initialize frontend: Teletype
+Step #0: debconf: (This frontend requires a controlling tty.)
+Step #0: debconf: falling back to frontend: Noninteractive
+Step #0: Fetched 52.0 MB in 3s (20.6 MB/s)
+Step #0: Selecting previously unselected package libsframe1:amd64.
+Step #0: (Reading database ... 
+(Reading database ... 5%
+(Reading database ... 10%
+(Reading database ... 15%
+(Reading database ... 20%
+(Reading database ... 25%
+(Reading database ... 30%
+(Reading database ... 35%
+(Reading database ... 40%
+(Reading database ... 45%
+(Reading database ... 50%
+(Reading database ... 55%
+(Reading database ... 60%
+(Reading database ... 65%
+(Reading database ... 70%
+(Reading database ... 75%
+(Reading database ... 80%
+(Reading database ... 85%
+(Reading database ... 90%
+(Reading database ... 95%
+(Reading database ... 100%
+(Reading database ... 5645 files and directories currently installed.)
+Step #0: Preparing to unpack .../00-libsframe1_2.44-3_amd64.deb ...
+Step #0: Unpacking libsframe1:amd64 (2.44-3) ...
+Step #0: Selecting previously unselected package binutils-common:amd64.
+Step #0: Preparing to unpack .../01-binutils-common_2.44-3_amd64.deb ...
+Step #0: Unpacking binutils-common:amd64 (2.44-3) ...
+Step #0: Selecting previously unselected package libbinutils:amd64.
+Step #0: Preparing to unpack .../02-libbinutils_2.44-3_amd64.deb ...
+Step #0: Unpacking libbinutils:amd64 (2.44-3) ...
+Step #0: Selecting previously unselected package libgprofng0:amd64.
+Step #0: Preparing to unpack .../03-libgprofng0_2.44-3_amd64.deb ...
+Step #0: Unpacking libgprofng0:amd64 (2.44-3) ...
+Step #0: Selecting previously unselected package libctf-nobfd0:amd64.
+Step #0: Preparing to unpack .../04-libctf-nobfd0_2.44-3_amd64.deb ...
+Step #0: Unpacking libctf-nobfd0:amd64 (2.44-3) ...
+Step #0: Selecting previously unselected package libctf0:amd64.
+Step #0: Preparing to unpack .../05-libctf0_2.44-3_amd64.deb ...
+Step #0: Unpacking libctf0:amd64 (2.44-3) ...
+Step #0: Selecting previously unselected package libjansson4:amd64.
+Step #0: Preparing to unpack .../06-libjansson4_2.14-2+b3_amd64.deb ...
+Step #0: Unpacking libjansson4:amd64 (2.14-2+b3) ...
+Step #0: Selecting previously unselected package binutils-x86-64-linux-gnu.
+Step #0: Preparing to unpack .../07-binutils-x86-64-linux-gnu_2.44-3_amd64.deb ...
+Step #0: Unpacking binutils-x86-64-linux-gnu (2.44-3) ...
+Step #0: Selecting previously unselected package binutils.
+Step #0: Preparing to unpack .../08-binutils_2.44-3_amd64.deb ...
+Step #0: Unpacking binutils (2.44-3) ...
+Step #0: Selecting previously unselected package libisl23:amd64.
+Step #0: Preparing to unpack .../09-libisl23_0.27-1_amd64.deb ...
+Step #0: Unpacking libisl23:amd64 (0.27-1) ...
+Step #0: Selecting previously unselected package libmpfr6:amd64.
+Step #0: Preparing to unpack .../10-libmpfr6_4.2.2-1_amd64.deb ...
+Step #0: Unpacking libmpfr6:amd64 (4.2.2-1) ...
+Step #0: Selecting previously unselected package libmpc3:amd64.
+Step #0: Preparing to unpack .../11-libmpc3_1.3.1-1+b3_amd64.deb ...
+Step #0: Unpacking libmpc3:amd64 (1.3.1-1+b3) ...
+Step #0: Selecting previously unselected package cpp-14-x86-64-linux-gnu.
+Step #0: Preparing to unpack .../12-cpp-14-x86-64-linux-gnu_14.2.0-19_amd64.deb ...
+Step #0: Unpacking cpp-14-x86-64-linux-gnu (14.2.0-19) ...
+Step #0: Selecting previously unselected package cpp-14.
+Step #0: Preparing to unpack .../13-cpp-14_14.2.0-19_amd64.deb ...
+Step #0: Unpacking cpp-14 (14.2.0-19) ...
+Step #0: Selecting previously unselected package cpp-x86-64-linux-gnu.
+Step #0: Preparing to unpack .../14-cpp-x86-64-linux-gnu_4%3a14.2.0-1_amd64.deb ...
+Step #0: Unpacking cpp-x86-64-linux-gnu (4:14.2.0-1) ...
+Step #0: Selecting previously unselected package cpp.
+Step #0: Preparing to unpack .../15-cpp_4%3a14.2.0-1_amd64.deb ...
+Step #0: Unpacking cpp (4:14.2.0-1) ...
+Step #0: Selecting previously unselected package libcc1-0:amd64.
+Step #0: Preparing to unpack .../16-libcc1-0_14.2.0-19_amd64.deb ...
+Step #0: Unpacking libcc1-0:amd64 (14.2.0-19) ...
+Step #0: Selecting previously unselected package libgomp1:amd64.
+Step #0: Preparing to unpack .../17-libgomp1_14.2.0-19_amd64.deb ...
+Step #0: Unpacking libgomp1:amd64 (14.2.0-19) ...
+Step #0: Selecting previously unselected package libitm1:amd64.
+Step #0: Preparing to unpack .../18-libitm1_14.2.0-19_amd64.deb ...
+Step #0: Unpacking libitm1:amd64 (14.2.0-19) ...
+Step #0: Selecting previously unselected package libatomic1:amd64.
+Step #0: Preparing to unpack .../19-libatomic1_14.2.0-19_amd64.deb ...
+Step #0: Unpacking libatomic1:amd64 (14.2.0-19) ...
+Step #0: Selecting previously unselected package libasan8:amd64.
+Step #0: Preparing to unpack .../20-libasan8_14.2.0-19_amd64.deb ...
+Step #0: Unpacking libasan8:amd64 (14.2.0-19) ...
+Step #0: Selecting previously unselected package liblsan0:amd64.
+Step #0: Preparing to unpack .../21-liblsan0_14.2.0-19_amd64.deb ...
+Step #0: Unpacking liblsan0:amd64 (14.2.0-19) ...
+Step #0: Selecting previously unselected package libtsan2:amd64.
+Step #0: Preparing to unpack .../22-libtsan2_14.2.0-19_amd64.deb ...
+Step #0: Unpacking libtsan2:amd64 (14.2.0-19) ...
+Step #0: Selecting previously unselected package libubsan1:amd64.
+Step #0: Preparing to unpack .../23-libubsan1_14.2.0-19_amd64.deb ...
+Step #0: Unpacking libubsan1:amd64 (14.2.0-19) ...
+Step #0: Selecting previously unselected package libhwasan0:amd64.
+Step #0: Preparing to unpack .../24-libhwasan0_14.2.0-19_amd64.deb ...
+Step #0: Unpacking libhwasan0:amd64 (14.2.0-19) ...
+Step #0: Selecting previously unselected package libquadmath0:amd64.
+Step #0: Preparing to unpack .../25-libquadmath0_14.2.0-19_amd64.deb ...
+Step #0: Unpacking libquadmath0:amd64 (14.2.0-19) ...
+Step #0: Selecting previously unselected package libgcc-14-dev:amd64.
+Step #0: Preparing to unpack .../26-libgcc-14-dev_14.2.0-19_amd64.deb ...
+Step #0: Unpacking libgcc-14-dev:amd64 (14.2.0-19) ...
+Step #0: Selecting previously unselected package gcc-14-x86-64-linux-gnu.
+Step #0: Preparing to unpack .../27-gcc-14-x86-64-linux-gnu_14.2.0-19_amd64.deb ...
+Step #0: Unpacking gcc-14-x86-64-linux-gnu (14.2.0-19) ...
+Step #0: Selecting previously unselected package gcc-14.
+Step #0: Preparing to unpack .../28-gcc-14_14.2.0-19_amd64.deb ...
+Step #0: Unpacking gcc-14 (14.2.0-19) ...
+Step #0: Selecting previously unselected package gcc-x86-64-linux-gnu.
+Step #0: Preparing to unpack .../29-gcc-x86-64-linux-gnu_4%3a14.2.0-1_amd64.deb ...
+Step #0: Unpacking gcc-x86-64-linux-gnu (4:14.2.0-1) ...
+Step #0: Selecting previously unselected package gcc.
+Step #0: Preparing to unpack .../30-gcc_4%3a14.2.0-1_amd64.deb ...
+Step #0: Unpacking gcc (4:14.2.0-1) ...
+Step #0: Selecting previously unselected package libffi-dev:amd64.
+Step #0: Preparing to unpack .../31-libffi-dev_3.4.8-2_amd64.deb ...
+Step #0: Unpacking libffi-dev:amd64 (3.4.8-2) ...
+Step #0: Setting up binutils-common:amd64 (2.44-3) ...
+Step #0: Setting up libctf-nobfd0:amd64 (2.44-3) ...
+Step #0: Setting up libgomp1:amd64 (14.2.0-19) ...
+Step #0: Setting up libffi-dev:amd64 (3.4.8-2) ...
+Step #0: Setting up libsframe1:amd64 (2.44-3) ...
+Step #0: Setting up libjansson4:amd64 (2.14-2+b3) ...
+Step #0: Setting up libmpfr6:amd64 (4.2.2-1) ...
+Step #0: Setting up libquadmath0:amd64 (14.2.0-19) ...
+Step #0: Setting up libmpc3:amd64 (1.3.1-1+b3) ...
+Step #0: Setting up libatomic1:amd64 (14.2.0-19) ...
+Step #0: Setting up libubsan1:amd64 (14.2.0-19) ...
+Step #0: Setting up libhwasan0:amd64 (14.2.0-19) ...
+Step #0: Setting up libasan8:amd64 (14.2.0-19) ...
+Step #0: Setting up libtsan2:amd64 (14.2.0-19) ...
+Step #0: Setting up libbinutils:amd64 (2.44-3) ...
+Step #0: Setting up libisl23:amd64 (0.27-1) ...
+Step #0: Setting up libcc1-0:amd64 (14.2.0-19) ...
+Step #0: Setting up liblsan0:amd64 (14.2.0-19) ...
+Step #0: Setting up libitm1:amd64 (14.2.0-19) ...
+Step #0: Setting up libctf0:amd64 (2.44-3) ...
+Step #0: Setting up libgprofng0:amd64 (2.44-3) ...
+Step #0: Setting up cpp-14-x86-64-linux-gnu (14.2.0-19) ...
+Step #0: Setting up cpp-14 (14.2.0-19) ...
+Step #0: Setting up libgcc-14-dev:amd64 (14.2.0-19) ...
+Step #0: Setting up binutils-x86-64-linux-gnu (2.44-3) ...
+Step #0: Setting up cpp-x86-64-linux-gnu (4:14.2.0-1) ...
+Step #0: Setting up binutils (2.44-3) ...
+Step #0: Setting up cpp (4:14.2.0-1) ...
+Step #0: Setting up gcc-14-x86-64-linux-gnu (14.2.0-19) ...
+Step #0: Setting up gcc-x86-64-linux-gnu (4:14.2.0-1) ...
+Step #0: Setting up gcc-14 (14.2.0-19) ...
+Step #0: Setting up gcc (4:14.2.0-1) ...
+Step #0: Processing triggers for libc-bin (2.41-12+deb13u3) ...
+Step #0: Removing intermediate container d9c5af26ea90
+Step #0:  ---> 12ce05ab92ca
+Step #0: Step 4/16 : COPY requirements.txt .
+Step #0:  ---> 830e092054cd
+Step #0: Step 5/16 : RUN sed 's/ *\\$//' requirements.txt | grep -v '^\s*--hash' > requirements-nohash.txt     && pip install --no-cache-dir --user -r requirements-nohash.txt     && pip install --no-cache-dir --user "email-validator>=2.0"
+Step #0:  ---> Running in 232e9d1f37f2
+Step #0: Collecting aiohappyeyeballs==2.6.2 (from -r requirements-nohash.txt (line 7))
+Step #0:   Downloading aiohappyeyeballs-2.6.2-py3-none-any.whl.metadata (5.9 kB)
+Step #0: Collecting aiohttp==3.13.5 (from -r requirements-nohash.txt (line 9))
+Step #0:   Downloading aiohttp-3.13.5-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.1 kB)
+Step #0: Collecting aiosignal==1.4.0 (from -r requirements-nohash.txt (line 13))
+Step #0:   Downloading aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+Step #0: Collecting annotated-doc==0.0.4 (from -r requirements-nohash.txt (line 15))
+Step #0:   Downloading annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+Step #0: Collecting annotated-types==0.7.0 (from -r requirements-nohash.txt (line 17))
+Step #0:   Downloading annotated_types-0.7.0-py3-none-any.whl.metadata (15 kB)
+Step #0: Collecting anyio==4.13.0 (from -r requirements-nohash.txt (line 19))
+Step #0:   Downloading anyio-4.13.0-py3-none-any.whl.metadata (4.5 kB)
+Step #0: Collecting attrs==26.1.0 (from -r requirements-nohash.txt (line 24))
+Step #0:   Downloading attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+Step #0: Collecting backoff==2.2.1 (from -r requirements-nohash.txt (line 26))
+Step #0:   Downloading backoff-2.2.1-py3-none-any.whl.metadata (14 kB)
+Step #0: Collecting bcrypt==5.0.0 (from -r requirements-nohash.txt (line 28))
+Step #0:   Downloading bcrypt-5.0.0-cp39-abi3-manylinux_2_34_x86_64.whl.metadata (10 kB)
+Step #0: Collecting beanie==2.1.0 (from -r requirements-nohash.txt (line 30))
+Step #0:   Downloading beanie-2.1.0-py3-none-any.whl.metadata (9.0 kB)
+Step #0: Collecting certifi==2026.5.20 (from -r requirements-nohash.txt (line 32))
+Step #0:   Downloading certifi-2026.5.20-py3-none-any.whl.metadata (2.5 kB)
+Step #0: Collecting cffi==2.0.0 (from -r requirements-nohash.txt (line 38))
+Step #0:   Downloading cffi-2.0.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.6 kB)
+Step #0: Collecting charset-normalizer==3.4.7 (from -r requirements-nohash.txt (line 40))
+Step #0:   Downloading charset_normalizer-3.4.7-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+Step #0:      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 40.9/40.9 kB 1.2 MB/s eta 0:00:00
+Step #0: Collecting click==8.4.1 (from -r requirements-nohash.txt (line 42))
+Step #0:   Downloading click-8.4.1-py3-none-any.whl.metadata (2.6 kB)
+Step #0: Collecting cryptography==48.0.0 (from -r requirements-nohash.txt (line 46))
+tep #0:   Downloading cryptography-48.0.0-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (4.3 kB)
+Step #0: Collecting distro==1.9.0 (from -r requirements-nohash.txt (line 50))
+Step #0:   Downloading distro-1.9.0-py3-none-any.whl.metadata (6.8 kB)
+Step #0: Collecting dnspython==2.8.0 (from -r requirements-nohash.txt (line 54))
+Step #0:   Downloading dnspython-2.8.0-py3-none-any.whl.metadata (5.7 kB)
+Step #0: Collecting docstring-parser==0.18.0 (from -r requirements-nohash.txt (line 58))
+Step #0:   Downloading docstring_parser-0.18.0-py3-none-any.whl.metadata (3.5 kB)
+Step #0: Collecting email-validator==2.3.0 (from -r requirements-nohash.txt (line 60))
+Step #0:   Downloading email_validator-2.3.0-py3-none-any.whl.metadata (26 kB)
+Step #0: Collecting fastapi==0.136.3 (from -r requirements-nohash.txt (line 64))
+Step #0:   Downloading fastapi-0.136.3-py3-none-any.whl.metadata (27 kB)
+Step #0: Collecting frozenlist==1.8.0 (from -r requirements-nohash.txt (line 66))
+Step #0:   Downloading frozenlist-1.8.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+Step #0: Collecting google-api-core==2.30.3 (from -r requirements-nohash.txt (line 70))
+Step #0:   Downloading google_api_core-2.30.3-py3-none-any.whl.metadata (3.1 kB)
+Step #0: Collecting google-auth==2.53.0 (from -r requirements-nohash.txt (line 78))
+Step #0:   Downloading google_auth-2.53.0-py3-none-any.whl.metadata (5.5 kB)
+Step #0: Collecting google-cloud-aiplatform==1.154.0 (from -r requirements-nohash.txt (line 89))
+Step #0:   Downloading google_cloud_aiplatform-1.154.0-py2.py3-none-any.whl.metadata (50 kB)
+Step #0:      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 50.3/50.3 kB 7.3 MB/s eta 0:00:00
+Step #0: Collecting google-cloud-bigquery==3.41.0 (from -r requirements-nohash.txt (line 91))
+Step #0:   Downloading google_cloud_bigquery-3.41.0-py3-none-any.whl.metadata (8.2 kB)
+Step #0: Collecting google-cloud-core==2.6.0 (from -r requirements-nohash.txt (line 93))
+Step #0:   Downloading google_cloud_core-2.6.0-py3-none-any.whl.metadata (2.8 kB)
+Step #0: Collecting google-cloud-discoveryengine==0.19.0 (from -r requirements-nohash.txt (line 97))
+Step #0:   Downloading google_cloud_discoveryengine-0.19.0-py3-none-any.whl.metadata (9.6 kB)
+Step #0: Collecting google-cloud-resource-manager==1.17.0 (from -r requirements-nohash.txt (line 99))
+Step #0:   Downloading google_cloud_resource_manager-1.17.0-py3-none-any.whl.metadata (9.7 kB)
+Step #0: Collecting google-cloud-storage==3.10.1 (from -r requirements-nohash.txt (line 101))
+Step #0:   Downloading google_cloud_storage-3.10.1-py3-none-any.whl.metadata (15 kB)
+Step #0: Collecting google-crc32c==1.8.0 (from -r requirements-nohash.txt (line 105))
+Step #0:   Downloading google_crc32c-1.8.0-cp311-cp311-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl.metadata (1.7 kB)
+)
+Step #0: Collecting google-genai==2.7.0 (from -r requirements-nohash.txt (line 109))
+Step #0:   Downloading google_genai-2.7.0-py3-none-any.whl.metadata (52 kB)
+Step #0:      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 52.7/52.7 kB 9.7 MB/s eta 0:00:00
+Step #0: Collecting google-resumable-media==2.9.0 (from -r requirements-nohash.txt (line 111))
+Step #0:   Downloading google_resumable_media-2.9.0-py3-none-any.whl.metadata (2.2 kB)
+Step #0: Collecting googleapis-common-protos==1.75.0 (from -r requirements-nohash.txt (line 115))
+Step #0:   Downloading googleapis_common_protos-1.75.0-py3-none-any.whl.metadata (8.6 kB)
+Step #0: Collecting grpc-google-iam-v1==0.14.4 (from -r requirements-nohash.txt (line 120))
+Step #0:   Downloading grpc_google_iam_v1-0.14.4-py3-none-any.whl.metadata (9.1 kB)
+Step #0: Collecting grpcio==1.81.0 (from -r requirements-nohash.txt (line 122))
+Step #0:   Downloading grpcio-1.81.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (3.7 kB)
+Step #0: Collecting grpcio-status==1.81.0 (from -r requirements-nohash.txt (line 130))
+Step #0:   Downloading grpcio_status-1.81.0-py3-none-any.whl.metadata (1.2 kB)
+Step #0: Collecting gunicorn==26.0.0 (from -r requirements-nohash.txt (line 132))
+Step #0:   Downloading gunicorn-26.0.0-py3-none-any.whl.metadata (5.4 kB)
+Step #0: Collecting h11==0.16.0 (from -r requirements-nohash.txt (line 134))
+Step #0:   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Step #0: Collecting httpcore==1.0.9 (from -r requirements-nohash.txt (line 138))
+Step #0:   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Step #0: Collecting httpx==0.28.1 (from -r requirements-nohash.txt (line 140))
+Step #0:   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Step #0: Collecting idna==3.17 (from -r requirements-nohash.txt (line 145))
+)
+Step #0:   Downloading idna-3.17-py3-none-any.whl.metadata (6.4 kB)
+Step #0: Collecting jinja2==3.1.6 (from -r requirements-nohash.txt (line 152))
+Step #0:   Downloading jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+Step #0: Collecting lazy-model==0.4.0 (from -r requirements-nohash.txt (line 154))
+Step #0:   Downloading lazy_model-0.4.0-py3-none-any.whl.metadata (1.6 kB)
+Step #0: Collecting markdown==3.10.2 (from -r requirements-nohash.txt (line 156))
+Step #0:   Downloading markdown-3.10.2-py3-none-any.whl.metadata (5.1 kB)
+Step #0: Collecting markupsafe==3.0.3 (from -r requirements-nohash.txt (line 158))
+Step #0:   Downloading markupsafe-3.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+Step #0: Collecting multidict==6.7.1 (from -r requirements-nohash.txt (line 160))
+Step #0:   Downloading multidict-6.7.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+Step #0: Collecting numpy==2.4.6 (from -r requirements-nohash.txt (line 164))
+Step #0:   Downloading numpy-2.4.6-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+Step #0: Collecting packaging==26.2 (from -r requirements-nohash.txt (line 166))
+Step #0:   Downloading packaging-26.2-py3-none-any.whl.metadata (3.5 kB)
+Step #0: Collecting posthog==7.16.2 (from -r requirements-nohash.txt (line 171))
+Step #0:   Downloading posthog-7.16.2-py3-none-any.whl.metadata (4.7 kB)
+Step #0: Collecting propcache==0.5.2 (from -r requirements-nohash.txt (line 173))
+Step #0:   Downloading propcache-0.5.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (16 kB)
+Step #0: Collecting proto-plus==1.28.0 (from -r requirements-nohash.txt (line 177))
+Step #0:   Downloading proto_plus-1.28.0-py3-none-any.whl.metadata (2.2 kB)
+Step #0: Collecting protobuf==6.33.6 (from -r requirements-nohash.txt (line 183))
+Step #0:   Downloading protobuf-6.33.6-cp39-abi3-manylinux2014_x86_64.whl.metadata (593 bytes)
+Step #0: Collecting pyasn1==0.6.3 (from -r requirements-nohash.txt (line 193))
+Step #0:   Downloading pyasn1-0.6.3-py3-none-any.whl.metadata (8.4 kB)
+Step #0: Collecting pyasn1-modules==0.4.2 (from -r requirements-nohash.txt (line 195))
+Step #0:   Downloading pyasn1_modules-0.4.2-py3-none-any.whl.metadata (3.5 kB)
+Step #0: Collecting pycparser==3.0 (from -r requirements-nohash.txt (line 197))
+Step #0:   Downloading pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+Step #0: Collecting pydantic==2.13.4 (from -r requirements-nohash.txt (line 199))
+Step #0:   Downloading pydantic-2.13.4-py3-none-any.whl.metadata (109 kB)
+Step #0:      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 109.4/109.4 kB 8.7 MB/s eta 0:00:00
+Step #0: Collecting pydantic-core==2.46.4 (from -r requirements-nohash.txt (line 208))
+Step #0:   Downloading pydantic_core-2.46.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+Step #0: Collecting pydantic-settings==2.14.1 (from -r requirements-nohash.txt (line 210))
+Step #0:   Downloading pydantic_settings-2.14.1-py3-none-any.whl.metadata (3.4 kB)
+Step #0: Collecting pyjwt==2.13.0 (from -r requirements-nohash.txt (line 212))
+Step #0:   Downloading pyjwt-2.13.0-py3-none-any.whl.metadata (3.4 kB)
+Step #0: Collecting pymongo==4.17.0 (from -r requirements-nohash.txt (line 214))
+Step #0:   Downloading pymongo-4.17.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (10 kB)
+Step #0: Collecting python-dateutil==2.9.0.post0 (from -r requirements-nohash.txt (line 218))
+Step #0:   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+Step #0: Collecting python-dotenv==1.2.2 (from -r requirements-nohash.txt (line 222))
+Step #0:   Downloading python_dotenv-1.2.2-py3-none-any.whl.metadata (27 kB)
+Step #0: Collecting python-multipart==0.0.30 (from -r requirements-nohash.txt (line 226))
+Step #0:   Downloading python_multipart-0.0.30-py3-none-any.whl.metadata (2.1 kB)
+Step #0: Collecting razorpay==2.0.1 (from -r requirements-nohash.txt (line 228))
+Step #0:   Downloading razorpay-2.0.1-py3-none-any.whl.metadata (3.9 kB)
+Step #0: Collecting requests==2.34.2 (from -r requirements-nohash.txt (line 230))
+Step #0:   Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Step #0: Collecting resend==2.30.1 (from -r requirements-nohash.txt (line 240))
+Step #0:   Downloading resend-2.30.1-py2.py3-none-any.whl.metadata (3.5 kB)
+Step #0: Collecting sentry-sdk==2.61.1 (from -r requirements-nohash.txt (line 242))
+Step #0:   Downloading sentry_sdk-2.61.1-py3-none-any.whl.metadata (10 kB)
+Step #0: Collecting six==1.17.0 (from -r requirements-nohash.txt (line 244))
+Step #0:   Downloading six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+Step #0: Collecting sniffio==1.3.1 (from -r requirements-nohash.txt (line 246))
+Step #0:   Downloading sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+Step #0: Collecting starlette==1.2.1 (from -r requirements-nohash.txt (line 248))
+Step #0:   Downloading starlette-1.2.1-py3-none-any.whl.metadata (6.3 kB)
+Step #0: Collecting tenacity==9.1.4 (from -r requirements-nohash.txt (line 250))
+Step #0:   Downloading tenacity-9.1.4-py3-none-any.whl.metadata (1.2 kB)
+Step #0: Collecting typing-extensions==4.15.0 (from -r requirements-nohash.txt (line 254))
+Step #0:   Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+Step #0: Collecting typing-inspection==0.4.2 (from -r requirements-nohash.txt (line 269))
+Step #0:   Downloading typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+Step #0: Collecting upstash-redis==1.7.0 (from -r requirements-nohash.txt (line 274))
+Step #0:   Downloading upstash_redis-1.7.0-py3-none-any.whl.metadata (8.7 kB)
+Step #0: Collecting urllib3==2.7.0 (from -r requirements-nohash.txt (line 276))
+Step #0:   Downloading urllib3-2.7.0-py3-none-any.whl.metadata (6.9 kB)
+Step #0: Collecting uvicorn==0.48.0 (from -r requirements-nohash.txt (line 280))
+Step #0:   Downloading uvicorn-0.48.0-py3-none-any.whl.metadata (6.7 kB)
+Step #0: Collecting websockets==16.0 (from -r requirements-nohash.txt (line 282))
+Step #0:   Downloading websockets-16.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (6.8 kB)
+Step #0: Collecting yarl==1.24.2 (from -r requirements-nohash.txt (line 284))
+Step #0:   Downloading yarl-1.24.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (94 kB)
+Step #0:      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 94.2/94.2 kB 25.9 MB/s eta 0:00:00
+tep #0: Downloading aiohappyeyeballs-2.6.2-py3-none-any.whl (15 kB)
+Step #0: Downloading aiohttp-3.13.5-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.8 MB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 21.5 MB/s eta 0:00:00
+Step #0: Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+Step #0: Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+Step #0: Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+Step #0: Downloading anyio-4.13.0-py3-none-any.whl (114 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 114.4/114.4 kB 251.8 MB/s eta 0:00:00
+Step #0: Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 67.5/67.5 kB 225.6 MB/s eta 0:00:00
+Step #0: Downloading backoff-2.2.1-py3-none-any.whl (15 kB)
+Step #0: Downloading bcrypt-5.0.0-cp39-abi3-manylinux_2_34_x86_64.whl (278 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 278.2/278.2 kB 288.0 MB/s eta 0:00:00
+Step #0: Downloading beanie-2.1.0-py3-none-any.whl (92 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 92.7/92.7 kB 243.4 MB/s eta 0:00:00
+Step #0: Downloading certifi-2026.5.20-py3-none-any.whl (134 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.1/134.1 kB 249.6 MB/s eta 0:00:00
+Step #0: Downloading cffi-2.0.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (215 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 215.6/215.6 kB 270.5 MB/s eta 0:00:00
+Step #0: Downloading charset_normalizer-3.4.7-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (214 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 214.1/214.1 kB 226.1 MB/s eta 0:00:00
+Step #0: Downloading click-8.4.1-py3-none-any.whl (116 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 116.6/116.6 kB 249.2 MB/s eta 0:00:00
+Step #0: Downloading cryptography-48.0.0-cp311-abi3-manylinux_2_34_x86_64.whl (4.7 MB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.7/4.7 MB 116.9 MB/s eta 0:00:00
+Step #0: Downloading distro-1.9.0-py3-none-any.whl (20 kB)
+Step #0: Downloading dnspython-2.8.0-py3-none-any.whl (331 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 331.1/331.1 kB 273.7 MB/s eta 0:00:00
+Step #0: Downloading docstring_parser-0.18.0-py3-none-any.whl (22 kB)
+Step #0: Downloading email_validator-2.3.0-py3-none-any.whl (35 kB)
+Step #0: Downloading fastapi-0.136.3-py3-none-any.whl (117 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 117.5/117.5 kB 238.7 MB/s eta 0:00:00
+Step #0: Downloading frozenlist-1.8.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (231 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 231.1/231.1 kB 279.5 MB/s eta 0:00:00
+Step #0: Downloading google_api_core-2.30.3-py3-none-any.whl (173 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 173.3/173.3 kB 278.7 MB/s eta 0:00:00
+Step #0: Downloading google_auth-2.53.0-py3-none-any.whl (246 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 246.1/246.1 kB 280.7 MB/s eta 0:00:00
+Step #0: Downloading google_cloud_aiplatform-1.154.0-py2.py3-none-any.whl (9.2 MB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 9.2/9.2 MB 110.9 MB/s eta 0:00:00
+Step #0: Downloading google_cloud_bigquery-3.41.0-py3-none-any.whl (262 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 262.3/262.3 kB 277.6 MB/s eta 0:00:00
+Step #0: Downloading google_cloud_core-2.6.0-py3-none-any.whl (29 kB)
+Step #0: Downloading google_cloud_discoveryengine-0.19.0-py3-none-any.whl (3.4 MB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.4/3.4 MB 120.0 MB/s eta 0:00:00
+Step #0: Downloading google_cloud_resource_manager-1.17.0-py3-none-any.whl (404 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 404.4/404.4 kB 294.9 MB/s eta 0:00:00
+Step #0: Downloading google_cloud_storage-3.10.1-py3-none-any.whl (324 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 324.5/324.5 kB 177.2 MB/s eta 0:00:00
+Step #0: Downloading google_crc32c-1.8.0-cp311-cp311-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl (33 kB)
+Step #0: Downloading google_genai-2.7.0-py3-none-any.whl (822 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 822.5/822.5 kB 250.5 MB/s eta 0:00:00
+Step #0: Downloading google_resumable_media-2.9.0-py3-none-any.whl (81 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 81.5/81.5 kB 235.3 MB/s eta 0:00:00
+Step #0: Downloading googleapis_common_protos-1.75.0-py3-none-any.whl (300 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 300.6/300.6 kB 274.8 MB/s eta 0:00:00
+Step #0: Downloading grpc_google_iam_v1-0.14.4-py3-none-any.whl (32 kB)
+Step #0: Downloading grpcio-1.81.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (6.8 MB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.8/6.8 MB 110.5 MB/s eta 0:00:00
+Step #0: Downloading grpcio_status-1.81.0-py3-none-any.whl (14 kB)
+Step #0: Downloading gunicorn-26.0.0-py3-none-any.whl (212 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 212.0/212.0 kB 254.9 MB/s eta 0:00:00
+Step #0: Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Step #0: Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.8/78.8 kB 249.1 MB/s eta 0:00:00
+Step #0: Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.5/73.5 kB 233.0 MB/s eta 0:00:00
+Step #0: Downloading idna-3.17-py3-none-any.whl (65 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 65.3/65.3 kB 223.3 MB/s eta 0:00:00
+Step #0: Downloading jinja2-3.1.6-py3-none-any.whl (134 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.9/134.9 kB 220.1 MB/s eta 0:00:00
+Step #0: Downloading lazy_model-0.4.0-py3-none-any.whl (13 kB)
+Step #0: Downloading markdown-3.10.2-py3-none-any.whl (108 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 108.2/108.2 kB 260.1 MB/s eta 0:00:00
+Step #0: Downloading markupsafe-3.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+Step #0: Downloading multidict-6.7.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (246 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 246.3/246.3 kB 304.6 MB/s eta 0:00:00
+Step #0: Downloading numpy-2.4.6-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.9 MB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.9/16.9 MB 79.1 MB/s eta 0:00:00
+Step #0: Downloading packaging-26.2-py3-none-any.whl (100 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100.2/100.2 kB 246.4 MB/s eta 0:00:00
+Step #0: Downloading posthog-7.16.2-py3-none-any.whl (264 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 264.0/264.0 kB 282.5 MB/s eta 0:00:00
+Step #0: Downloading propcache-0.5.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (58 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 58.9/58.9 kB 218.6 MB/s eta 0:00:00
+tep #0: Downloading proto_plus-1.28.0-py3-none-any.whl (50 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 50.4/50.4 kB 92.0 MB/s eta 0:00:00
+Step #0: Downloading protobuf-6.33.6-cp39-abi3-manylinux2014_x86_64.whl (323 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 323.4/323.4 kB 203.4 MB/s eta 0:00:00
+Step #0: Downloading pyasn1-0.6.3-py3-none-any.whl (83 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 84.0/84.0 kB 241.2 MB/s eta 0:00:00
+Step #0: Downloading pyasn1_modules-0.4.2-py3-none-any.whl (181 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 181.3/181.3 kB 257.8 MB/s eta 0:00:00
+Step #0: Downloading pycparser-3.0-py3-none-any.whl (48 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.2/48.2 kB 207.8 MB/s eta 0:00:00
+Step #0: Downloading pydantic-2.13.4-py3-none-any.whl (472 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 472.3/472.3 kB 297.6 MB/s eta 0:00:00
+Step #0: Downloading pydantic_core-2.46.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 263.3 MB/s eta 0:00:00
+Step #0: Downloading pydantic_settings-2.14.1-py3-none-any.whl (60 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 61.0/61.0 kB 241.1 MB/s eta 0:00:00
+Step #0: Downloading pyjwt-2.13.0-py3-none-any.whl (31 kB)
+Step #0: Downloading pymongo-4.17.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.5 MB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.5/1.5 MB 285.6 MB/s eta 0:00:00
+Step #0: Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 228.4 MB/s eta 0:00:00
+Step #0: Downloading python_dotenv-1.2.2-py3-none-any.whl (22 kB)
+Step #0: Downloading python_multipart-0.0.30-py3-none-any.whl (29 kB)
+Step #0: Downloading razorpay-2.0.1-py3-none-any.whl (176 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 176.9/176.9 kB 269.4 MB/s eta 0:00:00
+Step #0: Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.1/73.1 kB 210.3 MB/s eta 0:00:00
+Step #0: Downloading resend-2.30.1-py2.py3-none-any.whl (68 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 68.4/68.4 kB 224.7 MB/s eta 0:00:00
+Step #0: Downloading sentry_sdk-2.61.1-py3-none-any.whl (483 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 483.7/483.7 kB 234.6 MB/s eta 0:00:00
+Step #0: Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+Step #0: Downloading sniffio-1.3.1-py3-none-any.whl (10 kB)
+Step #0: Downloading starlette-1.2.1-py3-none-any.whl (73 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.3/73.3 kB 222.5 MB/s eta 0:00:00
+Step #0: Downloading tenacity-9.1.4-py3-none-any.whl (28 kB)
+Step #0: Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.6/44.6 kB 205.2 MB/s eta 0:00:00
+Step #0: Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+Step #0: Downloading upstash_redis-1.7.0-py3-none-any.whl (49 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 49.7/49.7 kB 195.0 MB/s eta 0:00:00
+Step #0: Downloading urllib3-2.7.0-py3-none-any.whl (131 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 131.1/131.1 kB 263.0 MB/s eta 0:00:00
+Step #0: Downloading uvicorn-0.48.0-py3-none-any.whl (71 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 71.4/71.4 kB 224.9 MB/s eta 0:00:00
+Step #0: Downloading websockets-16.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (184 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 184.6/184.6 kB 280.5 MB/s eta 0:00:00
+Step #0: Downloading yarl-1.24.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (106 kB)
+Step #0:    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 106.4/106.4 kB 267.0 MB/s eta 0:00:00
+Step #0: Installing collected packages: websockets, urllib3, typing-extensions, tenacity, sniffio, six, python-multipart, python-dotenv, pyjwt, pycparser, pyasn1, protobuf, propcache, packaging, numpy, multidict, markupsafe, markdown, idna, h11, google-crc32c, frozenlist, docstring-parser, dnspython, distro, click, charset-normalizer, certifi, bcrypt, backoff, attrs, annotated-types, annotated-doc, aiohappyeyeballs, yarl, uvicorn, typing-inspection, sentry-sdk, requests, python-dateutil, pymongo, pydantic-core, pyasn1-modules, proto-plus, jinja2, httpcore, gunicorn, grpcio, googleapis-common-protos, google-resumable-media, email-validator, cffi, anyio, aiosignal, starlette, resend, razorpay, pydantic, posthog, httpx, grpcio-status, cryptography, aiohttp, upstash-redis, pydantic-settings, lazy-model, grpc-google-iam-v1, google-auth, fastapi, google-api-core, beanie, google-genai, google-cloud-core, google-cloud-storage, google-cloud-resource-manager, google-cloud-discoveryengine, google-cloud-bigquery, google-cloud-aiplatform
+Step #0:   WARNING: The script websockets is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The script dotenv is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The scripts f2py and numpy-config are installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The script markdown_py is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The script idna is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The script distro is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The script normalizer is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The script uvicorn is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The scripts gunicorn and gunicornc are installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The script email_validator is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The script httpx is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The script fastapi is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The script beanie is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0:   WARNING: The script tb-gcp-uploader is installed in '/root/.local/bin' which is not on PATH.
+Step #0:   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Step #0: Successfully installed aiohappyeyeballs-2.6.2 aiohttp-3.13.5 aiosignal-1.4.0 annotated-doc-0.0.4 annotated-types-0.7.0 anyio-4.13.0 attrs-26.1.0 backoff-2.2.1 bcrypt-5.0.0 beanie-2.1.0 certifi-2026.5.20 cffi-2.0.0 charset-normalizer-3.4.7 click-8.4.1 cryptography-48.0.0 distro-1.9.0 dnspython-2.8.0 docstring-parser-0.18.0 email-validator-2.3.0 fastapi-0.136.3 frozenlist-1.8.0 google-api-core-2.30.3 google-auth-2.53.0 google-cloud-aiplatform-1.154.0 google-cloud-bigquery-3.41.0 google-cloud-core-2.6.0 google-cloud-discoveryengine-0.19.0 google-cloud-resource-manager-1.17.0 google-cloud-storage-3.10.1 google-crc32c-1.8.0 google-genai-2.7.0 google-resumable-media-2.9.0 googleapis-common-protos-1.75.0 grpc-google-iam-v1-0.14.4 grpcio-1.81.0 grpcio-status-1.81.0 gunicorn-26.0.0 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.17 jinja2-3.1.6 lazy-model-0.4.0 markdown-3.10.2 markupsafe-3.0.3 multidict-6.7.1 numpy-2.4.6 packaging-26.2 posthog-7.16.2 propcache-0.5.2 proto-plus-1.28.0 protobuf-6.33.6 pyasn1-0.6.3 pyasn1-modules-0.4.2 pycparser-3.0 pydantic-2.13.4 pydantic-core-2.46.4 pydantic-settings-2.14.1 pyjwt-2.13.0 pymongo-4.17.0 python-dateutil-2.9.0.post0 python-dotenv-1.2.2 python-multipart-0.0.30 razorpay-2.0.1 requests-2.34.2 resend-2.30.1 sentry-sdk-2.61.1 six-1.17.0 sniffio-1.3.1 starlette-1.2.1 tenacity-9.1.4 typing-extensions-4.15.0 typing-inspection-0.4.2 upstash-redis-1.7.0 urllib3-2.7.0 uvicorn-0.48.0 websockets-16.0 yarl-1.24.2
+Step #0: WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+Step #0: 
+Step #0: [notice] A new release of pip is available: 24.0 -> 26.1.2
+Step #0: [notice] To update, run: pip install --upgrade pip
+Step #0: Requirement already satisfied: email-validator>=2.0 in /root/.local/lib/python3.11/site-packages (2.3.0)
+Step #0: Requirement already satisfied: dnspython>=2.0.0 in /root/.local/lib/python3.11/site-packages (from email-validator>=2.0) (2.8.0)
+Step #0: Requirement already satisfied: idna>=2.0.0 in /root/.local/lib/python3.11/site-packages (from email-validator>=2.0) (3.17)
+Step #0: WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+Step #0: 
+Step #0: [notice] A new release of pip is available: 24.0 -> 26.1.2
+Step #0: [notice] To update, run: pip install --upgrade pip
+Step #0: Removing intermediate container 232e9d1f37f2
+Step #0:  ---> 62da82ab78c6
+Step #0: Step 6/16 : FROM python:3.11-slim
+Step #0:  ---> 1455a91ef4da
+Step #0: Step 7/16 : WORKDIR /app
+Step #0:  ---> Using cache
+Step #0:  ---> c957be14f02a
+Step #0: Step 8/16 : RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+Step #0:  ---> Running in 16641b474079
+Step #0: Removing intermediate container 16641b474079
+Step #0:  ---> 78ef4cc00e92
+Step #0: Step 9/16 : USER appuser
+Step #0:  ---> Running in 6b2341e4e339
+Step #0: Removing intermediate container 6b2341e4e339
+Step #0:  ---> 473dfb5edf3c
+Step #0: Step 10/16 : COPY --from=builder /root/.local /home/appuser/.local
+Step #0:  ---> 8af9ed5a5b1a
+Step #0: Step 11/16 : COPY app/ ./app/
+Step #0:  ---> 38feb9d0d461
+Step #0: Step 12/16 : COPY gunicorn_conf.py ./gunicorn_conf.py
+Step #0:  ---> ae532529163f
+Step #0: Step 13/16 : ENV PATH=/home/appuser/.local/bin:$PATH
+Step #0:  ---> Running in 0b46df946c19
+Step #0: Removing intermediate container 0b46df946c19
+Step #0:  ---> 8c39cb275de7
+Step #0: Step 14/16 : EXPOSE 8000
+Step #0:  ---> Running in d8b2876f4fcd
+Step #0: Removing intermediate container d8b2876f4fcd
+Step #0:  ---> cc511f944c2a
+Step #0: Step 15/16 : HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+Step #0:  ---> Running in 07902d3a099f
+Step #0: Removing intermediate container 07902d3a099f
+Step #0:  ---> 2fb6e29dd132
+Step #0: Step 16/16 : CMD ["gunicorn", "app.main:app", "--bind", "0.0.0.0:8000", "-k", "uvicorn.workers.UvicornWorker", "-c", "gunicorn_conf.py"]
+Step #0:  ---> Running in d52651fb3551
+Step #0: Removing intermediate container d52651fb3551
+Step #0:  ---> 199a715ebf1a
+Step #0: Successfully built 199a715ebf1a
+Step #0: Successfully tagged asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:b2f2929b0d0421489f489296a30e3910d115dfb2
+Finished Step #0
+Starting Step #1
+Step #1: Already have image (with digest): gcr.io/cloud-builders/docker
+Step #1: The push refers to repository [asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend]
+Step #1: d3b14707c068: Preparing
+Step #1: d5ec35f25005: Preparing
+Step #1: 4275f8fc7ad8: Preparing
+Step #1: ffacfcfad3c3: Preparing
+Step #1: 236af8623b4e: Preparing
+Step #1: 89bfb82659d0: Preparing
+Step #1: bffa3c30a00b: Preparing
+Step #1: 98df1ca0e575: Preparing
+Step #1: 219a998c6050: Preparing
+Step #1: 89bfb82659d0: Layer already exists
+Step #1: 98df1ca0e575: Layer already exists
+Step #1: bffa3c30a00b: Layer already exists
+Step #1: ffacfcfad3c3: Pushed
+Step #1: d3b14707c068: Pushed
+Step #1: 236af8623b4e: Pushed
+Step #1: d5ec35f25005: Pushed
+Step #1: 219a998c6050: Pushed
+Step #1: 4275f8fc7ad8: Pushed
+Step #1: b2f2929b0d0421489f489296a30e3910d115dfb2: digest: sha256:ed180ba131b39b55ac550423edc6c849cbd741c409b7511d0005e7fd83983535 size: 2203
+Finished Step #1
+Starting Step #2
+Step #2: Pulling image: gcr.io/google.com/cloudsdktool/cloud-sdk
+Step #2: Using default tag: latest
+Step #2: latest: Pulling from google.com/cloudsdktool/cloud-sdk
+Step #2: 5b4d6ff92fc4: Already exists
+Step #2: a364003af86f: Pulling fs layer
+Step #2: d76345147f7a: Pulling fs layer
+Step #2: 62779cb46d7f: Pulling fs layer
+Step #2: 1684689c2ff5: Pulling fs layer
+Step #2: 94c8bd5a58c6: Pulling fs layer
+Step #2: 1684689c2ff5: Verifying Checksum
+Step #2: 1684689c2ff5: Download complete
+Step #2: 94c8bd5a58c6: Download complete
+Step #2: a364003af86f: Verifying Checksum
+Step #2: a364003af86f: Download complete
+Step #2: a364003af86f: Pull complete
+Step #2: 62779cb46d7f: Verifying Checksum
+Step #2: d76345147f7a: Verifying Checksum
+Step #2: d76345147f7a: Download complete
+Step #2: d76345147f7a: Pull complete
+Step #2: 62779cb46d7f: Pull complete
+Step #2: 1684689c2ff5: Pull complete
+Step #2: 94c8bd5a58c6: Pull complete
+Step #2: Digest: sha256:246f1d97dd5a73dbdecb547a75e8c552403c926762e2044df2f833b44d1fc9c1
+Step #2: Status: Downloaded newer image for gcr.io/google.com/cloudsdktool/cloud-sdk:latest
+Step #2: gcr.io/google.com/cloudsdktool/cloud-sdk:latest
+Step #2: Deploying container to Cloud Run service [syrabit-backend] in project [blissful-acumen-495019-t6] region [asia-south1]
+Step #2: Deploying...
+Step #2: Setting IAM Policy.............warning
+Step #2: Creating Revision...................................................................................................................................................................done
+Step #2: Routing traffic.....done
+Step #2: Completed with warnings:
+Step #2:   Setting IAM policy failed, try "gcloud beta run services add-iam-policy-binding --region=asia-south1 --member=allUsers --role=roles/run.invoker syrabit-backend"
+Step #2: Service [syrabit-backend] revision [syrabit-backend-00132-5gr] has been deployed and is serving 100 percent of traffic.
+Step #2: Service URL: https://syrabit-backend-851687450401.asia-south1.run.app
+Finished Step #2
+PUSH
+Pushing asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:b2f2929b0d0421489f489296a30e3910d115dfb2
+The push refers to repository [asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend]
+d3b14707c068: Preparing
+d5ec35f25005: Preparing
+4275f8fc7ad8: Preparing
+ffacfcfad3c3: Preparing
+236af8623b4e: Preparing
+89bfb82659d0: Preparing
+bffa3c30a00b: Preparing
+98df1ca0e575: Preparing
+219a998c6050: Preparing
+bffa3c30a00b: Layer already exists
+ffacfcfad3c3: Layer already exists
+236af8623b4e: Layer already exists
+d5ec35f25005: Layer already exists
+89bfb82659d0: Layer already exists
+4275f8fc7ad8: Layer already exists
+d3b14707c068: Layer already exists
+98df1ca0e575: Layer already exists
+219a998c6050: Layer already exists
+b2f2929b0d0421489f489296a30e3910d115dfb2: digest: sha256:ed180ba131b39b55ac550423edc6c849cbd741c409b7511d0005e7fd83983535 size: 2203
+DONE
+  audit  https://console.cloud.google.com/cloud-build/builds;region=asia-south1/06a19fca-4745-45ed-b94f-e7cb7d471b1f?authuser=1&project=blissful-acumen-495019-t6
