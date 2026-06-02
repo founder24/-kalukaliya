@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "fix",
   "description": "Address 5 issues from the 2025-07-15 review of test_pr358_chat_audit.py: vertex mock assertion, latency thresholds, dead patches, _failing_stream helper, content correctness assertions.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Add mock_vertex.stream_generate_with_retry assert_called in fallback test",
     "Increase latency thresholds from 200ms/500ms to 1000ms/2000ms",
@@ -22,5 +22,5 @@
     "cd apps/backend && eval \"$(pyenv init -)\" && pyenv shell 3.11.15 && python -m pytest tests/test_pr358_chat_audit.py -v --tb=short"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 17 tests pass in 1.03s after all 5 review fixes. The _raise_before_yield helper cleanly replaces inline failing generators. Content assertions confirmed SSE events carry expected mocked text. The vertex fallback test now verifies content from the vertex mock appears in events (direct assert_called is not possible since stream_generate_with_retry is a plain async generator, not a Mock)."
 }
