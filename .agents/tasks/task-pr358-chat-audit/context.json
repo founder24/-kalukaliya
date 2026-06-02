@@ -1,0 +1,30 @@
+{
+  "project_type": "Python FastAPI monorepo (backend + edge + frontend)",
+  "language": "Python",
+  "build_system": "pip-compile, requirements.txt",
+  "test_framework": "pytest with pytest-asyncio (asyncio_mode=auto), httpx AsyncClient ASGI transport",
+  "build_command": "cd apps/backend && pip install -r requirements.txt -r requirements-dev.in",
+  "test_command": "cd apps/backend && eval \"$(pyenv init -)\" && pyenv shell 3.11.15 && python -m pytest tests/ -v",
+  "verification_instructions": "Run pytest on the new test file: python -m pytest tests/test_pr358_chat_audit.py -v",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "eval \"$(pyenv init -)\" && pyenv shell 3.11.15 && cd apps/backend && pip install -r requirements.txt && pip install pytest pytest-asyncio pytest-env pytest-cov",
+  "environment_constraints": "OPEN_INTERNET network mode. Python 3.11 via pyenv. No real AI services available - must use mocked providers. Tests use JWT_SECRET=test-secret-at-least-32-characters-long and APP_ENV=test.",
+  "contribution_requirements": "Tests follow existing patterns in tests/ directory. Use httpx.AsyncClient with ASGITransport for endpoint tests. Use unittest.mock for service mocking. pytest.ini sets asyncio_mode=auto.",
+  "key_patterns": "conftest.py provides: client fixture (AsyncClient), mock_user, auth_headers. Tests mock rate_limit, Redis, MongoDB, search_service, LLM providers. SSE stream events use format: data: {\"content\": \"...\", \"done\": false}. Final event includes done=true, latency_ms, model, lang. ChatRequest model accepts: message, lang (Optional[en|as]), session_id, context_messages.",
+  "relevant_files": [
+    "apps/backend/app/api/v1/chat.py",
+    "apps/backend/app/services/chat_service.py",
+    "apps/backend/app/services/ai/router.py",
+    "apps/backend/app/services/ai/vertex_client.py",
+    "apps/backend/app/services/ai/sarvam_client.py",
+    "apps/backend/app/services/search/vertex_search.py",
+    "apps/backend/tests/conftest.py",
+    "apps/backend/tests/test_chat.py",
+    "apps/backend/tests/test_english_chat_integration.py",
+    "apps/backend/tests/test_pipeline_audit.py",
+    "apps/backend/tests/test_latency_audit.py",
+    "apps/backend/app/config.py",
+    "apps/frontend/src/pages/ChatPage.jsx"
+  ],
+  "directory_structure": "apps/backend/app/ - FastAPI app (api/v1/chat.py, services/chat_service.py, services/ai/router.py, services/ai/vertex_client.py, services/ai/sarvam_client.py, services/search/vertex_search.py, config.py), apps/backend/tests/ - pytest tests, apps/frontend/src/pages/ - React pages"
+}

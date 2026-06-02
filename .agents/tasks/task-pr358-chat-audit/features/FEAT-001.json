@@ -1,0 +1,22 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Set up the test environment: install backend dependencies and verify existing tests pass before adding new ones.",
+  "status": "completed",
+  "steps": [
+    "Run: eval \"$(pyenv init -)\" && pyenv shell 3.11.15",
+    "Install production deps: cd apps/backend && pip install -r requirements.txt",
+    "Install test deps: pip install pytest pytest-asyncio pytest-env pytest-cov",
+    "Run existing tests to confirm baseline: python -m pytest tests/test_chat.py tests/test_english_chat_integration.py -v",
+    "If any failures, report them in findings but do NOT fix them - just confirm the test infrastructure works"
+  ],
+  "acceptance_criteria": [
+    "pytest can be invoked and discovers tests",
+    "Existing chat-related tests (test_chat.py, test_english_chat_integration.py) run without import errors"
+  ],
+  "verification": [
+    "cd apps/backend && eval \"$(pyenv init -)\" && pyenv shell 3.11.15 && python -m pytest tests/test_chat.py tests/test_english_chat_integration.py -v --tb=short 2>&1 | tail -30"
+  ],
+  "blocked_reason": null,
+  "findings": "All 19 existing tests pass (9 in test_chat.py, 10 in test_english_chat_integration.py). Python 3.11.15 via pyenv. All production and test deps already installed. pytest-asyncio 1.4.0 with asyncio mode=auto. No import errors or failures. Baseline is clean."
+}
