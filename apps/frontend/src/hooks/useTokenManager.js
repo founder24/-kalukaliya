@@ -31,6 +31,16 @@ function safeSessionRemove(key) {
 }
 
 // localStorage wrappers for refresh token persistence across tabs/sessions
+//
+// SECURITY NOTE (XSS trade-off): Storing refresh tokens in localStorage exposes them
+// to any XSS on this origin. This is an accepted trade-off because:
+//   1. CSP restricts script-src to 'self', limiting XSS vectors significantly.
+//   2. Refresh tokens have a short TTL and are rotated on each use (single-use via
+//      Redis atomic claim), so a stolen token has a narrow window of validity.
+//   3. httpOnly cookies are not viable for this SPA architecture -- the edge worker
+//      and client both need to read the token for refresh flows, and cookie-based
+//      refresh would require a same-origin BFF endpoint that does not exist here.
+//
 function safeLocalGet(key) {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {

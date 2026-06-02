@@ -586,6 +586,10 @@ async def chat_stream(
         HEARTBEAT_INTERVAL = 15  # seconds
         last_heartbeat = time.time()
 
+        # NOTE: The timeout check below fires between chunks only. If the upstream
+        # LLM connection stalls mid-chunk (never yields), this timeout will not
+        # trigger. In that scenario, the effective timeout is httpx's internal
+        # read timeout (configured via PROXY_TIMEOUT / connection pool settings).
         async for event in ChatService.stream_llm(
             system_prompt=system_prompt,
             sanitized_message=sanitized_message,

@@ -114,6 +114,18 @@ async def handle_razorpay_webhook(request: Request):
             order_id = payload.get("payment", {}).get("order_id")
             if order_id and _RAZORPAY_ORDER_ID_RE.fullmatch(order_id):
                 user = await User.find_one({"razorpay_subscription_id": order_id})
+                # Validate amount against user's plan tier before granting renewal
+                if user:
+                    expected_prices = {"pro": 29900, "premium": 59900}
+                    user_tier = getattr(user, "subscription_tier", "free")
+                    expected_amount = expected_prices.get(user_tier)
+                    if expected_amount and amount != expected_amount:
+                        logger.warning(
+                            f"Amount mismatch on order_id fallback: got {amount}, "
+                            f"expected {expected_amount} for tier '{user_tier}' "
+                            f"(user={user.email}, order_id={order_id})"
+                        )
+                        return {"status": "ignored", "reason": "amount_mismatch"}
 
         if not user:
             logger.error(f"User not found for sub {sub_id}")

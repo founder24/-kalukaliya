@@ -75,7 +75,7 @@ def sanitize_user_input(text: str) -> str:
         r"Do Anything Now",
         r"DAN mode",
         r"jailbreak",
-        r"developer mode",
+        r"(?:enter|activate|enable) developer mode",
         r"Act as if you",
         r"Pretend you are",
         r"From now on you",
