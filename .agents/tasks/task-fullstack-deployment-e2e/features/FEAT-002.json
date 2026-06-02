@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create a comprehensive Playwright e2e test for the library page that verifies MongoDB content flows through the backend API and renders as subject cards on the frontend. Also add tests for the chat pipeline with auth headers and the login/auth flow end-to-end. This simulates the full deployment flow after PR 356.",
+  "status": "pending",
+  "steps": [
+    "Create a new Playwright test file at apps/frontend/e2e/library-deployment.spec.ts that tests the library page content rendering flow",
+    "In the library test: mock the /api/v1/content/library-bundle endpoint to return realistic MongoDB-shaped data (boards, classes, streams, subjects with chapters) matching the schema from apps/backend/app/api/v1/public_content.py",
+    "Also mock /api/v1/content/library-bundle?slim=1 since LibraryPage.jsx first fetches the slim bundle (useLibraryBundleSlim hook)",
+    "Assert that: (a) the page renders the heading 'Educational Browser' (data-testid or text), (b) subject cards appear with names from the mocked data, (c) the search input is visible (data-testid='library-search-input'), (d) filter chips render, (e) chapter count text appears",
+    "Add a test that verifies the /library route alias also works (frontend routes /library to LibraryPage)",
+    "Create a chat pipeline test in apps/frontend/e2e/chat-deployment.spec.ts that: (a) mocks the auth endpoint to return a valid token, (b) mocks /api/v1/users/me to return an authenticated user, (c) mocks /api/v1/chat/stream with SSE events including text chunks and a done event with latency_ms/model/lang fields, (d) navigates to /chat, fills the message input, sends it, and verifies response text appears",
+    "Create an auth flow test in apps/frontend/e2e/auth-deployment.spec.ts that: (a) mocks POST /api/v1/auth/login to return access_token and refresh_token, (b) mocks GET /api/v1/users/me to return user profile with subscription_tier, (c) navigates to /login, fills email and password fields, submits the form, (d) verifies the user is redirected away from login and the user state is updated",
+    "Ensure all mocked API responses match the actual backend response schemas found in the source code (TokenResponse model in auth.py, library-bundle shape in public_content.py, SSE format in chat.py)"
+  ],
+  "acceptance_criteria": [
+    "Running 'cd apps/frontend && npx playwright test e2e/library-deployment.spec.ts --reporter=list' passes all tests",
+    "Running 'cd apps/frontend && npx playwright test e2e/chat-deployment.spec.ts --reporter=list' passes all tests",
+    "Running 'cd apps/frontend && npx playwright test e2e/auth-deployment.spec.ts --reporter=list' passes all tests",
+    "The library test verifies that subject cards with realistic content render on the page (not just that the page loads)",
+    "The chat test verifies SSE streaming responses are assembled and displayed",
+    "The auth test verifies token-based login flow completes and auth state updates"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/-kalukaliya/apps/frontend && npx playwright test e2e/library-deployment.spec.ts e2e/chat-deployment.spec.ts e2e/auth-deployment.spec.ts --reporter=list"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
