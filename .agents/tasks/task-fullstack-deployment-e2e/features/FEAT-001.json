@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "chore",
   "description": "Install dependencies for backend and frontend, install Playwright browsers, and verify the existing test suites run successfully as a baseline before adding new tests.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Install backend Python dependencies: pip install -r apps/backend/requirements.txt and the dev deps (pytest, httpx, etc.)",
     "Install frontend Node dependencies: cd apps/frontend && pnpm install",
@@ -20,5 +20,5 @@
     "Run: cd /projects/sandbox/-kalukaliya/apps/frontend && npx playwright test e2e/navigation.spec.ts --reporter=list 2>&1 | tail -10"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "1. requirements.txt has pinned versions that may not be available (aiohappyeyeballs==2.6.2 was yanked); used requirements.in instead for install. 2. Python must be switched to 3.11.15 via pyenv (pyenv global 3.11.15). 3. --with-deps flag for playwright install fails because apt-get is not available on Amazon Linux 2023; instead installed system deps via dnf (nspr, nss, atk, cups-libs, libdrm, etc.) and manually extracted libnss3.so from RPM. 4. playwright.config.ts had port mismatch: webServer url was 5173 but dev script uses port 5000; fixed to 5000. 5. Backend auth tests: 11/11 pass. Frontend navigation e2e: 4/4 pass. 6. --timeout=30 pytest flag is not available without pytest-timeout plugin; omit it."
 }
