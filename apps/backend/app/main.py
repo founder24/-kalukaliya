@@ -40,6 +40,7 @@ from app.api.v1 import (
     admin_translate,
     admin_dead_letters,
     admin_security,
+    admin_corpus,
     seo,
     indexnow,
     content,
@@ -338,6 +339,7 @@ def create_app() -> FastAPI:
     app.include_router(
         analytics.router, prefix="/api/v1/analytics", tags=["Analytics"]
     )
+    app.include_router(admin_corpus.router, prefix="/api/v1", tags=["Admin Corpus"])
 
     # CORS middleware — added last so it becomes the outermost layer and
     # handles OPTIONS preflight before any other middleware runs.

@@ -306,7 +306,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                         opacity: (hasValidLink && hasContent) ? 1 : 0.5,
                       }}
                     >
-                      {ch.title}
+                      {(isAs && ch.title_as) ? ch.title_as : ch.title}
                     </Link>
                     <ExternalLink
                       size={10}

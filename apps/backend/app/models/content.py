@@ -74,6 +74,7 @@ class Topic(BaseModel):
 
 class Chapter(Document):
     title: str
+    title_as: Optional[str] = None
     slug: str
     subject_id: PydanticObjectId
     chapter_number: int

@@ -132,12 +132,14 @@ async def get_library_bundle(
                         ch_data = {
                             "id": str(ch.id),
                             "title": ch.title,
+                            "title_as": ch.title_as or None,
                             "slug": ch.slug,
                             "subject_id": subj_id,
                             "order": ch.chapter_number,
                             "topic_count": len(ch.published_topics),
                             "notes_generated": ch.notes_generated
                             or bool(ch.content_en or ch.content_as),
+                            "has_assamese": bool(ch.content_as),
                             "status": ch.status,
                         }
                         chapter_list.append(ch_data)

@@ -1,1 +1,2 @@
 - [Syrabit dev setup](syrabit-dev-setup.md) — Replit dev environment setup details for this monorepo
+- [Syrabit content architecture](syrabit-content-arch.md) — Chapter model, KnowledgeObject vs Chapter split, translation pipeline
