@@ -395,6 +395,18 @@ def create_app() -> FastAPI:
     async def legacy_health_deep_redirect():
         return RedirectResponse(url="/health/deep", status_code=301)
 
+    @app.get("/api/v1/cms/posts")
+    async def legacy_cms_posts_redirect(request: Request):
+        qs = request.url.query
+        url = "/api/v1/content/cms/posts" + (f"?{qs}" if qs else "")
+        return RedirectResponse(url=url, status_code=307)
+
+    @app.get("/api/v1/cms/posts/{path:path}")
+    async def legacy_cms_posts_path_redirect(path: str, request: Request):
+        qs = request.url.query
+        url = f"/api/v1/content/cms/{path}" + (f"?{qs}" if qs else "")
+        return RedirectResponse(url=url, status_code=307)
+
     return app
 
 

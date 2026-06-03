@@ -809,3 +809,24 @@ async def get_cms_posts(
     except Exception as e:
         logger.warning(f"CMS posts query failed (DB may not be ready): {e}")
         return {"items": [], "total": 0}
+
+
+@router.get("/cms-library")
+async def get_cms_library(
+    response: Response,
+    limit: int = Query(12, ge=1, le=50),
+    skip: int = Query(0, ge=0),
+    board: Optional[str] = Query(None),
+    class_slug: Optional[str] = Query(None),
+):
+    """
+    Alias for /cms/posts — used by older frontend builds.
+    Delegates to the same CMS posts logic.
+    """
+    return await get_cms_posts(
+        response=response,
+        limit=limit,
+        skip=skip,
+        board=board,
+        class_slug=class_slug,
+    )

@@ -375,13 +375,15 @@ export default {
 /** Fetch backend health with a 2s timeout. Returns true if backend responds with 2xx. */
 async function fetchBackendHealth(backendUrl: string, env: Env): Promise<boolean> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    // Fetch OIDC token BEFORE starting the abort timer so the 2s window
+    // covers only the actual HTTP request to the backend, not token exchange.
     const headers: Record<string, string> = {};
     const token = await getIdentityToken(env);
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
     const res = await fetch(`${backendUrl}/health`, { signal: controller.signal, headers });
     clearTimeout(timeoutId);
     return res.ok;

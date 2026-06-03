@@ -4,11 +4,15 @@ Used for the educational content management system.
 """
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 from uuid import uuid4
 
 from beanie import Document, PydanticObjectId
 from pydantic import BaseModel, Field
+
+# Flexible ID type: accepts MongoDB ObjectIds AND legacy short/UUID string IDs
+# stored in the DB (e.g. 'b1', 's13', '0bd48cd1-3912-47f8-...')
+FlexId = Union[PydanticObjectId, str]
 
 
 class Board(Document):
@@ -24,7 +28,7 @@ class Board(Document):
 
 class Class(Document):
     name: str
-    board_id: PydanticObjectId
+    board_id: FlexId
     status: str = "active"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -35,7 +39,7 @@ class Class(Document):
 
 class Stream(Document):
     name: str
-    class_id: PydanticObjectId
+    class_id: FlexId
     status: str = "active"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -46,7 +50,7 @@ class Stream(Document):
 
 class Subject(Document):
     name: str
-    stream_id: Optional[PydanticObjectId] = None  # None for subjects not yet linked to a stream
+    stream_id: Optional[FlexId] = None
     status: str = "active"
     slug: Optional[str] = None
     description: Optional[str] = None
@@ -69,14 +73,14 @@ class Topic(BaseModel):
     definition: Optional[str] = None
     topic_slug: str
     definition_status: str = "pending"
-    wikidata_uri: Optional[str] = None  # Auto-resolved at publish time
+    wikidata_uri: Optional[str] = None
 
 
 class Chapter(Document):
     title: str
     title_as: Optional[str] = None
     slug: str
-    subject_id: PydanticObjectId
+    subject_id: FlexId
     chapter_number: int
     status: str = "draft"
     content_en: Optional[str] = None
@@ -103,7 +107,7 @@ class TopicEmbedding(Document):
 
     topic_id: str
     topic_title: str
-    chapter_id: PydanticObjectId
+    chapter_id: FlexId
     chapter_title: str
     subject_slug: str
     board_slug: str
