@@ -1,0 +1,213 @@
+~/syrabit$ ^C
+founder@instance-20260603-085552:~/syrabit$ bash scripts/live-deployment-test.sh --verbose
+    bash scripts/test-auth-live.sh
+    bash scripts/test-chat-live.sh
+
+=================================================================
+  SYRABIT LIVE DEPLOYMENT TEST
+=================================================================
+  Date:       2026-06-03 14:41:17 UTC
+  Backend:    https://api.syrabit.ai
+  Frontend:   https://syrabit.ai
+  Categories: health,auth,content,chat,seo,payments,admin,edge,security,performance,webhook
+=================================================================
+
+--- [health] Health & Basics ---
+
+    [verbose] curl -X GET https://api.syrabit.ai/health 
+    [verbose] Status: 200, Body: {"status":"healthy","service":"syrabit-edge","timestamp":"2026-06-03T14:41:17.601Z","backend_reachable":false}
+  PASS /health returns 200 with status field
+    [verbose] curl -X GET https://api.syrabit.ai/health/deep 
+    [verbose] Status: 404, Body: 
+<html><head>
+<meta http-equiv="content-type" content="text/html;charset=utf-8">
+<title>404 Page not found</title>
+</head>
+<body text=#000000 bgcolor=#ffffff>
+<h1>Error: Page not found</h1>
+<h2>The re
+  FAIL /health/deep returned HTTP 404 (expected 200 or 503)
+    [verbose] curl -X GET https://api.syrabit.ai/health/circuit-breakers 
+    [verbose] Status: 404
+  WARN /health/circuit-breakers not found (may not be deployed)
+
+--- [auth] Authentication Flow ---
+
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/auth/signup -H Content-Type: application/json -d {"bad":"data"}
+  FAIL [CRITICAL] signup with invalid data returned 404 (expected 422)
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/auth/login -H Content-Type: application/json -d {"email":"nonexistent@test.invalid","password":"wrongpass123"}
+  FAIL [CRITICAL] login with wrong creds returned 404 (expected 401)
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/auth/login -H Content-Type: application/json -d {}
+  FAIL [CRITICAL] login with empty body returned 404 (expected 422)
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/auth/forgot-password -H Content-Type: application/json -d {"email":"nobody-exists-here@test.invalid"}
+  FAIL [CRITICAL] forgot-password returned 404 (expected 200 to not leak info)
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/auth/refresh -H Content-Type: application/json -d {"refresh_token":"invalid-token-value"}
+  FAIL [CRITICAL] refresh with invalid token returned 404 (expected 401 or 422)
+  Testing rate limiting (15 rapid requests to /api/v1/auth/login)...
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/auth/login -H Content-Type: application/json -d {"email":"ratelimit-test@test.invalid","password":"wrong"}
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/auth/login -H Content-Type: application/json -d {"email":"ratelimit-test@test.invalid","password":"wrong"}
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/auth/login -H Content-Type: application/json -d {"email":"ratelimit-test@test.invalid","password":"wrong"}
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/auth/login -H Content-Type: application/json -d {"email":"ratelimit-test@test.invalid","password":"wrong"}
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/auth/login -H Content-Type: application/json -d {"email":"ratelimit-test@test.invalid","password":"wrong"}
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/auth/login -H Content-Type: application/json -d {"email":"ratelimit-test@test.invalid","password":"wrong"}
+  PASS rate limiting active (got 429 after rapid requests)
+
+--- [content] Content Delivery ---
+
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/content/render/seba/10/science/chemical-reactions 
+  PASS content render returns 404 (valid response)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/content/render/INJECTION/../../etc/passwd 
+  PASS path traversal blocked (returned 404)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/content/subject/seba/10/science 
+  PASS content subject returns 404
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/content/render/seba/10/science/chemical-reactions 
+  WARN Cache-Control header missing on content responses
+
+--- [chat] Chat/AI Pipeline ---
+
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/chat/ -H Content-Type: application/json -d {"message":"test","language":"en"}
+  FAIL chat returned unexpected 404 (expected 200, 401, 403, or 429)
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/chat/stream -H Content-Type: application/json -d {"message":"test","language":"en","stream":true}
+  FAIL chat/stream returned unexpected 404 (expected 200, 401, 403, or 429)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/chat/history 
+  FAIL [CRITICAL] chat/history without auth returned 404 (expected 401 or 403)
+
+--- [seo] SEO & Sitemaps ---
+
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/seo/sitemap.xml 
+  FAIL sitemap.xml returned 404 (expected 200)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/seo/sitemap-static.xml 
+  FAIL sitemap-static.xml returned 404 (expected 200)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/seo/sitemap-subjects.xml 
+  FAIL sitemap-subjects.xml returned 404 (expected 200)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/seo/sitemap-chapters.xml 
+  FAIL sitemap-chapters.xml returned 404 (expected 200)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/seo/sitemap-topics.xml 
+  FAIL sitemap-topics.xml returned 404 (expected 200)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/seo/sitemap.xml 
+  FAIL sitemap.xml does not contain expected XML structure
+
+--- [payments] Payment Endpoints ---
+
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/payments/create-order -H Content-Type: application/json -d {"plan_id":"test"}
+  WARN payments/create-order endpoint not found (may not be deployed)
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/payments/verify -H Content-Type: application/json -d {"order_id":"test","payment_id":"test","signature":"test"}
+  WARN payments/verify endpoint not found (may not be deployed)
+
+--- [admin] Admin Panel ---
+
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/admin/verify 
+  WARN admin/verify endpoint not found
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/admin/login -H Content-Type: application/json -d {"email":"wrongadmin@test.invalid","password":"wrongpass"}
+  FAIL [CRITICAL] admin/login with wrong creds returned 429 (expected 401)
+  Testing admin rate limiting (10 rapid requests)...
+    [verbose] curl -X POST https://api.syrabit.ai/api/v1/admin/login -H Content-Type: application/json -d {"username":"attacker","password":"attempt1"}
+  PASS admin rate limiting active (got 429)
+
+--- [edge] Edge Worker / Frontend ---
+
+    [verbose] curl -X GET https://syrabit.ai/ -H User-Agent: Mozilla/5.0 SyrabitTest/1.0
+  PASS frontend / returns 200 with HTML content
+    [verbose] curl -X GET https://syrabit.ai/chat -H User-Agent: Mozilla/5.0 SyrabitTest/1.0
+  PASS frontend /chat returns 308 redirect (trailing slash normalization)
+    [verbose] curl -X GET https://syrabit.ai/render/seba/10/science/chemical-reactions -H User-Agent: Mozilla/5.0 SyrabitTest/1.0
+  PASS frontend render page returns 200 (ISR)
+    [verbose] curl -X GET https://syrabit.ai/robots.txt 
+  PASS robots.txt returns 200 and contains Sitemap directive
+    [verbose] curl -X GET https://syrabit.ai/manifest.json 
+  PASS manifest.json returns 200 with valid JSON
+    [verbose] curl -X GET https://syrabit.ai/ -H User-Agent: Mozilla/5.0 SyrabitTest/1.0
+  PASS X-Content-Type-Options header present on frontend
+  PASS X-Frame-Options header present on frontend
+    [verbose] curl -X GET https://api.syrabit.ai/health -H Origin: https://syrabit.ai
+  WARN CORS Access-Control-Allow-Origin header missing
+
+--- [security] Security Checks ---
+
+    [verbose] curl -X GET https://api.syrabit.ai/health 
+  PASS Server header present but no version leaked
+    [verbose] curl -X GET https://api.syrabit.ai/health 
+  PASS HSTS header present on HTTPS responses
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/content/render/%7B%24gt%3A%22%22%7D/10/science/test 
+  PASS NoSQL injection attempt blocked (returned 404)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/content/render/../../../etc/passwd 
+  PASS path traversal blocked (returned 404)
+    [verbose] curl -X POST https://api.syrabit.ai/api/webhooks/razorpay -H Content-Type: application/json -d {"event":"payment.captured","payload":{}}
+  WARN webhook endpoint not found (may not be deployed)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/nonexistent-endpoint-xyz 
+  PASS error response does not leak internal details
+
+--- [performance] Response Times ---
+
+    [verbose] curl -X GET https://api.syrabit.ai/health 
+  WARN /health response time: 680ms (> 500ms threshold)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/seo/sitemap.xml 
+  PASS sitemap.xml response time: 392ms (< 2000ms)
+    [verbose] curl -X GET https://syrabit.ai/ -H User-Agent: Mozilla/5.0 SyrabitTest/1.0
+  PASS frontend / response time: 163ms (< 1500ms)
+    [verbose] curl -X GET https://api.syrabit.ai/api/v1/content/render/seba/10/science/chemical-reactions 
+  INFO content render response time: 397ms
+  PASS content render response time: 397ms (< 3000ms)
+
+--- [webhook] Webhook Security ---
+
+    [verbose] curl -X POST https://api.syrabit.ai/api/webhooks/razorpay -H Content-Type: application/json -d {}
+  WARN webhook endpoint not found (may not be deployed)
+    [verbose] curl -X POST https://api.syrabit.ai/api/webhooks/razorpay -H Content-Type: application/json -H X-Razorpay-Signature: invalid-signature-value -d {"event":"payment.captured","payload":{"payment":{"entity":{"id":"pay_fake"}}}}
+  WARN webhook endpoint not found
+
+=================================================================
+  TEST SUMMARY
+=================================================================
+
+  PASSED: 21/47 | FAILED: 16 | WARNINGS: 10
+
+  CRITICAL FAILURES: 7
+  Security and auth tests have critical failures.
+
+=================================================================
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                               !
+!   WARNING: This script tests against PRODUCTION               !
+!   Target: https://syrabit.ai                              !
+!                                                               !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+ERROR: Required environment variables not set.
+
+Required:
+  export TEST_USER_EMAIL="your-email@example.com"
+  export TEST_USER_PASSWORD="your-password"
+
+Optional (for admin tests):
+  export TEST_ADMIN_EMAIL="admin@example.com"
+  export TEST_ADMIN_PASSWORD="admin-password"
+
+Flags:
+  --dry-run           Show test plan without executing
+  --skip-destructive  Skip rate-limit tests
+  --skip-admin        Skip admin auth tests
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                               !
+!   WARNING: This script tests against PRODUCTION               !
+!   Target: https://syrabit.ai                              !
+!                                                               !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+ERROR: Required environment variables not set.
+
+Required:
+  export TEST_USER_EMAIL="your-email@example.com"
+  export TEST_USER_PASSWORD="your-password"
+
+Flags:
+  --dry-run           Show test plan without executing
+  --skip-tts          Skip TTS tests (may be slow)
+  --skip-image        Skip image analysis tests
+
+founder@instance-20260603-085552:~/syrabit$ ^C
+founder@instance-20260603-085552:~/syrabit$ 
