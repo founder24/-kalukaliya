@@ -1,0 +1,46 @@
+cd ~/syrabit
+
+# ── Build + Push + Deploy using Cloud Build (no local Docker needed) ─────────
+export PROJECT_ID=blissful-acumen-495019-t6
+export REGION=asia-south1
+export COMMIT_SHA=$(git rev-parse --short HEAD)
+
+gcloud builds submit \
+  --config cloudbuild.yaml \
+  --project "$PROJECT_ID" \
+  --substitutions "COMMIT_SHA=${COMMIT_SHA}" \
+  --region "$REGION"
+
+# ── Verify ────────────────────────────────────────────────────────────────────
+SERVICE_URL=$(gcloud run services describe syrabit-backend \
+  --region "$REGION" --format 'value(status.url)')
+curl -sf "${SERVICE_URL}/health" && echo "✅ Deployed & healthy" || echo "❌ Health check failed"
+Creating temporary archive of 867 file(s) totalling 10.7 MiB before compression.
+Some files were not included in the source upload.
+
+Check the gcloud log [/home/founder/.config/gcloud/logs/2026.06.03/13.25.47.481153.log] to see which files and the contents of the
+default gcloudignore file used (see `$ gcloud topic gcloudignore` to learn
+more).
+
+Uploading tarball of [.] to [gs://blissful-acumen-495019-t6_cloudbuild/source/1780493147.797198-beb916bb23444ae084aca69784031b9c.tgz]
+ERROR: (gcloud.builds.submit) NOT_FOUND: Requested entity was not found. This command is authenticated as founder@syrabit.ai which is the active account specified by the [core/account] property.
+{"status":"healthy","service":"syrabit-backend"}✅ Deployed & healthy
+founder@instance-20260603-085552:~/syrabit$ cd ~/syrabit
+
+gcloud run deploy syrabit-backend \
+  --source apps/backend \
+  --region asia-south1 \
+  --project blissful-acumen-495019-t6 \
+  --port 8000 \
+  --allow-unauthenticated
+Building using Dockerfile and deploying container to Cloud Run service [syrabit-backend] in project [blissful-acumen-495019-t6] region [asia-south1]
+X Building and deploying... Building Container.                                                                                                                                                                    
+  ✓ Validating configuration...                                                                                                                                                                                    
+  ✓ Uploading sources...                                                                                                                                                                                           
+  - Building Container... Logs are available at [ https://console.cloud.google.com/cloud-build/builds;region=asia-south1/8e794f7f-f0a1-455e-b5e6-75bacb4d8f0f?project=851687450401 ].                              
+  . Creating Revision...                                                                                                                                                                                           
+  . Routing traffic...                                                                                                                                                                                             
+  . Setting IAM Policy...                                                                                                                                                                                          
+Deployment failed                                                                                                                                                                                                  
+ERROR: (gcloud.run.deploy) Build failed; check build logs for details
+founder@instance-20260603-085552:~/syrabit$ 
