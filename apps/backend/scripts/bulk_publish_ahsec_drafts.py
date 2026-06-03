@@ -1,11 +1,12 @@
 """
-Bulk-publish AHSEC draft chapters that have content and topics ready.
+Bulk-publish draft chapters that have content and topics ready.
 
 Selects chapters where:
   - status == "draft"
   - published_topics is non-empty  (topics are ready)
   - content_en is non-empty        (notes have been generated)
   - Board slug matches --board flag (default: "ahsec")
+    OR --all-boards skips board filtering entirely
 
 Runs the full ContentPublisherService.publish_chapter() pipeline per chapter.
 GCP/Cloudflare steps skip automatically when credentials are absent — the
@@ -14,20 +15,26 @@ one step that always runs is flipping status → "published" in MongoDB.
 Usage:
     cd apps/backend
 
-    # Preview what would be published (no writes)
+    # Preview AHSEC eligible drafts (no writes)
     python -m scripts.bulk_publish_ahsec_drafts --dry-run
+
+    # Preview every eligible draft across ALL boards (incl. unlinked subjects)
+    python -m scripts.bulk_publish_ahsec_drafts --all-boards --dry-run
 
     # Publish all eligible AHSEC drafts
     python -m scripts.bulk_publish_ahsec_drafts
 
-    # Publish a different board
+    # Publish ALL boards in one go
+    python -m scripts.bulk_publish_ahsec_drafts --all-boards
+
+    # Publish a specific board
     python -m scripts.bulk_publish_ahsec_drafts --board seba
 
-    # Limit to N chapters (useful for staged rollout)
-    python -m scripts.bulk_publish_ahsec_drafts --limit 20
+    # Limit to N chapters (staged rollout)
+    python -m scripts.bulk_publish_ahsec_drafts --all-boards --limit 50
 
     # Adjust delay between chapters (seconds, default 0.5)
-    python -m scripts.bulk_publish_ahsec_drafts --delay 1.0
+    python -m scripts.bulk_publish_ahsec_drafts --all-boards --delay 1.0
 """
 
 import argparse
@@ -44,7 +51,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def main(board_slug: str, dry_run: bool, limit: int | None, delay: float):
+async def main(
+    board_slug: str,
+    all_boards: bool,
+    dry_run: bool,
+    limit: int | None,
+    delay: float,
+):
     from pymongo import AsyncMongoClient
     from beanie import init_beanie
 
@@ -64,66 +77,57 @@ async def main(board_slug: str, dry_run: bool, limit: int | None, delay: float):
     await init_beanie(
         database=client[settings.MONGODB_DB_NAME],
         document_models=[
-            User,
-            Chat,
-            ChatFeedback,
-            KnowledgeObject,
-            Board,
-            Class,
-            Stream,
-            Subject,
-            Chapter,
-            TopicEmbedding,
+            User, Chat, ChatFeedback, KnowledgeObject,
+            Board, Class, Stream, Subject, Chapter, TopicEmbedding,
         ],
     )
 
     logger.info(f"Connected to MongoDB database: {settings.MONGODB_DB_NAME}")
 
-    # ── Resolve board → classes → streams → subjects ─────────────────────────
-    board = await Board.find_one(Board.slug == board_slug)
-    if not board:
-        all_boards = await Board.find_all().to_list()
-        slugs = [b.slug for b in all_boards]
-        logger.error(
-            f"Board '{board_slug}' not found. Available board slugs: {slugs}"
+    # ── Resolve scope: all boards vs a specific board ─────────────────────────
+    if all_boards:
+        logger.info("Scope: ALL boards + unlinked subjects")
+        all_drafts = await Chapter.find({"status": "draft"}).to_list()
+
+    else:
+        board = await Board.find_one(Board.slug == board_slug)
+        if not board:
+            all_boards_list = await Board.find_all().to_list()
+            slugs = [b.slug for b in all_boards_list]
+            logger.error(
+                f"Board '{board_slug}' not found. Available slugs: {slugs}\n"
+                f"Tip: use --all-boards to publish every eligible draft."
+            )
+            sys.exit(1)
+
+        logger.info(f"Board: {board.name} (slug={board.slug}, id={board.id})")
+
+        classes  = await Class.find(Class.board_id == board.id).to_list()
+        if not classes:
+            logger.error(f"No classes found for board '{board_slug}'")
+            sys.exit(1)
+
+        class_ids  = [c.id for c in classes]
+        streams    = await Stream.find({"class_id": {"$in": class_ids}}).to_list()
+        stream_ids = [s.id for s in streams]
+        subjects   = await Subject.find({"stream_id": {"$in": stream_ids}}).to_list()
+        subject_ids = [s.id for s in subjects]
+
+        logger.info(
+            f"Hierarchy: {len(classes)} class(es), {len(streams)} stream(s), "
+            f"{len(subjects)} subject(s)"
         )
-        sys.exit(1)
 
-    logger.info(f"Board: {board.name} (slug={board.slug}, id={board.id})")
+        all_drafts = await Chapter.find(
+            {"subject_id": {"$in": subject_ids}, "status": "draft"}
+        ).to_list()
 
-    classes = await Class.find(Class.board_id == board.id).to_list()
-    if not classes:
-        logger.error(f"No classes found for board '{board_slug}'")
-        sys.exit(1)
-
-    class_ids = [c.id for c in classes]
-    streams = await Stream.find({"class_id": {"$in": class_ids}}).to_list()
-    stream_ids = [s.id for s in streams]
-
-    subjects = await Subject.find({"stream_id": {"$in": stream_ids}}).to_list()
-    subject_ids = [s.id for s in subjects]
-
-    logger.info(
-        f"Hierarchy: {len(classes)} class(es), {len(streams)} stream(s), "
-        f"{len(subjects)} subject(s)"
-    )
-
-    # ── Find eligible draft chapters ─────────────────────────────────────────
-    all_drafts = await Chapter.find(
-        {
-            "subject_id": {"$in": subject_ids},
-            "status": "draft",
-        }
-    ).to_list()
-
+    # ── Filter eligible ───────────────────────────────────────────────────────
     eligible = [
         ch for ch in all_drafts
         if ch.published_topics and ch.content_en and ch.content_en.strip()
     ]
-
-    skipped_no_topics = sum(
-        1 for ch in all_drafts if not ch.published_topics
-    )
+    skipped_no_topics  = sum(1 for ch in all_drafts if not ch.published_topics)
     skipped_no_content = sum(
         1 for ch in all_drafts
         if ch.published_topics and (not ch.content_en or not ch.content_en.strip())
@@ -138,18 +142,19 @@ async def main(board_slug: str, dry_run: bool, limit: int | None, delay: float):
 
     if not eligible:
         logger.info("Nothing to publish.")
-        client.close()
+        await client.close()
         return
 
     if limit:
         eligible = eligible[:limit]
         logger.info(f"--limit applied: processing {len(eligible)} chapter(s)")
 
+    # ── Dry-run preview ───────────────────────────────────────────────────────
     if dry_run:
         logger.info("DRY RUN — no changes will be made.\n")
         for i, ch in enumerate(eligible, 1):
             topic_count = len(ch.published_topics)
-            word_count = ch.word_count or len((ch.content_en or "").split())
+            word_count  = ch.word_count or len((ch.content_en or "").split())
             logger.info(
                 f"  [{i:3d}/{len(eligible)}] {ch.title!r:55s} "
                 f"({topic_count} topics, ~{word_count} words)"
@@ -157,14 +162,14 @@ async def main(board_slug: str, dry_run: bool, limit: int | None, delay: float):
         logger.info(
             f"\nDry run complete. Run without --dry-run to publish {len(eligible)} chapter(s)."
         )
-        client.close()
+        await client.close()
         return
 
     # ── Publish ───────────────────────────────────────────────────────────────
-    publisher = ContentPublisherService()
-    published = 0
-    errors = 0
-    started_at = datetime.now(timezone.utc)
+    publisher   = ContentPublisherService()
+    published   = 0
+    errors      = 0
+    started_at  = datetime.now(timezone.utc)
 
     logger.info(f"Starting bulk publish of {len(eligible)} chapter(s)...\n")
 
@@ -206,17 +211,22 @@ async def main(board_slug: str, dry_run: bool, limit: int | None, delay: float):
         f"  Total     : {len(eligible)}\n"
     )
 
-    client.close()
+    await client.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Bulk-publish AHSEC draft chapters that have content and topics ready."
+        description="Bulk-publish draft chapters that have content and topics ready."
     )
     parser.add_argument(
         "--board",
         default="ahsec",
-        help="Board slug to target (default: ahsec)",
+        help="Board slug to target (default: ahsec). Ignored when --all-boards is set.",
+    )
+    parser.add_argument(
+        "--all-boards",
+        action="store_true",
+        help="Publish eligible drafts across ALL boards, including subjects with no board link.",
     )
     parser.add_argument(
         "--dry-run",
@@ -242,6 +252,7 @@ if __name__ == "__main__":
     asyncio.run(
         main(
             board_slug=args.board,
+            all_boards=args.all_boards,
             dry_run=args.dry_run,
             limit=args.limit,
             delay=args.delay,
