@@ -46,7 +46,7 @@ class Stream(Document):
 
 class Subject(Document):
     name: str
-    stream_id: PydanticObjectId
+    stream_id: Optional[PydanticObjectId] = None  # None for subjects not yet linked to a stream
     status: str = "active"
     slug: Optional[str] = None
     description: Optional[str] = None

@@ -52,11 +52,26 @@ async def get_library_bundle(
         boards = await Board.find(_status_q).to_list()
         classes = await Class.find(_status_q).to_list()
         streams = await Stream.find(_status_q).to_list()
-        subjects = await Subject.find(_status_q).to_list()
         chapters = await Chapter.find().to_list()
     except Exception as e:
         logger.warning(f"Library bundle DB query failed (DB may not be ready): {e}")
         return {"boards": []}
+
+    # Load subjects separately so a validation error on one bad document
+    # does not wipe out the entire library response.
+    try:
+        subjects = await Subject.find(_status_q).to_list()
+    except Exception as subj_err:
+        logger.error(
+            f"Subject bulk load failed — attempting per-document fallback: {subj_err}"
+        )
+        subjects = []
+        raw_cursor = Subject.find(_status_q)
+        async for doc in raw_cursor:
+            try:
+                subjects.append(doc)
+            except Exception as doc_err:
+                logger.warning(f"Skipping invalid subject document: {doc_err}")
 
     # Index by parent ID for fast lookups
     classes_by_board: dict[str, list] = {}
@@ -218,6 +233,67 @@ async def get_library_bundle(
                 "classes": result_classes,
             }
         )
+
+    # Include subjects not reached by the hierarchy walk.
+    # This covers subjects with stream_id=None (migrated from legacy DBs without
+    # a matching stream) and subjects whose stream was deleted/never linked.
+    # They appear in flat listings (subject cards, search) but not under a board.
+    included_subject_ids = {s["id"] for s in flat_subjects}
+    for subj in subjects:
+        subj_id = str(subj.id)
+        if subj_id in included_subject_ids:
+            continue
+
+        subj_chapters = chapters_by_subject.get(subj_id, [])
+        subj_chapters.sort(key=lambda c: c.chapter_number)
+        notes_count = sum(
+            1
+            for ch in subj_chapters
+            if ch.notes_generated or ch.content_en or ch.content_as
+        )
+        chapter_count = len(subj_chapters)
+        notes_pct = int(notes_count / chapter_count * 100) if chapter_count else 0
+
+        chapter_list = []
+        for ch in subj_chapters:
+            ch_data = {
+                "id": str(ch.id),
+                "title": ch.title,
+                "title_as": ch.title_as or None,
+                "slug": ch.slug,
+                "subject_id": subj_id,
+                "order": ch.chapter_number,
+                "topic_count": len(ch.published_topics),
+                "notes_generated": ch.notes_generated
+                or bool(ch.content_en or ch.content_as),
+                "has_assamese": bool(ch.content_as),
+                "status": ch.status,
+            }
+            chapter_list.append(ch_data)
+            if not is_slim:
+                flat_chapters.append(ch_data)
+
+        subj_slug = subj.slug or _slugify(subj.name)
+        subj_data = {
+            "id": subj_id,
+            "name": subj.name,
+            "slug": subj_slug,
+            "stream_id": None,
+            "status": subj.status,
+            "description": subj.description,
+            "tags": subj.tags or [],
+            "seo_stats": subj.seo_stats,
+            "icon": subj.icon,
+            "gradient": subj.gradient,
+            "thumbnailUrl": subj.thumbnail_url,
+            "has_document": subj.has_document,
+            "chapter_count": chapter_count,
+            "notes_count": notes_count,
+            "notes_pct": notes_pct,
+        }
+        if not is_slim:
+            subj_data["chapters"] = chapter_list
+        flat_subjects.append(subj_data)
 
     result = {
         "boards": result_boards,
