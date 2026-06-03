@@ -1,0 +1,51 @@
+ gcloud run services logs read syrabit-backend \
+  --region=asia-south1 \
+  --limit=50
+2026-06-03 12:14:17   File "/home/appuser/.local/lib/python3.11/site-packages/pymongo/asynchronous/mongo_client.py", line 2029, in _retry_internal
+2026-06-03 12:14:17     return await _ClientConnectionRetryable(
+2026-06-03 12:14:17            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-06-03 12:14:17   File "/home/appuser/.local/lib/python3.11/site-packages/pymongo/asynchronous/mongo_client.py", line 2821, in run
+2026-06-03 12:14:17     res = await self._read() if self._is_read else await self._write()
+2026-06-03 12:14:17           ^^^^^^^^^^^^^^^^^^
+2026-06-03 12:14:17   File "/home/appuser/.local/lib/python3.11/site-packages/pymongo/asynchronous/mongo_client.py", line 3037, in _read
+2026-06-03 12:14:17     self._server = await self._get_server()
+2026-06-03 12:14:17                    ^^^^^^^^^^^^^^^^^^^^^^^^
+2026-06-03 12:14:17   File "/home/appuser/.local/lib/python3.11/site-packages/pymongo/asynchronous/mongo_client.py", line 2985, in _get_server
+2026-06-03 12:14:17     return await self._client._select_server(
+2026-06-03 12:14:17            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-06-03 12:14:17   File "/home/appuser/.local/lib/python3.11/site-packages/pymongo/asynchronous/mongo_client.py", line 1855, in _select_server
+2026-06-03 12:14:17     server = await topology.select_server(
+2026-06-03 12:14:17              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-06-03 12:14:17   File "/home/appuser/.local/lib/python3.11/site-packages/pymongo/asynchronous/topology.py", line 428, in select_server
+2026-06-03 12:14:17     server = await self._select_server(
+2026-06-03 12:14:17              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-06-03 12:14:17   File "/home/appuser/.local/lib/python3.11/site-packages/pymongo/asynchronous/topology.py", line 402, in _select_server
+2026-06-03 12:14:17     servers = await self.select_servers(
+2026-06-03 12:14:17               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-06-03 12:14:17   File "/home/appuser/.local/lib/python3.11/site-packages/pymongo/asynchronous/topology.py", line 298, in select_servers
+2026-06-03 12:14:17     server_descriptions = await self._select_servers_loop(
+2026-06-03 12:14:17                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-06-03 12:14:17   File "/home/appuser/.local/lib/python3.11/site-packages/pymongo/asynchronous/topology.py", line 359, in _select_servers_loop
+2026-06-03 12:14:17     raise ServerSelectionTimeoutError(
+2026-06-03 12:14:17 pymongo.errors.ServerSelectionTimeoutError: No replica set members found yet, Timeout: 5.0s, Topology Description: <TopologyDescription id: 6a201a7a95bde9b55210d5f3, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('ac-tjt3a8b-shard-00-00.rt24pqk.mongodb.net', 27017) server_type: Unknown, rtt: None>, <ServerDescription ('ac-tjt3a8b-shard-00-01.rt24pqk.mongodb.net', 27017) server_type: Unknown, rtt: None>, <ServerDescription ('ac-tjt3a8b-shard-00-02.rt24pqk.mongodb.net', 27017) server_type: Unknown, rtt: None>]>
+2026-06-03 12:14:18 [2026-06-03 12:14:18 +0000] [2] [ERROR] Application startup failed. Exiting.
+2026-06-03 12:16:04 [2026-06-03 12:16:04 +0000] [2] [INFO] Worker exiting (pid: 2)
+2026-06-03 12:17:06 [2026-06-03 12:17:06 +0000] [1] [ERROR] Worker (pid:3) exited with code 3.
+2026-06-03 12:17:09 [2026-06-03 12:17:09 +0000] [1] [INFO] Worker (pid:2) was sent SIGTERM!
+2026-06-03 12:17:09 [2026-06-03 12:17:09 +0000] [1] [ERROR] Shutting down: Master
+2026-06-03 12:17:09 [2026-06-03 12:17:09 +0000] [1] [ERROR] Reason: Worker failed to boot.
+2026-06-03 12:17:36 [2026-06-03 12:17:36 +0000] [1] [INFO] Starting gunicorn 26.0.0
+2026-06-03 12:17:36 [2026-06-03 12:17:36 +0000] [1] [INFO] Listening at: http://0.0.0.0:8000 (1)
+2026-06-03 12:17:36 [2026-06-03 12:17:36 +0000] [1] [INFO] Using worker: uvicorn.workers.UvicornWorker
+2026-06-03 12:17:36 [2026-06-03 12:17:36 +0000] [2] [INFO] Booting worker with pid: 2
+2026-06-03 12:17:36 [2026-06-03 12:17:36 +0000] [3] [INFO] Booting worker with pid: 3
+2026-06-03 12:17:41 [2026-06-03 12:17:41 +0000] [1] [INFO] Control socket listening at /home/appuser/.gunicorn/gunicorn.ctl
+2026-06-03 12:25:08 VERTEX_SEARCH_DATASTORE_ID is not set in production
+2026-06-03 12:25:08 Sentry DSN not configured in production - error tracking disabled
+2026-06-03 12:25:09 VERTEX_SEARCH_DATASTORE_ID is not set in production
+2026-06-03 12:25:09 Sentry DSN not configured in production - error tracking disabled
+2026-06-03 12:28:41 Vertex AI Search not configured - RAG search will return empty results
+2026-06-03 12:28:44 Vertex AI Search not configured - RAG search will return empty results
+2026-06-03 12:32:44 
+2026-06-03 12:32:52 
+founder@instance-20260603-085552:~$ 
