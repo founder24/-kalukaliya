@@ -144,10 +144,13 @@ def _board_slug(meta: dict) -> str:
 # ---------------------------------------------------------------------------
 
 async def migrate_to_mongo(records: list[dict], dry_run: bool) -> dict:
-    """Re-embed each record and upsert into TopicEmbedding."""
+    """
+    Upsert Pinecone records into MongoDB TopicEmbedding.
+    Embeddings are stored as empty lists — run backfill_topic_embeddings.py
+    in production (where Vertex AI creds are available) to populate them.
+    """
     from app.config import settings
     from app.models.content import TopicEmbedding
-    from app.services.ai.embedder import generate_embedding_vector
     from beanie import init_beanie, PydanticObjectId
     from bson import ObjectId
     from pymongo import AsyncMongoClient
@@ -158,67 +161,70 @@ async def migrate_to_mongo(records: list[dict], dry_run: bool) -> dict:
         document_models=[TopicEmbedding],
     )
 
-    sem = asyncio.Semaphore(EMBED_CONCURRENCY)
-    stats = {"upserted": 0, "skipped": 0, "errors": 0}
+    stats = {"inserted": 0, "updated": 0, "skipped": 0, "errors": 0}
 
-    async def process_one(rec: dict):
+    for i, rec in enumerate(records):
         meta = rec["metadata"]
         ns = rec["namespace"]
         chapter_id_str = meta.get("chapter_id", "")
-        if not chapter_id_str:
+        content_id = meta.get("content_id", "")
+        content_type = meta.get("content_type", "chapter")
+
+        # Use content_id as topic_id for topic/iq records so they don't
+        # collide with their parent chapter record which shares chapter_id.
+        if content_type in ("topic", "important_questions") and content_id:
+            topic_id = f"{content_id}:{ns}"
+        elif chapter_id_str:
+            topic_id = f"{chapter_id_str}:{ns}"
+        else:
             stats["skipped"] += 1
-            return
+            continue
 
-        topic_id = f"{chapter_id_str}:{ns}"
-        title = meta.get("title", "")
-        embed_text = _embed_text_for_record(meta, ns)
+        # topic-level records have a richer title in the "topic" field
+        title = meta.get("topic") or meta.get("title", "")
+        if not title:
+            title = meta.get("chapter", "")
 
-        async with sem:
-            try:
-                if dry_run:
-                    logger.info(f"  [DRY-RUN] would embed: {title[:60]}")
-                    stats["upserted"] += 1
-                    return
+        try:
+            if dry_run:
+                logger.info(f"  [DRY-RUN] [{i+1}/{len(records)}] [{ns}] {title[:70]}")
+                stats["inserted"] += 1
+                continue
 
-                embedding = await generate_embedding_vector(embed_text)
-                await asyncio.sleep(EMBED_DELAY)
+            existing = await TopicEmbedding.find_one(
+                TopicEmbedding.topic_id == topic_id
+            )
+            now = datetime.now(timezone.utc)
 
-                existing = await TopicEmbedding.find_one(
-                    TopicEmbedding.topic_id == topic_id
+            if existing:
+                existing.topic_title = title
+                existing.chapter_title = title
+                existing.subject_slug = _subject_slug(meta)
+                existing.board_slug = _board_slug(meta)
+                existing.class_level = _class_level(meta)
+                existing.updated_at = now
+                await existing.save()
+                stats["updated"] += 1
+                logger.info(f"  UPDATED  [{i+1}/{len(records)}] [{ns}] {title[:70]}")
+            else:
+                doc = TopicEmbedding(
+                    topic_id=topic_id,
+                    topic_title=title,
+                    chapter_id=PydanticObjectId(ObjectId()),
+                    chapter_title=title,
+                    subject_slug=_subject_slug(meta),
+                    board_slug=_board_slug(meta),
+                    class_level=_class_level(meta),
+                    embedding=[],
                 )
-                now = datetime.now(timezone.utc)
+                await doc.insert()
+                stats["inserted"] += 1
+                logger.info(f"  INSERTED [{i+1}/{len(records)}] [{ns}] {title[:70]}")
 
-                if existing:
-                    existing.topic_title = title
-                    existing.chapter_title = title
-                    existing.subject_slug = _subject_slug(meta)
-                    existing.board_slug = _board_slug(meta)
-                    existing.class_level = _class_level(meta)
-                    existing.embedding = embedding
-                    existing.updated_at = now
-                    await existing.save()
-                    logger.info(f"  UPDATED  [{ns}] {title[:60]}")
-                else:
-                    doc = TopicEmbedding(
-                        topic_id=topic_id,
-                        topic_title=title,
-                        chapter_id=PydanticObjectId(ObjectId()),
-                        chapter_title=title,
-                        subject_slug=_subject_slug(meta),
-                        board_slug=_board_slug(meta),
-                        class_level=_class_level(meta),
-                        embedding=embedding,
-                    )
-                    await doc.insert()
-                    logger.info(f"  INSERTED [{ns}] {title[:60]}")
+        except Exception as e:
+            stats["errors"] += 1
+            logger.error(f"  ERROR [{ns}] {title[:60]}: {e}")
 
-                stats["upserted"] += 1
-
-            except Exception as e:
-                stats["errors"] += 1
-                logger.error(f"  ERROR [{ns}] {title[:60]}: {e}")
-
-    await asyncio.gather(*[process_one(r) for r in records])
     try:
         client.close()
     except Exception:
@@ -369,7 +375,8 @@ async def main():
         logger.info("\n--- MongoDB TopicEmbedding ---")
         mongo_stats = await migrate_to_mongo(records, dry_run=args.dry_run)
         logger.info(
-            f"MongoDB: upserted={mongo_stats['upserted']} "
+            f"MongoDB: inserted={mongo_stats['inserted']} "
+            f"updated={mongo_stats['updated']} "
             f"skipped={mongo_stats['skipped']} errors={mongo_stats['errors']}"
         )
     else:
