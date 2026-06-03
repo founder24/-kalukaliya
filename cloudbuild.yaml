@@ -1,5 +1,3 @@
-logsBucket: 'gs://blissful-acumen-495019-t6_cloudbuild_logs'
-
 steps:
   # ── Step 1: Build the backend Docker image ────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
