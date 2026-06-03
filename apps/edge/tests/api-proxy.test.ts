@@ -108,6 +108,71 @@ describe('API Proxy - proxyRequest', () => {
     expect(body.details).toBe('Connection refused');
   });
 
+  it('GCP IAM 401 HTML → normalized to 503 JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      '<html><body>Unauthorized</body></html>',
+      { status: 401, headers: { 'Content-Type': 'text/html' } }
+    )));
+
+    const env = createMockEnv();
+    const request = new Request('https://syrabit.ai/api/v1/chat', { method: 'POST' });
+
+    const response = await proxyRequest(request, env.BACKEND_URL, env);
+
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body.error).toBe('Backend service unavailable');
+    expect(body.status).toBe(401);
+  });
+
+  it('GCP IAM 403 HTML → normalized to 503 JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      '<html><body>Forbidden</body></html>',
+      { status: 403, headers: { 'Content-Type': 'text/html' } }
+    )));
+
+    const env = createMockEnv();
+    const request = new Request('https://syrabit.ai/api/v1/users', { method: 'GET' });
+
+    const response = await proxyRequest(request, env.BACKEND_URL, env);
+
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body.error).toBe('Backend service unavailable');
+  });
+
+  it('FastAPI JSON 401 passes through unchanged', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ detail: 'Could not validate credentials' }),
+      { status: 401, headers: { 'Content-Type': 'application/json' } }
+    )));
+
+    const env = createMockEnv();
+    const request = new Request('https://syrabit.ai/api/v1/auth/login', { method: 'POST' });
+
+    const response = await proxyRequest(request, env.BACKEND_URL, env);
+
+    expect(response.status).toBe(401);
+    const body = await response.json();
+    expect(body.detail).toBe('Could not validate credentials');
+  });
+
+  it('FastAPI JSON 422 passes through unchanged', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ detail: [{ loc: ['body', 'email'], msg: 'field required' }] }),
+      { status: 422, headers: { 'Content-Type': 'application/json' } }
+    )));
+
+    const env = createMockEnv();
+    const request = new Request('https://syrabit.ai/api/v1/auth/signup', { method: 'POST' });
+
+    const response = await proxyRequest(request, env.BACKEND_URL, env);
+
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.detail).toBeDefined();
+  });
+
   it('Header injection: X-Real-IP and CF-Ray-ID are set', async () => {
     let capturedHeaders: Headers | null = null;
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {

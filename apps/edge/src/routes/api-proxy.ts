@@ -106,15 +106,25 @@ export async function proxyRequest(
     clearTimeout(timeout);
 
     // Normalize non-JSON error responses from Cloud Run infrastructure (e.g.
-    // Google Frontend 404 HTML when the service is unreachable or not deployed,
-    // or 403 HTML when Cloud Run rejects an unauthenticated request). Passing
-    // raw HTML through to API clients is confusing — convert to JSON 503.
+    // Google Frontend 404/401/403 HTML when the service is unreachable, not yet
+    // deployed, or when Cloud Run IAM rejects an unauthenticated request).
+    // Passing raw HTML through to API clients is confusing — convert to JSON.
+    // NOTE: JSON error responses from FastAPI (application/json) are NOT touched
+    // here — they pass through with their original status code (e.g. 401, 422).
     if (!response.ok && response.status >= 400) {
       const ct = response.headers.get('Content-Type') || '';
       if (!ct.includes('application/json') && !ct.includes('text/event-stream')) {
         const errorOrigin = request.headers.get('Origin') || 'https://syrabit.ai';
         const corsH = getCorsHeaders(errorOrigin);
-        const statusCode = response.status >= 500 || response.status === 404 ? 503 : response.status;
+        // GCP infra errors (404 HTML, 401 IAM denied, 403 IAM denied, 5xx) are
+        // all surfaced as 503 "Backend service unavailable" to the caller.
+        // Other non-JSON errors (e.g. 400 bad request from GCP) keep their status.
+        const isInfraError =
+          response.status >= 500 ||
+          response.status === 404 ||
+          response.status === 401 ||
+          response.status === 403;
+        const statusCode = isInfraError ? 503 : response.status;
         return new Response(
           JSON.stringify({
             error: statusCode === 503 ? 'Backend service unavailable' : 'Request failed',

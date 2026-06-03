@@ -226,6 +226,8 @@ export default {
         }
       );
       const securedHealth = addSecurityHeaders(healthResponse);
+      const healthOrigin = request.headers.get('Origin') || '';
+      applyCorsHeaders(securedHealth.headers, healthOrigin);
       securedHealth.headers.set('X-Request-ID', requestId);
       return securedHealth;
     }
@@ -277,6 +279,8 @@ export default {
         }
       );
       const securedFull = addSecurityHeaders(fullHealthResponse);
+      const fullHealthOrigin = request.headers.get('Origin') || '';
+      applyCorsHeaders(securedFull.headers, fullHealthOrigin);
       securedFull.headers.set('X-Request-ID', requestId);
       return securedFull;
     }

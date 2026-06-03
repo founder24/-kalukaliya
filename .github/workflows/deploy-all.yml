@@ -257,8 +257,12 @@ jobs:
           END_TIME=$(date +%s%N)
           ELAPSED_MS=$(( (END_TIME - START_TIME) / 1000000 ))
           echo "Chat EN: HTTP $HTTP_STATUS (${ELAPSED_MS}ms)"
-          # Accept 401/403 as valid (endpoint alive, auth/rate-limit working)
-          # Only fail on 5xx or timeout
+          # Accept 200/401/403/429 as valid (endpoint alive, auth/rate-limit working)
+          # Reject 404 (broken proxy — edge can't reach backend) and 5xx (server errors)
+          if [ "$HTTP_STATUS" -eq 404 ]; then
+            echo "ERROR: Chat endpoint returned 404 — edge proxy is broken (backend unreachable)"
+            exit 1
+          fi
           if [ "$HTTP_STATUS" -ge 500 ]; then
             echo "Chat endpoint server error (HTTP $HTTP_STATUS)"
             exit 1
@@ -279,8 +283,12 @@ jobs:
           END_TIME=$(date +%s%N)
           ELAPSED_MS=$(( (END_TIME - START_TIME) / 1000000 ))
           echo "Chat AS (Assamese/Sarvam): HTTP $HTTP_STATUS (${ELAPSED_MS}ms)"
-          # Accept 401/403 as valid (endpoint alive, auth/rate-limit working)
-          # Only fail on 5xx or timeout
+          # Accept 200/401/403/429 as valid (endpoint alive, auth/rate-limit working)
+          # Reject 404 (broken proxy — edge can't reach backend) and 5xx (server errors)
+          if [ "$HTTP_STATUS" -eq 404 ]; then
+            echo "ERROR: Assamese chat endpoint returned 404 — edge proxy is broken (backend unreachable)"
+            exit 1
+          fi
           if [ "$HTTP_STATUS" -ge 500 ]; then
             echo "Assamese chat endpoint server error (HTTP $HTTP_STATUS)"
             exit 1
