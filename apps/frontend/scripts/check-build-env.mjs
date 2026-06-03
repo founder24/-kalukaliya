@@ -10,6 +10,29 @@
 // already strips the placeholder cleanly and the build succeeds, but
 // gtag won't load and Realtime traffic won't show up.
 
+import { readFileSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+// Load .env.production as fallback when running locally (Vite reads it
+// automatically during vite build, but this pre-check runs in raw Node).
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const envProdPath = resolve(__dirname, "../.env.production");
+try {
+  const raw = readFileSync(envProdPath, "utf8");
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    if (key && !(key in process.env)) process.env[key] = val;
+  }
+} catch {
+  // .env.production absent — rely on Cloudflare Pages build env vars.
+}
+
 const errors = [];
 const warnings = [];
 
