@@ -42,3 +42,6 @@ steps:
 
 images:
   - 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
