@@ -1,0 +1,29 @@
+Linux instance-20260603-085552 6.1.0-49-cloud-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.174-1 (2026-05-26) x86_64
+
+The programs included with the Debian GNU/Linux system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
+permitted by applicable law.
+Last login: Wed Jun  3 12:27:53 2026 from 35.235.244.34
+founder@instance-20260603-085552:~$ cd ~/syrabit
+git pull origin main
+gcloud run deploy syrabit-backend \
+  --source=apps/backend \
+  --region=asia-south1 \
+  --no-allow-unauthenticated
+-bash: cd: /home/founder/syrabit: No such file or directory
+fatal: not a git repository (or any of the parent directories): .git
+Building using Buildpacks and deploying container to Cloud Run service [syrabit-backend] in project [blissful-acumen-495019-t6] region [asia-south1]
+X Building and deploying... Uploading sources.                                                                                                                                                                     
+  ✓ Validating configuration...                                                                                                                                                                                    
+  - Uploading sources...                                                                                                                                                                                           
+  . Building Container...                                                                                                                                                                                          
+  . Creating Revision...                                                                                                                                                                                           
+  . Routing traffic...                                                                                                                                                                                             
+  . Setting IAM Policy...                                                                                                                                                                                          
+Deployment failed                                                                                                                                                                                                  
+ERROR: (gcloud.run.deploy) could not find source [apps/backend]
+founder@instance-20260603-085552:~$ ^C
+founder@instance-20260603-085552:~$ 
