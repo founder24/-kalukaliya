@@ -61,6 +61,11 @@ const PUBLIC_PATHS = [
   '/api/v1/seo/related',
   '/sitemap',
   '/robots.txt',
+  // Analytics & page-tracking — no auth required, fired from every page load
+  '/api/v1/analytics',
+  '/api/analytics',
+  // Public config endpoints — Trustpilot widget config, no auth required
+  '/api/v1/config',
 ];
 
 /**
@@ -152,9 +157,16 @@ async function decodeAndVerify(
 
   const [headerB64, payloadB64, signatureB64] = parts;
 
-  // Decode header to determine algorithm
-  const headerJson = atob(base64UrlToBase64(headerB64));
-  const header: JWTHeader = JSON.parse(headerJson);
+  // Decode header to determine algorithm.
+  // atob + JSON.parse can throw SyntaxError/DOMException on garbage input —
+  // catch and rethrow a clean message so internal JS errors never leak to clients.
+  let header: JWTHeader;
+  try {
+    const headerJson = atob(base64UrlToBase64(headerB64));
+    header = JSON.parse(headerJson) as JWTHeader;
+  } catch {
+    throw new Error('Malformed token');
+  }
   const alg = header.alg;
 
   // Security: reject 'none' algorithm to prevent algorithm confusion attacks
@@ -198,9 +210,14 @@ async function decodeAndVerify(
     throw new Error(`Unsupported algorithm: ${alg}`);
   }
 
-  // Decode payload
-  const payloadJson = atob(base64UrlToBase64(payloadB64));
-  const payload: JWTPayload = JSON.parse(payloadJson);
+  // Decode payload — same guard as header decode above.
+  let payload: JWTPayload;
+  try {
+    const payloadJson = atob(base64UrlToBase64(payloadB64));
+    payload = JSON.parse(payloadJson) as JWTPayload;
+  } catch {
+    throw new Error('Malformed token');
+  }
 
   return payload;
 }
