@@ -1,4 +1,4 @@
-FROM python:3.11-slim as builder
+FROM python:3.12-slim as builder
 
 WORKDIR /app
 
@@ -13,7 +13,7 @@ RUN sed 's/ *\\$//' requirements.txt | grep -v '^\s*--hash' > requirements-nohas
     && pip install --no-cache-dir --user -r requirements-nohash.txt \
     && pip install --no-cache-dir --user "email-validator>=2.0"
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
