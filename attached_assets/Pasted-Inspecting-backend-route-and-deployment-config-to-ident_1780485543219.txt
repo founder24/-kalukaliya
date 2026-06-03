@@ -1,0 +1,116 @@
+Inspecting backend route and deployment config to identify exactly why live deployment returns 404/health failures.
+
+Searched for regex `def health|@app.get\("/health|/health|api/v1/chat|chat/stream|Health|health/deep` (`**/apps/backend/**`), 100 results
+
+Read [](file:///workspaces/-kalukaliya/apps/backend)
+
+Read [](file:///workspaces/-kalukaliya/cloudbuild.yaml)
+
+Read [](file:///workspaces/-kalukaliya/apps/backend/app/main.py#220-220), lines 220 to 390
+
+Read [](file:///workspaces/-kalukaliya/apps/backend/app/api/v1/chat.py#1-1), lines 1 to 220
+
+Searched for regex `backend_reachable|health/full|dead Cloud Run|edge can't reach|api.syrabit.ai|cloudflare-edge|run.invoker|legacy` (`**/apps/edge/**`), 25 results
+
+Read [](file:///workspaces/-kalukaliya/apps/edge/src/index.ts#120-120), lines 120 to 230
+
+Read [](file:///workspaces/-kalukaliya/apps/backend/Dockerfile)
+
+Searched for regex `BACKEND_URL|backend_url|env.BACKEND_URL|CLOUDFLARE|cloudflare-edge-invoker|run.invoker` (`**/*.{ts,js,md,yaml}`), 100 results
+
+## Configuration issues found
+
+### 1. Cloud Run backend is not serving the expected API routes
+- Your audit says `Cloud Run /health` is down and `Cloud Run /api/v1/*` returns `404`.
+- But the repo clearly defines `/health` and `/api/v1/chat/` routes in main.py and chat.py.
+- That means the deployed Cloud Run service is either:
+  - not the right service,
+  - not the current code,
+  - or not mapped to the expected URL/port.
+
+### 2. Edge worker cannot reach the backend
+- `api.syrabit.ai` edge health shows `backend_reachable: false`.
+- That means the Cloudflare Worker at `api.syrabit.ai` is unable to successfully proxy to the backend URL configured in the worker.
+- This is usually a `BACKEND_URL` or IAM/access issue:
+  - wrong backend URL in worker config
+  - Cloud Run service account permission missing
+  - Cloud Run private service access not reachable from the worker
+
+### 3. Stale/old edge deployment
+- The audit says `Edge security (path blocking)` still returns `302` and the new code is not deployed yet.
+- That implies the Cloudflare Worker or Pages deploy is stale and still running old routing/security logic.
+- Even if the backend is fixed, stale edge code will keep breaking chat and API proxy behavior.
+
+### 4. Frontend build may still bake an old backend URL
+- Your own report says frontend JS bundle now bakes in a Cloud Run URL (`index-D0zx3UFU.js`).
+- This is a sign that the frontend build may still be using an outdated `VITE_BACKEND_URL` value or hardcoded route.
+- If the frontend points to wrong API host, `/chat` and other endpoints will fail.
+
+---
+
+## Most likely root causes
+
+- `syrabit-backend` Cloud Run service is not the correct deployed version or not healthy.
+- Cloudflare edge worker is not pointing to the correct backend or lacks invoker permissions.
+- The Cloudflare worker deployment has not been refreshed after backend/edge changes.
+
+---
+
+## Recommended fix steps
+
+1. **Verify Cloud Run service**
+   - Check the deployed service name and status:
+     ```bash
+     gcloud run services describe syrabit-backend --region=asia-south1 --format="yaml(status.conditions)"
+     ```
+   - Confirm it is using the expected image and serving on port `8000`.
+
+2. **Confirm backend routes directly**
+   - If you have a direct Cloud Run URL, test:
+     ```bash
+     curl -i https://<cloud-run-url>/health
+     curl -i -X POST https://<cloud-run-url>/api/v1/chat/ -H 'Content-Type: application/json' -d '{"message":"test","language":"en"}'
+     ```
+   - If these return 404, the Cloud Run deployment is wrong.
+
+3. **Re-grant Cloud Run invoker to the Cloudflare worker**
+   - If the worker uses `cloudflare-edge-invoker@...`, ensure:
+     ```bash
+     gcloud run services add-iam-policy-binding syrabit-backend \
+       --region=asia-south1 \
+       --member=serviceAccount:cloudflare-edge-invoker@blissful-acumen-495019-t6.iam.gserviceaccount.com \
+       --role=roles/run.invoker
+     ```
+
+4. **Redeploy the edge worker / Cloudflare Pages**
+   - Push the current edge code and make sure `BACKEND_URL` is updated.
+   - If using `wrangler`, run:
+     ```bash
+     npx wrangler deploy
+     ```
+   - If using Pages, redeploy the Pages site and confirm the worker is current.
+
+5. **Check worker config for `BACKEND_URL`**
+   - Ensure the production worker’s backend target is correct and not localhost or an old staging URL.
+
+6. **Validate chat endpoints after fixes**
+   - Run:
+     ```bash
+     curl -i -X POST https://api.syrabit.ai/api/v1/chat/ \
+       -H 'Content-Type: application/json' \
+       -d '{"message":"test","language":"en"}'
+     curl -i -X POST https://api.syrabit.ai/api/v1/chat/stream \
+       -H 'Content-Type: application/json' \
+       -d '{"message":"test","language":"en","stream":true}'
+     ```
+
+---
+
+## Short summary
+
+The audit shows the problem is not frontend page delivery — frontend is fine. The broken part is:
+- backend Cloud Run deployment,
+- worker-to-backend proxy access,
+- stale edge worker deployment.
+
+Fix those three and the chat pipeline should recover.
