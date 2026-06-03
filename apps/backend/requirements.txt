@@ -27,7 +27,7 @@ backoff==2.2.1
     # via posthog
 bcrypt==5.0.0
     # via -r apps/backend/requirements.in
-beanie==2.2.0
+beanie==2.1.0
     # via -r apps/backend/requirements.in
 motor==3.7.0
     # via

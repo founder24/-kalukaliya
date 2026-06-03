@@ -1,0 +1,144 @@
+
+founder@instance-20260603-085552:~/syrabit$ cd ~/syrabit && git pull origin main
+TEST_USER_EMAIL="you@syrabit.ai" \
+TEST_USER_PASSWORD="yourpassword" \
+bash scripts/cloud-shell-test.sh
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+Already up to date.
+
+╔══════════════════════════════════════════════════════════════╗
+║         SYRABIT FULLSTACK TEST  —  2026-06-03 14:29 UTC         ║
+╚══════════════════════════════════════════════════════════════╝
+
+  Backend:   https://api.syrabit.ai
+  Frontend:  https://syrabit.ai
+  Project:   blissful-acumen-495019-t6 / asia-south1
+  Auth user: you@syrabit.ai
+
+
+▶ 1. Cloud Run Deployment Status
+  Checking Cloud Run service: syrabit-backend
+  ✔ Latest revision: syrabit-backend-00149-22n (traffic: 100%)
+  ✔ Cloud Run direct health check → HTTP 200 (https://syrabit-backend-bl6wu3psza-el.a.run.app/health)
+
+▶ 2. Backend Health
+  ✔ GET /health → HTTP 200
+  ✘ GET /health/deep → expected HTTP 200, got HTTP 404
+  ✘ GET /health/circuit-breakers → expected HTTP 200, got HTTP 404
+  ✘ Legacy redirect /api/health → expected HTTP 200, got HTTP 404
+  ✔ GET /health body contains 'status' field
+
+▶ 3. Frontend & Edge
+  ✔ GET https://syrabit.ai/ → HTTP 200
+  ✔ GET https://syrabit.ai/manifest.json → HTTP 200
+  ✔ GET https://syrabit.ai/robots.txt → HTTP 200
+  ✔ GET https://api.syrabit.ai/health via edge → HTTP 200
+  ✔ CORS headers present on API (Access-Control-Allow-Origin)
+  ✔ Security header present: x-content-type-options
+  ✔ Security header present: x-frame-options
+  ✔ Security header present: strict-transport-security
+
+▶ 4. Content & SEO
+  ✘ GET /api/v1/seo/sitemap.xml → expected HTTP 200, got HTTP 404
+  ✘ GET /api/content/library-bundle → expected HTTP 200, got HTTP 404
+  ✘ GET /api/v1/config/trustpilot → expected HTTP 200, got HTTP 404
+  ✘ Library bundle returned empty response
+  ✘ Sitemap missing syrabit.ai URLs
+
+▶ 5. Security Probes
+  ✘ POST /auth/login empty body → HTTP 404 (expected 422)
+  ✘ POST /webhooks/razorpay unsigned → HTTP 404 (should be 401/403)
+  ✔ Error responses do not leak stack traces
+  ✘ GET /users/me without token → HTTP 404 (expected 401)
+  ℹ  GET /docs → HTTP 302 (docs visible — expected if APP_ENV≠production)
+
+▶ 6. Auth Pipeline
+  Running auth pipeline tests...
+  !   WARNING: This script tests against PRODUCTION               !
+    [INFO] TEST_ADMIN_EMAIL/TEST_ADMIN_PASSWORD not set - skipping admin tests
+    [FAIL] Login with valid credentials (expected HTTP 200, got HTTP 404)
+    [FAIL] Cannot proceed with auth flow - login failed
+    [FAIL] GET /users/me with NO token (expected HTTP 401, got HTTP 404)
+    [PASS] GET /users/me with INVALID token (HTTP 401)
+    [PASS] GET /users/me with EXPIRED/garbage JWT (HTTP 401)
+    [FAIL] POST /auth/forgot-password with valid email (expected HTTP 200, got HTTP 404)
+    [FAIL] POST /auth/forgot-password with nonexistent email (no enumeration) (expected HTTP 200, got HTTP 404)
+    [FAIL] Rate limiting NOT triggered after 11 attempts (last HTTP 404)
+    [SKIP] Admin tests skipped (--skip-admin or no admin credentials)
+    [SKIP] Admin rate limit tests skipped (--skip-admin or --skip-destructive)
+    [FAIL] POST /auth/login with empty body (expected one of [422 400], got HTTP 404)
+    [FAIL] POST /auth/login missing password (expected one of [422 400], got HTTP 404)
+    [FAIL] POST /auth/refresh with invalid refresh token (expected one of [401 403 422], got HTTP 404)
+    [FAIL] POST /auth/refresh with garbage refresh token (expected one of [401 403 422], got HTTP 404)
+    [PASS] Header present: x-content-type-options
+    [PASS] Header present: strict-transport-security
+    [PASS] Header present: content-type
+    PASSED:  5
+    FAILED:  10
+    SKIPPED: 2
+  Some tests FAILED. Review output above for details.
+  ✘ Auth pipeline script exited 1 (failures detected — run directly for detail)
+
+▶ 7. Chat Pipeline
+  Running chat pipeline tests (this may take ~30s)...
+  !   WARNING: This script tests against PRODUCTION               !
+    [FAIL] Login failed (expected HTTP 200, got HTTP 404)
+    [SKIP] All authenticated chat tests skipped - no token
+    [FAIL] POST /chat/ anonymous (no auth token) (expected HTTP 200, got HTTP 404)
+    [FAIL] POST /chat/ anonymous with X-Anon-ID header (expected HTTP 200, got HTTP 404)
+    [SKIP] Authenticated streaming tests skipped - no token
+    [PASS] POST /chat/stream anonymous - received response
+    [SKIP] Authenticated history tests skipped - no token
+    [FAIL] GET /chat/history without auth unexpected status (HTTP 404)
+    [SKIP] Chat messages tests skipped - no token
+    [PASS] GET /chat/nonexistent-session/messages (HTTP 404)
+    [SKIP] TTS tests skipped (--skip-tts)
+    [FAIL] POST /chat/image without auth (expect 401) (expected HTTP 401, got HTTP 404)
+    [SKIP] Image with auth test skipped - no token
+    [SKIP] Performance tests skipped - no token
+    [SKIP] Multi-turn tests skipped - no token
+    [INFO] No latency measurements collected
+    PASSED:  2
+    FAILED:  5
+    SKIPPED: 8
+  Some tests FAILED. Review output above for details.
+  ✘ Chat pipeline script exited 1 (failures detected — run directly for detail)
+
+▶ 8. Performance Spot Check
+  ✔ /health → 417ms  (threshold 500ms)
+  ✔ /api/content/library-bundle → 108ms  (threshold 3000ms)
+  ✔ /api/v1/seo/sitemap.xml → 378ms  (threshold 2000ms)
+
+╔══════════════════════════════════════════════════════════════╗
+║                        SUMMARY                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+  ✔ Passed:  16
+  ✘ Failed:  13
+  ⊘ Skipped: 0
+  ⏱ Duration: 40s
+
+  Failed checks:
+    • GET /health/deep → expected HTTP 200, got HTTP 404
+    • GET /health/circuit-breakers → expected HTTP 200, got HTTP 404
+    • Legacy redirect /api/health → expected HTTP 200, got HTTP 404
+    • GET /api/v1/seo/sitemap.xml → expected HTTP 200, got HTTP 404
+    • GET /api/content/library-bundle → expected HTTP 200, got HTTP 404
+    • GET /api/v1/config/trustpilot → expected HTTP 200, got HTTP 404
+    • Library bundle returned empty response
+    • Sitemap missing syrabit.ai URLs
+    • POST /auth/login empty body → HTTP 404 (expected 422)
+    • POST /webhooks/razorpay unsigned → HTTP 404 (should be 401/403)
+    • GET /users/me without token → HTTP 404 (expected 401)
+    • Auth pipeline script exited 1 (failures detected — run directly for detail)
+    • Chat pipeline script exited 1 (failures detected — run directly for detail)
+
+  ✘  13 check(s) failed — review output above
+
+  Tip: run the failing section directly for full detail:
+    bash scripts/live-deployment-test.sh --verbose
+    bash scripts/test-auth-live.sh
+    bash scripts/test-chat-live.sh
+
+founder@instance-20260603-085552:~/syrabit$ 

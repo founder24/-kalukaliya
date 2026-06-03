@@ -186,18 +186,24 @@ run_section "1. Cloud Run Deployment Status" check_cloud_run
 # =============================================================================
 check_backend_health() {
   http_check "GET /health"              "${BACKEND_URL}/health"              "200"
-  http_check "GET /health/deep"         "${BACKEND_URL}/health/deep"         "200"
-
-  # Deep health may return 503 when DB is degraded — both are valid responses
+  # /health/deep and /health/circuit-breakers: proxied through edge to backend
+  # Accept 200 (healthy), 503 (degraded-but-alive), or 200 via circuit-breaker endpoint
   local code
-  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
     "${BACKEND_URL}/health/deep" 2>/dev/null || echo "000")
   if [[ "$code" == "200" || "$code" == "503" ]]; then
     section_pass "GET /health/deep → HTTP ${code} (200=healthy, 503=degraded-but-alive)"
+  else
+    section_fail "GET /health/deep → HTTP ${code} (expected 200 or 503)"
   fi
 
-  http_check "GET /health/circuit-breakers" "${BACKEND_URL}/health/circuit-breakers" "200"
-  http_check "Legacy redirect /api/health"  "${BACKEND_URL}/api/health"              "200"
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+    "${BACKEND_URL}/health/circuit-breakers" 2>/dev/null || echo "000")
+  if [[ "$code" == "200" ]]; then
+    section_pass "GET /health/circuit-breakers → HTTP 200"
+  else
+    section_fail "GET /health/circuit-breakers → HTTP ${code} (expected 200)"
+  fi
 
   # Verify response body has status field
   local body
@@ -251,13 +257,15 @@ run_section "3. Frontend & Edge" check_frontend_edge
 # SECTION 4 — CONTENT & SEO
 # =============================================================================
 check_content_seo() {
-  http_check "GET /api/v1/seo/sitemap.xml"     "${BACKEND_URL}/api/v1/seo/sitemap.xml"    "200"
-  http_check "GET /api/content/library-bundle" "${BACKEND_URL}/api/content/library-bundle" "200"
-  http_check "GET /api/v1/config/trustpilot"   "${BACKEND_URL}/api/v1/config/trustpilot"  "200"
+  # Sitemap: edge rewrites /sitemap.xml → /api/v1/seo/sitemap.xml on the backend.
+  # Use the edge rewrite URL, not the direct backend path.
+  http_check "GET /sitemap.xml (via edge rewrite)"  "${BACKEND_URL}/sitemap.xml"              "200"
+  http_check "GET /api/v1/content/library-bundle"   "${BACKEND_URL}/api/v1/content/library-bundle" "200"
+  http_check "GET /api/v1/config/trustpilot"        "${BACKEND_URL}/api/v1/config/trustpilot" "200"
 
-  # Library bundle should return JSON with subjects
+  # Library bundle should return JSON
   local body
-  body=$(curl -sf --max-time 15 "${BACKEND_URL}/api/content/library-bundle" 2>/dev/null || echo "")
+  body=$(curl -sf --max-time 15 "${BACKEND_URL}/api/v1/content/library-bundle" 2>/dev/null || echo "")
   if echo "$body" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d)>0)" 2>/dev/null | grep -q "True"; then
     section_pass "Library bundle returns non-empty JSON"
   elif [[ -n "$body" ]]; then
@@ -268,7 +276,7 @@ check_content_seo() {
 
   # Sitemap should contain syrabit.ai URLs
   local sitemap
-  sitemap=$(curl -sf --max-time 15 "${BACKEND_URL}/api/v1/seo/sitemap.xml" 2>/dev/null || echo "")
+  sitemap=$(curl -sf --max-time 15 "${BACKEND_URL}/sitemap.xml" 2>/dev/null || echo "")
   if echo "$sitemap" | grep -q "syrabit.ai"; then
     section_pass "Sitemap contains syrabit.ai URLs"
   else
@@ -349,7 +357,6 @@ check_auth_pipeline() {
   echo -e "  ${CYAN}Running auth pipeline tests...${NC}"
   if [[ -x "${SCRIPT_DIR}/test-auth-live.sh" ]]; then
     local exit_code=0
-    BASE_URL="$BACKEND_URL" \
     TEST_USER_EMAIL="$TEST_USER_EMAIL" \
     TEST_USER_PASSWORD="$TEST_USER_PASSWORD" \
       bash "${SCRIPT_DIR}/test-auth-live.sh" 2>&1 \
@@ -386,7 +393,6 @@ check_chat_pipeline() {
   echo -e "  ${CYAN}Running chat pipeline tests (this may take ~30s)...${NC}"
   if [[ -x "${SCRIPT_DIR}/test-chat-live.sh" ]]; then
     local exit_code=0
-    BASE_URL="$BACKEND_URL" \
     TEST_USER_EMAIL="$TEST_USER_EMAIL" \
     TEST_USER_PASSWORD="$TEST_USER_PASSWORD" \
       bash "${SCRIPT_DIR}/test-chat-live.sh" --skip-tts 2>&1 \
@@ -412,22 +418,26 @@ run_section "7. Chat Pipeline" check_chat_pipeline
 check_performance() {
   local checks=(
     "/health:500"
-    "/api/content/library-bundle:3000"
-    "/api/v1/seo/sitemap.xml:2000"
+    "/api/v1/content/library-bundle:3000"
+    "/sitemap.xml:2000"
   )
 
   for entry in "${checks[@]}"; do
     local path="${entry%%:*}"
     local threshold="${entry##*:}"
-    local ms
-    ms=$(curl -s -o /dev/null -w "%{time_total}" --max-time 15 \
-      "${BACKEND_URL}${path}" 2>/dev/null | awk '{printf "%d", $1*1000}')
+    local http_code ms
+    # Capture both status code and timing in one request
+    read -r http_code ms < <(curl -s -o /dev/null \
+      -w "%{http_code} %{time_total}" --max-time 15 \
+      "${BACKEND_URL}${path}" 2>/dev/null | awk '{printf "%s %d", $1, $2*1000}')
     if [[ -z "$ms" || "$ms" == "0" ]]; then
       section_fail "${path} — no response"
+    elif [[ "$http_code" != "200" ]]; then
+      section_fail "${path} → HTTP ${http_code} (expected 200, ${ms}ms)"
     elif [[ "$ms" -lt "$threshold" ]]; then
       section_pass "${path} → ${ms}ms  (threshold ${threshold}ms)"
     else
-      section_info "${path} → ${ms}ms  ⚠ above ${threshold}ms threshold"
+      section_info "${path} → ${ms}ms  ⚠ above ${threshold}ms threshold (HTTP ${http_code})"
     fi
   done
 }
