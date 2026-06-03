@@ -11,8 +11,8 @@ description: How this monorepo is configured to run in the Replit environment
 - Edge/Cloudflare Worker not run locally — only frontend+backend in dev
 
 ## Workflows
-- "Start application": `cd apps/frontend && pnpm dev` — port 5000, webview
-- "Backend API": `cd apps/backend && python3 -m uvicorn app.main:app --host localhost --port 8000 --reload` — no port probe (localhost only), console
+- "Start application": `pnpm --filter @workspace/syrabit run dev` — port 5000, webview (run from monorepo root)
+- Backend not configured as a workflow — requires cloud secrets (MongoDB, Redis, Vertex AI, Razorpay, etc.)
 
 ## Key config
 - `apps/backend/.env` sets `APP_ENV=development` and `TRUST_EDGE_AUTH=False` — required for dev startup without errors
