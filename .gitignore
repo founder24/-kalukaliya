@@ -1,53 +1,71 @@
-# Environment & Secrets
+```
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
 .env
-.env.*
-!.env.example
-!.env.shared
-!.env.production
+.env.local
+*.env.*
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.venv/
-venv/
-env/
-.eggs/
-*.egg-info/
-dist/
-build/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-htmlcov/
-.coverage
-
-# Node / Frontend
-node_modules/
-dist/
-dist-ssr/
-.output/
-.cache/
-.turbo/
-.vercel/
-.wrangler/
-
-# IDE
+# Editors
 .vscode/
 .idea/
-*.swp
-*.swo
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+dist/
+build/
+target/
+.gradle/
+
+# OS generated files
 .DS_Store
 Thumbs.db
 
-# Docker
-docker-compose.override.yml
+# Compiled files
+*.pyc
+*.class
+*.o
+*.exe
+*.dll
+*.so
+*.a
+*.obj
+*.out
 
-# Project-specific
-*.log
-.ideavo/project
-.canvas/
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
-# Replit
-.replit
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+```
