@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Literal
 import hashlib
 import io
@@ -45,7 +45,22 @@ class ChatRequest(BaseModel):
     message: str
     lang: Optional[Literal["en", "as"]] = None  # Explicit language override
     session_id: Optional[str] = None
+    # conversation_id is the legacy frontend key — coalesced into session_id
+    # by the model_validator below so existing clients keep working.
+    conversation_id: Optional[str] = None
     context_messages: List[dict] = Field(default=[], max_length=10)
+
+    @model_validator(mode="after")
+    def coalesce_conversation_id(self) -> "ChatRequest":
+        """Accept conversation_id as a fallback for session_id.
+
+        The frontend sends conversation_id but the backend field is session_id.
+        Without this coalescion session_id is always None, breaking multi-turn
+        history and session linking.
+        """
+        if self.session_id is None and self.conversation_id is not None:
+            self.session_id = self.conversation_id
+        return self
 
     @field_validator("message")
     @classmethod
@@ -56,7 +71,7 @@ class ChatRequest(BaseModel):
             raise ValueError("message must not exceed 2000 characters")
         return v
 
-    @field_validator("session_id")
+    @field_validator("session_id", "conversation_id")
     @classmethod
     def validate_session_id(cls, v: Optional[str]) -> Optional[str]:
         if v is None:

@@ -38,3 +38,54 @@ async def session_end(request: Request):
     except Exception:
         pass
     return JSONResponse({"status": "ok"})
+
+
+@router.post("/page-view")
+async def page_view(request: Request):
+    """Page-view signal fired on every SPA route change and session resume."""
+    try:
+        body = await request.json()
+        path = body.get("path", "")
+        visitor_id = body.get("visitor_id", "")
+        session_id = body.get("session_id", "")
+        referrer = body.get("referrer", "")
+        is_404 = body.get("is_404_hint", False)
+        logger.debug(
+            "page-view",
+            extra={
+                "path": path,
+                "vid": visitor_id,
+                "sid": session_id,
+                "referrer": referrer,
+                "is_404": is_404,
+            },
+        )
+    except Exception:
+        pass
+    return JSONResponse({"status": "ok"})
+
+
+@router.post("/review-prompt-event")
+async def review_prompt_event(request: Request):
+    """Review-prompt funnel events mirrored from the frontend."""
+    try:
+        body = await request.json()
+        event = body.get("event", "")
+        reason = body.get("reason", None)
+        logger.debug(f"review-prompt-event event={event} reason={reason}")
+    except Exception:
+        pass
+    return JSONResponse({"status": "ok"})
+
+
+@router.post("/ad-impression")
+async def ad_impression(request: Request):
+    """Ad-viewability impression events mirrored from the frontend."""
+    try:
+        body = await request.json()
+        placement = body.get("placement", "")
+        network = body.get("network", "")
+        logger.debug(f"ad-impression placement={placement} network={network}")
+    except Exception:
+        pass
+    return JSONResponse({"status": "ok"})

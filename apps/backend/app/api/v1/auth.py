@@ -95,7 +95,7 @@ class RefreshTokenRequest(BaseModel):
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str = Field(min_length=1)
+    refresh_token: Optional[str] = Field(default=None)
 
 
 # ─── Token Helpers ───────────────────────────────────────────────────────────
@@ -781,21 +781,22 @@ async def logout(
         if ttl > 0:
             await redis.set(f"blacklisted_token:{token_hash}", "1", ex=ttl)
 
-        # Revoke the refresh token
-        try:
-            refresh_payload = jwt.decode(
-                body.refresh_token,
-                key,
-                algorithms=[algorithm],
-            )
-            jti = refresh_payload.get("jti")
-            if jti:
-                refresh_exp = refresh_payload.get("exp", 0)
-                refresh_ttl = max(refresh_exp - now, 0)
-                if refresh_ttl > 0:
-                    await redis.set(f"revoked_refresh:{jti}", "1", ex=refresh_ttl)
-        except InvalidTokenError:
-            pass  # Invalid refresh token - ignore
+        # Revoke the refresh token (best-effort; client may not supply one)
+        if body.refresh_token:
+            try:
+                refresh_payload = jwt.decode(
+                    body.refresh_token,
+                    key,
+                    algorithms=[algorithm],
+                )
+                jti = refresh_payload.get("jti")
+                if jti:
+                    refresh_exp = refresh_payload.get("exp", 0)
+                    refresh_ttl = max(refresh_exp - now, 0)
+                    if refresh_ttl > 0:
+                        await redis.set(f"revoked_refresh:{jti}", "1", ex=refresh_ttl)
+            except InvalidTokenError:
+                pass  # Invalid refresh token - ignore
     except HTTPException:
         raise
     except Exception as e:
