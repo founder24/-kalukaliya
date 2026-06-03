@@ -132,6 +132,29 @@ export default {
 
     // ── 5. Routing ──
 
+    // Block scanner-bait and sensitive paths immediately — never proxy or redirect these.
+    // Cloudflare Pages SPA returns 200 for unknown routes (SPA fallback), so these paths
+    // look "accessible" to scanners. Return an explicit 404 here at the edge.
+    const BLOCKED_PATH_PATTERNS = [
+      /^\/\.env(\.|$)/i,
+      /^\/\.git\//i,
+      /^\/\.git$/i,
+      /^\/\.svn\//i,
+      /^\/\.htaccess$/i,
+      /^\/\.DS_Store$/i,
+      /^\/web\.config$/i,
+      /^\/phpinfo\.php$/i,
+      /^\/server-status$/i,
+      /^\/wp-admin/i,
+      /^\/wp-login\.php$/i,
+      /^\/xmlrpc\.php$/i,
+      /^\/config\.(php|yml|yaml|json)$/i,
+      /^\/\.well-known\/traffic-advice$/i,
+    ];
+    if (BLOCKED_PATH_PATTERNS.some((re) => re.test(url.pathname))) {
+      return new Response('Not Found', { status: 404, headers: { 'X-Request-ID': requestId } });
+    }
+
     // Robots.txt
     if (url.pathname === '/robots.txt') {
       const robotsResponse = await handleRobots(env);

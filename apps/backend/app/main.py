@@ -188,11 +188,15 @@ def create_app() -> FastAPI:
 
     setup_logging()
 
+    is_prod = settings.APP_ENV in ("production", "staging")
     app = FastAPI(
         title="Syrabit API",
         description="Educational AI Assistant for Assamese Students",
         version="3.0.0",
         lifespan=lifespan,
+        docs_url=None if is_prod else "/docs",
+        redoc_url=None if is_prod else "/redoc",
+        openapi_url=None if is_prod else "/openapi.json",
     )
 
     # Unified Middleware - combines CSRF, security headers, and request ID

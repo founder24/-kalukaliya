@@ -1,0 +1,129 @@
+This is a CRITICAL situation. Your production server is exposing sensitive files (.env, .git, admin panels) to the public internet. This allows attackers to steal database credentials, API keys, and potentially take over your entire server.
+Here is a step-by-step, layer-by-layer plan to fix this, moving from Immediate Emergency Fixes to Long-term Architecture.
+🚨 PHASE 1: EMERGENCY CONTAINMENT (Do this NOW)
+Goal: Stop the bleeding. Block public access to sensitive files immediately via Cloudflare (since you are behind Cloudflare).
+Step 1.1: Create Cloudflare WAF Rules (No Server Restart Needed)
+Since your server is returning 200 OK for .env and .git, we must block these at the edge before they reach your server.
+Log in to Cloudflare Dashboard.
+Go to Security > WAF > Custom rules.
+Click Create rule.
+Rule Name: Block Sensitive Files
+Field: URI Path
+Operator: contains (or matches regex for advanced)
+Value: Enter the following patterns (add multiple conditions with OR):
+.env
+.git
+.svn
+.htaccess
+wp-admin
+wp-login.php
+phpinfo.php
+server-status
+.DS_Store
+web.config
+Action: Block (or Managed Challenge if you want to be less aggressive, but Block is safer here).
+Deploy.
+Verification: Run curl https://syrabit.ai/.env again. It should now return a Cloudflare block page (Error 1020), not your file content.
+Step 1.2: Block Direct IP Access (If applicable)
+If attackers know your origin IP, they can bypass Cloudflare.
+In Cloudflare WAF, create a rule:
+Field: IP Source Address
+Operator: is not in
+Value: Cloudflare IPs (Cloudflare has a predefined list option).
+Action: Block.
+Note: Only do this if your Nginx/Apache is configured to ONLY accept traffic from Cloudflare IPs. If not, skip this to avoid locking yourself out.
+🛠️ PHASE 2: WEB SERVER HARDENING (The Root Cause Fix)
+Goal: Configure your web server (Nginx/Apache) to never serve these files, even if Cloudflare is down.
+Assumption: Based on your stack, you are likely using Nginx or Apache. I will provide Nginx config as it's standard for FastAPI/Python stacks.
+Step 2.1: Update Nginx Configuration
+Edit your Nginx config (usually /etc/nginx/sites-available/default or similar).
+nginx
+1234567891011121314151617181920212223242526272829303132333435363738394041424344
+Step 2.2: Reload Nginx
+bash
+12
+Step 2.3: Verify File System Permissions
+Ensure the web server user (www-data) cannot read sensitive files if possible, though the config above is the primary defense.
+bash
+123
+🔍 PHASE 3: DNS & INFRASTRUCTURE REPAIR
+Goal: Fix the "FAIL" and "WARN" status in Section 1 of your audit.
+Step 3.1: Fix DNS Records
+Your audit says "No A record" and "DNS fails via Google". This suggests your DNS propagation is broken or records are missing at the registrar level.
+Log in to your Domain Registrar (where you bought syrabit.ai).
+Ensure Nameservers are set to Cloudflare (e.g., ns1.cloudflare.com, ns2.cloudflare.com).
+In Cloudflare DNS Settings:
+Add A Record:
+Type: A
+Name: @ (root)
+Content: <Your-Server-IP>
+Proxy: Proxied (Orange Cloud)
+Add A Record:
+Type: A
+Name: api
+Content: <Your-Server-IP>
+Proxy: Proxied (Orange Cloud)
+Add MX Record (if you use email):
+Type: MX
+Name: @
+Content: mail.syrabit.ai (or your provider like mx.google.com)
+Add TXT Record (SPF/DMARC):
+Type: TXT
+Name: @
+Content: v=spf1 include:_spf.google.com ~all (Example for Google)
+Type: TXT
+Name: _dmarc
+Content: v=DMARC1; p=reject; rua=mailto:admin@syrabit.ai
+Step 3.2: Verify Propagation
+Wait 15-30 minutes, then run:
+bash
+12
+You should see your IP address in the ANSWER SECTION.
+💻 PHASE 4: APPLICATION LAYER FIXES
+Goal: Fix the missing API endpoints (/health/deep, /api/content/boards) identified in the audit.
+Step 4.1: Implement Deep Health Check
+Your code has init_mongo(), but no endpoint exposes its status.
+File: apps/backend/app/api/routes/health.py (create if missing)
+python
+123456789101112131415161718192021222324252627282930313233343536373839
+Step 4.2: Fix Content Endpoints
+The audit failed /api/content/boards. Ensure your router is mounted.
+File: apps/backend/app/main.py
+python
+12
+Check: Verify the route function exists in apps/backend/app/api/routes/content.py:
+python
+1234
+Step 4.3: Add Sitemap Endpoint
+Create a simple sitemap generator if you don't have one.
+File: apps/backend/app/api/routes/seo.py
+python
+12345678910111213141516
+🚀 PHASE 5: ADVANCED SECURITY & OPTIMIZATION
+Goal: Move from "Needs Attention" to "Production Ready".
+Step 5.1: Rate Limiting
+Your audit warned about missing rate limits.
+Install: pip install slowapi
+Implementation:
+python
+1234567891011
+Step 5.2: CSP Header Refinement
+Your audit warned about unsafe-inline in CSP.
+Action: If you are using React/Next.js/Vite, ensure your build process hashes scripts or uses nonces so you can remove unsafe-inline from your Content-Security-Policy header in Nginx/FastAPI.
+Step 5.3: Automated Monitoring
+Set up an automated cron job to run your audit script daily and alert you if critical issues return.
+bash
+12
+✅ VERIFICATION CHECKLIST
+After completing the steps above, run the audit again:
+Security:
+curl https://syrabit.ai/.env returns 403/404/Cloudflare Block.
+curl https://syrabit.ai/.git/config returns 403/404.
+No 200 OK on admin/phpinfo paths.
+API:
+curl https://api.syrabit.ai/health/deep returns 200 and DB status.
+curl https://api.syrabit.ai/api/content/boards returns 200.
+DNS:
+dig syrabit.ai @8.8.8.8 returns your IP.
+Audit script shows "PASS" for DNS propagation.
+Start with Phase 1 immediately. Do not wait to configure Nginx before blocking via Cloudflare.
