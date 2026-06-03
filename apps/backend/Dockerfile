@@ -30,7 +30,9 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+# Cloud Run injects PORT env var matching the --port flag (default 8080, or 8000 when --port=8000 is set).
+# Using shell form so ${PORT:-8000} is expanded at runtime.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-8000}/health')"
 
-CMD ["gunicorn", "app.main:app", "--bind", "0.0.0.0:8000", "-k", "uvicorn.workers.UvicornWorker", "-c", "gunicorn_conf.py"]
+CMD ["sh", "-c", "exec gunicorn app.main:app --bind 0.0.0.0:${PORT:-8000} -k uvicorn.workers.UvicornWorker -c gunicorn_conf.py"]

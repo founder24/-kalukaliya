@@ -136,7 +136,8 @@ class Settings(BaseSettings):
     EDGE_SHARED_SECRET: Optional[str] = None
     TRUST_EDGE_AUTH: bool = True
     ALLOWED_ORIGINS: str = (
-        "https://syrabit.ai,https://www.syrabit.ai,https://app.syrabit.ai"
+        "https://syrabit.ai,https://www.syrabit.ai,https://app.syrabit.ai,"
+        "https://api.syrabit.ai"
     )
     # Note (HF-108): ALLOWED_ORIGINS uses exact match; Cloudflare Pages preview URLs
     # are handled by is_origin_allowed() regex. Use that method for all origin checks.
@@ -269,13 +270,18 @@ class Settings(BaseSettings):
         return origins
 
     def is_origin_allowed(self, origin: str) -> bool:
-        """Check if an origin is allowed, including Cloudflare Pages preview domains."""
+        """Check if an origin is allowed, including Cloudflare Pages and Replit dev domains."""
         import re
 
         if origin in self.allowed_origins_list:
             return True
         # Allow Cloudflare Pages preview URLs
         if re.match(r"^https://[a-z0-9-]+\.syrabitfrontend\.pages\.dev$", origin):
+            return True
+        # Allow Replit dev preview URLs (used during development/testing)
+        if self.APP_ENV in ("development", "test") and re.match(
+            r"^https://[a-z0-9-]+\.(sisko\.replit\.dev|repl\.co|replit\.dev)$", origin
+        ):
             return True
         return False
 

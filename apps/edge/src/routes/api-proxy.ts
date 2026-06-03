@@ -105,6 +105,33 @@ export async function proxyRequest(
 
     clearTimeout(timeout);
 
+    // Normalize non-JSON error responses from Cloud Run infrastructure (e.g.
+    // Google Frontend 404 HTML when the service is unreachable or not deployed,
+    // or 403 HTML when Cloud Run rejects an unauthenticated request). Passing
+    // raw HTML through to API clients is confusing — convert to JSON 503.
+    if (!response.ok && response.status >= 400) {
+      const ct = response.headers.get('Content-Type') || '';
+      if (!ct.includes('application/json') && !ct.includes('text/event-stream')) {
+        const errorOrigin = request.headers.get('Origin') || 'https://syrabit.ai';
+        const corsH = getCorsHeaders(errorOrigin);
+        const statusCode = response.status >= 500 || response.status === 404 ? 503 : response.status;
+        return new Response(
+          JSON.stringify({
+            error: statusCode === 503 ? 'Backend service unavailable' : 'Request failed',
+            status: response.status,
+          }),
+          {
+            status: statusCode,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': corsH['Access-Control-Allow-Origin'],
+              'Access-Control-Allow-Credentials': 'true',
+            },
+          }
+        );
+      }
+    }
+
     const responseHeaders = new Headers(response.headers);
 
     if (isStreamRequest) {

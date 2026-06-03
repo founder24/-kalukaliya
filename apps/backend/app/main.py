@@ -63,22 +63,24 @@ async def lifespan(app: FastAPI):
         await init_mongo()
         logger.info("MongoDB initialized successfully")
     except Exception as e:
-        if settings.APP_ENV in ("production", "staging"):
-            logger.error(f"MongoDB initialization failed in {settings.APP_ENV}: {e}")
-            raise
-        logger.warning(
-            f"MongoDB initialization failed (expected in local dev without DB): {e}"
+        # Log as critical but do NOT raise — allow the app to start in degraded mode.
+        # Cloud Run health checks hit /health (not MongoDB), so the service will report
+        # as running but degraded. This prevents a missing MONGODB_URI env var from
+        # causing Cloud Run to report 0 healthy instances (and serve Google's 404 page).
+        # Operators can detect the degraded state via /health/deep or Sentry alerts.
+        logger.critical(
+            f"MongoDB initialization failed ({settings.APP_ENV}): {e} — "
+            "service is DEGRADED. Set MONGODB_URI env var to restore full functionality."
         )
 
     try:
         await init_redis()
         logger.info("Redis initialized successfully")
     except Exception as e:
-        if settings.APP_ENV in ("production", "staging"):
-            logger.error(f"Redis initialization failed in production: {e}")
-            raise
-        logger.warning(
-            f"Redis initialization failed (expected in local dev without DB): {e}"
+        # Same rationale as MongoDB above — degrade gracefully, don't crash.
+        logger.critical(
+            f"Redis initialization failed ({settings.APP_ENV}): {e} — "
+            "service is DEGRADED. Set UPSTASH_REDIS_REST_URL/TOKEN env vars to restore."
         )
 
     # Warm up Vertex AI Search connection

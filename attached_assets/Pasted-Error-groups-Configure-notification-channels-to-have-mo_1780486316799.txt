@@ -1,0 +1,484 @@
+Error groups
+Configure notification channels to have more control over who is notified when errors occur.
+Filter errors
+
+
+
+
+
+Resolution status
+Occurrences
+Error
+Seen in
+Type
+First seen
+Last seen
+Location
+Response code
+Issue link
+2,418
+
+2,418
+
+newImportError: cannot import name '_QUERY_OPTIONS' from 'pymongo.cursor' (/home/appuser/.local/lib/python3.11/site-packages/pymongo/cursor.py)
+30/home/appuser/.local/lib/python3.11/site-packages/motor/core.py(<module>)
+
+syrabit-backend:syrabit-backend-00099-wmh
+5 more
+Application error
+2 days ago
+2 days ago
+1 day ago
+1 day ago
+global
+-
+303
+
+303
+
+HaltServer: <HaltServer 'Worker failed to boot.' 3>
+641/home/appuser/.local/lib/python3.11/site-packages/gunicorn/arbiter.py(reap_workers)
+
+syrabit-backend:syrabit-backend-00099-wmh
+5 more
+Application error
+2 days ago
+2 days ago
+1 day ago
+1 day ago
+global
+-
+303
+
+303
+
+HaltServer: <HaltServer 'Worker failed to boot.' 3>
+641/home/appuser/.local/lib/python3.11/site-packages/gunicorn/arbiter.py(reap_workers)
+
+syrabit-backend:syrabit-backend-00067-5l5
+5 more
+Application error
+2 days ago
+2 days ago
+1 day ago
+1 day ago
+global
+-
+290
+
+290
+
+RuntimeError: RS256 JWT_PUBLIC_KEY required in production
+131/app/app/api/v1/auth.py(_get_verification_key)
+
+syrabit-backend:syrabit-backend-00036-dx7
+5 more
+Application error
+3 days ago
+3 days ago
+1 day ago
+1 day ago
+global
+-
+138
+
+138
+
+ModuleNotFoundError: No module named 'motor'
+2/app/app/db/mongo.py(<module>)
+
+syrabit-backend:syrabit-backend-00067-5l5
+Application error
+2 days ago
+2 days ago
+2 days ago
+2 days ago
+global
+-
+118
+
+118
+
+newTraceback (most recent call last):
+1162/home/appuser/.local/lib/python3.11/site-packages/beanie/odm/documents.py(get_settings)
+
+syrabit-backend:syrabit-backend-00083-krn
+4 more
+Application error
+2 days ago
+2 days ago
+2 days ago
+2 days ago
+global
+-
+70
+
+70
+
+SyntaxError: invalid decimal literal
+25/app/app/main.py(<module>)
+
+syrabit-backend:syrabit-backend-00016-ldc
+Application error
+4 days ago
+4 days ago
+4 days ago
+4 days ago
+global
+-
+18
+
+18
+
+AttributeError: 'cryptography.hazmat.bindings._rust.openssl.rsa.RSA' object has no attribute 'verify'
+602/home/appuser/.local/lib/python3.11/site-packages/jwt/algorithms.py(verify)
+
+syrabit-backend:syrabit-backend-00011-k5p
+1 more
+Application error
+5 days ago
+5 days ago
+5 days ago
+5 days ago
+global
+-
+15
+
+15
+
+[google.cloud.discoveryengine.v1main.DocumentService.CreateDocument] Active document with the same name "projects/851687450401/locations/global/collections/default_collection/dataStores/syrabit-edu-datastore/branches/0/documents/7801956c7a4d87334af2d240a58399c8" exists.
+0(google.cloud.discoveryengine.v1main.DocumentService.CreateDocument)
+
+discoveryengine.googleapis.com
+Application error
+5 days ago
+5 days ago
+5 days ago
+5 days ago
+global
+409
+13
+
+13
+
+AttributeError: 'dict' object has no attribute 'model_config'
+56/home/appuser/.local/lib/python3.11/site-packages/beanie/odm/utils/pydantic.py(get_config_value)
+
+syrabit-backend:syrabit-backend-00045-tm6
+2 more
+Application error
+3 days ago
+3 days ago
+3 days ago
+3 days ago
+global
+-
+8
+
+8
+
+RuntimeError: RS256 JWT_PRIVATE_KEY required in production
+114/app/app/api/v1/auth.py(_get_signing_key)
+
+syrabit-backend:syrabit-backend-00038-8px
+1 more
+Application error
+3 days ago
+3 days ago
+1 day ago
+1 day ago
+global
+-
+8
+
+8
+
+ValidationError: 1 validation error for Settings
+263/home/appuser/.local/lib/python3.11/site-packages/pydantic/main.py(__init__)
+
+syrabit-backend:syrabit-backend-00002-f4r
+1 more
+Application error
+5 days ago
+5 days ago
+5 days ago
+5 days ago
+global
+-
+7
+
+7
+
+ValueError: password cannot be longer than 72 bytes, truncate manually if necessary (e.g. my_password[:72])
+59/app/app/models/user.py(verify_password)
+
+syrabit-backend:syrabit-backend-00048-wgr
+2 more
+Application error
+3 days ago
+3 days ago
+3 days ago
+3 days ago
+global
+-
+6
+
+6
+
+newTraceback (most recent call last):
+1162/home/appuser/.local/lib/python3.11/site-packages/beanie/odm/documents.py(get_settings)
+
+syrabit-backend:syrabit-backend-00084-hmq
+Application error
+2 days ago
+2 days ago
+2 days ago
+2 days ago
+global
+-
+5
+
+5
+
+newRuntimeError: RS256 JWT_PRIVATE_KEY required in production
+114/app/app/api/v1/auth.py(_get_signing_key)
+
+syrabit-backend:syrabit-backend-00122-bgn
+1 more
+Application error
+1 day ago
+1 day ago
+1 day ago
+1 day ago
+global
+-
+5
+
+5
+
+newTraceback (most recent call last):
+1162/home/appuser/.local/lib/python3.11/site-packages/beanie/odm/documents.py(get_settings)
+
+syrabit-backend:syrabit-backend-00084-hmq
+2 more
+Application error
+2 days ago
+2 days ago
+2 days ago
+2 days ago
+global
+-
+5
+
+5
+
+ValidationError: 1 validation error for Settings
+263/home/appuser/.local/lib/python3.11/site-packages/pydantic/main.py(__init__)
+
+gcs-sync-job:gcs-sync-job-6r62b
+4 more
+Application error
+4 days ago
+4 days ago
+4 days ago
+4 days ago
+global
+-
+5
+
+5
+
+[google.cloud.discoveryengine.v1main.DocumentService.UpdateDocument] To create document without content, content config of data store must be NO_CONTENT.
+0(google.cloud.discoveryengine.v1main.DocumentService.UpdateDocument)
+
+discoveryengine.googleapis.com
+Application error
+5 days ago
+5 days ago
+5 days ago
+5 days ago
+global
+400
+4
+
+4
+
+BadRequestError: Authentication failed
+137/home/appuser/.local/lib/python3.11/site-packages/razorpay/client.py(request)
+
+syrabit-backend:syrabit-backend-00045-tm6
+Application error
+3 days ago
+3 days ago
+3 days ago
+3 days ago
+global
+-
+3
+
+3
+
+RuntimeError: reentrant call inside <_io.BufferedWriter name='<stderr>'>
+1113/usr/local/lib/python3.11/logging/__init__.py(emit)
+
+syrabit-backend:syrabit-backend-00016-ldc
+1 more
+Application error
+4 days ago
+4 days ago
+3 days ago
+3 days ago
+global
+-
+3
+
+3
+
+RuntimeError: reentrant call inside <_io.BufferedWriter name='<stderr>'>
+1031/usr/local/lib/python3.11/logging/__init__.py(handleError)
+
+syrabit-backend:syrabit-backend-00016-ldc
+1 more
+Application error
+4 days ago
+4 days ago
+3 days ago
+3 days ago
+global
+-
+3
+
+3
+
+ModuleNotFoundError: No module named 'app.services.content.hierarchy_sync'
+1<string>(<module>)
+
+gcs-sync-job:gcs-sync-job-pkrpj
+2 more
+Application error
+4 days ago
+4 days ago
+4 days ago
+4 days ago
+global
+-
+3
+
+3
+
+HaltServer: <HaltServer 'Worker failed to boot.' 3>
+529/home/appuser/.local/lib/python3.11/site-packages/gunicorn/arbiter.py(reap_workers)
+
+syrabit-backend:syrabit-backend-00016-ldc
+Application error
+4 days ago
+4 days ago
+4 days ago
+4 days ago
+global
+-
+2
+
+2
+
+ValueError: Unable to load PEM file. See https://cryptography.io/en/latest/faq/#why-can-t-i-import-my-pem-file for more details. MalformedFraming
+469/home/appuser/.local/lib/python3.11/site-packages/jwt/algorithms.py(prepare_key)
+
+syrabit-backend:syrabit-backend-00008-xtd
+Application error
+5 days ago
+5 days ago
+5 days ago
+5 days ago
+global
+-
+2
+
+2
+
+RuntimeError: RS256 JWT_PUBLIC_KEY required in production
+131/app/app/api/v1/auth.py(_get_verification_key)
+
+syrabit-backend:syrabit-backend-00005-swk
+Application error
+5 days ago
+5 days ago
+5 days ago
+5 days ago
+global
+-
+1
+
+1
+
+newRuntimeError: RS256 JWT_PUBLIC_KEY required in production
+132/app/app/api/v1/auth.py(_get_verification_key)
+
+syrabit-backend:syrabit-backend-00123-cgp
+Application error
+1 day ago
+1 day ago
+1 day ago
+1 day ago
+global
+-
+1
+
+1
+
+newTraceback (most recent call last):
+1162/home/appuser/.local/lib/python3.11/site-packages/beanie/odm/documents.py(get_settings)
+
+syrabit-backend:syrabit-backend-00087-tpb
+Application error
+2 days ago
+2 days ago
+2 days ago
+2 days ago
+global
+-
+1
+
+1
+
+Traceback (most recent call last):
+256/home/appuser/.local/lib/python3.11/site-packages/gunicorn/arbiter.py(handle_term)
+
+syrabit-backend:syrabit-backend-00036-dx7
+Application error
+3 days ago
+3 days ago
+3 days ago
+3 days ago
+global
+-
+1
+
+1
+
+HaltServer: <HaltServer 'Worker failed to boot.' 3>
+529/home/appuser/.local/lib/python3.11/site-packages/gunicorn/arbiter.py(reap_workers)
+
+syrabit-backend:syrabit-backend-00016-ldc
+Application error
+4 days ago
+4 days ago
+4 days ago
+4 days ago
+global
+-
+1
+
+1
+
+HaltServer: <HaltServer 'Worker failed to boot.' 3>
+529/home/appuser/.local/lib/python3.11/site-packages/gunicorn/arbiter.py(reap_workers)
+
+syrabit-backend:syrabit-backend-00016-ldc
+Application error
+4 days ago
+4 days ago
+4 days ago
+4 days ago
+global
+-
