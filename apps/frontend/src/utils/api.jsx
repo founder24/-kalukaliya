@@ -848,7 +848,7 @@ export const verifyCreditTopUp = (data) =>
   axios.post(`${API_BASE}/payments/credit-topup/verify`, data, authConfig());
 
 export const getPaymentHistory = () =>
-  axios.get(`${API_BASE}/user/payments`, authConfig());
+  axios.get(`${API_BASE}/payments/history`, authConfig());
 
 export const requestRefund = (paymentId, reason = '') =>
   axios.post(`${API_BASE}/payments/refund-request`, { payment_id: paymentId, reason }, authConfig());

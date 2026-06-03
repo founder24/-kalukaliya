@@ -89,3 +89,41 @@ async def ad_impression(request: Request):
     except Exception:
         pass
     return JSONResponse({"status": "ok"})
+
+
+@router.post("/hydrate-event")
+async def hydrate_event(request: Request):
+    """Hydration / page-chunk preload health events mirrored from the frontend.
+
+    Receives hydrate_preload_failed, hydrate_stalled, hydrate_recovered events
+    so the admin ops-health tile can surface chunk-load regressions without
+    depending on the PostHog API.
+    """
+    try:
+        body = await request.json()
+        event = body.get("event", "")
+        kind = body.get("kind", None)
+        path = body.get("path", None)
+        auto_reload = body.get("auto_reload", None)
+        preload_failed = body.get("preload_failed", None)
+        message = body.get("message", None)
+        name = body.get("name", None)
+        elapsed_ms = body.get("elapsed_ms", None)
+        ms_since_reload = body.get("ms_since_reload", None)
+        logger.info(
+            "hydrate-event",
+            extra={
+                "event": event,
+                "kind": kind,
+                "path": path,
+                "auto_reload": auto_reload,
+                "preload_failed": preload_failed,
+                "message": message,
+                "name": name,
+                "elapsed_ms": elapsed_ms,
+                "ms_since_reload": ms_since_reload,
+            },
+        )
+    except Exception:
+        pass
+    return JSONResponse({"status": "ok"})
