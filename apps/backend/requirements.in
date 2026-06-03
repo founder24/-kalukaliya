@@ -4,7 +4,7 @@
 
 aiohttp
 bcrypt
-beanie
+beanie>=2.2.0
 fastapi
 google-auth[aiohttp]
 google-cloud-aiplatform
@@ -14,6 +14,7 @@ gunicorn
 httpx
 jinja2
 markdown
+motor>=3.7.0
 numpy
 posthog
 pydantic[email]

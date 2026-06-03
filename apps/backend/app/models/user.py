@@ -3,6 +3,22 @@ from pydantic import EmailStr, Field
 from typing import Optional, Literal
 from datetime import datetime, timezone
 import bcrypt
+import hashlib
+
+# bcrypt silently truncates passwords > 72 bytes in older versions;
+# bcrypt 4.x raises ValueError instead. We use SHA-256 to derive a
+# fixed-length key, which is safe and backward-compatible for new users.
+# For legacy passwords (hashed without SHA-256), verify_password tries
+# the direct path first, then the SHA-256 path.
+_BCRYPT_MAX = 72
+
+
+def _bcrypt_safe(password: str) -> bytes:
+    """Return password bytes safe for bcrypt (max 72 bytes via SHA-256)."""
+    raw = password.encode("utf-8")
+    if len(raw) <= _BCRYPT_MAX:
+        return raw
+    return hashlib.sha256(raw).digest()
 
 
 class User(Document):
@@ -47,24 +63,43 @@ class User(Document):
     class Settings:
         name = "users"
         indexes = [
-            [("email", 1)],  # Unique index created in mongo.py
-            [("razorpay_subscription_id", 1)],
-            [("preferred_language", 1)],
-            [("created_at", -1)],
+            # NOTE: email unique+sparse index is created explicitly in mongo.py
+            # with the correct options. Do NOT define it here — beanie would
+            # create a plain non-unique index named "email_1" which conflicts
+            # with the unique+sparse one already on Atlas (IndexKeySpecsConflict).
+            #
+            # razorpay_subscription_id, preferred_language, and created_at are
+            # also managed in create_indexes() in mongo.py to avoid duplicate
+            # or conflicting beanie-generated definitions.
         ]
 
     def verify_password(self, password: str) -> bool:
-        """Verify password against hashed password"""
+        """Verify password against hashed password.
+
+        Tries the safe (SHA-256 for >72 byte) path first, then falls back
+        to the raw-bytes path for passwords hashed before this fix.
+        """
         if not self.hashed_password:
             return False
-        return bcrypt.checkpw(
-            password.encode("utf-8"), self.hashed_password.encode("utf-8")
-        )
+        hashed = self.hashed_password.encode("utf-8")
+        safe_bytes = _bcrypt_safe(password)
+        try:
+            if bcrypt.checkpw(safe_bytes, hashed):
+                return True
+        except Exception:
+            pass
+        raw = password.encode("utf-8")
+        if raw != safe_bytes:
+            try:
+                return bcrypt.checkpw(raw[:_BCRYPT_MAX], hashed)
+            except Exception:
+                return False
+        return False
 
     @classmethod
     def hash_password(cls, password: str) -> str:
-        """Hash password using bcrypt"""
-        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        """Hash password using bcrypt with SHA-256 pre-hashing for >72 byte passwords."""
+        return bcrypt.hashpw(_bcrypt_safe(password), bcrypt.gensalt()).decode("utf-8")
 
     def is_pro(self) -> bool:
         """Check if user has Pro subscription"""

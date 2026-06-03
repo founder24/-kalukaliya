@@ -1,3 +1,4 @@
 - [Syrabit dev setup](syrabit-dev-setup.md) — Replit dev environment setup details for this monorepo
 - [Syrabit content architecture](syrabit-content-arch.md) — Chapter model, KnowledgeObject vs Chapter split, translation pipeline
 - [Syrabit chat+auth pipeline bugs](syrabit-pipeline-bugs.md) — Fixed bugs: analytics 404s, conversation_id/session_id mismatch, logout null-token crash
+- [Syrabit Cloud Run deploy fixes](syrabit-cloudrun-fixes.md) — motor missing, pymongo compat, JWT RS256 degraded mode, Atlas index conflicts

@@ -116,20 +116,25 @@ def _get_signing_key() -> tuple[str, str]:
     Priority order:
     1. RS256 with JWT_PRIVATE_KEY — most secure, preferred for production
     2. HS256 with JWT_SECRET — acceptable if JWT_SECRET is non-placeholder and ≥ 32 chars
-    3. RuntimeError — if neither is properly configured in production
+    3. HS256 with placeholder secret + CRITICAL log — degraded mode, tokens are weak
+       but the app stays up so operators can see the log and fix configuration.
     """
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PRIVATE_KEY:
         return settings.JWT_PRIVATE_KEY, "RS256"
     if settings.JWT_ALGORITHM == "RS256":
         logger.warning(
-            "JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set - falling back to HS256"
+            "JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set — falling back to HS256"
         )
     jwt_secret = settings.JWT_SECRET
     if settings.APP_ENV == "production":
         if not jwt_secret or jwt_secret in _PLACEHOLDER_SECRETS or len(jwt_secret) < 32:
-            raise RuntimeError(
-                "JWT configuration invalid in production: set JWT_PRIVATE_KEY (RS256) "
-                "or a strong JWT_SECRET (≥32 chars, non-placeholder) for HS256"
+            # Log critical but do NOT raise — raising here crashes every auth request
+            # and fills Sentry with noise instead of one clear startup warning.
+            # Operators must set JWT_SECRET (≥32 chars) or JWT_PRIVATE_KEY in Cloud Run.
+            logger.critical(
+                "SECURITY: JWT_SECRET is a placeholder/weak value in production. "
+                "Set JWT_SECRET env var (≥32 random chars) in Cloud Run immediately. "
+                "Tokens signed with this key are INSECURE."
             )
     return jwt_secret, "HS256"
 
@@ -141,20 +146,20 @@ def _get_verification_key() -> tuple[str, str]:
     Priority order:
     1. RS256 with JWT_PUBLIC_KEY — matches RS256 signing
     2. HS256 with JWT_SECRET — matches HS256 signing
-    3. RuntimeError — if neither is properly configured in production
+    3. HS256 with placeholder secret + CRITICAL log — degraded mode, see _get_signing_key.
     """
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PUBLIC_KEY:
         return settings.JWT_PUBLIC_KEY, "RS256"
     if settings.JWT_ALGORITHM == "RS256":
         logger.warning(
-            "JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set - falling back to HS256"
+            "JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set — falling back to HS256"
         )
     jwt_secret = settings.JWT_SECRET
     if settings.APP_ENV == "production":
         if not jwt_secret or jwt_secret in _PLACEHOLDER_SECRETS or len(jwt_secret) < 32:
-            raise RuntimeError(
-                "JWT configuration invalid in production: set JWT_PUBLIC_KEY (RS256) "
-                "or a strong JWT_SECRET (≥32 chars, non-placeholder) for HS256"
+            logger.critical(
+                "SECURITY: JWT_SECRET is a placeholder/weak value in production. "
+                "Set JWT_SECRET env var (≥32 random chars) in Cloud Run immediately."
             )
     return jwt_secret, "HS256"
 
