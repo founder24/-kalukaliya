@@ -1,0 +1,68 @@
+^C
+founder@instance-20260603-085552:~$ # ── 1. Set your project ──────────────────────────────────────────────────────
+export PROJECT_ID=blissful-acumen-495019-t6
+export REGION=asia-south1
+export REPO_URL=https://github.com/founder24/-kalukaliya
+
+# ── 2. Clone (or pull) the latest merged code ────────────────────────────────
+if [ -d ~/syrabit ]; then
+  cd ~/syrabit && git pull origin main
+else
+  git clone "$REPO_URL" ~/syrabit && cd ~/syrabit
+fi
+
+# ── 3. Authenticate Docker with Artifact Registry ────────────────────────────
+gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
+
+# ── 4. Build the backend image ───────────────────────────────────────────────
+export COMMIT_SHA=$(git rev-parse --short HEAD)
+export IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/syrabit/backend:${COMMIT_SHA}"
+
+docker build -t "$IMAGE" -f apps/backend/Dockerfile apps/backend/
+
+# ── 5. Push to Artifact Registry ─────────────────────────────────────────────
+docker push "$IMAGE"
+
+# ── 6. Deploy to Cloud Run ───────────────────────────────────────────────────
+gcloud run deploy syrabit-backend \
+  --image "$IMAGE" \
+  --region "$REGION" \
+  --platform managed \
+  --port 8000 \
+  --allow-unauthenticated
+
+# ── 7. Verify it's healthy ───────────────────────────────────────────────────
+SERVICE_URL=$(gcloud run services describe syrabit-backend \
+  --region "$REGION" --format 'value(status.url)')
+curl -sf "${SERVICE_URL}/health" && echo "✅ Deployed & healthy" || echo "❌ Health check failed"
+Cloning into '/home/founder/syrabit'...
+remote: Enumerating objects: 53029, done.
+remote: Counting objects: 100% (2163/2163), done.
+remote: Compressing objects: 100% (181/181), done.
+remote: Total 53029 (delta 2069), reused 1984 (delta 1982), pack-reused 50866 (from 3)
+Receiving objects: 100% (53029/53029), 138.31 MiB | 20.42 MiB/s, done.
+Resolving deltas: 100% (34756/34756), done.
+WARNING: `docker` not in system PATH.
+`docker` and `docker-credential-gcloud` need to be in the same PATH in order to work correctly together.
+gcloud's Docker credential helper can be configured but it will not work until this is corrected.
+WARNING: Your config file at [/home/founder/.docker/config.json] contains these credential helper entries:
+
+{
+  "credHelpers": {
+    "asia-south1-docker.pkg.dev": "gcloud"
+  }
+}
+Adding credentials for: asia-south1-docker.pkg.dev
+gcloud credential helpers already registered correctly.
+-bash: docker: command not found
+-bash: docker: command not found
+Deploying container to Cloud Run service [syrabit-backend] in project [blissful-acumen-495019-t6] region [asia-south1]
+X Deploying...                                                                                                                                                                                                     
+  - Creating Revision...                                                                                                                                                                                           
+  . Routing traffic...                                                                                                                                                                                             
+    Setting IAM Policy...                                                                                                                                                                                          
+Deployment failed                                                                                                                                                                                                  
+  Setting IAM policy failed, try "gcloud beta run services add-iam-policy-binding --region=asia-south1 --member=allUsers --role=roles/run.invoker syrabit-backend"
+ERROR: (gcloud.run.deploy) Image 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:7f9c9656' not found.
+{"status":"healthy","service":"syrabit-backend"}✅ Deployed & healthy
+founder@instance-20260603-085552:~/syrabit$ 
