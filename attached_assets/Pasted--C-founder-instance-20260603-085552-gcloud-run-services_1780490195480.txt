@@ -1,0 +1,119 @@
+$ ^C
+founder@instance-20260603-085552:~$ gcloud run services describe syrabit-backend \
+  --region=asia-south1 \
+  --format="yaml(spec.template.spec.containers[0].env)"
+spec:
+  template:
+    spec:
+      containers:
+      - env:
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: jwt-secret
+        - name: MONGODB_URI
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: MONGODB_URI
+        - name: UPSTASH_REDIS_REST_URL
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: UPSTASH_REDIS_REST_URL
+        - name: UPSTASH_REDIS_REST_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: UPSTASH_REDIS_REST_TOKEN
+        - name: GOOGLE_APPLICATION_CREDENTIALS_JSON
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        - name: SARVAM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: SARVAM_API_KEY
+        - name: RAZORPAY_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: RAZORPAY_KEY_ID
+        - name: RAZORPAY_KEY_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: RAZORPAY_KEY_SECRET
+        - name: RAZORPAY_WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: RAZORPAY_WEBHOOK_SECRET
+        - name: POSTHOG_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: POSTHOG_API_KEY
+        - name: ADMIN_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: ADMIN_JWT_SECRET
+        - name: VERTEX_PROJECT_ID
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: VERTEX_PROJECT_ID
+        - name: RESEND_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: RESEND_API_KEY
+        - name: INDEXNOW_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: INDEXNOW_API_KEY
+        - name: INDEXNOW_INTERNAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: INDEXNOW_INTERNAL_SECRET
+        - name: RESET_TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: RESET_TOKEN_SECRET
+        - name: TRANSLATE_CRON_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: TRANSLATE_CRON_SECRET
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: gemini-api-key
+        - name: EDGE_SHARED_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: edge-shared-secret
+        - name: JWT_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: jwt-private-key
+        - name: JWT_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: jwt-public-key
+        - name: APP_ENV
+          value: production
+        - name: JWT_ALGORITHM
+          value: HS256
+founder@instance-20260603-085552:~$ 
