@@ -8,7 +8,6 @@ import {
 import { useShare } from '@/hooks/useShare';
 import { prefetchSubjectData } from '@/hooks/useContent';
 import { useContentLang } from '@/context/LanguageContext';
-import { cdnImage, cdnSrcSet } from '@/utils/imageCdn';
 
 const THUMB_GRADIENTS = {
   math:      ['#4f46e5', '#7c3aed'],
@@ -63,7 +62,6 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     }
   }, [queryClient, sub.boardSlug, sub.classSlug, sub.slug]);
 
-  const hasWP = !!sub.thumbnailUrl;
   const [showAllChapters, setShowAllChapters] = useState(false);
   const visibleChapters = useMemo(() => showAllChapters ? chapters : chapters.slice(0, 3), [chapters, showAllChapters]);
   const moreChapters = showAllChapters ? 0 : chapters.length - 3;
@@ -72,47 +70,25 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     <div
       className="w-full rounded-2xl overflow-hidden transition-all duration-300 group/card hover:-translate-y-0.5 relative cursor-pointer"
       style={{
-        background: sub.thumbnailUrl ? '#0a0518' : 'var(--card)',
+        background: '#09090b',
         border: isSaved
           ? '1px solid rgba(139,92,246,0.40)'
-          : '1px solid rgba(139,92,246,0.10)',
+          : '1px solid rgba(139,92,246,0.12)',
         boxShadow: isSaved
-          ? '0 0 32px rgba(139,92,246,0.15), 0 8px 32px rgba(0,0,0,0.08)'
-          : '0 2px 12px rgba(0,0,0,0.06)',
+          ? '0 0 32px rgba(139,92,246,0.15), 0 8px 32px rgba(0,0,0,0.4)'
+          : '0 2px 16px rgba(0,0,0,0.35)',
         animationDelay: `${index * 50}ms`,
-        // Task #391: lock card height to skeleton (420px) until content
-        // settles so swapping skeleton → card produces zero CLS.
         minHeight: '420px',
         contain: 'layout style',
       }}
       data-testid="library-subject-card"
       data-subject-id={sub.id}
     >
-      {sub.thumbnailUrl && (
-        <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-2xl" style={{ zIndex: 1, aspectRatio: '4 / 3' }}>
-          <img
-            src={cdnImage(sub.thumbnailUrl, { width: 640 })}
-            srcSet={cdnSrcSet(sub.thumbnailUrl, [320, 640, 960])}
-            alt=""
-            loading={index === 0 ? 'eager' : 'lazy'}
-            fetchpriority={index === 0 ? 'high' : 'low'}
-            decoding="async"
-            width="400"
-            height="300"
-            sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw"
-            className="absolute inset-0 w-full h-full object-cover"
-            style={{ opacity: 0.25 }}
-          />
-          <div
-            className="absolute inset-0"
-            style={{ background: 'linear-gradient(180deg, rgba(10,5,25,0.35) 0%, rgba(10,5,25,0.50) 50%, rgba(10,5,25,0.40) 100%)' }}
-          />
-        </div>
-      )}
+      {/* Header bar */}
       <div
         className="flex items-center justify-between px-3.5 py-2.5 relative z-[2]"
         style={{
-          background: sub.thumbnailUrl ? 'transparent' : `linear-gradient(135deg, ${thumbColors[0]}22, ${thumbColors[1]}14)`,
+          background: `linear-gradient(135deg, ${thumbColors[0]}22, ${thumbColors[1]}14)`,
           borderBottom: `1px solid ${thumbColors[0]}28`,
         }}
       >
@@ -123,7 +99,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           >
             <Layers size={10} className="text-white" />
           </div>
-          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: hasWP ? '#ffffff' : thumbColors[0] }}>
+          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: thumbColors[0] }}>
             {sub.streamName || sub.boardName || 'Subject'}
           </span>
         </div>
@@ -140,6 +116,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         </div>
       </div>
 
+      {/* Subject info */}
       <div className="px-3 sm:px-4 pt-3 pb-2 relative z-[2]">
         <Link to={subjectLandingPath} className="block group/title static" aria-label={`View ${sub.name}`}>
           <span className="absolute inset-0 z-0" aria-hidden="true" />
@@ -156,28 +133,24 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
             <div className="min-w-0 flex-1">
               <h3
                 className="font-bold group-hover/title:text-purple-300 transition-colors leading-tight"
-                style={{
-                  fontSize: '0.95rem',
-                  color: hasWP ? '#ffffff' : 'hsl(var(--foreground))',
-                  textShadow: hasWP ? '0 1px 4px rgba(0,0,0,0.7)' : 'none',
-                }}
+                style={{ fontSize: '0.95rem', color: '#f1f5f9' }}
               >
                 {sub.name}
               </h3>
               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-0.5">
                 <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded" style={{
-                  background: hasWP ? 'rgba(255,255,255,0.15)' : 'rgba(139,92,246,0.12)',
-                  color: hasWP ? '#ffffff' : 'hsl(var(--primary))',
+                  background: 'rgba(139,92,246,0.15)',
+                  color: '#a78bfa',
                 }}>
                   {sub.boardName}
                 </span>
-                <span className="text-[11px] font-medium" style={{ color: hasWP ? 'rgba(255,255,255,0.85)' : 'hsl(var(--muted-foreground))' }}>
+                <span className="text-[11px] font-medium" style={{ color: '#94a3b8' }}>
                   {sub.className}
                 </span>
                 {sub.streamName && (
                   <>
-                    <span className="text-[11px]" style={{ color: hasWP ? 'rgba(255,255,255,0.70)' : 'hsl(var(--muted-foreground))' }}>·</span>
-                    <span className="text-[11px] font-medium" style={{ color: hasWP ? 'rgba(255,255,255,0.85)' : 'hsl(var(--muted-foreground))' }}>
+                    <span className="text-[11px]" style={{ color: '#64748b' }}>·</span>
+                    <span className="text-[11px] font-medium" style={{ color: '#94a3b8' }}>
                       {sub.streamName}
                     </span>
                   </>
@@ -189,10 +162,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
 
         {sub.description && (
           <p className="text-xs leading-relaxed mb-1.5 sm:mb-2 line-clamp-1 sm:line-clamp-2 font-medium"
-            style={{
-              color: hasWP ? 'rgba(255,255,255,0.80)' : 'hsl(var(--muted-foreground))',
-              textShadow: hasWP ? '0 1px 3px rgba(0,0,0,0.5)' : 'none',
-            }}>
+            style={{ color: '#94a3b8' }}>
             {sub.description}
           </p>
         )}
@@ -204,38 +174,40 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                 key={tag}
                 className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
                 style={{
-                  color: hasWP ? '#ffffff' : 'hsl(var(--primary) / 0.8)',
-                  background: hasWP ? 'rgba(255,255,255,0.12)' : 'rgba(139,92,246,0.06)',
-                  border: hasWP ? '1px solid rgba(255,255,255,0.20)' : '1px solid rgba(139,92,246,0.12)',
+                  color: '#a78bfa',
+                  background: 'rgba(139,92,246,0.08)',
+                  border: '1px solid rgba(139,92,246,0.14)',
                 }}
               >
                 {tag}
               </span>
             ))}
             {tags.length > 3 && (
-              <span className="text-[10px] px-1" style={{ color: hasWP ? 'rgba(255,255,255,0.85)' : 'hsl(var(--muted-foreground))' }}>
+              <span className="text-[10px] px-1" style={{ color: '#64748b' }}>
                 +{tags.length - 3}
               </span>
             )}
           </div>
         )}
-
       </div>
 
+      {/* Chapter list */}
       {visibleChapters.length > 0 && (
         <div
           className="mx-3 mb-2 sm:mb-3 rounded-xl overflow-hidden relative z-[2]"
           style={{
-            background: hasWP ? 'rgba(0,0,0,0.30)' : 'rgba(139,92,246,0.03)',
-            border: hasWP ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(139,92,246,0.08)',
-            backdropFilter: hasWP ? 'blur(8px)' : 'none',
+            background: 'rgba(139,92,246,0.04)',
+            border: '1px solid rgba(139,92,246,0.10)',
           }}
         >
           <div className="relative z-10">
-            <div className="flex items-center justify-between gap-1.5 px-3 py-1.5" style={{ borderBottom: hasWP ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(139,92,246,0.06)' }}>
+            <div
+              className="flex items-center justify-between gap-1.5 px-3 py-1.5"
+              style={{ borderBottom: '1px solid rgba(139,92,246,0.08)' }}
+            >
               <div className="flex items-center gap-1.5">
-                <Layers size={11} style={{ color: hasWP ? 'rgba(255,255,255,0.70)' : undefined }} className={hasWP ? '' : 'text-purple-400/60'} />
-                <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: hasWP ? 'rgba(255,255,255,0.90)' : 'hsl(var(--muted-foreground))' }}>
+                <Layers size={11} className="text-purple-400/60" />
+                <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#94a3b8' }}>
                   {chapterCount} {isAs ? 'পাঠ' : 'LESSONS'}
                 </span>
               </div>
@@ -246,7 +218,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                       className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
                       style={{
                         background: sub.notes_pct >= 100 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.12)',
-                        color: sub.notes_pct >= 100 ? '#047857' : '#92400e',
+                        color: sub.notes_pct >= 100 ? '#10b981' : '#f59e0b',
                         border: `1px solid ${sub.notes_pct >= 100 ? 'rgba(16,185,129,0.25)' : 'rgba(245,158,11,0.20)'}`,
                       }}
                     >
@@ -256,7 +228,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                   {sub.pyq_count > 0 && (
                     <span
                       className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
-                      style={{ background: 'rgba(99,102,241,0.10)', color: '#4f46e5', border: '1px solid rgba(99,102,241,0.20)' }}
+                      style={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.22)' }}
                     >
                       {sub.pyq_count} {isAs ? 'পূৰ্বৰ প্ৰশ্ন' : 'PYQs'}
                     </span>
@@ -264,7 +236,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                   {sub.flash_count > 0 && (
                     <span
                       className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
-                      style={{ background: 'rgba(139,92,246,0.10)', color: 'hsl(var(--primary))', border: '1px solid rgba(139,92,246,0.20)' }}
+                      style={{ background: 'rgba(139,92,246,0.12)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.22)' }}
                     >
                       {sub.flash_count} {isAs ? 'ফ্লেশ' : 'Flash'}
                     </span>
@@ -272,6 +244,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                 </div>
               )}
             </div>
+
             {visibleChapters.map((ch, i) => {
               const effectiveSlug = ch.slug || (ch.title ? ch.title.toLowerCase().replace(/[^\p{L}\p{N}\p{M}]+/gu, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '') : '');
               const hasValidLink = !!(sub.boardSlug && sub.classSlug && sub.slug && effectiveSlug);
@@ -284,25 +257,24 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                   <div
                     className="flex items-center gap-2 px-3 py-2.5 sm:py-2 text-xs transition-all group/lesson"
                     style={{
-                      borderBottom: i < visibleChapters.length - 1 ? `1px solid ${hasWP ? 'rgba(255,255,255,0.06)' : 'rgba(139,92,246,0.05)'}` : 'none',
+                      borderBottom: i < visibleChapters.length - 1 ? '1px solid rgba(139,92,246,0.06)' : 'none',
                     }}
                   >
                     <span
                       className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0"
                       style={{
-                        background: hasWP ? 'rgba(59,130,246,0.20)' : 'rgba(139,92,246,0.10)',
-                        color: hasWP ? '#60a5fa' : 'hsl(var(--primary))',
+                        background: 'rgba(139,92,246,0.12)',
+                        color: '#a78bfa',
                       }}
                     >
                       {i + 1}
                     </span>
                     <Link
                       to={chPath}
-                      className="truncate transition-colors flex-1 font-medium"
+                      className="truncate transition-colors flex-1 font-medium hover:text-purple-300"
                       title={`${ch.title} — ${sub.name}`}
                       style={{
-                        color: hasWP ? '#93c5fd' : 'hsl(var(--primary))',
-                        textShadow: hasWP ? '0 1px 3px rgba(0,0,0,0.5)' : 'none',
+                        color: '#93c5fd',
                         opacity: (hasValidLink && hasContent) ? 1 : 0.5,
                       }}
                     >
@@ -311,19 +283,20 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                     <ExternalLink
                       size={10}
                       className="shrink-0 transition-colors"
-                      style={{ color: hasWP ? 'rgba(147,197,253,0.40)' : 'hsl(var(--muted-foreground) / 0.2)' }}
+                      style={{ color: 'rgba(148,163,184,0.25)' }}
                     />
                   </div>
                 </div>
               );
             })}
+
             {moreChapters > 0 && (
               <button
                 onClick={() => setShowAllChapters(true)}
-                className="flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-medium transition-colors w-full"
+                className="flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-medium transition-colors w-full hover:text-purple-300"
                 style={{
-                  borderTop: `1px solid ${hasWP ? 'rgba(255,255,255,0.06)' : 'rgba(139,92,246,0.06)'}`,
-                  color: hasWP ? 'rgba(147,197,253,0.95)' : 'hsl(var(--primary))',
+                  borderTop: '1px solid rgba(139,92,246,0.07)',
+                  color: '#a78bfa',
                 }}
               >
                 +{moreChapters} {isAs ? 'আৰু পাঠ' : 'more lessons'}
@@ -334,9 +307,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         </div>
       )}
 
+      {/* Action buttons */}
       <div
         className="grid grid-cols-2 gap-1.5 px-3 py-2.5 relative z-[2]"
-        style={{ borderTop: `1px solid ${hasWP ? 'rgba(255,255,255,0.08)' : 'hsl(var(--border) / 0.3)'}` }}
+        style={{ borderTop: '1px solid rgba(139,92,246,0.10)' }}
       >
         <button
           onClick={() => { onToggleSave(sub.id); try { Analytics.subjectBookmarked(sub.name, !isSaved); } catch {} }}
@@ -345,16 +319,14 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           style={
             isSaved
               ? {
-                  color: hasWP ? '#ffffff' : 'hsl(var(--primary))',
-                  background: hasWP ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.10)',
-                  border: hasWP ? '1px solid rgba(139,92,246,0.50)' : '1px solid rgba(139,92,246,0.25)',
-                  backdropFilter: hasWP ? 'blur(6px)' : 'none',
+                  color: '#a78bfa',
+                  background: 'rgba(139,92,246,0.15)',
+                  border: '1px solid rgba(139,92,246,0.35)',
                 }
               : {
-                  color: hasWP ? 'rgba(255,255,255,0.85)' : 'hsl(var(--muted-foreground))',
-                  background: hasWP ? 'rgba(255,255,255,0.08)' : 'transparent',
-                  border: hasWP ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(139,92,246,0.12)',
-                  backdropFilter: hasWP ? 'blur(6px)' : 'none',
+                  color: '#94a3b8',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)',
                 }
           }
           data-testid="subject-bookmark-button"
@@ -368,10 +340,9 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           onMouseEnter={handlePrefetch}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95 relative z-[3]"
           style={{
-            color: hasWP ? 'rgba(255,255,255,0.85)' : 'hsl(var(--muted-foreground))',
-            background: hasWP ? 'rgba(255,255,255,0.08)' : 'transparent',
-            border: hasWP ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(139,92,246,0.12)',
-            backdropFilter: hasWP ? 'blur(6px)' : 'none',
+            color: '#94a3b8',
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
           }}
         >
           <BookOpen size={12} />
@@ -386,9 +357,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
             background: hasDocument
               ? 'linear-gradient(135deg, #059669, #10b981)'
               : 'linear-gradient(135deg, #7c3aed, #8b5cf6)',
-            boxShadow: hasWP
-              ? '0 2px 12px rgba(139,92,246,0.40)'
-              : '0 2px 10px rgba(139,92,246,0.20)',
+            boxShadow: '0 2px 12px rgba(139,92,246,0.30)',
           }}
           data-testid="subject-ask-ai-button"
         >
@@ -402,10 +371,9 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           aria-label={`Share ${sub.name}`}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95 disabled:opacity-50"
           style={{
-            color: hasWP ? 'rgba(255,255,255,0.85)' : 'hsl(var(--muted-foreground))',
-            background: hasWP ? 'rgba(255,255,255,0.08)' : 'transparent',
-            border: hasWP ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(148,163,184,0.22)',
-            backdropFilter: hasWP ? 'blur(6px)' : 'none',
+            color: '#94a3b8',
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
           }}
           data-testid="subject-share"
         >
