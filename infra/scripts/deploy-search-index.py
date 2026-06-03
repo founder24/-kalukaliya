@@ -1,54 +1,44 @@
 """
-Deploy Azure Search Index Schema
-Usage: python deploy-search-index.py --endpoint <endpoint> --key <admin_key>
+Upload a search/index JSON to a GCS bucket for downstream GCP indexing pipelines.
+Usage: python deploy-search-index.py --bucket <gcs-bucket> --index-file infra/azure/search-index.json
 """
 import argparse
-import json
-import requests
 from pathlib import Path
+from google.cloud import storage
 
 
-def deploy_index(endpoint: str, admin_key: str, index_file: str = "infra/azure/search-index.json"):
-    """Deploy or update Azure Search index schema"""
-    
-    # Load index definition
+def upload_index_to_gcs(bucket_name: str, index_file: str = "infra/azure/search-index.json", dest_name: str = None) -> bool:
+    """Upload the index JSON to the specified GCS bucket.
+
+    This makes no assumptions about the downstream indexing process —
+    it simply stores the JSON where a GCP-based pipeline can consume it.
+    """
     index_path = Path(index_file)
     if not index_path.exists():
         print(f"✗ Index file not found: {index_file}")
         return False
-    
-    with open(index_path, "r") as f:
-        index_def = json.load(f)
-    
-    index_name = index_def["name"]
-    url = f"{endpoint}/indexes/{index_name}?api-version=2023-10-01-Preview"
-    
-    headers = {
-        "Content-Type": "application/json",
-        "api-key": admin_key
-    }
-    
-    print(f"Deploying index '{index_name}' to {endpoint}...")
-    
-    # Try to create or update the index
-    response = requests.put(url, json=index_def, headers=headers)
-    
-    if response.status_code in [200, 201]:
-        print(f"✓ Index '{index_name}' deployed successfully!")
+
+    dest_name = dest_name or index_path.name
+
+    client = storage.Client()
+    try:
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(dest_name)
+        blob.upload_from_filename(str(index_path))
+        print(f"✓ Uploaded '{index_file}' to gs://{bucket_name}/{dest_name}")
         return True
-    else:
-        print(f"✗ Failed to deploy index: {response.status_code}")
-        print(f"Response: {response.text}")
+    except Exception as e:
+        print(f"✗ Failed to upload to GCS: {e}")
         return False
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Deploy Azure Search Index")
-    parser.add_argument("--endpoint", required=True, help="Azure Search endpoint URL")
-    parser.add_argument("--key", required=True, help="Azure Search Admin Key")
+    parser = argparse.ArgumentParser(description="Upload search index JSON to GCS for GCP pipelines")
+    parser.add_argument("--bucket", required=True, help="GCS bucket name to upload the index into")
     parser.add_argument("--index-file", default="infra/azure/search-index.json", help="Path to index JSON file")
-    
+    parser.add_argument("--dest-name", default=None, help="Destination object name in the bucket")
+
     args = parser.parse_args()
-    
-    success = deploy_index(args.endpoint, args.key, args.index_file)
+
+    success = upload_index_to_gcs(args.bucket, args.index_file, args.dest_name)
     exit(0 if success else 1)
