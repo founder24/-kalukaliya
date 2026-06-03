@@ -1,0 +1,111 @@
+#!/bin/bash
+# Qwen Coder Setup Script for Syrabit Monorepo
+# Generated for: founder24/-kalukaliya
+
+set -e
+
+echo "🚀 Syrabit Setup for Qwen Coder"
+echo "================================"
+
+# Configuration
+REPO="founder24/-kalukaliya"
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"  # Will be provided by user
+PYTHON_VERSION="3.11"
+NODE_VERSION="22"
+
+# Verify token
+if [ -z "$GITHUB_TOKEN" ]; then
+    echo "❌ ERROR: GITHUB_TOKEN environment variable not set"
+    echo "Please set: export GITHUB_TOKEN=your_token_here"
+    exit 1
+fi
+
+echo "✅ GitHub Token verified"
+
+# 1. ENVIRONMENT SETUP
+echo "📦 Setting up environment variables..."
+cat > .env.local << EOF
+# Auto-generated for Qwen Coder
+GITHUB_TOKEN=$GITHUB_TOKEN
+REPO_NAME=$REPO
+NODE_ENV=development
+PYTHON_VERSION=$PYTHON_VERSION
+EOF
+
+echo "✅ .env.local created"
+
+# 2. PYTHON SETUP (Backend)
+echo "📦 Setting up Python environment..."
+python$PYTHON_VERSION --version
+python$PYTHON_VERSION -m venv venv
+
+# Activate venv
+source venv/bin/activate  # Unix/Linux/Mac
+# On Windows use: venv\Scripts\activate
+
+# Install backend dependencies
+cd apps/backend
+pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+pip install pytest pytest-cov pylint black flake8 isort mypy
+
+echo "✅ Backend dependencies installed"
+cd ../..
+
+# 3. NODE SETUP (Frontend + Edge)
+echo "📦 Setting up Node.js environment..."
+node --version
+npm install -g pnpm@10.26.1  # Match package.json requirement
+
+# Install all monorepo dependencies
+pnpm install
+
+echo "✅ Frontend and Edge dependencies installed"
+
+# 4. DOCKER SERVICES
+echo "📦 Starting local services (MongoDB, Redis)..."
+docker-compose up -d
+
+# Wait for services
+sleep 5
+
+# 5. DATABASE MIGRATIONS
+echo "📦 Running database migrations..."
+python infra/scripts/migrate-users.py
+
+echo "✅ Database initialized"
+
+# 6. VALIDATION
+echo "📦 Validating setup..."
+
+# Test Python
+cd apps/backend
+python -m pytest tests/ --collect-only > /dev/null 2>&1 && echo "✅ Backend tests ready" || echo "⚠️  Backend test collection failed"
+cd ../..
+
+# Test TypeScript
+cd apps/edge
+pnpm run build > /dev/null 2>&1 && echo "✅ Edge worker builds" || echo "⚠️  Edge build failed"
+cd ../..
+
+# Test Frontend types
+cd apps/frontend
+pnpm run typecheck > /dev/null 2>&1 && echo "✅ Frontend types OK" || echo "⚠️  Frontend type check failed"
+cd ../..
+
+echo ""
+echo "✅ SETUP COMPLETE!"
+echo ""
+echo "🎯 Next steps:"
+echo "   1. Source environment: source venv/bin/activate (Python)"
+echo "   2. Start backend:      cd apps/backend && uvicorn app.main:app --reload --port 8000"
+echo "   3. Start frontend:     cd apps/frontend && pnpm dev"
+echo "   4. Start edge:         cd apps/edge && pnpm dev"
+echo ""
+echo "📋 For code fixing:"
+echo "   - Lint backend:    pylint apps/backend/app"
+echo "   - Format Python:   black apps/backend/"
+echo "   - Lint frontend:   pnpm run lint"
+echo "   - Run tests:       cd apps/backend && pytest tests/ -v"
+echo ""
+echo "🔗 API Docs: http://localhost:8000/docs"

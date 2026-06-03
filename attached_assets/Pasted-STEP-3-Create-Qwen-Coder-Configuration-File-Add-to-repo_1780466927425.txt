@@ -1,0 +1,166 @@
+STEP 3: Create Qwen Coder Configuration File
+Add to repo:
+
+bash
+# Path: .qwencoder.yaml
+YAML
+name: "Syrabit Monorepo - Qwen Coder Configuration"
+version: "1.0"
+description: "Setup configuration for Qwen Coder to work with Syrabit AI platform"
+
+# Repository Information
+repository:
+  owner: "founder24"
+  name: "-kalukaliya"
+  url: "https://github.com/founder24/-kalukaliya.git"
+  branch: "main"
+
+# Required Tools
+requirements:
+  python: ">=3.11"
+  node: ">=22.0.0"
+  docker: true
+  docker_compose: true
+
+# Environment Variables
+environment:
+  GITHUB_TOKEN: "${GITHUB_TOKEN}"  # User must provide this
+  NODE_ENV: "development"
+  PYTHON_VERSION: "3.11"
+  PACKAGE_MANAGER: "pnpm"
+
+# Setup Commands (run in order)
+setup_commands:
+  - "bash .github/qwen-setup.sh"
+  - "source venv/bin/activate"
+
+# Development Servers
+dev_servers:
+  backend:
+    command: "cd apps/backend && uvicorn app.main:app --reload --port 8000"
+    port: 8000
+    health_check: "http://localhost:8000/docs"
+    language: "python"
+  
+  frontend:
+    command: "cd apps/frontend && pnpm dev"
+    port: 5000
+    language: "javascript"
+  
+  edge_worker:
+    command: "cd apps/edge && pnpm dev"
+    port: 8787
+    language: "typescript"
+
+# Code Quality Tools
+linting:
+  python:
+    - tool: "pylint"
+      config: ".pylintrc"
+      command: "pylint apps/backend/app"
+    - tool: "black"
+      command: "black apps/backend/"
+    - tool: "isort"
+      command: "isort apps/backend/"
+  
+  javascript:
+    - tool: "eslint"
+      command: "pnpm run lint"
+    - tool: "prettier"
+      command: "pnpm run format"
+  
+  typescript:
+    - tool: "tsc"
+      command: "pnpm run typecheck"
+
+# Testing
+testing:
+  backend:
+    command: "cd apps/backend && pytest tests/ -v --cov"
+    framework: "pytest"
+  
+  frontend:
+    command: "cd apps/frontend && pnpm run test"
+    framework: "vitest"
+  
+  edge:
+    command: "cd apps/edge && pnpm run test"
+    framework: "vitest"
+
+# Project Structure
+project_structure:
+  apps/backend:
+    type: "FastAPI REST API"
+    language: "python"
+    main_entry: "app/main.py"
+    key_paths:
+      - "app/api/v1/"
+      - "app/core/"
+      - "app/services/"
+      - "tests/"
+  
+  apps/frontend:
+    type: "React + Vite"
+    language: "typescript"
+    main_entry: "src/main.jsx"
+    key_paths:
+      - "src/components/"
+      - "src/pages/"
+      - "src/hooks/"
+  
+  apps/edge:
+    type: "Cloudflare Worker"
+    language: "typescript"
+    main_entry: "src/index.ts"
+    key_paths:
+      - "src/middleware/"
+      - "src/routes/"
+
+# Issue Fixing Commands
+issue_fixing:
+  security_scan: "pnpm audit"
+  dependency_update: "pnpm upgrade && pip install --upgrade -r apps/backend/requirements.txt"
+  type_check: "pnpm run typecheck && python -m mypy apps/backend/"
+  format_code: "black apps/backend/ && pnpm run format"
+  run_all_tests: "cd apps/backend && pytest tests/ && cd ../../apps/frontend && pnpm run test"
+
+# Monitoring & Observability
+monitoring:
+  logs_backend: "cloud logging via Cloud Run"
+  errors: "Sentry"
+  analytics: "PostHog"
+  uptime: "GitHub Actions (every 15 min)"
+
+# Deployment Info
+deployment:
+  backend:
+    platform: "Google Cloud Run"
+    min_instances: 1
+    region: "asia-south1"
+  frontend:
+    platform: "Cloudflare Pages"
+    url: "https://syrabit.ai"
+  edge:
+    platform: "Cloudflare Workers"
+    url: "https://api.syrabit.ai"
+
+# Docker Services
+services:
+  mongodb:
+    image: "mongo:latest"
+    port: 27017
+  redis:
+    image: "redis:latest"
+    port: 6379
+
+# Helpful Resources
+docs:
+  architecture: "docs/architecture.md"
+  api: "http://localhost:8000/docs (when running)"
+  readme: "README.md"
+Git add:
+
+bash
+git add .qwencoder.yaml
+git commit -m "Add Qwen Coder configuration"
+git push
