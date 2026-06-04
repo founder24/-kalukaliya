@@ -11,7 +11,6 @@ name: Deploy — Backend + Edge + Frontend
 on:
   push:
     branches: [main]
-  push:
     tags:
       - 'release/*'
       - 'v[0-9]*'
@@ -207,51 +206,81 @@ jobs:
       (needs.deploy-edge.result == 'success' || needs.deploy-edge.result == 'skipped') &&
       (needs.deploy-frontend.result == 'success' || needs.deploy-frontend.result == 'skipped')
     steps:
-      - name: Edge health (api.syrabit.ai)
+      - name: Edge health + backend reachability (api.syrabit.ai)
         run: |
-          for attempt in 1 2 3; do
-            HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+          # Retries up to 75 s total — enough for the edge KV health cache (30 s TTL)
+          # to refresh after a fresh backend deploy.
+          REACHABLE="false"
+          HTTP="000"
+          for attempt in 1 2 3 4 5; do
+            HTTP=$(curl -s -o /tmp/edge-health.json -w "%{http_code}" \
               "https://api.syrabit.ai/health" --max-time 15 2>/dev/null || echo "000")
-            if [[ "$HTTP" == "200" ]]; then
-              echo "✔ Edge healthy (attempt ${attempt})"
+            REACHABLE=$(python3 -c "
+import json
+try:
+  d = json.load(open('/tmp/edge-health.json'))
+  print(str(d.get('backend_reachable', False)).lower())
+except Exception:
+  print('false')
+" 2>/dev/null || echo "false")
+            echo "  Attempt ${attempt}/5 — HTTP ${HTTP}, backend_reachable=${REACHABLE}"
+            if [[ "$HTTP" == "200" && "$REACHABLE" == "true" ]]; then
+              echo "✔ Edge healthy, backend reachable"
               exit 0
             fi
-            echo "  Attempt ${attempt}/3 — HTTP ${HTTP}, retrying in 10s..."
-            sleep 10
+            [[ "$attempt" -lt 5 ]] && sleep 15
           done
-          echo "✘ Edge health failed after 3 attempts"
+          echo "✘ Edge health check failed after 5 attempts"
+          if [[ "$HTTP" == "200" && "$REACHABLE" != "true" ]]; then
+            echo "::error title=Backend unreachable via edge::Edge is up but backend_reachable=false."
+            echo "  Likely cause: BACKEND_URL Wrangler secret is stale or missing."
+            echo "  Fix:  npx wrangler secret put BACKEND_URL --env production"
+            echo "  Value: $(gcloud run services describe syrabit-backend \
+                   --region ${{ secrets.GCP_REGION }} \
+                   --project ${{ secrets.GCP_PROJECT_ID }} \
+                   --format 'value(status.url)' 2>/dev/null || echo '<run gcloud locally>')"
+          fi
           exit 1
 
       - name: Chat endpoint — English (stream)
         run: |
-          HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "https://api.syrabit.ai/api/v1/chat/stream" \
             -H "Content-Type: application/json" \
             -H "Origin: https://syrabit.ai" \
             -d '{"message":"hello","lang":"en"}' \
             --max-time 20 2>/dev/null || echo "000")
           echo "Chat EN → HTTP ${HTTP}"
-          # 401/403 = alive + auth working. Only fail on 5xx.
+          # 404 = edge proxy broken (backend unreachable). 5xx = server error.
+          # 401/403/429 = endpoint alive, auth/rate-limit working — all acceptable.
+          if [[ "$HTTP" -eq 404 ]]; then
+            echo "::error title=Broken proxy::Chat EN returned 404 — edge cannot reach backend."
+            exit 1
+          fi
           if [[ "$HTTP" -ge 500 ]]; then
             echo "✘ Chat EN server error (HTTP ${HTTP})"
             exit 1
           fi
-          echo "✔ Chat EN endpoint alive"
+          echo "✔ Chat EN endpoint alive (HTTP ${HTTP})"
 
       - name: Chat endpoint — Assamese (stream)
         run: |
-          HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "https://api.syrabit.ai/api/v1/chat/stream" \
             -H "Content-Type: application/json" \
             -H "Origin: https://syrabit.ai" \
             -d '{"message":"নমস্কাৰ","lang":"as"}' \
             --max-time 20 2>/dev/null || echo "000")
           echo "Chat AS → HTTP ${HTTP}"
+          if [[ "$HTTP" -eq 404 ]]; then
+            echo "::error title=Broken proxy::Chat AS returned 404 — edge cannot reach backend."
+            exit 1
+          fi
           if [[ "$HTTP" -ge 500 ]]; then
             echo "✘ Chat AS server error (HTTP ${HTTP})"
             exit 1
           fi
-          echo "✔ Chat AS endpoint alive"
+          echo "✔ Chat AS endpoint alive (HTTP ${HTTP})"
 
       - name: Frontend reachable (syrabit.ai)
         if: ${{ github.event.inputs.backend_only != 'true' }}

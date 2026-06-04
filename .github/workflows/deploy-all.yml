@@ -231,18 +231,36 @@ jobs:
     runs-on: ubuntu-latest
     needs: [deploy-backend, deploy-edge, deploy-frontend]
     steps:
-      - name: Edge Health
+      - name: Edge health + backend reachability
         run: |
-          for attempt in 1 2 3; do
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://api.syrabit.ai/health" --max-time 15)
-            if [ "$HTTP_STATUS" -eq 200 ]; then
-              echo "Edge: healthy (attempt $attempt)"
+          # Retry up to 75 s — allows edge KV health cache (30 s TTL) to refresh
+          # after a fresh backend deploy before we declare the proxy broken.
+          REACHABLE="false"
+          HTTP="000"
+          for attempt in 1 2 3 4 5; do
+            HTTP=$(curl -s -o /tmp/edge-health.json -w "%{http_code}" \
+              "https://api.syrabit.ai/health" --max-time 15 2>/dev/null || echo "000")
+            REACHABLE=$(python3 -c "
+import json
+try:
+  d = json.load(open('/tmp/edge-health.json'))
+  print(str(d.get('backend_reachable', False)).lower())
+except Exception:
+  print('false')
+" 2>/dev/null || echo "false")
+            echo "  Attempt ${attempt}/5 — HTTP ${HTTP}, backend_reachable=${REACHABLE}"
+            if [ "$HTTP" = "200" ] && [ "$REACHABLE" = "true" ]; then
+              echo "✔ Edge healthy, backend reachable"
               exit 0
             fi
-            echo "Attempt $attempt/3 failed (HTTP $HTTP_STATUS), retrying in 10s..."
-            sleep 10
+            [ "$attempt" -lt 5 ] && sleep 15
           done
-          echo "Edge health failed after 3 attempts"
+          echo "✘ Edge health check failed after 5 attempts"
+          if [ "$HTTP" = "200" ] && [ "$REACHABLE" != "true" ]; then
+            echo "::error title=Backend unreachable via edge::Edge is up but backend_reachable=false."
+            echo "  Likely cause: BACKEND_URL Wrangler secret is stale or missing."
+            echo "  Fix:  npx wrangler secret put BACKEND_URL --env production"
+          fi
           exit 1
 
       - name: Chat endpoint (English)
