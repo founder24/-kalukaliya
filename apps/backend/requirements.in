@@ -2,7 +2,7 @@
 # Test dependencies live in requirements-dev.in (pytest, pytest-asyncio, pytest-cov)
 # Run: bash scripts/compile-deps.sh   (or see that script for the full pip-compile command)
 
-aiohttp
+aiohttp>=3.14.0
 bcrypt
 beanie>=2.1.0
 fastapi
