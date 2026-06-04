@@ -1,0 +1,95 @@
+name: CI — Dependency Sync Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/backend/requirements.in'
+      - 'apps/backend/requirements.txt'
+      - 'scripts/compile-deps.sh'
+      - '.github/workflows/ci-deps.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/backend/requirements.in'
+      - 'apps/backend/requirements.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # JOB 1: Sync check — requirements.txt must match what pip-compile generates
+  # ---------------------------------------------------------------------------
+  sync-check:
+    name: requirements.txt in sync with requirements.in
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install pip-tools
+        run: pip install pip-tools --quiet
+
+      - name: Check requirements.txt is up to date
+        run: bash scripts/compile-deps.sh --check
+
+      - name: Show fix command on failure
+        if: failure()
+        run: |
+          echo ""
+          echo "::error title=requirements.txt out of sync::Run 'bash scripts/compile-deps.sh' locally, then commit both requirements.in and requirements.txt together."
+          echo ""
+          echo "Quick fix:"
+          echo "  pip install pip-tools"
+          echo "  bash scripts/compile-deps.sh"
+          echo "  git add apps/backend/requirements.in apps/backend/requirements.txt"
+          echo "  git commit -m 'chore: regenerate requirements.txt'"
+
+  # ---------------------------------------------------------------------------
+  # JOB 2: PyPI existence check — every pinned version must exist on PyPI
+  # ---------------------------------------------------------------------------
+  pypi-verify:
+    name: All pinned versions exist on PyPI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Strip hashes and run pip install --dry-run
+        run: |
+          cd apps/backend
+          sed 's/ *\\$//' requirements.txt \
+            | grep -v '^\s*--hash' \
+            | grep -v '^\s*#' \
+            | grep -v '^\s*$' \
+            > /tmp/requirements-nohash.txt
+
+          echo "Validating $(wc -l < /tmp/requirements-nohash.txt) pinned packages..."
+          pip install --dry-run --no-deps --quiet -r /tmp/requirements-nohash.txt
+
+      - name: Show fix command on failure
+        if: failure()
+        run: |
+          echo ""
+          echo "::error title=Version not on PyPI::One or more pinned versions in requirements.txt do not exist on PyPI."
+          echo ""
+          echo "To find the bad package:"
+          echo "  bash scripts/compile-deps.sh --verify"
+          echo ""
+          echo "To regenerate requirements.txt from requirements.in:"
+          echo "  pip install pip-tools"
+          echo "  bash scripts/compile-deps.sh"
+          echo "  git add apps/backend/requirements.in apps/backend/requirements.txt"
+          echo "  git commit -m 'chore: fix missing PyPI version'"

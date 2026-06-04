@@ -101,18 +101,31 @@ fi
 # MODE: check — compile to a temp file, diff against committed requirements.txt
 # =============================================================================
 if [[ "$MODE" == "check" ]]; then
-  TMP_OUT=$(mktemp)
-  echo -e "  Running pip-compile in check mode (no files written)..."
+  TMP_OUT=$(mktemp --suffix=.txt)
+  echo -e "  Running pip-compile into temp file (no committed files written)..."
+  echo -e "  Source: ${CYAN}${REQUIREMENTS_IN}${NC}"
+  echo ""
 
-  "${PIP_COMPILE_CMD[@]}" --dry-run --output-file "$TMP_OUT" 2>/dev/null \
-    || pip-compile --python-version 3.12 --strip-extras --no-header \
-        --output-file "$TMP_OUT" "$REQUIREMENTS_IN" >/dev/null 2>&1
+  # pip-compile --dry-run only prints to stdout without resolving properly.
+  # Instead, compile to a temp file then compare — this is the reliable approach.
+  if ! pip-compile \
+      --python-version 3.12 \
+      --strip-extras \
+      --no-header \
+      --quiet \
+      --output-file "$TMP_OUT" \
+      "$REQUIREMENTS_IN" 2>&1; then
+    rm -f "$TMP_OUT"
+    echo -e "${RED}✘  pip-compile FAILED — requirements.in has unresolvable constraints.${NC}"
+    echo -e "   Fix the constraint in requirements.in then re-run."
+    exit 1
+  fi
 
-  # Compare ignoring comment lines (timestamps differ)
+  # Compare ignoring comment lines (timestamps, regen commands differ)
   DIFF=$(diff \
-    <(grep -v '^\s*#' "$REQUIREMENTS_TXT" | sort) \
-    <(grep -v '^\s*#' "$TMP_OUT" | sort) \
-    || true)
+    <(grep -v '^\s*#' "$REQUIREMENTS_TXT" | grep -v '^\s*$' | sort) \
+    <(grep -v '^\s*#' "$TMP_OUT"          | grep -v '^\s*$' | sort) \
+    2>/dev/null || true)
   rm -f "$TMP_OUT"
 
   if [[ -z "$DIFF" ]]; then
@@ -121,10 +134,10 @@ if [[ "$MODE" == "check" ]]; then
   else
     echo -e "${RED}✘  requirements.txt is OUT OF SYNC with requirements.in${NC}"
     echo ""
-    echo -e "  Diff (requirements.txt vs what pip-compile would generate):"
-    echo "$DIFF" | head -40 | sed 's/^/    /'
+    echo -e "  Diff (committed vs what pip-compile generates now):"
+    echo "$DIFF" | head -50 | sed 's/^/    /'
     echo ""
-    echo -e "  Fix: run  ${CYAN}bash scripts/compile-deps.sh${NC}  then commit the result."
+    echo -e "  Fix: run  ${CYAN}bash scripts/compile-deps.sh${NC}  then commit both files."
     exit 1
   fi
 fi
