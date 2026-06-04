@@ -6,11 +6,13 @@ PASS=0
 FAIL=0
 ERRORS=()
 LIVE=false
+PERF=false
 
 # ── Parse flags ───────────────────────────────────────────────────────────────
 for arg in "$@"; do
   case $arg in
     --live) LIVE=true ;;
+    --perf) PERF=true ;;
   esac
 done
 
@@ -51,6 +53,35 @@ check_header() {
     ok "$label"
   else
     fail "$label  (header '$pattern' missing)"
+  fi
+}
+
+# ── Performance thresholds (milliseconds) ─────────────────────────────────────
+# TTFB = time_starttransfer in curl: time from request sent to first response byte.
+# Thresholds reflect expected CDN-cached or lightly-computed responses in production.
+PERF_THRESHOLD_HOMEPAGE=800       # / served from Cloudflare edge cache
+PERF_THRESHOLD_LIBRARY_BUNDLE=500 # /api/v1/content/library-bundle?slim=1 (cached)
+PERF_THRESHOLD_HEALTH=200         # /health  (no DB query)
+PERF_THRESHOLD_PLANS=300          # /api/v1/subscription/plans (tiny, cached)
+PERF_THRESHOLD_CHAT_STREAM=1500   # /api/v1/chat/stream 401 TTFB (edge→backend RTT)
+
+perf_check() {
+  # perf_check <label> <threshold_ms> <curl_args...>
+  # Measures TTFB (time_starttransfer) and fails if it exceeds the threshold.
+  local label="$1" threshold_ms="$2"; shift 2
+  local ttfb_s ttfb_ms
+  ttfb_s=$(curl -s -o /dev/null -w "%{time_starttransfer}" --max-time 15 "$@" 2>/dev/null)
+  # Convert fractional seconds → integer milliseconds (awk handles float arithmetic)
+  ttfb_ms=$(awk "BEGIN { printf \"%d\", $ttfb_s * 1000 }" 2>/dev/null)
+  # Guard: if curl failed or returned empty, treat as timeout
+  if [ -z "$ttfb_ms" ] || [ "$ttfb_ms" -le 0 ] 2>/dev/null; then
+    fail "$label → no response / curl error  (threshold ${threshold_ms}ms)"
+    return
+  fi
+  if [ "$ttfb_ms" -le "$threshold_ms" ]; then
+    ok "$label → TTFB ${ttfb_ms}ms  (≤${threshold_ms}ms)"
+  else
+    fail "$label → TTFB ${ttfb_ms}ms  (exceeded ${threshold_ms}ms threshold)"
   fi
 }
 
@@ -182,14 +213,85 @@ if [ "$LIVE" = true ]; then
 
 fi
 
+# ── 5. PERFORMANCE CHECKS (--perf only) ──────────────────────────────────────
+# Measures TTFB (time_starttransfer) on critical production paths.
+# Does NOT require --live; runs independently against syrabit.ai + api.syrabit.ai.
+# Override any threshold at call-time:
+#   PERF_THRESHOLD_HOMEPAGE=600 bash run_tests.sh --perf
+if [ "$PERF" = true ]; then
+
+  FE_PERF="https://syrabit.ai"
+  API_PERF="https://api.syrabit.ai"
+
+  # ── 5a. Homepage TTFB ──────────────────────────────────────────────────────
+  # Measures time to first byte for the root HTML document served by Cloudflare.
+  # Cloudflare should serve this from edge cache; >800 ms indicates a cache miss
+  # or an edge routing issue.
+  header "5a/4  PERF — HOMEPAGE TTFB  (threshold ${PERF_THRESHOLD_HOMEPAGE}ms)"
+  perf_check \
+    "GET /  (homepage, edge-cached HTML)" \
+    "$PERF_THRESHOLD_HOMEPAGE" \
+    -L -H "Accept: text/html" \
+    "$FE_PERF/"
+
+  # ── 5b. Library-bundle TTFB ────────────────────────────────────────────────
+  # /api/v1/content/library-bundle?slim=1 is the single most latency-sensitive
+  # API call: it blocks the /library page render and is preloaded on every page.
+  # The backend caches this in Redis; >500 ms means the cache is cold or Redis
+  # is missing, causing a full MongoDB aggregation on the critical path.
+  header "5b/4  PERF — LIBRARY-BUNDLE TTFB  (threshold ${PERF_THRESHOLD_LIBRARY_BUNDLE}ms)"
+  perf_check \
+    "GET /api/v1/content/library-bundle?slim=1  (Redis-cached)" \
+    "$PERF_THRESHOLD_LIBRARY_BUNDLE" \
+    -H "Origin: https://syrabit.ai" \
+    "$API_PERF/api/v1/content/library-bundle?slim=1"
+
+  # ── 5c. Backend health + subscription plans ────────────────────────────────
+  # /health has no DB I/O; >200 ms means the backend container itself is cold or
+  # the edge-to-backend path is degraded.
+  # /subscription/plans is tiny and should be served from memory/cache; >300 ms
+  # is a regression signal.
+  header "5c/4  PERF — BACKEND ENDPOINTS"
+  perf_check \
+    "GET /health  (no DB, memory only)" \
+    "$PERF_THRESHOLD_HEALTH" \
+    "$API_PERF/health"
+
+  perf_check \
+    "GET /api/v1/subscription/plans  (in-process cache)" \
+    "$PERF_THRESHOLD_PLANS" \
+    -H "Origin: https://syrabit.ai" \
+    "$API_PERF/api/v1/subscription/plans"
+
+  # ── 5d. Chat stream TTFB ───────────────────────────────────────────────────
+  # Sends an unauthenticated POST to /api/v1/chat/stream and measures the TTFB
+  # of the 401 rejection.  This exercises the full edge→backend path without
+  # requiring a real user token or triggering an AI call.
+  # >1500 ms means the edge proxy is slow to reach the backend or the backend
+  # startup/auth middleware is sluggish.
+  header "5d/4  PERF — CHAT STREAM TTFB  (threshold ${PERF_THRESHOLD_CHAT_STREAM}ms)"
+  perf_check \
+    "POST /api/v1/chat/stream  (unauthed → 401, measures edge→backend RTT)" \
+    "$PERF_THRESHOLD_CHAT_STREAM" \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -H "Origin: https://syrabit.ai" \
+    -d '{"message":"perf-probe","session_id":"perf-test"}' \
+    "$API_PERF/api/v1/chat/stream"
+
+fi
+
 # ── SUMMARY ───────────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════════════════"
-if [ "$LIVE" = true ]; then
-  echo "  RESULTS (unit + live):  ✅ $PASS passed   ❌ $FAIL failed"
-else
-  echo "  RESULTS (unit only):    ✅ $PASS passed   ❌ $FAIL failed"
-  echo "  Tip: run with --live to also test syrabit.ai + api.syrabit.ai"
+_mode="unit"
+[ "$LIVE" = true ] && _mode="$_mode + live"
+[ "$PERF" = true ] && _mode="$_mode + perf"
+echo "  RESULTS ($_mode):  ✅ $PASS passed   ❌ $FAIL failed"
+if [ "$LIVE" = false ] && [ "$PERF" = false ]; then
+  echo "  Tips:"
+  echo "    --live   also tests syrabit.ai + api.syrabit.ai HTTP checks"
+  echo "    --perf   measures TTFB on homepage, library-bundle, health, chat/stream"
 fi
 echo "════════════════════════════════════════════════════"
 if [ ${#ERRORS[@]} -gt 0 ]; then
