@@ -1,0 +1,331 @@
+ # Backend
+cd ~/syrabit/syrabit/apps/backend && pip install pytest pytest-asyncio anyio httpx -q && python3 -m pytest tests/ --tb=short -q
+# Edge worker
+cd ~/syrabit/syrabit/apps/edge && npm install typescript -q && npx vitest run --reporter=verbose
+cd ~/syrabit/syrabit/apps/edge && npm install typescript -q && npx vitest run --reporter=verbose
+
+# Frontend
+cd ~/syrabit/syrabit/apps/frontend && npx vitest run --reporter=verbose
+  WARNING: The scripts py.test and pytest are installed in '/home/founder/.local/bin' which is not on PATH.
+  Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+
+==================================== ERRORS ====================================
+________________ ERROR collecting tests/test_admin_endpoints.py ________________
+ImportError while importing test module '/home/founder/syrabit/syrabit/apps/backend/tests/test_admin_endpoints.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_admin_endpoints.py:8: in <module>
+    from fastapi.testclient import TestClient
+E   ModuleNotFoundError: No module named 'fastapi'
+_______________ ERROR collecting tests/test_content_publisher.py _______________
+ImportError while importing test module '/home/founder/syrabit/syrabit/apps/backend/tests/test_content_publisher.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_content_publisher.py:6: in <module>
+    from app.models.content import Board, Chapter, Class, Stream, Subject, Topic
+app/models/content.py:10: in <module>
+    from beanie import Document, PydanticObjectId
+E   ModuleNotFoundError: No module named 'beanie'
+________________ ERROR collecting tests/test_endpoints_audit.py ________________
+ImportError while importing test module '/home/founder/syrabit/syrabit/apps/backend/tests/test_endpoints_audit.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_endpoints_audit.py:11: in <module>
+    from fastapi.testclient import TestClient
+E   ModuleNotFoundError: No module named 'fastapi'
+_________________ ERROR collecting tests/test_latency_audit.py _________________
+ImportError while importing test module '/home/founder/syrabit/syrabit/apps/backend/tests/test_latency_audit.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_latency_audit.py:15: in <module>
+    from fastapi.testclient import TestClient
+E   ModuleNotFoundError: No module named 'fastapi'
+________________ ERROR collecting tests/test_pipeline_audit.py _________________
+ImportError while importing test module '/home/founder/syrabit/syrabit/apps/backend/tests/test_pipeline_audit.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pipeline_audit.py:12: in <module>
+    from fastapi.testclient import TestClient
+E   ModuleNotFoundError: No module named 'fastapi'
+_________________ ERROR collecting tests/test_rate_limiter.py __________________
+ImportError while importing test module '/home/founder/syrabit/syrabit/apps/backend/tests/test_rate_limiter.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_rate_limiter.py:5: in <module>
+    from fastapi import HTTPException
+E   ModuleNotFoundError: No module named 'fastapi'
+______________ ERROR collecting tests/test_service_degradation.py ______________
+ImportError while importing test module '/home/founder/syrabit/syrabit/apps/backend/tests/test_service_degradation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_service_degradation.py:12: in <module>
+    from app.config import settings
+app/config.py:1: in <module>
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+E   ModuleNotFoundError: No module named 'pydantic_settings'
+=============================== warnings summary ===============================
+../../../../.local/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /home/founder/.local/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: env
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR tests/test_admin_endpoints.py
+ERROR tests/test_content_publisher.py
+ERROR tests/test_endpoints_audit.py
+ERROR tests/test_latency_audit.py
+ERROR tests/test_pipeline_audit.py
+ERROR tests/test_rate_limiter.py
+ERROR tests/test_service_degradation.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 7 errors during collection !!!!!!!!!!!!!!!!!!!!
+1 warning, 7 errors in 1.35s
+
+up to date, audited 79 packages in 922ms
+
+24 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+npm warn allow-scripts 3 packages have install scripts not yet covered by allowScripts:
+npm warn allow-scripts   esbuild@0.27.3 (install: (install scripts present))
+npm warn allow-scripts   sharp@0.34.5 (install: (install scripts present))
+npm warn allow-scripts   workerd@1.20260601.1 (install: (install scripts present))
+npm warn allow-scripts
+npm warn allow-scripts Run `npm approve-scripts --allow-scripts-pending` to review, or `npm approve-scripts <pkg>` to allow.
+
+ RUN  v4.1.8 /home/founder/syrabit/syrabit/apps/edge
+
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > HYPOTHETICAL UNOPTIMIZED: separate KV reads for rate limit (4 ops per request)
+
+
+  HYPOTHETICAL unoptimized edge rate limit (4 KV ops): 23.5ms
+
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > ACTUAL flow: single KV window check (2 ops per request)
+  ACTUAL edge rate limit (2 KV ops): 10.1ms
+
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > Chat request total: hypothetical unoptimized vs actual full round-trip overhead
+
+  === LATENCY COMPARISON: Chat Request Overhead ===
+  HYPOTHETICAL (4 KV ops + backend rate limit):  47.0ms
+  ACTUAL (2 KV ops + edge trust header):         10.8ms
+  Improvement vs hypothetical:                   76.9%
+  =================================================
+
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > HYPOTHETICAL UNOPTIMIZED: separate KV reads for rate limit (4 ops per request) 29ms
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > ACTUAL flow: single KV window check (2 ops per request) 11ms
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > Chat request total: hypothetical unoptimized vs actual full round-trip overhead 59ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > checks CF Cache API for non-API GET requests 141ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > returns cached response immediately on cache hit 4ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > stores redirect response in cache on cache miss 3ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > does not cache API routes via CF Cache API 5ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > does not cache /health via CF Cache API 4ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > does not cache /assets/ via CF Cache API (served from R2) 3ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > reads health from ISR_CACHE_KV when KV has cached value 6ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > falls back to backend fetch when KV cache is empty 4ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > stores health result in ISR_CACHE_KV with 30s TTL after fresh fetch 7ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > handles KV read failure gracefully and falls back to backend 3ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > returns backend_reachable=false when backend is unreachable 3ms
+stderr | tests/contract.test.ts > Edge-to-Backend Contract Tests > Backend error handling > returns 503 when backend returns connection error
+Proxy error: Error: ECONNREFUSED
+    at /home/founder/syrabit/syrabit/apps/edge/tests/contract.test.ts:119:15
+    at Mock (file:///home/founder/syrabit/syrabit/apps/edge/node_modules/@vitest/spy/dist/index.js:332:34)
+    at proxyRequest (/home/founder/syrabit/syrabit/apps/edge/src/routes/api-proxy.ts:77:26)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /home/founder/syrabit/syrabit/apps/edge/tests/contract.test.ts:132:24
+    at file:///home/founder/syrabit/syrabit/apps/edge/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Chat POST proxy contract > proxies /api/v1/chat POST to backend with correct headers 47ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Chat POST proxy contract > passes X-Rate-Limited-By header when rate limit KV is available 2ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Backend error handling > returns 503 when backend returns connection error 11ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Backend error handling > passes through backend 5xx status codes 2ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Chat endpoint request/response contract shapes > validates expected chat request shape (message, lang, session_id) 3ms
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Batch Performance > 100 requests: actual flow uses fewer total KV operations than hypothetical unoptimized
+
+
+
+  === BATCH PERFORMANCE: 100 Requests ===
+  HYPOTHETICAL (100 * 4 KV ops): 464.3ms total
+  ACTUAL (100 * 2 KV ops):       232.4ms total
+  Improvement:                          50.0%
+  =======================================
+
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Batch Performance > 100 requests: actual flow uses fewer total KV operations than hypothetical unoptimized 698ms
+stdout | tests/latency-comparison.test.ts > Latency Comparison Summary > documents the optimization improvements
+
+
+
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │           EDGE WORKER LATENCY OPTIMIZATIONS                  │
+  ├─────────────────────────────────────────────────────────────┤
+  │ Metric                  │ Hypothetical │ Actual  │ Savings    │
+  ├─────────────────────────────────────────────────────────────┤
+  │ KV ops per request       │ 4 ops        │ 2 ops   │ 50% fewer │
+  │ Edge rate limit time     │ ~20ms        │ ~10ms   │ ~10ms     │
+  │ Backend rate limit       │ ~25ms        │ 0ms     │ ~25ms     │
+  │ Total overhead/req       │ ~45ms        │ ~10ms   │ ~78%      │
+  └─────────────────────────────────────────────────────────────┘
+  Note: "Hypothetical" = unoptimized baseline that was never shipped.
+
+stdout | tests/latency-comparison.test.ts > Unified Middleware vs Separate Middlewares > single unified middleware is faster than 3 separate middlewares
+
+  === UNIFIED vs SEPARATE MIDDLEWARES ===
+  Separate (3 middlewares):  30.3ms
+  Unified (1 middleware):    10.3ms
+  Improvement:               66.1%
+  ========================================
+
+stdout | tests/latency-comparison.test.ts > X-API-Version Header Injection > adding X-API-Version header has near-instant overhead (<2ms)
+
+  === X-API-VERSION HEADER INJECTION ===
+  Header injection time: 0.003ms
+  Target: < 2ms
+  =======================================
+
+ ✓ tests/latency-comparison.test.ts > Latency Comparison Summary > documents the optimization improvements 1ms
+ ✓ tests/latency-comparison.test.ts > Regression: Real checkRateLimit uses exactly 2 KV ops > checkRateLimit performs 1 KV.get + 1 KV.put for an allowed request 1ms
+ ✓ tests/latency-comparison.test.ts > Regression: Real checkRateLimit uses exactly 2 KV ops > checkRateLimit performs only 1 KV.get when limit is exceeded (no put) 1ms
+ ✓ tests/latency-comparison.test.ts > Unified Middleware vs Separate Middlewares > single unified middleware is faster than 3 separate middlewares 43ms
+ ✓ tests/latency-comparison.test.ts > X-API-Version Header Injection > adding X-API-Version header has near-instant overhead (<2ms) 1ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > CORS preflight (OPTIONS /api/v1/chat) returns 200 with CORS headers 36ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Health endpoint returns edge status directly 29ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > /robots.txt returns robots content 2ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > /assets/missing returns 404 1ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > /assets/found returns R2 object with correct headers 2ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Unknown path returns 404 1ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > JWT-protected endpoint without token gets passed through to backend 5ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Rate-limited chat POST with KV mock - allowed when under limit 8ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Rate-limited chat POST - blocked when over limit (returns 429) 9ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Request without RATE_LIMIT_KV binding skips rate limiting gracefully 3ms
+stderr | tests/api-proxy.test.ts > API Proxy - proxyRequest > Backend failure: returns 503
+Proxy error: Error: Connection refused
+    at /home/founder/syrabit/syrabit/apps/edge/tests/api-proxy.test.ts:95:13
+    at Mock (file:///home/founder/syrabit/syrabit/apps/edge/node_modules/@vitest/spy/dist/index.js:332:34)
+    at proxyRequest (/home/founder/syrabit/syrabit/apps/edge/src/routes/api-proxy.ts:77:26)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /home/founder/syrabit/syrabit/apps/edge/tests/api-proxy.test.ts:103:22
+
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - X-Rate-Limited-By header > rate limit check returns allowed=true for fresh user 3ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - X-Rate-Limited-By header > after rate limit passes, edge worker sets X-Rate-Limited-By header 37ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - X-Rate-Limited-By header > verifies index.ts source sets X-Rate-Limited-By after rate limit 2ms
+ ✓ tests/latency-audit.test.ts > Edge Proxy - Connection header > proxy does NOT set Connection: keep-alive on outbound request (Workers manage their own pooling) 8ms
+ ✓ tests/latency-audit.test.ts > Edge Proxy - Connection header > proxy forwards request to correct backend URL 2ms
+ ✓ tests/latency-audit.test.ts > Edge Proxy - Connection header > proxy source code does not set Connection: keep-alive on outbound 1ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - Performance > rate limit check completes quickly (under 10ms with mock KV) 1ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - Performance > rate limit only calls KV get and put (no other external services) 1ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Successful proxy: passes through response from backend 46ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Stream request: Content-Type is text/event-stream, no Content-Length 3ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Backend failure: returns 503 10ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > GCP IAM 401 HTML → normalized to 503 JSON 2ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > GCP IAM 403 HTML → normalized to 503 JSON 2ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > FastAPI JSON 401 passes through unchanged 1ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > FastAPI JSON 422 passes through unchanged 2ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Header injection: X-Real-IP and CF-Ray-ID are set 2ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > returns null when GOOGLE_SA_KEY is not set 4ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > returns null when GOOGLE_SA_KEY is empty string 1ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > fetches and returns an identity token when SA key is configured 38ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > caches the token and does not re-fetch on second call 2ms
+ ✓ tests/google-auth.test.ts > Google Auth - JWT creation > creates a JWT with correct header and payload structure 2ms
+ ✓ tests/google-auth.test.ts > Google Auth - base64url encoding > encodes bytes without padding 1ms
+ ✓ tests/google-auth.test.ts > Google Auth - base64url encoding > encodes strings correctly 1ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Non-bot UA returns null (no ISR handling) 50ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Bot UA with cache hit returns cached HTML with X-ISR-Cache: HIT 5ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Bot UA with cache miss proxies to backend, caches result, returns with X-ISR-Cache: MISS 3ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Bot UA when backend returns non-200 returns null 1ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Missing ISR_CACHE_KV binding returns null 1ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > allows request under limit 3ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > blocks request at limit 1ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > increments counter on each call 3ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > returns correct remaining count 1ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > includes resetAt timestamp 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > allows public paths without auth 42ms
+ ✓ tests/jwt.test.ts > JWT Middleware > allows auth signup without auth 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects missing Authorization header on protected paths 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > allows anonymous access to optional-auth chat path 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects expired tokens 7ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects refresh tokens used as access tokens 2ms
+ ✓ tests/jwt.test.ts > JWT Middleware > accepts valid access tokens 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects tokens signed with wrong secret 1ms
+ ✓ tests/cors.test.ts > CORS Middleware > returns correct headers for allowed origin 2ms
+ ✓ tests/cors.test.ts > CORS Middleware > returns default origin for disallowed origin 0ms
+ ✓ tests/cors.test.ts > CORS Middleware > allows app.syrabit.ai as valid origin 0ms
+ ✓ tests/cors.test.ts > CORS Middleware > applyCorsHeaders sets all headers on Headers object 29ms
+
+ Test Files  11 passed (11)
+      Tests  81 passed (81)
+   Start at  08:07:06
+   Duration  2.38s (transform 357ms, setup 233ms, import 363ms, tests 1.55s, environment 2ms)
+
+Need to install the following packages:
+vitest@4.1.8
+Ok to proceed? (y) Y
+vitest.config.js (1:340) [UNRESOLVED_IMPORT] Could not resolve 'vitest/config' in vitest.config.js
+   ╭─[ vitest.config.js:1:341 ]
+   │
+ 1 │ const __vite_injected_original_dirname = "/home/founder/syrabit/syrabit/apps/frontend";const __vite_injected_original_filename = "/home/founder/syrabit/syrabit/apps/frontend/vitest.config.js";const __vite_injected_original_import_meta_url = "file:///home/founder/syrabit/syrabit/apps/frontend/vitest.config.js";import { defineConfig } from 'vitest/config';
+   │                                                                                                                                                                                                                                                                                                                                                     ───────┬───────  
+   │                                                                                                                                                                                                                                                                                                                                                            ╰───────── Module not found, treating it as an external dependency
+───╯
+
+vitest.config.js (3:18) [UNRESOLVED_IMPORT] Could not resolve '@vitejs/plugin-react' in vitest.config.js
+   ╭─[ vitest.config.js:3:19 ]
+   │
+ 3 │ import react from '@vitejs/plugin-react';
+   │                   ───────────┬──────────  
+   │                              ╰──────────── Module not found, treating it as an external dependency
+───╯
+
+failed to load config from /home/founder/syrabit/syrabit/apps/frontend/vitest.config.js
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯ Startup Error ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'vitest' imported from /home/founder/syrabit/syrabit/node_modules/.vite-temp/vitest.config.js.timestamp-1780560443937-d7adcad658d9.mjs
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:768:81)
+    at moduleResolve (node:internal/modules/esm/resolve:859:18)
+    at defaultResolve (node:internal/modules/esm/resolve:992:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:691:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:708:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:740:52)
+    at #resolve (node:internal/modules/esm/loader:673:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:593:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+
+founder@cloudshell:~/syrabit/syrabit/apps/frontend (blissful-acumen-495019-t6)$  
+-bash: syntax error near unexpected token `blissful-acumen-495019-t6'95019-t6)$  
+^Cunder@cloudshell:~/syrabit/syrabit/apps/frontend (blissful-acumen-495019-t6)$  
+  under@cloudshell:~/syrabit/syrabit/apps/frontend (blissful-acumen-495019-t6)$  
+founder@cloudshell:~/syrabit/syrabit/apps/frontend (blissful-acumen-495019-t6)$  
+
+
+
+
+
+
+
+
+
+
