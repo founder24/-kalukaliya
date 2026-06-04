@@ -1,0 +1,109 @@
+
+founder@cloudshell:~/syrabit/syrabit (blissful-acumen-495019-t6)$ cd ~/syrabit/syrabit/apps/edge && npx wrangler deploy --env production
+
+ ⛅️ wrangler 4.97.0
+───────────────────
+[custom build] Running: npx tsc --noEmit
+[custom build] npm warn exec The following package was not found and will be installed: tsc@2.0.4
+[custom build] 
+[custom build] npm warn deprecated tsc@2.0.4: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+[custom build] 
+[custom build] 
+[custom build] 
+[custom build]                                                                                
+[custom build]                 This is not the tsc command you are looking for                
+[custom build]                                                                                
+[custom build] 
+[custom build] To get access to the TypeScript compiler, tsc, from the command line either:
+[custom build] 
+[custom build] - Use npm install typescript to first add TypeScript to your project before using npx
+[custom build] - Use yarn to avoid accidentally running code from un-installed packages
+[custom build] 
+✘ [ERROR] Error: Command failed with exit code 1: npx tsc --noEmit
+
+  npm warn exec The following package was not found and will be installed:
+  tsc@2.0.4
+  npm warn deprecated tsc@2.0.4: Package no longer supported. Contact Support at
+  https://www.npmjs.com/support for more info.
+  
+  
+  
+                  This is not the tsc command you are looking for
+  
+  
+  
+  
+  To get access to the TypeScript compiler, tsc, from the command line
+  either:
+  
+  - Use npm install typescript to first add TypeScript to your project
+  before using npx
+  - Use yarn to avoid accidentally running code from un-installed
+  packages
+      at makeError
+  (/home/founder/.npm/_npx/32026684e21afda6/node_modules/wrangler/wrangler-dist/cli.js:66649:18)
+      at handlePromise
+  (/home/founder/.npm/_npx/32026684e21afda6/node_modules/wrangler/wrangler-dist/cli.js:67116:29)
+      at process.processTicksAndRejections
+  (node:internal/process/task_queues:104:5)
+      at async runCommand
+  (/home/founder/.npm/_npx/32026684e21afda6/node_modules/wrangler/wrangler-dist/cli.js:142305:5)
+      at async runCustomBuild
+  (/home/founder/.npm/_npx/32026684e21afda6/node_modules/wrangler/wrangler-dist/cli.js:142319:5)
+      at async getEntry
+  (/home/founder/.npm/_npx/32026684e21afda6/node_modules/wrangler/wrangler-dist/cli.js:189391:3)
+      at async Object.handler
+  (/home/founder/.npm/_npx/32026684e21afda6/node_modules/wrangler/wrangler-dist/cli.js:237074:23)
+      at async
+  /home/founder/.npm/_npx/32026684e21afda6/node_modules/wrangler/wrangler-dist/cli.js:185004:26
+      at async Object.handler
+  (/home/founder/.npm/_npx/32026684e21afda6/node_modules/wrangler/wrangler-dist/cli.js:184953:7)
+  {
+    shortMessage: 'Command failed with exit code 1: npx tsc --noEmit',
+    command: 'npx tsc --noEmit',
+    escapedCommand: 'npx tsc --noEmit',
+    exitCode: 1,
+    signal: undefined,
+    signalDescription: undefined,
+    stdout: '\n' +
+      '\x1B[41m
+  \x1B[0m\n' +
+      '\x1B[41m\x1B[37m                This is not the tsc command you are
+  looking for                \x1B[0m\n' +
+      '\x1B[41m
+  \x1B[0m\n' +
+      '\n' +
+      'To get access to the TypeScript compiler, \x1B[34mtsc\x1B[0m, from the
+  command line either:\n' +
+      '\n' +
+      '- Use \x1B[1mnpm install typescript\x1B[0m to first add TypeScript to
+  your project \x1B[1mbefore\x1B[0m using npx\n' +
+      '- Use \x1B[1myarn\x1B[0m to avoid accidentally running code from
+  un-installed packages',
+    stderr: 'npm warn exec The following package was not found and will be
+  installed: tsc@2.0.4\n' +
+      'npm warn deprecated tsc@2.0.4: Package no longer supported. Contact
+  Support at https://www.npmjs.com/support for more info.',
+    failed: true,
+    timedOut: false,
+    isCanceled: false,
+    killed: false
+  }
+
+
+
+✘ [ERROR] Running custom build `npx tsc --noEmit` failed. There are likely more logs from your build command above.
+
+
+🪵  Logs were written to "/home/founder/.config/.wrangler/logs/wrangler-2026-06-04_07-56-54_597.log"
+founder@cloudshell:~/syrabit/syrabit/apps/edge (blissful-acumen-495019-t6)$ 
+
+
+
+
+
+
+
+
+
+

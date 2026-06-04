@@ -78,4 +78,4 @@ ALLOWED_ORIGIN = "https://syrabit.ai"
 # Override at runtime (highest priority) with a Wrangler secret:
 #   npx wrangler secret put BACKEND_URL --env production
 # Valid Cloud Run URL format: https://<service>-<hash>-<region-code>.a.run.app
-BACKEND_URL = "https://syrabit-backend-bl6wu3psza-el.a.run.app"
+BACKEND_URL = "https://syrabit-backend-851687450401.asia-south1.run.app"
