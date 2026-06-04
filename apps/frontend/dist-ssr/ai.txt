@@ -1,0 +1,37 @@
+# Syrabit.ai — AI Bot Discovery Manifest (RFC-style /ai.txt)
+# Task #287: aligned with /robots.txt (citation-driving answer bots
+# allowed; training-only crawlers blocked).
+# Curators of this file: Syrabit.ai Editorial Team <hello@syrabit.ai>
+# Last updated: 2026-05-03
+
+[allow]
+PerplexityBot
+Perplexity-User
+ChatGPT-User
+OAI-SearchBot
+
+[disallow]
+GPTBot
+ClaudeBot
+Claude-Web
+anthropic-ai
+Anthropic-AI
+Google-Extended
+Applebot-Extended
+CCBot
+Meta-ExternalAgent
+Bytespider
+Amazonbot
+Cohere-AI
+cohere-ai
+Diffbot
+
+[contact]
+mailto:hello@syrabit.ai
+
+[sitemap]
+https://syrabit.ai/sitemap-index.xml
+
+[llms]
+https://syrabit.ai/llms.txt
+https://syrabit.ai/llms-full.txt

@@ -1,0 +1,1 @@
+import{useState as c,useEffect as n}from"react";import{W as u}from"../entry-server.js";let s=null;function f(){const[e,a]=c(s);return n(()=>{s||fetch(`${u}/analytics/public-stats`).then(t=>t.json()).then(t=>{s=t,a(t)}).catch(()=>{})},[]),e}export{f as u};
