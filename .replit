@@ -67,4 +67,22 @@ build = ["bash", "-c", "cd apps/frontend && pnpm install && pnpm build:client"]
 [userenv]
 
 [userenv.development]
+
+[userenv.shared]
 APP_ENV = "development"
+MONGODB_DB_NAME = "syrabit_prod"
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_MINUTES = "60"
+REFRESH_TOKEN_EXPIRY_DAYS = "7"
+RATE_LIMIT_FREE_TIER = "30"
+TRUST_EDGE_AUTH = "false"
+VERTEX_LOCATION = "us-central1"
+VERTEX_GEMINI_MODEL = "gemini-2.5-flash"
+SARVAM_BASE_URL = "https://api.sarvam.ai/v1"
+SARVAM_MODEL = "sarvam-m"
+RAZORPAY_PLAN_ID = "plan_pro_monthly"
+RAZORPAY_CURRENCY = "INR"
+RESEND_FROM_ADDRESS = "noreply@syrabit.ai"
+RESEND_FROM_NAME = "Syrabit Education"
+POSTHOG_HOST = "https://app.posthog.com"
+ALLOWED_ORIGINS = "https://syrabit.ai,https://www.syrabit.ai,https://app.syrabit.ai,https://api.syrabit.ai"
