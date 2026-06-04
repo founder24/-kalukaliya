@@ -1,26 +1,170 @@
 version: 2
+
 updates:
+  # ===========================================================================
+  # PYTHON — apps/backend
+  # ===========================================================================
+  # Dependabot reads requirements.txt for pinned versions.
+  # After a PR is merged, run `bash scripts/compile-deps.sh` locally and commit
+  # the regenerated requirements.txt to keep it in sync with requirements.in.
+  # ===========================================================================
   - package-ecosystem: "pip"
     directory: "/apps/backend"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    target-branch: "main"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "fix(deps)"
+      prefix-development: "chore(deps-dev)"
+      include: "scope"
 
+    # ── Groups ─────────────────────────────────────────────────────────────
+    groups:
+      # Security patches land as a single PR, highest priority
+      python-security:
+        applies-to: security-updates
+        patterns: ["*"]
+        update-types: ["patch"]
+
+      # All non-security patch + minor bumps in one weekly PR
+      python-non-major:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+      # AI / ML stack — group together since they tend to move together
+      ai-stack:
+        applies-to: version-updates
+        patterns:
+          - "google-cloud-aiplatform"
+          - "google-cloud-discoveryengine"
+          - "google-cloud-storage"
+          - "google-auth"
+          - "google-genai"
+        update-types: ["minor", "patch"]
+
+    # ── Ignore rules ────────────────────────────────────────────────────────
+    ignore:
+      # MongoDB ODM stack — beanie/motor/pymongo are tightly coupled.
+      # Major bumps require manual migration testing; only allow patch + minor.
+      - dependency-name: "beanie"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "motor"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pymongo"
+        update-types: ["version-update:semver-major"]
+      # FastAPI major versions often have breaking Pydantic/Starlette changes
+      - dependency-name: "fastapi"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pydantic"
+        update-types: ["version-update:semver-major"]
+
+  # ===========================================================================
+  # NODE / PNPM — monorepo root
+  # ===========================================================================
+  # pnpm-lock.yaml lives at the repo root and covers all workspace packages
+  # (apps/frontend, apps/edge). A single entry here avoids duplicate PRs that
+  # the old per-directory entries caused.
+  # ===========================================================================
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    target-branch: "main"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript"
+    commit-message:
+      prefix: "fix(deps)"
+      prefix-development: "chore(deps-dev)"
+      include: "scope"
 
-  - package-ecosystem: "npm"
-    directory: "/apps/frontend"
-    schedule:
-      interval: "weekly"
+    # ── Groups ─────────────────────────────────────────────────────────────
+    groups:
+      # Security patches — single PR, merged fast
+      node-security:
+        applies-to: security-updates
+        patterns: ["*"]
+        update-types: ["patch"]
 
-  - package-ecosystem: "npm"
-    directory: "/apps/edge"
-    schedule:
-      interval: "weekly"
+      # Cloudflare Workers ecosystem — moves together
+      cloudflare:
+        applies-to: version-updates
+        patterns:
+          - "@cloudflare/*"
+          - "wrangler"
+          - "miniflare"
+          - "hono"
+        update-types: ["minor", "patch"]
 
+      # Vite + React build toolchain
+      frontend-toolchain:
+        applies-to: version-updates
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+          - "typescript"
+        update-types: ["minor", "patch"]
+
+      # All remaining non-major Node bumps
+      node-non-major:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+    # ── Ignore rules ────────────────────────────────────────────────────────
+    ignore:
+      # Wrangler major versions often require wrangler.toml schema changes
+      - dependency-name: "wrangler"
+        update-types: ["version-update:semver-major"]
+      # React major versions require app-wide migration
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+
+  # ===========================================================================
+  # GITHUB ACTIONS — .github/workflows
+  # ===========================================================================
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "tuesday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    target-branch: "main"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+
+    groups:
+      # Batch all action bumps into one PR per week
+      actions-non-major:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+      # Security patches to actions land immediately, not batched
+      actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
