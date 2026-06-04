@@ -1,10 +1,10 @@
 # Direct dependencies for the backend application.
 # Test dependencies live in requirements-dev.in (pytest, pytest-asyncio, pytest-cov)
-# Run: pip-compile --python-version 3.11 --generate-hashes --output-file=requirements.txt --strip-extras requirements.in
+# Run: bash scripts/compile-deps.sh   (or see that script for the full pip-compile command)
 
 aiohttp
 bcrypt
-beanie>=2.2.0
+beanie>=2.1.0
 fastapi
 google-auth[aiohttp]
 google-cloud-aiplatform
