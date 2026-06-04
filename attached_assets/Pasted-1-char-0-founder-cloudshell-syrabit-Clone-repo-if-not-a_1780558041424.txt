@@ -1,0 +1,998 @@
+1 (char 0)
+founder@cloudshell:~/syrabit$ # Clone repo (if not already done)
+cd ~/syrabit
+
+# Full 22-layer test (recommended)
+./scripts/fullstack-layer-test.sh --cloudshell
+
+# Just backend health (fastest check post-deploy)
+./scripts/fullstack-layer-test.sh --layer 3
+
+# Auth tests only (needs credentials)
+export TEST_USER_EMAIL="your@email.com"
+export TEST_USER_PASSWORD="yourpassword"
+./scripts/test-auth-live.sh
+
+# Chat tests only
+./scripts/test-chat-live.sh
+
+========================================================================
+  SYRABIT FULLSTACK LAYER-BY-LAYER CLOUD SHELL TEST (v3)
+  1000+ Assertions | 22 Layers (0-21) | 9 Pillars
+========================================================================
+  Date:      2026-06-04 07:24:20 UTC
+  Target:    https://api.syrabit.ai
+  Frontend:  https://syrabit.ai
+  Mode:      cloudshell
+========================================================================
+
+  Cloud Shell Tips:
+    - Authenticate: gcloud auth login
+    - Set project: gcloud config set project YOUR_PROJECT_ID
+    - Get JWT token: export TEST_JWT_TOKEN=$(gcloud auth print-identity-token)
+    - Results will be exported to fullstack-test-results.json
+
+
+== LAYER 0: Prerequisites & Config Validation ==
+
+    PASS curl is installed (8.5.0)
+    PASS jq is installed (jq-1.7)
+    PASS openssl is available (3.0.13)
+    PASS BASE_URL is valid URL format: https://api.syrabit.ai
+    PASS FRONTEND_URL is valid URL format: https://syrabit.ai
+    PASS BASE_URL uses HTTPS
+    PASS FRONTEND_URL uses HTTPS
+    PASS BASE_URL has no trailing slash
+    PASS FRONTEND_URL has no trailing slash
+    SKIP TEST_JWT_TOKEN not set (auth tests will use login flow)
+    SKIP Admin credentials not set (admin tests will be limited)
+    SKIP RAZORPAY_WEBHOOK_SECRET not set (webhook HMAC tests skipped)
+    SKIP CRON_SECRET not set
+    PASS Bash version 5.2.21(1)-release (>= 4.x required)
+    PASS dig available for DNS checks
+
+  Configuration:
+    BASE_URL:         https://api.syrabit.ai
+    FRONTEND_URL:     https://syrabit.ai
+    JWT Token:        not set
+    Turnstile Token:  not set
+    Admin Email:      not set
+    Admin Password:   not set
+    Webhook Secret:   not set
+    Cron Secret:      not set
+    Verbose:          0
+    Stress Test:      0
+    Export JSON:       1
+    Quick Mode:       0
+    Skip Auth:        0
+    Skip Admin:       0
+
+
+== LAYER 1: Frontend (P1 Cloudflare CDN) ==
+
+
+  1.1 Page Load & Response
+./scripts/fullstack-layer-test.sh: line 327: warning: command substitution: ignored null byte in input
+    PASS Frontend loads (HTTP 200, 654ms TTFB)
+    PASS Frontend returns exactly HTTP 200
+    PASS Frontend TTFB under 3s (654ms)
+    PASS Frontend response body is non-empty (7813 bytes)
+
+  1.2 Compression
+    PASS Compression enabled (br)
+./scripts/fullstack-layer-test.sh: line 327: warning: command substitution: ignored null byte in input
+    PASS Brotli compression supported
+./scripts/fullstack-layer-test.sh: line 327: warning: command substitution: ignored null byte in input
+    PASS Gzip compression fallback works
+
+  1.3 Security Headers
+    PASS HSTS header present (max-age=31536000; includeSubDomains; preload)
+    PASS X-Content-Type-Options: nosniff
+    PASS X-Frame-Options header present
+    PASS Content-Security-Policy header present
+    PASS Referrer-Policy header present
+    PASS Permissions-Policy header present
+    PASS Server header safe (cloudflare)
+
+  1.4 robots.txt
+    PASS robots.txt accessible (HTTP 200)
+    PASS robots.txt contains User-agent directive
+    PASS robots.txt references Sitemap
+    PASS robots.txt served as text/plain
+
+  1.5 Sitemap
+    PASS sitemap.xml accessible (HTTP 200)
+    PASS sitemap.xml contains valid XML structure
+
+  1.6 Favicon & Manifest
+./scripts/fullstack-layer-test.sh: line 327: warning: command substitution: ignored null byte in input
+    PASS favicon.ico accessible
+    PASS manifest.json accessible
+
+  1.7 HTML Content & Meta Tags
+    PASS Valid HTML document (doctype or html tag found)
+    WARN No <title> tag found
+    PASS Meta charset UTF-8 declared
+    PASS Meta viewport tag present
+    PASS Meta description present
+    PASS Open Graph meta tags found
+    PASS HTML lang attribute present
+
+  1.8 Structured Data
+    PASS JSON-LD structured data present
+    PASS Schema.org reference found
+
+  1.9 Caching
+    PASS Cache-Control on main page: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400
+    WARN No ETag or Last-Modified header
+    PASS Cloudflare cache status: DYNAMIC
+    WARN No Cache-Control on static asset
+
+  1.10 Error Pages
+    PASS SPA catches unknown routes (returns 200 with client routing)
+    PASS Error/fallback page has content body
+
+== LAYER 2: Edge Worker (P1 Cloudflare Workers) ==
+
+
+  2.1 Edge Health Endpoints
+    PASS Edge /health returns 200 (605ms)
+    PASS /health returns valid JSON
+    PASS /health includes backend_reachable field
+    PASS /health TTFB under 2s (605ms)
+    PASS Edge /health/full reachable (HTTP 200)
+    PASS /health/full returns valid JSON
+
+  2.2 CORS Configuration
+    PASS CORS: Access-Control-Allow-Origin present (https://syrabit.ai)
+    PASS CORS: Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+    PASS CORS: Allow-Headers present
+    PASS CORS: Max-Age header present (preflight caching)
+    PASS CORS preflight returns 200
+    PASS CORS: Invalid origin not echoed back
+    WARN No CORS headers on /health
+
+  2.3 Bot Detection
+    PASS Googlebot request not blocked (HTTP 200)
+    PASS Bingbot request not blocked
+    PASS Scraper bot handled (HTTP 200)
+    PASS Empty User-Agent handled (HTTP 200)
+    PASS Normal browser request succeeds
+
+  2.4 Rate Limit Headers
+    PASS Rate limit headers present on chat endpoint
+    PASS Rate limit remaining counter present
+    PASS Rate limit reset time present
+
+  2.5 Method Enforcement
+    WARN PUT /health returns 200 (method not enforced)
+    WARN DELETE /health returns 200 (method not enforced)
+    WARN PATCH /health returned HTTP 200
+    PASS GET /api/v1/chat/ correctly rejected (HTTP 405)
+
+  2.6 Security Headers on API
+    PASS API: X-Content-Type-Options present
+    PASS API: X-Frame-Options present
+    PASS API: HSTS present
+    PASS API: X-Powered-By not exposed
+
+  2.7 Error Response Format
+    PASS Unknown API path returns 404
+    PASS 404 error returns JSON body
+    PASS Error response has 'detail' field
+    PASS Error Content-Type is application/json
+
+  2.8 Path Traversal Protection
+    WARN Path traversal returned HTTP 302
+    PASS Double-encoded traversal blocked (HTTP 404)
+    PASS Null byte path rejected (HTTP 400)
+
+== LAYER 3: Backend Health (P2 Cloud Run + P4 + P5) ==
+
+
+  3.1 Basic Health
+    PASS GET /health returns 200
+    PASS /health response is valid JSON
+    PASS /health status: healthy
+    PASS /health TTFB under 1s (73ms)
+    PASS /health response size reasonable (109 bytes)
+
+  3.2 Deep Health
+    PASS GET /health/deep returns 200 (all services healthy)
+    PASS /health/deep response is valid JSON
+    WARN MongoDB status: {
+  "status": "healthy",
+  "latency_ms": "N/A"
+}
+    WARN Redis status: {
+  "status": "healthy"
+}
+    WARN Vertex AI status: {
+  "status": "healthy",
+  "project_id": "not-configured"
+}
+    WARN Vertex Search status: {
+  "status": "unhealthy",
+  "error": "Search client not configured"
+}
+    PASS /health/deep TTFB under 5s (340ms)
+
+  3.3 Circuit Breakers
+    PASS GET /health/circuit-breakers returns 200
+    PASS Circuit breakers response is JSON
+    PASS Vertex AI CB state: CLOSED
+    PASS Sarvam AI CB state: CLOSED
+    PASS Vertex Search CB state: CLOSED
+
+  3.4 Service Dependencies
+    PASS API v1 root responds (HTTP 404)
+    PASS Health endpoint Content-Type: application/json
+    PASS Health endpoint idempotent (consistent 200)
+    PASS Health respects Accept: application/json
+    SKIP Health does not include uptime field
+    SKIP Health does not include version field
+    PASS Health includes timestamp
+    PASS Health response has no obvious sensitive data
+
+  3.5 Degraded Health Reporting
+    PASS Health status is a valid value: healthy
+    SKIP Not degraded; config_error_count check skipped
+    SKIP Not degraded; sensitive keyword check skipped
+    SKIP Not degraded; token/key exposure check skipped
+    WARN Health service field: syrabit-edge (expected syrabit-backend)
+    PASS Health response does not expose raw error messages
+    PASS Health response size reasonable for reporting (109 bytes)
+
+== LAYER 4: Authentication (JWT Flow) ==
+
+
+  4.1 Signup Endpoint
+    PASS Signup returns 200 (success)
+    PASS Signup response is JSON
+    PASS Signup without email returns 422 (validation error)
+    PASS Signup without password returns 422
+    PASS Signup with invalid email returns 422
+    PASS Signup with weak password rejected (422)
+    PASS Signup with empty body returns 422
+    WARN SQL injection probe returned HTTP 403
+
+  4.2 Login Endpoint
+    PASS Login with invalid body returns 422
+    PASS Login with wrong credentials returns 401
+    PASS Login without Content-Type handled (422)
+    PASS Login with empty email rejected (422)
+    PASS Login with empty password rejected (401)
+    PASS Login with 300+ char email rejected (422)
+    SKIP Admin login skipped (no credentials)
+
+  4.3 Token Validation
+    PASS Invalid JWT returns 401
+    WARN Malformed auth header returned HTTP 200
+    WARN Empty Bearer returned HTTP 200
+    PASS Expired-like token returns 401
+    PASS XSS in auth header rejected (401)
+
+  4.4 Refresh Token
+    PASS Refresh without token returns 422
+    PASS Refresh with invalid token returns 401
+
+  4.5 Forgot Password
+    PASS Forgot password returns 200 (no email existence leak)
+    PASS Forgot password does not leak email existence (returns 200)
+    PASS Forgot password with empty email returns 422
+
+  4.6 Logout
+    PASS Logout without auth returns 401
+    PASS Logout with invalid token returns 401
+
+  4.7 Security Probes
+    PASS CRLF injection in login email handled (422)
+    PASS Null byte in email handled (422)
+    PASS Extra field (role escalation) in login rejected (401)
+    PASS Very large password handled (401)
+    PASS GET /auth/login returns 405 (POST only)
+    PASS GET /auth/signup returns 405 (POST only)
+
+== LAYER 5: Chat Endpoints (P6 Vertex AI + P7 Sarvam AI) ==
+
+
+  5.1 Chat POST (Non-streaming) - Unauthenticated
+    PASS Anon chat returns 200
+    PASS Chat response is valid JSON
+    PASS Chat response has text content
+    PASS Chat without message returns 422 (validation)
+    PASS Chat with empty message returns 422
+    PASS Whitespace-only message handled (422)
+    PASS Very long message handled (422)
+    PASS Invalid language handled (200)
+
+  5.2 Chat - Security Probes
+    PASS XSS in chat message handled safely (400)
+    PASS XSS payload not reflected in response
+    WARN SQL injection chat returned HTTP 403
+    WARN Path traversal chat returned HTTP 403
+    PASS Unicode/emoji message handled (200)
+    PASS Assamese chat returns 200 (Sarvam AI route)
+    WARN Rate limited
+
+  5.3 Chat - Authenticated
+    SKIP Auth English chat (no token)
+    SKIP Auth chat response fields (no token)
+    SKIP Auth chat model_used (no token)
+    SKIP Auth chat latency_ms (no token)
+    SKIP Auth chat sources (no token)
+    SKIP Auth Assamese chat (no token)
+    SKIP Chat with conversation_id (no token)
+
+  5.4 Streaming Endpoint
+    WARN Stream endpoint rate limited
+    SKIP Stream Content-Type (rate limited)
+    PASS Stream without message returns 422
+
+  5.5 Chat History
+    WARN Chat history accessible without auth
+    SKIP Chat history with auth (no token)
+    SKIP Chat history JSON (no token)
+    WARN Chat conversations accessible without auth
+    SKIP Chat conversations with auth (no token)
+
+  5.6 Chat Input Validation (Additional)
+    PASS Numeric message handled (422)
+    PASS Array message rejected (422)
+    PASS Object message rejected (422)
+    PASS Boolean message handled (422)
+    PASS Null message rejected (422)
+    WARN Rate limited
+    PASS Invalid JSON body rejected (422)
+    PASS GET /chat/ returns 405 (POST only)
+    PASS PUT /chat/ returns 405
+    PASS DELETE /chat/ returns 405
+
+  5.7 Provider Routing Validation
+    SKIP 5.7 Provider routing: no AUTH_TOKEN
+    SKIP 5.7 English Gemini check: no AUTH_TOKEN
+    SKIP 5.7 English exclusion check: no AUTH_TOKEN
+    SKIP 5.7 Assamese Sarvam check: no AUTH_TOKEN
+    SKIP 5.7 Assamese exclusion check: no AUTH_TOKEN
+
+  5.8 Streaming Provider Check
+    SKIP 5.8 Streaming English: no AUTH_TOKEN
+    SKIP 5.8 Streaming English content-type: no AUTH_TOKEN
+    SKIP 5.8 Streaming English data: no AUTH_TOKEN
+    SKIP 5.8 Streaming Assamese: no AUTH_TOKEN
+    SKIP 5.8 Streaming Assamese content-type: no AUTH_TOKEN
+    SKIP 5.8 Streaming Assamese data: no AUTH_TOKEN
+
+== LAYER 6: RAG / Hybrid Search (P3 Vertex AI Search) ==
+
+
+  6.1 RAG Context in Chat Response
+    SKIP RAG query (no auth token)
+    SKIP RAG sources (no auth token)
+    SKIP Source title (no token)
+    SKIP Source score (no token)
+    SKIP Source doc_id (no token)
+    SKIP Context chunks (no token)
+
+  6.2 Circuit Breaker Status
+    SKIP Vertex Search CB state unknown: CLOSED
+    PASS Vertex Search failures low: 0
+
+  6.3 RAG Fallback Behavior
+    SKIP Non-academic fallback (no token)
+    SKIP Fallback content (no token)
+    SKIP Assamese RAG query (no token)
+
+  6.4 Search Quality Indicators
+    SKIP Search used flag (no token)
+    SKIP RAG latency (no token)
+    SKIP vertex_search not in deep health
+
+== LAYER 7: Content & Knowledge (P4 MongoDB) ==
+
+
+  7.1 Library Bundle
+    PASS Library bundle returns 200 (public)
+    PASS Library bundle is valid JSON
+    PASS Library bundle has 3 board(s)
+    PASS Library bundle TTFB under 5s (574ms)
+    PASS Library bundle slim mode returns 200
+    PASS Slim bundle size: 77412 bytes
+    PASS Library bundle accessible without auth
+    PASS Library bundle has Cache-Control header
+
+  7.1b Library Bundle API Alignment
+    PASS Slim bundle returns valid JSON (200)
+    PASS Slim bundle has boards array (3 boards)
+    PASS First board has id field: 6a19e0d64d8e6ddb2deb7d01
+    PASS First board has name field: AHSEC
+    PASS First board has slug field: ahsec
+    PASS First board has classes array
+    PASS Full bundle returns valid JSON (200)
+    PASS Full bundle has subjects with chapters (71)
+    PASS Library bundle with boot=SEBA returns 200
+    PASS Slim bundle (77412 bytes) <= full bundle (443017 bytes)
+    PASS Slim bundle has Cache-Control header
+    PASS Full bundle has Cache-Control header
+    PASS Slim and full bundle have same board count (3)
+    PASS Slim bundle TTFB under 5s (427ms)
+    PASS Bundle Content-Type is application/json
+
+  7.2 Content Render
+    PASS Content render returns 404 (content not found)
+    PASS Invalid board returns 400
+    PASS Invalid class returns 404
+    PASS Render path traversal blocked (404)
+    WARN Encoded render path returned HTTP 400
+
+  7.3 Content by Slug
+    PASS Content slug returns 404 (not found)
+    PASS Non-existent slug returns 404
+    PASS XSS slug rejected (404)
+    PASS Very long slug handled (404)
+
+  7.4 Subject Chapters
+    WARN Subject chapters returned HTTP 500
+    SKIP Subject chapters JSON
+    SKIP Chapter count
+    WARN Invalid subject returned HTTP 500
+    PASS POST on subjects returns 405 (GET only)
+
+  7.5 Content Validation & Edge Cases
+    PASS Empty path segments handled (404)
+    PASS Content API returns application/json
+    WARN HEAD on library-bundle returned HTTP 0
+    PASS Extra query params ignored gracefully
+    WARN SQL injection slug returned HTTP 0
+
+== LAYER 8: Subscription & Payments (P8 Razorpay) ==
+
+
+  8.1 Subscription Plans
+    PASS Subscription plans returns 200 (public)
+    PASS Plans response is valid JSON
+    PASS Plans include free tier
+    PASS Plans include pro/premium tier
+    PASS Plans endpoint accessible without auth
+    WARN Plans missing Cache-Control
+    PASS Plans Content-Type: application/json
+
+  8.2 Subscription Status
+    PASS Subscription status requires auth (401)
+    SKIP Subscription status with auth (no token)
+    SKIP Subscription tier (no token)
+    SKIP Subscription limit (no token)
+    PASS Subscription status rejects invalid token (401)
+
+  8.3 Create Order
+    PASS Create order requires auth (401)
+    SKIP Create order with auth (no token)
+    SKIP Create order missing plan_id (no token)
+    SKIP Create order invalid plan (no token)
+
+  8.4 Verify Payment
+    PASS Payment verify requires auth (401)
+    SKIP Verify invalid signature (no token)
+    SKIP Verify empty body (no token)
+    SKIP Signature tampering (no token)
+
+  8.5 Payment History
+    PASS Payment history requires auth (401)
+    SKIP Payment history with auth (no token)
+    SKIP Payment history JSON (no token)
+
+  8.6 Payment Recover & Credit Topup
+    PASS Payment recover requires auth (401)
+    PASS Credit topup requires auth (401)
+    SKIP Credit topup with auth (no token)
+    SKIP Negative credit amount (no token)
+    SKIP Zero credit amount (no token)
+    SKIP Large credit amount (no token)
+    SKIP Payment recover with auth (no token)
+
+  8.7 Payment Method Enforcement
+    PASS GET on create-order rejected (405)
+    PASS GET on verify rejected (405)
+    PASS DELETE on payment history rejected (405)
+
+== LAYER 9: Webhook Pipeline (P8 Razorpay) ==
+
+
+  9.1 Webhook Signature Validation
+    PASS Webhook without signature returns 400
+    PASS Invalid webhook signature rejected (400)
+    PASS Empty webhook signature rejected (400)
+    PASS Malformed webhook body rejected (400)
+    PASS Empty webhook body rejected (400)
+
+  9.2 HMAC Signature Test
+    SKIP Valid HMAC test (no secret or no openssl)
+    SKIP Tampered payload test (no secret)
+    SKIP Wrong HMAC key test (no secret)
+
+  9.3 Replay & Idempotency
+    PASS Duplicate webhook rejected (400)
+
+  9.4 Event Types
+    PASS payment.captured event handled (400)
+    PASS subscription.activated event handled (400)
+    PASS subscription.cancelled event handled (400)
+    PASS Unknown event type handled (400)
+
+  9.5 Webhook Method & Headers
+    PASS GET on webhook rejected (405)
+    PASS PUT on webhook rejected (405)
+    PASS Webhook error response is JSON
+    PASS Large webhook payload handled (400)
+
+== LAYER 10: Conversations API ==
+
+
+  10.1 List Conversations
+    PASS Conversations list requires auth (401)
+    SKIP Conversations list with auth (no token)
+    SKIP Conversations JSON (no token)
+    SKIP Conversations structure (no token)
+    SKIP Conversations pagination (no token)
+    SKIP Invalid pagination (no token)
+    SKIP Large limit (no token)
+
+  10.2 Anonymous Conversations
+    PASS Anon conversations returns 200
+    PASS Anon conversations is JSON
+    PASS Anon without x-anon-id returns 400
+    PASS Empty anon-id rejected (400)
+    PASS Very long anon-id handled (400)
+    PASS XSS in anon-id handled (400)
+
+  10.3 Conversation CRUD
+    SKIP PATCH conversation (no token)
+    SKIP PATCH empty title (no token)
+    SKIP DELETE conversation (no token)
+    SKIP DELETE without auth (no token)
+    SKIP PATCH without auth (no token)
+    SKIP Invalid conversation ID (no token)
+
+  10.4 Method Enforcement
+    PASS POST on conversations list rejected (405)
+    PASS PUT on conversations rejected (405)
+
+== LAYER 11: Feedback ==
+
+
+  11.1 Submit Feedback
+    PASS Feedback submit requires auth (401)
+    SKIP Feedback submit with auth (no token)
+    SKIP Feedback JSON response (no token)
+    SKIP Feedback status (no token)
+    SKIP Rating 1 (no token)
+    SKIP Rating 0 (no token)
+    SKIP Rating 6 (no token)
+    SKIP Negative rating (no token)
+    SKIP Missing rating (no token)
+    SKIP Missing message_id (no token)
+    SKIP Empty body (no token)
+    SKIP XSS comment (no token)
+    SKIP Long comment (no token)
+    SKIP Float rating (no token)
+    SKIP String rating (no token)
+
+  11.2 Feedback Stats
+    PASS Feedback stats requires auth (401)
+    SKIP Feedback stats with auth (no token)
+    SKIP Feedback stats JSON (no token)
+
+  11.3 Method Enforcement
+    PASS GET on feedback submit rejected (405)
+    PASS DELETE on feedback rejected (405)
+    PASS POST on feedback stats rejected (405)
+
+== LAYER 12: Admin Endpoints ==
+
+
+  12.1 Admin Auth Enforcement (No Token)
+    PASS GET /admin/dashboard requires auth (401)
+    PASS GET /admin/users requires auth (401)
+    PASS GET /admin/analytics requires auth (401)
+    WARN GET /admin/content not found (404)
+    PASS GET /admin/settings requires auth (401)
+    WARN GET /admin/security not found (404)
+    WARN GET /admin/seo not found (404)
+    PASS GET /admin/notifications requires auth (401)
+    WARN GET /admin/revenue not found (404)
+    WARN GET /admin/knowledge not found (404)
+    WARN GET /admin/translate not found (404)
+    PASS GET /admin/conversations requires auth (401)
+    PASS GET /admin/dead-letters requires auth (401)
+    WARN GET /admin/alerts not found (404)
+    WARN GET /admin/ai not found (404)
+
+  12.2 Admin Auth Enforcement (Invalid Token)
+    PASS Admin dashboard rejects invalid token (401)
+    PASS Admin users rejects non-admin JWT (401)
+
+  12.3 Admin with Valid Token
+    SKIP Admin dashboard (no admin token/cookie)
+    SKIP Dashboard JSON (no admin token/cookie)
+    SKIP Admin users (no admin token/cookie)
+    SKIP Users JSON (no admin token/cookie)
+    SKIP Admin analytics (no admin token/cookie)
+    SKIP Admin content (no admin token/cookie)
+    SKIP Admin settings (no admin token/cookie)
+    SKIP Admin security (no admin token/cookie)
+    SKIP Admin revenue (no admin token/cookie)
+    SKIP Admin knowledge (no admin token/cookie)
+
+  12.4 Admin Security Probes
+    WARN SQL injection admin returned HTTP 0
+    WARN Admin path traversal returned HTTP 302
+    PASS XSS in admin query blocked (401)
+    SKIP Privilege escalation test (no non-admin token)
+
+  12.5 Admin Method Enforcement
+    PASS DELETE on admin dashboard rejected (405)
+    PASS PUT on admin users rejected (405)
+
+== LAYER 13: SEO & Indexing ==
+
+
+  13.1 Sitemap XML
+    PASS Sitemap.xml returns 200
+    PASS Sitemap contains valid XML
+    PASS Sitemap Content-Type: application/xml
+    PASS Sitemap contains <loc> URL entries
+    PASS Sitemap URLs are HTTPS (or no HTTP found)
+    PASS Sitemap includes <lastmod> timestamps
+    WARN Sitemap missing changefreq/priority
+    WARN Sitemap-index not found
+    SKIP Sitemap-index structure
+
+  13.2 IndexNow
+    WARN IndexNow returned HTTP 422
+    SKIP IndexNow with auth (no token)
+    PASS IndexNow invalid URL handled (422)
+    PASS IndexNow empty body handled (422)
+
+  13.3 Frontend SEO Assets
+    PASS Frontend robots.txt accessible
+    PASS Canonical URL present in HTML
+    WARN No Twitter Card meta tags
+    PASS Hreflang tag present (multilingual SEO)
+    PASS Schema.org type found in structured data
+
+  13.4 Method Enforcement
+    PASS POST on sitemap rejected (405)
+    PASS DELETE on sitemap rejected (405)
+    PASS GET on indexnow/submit rejected (405)
+
+== LAYER 14: Education Endpoints (501 Stubs) ==
+
+
+  14.1 Quiz Endpoint
+    PASS Quiz endpoint returns 501 (Not Implemented)
+    PASS Quiz 501 response is JSON
+    PASS Quiz has message: This feature is coming soon
+    PASS Quiz/math endpoint responds (501)
+    PASS Quiz invalid subject handled (501)
+    PASS Quiz XSS subject handled (501)
+
+  14.2 Notes Endpoint
+    PASS Notes endpoint returns 501 (Not Implemented)
+    PASS Notes response is JSON
+    PASS Notes/english responds (501)
+    PASS Notes path traversal blocked (404)
+
+  14.3 Flashcards Endpoint
+    PASS Flashcards returns 501 (Not Implemented)
+    PASS Flashcards response is JSON
+    PASS Flashcards/history responds (501)
+
+  14.4 Method Enforcement
+    PASS POST on quiz handled (405)
+    PASS DELETE on notes handled (405)
+    PASS PUT on flashcards handled (405)
+
+== LAYER 15: Rate Limiting (P5 Upstash Redis) ==
+
+
+  15.1 Rate Limit Headers Presence
+    PASS X-RateLimit-Limit present: 30
+    PASS X-RateLimit-Remaining present: 0
+
+========================================================================
+  SYRABIT FULLSTACK LAYER-BY-LAYER CLOUD SHELL TEST (v3)
+  1000+ Assertions | 22 Layers (0-21) | 9 Pillars
+========================================================================
+  Date:      2026-06-04 07:25:57 UTC
+  Target:    https://api.syrabit.ai
+  Frontend:  https://syrabit.ai
+  Layer:     3
+========================================================================
+
+== LAYER 0: Prerequisites & Config Validation ==
+
+    PASS curl is installed (8.5.0)
+    PASS jq is installed (jq-1.7)
+    PASS openssl is available (3.0.13)
+    PASS BASE_URL is valid URL format: https://api.syrabit.ai
+    PASS FRONTEND_URL is valid URL format: https://syrabit.ai
+    PASS BASE_URL uses HTTPS
+    PASS FRONTEND_URL uses HTTPS
+    PASS BASE_URL has no trailing slash
+    PASS FRONTEND_URL has no trailing slash
+    SKIP TEST_JWT_TOKEN not set (auth tests will use login flow)
+    SKIP Admin credentials not set (admin tests will be limited)
+    SKIP RAZORPAY_WEBHOOK_SECRET not set (webhook HMAC tests skipped)
+    SKIP CRON_SECRET not set
+    PASS Bash version 5.2.21(1)-release (>= 4.x required)
+    PASS dig available for DNS checks
+
+  Configuration:
+    BASE_URL:         https://api.syrabit.ai
+    FRONTEND_URL:     https://syrabit.ai
+    JWT Token:        not set
+    Turnstile Token:  not set
+    Admin Email:      not set
+    Admin Password:   not set
+    Webhook Secret:   not set
+    Cron Secret:      not set
+    Verbose:          0
+    Stress Test:      0
+    Export JSON:       0
+    Quick Mode:       0
+    Skip Auth:        0
+    Skip Admin:       0
+
+
+== LAYER 3: Backend Health (P2 Cloud Run + P4 + P5) ==
+
+
+  3.1 Basic Health
+    PASS GET /health returns 200
+    PASS /health response is valid JSON
+    PASS /health status: healthy
+    PASS /health TTFB under 1s (549ms)
+    PASS /health response size reasonable (109 bytes)
+
+  3.2 Deep Health
+    PASS GET /health/deep returns 200 (all services healthy)
+    PASS /health/deep response is valid JSON
+    WARN MongoDB status: {
+  "status": "healthy",
+  "latency_ms": "N/A"
+}
+    WARN Redis status: {
+  "status": "healthy"
+}
+    WARN Vertex AI status: {
+  "status": "healthy",
+  "project_id": "not-configured"
+}
+    WARN Vertex Search status: {
+  "status": "unhealthy",
+  "error": "Search client not configured"
+}
+    PASS /health/deep TTFB under 5s (334ms)
+
+  3.3 Circuit Breakers
+    PASS GET /health/circuit-breakers returns 200
+    PASS Circuit breakers response is JSON
+    PASS Vertex AI CB state: CLOSED
+    PASS Sarvam AI CB state: CLOSED
+    PASS Vertex Search CB state: CLOSED
+
+  3.4 Service Dependencies
+    PASS API v1 root responds (HTTP 404)
+    PASS Health endpoint Content-Type: application/json
+    PASS Health endpoint idempotent (consistent 200)
+    PASS Health respects Accept: application/json
+    SKIP Health does not include uptime field
+    SKIP Health does not include version field
+    PASS Health includes timestamp
+    PASS Health response has no obvious sensitive data
+
+  3.5 Degraded Health Reporting
+    PASS Health status is a valid value: healthy
+    SKIP Not degraded; config_error_count check skipped
+    SKIP Not degraded; sensitive keyword check skipped
+    SKIP Not degraded; token/key exposure check skipped
+    WARN Health service field: syrabit-edge (expected syrabit-backend)
+    PASS Health response does not expose raw error messages
+    PASS Health response size reasonable for reporting (109 bytes)
+
+========================================================================
+  SUMMARY
+========================================================================
+
+  Total tests:   47
+  Passed:        33
+  Failed:        0
+  Warnings:      5
+  Skipped:       9
+
+  Pass rate:     70%
+
+  Layer Results:
+    - Layer 0: Prerequisites & Config (15 tests)
+    - Layer 3: Backend Health (32 tests)
+
+  Status: ALL CRITICAL CHECKS PASSED
+========================================================================
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                               !
+!   WARNING: This script tests against PRODUCTION               !
+!   Target: https://syrabit.ai                              !
+!                                                               !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  [INFO] TEST_ADMIN_EMAIL/TEST_ADMIN_PASSWORD not set - skipping admin tests
+Starting auth tests against https://syrabit.ai
+Timestamp: 2026-06-04 07:25:59 UTC
+
+
+=================================================================
+  USER AUTH FLOW
+=================================================================
+
+  [FAIL] Login with valid credentials (expected HTTP 200, got HTTP 401)
+         Response: {"detail":"Invalid credentials"}
+  [FAIL] Cannot proceed with auth flow - login failed
+  Skipping remaining user auth tests
+  [PASS] GET /users/me with NO token (HTTP 401)
+  [PASS] GET /users/me with INVALID token (HTTP 401)
+  [PASS] GET /users/me with EXPIRED/garbage JWT (HTTP 401)
+  [PASS] POST /auth/forgot-password with valid email (HTTP 200)
+  [PASS] POST /auth/forgot-password with nonexistent email (no enumeration) (HTTP 200)
+
+=================================================================
+  RATE LIMITING (USER)
+=================================================================
+
+  [INFO] Sending 11 rapid login attempts with wrong password...
+  [INFO] This may temporarily lock out the test IP
+  [PASS] Rate limiting triggered on attempt 11 (HTTP 429)
+  [INFO] Sleeping 5s to let rate limit window pass...
+
+=================================================================
+  ADMIN AUTH FLOW
+=================================================================
+
+  [SKIP] Admin tests skipped (--skip-admin or no admin credentials)
+
+=================================================================
+  ADMIN RATE LIMITING (C-1 fix verification)
+=================================================================
+
+  [SKIP] Admin rate limit tests skipped (--skip-admin or --skip-destructive)
+
+=================================================================
+  EDGE CASES
+=================================================================
+
+  [PASS] POST /auth/login with empty body (HTTP 422)
+  [PASS] POST /auth/login missing password (HTTP 422)
+  [PASS] POST /auth/refresh with invalid refresh token (HTTP 401)
+  [PASS] POST /auth/refresh with garbage refresh token (HTTP 401)
+
+=================================================================
+  SECURITY HEADERS CHECK
+=================================================================
+
+  [PASS] Header present: x-content-type-options
+  [INFO] Header not found: x-frame-options (may not apply to this endpoint)
+  [PASS] Header present: strict-transport-security
+  [INFO] Header not found: x-xss-protection (may not apply to this endpoint)
+  [PASS] Header present: content-type
+
+=================================================================
+  TEST SUMMARY
+=================================================================
+
+  PASSED:  13
+  FAILED:  2
+  SKIPPED: 2
+  TOTAL:   17
+
+Some tests FAILED. Review output above for details.
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                               !
+!   WARNING: This script tests against PRODUCTION               !
+!   Target: https://syrabit.ai                              !
+!                                                               !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Starting chat pipeline tests against https://syrabit.ai
+Timestamp: 2026-06-04 07:26:14 UTC
+Session ID for multi-turn: test_1780557974_25326
+
+
+=================================================================
+  AUTHENTICATION
+=================================================================
+
+  [FAIL] Login failed (expected HTTP 200, got HTTP 429)
+  Cannot proceed with authenticated tests
+         Response: {"detail":"Too many login attempts. Please try again in 1 minute."}
+
+=================================================================
+  SECTION 1: Chat (Non-Streaming) - Authenticated
+=================================================================
+
+  [SKIP] All authenticated chat tests skipped - no token
+
+=================================================================
+  SECTION 2: Chat (Non-Streaming) - Anonymous
+=================================================================
+
+  [FAIL] POST /chat/ anonymous (no auth token) (expected HTTP 200, got HTTP 429)
+         Response: {"detail":"Rate limit exceeded. Upgrade to Pro for unlimited messages."}
+  [PASS] POST /chat/ anonymous with X-Anon-ID header (HTTP 200)
+
+=================================================================
+  SECTION 3: Streaming Chat (SSE)
+=================================================================
+
+  [SKIP] Authenticated streaming tests skipped - no token
+  [PASS] POST /chat/stream anonymous - received response
+
+=================================================================
+  SECTION 4: Chat History
+=================================================================
+
+  [SKIP] Authenticated history tests skipped - no token
+  [PASS] GET /chat/history without auth returns 200 (optional auth)
+  [INFO] Anonymous history returned 0 chats
+
+=================================================================
+  SECTION 5: Chat Messages
+=================================================================
+
+  [SKIP] Chat messages tests skipped - no token
+  [PASS] GET /chat/nonexistent-session/messages (HTTP 404)
+
+=================================================================
+  SECTION 6: TTS (Text-to-Speech)
+=================================================================
+
+  [SKIP] Authenticated TTS tests skipped - no token
+  [PASS] POST /chat/tts without auth (expect 401) (HTTP 401)
+
+=================================================================
+  SECTION 7: Image Analysis (OCR)
+=================================================================
+
+  [PASS] POST /chat/image without auth (expect 401) (HTTP 401)
+  [SKIP] Image with auth test skipped - no token
+
+=================================================================
+  SECTION 8: Performance & Latency
+=================================================================
+
+  [SKIP] Performance tests skipped - no token
+
+=================================================================
+  SECTION 9: Multi-turn Conversation
+=================================================================
+
+  [SKIP] Multi-turn tests skipped - no token
+
+=================================================================
+  LATENCY STATISTICS
+=================================================================
+
+  [INFO] No latency measurements collected
+
+=================================================================
+  TEST SUMMARY
+=================================================================
+
+  PASSED:  6
+  FAILED:  2
+  SKIPPED: 8
+  TOTAL:   16
+
+Some tests FAILED. Review output above for details.
+founder@cloudshell:~/syrabit$ 
