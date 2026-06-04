@@ -41,10 +41,14 @@ fi
 
 # ── 3. FRONTEND — vitest ──────────────────────────────────────────────────────
 header "3/3  FRONTEND  (vitest)"
-cd "$ROOT/apps/frontend"
+cd "$ROOT"
 
+echo "→ Installing all workspace dependencies (pnpm install)..."
+pnpm install --frozen-lockfile --silent 2>&1 | tail -3
+
+cd "$ROOT/apps/frontend"
 echo "→ Running vitest..."
-if npx vitest run --reporter=verbose 2>&1; then
+if pnpm vitest run --reporter=verbose 2>&1; then
   ok "Frontend vitest suite"
 else
   fail "Frontend vitest suite (see errors above)"
