@@ -1,0 +1,258 @@
+
+founder@cloudshell:~/syrabit/syrabit (blissful-acumen-495019-t6)$ cd ~/syrabit/syrabit && git pull origin main && bash run_tests.sh
+remote: Enumerating objects: 5, done.
+remote: Counting objects: 100% (5/5), done.
+remote: Compressing objects: 100% (2/2), done.
+remote: Total 5 (delta 3), reused 5 (delta 3), pack-reused 0 (from 0)
+Unpacking objects: 100% (5/5), 6.26 KiB | 2.08 MiB/s, done.
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+   6c363505..875ff86a  main       -> origin/main
+Updating 6c363505..875ff86a
+Fast-forward
+ ...t-syrabit-blissful-acumen-495_1780561687672.txt | 293 +++++++++++++++++++++
+ run_tests.sh                                       |   8 +-
+ 2 files changed, 299 insertions(+), 2 deletions(-)
+ create mode 100644 attached_assets/Pasted--founder-cloudshell-syrabit-syrabit-blissful-acumen-495_1780561687672.txt
+
+════════════════════════════════════════════════════
+  1/3  BACKEND  (pytest — 25 test files)
+════════════════════════════════════════════════════
+→ Installing all backend requirements...
+→ Running pytest...
+........................................................................ [ 27%]
+........................................................................ [ 55%]
+........................................................................ [ 82%]
+.............................................                            [100%]
+=============================== warnings summary ===============================
+../../../../.local/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /home/founder/.local/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: env
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../../../.local/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/founder/.local/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_admin_endpoints.py::TestResponseShapes::test_dashboard_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_users_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_ai_providers_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_ai_status_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_seo_entity_status_placeholder
+tests/test_admin_endpoints.py::TestResponseShapes::test_cf_overview_placeholder
+tests/test_admin_endpoints.py::TestResponseShapes::test_settings_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_alerts_count_response
+  /home/founder/.local/lib/python3.12/site-packages/starlette/testclient.py:459: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+tests/test_config_resilience.py::TestHealthEndpointDegraded::test_health_reports_healthy_without_startup_errors
+  /home/founder/syrabit/syrabit/apps/backend/app/api/v1/health.py:145: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+
+tests/test_service_degradation.py::test_admin_verify_valid_cookie_returns_200
+tests/test_service_degradation.py::test_admin_verify_non_admin_token_returns_403
+tests/test_service_degradation.py::test_admin_verify_expired_cookie_returns_401
+  /usr/local/lib/python3.12/dist-packages/httpx/_client.py:1768: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+261 passed, 14 warnings in 9.22s
+✅  Backend pytest suite
+
+════════════════════════════════════════════════════
+  2/3  EDGE WORKER  (vitest — 11 test files)
+════════════════════════════════════════════════════
+→ Installing typescript...
+npm warn allow-scripts
+npm warn allow-scripts Run `npm approve-scripts --allow-scripts-pending` to review, or `npm approve-scripts <pkg>` to allow.
+→ Running vitest...
+
+ RUN  v4.1.8 /home/founder/syrabit/syrabit/apps/edge
+
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > HYPOTHETICAL UNOPTIMIZED: separate KV reads for rate limit (4 ops per request)
+
+
+  HYPOTHETICAL unoptimized edge rate limit (4 KV ops): 22.3ms
+
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > ACTUAL flow: single KV window check (2 ops per request)
+  ACTUAL edge rate limit (2 KV ops): 10.6ms
+
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > Chat request total: hypothetical unoptimized vs actual full round-trip overhead
+
+  === LATENCY COMPARISON: Chat Request Overhead ===
+  HYPOTHETICAL (4 KV ops + backend rate limit):  46.6ms
+  ACTUAL (2 KV ops + edge trust header):         10.7ms
+  Improvement vs hypothetical:                   77.1%
+  =================================================
+
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > HYPOTHETICAL UNOPTIMIZED: separate KV reads for rate limit (4 ops per request) 28ms
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > ACTUAL flow: single KV window check (2 ops per request) 12ms
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > Chat request total: hypothetical unoptimized vs actual full round-trip overhead 59ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > checks CF Cache API for non-API GET requests 137ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > returns cached response immediately on cache hit 5ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > stores redirect response in cache on cache miss 3ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > does not cache API routes via CF Cache API 4ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > does not cache /health via CF Cache API 4ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > does not cache /assets/ via CF Cache API (served from R2) 3ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > reads health from ISR_CACHE_KV when KV has cached value 6ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > falls back to backend fetch when KV cache is empty 4ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > stores health result in ISR_CACHE_KV with 30s TTL after fresh fetch 5ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > handles KV read failure gracefully and falls back to backend 5ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > returns backend_reachable=false when backend is unreachable 2ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > CORS preflight (OPTIONS /api/v1/chat) returns 200 with CORS headers 40ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Health endpoint returns edge status directly 33ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > /robots.txt returns robots content 2ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > /assets/missing returns 404 2ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > /assets/found returns R2 object with correct headers 2ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Unknown path returns 404 1ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > JWT-protected endpoint without token gets passed through to backend 5ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Rate-limited chat POST with KV mock - allowed when under limit 9ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Rate-limited chat POST - blocked when over limit (returns 429) 6ms
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Batch Performance > 100 requests: actual flow uses fewer total KV operations than hypothetical unoptimized
+
+
+
+  === BATCH PERFORMANCE: 100 Requests ===
+  HYPOTHETICAL (100 * 4 KV ops): 465.8ms total
+  ACTUAL (100 * 2 KV ops):       227.3ms total
+  Improvement:                          51.2%
+  =======================================
+
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Batch Performance > 100 requests: actual flow uses fewer total KV operations than hypothetical unoptimized 695ms
+stdout | tests/latency-comparison.test.ts > Latency Comparison Summary > documents the optimization improvements
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │           EDGE WORKER LATENCY OPTIMIZATIONS                  │
+  ├─────────────────────────────────────────────────────────────┤
+  │ Metric                  │ Hypothetical │ Actual  │ Savings    │
+  ├─────────────────────────────────────────────────────────────┤
+  │ KV ops per request       │ 4 ops        │ 2 ops   │ 50% fewer │
+  │ Edge rate limit time     │ ~20ms        │ ~10ms   │ ~10ms     │
+  │ Backend rate limit       │ ~25ms        │ 0ms     │ ~25ms     │
+  │ Total overhead/req       │ ~45ms        │ ~10ms   │ ~78%      │
+  └─────────────────────────────────────────────────────────────┘
+  Note: "Hypothetical" = unoptimized baseline that was never shipped.
+
+stderr | tests/contract.test.ts > Edge-to-Backend Contract Tests > Backend error handling > returns 503 when backend returns connection error
+Proxy error: Error: ECONNREFUSED
+    at /home/founder/syrabit/syrabit/apps/edge/tests/contract.test.ts:119:15
+    at Mock (file:///home/founder/syrabit/syrabit/apps/edge/node_modules/@vitest/spy/dist/index.js:332:34)
+    at proxyRequest (/home/founder/syrabit/syrabit/apps/edge/src/routes/api-proxy.ts:77:26)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /home/founder/syrabit/syrabit/apps/edge/tests/contract.test.ts:132:24
+    at file:///home/founder/syrabit/syrabit/apps/edge/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stdout | tests/latency-comparison.test.ts > Unified Middleware vs Separate Middlewares > single unified middleware is faster than 3 separate middlewares
+
+
+  === UNIFIED vs SEPARATE MIDDLEWARES ===
+  Separate (3 middlewares):  31.1ms
+  Unified (1 middleware):    10.3ms
+  Improvement:               66.7%
+  ========================================
+
+stdout | tests/latency-comparison.test.ts > X-API-Version Header Injection > adding X-API-Version header has near-instant overhead (<2ms)
+
+  === X-API-VERSION HEADER INJECTION ===
+  Header injection time: 0.002ms
+  Target: < 2ms
+  =======================================
+
+ ✓ tests/latency-comparison.test.ts > Latency Comparison Summary > documents the optimization improvements 1ms
+ ✓ tests/latency-comparison.test.ts > Regression: Real checkRateLimit uses exactly 2 KV ops > checkRateLimit performs 1 KV.get + 1 KV.put for an allowed request 1ms
+ ✓ tests/latency-comparison.test.ts > Regression: Real checkRateLimit uses exactly 2 KV ops > checkRateLimit performs only 1 KV.get when limit is exceeded (no put) 1ms
+ ✓ tests/latency-comparison.test.ts > Unified Middleware vs Separate Middlewares > single unified middleware is faster than 3 separate middlewares 42ms
+ ✓ tests/latency-comparison.test.ts > X-API-Version Header Injection > adding X-API-Version header has near-instant overhead (<2ms) 1ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Chat POST proxy contract > proxies /api/v1/chat POST to backend with correct headers 40ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Chat POST proxy contract > passes X-Rate-Limited-By header when rate limit KV is available 2ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Backend error handling > returns 503 when backend returns connection error 8ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Backend error handling > passes through backend 5xx status codes 2ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Chat endpoint request/response contract shapes > validates expected chat request shape (message, lang, session_id) 3ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Chat endpoint request/response contract shapes > validates streaming response contract (text/event-stream with chunks) 3ms
+stderr | tests/api-proxy.test.ts > API Proxy - proxyRequest > Backend failure: returns 503
+Proxy error: Error: Connection refused
+    at /home/founder/syrabit/syrabit/apps/edge/tests/api-proxy.test.ts:95:13
+    at Mock (file:///home/founder/syrabit/syrabit/apps/edge/node_modules/@vitest/spy/dist/index.js:332:34)
+    at proxyRequest (/home/founder/syrabit/syrabit/apps/edge/src/routes/api-proxy.ts:77:26)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /home/founder/syrabit/syrabit/apps/edge/tests/api-proxy.test.ts:103:22
+
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - X-Rate-Limited-By header > rate limit check returns allowed=true for fresh user 3ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - X-Rate-Limited-By header > after rate limit passes, edge worker sets X-Rate-Limited-By header 37ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - X-Rate-Limited-By header > verifies index.ts source sets X-Rate-Limited-By after rate limit 2ms
+ ✓ tests/latency-audit.test.ts > Edge Proxy - Connection header > proxy does NOT set Connection: keep-alive on outbound request (Workers manage their own pooling) 9ms
+ ✓ tests/latency-audit.test.ts > Edge Proxy - Connection header > proxy forwards request to correct backend URL 2ms
+ ✓ tests/latency-audit.test.ts > Edge Proxy - Connection header > proxy source code does not set Connection: keep-alive on outbound 1ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - Performance > rate limit check completes quickly (under 10ms with mock KV) 1ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - Performance > rate limit only calls KV get and put (no other external services) 1ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Successful proxy: passes through response from backend 46ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Stream request: Content-Type is text/event-stream, no Content-Length 3ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Backend failure: returns 503 9ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > GCP IAM 401 HTML → normalized to 503 JSON 2ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > GCP IAM 403 HTML → normalized to 503 JSON 2ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > FastAPI JSON 401 passes through unchanged 1ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > FastAPI JSON 422 passes through unchanged 1ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Header injection: X-Real-IP and CF-Ray-ID are set 1ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > returns null when GOOGLE_SA_KEY is not set 4ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > returns null when GOOGLE_SA_KEY is empty string 1ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > fetches and returns an identity token when SA key is configured 41ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > caches the token and does not re-fetch on second call 2ms
+ ✓ tests/google-auth.test.ts > Google Auth - JWT creation > creates a JWT with correct header and payload structure 2ms
+ ✓ tests/google-auth.test.ts > Google Auth - base64url encoding > encodes bytes without padding 1ms
+ ✓ tests/google-auth.test.ts > Google Auth - base64url encoding > encodes strings correctly 1ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Non-bot UA returns null (no ISR handling) 41ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Bot UA with cache hit returns cached HTML with X-ISR-Cache: HIT 8ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Bot UA with cache miss proxies to backend, caches result, returns with X-ISR-Cache: MISS 3ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Bot UA when backend returns non-200 returns null 1ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Missing ISR_CACHE_KV binding returns null 1ms
+ ✓ tests/cors.test.ts > CORS Middleware > returns correct headers for allowed origin 3ms
+ ✓ tests/cors.test.ts > CORS Middleware > returns default origin for disallowed origin 0ms
+ ✓ tests/cors.test.ts > CORS Middleware > allows app.syrabit.ai as valid origin 0ms
+ ✓ tests/cors.test.ts > CORS Middleware > applyCorsHeaders sets all headers on Headers object 38ms
+ ✓ tests/jwt.test.ts > JWT Middleware > allows public paths without auth 38ms
+ ✓ tests/jwt.test.ts > JWT Middleware > allows auth signup without auth 0ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects missing Authorization header on protected paths 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > allows anonymous access to optional-auth chat path 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects expired tokens 7ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects refresh tokens used as access tokens 2ms
+ ✓ tests/jwt.test.ts > JWT Middleware > accepts valid access tokens 2ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects tokens signed with wrong secret 1ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > allows request under limit 3ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > blocks request at limit 0ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > increments counter on each call 3ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > returns correct remaining count 0ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > includes resetAt timestamp 0ms
+
+ Test Files  11 passed (11)
+      Tests  81 passed (81)
+   Start at  08:29:45
+   Duration  2.41s (transform 376ms, setup 224ms, import 397ms, tests 1.54s, environment 2ms)
+
+✅  Edge worker vitest suite
+
+════════════════════════════════════════════════════
+  3/3  FRONTEND  (vitest)
+════════════════════════════════════════════════════
+→ Installing all workspace dependencies (pnpm install)...
+run_tests.sh: line 47: pnpm: command not found
+→ Running vitest...
+run_tests.sh: line 51: pnpm: command not found
+❌  Frontend vitest suite (see errors above)
+
+════════════════════════════════════════════════════
+  RESULTS:  ✅ 2 passed   ❌ 1 failed
+════════════════════════════════════════════════════
+  Failed suites:
+    • Frontend vitest suite (see errors above)
+
+founder@cloudshell:~/syrabit/syrabit (blissful-acumen-495019-t6)$ 
+
+
+
+
+
+
+
+
+
+

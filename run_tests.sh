@@ -41,10 +41,17 @@ fi
 
 # ── 3. FRONTEND — vitest ──────────────────────────────────────────────────────
 header "3/3  FRONTEND  (vitest)"
-cd "$ROOT"
 
-echo "→ Installing all workspace dependencies (pnpm install)..."
-pnpm install --frozen-lockfile --silent 2>&1 | tail -3
+# Ensure pnpm is available (Cloud Shell may not have it)
+if ! command -v pnpm &>/dev/null; then
+  echo "→ Installing pnpm..."
+  npm install -g pnpm --quiet 2>&1 | tail -2
+fi
+export PATH="$HOME/.local/bin:$(npm root -g)/.bin:$PATH"
+
+cd "$ROOT"
+echo "→ Installing all workspace dependencies..."
+pnpm install --silent 2>&1 | tail -3
 
 cd "$ROOT/apps/frontend"
 echo "→ Running vitest..."
