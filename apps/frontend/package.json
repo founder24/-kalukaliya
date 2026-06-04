@@ -41,6 +41,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:all": "bash scripts/test-all.sh",
     "test:e2e": "bash scripts/run-e2e.sh"
   },
   "devDependencies": {

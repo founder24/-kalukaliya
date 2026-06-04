@@ -77,7 +77,8 @@ async def test_anon_get_history_with_anon_id_returns_200(anon_client: AsyncClien
 @pytest.mark.anyio
 async def test_anon_get_history_without_anon_id_returns_empty(anon_client: AsyncClient):
     """Anonymous user without x-anon-id header gets empty list, not 401."""
-    response = await anon_client.get("/api/v1/chat/history")
+    with patch("app.api.v1.chat.resolve_anon_id", return_value=None):
+        response = await anon_client.get("/api/v1/chat/history")
 
     assert response.status_code == 200
     data = response.json()
@@ -181,10 +182,17 @@ async def test_anon_conversations_endpoint_capped_at_5(anon_client: AsyncClient)
 @pytest.mark.anyio
 async def test_anon_invalid_anon_id_returns_empty(anon_client: AsyncClient):
     """Invalid anon_id (e.g., raw MongoDB ObjectId) returns empty list, not user data."""
-    # This is a raw MongoDB ObjectId - should NOT be accepted as a valid anon_id
+    # This is a raw MongoDB ObjectId - should NOT be accepted as a valid anon_id.
+    # We mock resolve_anon_id to return the invalid id directly (bypassing IP fallback)
+    # so the endpoint's ANON_ID_PATTERN check rejects it and returns early.
     invalid_anon_id = "507f1f77bcf86cd799439011"
 
-    with patch("app.models.chat.Chat.find") as mock_find:
+    with (
+        patch(
+            "app.api.v1.chat.resolve_anon_id", return_value=invalid_anon_id
+        ),
+        patch("app.models.chat.Chat.find") as mock_find,
+    ):
         response = await anon_client.get(
             "/api/v1/chat/history",
             headers={"x-anon-id": invalid_anon_id},
@@ -205,7 +213,12 @@ async def test_anon_invalid_anon_id_conversations_alias_returns_empty(
     """Invalid anon_id via /chat/conversations (legacy alias) also returns empty list."""
     invalid_anon_id = "not-a-valid-format"
 
-    with patch("app.models.chat.Chat.find") as mock_find:
+    with (
+        patch(
+            "app.api.v1.chat.resolve_anon_id", return_value=invalid_anon_id
+        ),
+        patch("app.models.chat.Chat.find") as mock_find,
+    ):
         response = await anon_client.get(
             "/api/v1/chat/conversations",
             headers={"x-anon-id": invalid_anon_id},
