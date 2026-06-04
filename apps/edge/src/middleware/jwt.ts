@@ -97,17 +97,23 @@ export async function verifyJWT(
     return { valid: true, userId: 'anonymous' };
   }
 
-  // For optional-auth paths: validate token if present, allow anonymous if absent
+  // For optional-auth paths: allow anonymous only when NO Authorization header present.
+  // If a header IS present but malformed, reject it (401) rather than silently downgrading.
   const isOptionalAuth = OPTIONAL_AUTH_PATHS.some((p) => url.pathname.startsWith(p));
   const authHeader = request.headers.get('Authorization');
 
-  if (isOptionalAuth && (!authHeader || !authHeader.startsWith('Bearer '))) {
+  if (isOptionalAuth && !authHeader) {
     return { valid: true, userId: 'anonymous' };
   }
 
-  // Extract Bearer token
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  // Extract Bearer token — two distinct failure modes:
+  //   1. No header at all → treated as anonymous (not rejected) for non-protected routes
+  //   2. Header present but wrong scheme → rejected with 401 (Malformed header)
+  if (!authHeader) {
     return { valid: false, error: 'Missing or invalid Authorization header' };
+  }
+  if (!authHeader.startsWith('Bearer ')) {
+    return { valid: false, error: 'Malformed Authorization header' };
   }
 
   const token = authHeader.slice(7);

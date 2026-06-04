@@ -69,7 +69,7 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     expect(response.status).toBe(200);
     const json = await response.json() as Record<string, unknown>;
     expect(json.status).toBe('healthy');
-    expect(json.service).toBe('syrabit-edge');
+    expect(json.service).toBe('syrabit-backend');
     expect(json.timestamp).toBeDefined();
   });
 

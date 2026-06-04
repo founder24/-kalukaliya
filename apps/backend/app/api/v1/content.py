@@ -183,31 +183,47 @@ async def list_chapters(
 ):
     """List all published chapters for a given board/class/subject."""
     _validate_path_params(board=board, class_level=class_level, subject=subject)
-    chapters = (
-        await KnowledgeObject.find(
-            {
-                "metadata.board": board,
-                "metadata.class_level": class_level,
-                "metadata.subject": subject,
-                "status": "published",
-            }
+    try:
+        raw_docs = (
+            await KnowledgeObject.find(
+                {
+                    "metadata.board": board,
+                    "metadata.class_level": class_level,
+                    "metadata.subject": subject,
+                    "status": "published",
+                },
+                projection={
+                    "_id": 0,
+                    "slug": 1,
+                    "title": 1,
+                    "description": 1,
+                    "metadata": 1,
+                },
+            )
+            .skip(skip)
+            .limit(limit)
+            .to_list()
         )
-        .project(
-            {
-                "_id": 0,
-                "slug": 1,
-                "title": 1,
-                "description": 1,
-                "metadata.chapter": 1,
-                "metadata.chapter_number": 1,
-                "metadata.difficulty": 1,
-                "metadata.estimated_read_time_minutes": 1,
-            }
-        )
-        .skip(skip)
-        .limit(limit)
-        .to_list()
-    )
+
+        chapters = []
+        for doc in raw_docs:
+            meta = doc.metadata if hasattr(doc, "metadata") else {}
+            if hasattr(meta, "model_dump"):
+                meta = meta.model_dump()
+            chapters.append(
+                {
+                    "slug": getattr(doc, "slug", None),
+                    "title": getattr(doc, "title", None),
+                    "description": getattr(doc, "description", None),
+                    "chapter": getattr(meta, "chapter", None) if not isinstance(meta, dict) else meta.get("chapter"),
+                    "chapter_number": getattr(meta, "chapter_number", None) if not isinstance(meta, dict) else meta.get("chapter_number"),
+                    "difficulty": getattr(meta, "difficulty", None) if not isinstance(meta, dict) else meta.get("difficulty"),
+                    "estimated_read_time_minutes": getattr(meta, "estimated_read_time_minutes", None) if not isinstance(meta, dict) else meta.get("estimated_read_time_minutes"),
+                }
+            )
+    except Exception as e:
+        logger.error(f"list_chapters error: {e}")
+        raise HTTPException(status_code=503, detail="Database service unavailable")
 
     return JSONResponse(
         content={

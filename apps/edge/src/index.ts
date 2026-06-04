@@ -155,6 +155,15 @@ export default {
       return new Response('Not Found', { status: 404, headers: { 'X-Request-ID': requestId } });
     }
 
+    // Block path traversal sequences — Cloudflare normalises `/../` in the URL
+    // but double-encoded or edge-case forms may survive. Return 404 (not 302).
+    if (url.pathname.includes('..') || url.pathname.includes('%2e%2e') || url.pathname.includes('%2E%2E')) {
+      return new Response(
+        JSON.stringify({ detail: 'Not Found' }),
+        { status: 404, headers: { 'Content-Type': 'application/json', 'X-Request-ID': requestId } }
+      );
+    }
+
     // Robots.txt
     if (url.pathname === '/robots.txt') {
       const robotsResponse = await handleRobots(env);
@@ -179,6 +188,16 @@ export default {
      * Result is cached for 10s to avoid blocking every health poll.
      */
     if (url.pathname === '/health') {
+      // Only GET and HEAD are valid on health endpoints
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        const methodNotAllowed = new Response(
+          JSON.stringify({ error: 'Method Not Allowed' }),
+          { status: 405, headers: { 'Content-Type': 'application/json', 'Allow': 'GET, HEAD' } }
+        );
+        methodNotAllowed.headers.set('X-Request-ID', requestId);
+        return methodNotAllowed;
+      }
+
       let backendReachable = false;
       const now = Date.now();
 
@@ -216,7 +235,7 @@ export default {
       const healthResponse = new Response(
         JSON.stringify({
           status: 'healthy',
-          service: 'syrabit-edge',
+          service: 'syrabit-backend',
           timestamp: new Date().toISOString(),
           backend_reachable: backendReachable,
         }),
@@ -238,6 +257,15 @@ export default {
      * Returns aggregated status: "healthy" if all pass, "degraded" if backend unreachable.
      */
     if (url.pathname === '/health/full') {
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        const methodNotAllowed = new Response(
+          JSON.stringify({ error: 'Method Not Allowed' }),
+          { status: 405, headers: { 'Content-Type': 'application/json', 'Allow': 'GET, HEAD' } }
+        );
+        methodNotAllowed.headers.set('X-Request-ID', requestId);
+        return methodNotAllowed;
+      }
+
       const edgeStatus = { status: 'healthy', timestamp: new Date().toISOString() };
       let backendStatus: Record<string, unknown>;
       let overallStatus: 'healthy' | 'degraded' = 'healthy';

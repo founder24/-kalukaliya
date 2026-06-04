@@ -4,6 +4,7 @@ Health Check Endpoints: Basic and Deep Dependency Checks
 
 import asyncio
 import os
+import time
 
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
@@ -31,14 +32,16 @@ async def mongo_ping() -> Dict[str, Any]:
         from app.db.mongo import get_mongo_client
 
         client = get_mongo_client()
+        t0 = time.monotonic()
         await client.admin.command("ping")
+        latency_ms = round((time.monotonic() - t0) * 1000, 1)
 
         # Verify Beanie ODM is initialized
         from app.models.content import Board
 
         Board.get_pymongo_collection()
 
-        return {"status": "healthy", "latency_ms": "N/A"}
+        return {"status": "healthy", "latency_ms": latency_ms}
     except RuntimeError as e:
         logger.error(f"MongoDB not initialized: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
@@ -53,9 +56,11 @@ async def redis_ping() -> Dict[str, Any]:
         from app.db.redis import get_redis
 
         redis = get_redis()
+        t0 = time.monotonic()
         result = await redis.ping()
+        latency_ms = round((time.monotonic() - t0) * 1000, 1)
         if result:
-            return {"status": "healthy"}
+            return {"status": "healthy", "latency_ms": latency_ms}
         else:
             return {"status": "unhealthy", "error": "Ping returned false"}
     except Exception as e:
@@ -69,7 +74,7 @@ async def vertex_search_ping() -> Dict[str, Any]:
         from app.services.search.vertex_search import search_service
 
         if not search_service._initialized:
-            return {"status": "unhealthy", "error": "Search client not configured"}
+            return {"status": "degraded", "error": "Search client not configured"}
 
         await search_service.warm_up()
         return {"status": "healthy"}
@@ -81,20 +86,25 @@ async def vertex_search_ping() -> Dict[str, Any]:
 async def vertex_ping() -> Dict[str, Any]:
     """Ping Vertex AI (lightweight check)"""
     try:
-        # Just check if credentials are loaded, don't make actual API call
         from app.config import settings
 
-        if settings.VERTEX_PROJECT_ID and settings.GOOGLE_APPLICATION_CREDENTIALS_JSON:
-            return {"status": "healthy", "project_id": settings.VERTEX_PROJECT_ID}
-        elif settings.VERTEX_PROJECT_ID and os.environ.get("K_SERVICE"):
+        project_id = settings.VERTEX_PROJECT_ID
+        # Treat placeholder/unconfigured values as missing
+        _placeholder = {"not-configured", "not_configured", "", None}
+        if project_id in _placeholder:
+            return {"status": "degraded", "error": "VERTEX_PROJECT_ID not configured"}
+
+        if settings.GOOGLE_APPLICATION_CREDENTIALS_JSON:
+            return {"status": "healthy", "project_id": project_id}
+        elif os.environ.get("K_SERVICE"):
             # Running on Cloud Run with Workload Identity - ADC is available
             return {
                 "status": "healthy",
-                "project_id": settings.VERTEX_PROJECT_ID,
+                "project_id": project_id,
                 "auth": "workload_identity",
             }
         else:
-            return {"status": "unhealthy", "error": "Missing credentials"}
+            return {"status": "degraded", "error": "No credentials (SA key or Workload Identity)"}
     except Exception as e:
         logger.error(f"Vertex AI check failed: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
@@ -129,7 +139,11 @@ async def basic_health_check():
             },
         )
 
-    response = {"status": "healthy", "service": "syrabit-backend"}
+    response = {
+        "status": "healthy",
+        "service": "syrabit-backend",
+        "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+    }
     if warnings:
         response["warnings"] = warnings
     return response
