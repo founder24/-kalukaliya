@@ -1,8 +1,8 @@
 name: Deploy Full Stack (Dual-LLM RAG)
 
 on:
-  push:
-    branches: [main]
+  # Automatic deploys are now handled by deploy.yml (Cloud Build backed).
+  # This workflow is kept as a manual fallback for full-stack redeploys.
   workflow_dispatch:
 
 permissions:

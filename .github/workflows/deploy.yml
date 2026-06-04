@@ -1,0 +1,331 @@
+name: Deploy — Backend + Edge + Frontend
+
+# =============================================================================
+# Triggers
+# =============================================================================
+# • push to main        — every merged PR deploys automatically
+# • release/* tags      — e.g. `git tag release/1.2.3 && git push --tags`
+# • v* tags             — e.g. `git tag v1.2.3 && git push --tags`
+# • workflow_dispatch   — manual trigger from GitHub Actions UI
+# =============================================================================
+on:
+  push:
+    branches: [main]
+  push:
+    tags:
+      - 'release/*'
+      - 'v[0-9]*'
+  workflow_dispatch:
+    inputs:
+      skip_dep_check:
+        description: 'Skip dependency sync check (emergency deploy only)'
+        required: false
+        default: 'false'
+        type: boolean
+      backend_only:
+        description: 'Deploy backend only (skip edge + frontend)'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+# Only one deploy at a time per ref. Never cancel in progress — let it finish.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+# =============================================================================
+# JOB 0: Dependency gate — must pass before any deployment starts
+# =============================================================================
+jobs:
+  dep-check:
+    name: Dependency Gate
+    if: ${{ github.event.inputs.skip_dep_check != 'true' }}
+    uses: ./.github/workflows/ci-deps.yml
+
+  # =============================================================================
+  # JOB 1: Backend — Cloud Build (pre-flight → docker build → push → Cloud Run)
+  # =============================================================================
+  deploy-backend:
+    name: Deploy Backend (Cloud Build)
+    runs-on: ubuntu-latest
+    needs: [dep-check]
+    # Run even when dep-check is skipped (skip_dep_check=true bypasses the job,
+    # which makes needs[] treat it as "skipped" — always() lets us continue)
+    if: always() && (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped')
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      service_url: ${{ steps.get-url.outputs.service_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Submit to Cloud Build
+        # Cloud Build runs our full pipeline:
+        #   Step 0: pre-flight PyPI version validation (fast — fails before Docker starts)
+        #   Step 1: docker build
+        #   Step 2: push to Artifact Registry
+        #   Step 3: gcloud run deploy syrabit-backend
+        # gcloud builds submit is synchronous — this step blocks until done.
+        run: |
+          gcloud builds submit \
+            --config cloudbuild.yaml \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --substitutions "COMMIT_SHA=${{ github.sha }}" \
+            --timeout 25m
+
+      - name: Get Cloud Run service URL
+        id: get-url
+        run: |
+          URL=$(gcloud run services describe syrabit-backend \
+            --region "${{ secrets.GCP_REGION }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --format "value(status.url)")
+          echo "service_url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "Cloud Run URL: ${URL}"
+
+      - name: Wait for healthy revision (up to 2 min)
+        run: |
+          SERVICE_URL="${{ steps.get-url.outputs.service_url }}"
+          echo "Polling ${SERVICE_URL}/health ..."
+          for i in $(seq 1 24); do
+            HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+              "${SERVICE_URL}/health" --max-time 8 2>/dev/null || echo "000")
+            if [[ "$HTTP" == "200" ]]; then
+              echo "✔ Backend healthy after $((i * 5))s (HTTP 200)"
+              exit 0
+            fi
+            echo "  Attempt ${i}/24 — HTTP ${HTTP}, retrying in 5s..."
+            sleep 5
+          done
+          echo "✘ Backend failed health check after 120s"
+          exit 1
+
+  # =============================================================================
+  # JOB 2: Edge — Cloudflare Worker (runs in parallel with backend deploy)
+  # =============================================================================
+  deploy-edge:
+    name: Deploy Edge (Cloudflare Worker)
+    runs-on: ubuntu-latest
+    needs: [dep-check]
+    if: |
+      always() &&
+      (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
+      github.event.inputs.backend_only != 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack + PNPM
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Guard — reject sentinel KV namespace IDs
+        run: |
+          if grep -v '^\s*#' apps/edge/wrangler.toml | grep -qi 'REPLACE_ME'; then
+            echo "::error::wrangler.toml still contains REPLACE_ME KV namespace IDs."
+            echo "Run: npx wrangler kv:namespace create ISR_CACHE_KV"
+            exit 1
+          fi
+          echo "KV namespace IDs look configured."
+
+      - name: Deploy Worker
+        run: pnpm --filter syrabit-edge exec wrangler deploy --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+  # =============================================================================
+  # JOB 3: Frontend — Cloudflare Pages (runs in parallel with backend deploy)
+  # =============================================================================
+  deploy-frontend:
+    name: Deploy Frontend (Cloudflare Pages)
+    runs-on: ubuntu-latest
+    needs: [dep-check]
+    if: |
+      always() &&
+      (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
+      github.event.inputs.backend_only != 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack + PNPM
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter @workspace/syrabit run build
+        env:
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: pages deploy apps/frontend/dist --project-name=syrabitfrontend
+
+      - name: Submit URLs to IndexNow
+        run: node apps/frontend/scripts/indexnow-submit.mjs
+        env:
+          INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
+
+  # =============================================================================
+  # JOB 4: Smoke tests — run after all three deploys succeed
+  # =============================================================================
+  smoke-test:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-edge, deploy-frontend]
+    if: |
+      always() &&
+      needs.deploy-backend.result == 'success' &&
+      (needs.deploy-edge.result == 'success' || needs.deploy-edge.result == 'skipped') &&
+      (needs.deploy-frontend.result == 'success' || needs.deploy-frontend.result == 'skipped')
+    steps:
+      - name: Edge health (api.syrabit.ai)
+        run: |
+          for attempt in 1 2 3; do
+            HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+              "https://api.syrabit.ai/health" --max-time 15 2>/dev/null || echo "000")
+            if [[ "$HTTP" == "200" ]]; then
+              echo "✔ Edge healthy (attempt ${attempt})"
+              exit 0
+            fi
+            echo "  Attempt ${attempt}/3 — HTTP ${HTTP}, retrying in 10s..."
+            sleep 10
+          done
+          echo "✘ Edge health failed after 3 attempts"
+          exit 1
+
+      - name: Chat endpoint — English (stream)
+        run: |
+          HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+            -X POST "https://api.syrabit.ai/api/v1/chat/stream" \
+            -H "Content-Type: application/json" \
+            -H "Origin: https://syrabit.ai" \
+            -d '{"message":"hello","lang":"en"}' \
+            --max-time 20 2>/dev/null || echo "000")
+          echo "Chat EN → HTTP ${HTTP}"
+          # 401/403 = alive + auth working. Only fail on 5xx.
+          if [[ "$HTTP" -ge 500 ]]; then
+            echo "✘ Chat EN server error (HTTP ${HTTP})"
+            exit 1
+          fi
+          echo "✔ Chat EN endpoint alive"
+
+      - name: Chat endpoint — Assamese (stream)
+        run: |
+          HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+            -X POST "https://api.syrabit.ai/api/v1/chat/stream" \
+            -H "Content-Type: application/json" \
+            -H "Origin: https://syrabit.ai" \
+            -d '{"message":"নমস্কাৰ","lang":"as"}' \
+            --max-time 20 2>/dev/null || echo "000")
+          echo "Chat AS → HTTP ${HTTP}"
+          if [[ "$HTTP" -ge 500 ]]; then
+            echo "✘ Chat AS server error (HTTP ${HTTP})"
+            exit 1
+          fi
+          echo "✔ Chat AS endpoint alive"
+
+      - name: Frontend reachable (syrabit.ai)
+        if: ${{ github.event.inputs.backend_only != 'true' }}
+        run: |
+          for attempt in 1 2 3; do
+            HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+              "https://syrabit.ai" --max-time 15 2>/dev/null || echo "000")
+            if [[ "$HTTP" == "200" ]]; then
+              echo "✔ Frontend live (attempt ${attempt})"
+              exit 0
+            fi
+            echo "  Attempt ${attempt}/3 — HTTP ${HTTP}, retrying in 10s..."
+            sleep 10
+          done
+          echo "✘ Frontend unreachable after 3 attempts"
+          exit 1
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "✔ All smoke tests passed"
+          echo "  Commit: ${{ github.sha }}"
+          echo "  Ref:    ${{ github.ref }}"
+          echo ""
+
+  # =============================================================================
+  # JOB 5: Rollback — fires only when smoke tests or deploy fails
+  # =============================================================================
+  rollback:
+    name: Rollback Backend on Failure
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, smoke-test]
+    if: |
+      always() &&
+      needs.deploy-backend.result == 'success' &&
+      needs.smoke-test.result == 'failure'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Route traffic back to previous revision
+        run: |
+          echo "Smoke tests failed — rolling back syrabit-backend..."
+          REVISIONS=$(gcloud run revisions list \
+            --service syrabit-backend \
+            --region "${{ secrets.GCP_REGION }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --sort-by "~creationTimestamp" \
+            --format "value(REVISION)" \
+            --limit 2)
+          CURRENT=$(echo "$REVISIONS" | head -1)
+          PREVIOUS=$(echo "$REVISIONS" | tail -1)
+          if [[ -n "$PREVIOUS" && "$PREVIOUS" != "$CURRENT" ]]; then
+            echo "Rolling back: $CURRENT → $PREVIOUS"
+            gcloud run services update-traffic syrabit-backend \
+              --region "${{ secrets.GCP_REGION }}" \
+              --project "${{ secrets.GCP_PROJECT_ID }}" \
+              --to-revisions "${PREVIOUS}=100"
+            echo "✔ Rollback complete — ${PREVIOUS} now serving 100% of traffic"
+          else
+            echo "⚠ No previous revision found to roll back to"
+            exit 1
+          fi
+
+      - name: Annotate failure
+        if: always()
+        run: |
+          echo "::error title=Deploy rolled back::Smoke tests failed after deploying ${{ github.sha }}. Traffic routed back to previous revision."
