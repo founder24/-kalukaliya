@@ -5,6 +5,7 @@
 #  Usage:
 #    bash run_tests.sh                         # unit tests only (sections 0-12)
 #    bash run_tests.sh --smoke                 # fast ~30s pre-commit subset (sections 0-1, 6-9, 13b)
+#    bash run_tests.sh --watch                 # smoke on every .py/.jsx change in apps/ (Ctrl+C to stop)
 #    bash run_tests.sh --local                 # + live checks against localhost
 #    bash run_tests.sh --live                  # + checks against syrabit.ai
 #    bash run_tests.sh --perf                  # + TTFB absolute thresholds
@@ -14,6 +15,7 @@
 #
 #  Env overrides:
 #    LOCAL_API=http://localhost:8000           backend base URL for --local
+#    WATCH_INTERVAL=2                          poll interval in seconds (default 2)
 #    PERF_THRESHOLD_HOMEPAGE=800              (ms)
 #    PERF_BASELINE_FILE=ci/base.json
 #    PERF_REGRESSION_PCT=20
@@ -28,11 +30,13 @@ ERRORS=()
 LIVE=false
 LOCAL=false
 SMOKE=false
+WATCH=false
 PERF=false
 PERF_BASELINE=false
 PERF_COMPARE=false
 
 LOCAL_API="${LOCAL_API:-http://localhost:8000}"
+WATCH_INTERVAL="${WATCH_INTERVAL:-2}"
 PERF_BASELINE_FILE="${PERF_BASELINE_FILE:-${ROOT}/perf-baseline.json}"
 PERF_REGRESSION_PCT="${PERF_REGRESSION_PCT:-20}"
 
@@ -42,11 +46,21 @@ for arg in "$@"; do
     --live)           LIVE=true ;;
     --local)          LOCAL=true ;;
     --smoke)          SMOKE=true ;;
+    --watch)          WATCH=true; SMOKE=true ;;   # watch always runs smoke
     --perf)           PERF=true ;;
     --perf-baseline)  PERF_BASELINE=true ;;
     --perf-compare)   PERF_COMPARE=true ;;
   esac
 done
+
+# ── Build replay-args for --watch re-runs (all flags except --watch itself) ───
+_REPLAY_ARGS=()
+for _a in "$@"; do
+  [ "$_a" = "--watch" ] && continue
+  [ "$_a" = "--smoke" ] && continue  # always appended below
+  _REPLAY_ARGS+=("$_a")
+done
+_REPLAY_ARGS+=("--smoke")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 header() {
@@ -1385,10 +1399,12 @@ if [ "$SMOKE" = true ]; then
 fi
 
 if [ "$LIVE" = false ] && [ "$LOCAL" = false ] && [ "$SMOKE" = false ] && \
+   [ "$WATCH" = false ] && \
    [ "$PERF" = false ] && [ "$PERF_BASELINE" = false ] && [ "$PERF_COMPARE" = false ]; then
   echo ""
   echo "  Flags:"
   echo "    --smoke          fast ~30s pre-commit check (sections 0-1, 6-9, 13b)"
+  echo "    --watch          re-run smoke on every .py/.jsx change in apps/ (Ctrl+C to stop)"
   echo "    --local          HTTP checks against localhost:8000"
   echo "    --live           HTTP checks against syrabit.ai + api.syrabit.ai"
   echo "    --perf           TTFB checks vs absolute thresholds"
@@ -1397,7 +1413,8 @@ if [ "$LIVE" = false ] && [ "$LOCAL" = false ] && [ "$SMOKE" = false ] && \
   echo ""
   echo "  Env overrides:"
   echo "    LOCAL_API=http://localhost:8000"
-  echo "    PERF_THRESHOLD_HOMEPAGE=800  (ms)"
+  echo "    WATCH_INTERVAL=2              (poll seconds, default 2)"
+  echo "    PERF_THRESHOLD_HOMEPAGE=800   (ms)"
   echo "    PERF_BASELINE_FILE=ci/prod-baseline.json"
   echo "    PERF_REGRESSION_PCT=15"
 fi
@@ -1408,6 +1425,77 @@ if [ ${#ERRORS[@]} -gt 0 ]; then
   echo "  Failed checks:"
   for e in "${ERRORS[@]}"; do echo "    • $e"; done
   echo ""
-  exit 1
+  # In watch mode don't exit on failure — just keep watching
+  [ "$WATCH" = false ] && exit 1
 fi
 echo ""
+
+# =============================================================================
+# WATCH LOOP — enters only when --watch is set; runs indefinitely until Ctrl+C
+# =============================================================================
+if [ "$WATCH" = true ]; then
+  # ── Fingerprint: mtime of every .py / .jsx / .tsx / .ts / .js in apps/ ──
+  # Uses `stat -c '%Y'` (GNU) with a fallback to `stat -f '%m'` (BSD/macOS).
+  _stat_mtime() {
+    stat -c '%Y %n' "$1" 2>/dev/null || stat -f '%m %N' "$1" 2>/dev/null || echo "0 $1"
+  }
+
+  _fingerprint() {
+    find "$ROOT/apps" \
+      \( -name "*.py" -o -name "*.jsx" -o -name "*.tsx" -o -name "*.ts" -o -name "*.js" \) \
+      ! -path "*/node_modules/*" ! -path "*/__pycache__/*" ! -path "*/.venv/*" \
+      -print0 2>/dev/null \
+    | sort -z \
+    | xargs -0 -I{} sh -c '_stat_mtime "$@"' _ {} \
+    | md5sum 2>/dev/null | awk '{print $1}' \
+    || echo "unavailable"
+  }
+
+  # Simpler, more portable alternative (stat not guaranteed on all shells)
+  _fingerprint2() {
+    find "$ROOT/apps" \
+      \( -name "*.py" -o -name "*.jsx" -o -name "*.tsx" -o -name "*.ts" -o -name "*.js" \) \
+      ! -path "*/node_modules/*" ! -path "*/__pycache__/*" ! -path "*/.venv/*" \
+      -newer "$ROOT/run_tests.sh" -print 2>/dev/null \
+    | sort | md5sum 2>/dev/null | awk '{print $1}'
+  }
+
+  # Build the stable fingerprint using find -newer with a sentinel timestamp file
+  _SENTINEL="${ROOT}/.watch_sentinel"
+  touch "$_SENTINEL"   # mark "last-checked-at"
+
+  _watch_changed() {
+    # Returns exit 0 if any watched file is newer than the sentinel
+    find "$ROOT/apps" \
+      \( -name "*.py" -o -name "*.jsx" -o -name "*.tsx" -o -name "*.ts" -o -name "*.js" \) \
+      ! -path "*/node_modules/*" ! -path "*/__pycache__/*" ! -path "*/.venv/*" \
+      -newer "$_SENTINEL" -print -quit 2>/dev/null \
+    | grep -q .
+  }
+
+  # Clean up sentinel on exit
+  trap 'rm -f "$_SENTINEL"; echo ""; echo "  Watch stopped."; exit 0' INT TERM
+
+  echo ""
+  echo "  ◉  WATCH MODE — polling every ${WATCH_INTERVAL}s for changes in apps/**"
+  echo "     Watching: *.py  *.jsx  *.tsx  *.ts  *.js  (excluding node_modules, __pycache__)"
+  echo "     Re-running: bash run_tests.sh ${_REPLAY_ARGS[*]}"
+  echo "     Press Ctrl+C to stop."
+  echo ""
+
+  while true; do
+    sleep "$WATCH_INTERVAL"
+    if _watch_changed; then
+      # Update sentinel BEFORE re-run so files saved during the run aren't missed
+      touch "$_SENTINEL"
+      echo ""
+      echo "  ────────────────────────────────────────────────────────────"
+      echo "  ◉  Change detected at $(date '+%H:%M:%S') — re-running smoke"
+      echo "  ────────────────────────────────────────────────────────────"
+      echo ""
+      bash "$0" "${_REPLAY_ARGS[@]}"
+      echo ""
+      echo "  ◉  Watching again... (Ctrl+C to stop)"
+    fi
+  done
+fi
