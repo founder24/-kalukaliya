@@ -63,3 +63,8 @@ externalPort = 3000
 deploymentTarget = "autoscale"
 run = ["bash", "-c", "cd apps/backend && pip install -r requirements.txt -q && uvicorn app.main:app --host 0.0.0.0 --port 5000"]
 build = ["bash", "-c", "cd apps/frontend && pnpm install && pnpm build:client"]
+
+[userenv]
+
+[userenv.development]
+APP_ENV = "development"
