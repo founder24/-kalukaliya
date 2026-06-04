@@ -1,0 +1,374 @@
+
+founder@cloudshell:~/syrabit/syrabit (blissful-acumen-495019-t6)$ cd ~/syrabit/syrabit && git pull origin main && bash run_tests.sh
+remote: Enumerating objects: 11, done.
+remote: Counting objects: 100% (11/11), done.
+remote: Compressing objects: 100% (4/4), done.
+remote: Total 11 (delta 7), reused 11 (delta 7), pack-reused 0 (from 0)
+Unpacking objects: 100% (11/11), 7.96 KiB | 1.14 MiB/s, done.
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+   a9f5f853..5e03b5ee  main       -> origin/main
+Updating a9f5f853..5e03b5ee
+Fast-forward
+ .replit                                            |   4 +
+ ...t-apps-backend-pip-install-py_1780560566683.txt | 331 +++++++++++++++++++++
+ run_tests.sh                                       |  64 ++++
+ 3 files changed, 399 insertions(+)
+ create mode 100644 attached_assets/Pasted--Backend-cd-syrabit-syrabit-apps-backend-pip-install-py_1780560566683.txt
+ create mode 100755 run_tests.sh
+
+════════════════════════════════════════════════════
+  1/3  BACKEND  (pytest — 25 test files)
+════════════════════════════════════════════════════
+→ Installing all backend requirements...
+  Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+  WARNING: The script tb-gcp-uploader is installed in '/home/founder/.local/bin' which is not on PATH.
+  Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+→ Running pytest...
+........................................................................ [ 27%]
+.................F...................................................... [ 55%]
+..............FF........................................................ [ 82%]
+.............................................                            [100%]
+=================================== FAILURES ===================================
+_______________________ test_health_endpoint_returns_200 _______________________
+tests/test_endpoints_audit.py:42: in test_health_endpoint_returns_200
+    assert response.status_code == 200
+E   assert 503 == 200
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout setup -----------------------------
+{"timestamp": "2026-06-04T08:12:05.516268+00:00", "level": "WARNING", "logger": "app.db.mongo", "message": "MONGODB_URI not set \u2014 MongoDB disabled", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:05.516478+00:00", "level": "INFO", "logger": "app.main", "message": "MongoDB initialized successfully", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:05.516585+00:00", "level": "WARNING", "logger": "app.db.redis", "message": "UPSTASH_REDIS_REST_URL/TOKEN not set \u2014 Redis disabled", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:05.516659+00:00", "level": "INFO", "logger": "app.main", "message": "Redis initialized successfully", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:05.516730+00:00", "level": "INFO", "logger": "app.main", "message": "Vertex AI Search warmed up successfully", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:05.516817+00:00", "level": "WARNING", "logger": "app.main", "message": "Vertex AI token warm-up failed: Vertex AI credentials not configured. Set GEMINI_API_KEY for the Generative Language API, or GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_APPLICATION_CREDENTIALS_JSON for the Vertex AI SDK.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------ Captured log setup ------------------------------
+WARNING  app.db.mongo:mongo.py:34 MONGODB_URI not set — MongoDB disabled
+INFO     app.main:main.py:64 MongoDB initialized successfully
+WARNING  app.db.redis:redis.py:20 UPSTASH_REDIS_REST_URL/TOKEN not set — Redis disabled
+INFO     app.main:main.py:78 Redis initialized successfully
+INFO     app.main:main.py:91 Vertex AI Search warmed up successfully
+WARNING  app.main:main.py:102 Vertex AI token warm-up failed: Vertex AI credentials not configured. Set GEMINI_API_KEY for the Generative Language API, or GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_APPLICATION_CREDENTIALS_JSON for the Vertex AI SDK.
+----------------------------- Captured stdout call -----------------------------
+{"timestamp": "2026-06-04T08:12:05.519361+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "b8184cd6-608b-4d04-98eb-f52e71e8753d", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/health", "status": 503}
+{"timestamp": "2026-06-04T08:12:05.519998+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/health \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------ Captured log call -------------------------------
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/health "HTTP/1.1 503 Service Unavailable"
+--------------------------- Captured stdout teardown ---------------------------
+{"timestamp": "2026-06-04T08:12:05.615828+00:00", "level": "INFO", "logger": "app.db.redis", "message": "Redis connection closed", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:05.616191+00:00", "level": "INFO", "logger": "app.main", "message": "Application shutdown complete", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+---------------------------- Captured log teardown -----------------------------
+INFO     app.db.redis:redis.py:45 Redis connection closed
+INFO     app.main:main.py:184 Application shutdown complete
+_____ TestLifespanProductionBehavior.test_lifespan_reraises_in_production ______
+tests/test_mongo_init.py:98: in test_lifespan_reraises_in_production
+    with pytest.raises(ConnectionFailure):
+E   Failed: DID NOT RAISE <class 'pymongo.errors.ConnectionFailure'>
+----------------------------- Captured stdout call -----------------------------
+{"timestamp": "2026-06-04T08:12:09.137239+00:00", "level": "CRITICAL", "logger": "app.main", "message": "MongoDB initialization failed (production): connection refused \u2014 service is DEGRADED. Set MONGODB_URI env var to restore full functionality.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.137422+00:00", "level": "WARNING", "logger": "app.db.redis", "message": "UPSTASH_REDIS_REST_URL/TOKEN not set \u2014 Redis disabled", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.137519+00:00", "level": "INFO", "logger": "app.main", "message": "Redis initialized successfully", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.137593+00:00", "level": "INFO", "logger": "app.main", "message": "Vertex AI Search warmed up successfully", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.137675+00:00", "level": "WARNING", "logger": "app.main", "message": "Vertex AI token warm-up failed: Vertex AI credentials not configured. Set GEMINI_API_KEY for the Generative Language API, or GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_APPLICATION_CREDENTIALS_JSON for the Vertex AI SDK.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.137967+00:00", "level": "INFO", "logger": "app.db.redis", "message": "Redis connection closed", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.138063+00:00", "level": "INFO", "logger": "app.main", "message": "Application shutdown complete", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------ Captured log call -------------------------------
+CRITICAL app.main:main.py:71 MongoDB initialization failed (production): connection refused — service is DEGRADED. Set MONGODB_URI env var to restore full functionality.
+WARNING  app.db.redis:redis.py:20 UPSTASH_REDIS_REST_URL/TOKEN not set — Redis disabled
+INFO     app.main:main.py:78 Redis initialized successfully
+INFO     app.main:main.py:91 Vertex AI Search warmed up successfully
+WARNING  app.main:main.py:102 Vertex AI token warm-up failed: Vertex AI credentials not configured. Set GEMINI_API_KEY for the Generative Language API, or GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_APPLICATION_CREDENTIALS_JSON for the Vertex AI SDK.
+INFO     app.db.redis:redis.py:45 Redis connection closed
+INFO     app.main:main.py:184 Application shutdown complete
+_______ TestLifespanProductionBehavior.test_lifespan_reraises_in_staging _______
+tests/test_mongo_init.py:122: in test_lifespan_reraises_in_staging
+    with pytest.raises(ConnectionFailure):
+E   Failed: DID NOT RAISE <class 'pymongo.errors.ConnectionFailure'>
+----------------------------- Captured stdout call -----------------------------
+{"timestamp": "2026-06-04T08:12:09.146498+00:00", "level": "CRITICAL", "logger": "app.main", "message": "MongoDB initialization failed (staging): connection refused \u2014 service is DEGRADED. Set MONGODB_URI env var to restore full functionality.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.146689+00:00", "level": "WARNING", "logger": "app.db.redis", "message": "UPSTASH_REDIS_REST_URL/TOKEN not set \u2014 Redis disabled", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.146772+00:00", "level": "INFO", "logger": "app.main", "message": "Redis initialized successfully", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.146847+00:00", "level": "INFO", "logger": "app.main", "message": "Vertex AI Search warmed up successfully", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.146946+00:00", "level": "WARNING", "logger": "app.main", "message": "Vertex AI token warm-up failed: Vertex AI credentials not configured. Set GEMINI_API_KEY for the Generative Language API, or GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_APPLICATION_CREDENTIALS_JSON for the Vertex AI SDK.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.147223+00:00", "level": "INFO", "logger": "app.db.redis", "message": "Redis connection closed", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-04T08:12:09.147306+00:00", "level": "INFO", "logger": "app.main", "message": "Application shutdown complete", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------ Captured log call -------------------------------
+CRITICAL app.main:main.py:71 MongoDB initialization failed (staging): connection refused — service is DEGRADED. Set MONGODB_URI env var to restore full functionality.
+WARNING  app.db.redis:redis.py:20 UPSTASH_REDIS_REST_URL/TOKEN not set — Redis disabled
+INFO     app.main:main.py:78 Redis initialized successfully
+INFO     app.main:main.py:91 Vertex AI Search warmed up successfully
+WARNING  app.main:main.py:102 Vertex AI token warm-up failed: Vertex AI credentials not configured. Set GEMINI_API_KEY for the Generative Language API, or GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_APPLICATION_CREDENTIALS_JSON for the Vertex AI SDK.
+INFO     app.db.redis:redis.py:45 Redis connection closed
+INFO     app.main:main.py:184 Application shutdown complete
+=============================== warnings summary ===============================
+../../../../.local/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /home/founder/.local/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: env
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../../../.local/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/founder/.local/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_admin_endpoints.py::TestResponseShapes::test_dashboard_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_users_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_ai_providers_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_ai_status_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_seo_entity_status_placeholder
+tests/test_admin_endpoints.py::TestResponseShapes::test_cf_overview_placeholder
+tests/test_admin_endpoints.py::TestResponseShapes::test_settings_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_alerts_count_response
+  /home/founder/.local/lib/python3.12/site-packages/starlette/testclient.py:459: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+tests/test_config_resilience.py::TestHealthEndpointDegraded::test_health_reports_healthy_without_startup_errors
+  /home/founder/syrabit/syrabit/apps/backend/app/api/v1/health.py:145: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+
+tests/test_service_degradation.py::test_admin_verify_valid_cookie_returns_200
+tests/test_service_degradation.py::test_admin_verify_non_admin_token_returns_403
+tests/test_service_degradation.py::test_admin_verify_expired_cookie_returns_401
+  /usr/local/lib/python3.12/dist-packages/httpx/_client.py:1768: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_endpoints_audit.py::test_health_endpoint_returns_200 - assert 503 == 200
+FAILED tests/test_mongo_init.py::TestLifespanProductionBehavior::test_lifespan_reraises_in_production - Failed: DID NOT RAISE <class 'pymongo.errors.ConnectionFailure'>
+FAILED tests/test_mongo_init.py::TestLifespanProductionBehavior::test_lifespan_reraises_in_staging - Failed: DID NOT RAISE <class 'pymongo.errors.ConnectionFailure'>
+3 failed, 258 passed, 14 warnings in 9.94s
+❌  Backend pytest suite (see errors above)
+
+════════════════════════════════════════════════════
+  2/3  EDGE WORKER  (vitest — 11 test files)
+════════════════════════════════════════════════════
+→ Installing typescript...
+npm warn allow-scripts
+npm warn allow-scripts Run `npm approve-scripts --allow-scripts-pending` to review, or `npm approve-scripts <pkg>` to allow.
+→ Running vitest...
+
+ RUN  v4.1.8 /home/founder/syrabit/syrabit/apps/edge
+
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > HYPOTHETICAL UNOPTIMIZED: separate KV reads for rate limit (4 ops per request)
+
+
+  HYPOTHETICAL unoptimized edge rate limit (4 KV ops): 21.6ms
+
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > ACTUAL flow: single KV window check (2 ops per request)
+  ACTUAL edge rate limit (2 KV ops): 11.0ms
+
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > Chat request total: hypothetical unoptimized vs actual full round-trip overhead
+
+  === LATENCY COMPARISON: Chat Request Overhead ===
+  HYPOTHETICAL (4 KV ops + backend rate limit):  48.0ms
+  ACTUAL (2 KV ops + edge trust header):         10.6ms
+  Improvement vs hypothetical:                   77.9%
+  =================================================
+
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > HYPOTHETICAL UNOPTIMIZED: separate KV reads for rate limit (4 ops per request) 28ms
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > ACTUAL flow: single KV window check (2 ops per request) 12ms
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Latency Comparison > Chat request total: hypothetical unoptimized vs actual full round-trip overhead 60ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > checks CF Cache API for non-API GET requests 129ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > returns cached response immediately on cache hit 4ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > stores redirect response in cache on cache miss 3ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > does not cache API routes via CF Cache API 4ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > does not cache /health via CF Cache API 4ms
+ ✓ tests/edge-caching.test.ts > CF Cache API - Frontend GET Redirect Caching > does not cache /assets/ via CF Cache API (served from R2) 3ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > reads health from ISR_CACHE_KV when KV has cached value 5ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > falls back to backend fetch when KV cache is empty 4ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > stores health result in ISR_CACHE_KV with 30s TTL after fresh fetch 5ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > handles KV read failure gracefully and falls back to backend 5ms
+ ✓ tests/edge-caching.test.ts > /health - ISR_CACHE_KV Cache Layer > returns backend_reachable=false when backend is unreachable 2ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > CORS preflight (OPTIONS /api/v1/chat) returns 200 with CORS headers 34ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Health endpoint returns edge status directly 29ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > /robots.txt returns robots content 2ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > /assets/missing returns 404 1ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > /assets/found returns R2 object with correct headers 2ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Unknown path returns 404 1ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > JWT-protected endpoint without token gets passed through to backend 5ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Rate-limited chat POST with KV mock - allowed when under limit 9ms
+ ✓ tests/deployment-audit.test.ts > Deployment Audit - Full Worker Fetch Handler > Rate-limited chat POST - blocked when over limit (returns 429) 5ms
+stderr | tests/contract.test.ts > Edge-to-Backend Contract Tests > Backend error handling > returns 503 when backend returns connection error
+Proxy error: Error: ECONNREFUSED
+    at /home/founder/syrabit/syrabit/apps/edge/tests/contract.test.ts:119:15
+    at Mock (file:///home/founder/syrabit/syrabit/apps/edge/node_modules/@vitest/spy/dist/index.js:332:34)
+    at proxyRequest (/home/founder/syrabit/syrabit/apps/edge/src/routes/api-proxy.ts:77:26)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /home/founder/syrabit/syrabit/apps/edge/tests/contract.test.ts:132:24
+    at file:///home/founder/syrabit/syrabit/apps/edge/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stdout | tests/latency-comparison.test.ts > Edge Rate Limit Batch Performance > 100 requests: actual flow uses fewer total KV operations than hypothetical unoptimized
+
+
+
+  === BATCH PERFORMANCE: 100 Requests ===
+  HYPOTHETICAL (100 * 4 KV ops): 460.2ms total
+  ACTUAL (100 * 2 KV ops):       227.4ms total
+  Improvement:                          50.6%
+  =======================================
+
+ ✓ tests/latency-comparison.test.ts > Edge Rate Limit Batch Performance > 100 requests: actual flow uses fewer total KV operations than hypothetical unoptimized 690ms
+stdout | tests/latency-comparison.test.ts > Latency Comparison Summary > documents the optimization improvements
+
+
+
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │           EDGE WORKER LATENCY OPTIMIZATIONS                  │
+  ├─────────────────────────────────────────────────────────────┤
+  │ Metric                  │ Hypothetical │ Actual  │ Savings    │
+  ├─────────────────────────────────────────────────────────────┤
+  │ KV ops per request       │ 4 ops        │ 2 ops   │ 50% fewer │
+  │ Edge rate limit time     │ ~20ms        │ ~10ms   │ ~10ms     │
+  │ Backend rate limit       │ ~25ms        │ 0ms     │ ~25ms     │
+  │ Total overhead/req       │ ~45ms        │ ~10ms   │ ~78%      │
+  └─────────────────────────────────────────────────────────────┘
+  Note: "Hypothetical" = unoptimized baseline that was never shipped.
+
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Chat POST proxy contract > proxies /api/v1/chat POST to backend with correct headers 40ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Chat POST proxy contract > passes X-Rate-Limited-By header when rate limit KV is available 2ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Backend error handling > returns 503 when backend returns connection error 11ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Backend error handling > passes through backend 5xx status codes 2ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Chat endpoint request/response contract shapes > validates expected chat request shape (message, lang, session_id) 3ms
+ ✓ tests/contract.test.ts > Edge-to-Backend Contract Tests > Chat endpoint request/response contract shapes > validates streaming response contract (text/event-stream with chunks) 3ms
+stdout | tests/latency-comparison.test.ts > Unified Middleware vs Separate Middlewares > single unified middleware is faster than 3 separate middlewares
+
+  === UNIFIED vs SEPARATE MIDDLEWARES ===
+  Separate (3 middlewares):  31.1ms
+  Unified (1 middleware):    10.3ms
+  Improvement:               66.8%
+  ========================================
+
+stdout | tests/latency-comparison.test.ts > X-API-Version Header Injection > adding X-API-Version header has near-instant overhead (<2ms)
+
+  === X-API-VERSION HEADER INJECTION ===
+  Header injection time: 0.002ms
+  Target: < 2ms
+  =======================================
+
+ ✓ tests/latency-comparison.test.ts > Latency Comparison Summary > documents the optimization improvements 1ms
+ ✓ tests/latency-comparison.test.ts > Regression: Real checkRateLimit uses exactly 2 KV ops > checkRateLimit performs 1 KV.get + 1 KV.put for an allowed request 1ms
+ ✓ tests/latency-comparison.test.ts > Regression: Real checkRateLimit uses exactly 2 KV ops > checkRateLimit performs only 1 KV.get when limit is exceeded (no put) 1ms
+ ✓ tests/latency-comparison.test.ts > Unified Middleware vs Separate Middlewares > single unified middleware is faster than 3 separate middlewares 43ms
+ ✓ tests/latency-comparison.test.ts > X-API-Version Header Injection > adding X-API-Version header has near-instant overhead (<2ms) 1ms
+stderr | tests/api-proxy.test.ts > API Proxy - proxyRequest > Backend failure: returns 503
+Proxy error: Error: Connection refused
+    at /home/founder/syrabit/syrabit/apps/edge/tests/api-proxy.test.ts:95:13
+    at Mock (file:///home/founder/syrabit/syrabit/apps/edge/node_modules/@vitest/spy/dist/index.js:332:34)
+    at proxyRequest (/home/founder/syrabit/syrabit/apps/edge/src/routes/api-proxy.ts:77:26)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at /home/founder/syrabit/syrabit/apps/edge/tests/api-proxy.test.ts:103:22
+
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Successful proxy: passes through response from backend 47ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Stream request: Content-Type is text/event-stream, no Content-Length 3ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Backend failure: returns 503 9ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > GCP IAM 401 HTML → normalized to 503 JSON 2ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > GCP IAM 403 HTML → normalized to 503 JSON 2ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > FastAPI JSON 401 passes through unchanged 1ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > FastAPI JSON 422 passes through unchanged 2ms
+ ✓ tests/api-proxy.test.ts > API Proxy - proxyRequest > Header injection: X-Real-IP and CF-Ray-ID are set 2ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Non-bot UA returns null (no ISR handling) 42ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Bot UA with cache hit returns cached HTML with X-ISR-Cache: HIT 6ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Bot UA with cache miss proxies to backend, caches result, returns with X-ISR-Cache: MISS 3ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Bot UA when backend returns non-200 returns null 1ms
+ ✓ tests/isr.test.ts > ISR - handleISR > Missing ISR_CACHE_KV binding returns null 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > allows public paths without auth 44ms
+ ✓ tests/jwt.test.ts > JWT Middleware > allows auth signup without auth 0ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects missing Authorization header on protected paths 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > allows anonymous access to optional-auth chat path 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects expired tokens 6ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects refresh tokens used as access tokens 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > accepts valid access tokens 1ms
+ ✓ tests/jwt.test.ts > JWT Middleware > rejects tokens signed with wrong secret 1ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - X-Rate-Limited-By header > rate limit check returns allowed=true for fresh user 3ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - X-Rate-Limited-By header > after rate limit passes, edge worker sets X-Rate-Limited-By header 37ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - X-Rate-Limited-By header > verifies index.ts source sets X-Rate-Limited-By after rate limit 1ms
+ ✓ tests/latency-audit.test.ts > Edge Proxy - Connection header > proxy does NOT set Connection: keep-alive on outbound request (Workers manage their own pooling) 7ms
+ ✓ tests/latency-audit.test.ts > Edge Proxy - Connection header > proxy forwards request to correct backend URL 2ms
+ ✓ tests/latency-audit.test.ts > Edge Proxy - Connection header > proxy source code does not set Connection: keep-alive on outbound 1ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - Performance > rate limit check completes quickly (under 10ms with mock KV) 1ms
+ ✓ tests/latency-audit.test.ts > Edge Rate Limit - Performance > rate limit only calls KV get and put (no other external services) 0ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > returns null when GOOGLE_SA_KEY is not set 5ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > returns null when GOOGLE_SA_KEY is empty string 1ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > fetches and returns an identity token when SA key is configured 46ms
+ ✓ tests/google-auth.test.ts > Google Auth - getIdentityToken > caches the token and does not re-fetch on second call 2ms
+ ✓ tests/google-auth.test.ts > Google Auth - JWT creation > creates a JWT with correct header and payload structure 3ms
+ ✓ tests/google-auth.test.ts > Google Auth - base64url encoding > encodes bytes without padding 1ms
+ ✓ tests/google-auth.test.ts > Google Auth - base64url encoding > encodes strings correctly 1ms
+ ✓ tests/cors.test.ts > CORS Middleware > returns correct headers for allowed origin 4ms
+ ✓ tests/cors.test.ts > CORS Middleware > returns default origin for disallowed origin 0ms
+ ✓ tests/cors.test.ts > CORS Middleware > allows app.syrabit.ai as valid origin 0ms
+ ✓ tests/cors.test.ts > CORS Middleware > applyCorsHeaders sets all headers on Headers object 42ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > allows request under limit 3ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > blocks request at limit 0ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > increments counter on each call 3ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > returns correct remaining count 1ms
+ ✓ tests/rate-limit.test.ts > Rate Limiting > includes resetAt timestamp 0ms
+
+ Test Files  11 passed (11)
+      Tests  81 passed (81)
+   Start at  08:12:12
+   Duration  2.33s (transform 338ms, setup 223ms, import 354ms, tests 1.53s, environment 2ms)
+
+✅  Edge worker vitest suite
+
+════════════════════════════════════════════════════
+  3/3  FRONTEND  (vitest)
+════════════════════════════════════════════════════
+→ Running vitest...
+vitest.config.js (1:340) [UNRESOLVED_IMPORT] Could not resolve 'vitest/config' in vitest.config.js
+   ╭─[ vitest.config.js:1:341 ]
+   │
+ 1 │ const __vite_injected_original_dirname = "/home/founder/syrabit/syrabit/apps/frontend";const __vite_injected_original_filename = "/home/founder/syrabit/syrabit/apps/frontend/vitest.config.js";const __vite_injected_original_import_meta_url = "file:///home/founder/syrabit/syrabit/apps/frontend/vitest.config.js";import { defineConfig } from 'vitest/config';
+   │                                                                                                                                                                                                                                                                                                                                                     ───────┬───────  
+   │                                                                                                                                                                                                                                                                                                                                                            ╰───────── Module not found, treating it as an external dependency
+───╯
+
+vitest.config.js (3:18) [UNRESOLVED_IMPORT] Could not resolve '@vitejs/plugin-react' in vitest.config.js
+   ╭─[ vitest.config.js:3:19 ]
+   │
+ 3 │ import react from '@vitejs/plugin-react';
+   │                   ───────────┬──────────  
+   │                              ╰──────────── Module not found, treating it as an external dependency
+───╯
+
+failed to load config from /home/founder/syrabit/syrabit/apps/frontend/vitest.config.js
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯ Startup Error ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'vitest' imported from /home/founder/syrabit/syrabit/node_modules/.vite-temp/vitest.config.js.timestamp-1780560736449-c6cfe1aca68fe.mjs
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at defaultResolve (node:internal/modules/esm/resolve:992:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:691:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:708:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:740:52)
+    at #resolve (node:internal/modules/esm/loader:673:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:593:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+
+
+❌  Frontend vitest suite (see errors above)
+
+════════════════════════════════════════════════════
+  RESULTS:  ✅ 1 passed   ❌ 2 failed
+════════════════════════════════════════════════════
+  Failed suites:
+    • Backend pytest suite (see errors above)
+    • Frontend vitest suite (see errors above)
+
+founder@cloudshell:~/syrabit/syrabit (blissful-acumen-495019-t6)$ 
+
+
+
+
+
+
+
+
+
+
+
+

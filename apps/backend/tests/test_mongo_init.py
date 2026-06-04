@@ -73,11 +73,18 @@ class TestClientResetOnFailure:
 
 
 class TestLifespanProductionBehavior:
-    """Verify lifespan re-raises init_mongo errors in production but swallows in dev."""
+    """Verify lifespan degrades gracefully on init_mongo errors in all environments.
+
+    The app no longer re-raises on MongoDB failure in any environment — it logs
+    CRITICAL and continues in degraded mode so Cloud Run stays healthy (avoids
+    serving Google's 404 page when MONGODB_URI is missing). The /health endpoint
+    reports 503/degraded so operators can detect the problem.
+    """
 
     @pytest.mark.anyio
-    async def test_lifespan_reraises_in_production(self):
-        """In production APP_ENV, init_mongo failure causes exception to propagate."""
+    async def test_lifespan_degrades_in_production(self):
+        """In production APP_ENV, init_mongo failure is swallowed and logged as CRITICAL.
+        The lifespan must NOT raise — it must complete so Cloud Run stays healthy."""
         from app.main import lifespan
 
         mock_app = MagicMock()
@@ -90,18 +97,23 @@ class TestLifespanProductionBehavior:
             mock_settings.SENTRY_DSN = None
             mock_settings.POSTHOG_API_KEY = None
 
-            with patch(
-                "app.main.init_mongo",
-                new_callable=AsyncMock,
-                side_effect=ConnectionFailure("connection refused"),
+            with (
+                patch(
+                    "app.main.init_mongo",
+                    new_callable=AsyncMock,
+                    side_effect=ConnectionFailure("connection refused"),
+                ),
+                patch("app.main.init_redis", new_callable=AsyncMock),
+                patch("app.main.close_mongo", new_callable=AsyncMock),
+                patch("app.main.close_redis", new_callable=AsyncMock),
             ):
-                with pytest.raises(ConnectionFailure):
-                    async with lifespan(mock_app):
-                        pass
+                async with lifespan(mock_app):
+                    pass
 
     @pytest.mark.anyio
-    async def test_lifespan_reraises_in_staging(self):
-        """In staging APP_ENV, init_mongo failure causes exception to propagate."""
+    async def test_lifespan_degrades_in_staging(self):
+        """In staging APP_ENV, init_mongo failure is swallowed and logged as CRITICAL.
+        The lifespan must NOT raise — it must complete so Cloud Run stays healthy."""
         from app.main import lifespan
 
         mock_app = MagicMock()
@@ -114,14 +126,18 @@ class TestLifespanProductionBehavior:
             mock_settings.SENTRY_DSN = None
             mock_settings.POSTHOG_API_KEY = None
 
-            with patch(
-                "app.main.init_mongo",
-                new_callable=AsyncMock,
-                side_effect=ConnectionFailure("connection refused"),
+            with (
+                patch(
+                    "app.main.init_mongo",
+                    new_callable=AsyncMock,
+                    side_effect=ConnectionFailure("connection refused"),
+                ),
+                patch("app.main.init_redis", new_callable=AsyncMock),
+                patch("app.main.close_mongo", new_callable=AsyncMock),
+                patch("app.main.close_redis", new_callable=AsyncMock),
             ):
-                with pytest.raises(ConnectionFailure):
-                    async with lifespan(mock_app):
-                        pass
+                async with lifespan(mock_app):
+                    pass
 
     @pytest.mark.anyio
     async def test_lifespan_swallows_in_dev(self):
