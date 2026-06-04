@@ -52,9 +52,14 @@ async def check_rate_limit(
 
     try:
         # Monthly quota check
+        # user_id is always a resolved identity (ip_* for anon, UUID for auth users).
+        # The old "anonymous" literal is kept as a safe fallback for any legacy callers.
         month_key = time.strftime("%Y-%m", time.gmtime())
         if user_id == "anonymous" and client_ip:
-            key = f"rate_anon:{client_ip}:{month_key}"
+            # Legacy fallback: normalize IP the same way core.anon does
+            import re as _re
+            _ip_key = "ip_" + _re.sub(r"[^a-z0-9]", "_", client_ip.lower())[:55]
+            key = f"rate:{_ip_key}:{month_key}"
         else:
             key = f"rate:{user_id}:{month_key}"
 

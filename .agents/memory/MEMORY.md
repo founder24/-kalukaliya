@@ -4,3 +4,4 @@
 - [Syrabit Cloud Run deploy fixes](syrabit-cloudrun-fixes.md) — motor missing, pymongo compat, JWT RS256 degraded mode, Atlas index conflicts
 - [Syrabit edge proxy audit fixes](syrabit-edge-proxy-audit.md) — Root cause of 14/47 prod failures: wrong BACKEND_URL format + GCP HTML error passthrough
 - [Replit git-commit workaround](replit-git-commit-workaround.md) — git commit is blocked in main agent; use GitHub REST API (blobs → tree → commit → ref PATCH) with GITHUB_TOKEN from bash env
+- [Syrabit anon user auth](syrabit-anon-auth.md) — IP-primary anon identity: core/anon.py resolve_anon_id(), 6 bugs fixed, rate-limit + conversation storage keyed by ip_* format

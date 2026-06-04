@@ -16,6 +16,7 @@ from fastapi import File, UploadFile, Form
 from app.models.user import User
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.security import sanitize_user_input
+from app.core.anon import resolve_anon_id, ANON_ID_PATTERN
 from app.services.chat_service import ChatService
 from app.api.deps.rate_limit import check_rate_limit
 from app.utils.tracking import track_chat_completed
@@ -109,21 +110,15 @@ async def chat(
     """
     start_time = time.time()
 
-    # Get client IP for anonymous rate limiting
+    # User tier and anonymous identity resolution
+    user_tier = getattr(user, "subscription_tier", "free") if user else "free"
+    user_id = str(user.id) if user else resolve_anon_id(http_request)
+
+    # client_ip for legacy rate_limit signature (rate_limit now uses user_id key)
     client_ip = (
         http_request.client.host
-        if http_request and hasattr(http_request, "client")
+        if http_request and hasattr(http_request, "client") and http_request.client
         else None
-    )
-
-    # User tier and ID - handle anonymous users gracefully
-    user_tier = getattr(user, "subscription_tier", "free") if user else "free"
-    user_id = (
-        str(user.id)
-        if user
-        else (http_request.headers.get("X-Anon-ID") or "anonymous")
-        if http_request
-        else "anonymous"
     )
 
     try:
@@ -319,7 +314,7 @@ async def chat(
             # 5. Save chat to MongoDB (fire-and-forget)
             task = asyncio.create_task(
                 ChatService.save_chat(
-                    user_id=user_id if user else None,
+                    user_id=user_id,
                     session_id=request.session_id,
                     user_message=sanitized_message,
                     assistant_response=response_text,
@@ -462,18 +457,13 @@ async def chat_stream(
     start_time = time.time()
 
     # -- Auth & rate limit --
+    user_tier = getattr(user, "subscription_tier", "free") if user else "free"
+    user_id = str(user.id) if user else resolve_anon_id(http_request)
+
     client_ip = (
         http_request.client.host
-        if http_request and hasattr(http_request, "client")
+        if http_request and hasattr(http_request, "client") and http_request.client
         else None
-    )
-    user_tier = getattr(user, "subscription_tier", "free") if user else "free"
-    user_id = (
-        str(user.id)
-        if user
-        else (http_request.headers.get("X-Anon-ID") or "anonymous")
-        if http_request
-        else "anonymous"
     )
 
     allowed, current_count, limit, limit_type = await check_rate_limit(
@@ -710,8 +700,6 @@ async def chat_stream(
 
 ANON_HISTORY_LIMIT = 5
 
-_ANON_ID_PATTERN = re.compile(r"^anon_[a-f0-9]{32}$")
-
 
 @router.get("/history")
 async def get_chat_history(
@@ -737,14 +725,9 @@ async def get_chat_history(
 
         total = await Chat.find({"user_id": str(user.id)}).count()
     else:
-        # Anonymous user: read anon_id from header, hard-cap at 5
-        anon_id = None
-        if http_request:
-            anon_id = http_request.headers.get("x-anon-id") or http_request.headers.get(
-                "X-Anon-ID"
-            )
-
-        if not anon_id or not _ANON_ID_PATTERN.match(anon_id):
+        # Anonymous user: resolve identity via IP (primary) then fallback chain
+        anon_id = resolve_anon_id(http_request)
+        if not anon_id or not ANON_ID_PATTERN.match(anon_id):
             return {
                 "chats": [],
                 "pagination": {"skip": 0, "limit": 0, "total": 0, "has_more": False},

@@ -14,20 +14,20 @@ import re
 from app.models.user import User
 from app.models.chat import Chat
 from app.api.v1.auth import get_current_user
+from app.core.anon import resolve_anon_id, ANON_ID_PATTERN
 
 logger = logging.getLogger(__name__)
-
-_ANON_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{7,63}$")
 
 ANON_HISTORY_LIMIT = 5
 
 
-def _validate_anon_id(anon_id: str) -> str:
-    """Validate the anonymous ID format (8-64 chars, starts with lowercase letter)."""
-    if not anon_id or not _ANON_ID_PATTERN.match(anon_id):
+def _resolve_request_anon_id(request: Request) -> str:
+    """Resolve the anon identity from request (IP-primary) and validate it."""
+    anon_id = resolve_anon_id(request)
+    if not anon_id or not ANON_ID_PATTERN.match(anon_id):
         raise HTTPException(
             status_code=400,
-            detail="Invalid anonymous identifier format. Must be 8-64 characters, start with a lowercase letter, and contain only lowercase alphanumeric, underscore, or hyphen.",
+            detail="Could not resolve a valid anonymous identifier for this request.",
         )
     return anon_id
 
@@ -88,8 +88,8 @@ async def list_anon_conversations(
     skip: int = 0,
     limit: int = 20,
 ):
-    """List conversations for anonymous users (identified by x-anon-id header)."""
-    anon_id = _validate_anon_id(request.headers.get("x-anon-id") or "")
+    """List conversations for anonymous users (identified by IP address)."""
+    anon_id = _resolve_request_anon_id(request)
 
     limit = min(limit, ANON_HISTORY_LIMIT)
 
@@ -130,7 +130,7 @@ async def get_anon_conversation(
     request: Request,
 ):
     """Get a single anonymous conversation by ID."""
-    anon_id = _validate_anon_id(request.headers.get("x-anon-id") or "")
+    anon_id = _resolve_request_anon_id(request)
 
     chat = await _find_chat_by_id(conversation_id)
     if not chat:
@@ -148,7 +148,7 @@ async def delete_anon_conversation(
     request: Request,
 ):
     """Delete an anonymous conversation."""
-    anon_id = _validate_anon_id(request.headers.get("x-anon-id") or "")
+    anon_id = _resolve_request_anon_id(request)
 
     chat = await _find_chat_by_id(conversation_id)
     if not chat:

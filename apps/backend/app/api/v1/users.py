@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from typing import Optional
 import logging
+import time
 
 from app.models.user import User
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, get_current_user_optional
+from app.core.anon import resolve_anon_id
 
 logger = logging.getLogger(__name__)
 
@@ -129,18 +131,49 @@ async def save_onboarding(
 
 
 @router.get("/credits")
-async def get_credits(user: User = Depends(get_current_user)):
-    """Get user credits information."""
-    tier = getattr(user, "subscription_tier", "free")
-    credits_remaining = getattr(user, "credits_remaining", 0) or 0
-    credits_used = getattr(user, "credits_used", 0) or 0
+async def get_credits(
+    request: Request,
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Get user credits information — works for both authenticated and anonymous users.
 
-    tier_limits = {"free": 30, "pro": 999999, "premium": 999999}
-    monthly_limit = tier_limits.get(tier, 30)
+    Authenticated users return their MongoDB-stored credit fields.
+    Anonymous users get their monthly usage count from Redis (keyed by IP).
+    """
+    MONTHLY_LIMIT_FREE = 30
 
+    if user:
+        tier = getattr(user, "subscription_tier", "free")
+        credits_remaining = getattr(user, "credits_remaining", 0) or 0
+        credits_used = getattr(user, "credits_used", 0) or 0
+        tier_limits = {"free": MONTHLY_LIMIT_FREE, "pro": 999999, "premium": 999999}
+        monthly_limit = tier_limits.get(tier, MONTHLY_LIMIT_FREE)
+        return {
+            "credits_remaining": credits_remaining,
+            "credits_used": credits_used,
+            "monthly_limit": monthly_limit,
+            "tier": tier,
+        }
+
+    # Anonymous user — derive identity from IP and read Redis monthly counter
+    anon_id = resolve_anon_id(request)
+    credits_used = 0
+    try:
+        from app.db.redis import get_redis
+
+        redis = get_redis()
+        month_key = time.strftime("%Y-%m", time.gmtime())
+        redis_key = f"rate:{anon_id}:{month_key}"
+        val = await redis.get(redis_key)
+        credits_used = max(0, int(val or 0))
+    except Exception:
+        pass  # Redis unavailable — report 0 used, do not block the user
+
+    credits_remaining = max(0, MONTHLY_LIMIT_FREE - credits_used)
     return {
         "credits_remaining": credits_remaining,
         "credits_used": credits_used,
-        "monthly_limit": monthly_limit,
-        "tier": tier,
+        "monthly_limit": MONTHLY_LIMIT_FREE,
+        "tier": "anonymous",
+        "anon_id": anon_id,
     }
