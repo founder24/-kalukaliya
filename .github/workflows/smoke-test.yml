@@ -1,0 +1,62 @@
+name: Smoke Tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    name: Live endpoint smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Wait for deployment to stabilise
+        run: sleep 20
+
+      - name: Health endpoint
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://api.syrabit.ai/api/v1/health)
+          echo "Health status: $STATUS"
+          [ "$STATUS" = "200" ] || { echo "FAIL: /api/v1/health returned $STATUS"; exit 1; }
+
+      - name: Health response is healthy
+        run: |
+          BODY=$(curl -s https://api.syrabit.ai/api/v1/health)
+          echo "Body: $BODY"
+          echo "$BODY" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'healthy', f'Expected healthy, got: {d}'
+          print('OK — status=healthy')
+          "
+
+      - name: Library bundle returns data
+        run: |
+          BODY=$(curl -s https://api.syrabit.ai/api/v1/content/library-bundle)
+          echo "$BODY" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          boards   = len(d.get('boards',   []))
+          subjects = len(d.get('subjects', []))
+          chapters = len(d.get('chapters', []))
+          print(f'boards={boards}  subjects={subjects}  chapters={chapters}')
+          assert boards   >= 1, f'Expected >=1 boards, got {boards}'
+          assert subjects >= 50, f'Expected >=50 subjects, got {subjects}'
+          assert chapters >= 200, f'Expected >=200 chapters, got {chapters}'
+          print('OK — library bundle has data')
+          "
+
+      - name: Cloudflare Worker is proxying (cf-ray header present)
+        run: |
+          CF_RAY=$(curl -sI https://api.syrabit.ai/api/v1/health | grep -i "^cf-ray:" | tr -d '\r\n')
+          echo "CF-Ray: $CF_RAY"
+          [ -n "$CF_RAY" ] || { echo "FAIL: cf-ray header missing — Worker not proxying"; exit 1; }
+          echo "OK — Cloudflare Worker is active"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Smoke tests failed — live endpoints are degraded."
+          echo "Check https://api.syrabit.ai/api/v1/health and https://api.syrabit.ai/api/v1/content/library-bundle"
