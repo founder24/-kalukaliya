@@ -1,0 +1,396 @@
+Here's a practical checklist.
+
+1. Authentication / Authorization Issues
+Cloud Run requires authentication
+
+If Cloud Run is set to:
+
+Require authentication
+
+instead of:
+
+Allow public access
+
+then requests from Cloudflare Worker will get:
+
+401 Unauthorized
+
+or
+
+403 Forbidden
+
+Check:
+
+gcloud run services get-iam-policy syrabit-backend \
+  --region=asia-south1
+
+Public services should typically include:
+
+allUsers
+roles/run.invoker
+Wrong service account
+
+Worker may send a token for:
+
+service-A
+
+while Cloud Run expects:
+
+service-B
+
+Result:
+
+403
+
+even though authentication exists.
+
+IAP enabled accidentally
+
+If Identity-Aware Proxy is enabled:
+
+Require authentication
+
+with IAP
+
+Cloudflare requests cannot access the service unless configured specifically.
+
+Result:
+
+403 Forbidden
+2. DNS Issues
+DNS record points to old backend
+
+Common after migrations.
+
+api.syrabit.com
+   ↓
+old-run-service
+
+while Worker points somewhere else.
+
+Symptoms:
+
+some users work
+some fail
+inconsistent behavior
+DNS propagation
+
+Different regions resolve:
+
+old IP
+new IP
+
+for several hours.
+
+Symptoms:
+
+works on mobile
+fails on office Wi-Fi
+3. TLS / SSL Issues
+Cloudflare SSL mode mismatch
+
+Examples:
+
+Flexible
+Full
+Full (strict)
+
+Wrong combination can create:
+
+525 SSL Handshake Failed
+
+or
+
+526 Invalid Certificate
+Cloud Run certificate not issued yet
+
+Domain mapping exists but certificate status:
+
+Provisioning
+
+Symptoms:
+
+ERR_CERT_COMMON_NAME_INVALID
+
+or
+
+526
+4. Worker Configuration Issues
+Wrong BACKEND_URL
+
+The one you're currently investigating.
+
+Worker:
+
+BACKEND_URL=old-service
+
+Cloud Run:
+
+new-service
+
+Symptoms:
+
+502
+
+or
+
+530
+
+or empty data.
+
+Missing Worker secret
+
+Example:
+
+BACKEND_URL undefined
+
+Worker may construct:
+
+https://undefined/api
+
+and fail.
+
+Wrong environment
+
+Worker deployed to:
+
+production
+
+but secret updated in:
+
+staging
+
+Very common.
+
+5. CORS Problems
+
+Backend allows:
+
+https://app.syrabit.com
+
+but frontend runs on:
+
+https://syrabit.ai
+
+Browser blocks response.
+
+Symptoms:
+
+Network Error
+
+even though API returns 200.
+
+Check browser console.
+
+6. Cloud Run Networking Issues
+Ingress restrictions
+
+Cloud Run can be configured:
+
+All traffic
+Internal only
+Internal and Load Balancer
+
+If not:
+
+All traffic
+
+Cloudflare cannot reach it.
+
+VPC connector issues
+
+Backend waits on:
+
+database
+redis
+external API
+
+through VPC connector.
+
+If connector broken:
+
+504 Gateway Timeout
+
+while health checks still pass.
+
+7. Database Connectivity
+
+This is one of the most common causes of "empty library".
+
+Backend responds:
+
+200
+
+but database query fails.
+
+Result:
+
+{
+  "subjects": []
+}
+
+instead of data.
+
+Causes:
+
+Cloud SQL IP changed
+password rotated
+connection pool exhausted
+database paused
+8. Environment Variables
+
+Missing:
+
+DATABASE_URL
+JWT_SECRET
+OPENAI_API_KEY
+REDIS_URL
+
+Symptoms vary:
+
+500
+
+or partial functionality.
+
+Check:
+
+gcloud run services describe syrabit-backend \
+  --region asia-south1
+9. Cloudflare Cache Problems
+
+Worker or CDN caches:
+
+{
+  "subjects": []
+}
+
+for 24 hours.
+
+Backend fixed later.
+
+Users still see empty library.
+
+Purge cache:
+
+Cloudflare → Caching → Purge Everything
+10. API Version Mismatch
+
+Frontend expects:
+
+{
+  "subjects": [...]
+}
+
+Backend returns:
+
+{
+  "data": [...]
+}
+
+No infrastructure error occurs.
+
+UI simply shows:
+
+0 subjects
+11. Rate Limiting
+
+Cloudflare WAF or backend rate limiter blocks requests.
+
+Symptoms:
+
+429 Too Many Requests
+
+or
+
+403
+
+for some users only.
+
+12. Cloudflare Firewall Rules
+
+A rule accidentally blocks:
+
+/api/*
+
+or
+
+country = IN
+
+or
+
+bot score < 30
+
+Symptoms:
+
+works for you
+fails for users
+13. Health Check Mismatch
+
+Current logs show:
+
+GET /api/health
+301 -> /health
+
+Health checker sees:
+
+301
+
+and may consider backend healthy.
+
+But application endpoint:
+
+/api/v1/content/library-bundle
+
+could still be broken.
+
+Healthy health checks ≠ healthy application.
+
+14. Frontend Build Using Wrong API URL
+
+Frontend built with:
+
+NEXT_PUBLIC_API_URL=https://old-api.example.com
+
+Deployment points elsewhere.
+
+Everything deploys successfully but calls wrong backend.
+
+15. Browser Authentication Problems
+
+For library pages specifically:
+
+expired JWT
+invalid refresh token
+wrong cookie domain
+SameSite cookie issue
+secure cookie mismatch
+
+Symptoms:
+
+401
+
+only in browser, while curl works.
+
+For your current situation
+
+Based on the evidence you've shown so far, I'd rank likely causes:
+
+Worker BACKEND_URL still pointing to old Cloud Run service
+Cloud Run IAM/authentication misconfiguration
+Frontend using stale API URL
+Database connectivity returning empty library data
+Cloudflare DNS/domain mapping issue
+CORS or cookie/auth issue
+
+The fastest way to narrow it down is to directly test the library endpoint through each layer:
+
+# Cloud Run directly
+curl -v https://syrabit-backend-bl6wu3psza-el.a.run.app/api/v1/content/library-bundle
+
+# Through Worker
+curl -v https://syrabit.ai/api/v1/content/library-bundle
+
+# Custom API domain
+curl -v https://api.syrabit.com/api/v1/content/library-bundle
+
+Comparing those three responses usually pinpoints exactly where the chain is breaking.
