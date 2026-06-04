@@ -1,12 +1,16 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const systemChromium = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+  || process.env.REPLIT_PLAYWRIGHT_CHROMIUM_EXECUTABLE
+  || undefined;
+
 export default defineConfig({
   testDir: './e2e',
-  fullyParallel: true,
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  workers: 1,
+  reporter: 'list',
   use: {
     baseURL: process.env.BASE_URL || 'http://localhost:5000',
     trace: 'on-first-retry',
@@ -15,13 +19,18 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...(systemChromium
+          ? { launchOptions: { executablePath: systemChromium, args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] } }
+          : {}),
+      },
     },
   ],
-  webServer: process.env.CI ? undefined : {
+  webServer: {
     command: 'pnpm dev',
     url: 'http://localhost:5000',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: true,
     timeout: 30000,
   },
 });

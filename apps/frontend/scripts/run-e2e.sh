@@ -1,95 +1,65 @@
 #!/usr/bin/env bash
 # scripts/run-e2e.sh — Replit/NixOS-friendly Playwright launcher.
 #
-# Why this wrapper exists (Task #904)
-# -----------------------------------
+# Why this wrapper exists
+# -----------------------
 # Playwright bundles its own Chromium / chrome-headless-shell. On the
-# Replit NixOS image those binaries fail to load with one of:
+# Replit NixOS image the bundled binary gets SIGTERM'd by the sandbox
+# before it can even finish downloading.
 #
-#   error while loading shared libraries: libgbm.so.1: cannot open shared
-#     object file: No such file or directory
-#   libatk-bridge-2.0.so.0: undefined symbol: atk_object_get_help_text
-#
-# The cause is twofold:
-#   (1) `libgbm.so.1` lives in a transitively-pulled `mesa-libgbm-*` nix
-#       store path that is *not* on the default loader search path here.
-#   (2) Only `libudev.so.0` is shipped (via `libudev0-shim`); Chromium
-#       needs `libudev.so.1`. The two ABIs are compatible enough for
-#       headless Chromium's minimal udev usage, so we present a
-#       `libudev.so.1 -> libudev.so.0` symlink in a writable shim dir.
+# The fix: install the system `chromium` nix package (added to .replit's
+# nix packages list) and point Playwright at it via
+# PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.  playwright.config.ts reads that
+# env var and passes it as `launchOptions.executablePath`, keeping
+# Playwright's own protocol layer while using the nix-managed binary.
 #
 # Control flow (in priority order)
 # --------------------------------
-# 1. If `REPLIT_PLAYWRIGHT_CHROMIUM_EXECUTABLE` is set, the Playwright
-#    config will launch that pre-staged Replit Chromium directly via
-#    `launchOptions.executablePath` — its dependencies are already
-#    satisfied by the surrounding nix derivation, so we skip every shim
-#    and just exec `playwright test`.
-# 2. If we're not on a Nix environment at all (`/nix/store` missing —
-#    e.g. CI runners on Ubuntu, contributor laptops with apt Chromium),
-#    we also skip the shim and exec `playwright test`. Those hosts
-#    rely on Playwright's own `--with-deps` install, which works fine.
-# 3. Otherwise we try to assemble the LD_LIBRARY_PATH shim. If a piece
-#    is missing we *warn* and still hand off to Playwright so its own
-#    error message surfaces — never hard-exit, which would mask the
-#    real failure on hosts the wrapper doesn't fully understand.
-#
-# Doing the fix here (instead of in `replit.nix`) avoids forcing a Nix
-# rebuild on every contributor and keeps the workaround localised to
-# the e2e command.
+# 1. REPLIT_PLAYWRIGHT_CHROMIUM_EXECUTABLE (legacy env var, kept for compat)
+# 2. PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH   (preferred)
+# 3. Auto-detect: `which chromium` (system nix package)
+# 4. Auto-detect: `which google-chrome` or `which chromium-browser` (CI)
+# 5. Fall through — let Playwright use its bundled binary and surface its
+#    own error message (never hard-exit so the real failure is visible).
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 PKG_DIR="$(cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd)"
-
-debug() {
-  if [ "${DEBUG_E2E_LIBS:-0}" = "1" ]; then
-    echo "run-e2e.sh: $*" >&2
-  fi
-}
 
 exec_playwright() {
   cd "${PKG_DIR}"
   exec ./node_modules/.bin/playwright test "$@"
 }
 
-# --- Path 1: Replit pre-staged Chromium ------------------------------------
+# --- Path 1: legacy env var (kept for backward compat) ----------------------
 if [ -n "${REPLIT_PLAYWRIGHT_CHROMIUM_EXECUTABLE:-}" ] \
    && [ -x "${REPLIT_PLAYWRIGHT_CHROMIUM_EXECUTABLE}" ]; then
-  debug "using REPLIT_PLAYWRIGHT_CHROMIUM_EXECUTABLE; skipping shim setup"
+  export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${REPLIT_PLAYWRIGHT_CHROMIUM_EXECUTABLE}"
   exec_playwright "$@"
 fi
 
-# --- Path 2: not a Nix host -> nothing to shim -----------------------------
-if [ ! -d /nix/store ]; then
-  debug "not on a Nix host; running playwright with system defaults"
+# --- Path 2: explicit env var already set ------------------------------------
+if [ -n "${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-}" ] \
+   && [ -x "${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH}" ]; then
   exec_playwright "$@"
 fi
 
-# --- Path 3: Nix host without the Replit env var -> try LD shim ------------
-GBM_LIB="$(ls -d /nix/store/*-mesa-libgbm-*/lib 2>/dev/null | sort | tail -1 || true)"
-if [ -z "${GBM_LIB}" ] || [ ! -e "${GBM_LIB}/libgbm.so.1" ]; then
-  GBM_LIB="$(ls -d /nix/store/*-mesa-*/lib 2>/dev/null \
-    | while read -r d; do [ -e "$d/libgbm.so.1" ] && echo "$d"; done \
-    | sort | tail -1 || true)"
-fi
-
-UDEV0="$(ls /nix/store/*-libudev0-shim-*/lib/libudev.so.0 2>/dev/null | sort | tail -1 || true)"
-
-if [ -z "${GBM_LIB:-}" ] || [ -z "${UDEV0:-}" ]; then
-  echo "run-e2e.sh: Nix host detected but couldn't assemble the libgbm" >&2
-  echo "  / libudev shim (gbm='${GBM_LIB:-MISSING}', udev='${UDEV0:-MISSING}')." >&2
-  echo "  Falling through to Playwright as-is — if it fails to launch," >&2
-  echo "  set REPLIT_PLAYWRIGHT_CHROMIUM_EXECUTABLE or add 'pkgs.mesa'" >&2
-  echo "  + a libudev source to replit.nix." >&2
+# --- Path 3: system nix chromium (installed as a nix package) ----------------
+if CHROMIUM_BIN="$(which chromium 2>/dev/null)" && [ -x "${CHROMIUM_BIN}" ]; then
+  export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${CHROMIUM_BIN}"
   exec_playwright "$@"
 fi
 
-SHIM_DIR="${HOME}/.cache/playwright-libs"
-mkdir -p "${SHIM_DIR}"
-ln -sfn "${UDEV0}" "${SHIM_DIR}/libudev.so.1"
+# --- Path 4: other common system browser names (CI / contributor laptops) ----
+for CANDIDATE in google-chrome google-chrome-stable chromium-browser; do
+  if CHROMIUM_BIN="$(which "${CANDIDATE}" 2>/dev/null)" && [ -x "${CHROMIUM_BIN}" ]; then
+    export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${CHROMIUM_BIN}"
+    exec_playwright "$@"
+  fi
+done
 
-export LD_LIBRARY_PATH="${GBM_LIB}:${SHIM_DIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-debug "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
-
+# --- Path 5: fall through — let Playwright's own error surface ---------------
+echo "run-e2e.sh: No system Chromium found; falling through to Playwright's" >&2
+echo "  bundled browser. If it fails, install the 'chromium' nix package." >&2
 exec_playwright "$@"

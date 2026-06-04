@@ -24,8 +24,11 @@ test: {
 }
 ```
 
+## E2e Playwright — Replit fix
+Playwright's bundled Chromium download is SIGTERM'd by the Replit sandbox. Fix: install `chromium` as a nix system package via `installSystemDependencies`. The `run-e2e.sh` auto-detects `which chromium` and sets `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`. The `playwright.config.ts` reads that env var and passes it as `launchOptions.executablePath` with `--no-sandbox` flags. `pnpm test:e2e` works without any manual env var setup.
+
 ## Test counts (as of audit)
 - Edge (vitest): 11 files, 81 tests — runs fine in one shot
 - Backend (pytest): 261 tests — takes ~90s, needs `timeout 120` in bash
-- Frontend (vitest): 66 files, ~584 tests — 6 batches via test:all
-- E2e (Playwright): CI-only — Chromium cannot install in Replit sandbox
+- Frontend (vitest): 66 files, ~584 tests — 6 batches via `pnpm test:all`
+- E2e (Playwright): 6 spec files, 23 tests — `pnpm test:e2e` via system nix chromium
