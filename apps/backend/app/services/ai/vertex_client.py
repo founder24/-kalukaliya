@@ -150,24 +150,16 @@ class VertexAIClient:
                 scopes=["https://www.googleapis.com/auth/cloud-platform"],
             )
 
-            # Try native async refresh via aiohttp transport first
-            try:
-                from google.auth.transport._aiohttp_requests import (
-                    Request as AiohttpRequest,
-                )
+            # service_account.Credentials.refresh() is synchronous — run it
+            # in a thread pool executor so it doesn't block the event loop.
+            # The aiohttp async transport does NOT work with this sync class
+            # (it produces an unawaited-coroutine RuntimeWarning), so we
+            # always use the requests transport here.
+            import google.auth.transport.requests
 
-                aiohttp_request = AiohttpRequest()
-                try:
-                    await creds.refresh(aiohttp_request)
-                finally:
-                    await aiohttp_request.close()
-            except (ImportError, AttributeError):
-                # aiohttp transport not available, fall back to executor pattern
-                import google.auth.transport.requests
-
-                request = google.auth.transport.requests.Request()
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, creds.refresh, request)
+            request = google.auth.transport.requests.Request()
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, creds.refresh, request)
 
             self._cached_token = creds.token
             # Token typically valid for 1 hour
