@@ -1,10 +1,4 @@
 import {
-  MDXEditor,
-  headingsPlugin, listsPlugin, quotePlugin, thematicBreakPlugin,
-  markdownShortcutPlugin, codeBlockPlugin, codeMirrorPlugin, tablePlugin,
-  linkPlugin, diffSourcePlugin, toolbarPlugin,
-} from '@mdxeditor/editor';
-import {
   Loader2, BookOpen, Eye, Copy, Sparkles, Zap,
   CheckCircle, ChevronDown, ChevronRight as ChevronRightIcon,
   Languages, X,
@@ -50,8 +44,7 @@ export default function ContentTab({
           {TEMPLATES.map(t => (
             <button key={t.label}
               onClick={() => {
-                const current = editorRef.current?.getMarkdown() || form.content;
-                setForm(f => ({ ...f, content: current + t.shortcode }));
+                setForm(f => ({ ...f, content: (f.content || '') + t.shortcode }));
               }}
               className="px-2 py-0.5 rounded text-[10px] border transition-colors"
               style={{ borderColor: '#e5e7eb', background: '#f9fafb', color: '#6b7280' }}
@@ -201,32 +194,36 @@ export default function ContentTab({
       )}
 
       <div className={`flex-1 min-h-0 flex ${canPreview ? 'gap-0' : ''} overflow-hidden`}>
-        <div className={`${canPreview ? 'w-1/2 border-r' : 'flex-1'} overflow-hidden cms-light-editor-wrapper`}
-          data-color-mode="light"
-          style={{ backgroundColor: '#ffffff', color: '#1a1a1a', borderColor: 'rgba(0,0,0,0.08)' }}>
-          <MDXEditor
+        <div className={`${canPreview ? 'w-1/2 border-r' : 'flex-1'} overflow-hidden flex flex-col`}
+          style={{ backgroundColor: '#ffffff', borderColor: 'rgba(0,0,0,0.08)' }}>
+          <MdxToolbar onAiParse={handleAiParse} aiParsing={aiParsing} />
+          <textarea
             ref={editorRef}
             key={editDoc?.id ?? '__new__'}
-            markdown={form.content || ''}
-            onChange={md => setForm(f => ({ ...f, content: md }))}
-            plugins={[
-              headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(),
-              markdownShortcutPlugin(),
-              codeBlockPlugin({ defaultCodeBlockLanguage: 'text' }),
-              codeMirrorPlugin({ codeBlockLanguages: { js: 'JavaScript', ts: 'TypeScript', python: 'Python', text: 'Text', md: 'Markdown', html: 'HTML', css: 'CSS' } }),
-              tablePlugin(), linkPlugin(),
-              diffSourcePlugin({ viewMode: 'rich-text', diffMarkdown: form.content || '' }),
-              toolbarPlugin({ toolbarContents: () => <MdxToolbar onAiParse={handleAiParse} aiParsing={aiParsing} /> }),
-            ]}
-            className="mdx-editor-light h-full"
-            contentEditableClassName="cms-editor-content"
+            value={form.content || ''}
+            onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
+            placeholder="Write markdown content here…"
+            style={{
+              flex: 1,
+              width: '100%',
+              padding: '16px',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+              fontSize: 13,
+              lineHeight: 1.7,
+              color: '#1a1a1a',
+              background: '#ffffff',
+              border: 'none',
+              outline: 'none',
+              resize: 'none',
+              overflow: 'auto',
+            }}
           />
         </div>
 
         {canPreview && (
           <div className="w-1/2 flex flex-col overflow-hidden" style={{ background: '#ffffff' }}>
             <div className="flex items-center gap-2 px-3 py-1.5 border-b flex-shrink-0" style={{ borderColor: 'rgba(0,0,0,0.08)', background: '#f8f8f8' }}>
-              <Eye size={11} style={{ color: '#6b7280' }} />
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
               <span className="text-[10px] font-mono" style={{ color: '#9ca3af' }}>/learn/{form.seo_slug}</span>
             </div>
             <iframe

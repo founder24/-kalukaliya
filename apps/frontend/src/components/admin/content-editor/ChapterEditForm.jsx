@@ -12,17 +12,6 @@ import { toast } from 'sonner';
 import { TEMPLATES } from '@/utils/editorTemplates';
 import { API, autoSlug, authHeaders } from '@/utils/adminHelpers';
 import PYQUploadPanel from './PYQUploadPanel';
-import {
-  MDXEditor,
-  headingsPlugin, listsPlugin, quotePlugin, thematicBreakPlugin,
-  markdownShortcutPlugin, codeBlockPlugin, codeMirrorPlugin, tablePlugin,
-  linkPlugin, diffSourcePlugin, toolbarPlugin, imagePlugin,
-  UndoRedo, BoldItalicUnderlineToggles, BlockTypeSelect,
-  CreateLink, CodeToggle, InsertTable, InsertThematicBreak,
-  ListsToggle, Separator, DiffSourceToggleWrapper, InsertCodeBlock,
-  InsertImage,
-} from '@mdxeditor/editor';
-import '@mdxeditor/editor/style.css';
 
 const CONTENT_TYPES = [
   { value: 'notes', label: 'Notes', color: 'violet' },
@@ -70,7 +59,8 @@ export default function ChapterEditForm({
   }, [editTarget?.id, adminToken, setContentForm]);
 
   const activeContent = editorLang === 'as' ? (contentForm.content_as || '') : contentForm.content;
-  const handleContentChange = useCallback((md) => {
+  const handleContentChange = useCallback((e) => {
+    const md = e.target.value;
     if (editorLang === 'as') {
       setContentForm(f => ({ ...f, content_as: md }));
     } else {
@@ -108,10 +98,10 @@ export default function ChapterEditForm({
           toast.loading(`Page ${i + 1}/${files.length}…`, { id: tid });
           urls.push(await imageUploadHandler(files[i]));
         }
-        const md = editorRef.current?.getMarkdown?.() ?? activeContent;
+        const current = editorRef.current?.value ?? activeContent;
         const pagesMd = urls.map((u, i) => `![Page ${i + 1}](${u})`).join('\n\n');
         const field = editorLang === 'as' ? 'content_as' : 'content';
-        setContentForm(f => ({ ...f, [field]: md + (md.trim() ? '\n\n' : '') + pagesMd + '\n' }));
+        setContentForm(f => ({ ...f, [field]: current + (current.trim() ? '\n\n' : '') + pagesMd + '\n' }));
         setEditorKey(k => k + 1);
         toast.success(`${urls.length} page(s) added`, { id: tid });
       } catch {
@@ -284,6 +274,15 @@ export default function ChapterEditForm({
                 <LayoutTemplate size={10} />
                 Templates
               </button>
+              <button
+                onClick={onAiParse}
+                disabled={aiParsing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold disabled:opacity-50 transition-all"
+                style={{ background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.20)', color: '#a78bfa' }}
+              >
+                {aiParsing ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                AI
+              </button>
             </div>
             <div className="ml-auto flex items-center gap-1.5">
               <span className="text-[10px] text-gray-300 font-mono">{activeContent.length}</span>
@@ -310,7 +309,7 @@ export default function ChapterEditForm({
                 <button
                   key={t.label}
                   onClick={() => {
-                    const current = editorRef.current?.getMarkdown?.() ?? activeContent;
+                    const current = editorRef.current?.value ?? activeContent;
                     const field = editorLang === 'as' ? 'content_as' : 'content';
                     setContentForm(f => ({ ...f, [field]: current + t.shortcode }));
                     setEditorKey(k => k + 1);
@@ -345,64 +344,25 @@ export default function ChapterEditForm({
                 </div>
               )}
               <div className="flex-1 min-h-0 overflow-hidden" style={{ background: '#fff' }}>
-                <MDXEditor
+                <textarea
                   ref={editorRef}
                   key={`${editTarget?.id ?? '__new__'}-${editorKey}-${editorLang}`}
-                  markdown={activeContent}
+                  value={activeContent}
                   onChange={handleContentChange}
-                  className="mdx-editor-light h-full"
-                  contentEditableClassName="cms-editor-content"
-                  plugins={[
-                    headingsPlugin(),
-                    listsPlugin(),
-                    quotePlugin(),
-                    thematicBreakPlugin(),
-                    markdownShortcutPlugin(),
-                    codeBlockPlugin({ defaultCodeBlockLanguage: 'text' }),
-                    codeMirrorPlugin({
-                      codeBlockLanguages: { js: 'JavaScript', ts: 'TypeScript', python: 'Python', text: 'Text', html: 'HTML', css: 'CSS' },
-                    }),
-                    tablePlugin(),
-                    linkPlugin(),
-                    imagePlugin({ imageUploadHandler }),
-                    diffSourcePlugin({ viewMode: 'rich-text', diffMarkdown: '' }),
-                    toolbarPlugin({
-                      toolbarContents: () => (
-                        <DiffSourceToggleWrapper>
-                          <UndoRedo />
-                          <Separator />
-                          <BoldItalicUnderlineToggles />
-                          <Separator />
-                          <ListsToggle />
-                          <Separator />
-                          <BlockTypeSelect />
-                          <Separator />
-                          <CreateLink />
-                          <InsertImage />
-                          <InsertTable />
-                          <Separator />
-                          <button
-                            type="button"
-                            onClick={onAiParse}
-                            disabled={aiParsing}
-                            style={{
-                              display: 'flex', alignItems: 'center', gap: 4,
-                              padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
-                              color: '#a78bfa', background: 'rgba(167,139,250,0.10)',
-                              border: '1px solid rgba(167,139,250,0.20)',
-                              cursor: aiParsing ? 'not-allowed' : 'pointer',
-                              opacity: aiParsing ? 0.5 : 1,
-                            }}
-                          >
-                            {aiParsing
-                              ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
-                              : <Sparkles size={12} />}
-                            AI
-                          </button>
-                        </DiffSourceToggleWrapper>
-                      ),
-                    }),
-                  ]}
+                  placeholder="Write markdown content here…"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    padding: '16px',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                    fontSize: 13,
+                    lineHeight: 1.7,
+                    color: '#1a1a1a',
+                    background: '#ffffff',
+                    border: 'none',
+                    outline: 'none',
+                    resize: 'none',
+                  }}
                 />
               </div>
               {mobilePreview && (

@@ -1,4 +1,3 @@
-import '@mdxeditor/editor/style.css';
 import { Plus, BookOpen, Edit2, Tag, Globe, ExternalLink } from 'lucide-react';
 import useCmsEditor from './cms-editor/useCmsEditor';
 import DocumentList from './cms-editor/DocumentList';

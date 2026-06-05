@@ -44,7 +44,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd apps/backend && pip install -r requirements.txt -q && APP_ENV=development python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+args = "cd apps/backend && APP_ENV=development python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 waitForPort = 8000
 
 [[ports]]
@@ -52,16 +52,8 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 5001
-externalPort = 3001
-
-[[ports]]
 localPort = 8000
 externalPort = 8000
-
-[[ports]]
-localPort = 24678
-externalPort = 3000
 
 [deployment]
 deploymentTarget = "autoscale"

@@ -161,7 +161,7 @@ export default function useCmsEditor(adminToken, onNavigate, hubContext) {
   };
 
   const handleAiParse = async () => {
-    const content = editorRef.current?.getMarkdown() || form.content;
+    const content = editorRef.current?.value || form.content;
     if (!content.trim()) { toast.error('Add content first'); return; }
     setAiParsing(true);
     try {
@@ -180,7 +180,7 @@ export default function useCmsEditor(adminToken, onNavigate, hubContext) {
 
   const handleSave = async () => {
     if (!form.title.trim()) { toast.error('Title is required'); return; }
-    const liveContent = editorRef.current?.getMarkdown() ?? form.content;
+    const liveContent = editorRef.current?.value ?? form.content;
     setSaving(true);
     try {
       const payload = { ...form, content: liveContent, seo_slug: form.seo_slug || autoSlug(form.title) };
@@ -239,7 +239,7 @@ export default function useCmsEditor(adminToken, onNavigate, hubContext) {
       );
       const extracted = res.data.text || '';
       if (!extracted) { toast.error('No text extracted from PDF'); return; }
-      const current = editorRef.current?.getMarkdown() || form.content;
+      const current = editorRef.current?.value || form.content;
       setForm(f => ({ ...f, content: current ? `${current}\n\n---\n\n${extracted}` : extracted }));
       toast.success(`Extracted ${res.data.chars?.toLocaleString() || '?'} chars from ${res.data.pages} pages`);
     } catch (e) {
@@ -251,7 +251,7 @@ export default function useCmsEditor(adminToken, onNavigate, hubContext) {
   };
 
   const handleTranslate = async () => {
-    const content = editorRef.current?.getMarkdown() || form.content;
+    const content = editorRef.current?.value || form.content;
     if (!content) { toast.error('No content to translate'); return; }
     setTranslating(true);
     setTranslateResult('');
@@ -284,7 +284,7 @@ export default function useCmsEditor(adminToken, onNavigate, hubContext) {
 
   const applyAiPaletteResult = () => {
     if (!aiPaletteResult) return;
-    const current = editorRef.current?.getMarkdown() || form.content;
+    const current = editorRef.current?.value || form.content;
     const updated = aiPaletteText
       ? current.replace(aiPaletteText, aiPaletteResult)
       : current + '\n\n' + aiPaletteResult;
@@ -311,7 +311,7 @@ export default function useCmsEditor(adminToken, onNavigate, hubContext) {
       if (syl.chapters?.length) block += `## Chapters\n\n${syl.chapters.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\n`;
       if (syl.guidelines) block += `## Guidelines\n\n${syl.guidelines}\n\n`;
       block += '---\n\n';
-      const current = editorRef.current?.getMarkdown() || form.content;
+      const current = editorRef.current?.value || form.content;
       setForm(f => ({ ...f, content: current + block }));
       if (syl.topics?.length && !form.primary_keyword) {
         setForm(f => ({ ...f, primary_keyword: syl.topics[0] }));
@@ -336,7 +336,7 @@ export default function useCmsEditor(adminToken, onNavigate, hubContext) {
   };
 
   const handleHandOff = () => {
-    const liveContent = editorRef.current?.getMarkdown() || form.content;
+    const liveContent = editorRef.current?.value || form.content;
     if (!liveContent.trim()) { toast.error('No content to hand off'); return; }
     localStorage.setItem('syrabit_editor_prefill', JSON.stringify({
       title: form.title, content: liveContent, timestamp: Date.now(),
