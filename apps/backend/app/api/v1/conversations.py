@@ -4,7 +4,6 @@ Provides endpoints for authenticated and anonymous users to manage their chat co
 """
 
 from fastapi import APIRouter, HTTPException, Request, Depends
-from app.db.mongo import get_mongo_client
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
@@ -90,23 +89,22 @@ async def list_anon_conversations(
     limit: int = 20,
 ):
     """List conversations for anonymous users (identified by IP address)."""
-    try:
-        get_mongo_client()
-    except RuntimeError:
-        raise HTTPException(status_code=503, detail="Database unavailable")
     anon_id = _resolve_request_anon_id(request)
 
     limit = min(limit, ANON_HISTORY_LIMIT)
 
-    chats = (
-        await Chat.find({"user_id": anon_id})
-        .sort("-updated_at")
-        .skip(skip)
-        .limit(limit)
-        .to_list()
-    )
+    try:
+        chats = (
+            await Chat.find({"user_id": anon_id})
+            .sort("-updated_at")
+            .skip(skip)
+            .limit(limit)
+            .to_list()
+        )
 
-    total = await Chat.find({"user_id": anon_id}).count()
+        total = await Chat.find({"user_id": anon_id}).count()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database unavailable")
 
     return {
         "conversations": [

@@ -1,0 +1,203 @@
+cd ~/syrabit/apps/backend
+
+# Patch chat.py
+python3 - << 'PYEOF'
+import re
+
+with open("app/api/v1/chat.py", "r") as f:
+    content = f.read()
+
+old = '''    """Get paginated chat history for the current user or anonymous user."""
+    from app.models.chat import Chat
+
+    if user:'''
+
+new = '''    """Get paginated chat history for the current user or anonymous user."""
+    from app.models.chat import Chat
+    from app.db.mongo import get_mongo_client
+    try:
+        get_mongo_client()
+    except RuntimeError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    if user:'''
+
+content = content.replace(old, new, 1)
+with open("app/api/v1/chat.py", "w") as f:
+    f.write(content)
+print("chat.py patched")
+PYEOF
+
+# Patch conversations.py
+python3 - << 'PYEOF'
+with open("app/api/v1/conversations.py", "r") as f:
+    content = f.read()
+
+old = '    """List conversations for anonymous users (identified by IP address)."""\n    anon_id = _resolve_request_anon_id(request)'
+new = '''    """List conversations for anonymous users (identified by IP address)."""
+    from app.db.mongo import get_mongo_client
+    try:
+        get_mongo_client()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    anon_id = _resolve_request_anon_id(request)'''
+
+content = content.replace(old, new, 1)
+with open("app/api/v1/conversations.py", "w") as f:
+    f.write(content)
+  --ignore=tests/test_latency_comparison.pyion.py \
+chat.py patched
+conversations.py patched
+...................................FFFFFFF......................................................................................................................F................................F.......... [ 88%]
+..........................                                                                                                                                                                                   [100%]
+===================================================================================================== FAILURES =====================================================================================================
+__________________________________________________________________________________ test_anon_get_history_with_anon_id_returns_200 __________________________________________________________________________________
+tests/test_anon_access.py:71: in test_anon_get_history_with_anon_id_returns_200
+    assert response.status_code == 200
+E   assert 503 == 200
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T13:57:04.743009+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "39c67673-2368-44c1-b495-bad3eaa53778", "user_id": null, "lang": null, "provider": null, "latency_ms": 2, "method": "GET", "path": "/api/v1/chat/history", "status": 503}
+{"timestamp": "2026-06-05T13:57:04.743589+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://test/api/v1/chat/history \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1740 HTTP Request: GET http://test/api/v1/chat/history "HTTP/1.1 503 Service Unavailable"
+_______________________________________________________________________________ test_anon_get_history_without_anon_id_returns_empty ________________________________________________________________________________
+tests/test_anon_access.py:83: in test_anon_get_history_without_anon_id_returns_empty
+    assert response.status_code == 200
+E   assert 503 == 200
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T13:57:04.891642+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "64ee0a71-c1d2-4a3d-b6d9-980ce8bee9aa", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/chat/history", "status": 503}
+{"timestamp": "2026-06-05T13:57:04.892223+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://test/api/v1/chat/history \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1740 HTTP Request: GET http://test/api/v1/chat/history "HTTP/1.1 503 Service Unavailable"
+__________________________________________________________________________________________ test_anon_history_capped_at_5 ___________________________________________________________________________________________
+tests/test_anon_access.py:107: in test_anon_history_capped_at_5
+    assert response.status_code == 200
+E   assert 503 == 200
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T13:57:04.908792+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "297e8952-86d4-4789-a808-dc80d689fec8", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/chat/history", "status": 503}
+{"timestamp": "2026-06-05T13:57:04.909316+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://test/api/v1/chat/history \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1740 HTTP Request: GET http://test/api/v1/chat/history "HTTP/1.1 503 Service Unavailable"
+____________________________________________________________________________________ test_authenticated_user_gets_full_history _____________________________________________________________________________________
+tests/test_anon_access.py:149: in test_authenticated_user_gets_full_history
+    assert response.status_code == 200
+E   assert 503 == 200
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T13:57:04.929859+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "31a3a47b-f8fe-491a-a75a-52c4518c254c", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/chat/history", "status": 503}
+{"timestamp": "2026-06-05T13:57:04.930412+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://test/api/v1/chat/history \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1740 HTTP Request: GET http://test/api/v1/chat/history "HTTP/1.1 503 Service Unavailable"
+___________________________________________________________________________________ test_anon_conversations_endpoint_capped_at_5 ___________________________________________________________________________________
+tests/test_anon_access.py:175: in test_anon_conversations_endpoint_capped_at_5
+    assert response.status_code == 200
+E   assert 503 == 200
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T13:57:04.948569+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "eaec2382-8782-46ce-afee-3b5b44891c0b", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/conversations/anon", "status": 503}
+{"timestamp": "2026-06-05T13:57:04.949144+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://test/api/v1/conversations/anon?limit=50 \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1740 HTTP Request: GET http://test/api/v1/conversations/anon?limit=50 "HTTP/1.1 503 Service Unavailable"
+_____________________________________________________________________________________ test_anon_invalid_anon_id_returns_empty ______________________________________________________________________________________
+tests/test_anon_access.py:201: in test_anon_invalid_anon_id_returns_empty
+    assert response.status_code == 200
+E   assert 503 == 200
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T13:57:04.963084+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "754f088e-6b6b-410c-8d1a-8c29afff0581", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/chat/history", "status": 503}
+{"timestamp": "2026-06-05T13:57:04.963598+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://test/api/v1/chat/history \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1740 HTTP Request: GET http://test/api/v1/chat/history "HTTP/1.1 503 Service Unavailable"
+___________________________________________________________________________ test_anon_invalid_anon_id_conversations_alias_returns_empty ____________________________________________________________________________
+tests/test_anon_access.py:227: in test_anon_invalid_anon_id_conversations_alias_returns_empty
+    assert response.status_code == 200
+E   assert 503 == 200
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T13:57:04.978930+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "4562902d-4efc-4e78-b6a8-05c4a62b59b9", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/chat/conversations", "status": 503}
+{"timestamp": "2026-06-05T13:57:04.979489+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://test/api/v1/chat/conversations \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1740 HTTP Request: GET http://test/api/v1/chat/conversations "HTTP/1.1 503 Service Unavailable"
+________________________________________________________________________________ test_rate_limit_returns_503_when_redis_unavailable ________________________________________________________________________________
+tests/test_rate_limiter.py:19: in test_rate_limit_returns_503_when_redis_unavailable
+    with pytest.raises(HTTPException) as exc_info:
+E   Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T13:57:08.939190+00:00", "level": "WARNING", "logger": "app.api.v1.auth", "message": "Rate limiting unavailable (login), failing open: ConnectionError", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+WARNING  app.api.v1.auth:auth.py:465 Rate limiting unavailable (login), failing open: ConnectionError
+________________________________________________________________________________________ test_redis_unavailable_returns_503 ________________________________________________________________________________________
+tests/test_service_degradation.py:94: in test_redis_unavailable_returns_503
+    assert "Rate limiting service unavailable" in response.json()["detail"]
+E   AssertionError: assert 'Rate limiting service unavailable' in 'Database service unavailable'
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T13:57:09.091211+00:00", "level": "WARNING", "logger": "app.api.v1.auth", "message": "Rate limiting unavailable (login), failing open: RuntimeError", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T13:57:09.091628+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "c80390e3-fef8-4f1d-be19-282ea5283844", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "POST", "path": "/api/v1/auth/login", "status": 503}
+{"timestamp": "2026-06-05T13:57:09.092157+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://test/api/v1/auth/login \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+WARNING  app.api.v1.auth:auth.py:465 Rate limiting unavailable (login), failing open: RuntimeError
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1740 HTTP Request: POST http://test/api/v1/auth/login "HTTP/1.1 503 Service Unavailable"
+================================================================================================= warnings summary =================================================================================================
+../../../syrabit-venv/lib/python3.11/site-packages/_pytest/config/__init__.py:1434
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: env
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../../syrabit-venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_admin_endpoints.py: 8 warnings
+tests/test_anon_access.py: 1 warning
+tests/test_service_degradation.py: 3 warnings
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/jwt/api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 20 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_admin_endpoints.py::TestResponseShapes::test_dashboard_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_users_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_ai_providers_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_ai_status_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_seo_entity_status_placeholder
+tests/test_admin_endpoints.py::TestResponseShapes::test_cf_overview_placeholder
+tests/test_admin_endpoints.py::TestResponseShapes::test_settings_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_alerts_count_response
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/starlette/testclient.py:459: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+tests/test_admin_endpoints.py: 8 warnings
+tests/test_anon_access.py: 1 warning
+tests/test_service_degradation.py: 3 warnings
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/jwt/api_jwt.py:368: InsecureKeyLengthWarning: The HMAC key is 20 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/test_service_degradation.py::test_admin_verify_valid_cookie_returns_200
+tests/test_service_degradation.py::test_admin_verify_non_admin_token_returns_403
+tests/test_service_degradation.py::test_admin_verify_expired_cookie_returns_401
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/httpx/_client.py:1768: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================================================================================= short test summary info ==============================================================================================
+FAILED tests/test_anon_access.py::test_anon_get_history_with_anon_id_returns_200 - assert 503 == 200
+FAILED tests/test_anon_access.py::test_anon_get_history_without_anon_id_returns_empty - assert 503 == 200
+FAILED tests/test_anon_access.py::test_anon_history_capped_at_5 - assert 503 == 200
+FAILED tests/test_anon_access.py::test_authenticated_user_gets_full_history - assert 503 == 200
+FAILED tests/test_anon_access.py::test_anon_conversations_endpoint_capped_at_5 - assert 503 == 200
+FAILED tests/test_anon_access.py::test_anon_invalid_anon_id_returns_empty - assert 503 == 200
+FAILED tests/test_anon_access.py::test_anon_invalid_anon_id_conversations_alias_returns_empty - assert 503 == 200
+FAILED tests/test_rate_limiter.py::test_rate_limit_returns_503_when_redis_unavailable - Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+FAILED tests/test_service_degradation.py::test_redis_unavailable_returns_503 - AssertionError: assert 'Rate limiting service unavailable' in 'Database service unavailable'
+9 failed, 221 passed, 37 warnings in 6.72s
+(syrabit-venv) founder@instance-20260603-085552:~/syrabit/apps/backend$ 

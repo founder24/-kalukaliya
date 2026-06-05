@@ -710,46 +710,44 @@ async def get_chat_history(
 ):
     """Get paginated chat history for the current user or anonymous user."""
     from app.models.chat import Chat
-    from app.db.mongo import get_mongo_client
+
     try:
-        get_mongo_client()
+        if user:
+            # Authenticated user: full paginated access
+            limit = min(limit, 100)
+
+            chats = (
+                await Chat.find({"user_id": str(user.id)})
+                .sort("-updated_at")
+                .skip(skip)
+                .limit(limit)
+                .to_list()
+            )
+
+            total = await Chat.find({"user_id": str(user.id)}).count()
+        else:
+            # Anonymous user: resolve identity via IP (primary) then fallback chain
+            anon_id = resolve_anon_id(http_request)
+            if not anon_id or not ANON_ID_PATTERN.match(anon_id):
+                return {
+                    "chats": [],
+                    "pagination": {"skip": 0, "limit": 0, "total": 0, "has_more": False},
+                }
+
+            limit = ANON_HISTORY_LIMIT
+            skip = 0
+
+            chats = (
+                await Chat.find({"user_id": anon_id})
+                .sort("-updated_at")
+                .skip(skip)
+                .limit(limit)
+                .to_list()
+            )
+
+            total = await Chat.find({"user_id": anon_id}).count()
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Database unavailable")
-
-    if user:
-        # Authenticated user: full paginated access
-        limit = min(limit, 100)
-
-        chats = (
-            await Chat.find({"user_id": str(user.id)})
-            .sort("-updated_at")
-            .skip(skip)
-            .limit(limit)
-            .to_list()
-        )
-
-        total = await Chat.find({"user_id": str(user.id)}).count()
-    else:
-        # Anonymous user: resolve identity via IP (primary) then fallback chain
-        anon_id = resolve_anon_id(http_request)
-        if not anon_id or not ANON_ID_PATTERN.match(anon_id):
-            return {
-                "chats": [],
-                "pagination": {"skip": 0, "limit": 0, "total": 0, "has_more": False},
-            }
-
-        limit = ANON_HISTORY_LIMIT
-        skip = 0
-
-        chats = (
-            await Chat.find({"user_id": anon_id})
-            .sort("-updated_at")
-            .skip(skip)
-            .limit(limit)
-            .to_list()
-        )
-
-        total = await Chat.find({"user_id": anon_id}).count()
 
     return {
         "chats": [
