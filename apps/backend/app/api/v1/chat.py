@@ -710,6 +710,11 @@ async def get_chat_history(
 ):
     """Get paginated chat history for the current user or anonymous user."""
     from app.models.chat import Chat
+    from app.db.mongo import get_mongo_client
+    try:
+        get_mongo_client()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Database unavailable")
 
     if user:
         # Authenticated user: full paginated access
