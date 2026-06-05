@@ -1,0 +1,41 @@
+ ^C
+(syrabit-venv) founder@instance-20260603-085552:~/syrabit/apps/backend$ cd ~/syrabit && git pull
+
+# Re-run the full suite
+pytest tests/ -q --tb=short \
+  --ignore=tests/locustfile.py \
+  --ignore=tests/test_english_chat_integration.py \
+  --ignore=tests/test_latency_audit.py \
+  --ignore=tests/test_latency_comparison.py
+remote: Enumerating objects: 131, done.
+remote: Counting objects: 100% (78/78), done.
+remote: Compressing objects: 100% (26/26), done.
+remote: Total 131 (delta 66), reused 52 (delta 52), pack-reused 53 (from 1)
+Receiving objects: 100% (131/131), 228.36 KiB | 3.41 MiB/s, done.
+Resolving deltas: 100% (86/86), completed with 10 local objects.
+From https://github.com/founder24/-kalukaliya
+ * [new branch]        dependabot/github_actions/actions/setup-python-6                             -> origin/dependabot/github_actions/actions/setup-python-6
+ * [new branch]        dependabot/github_actions/actions/stale-10                                   -> origin/dependabot/github_actions/actions/stale-10
+ * [new branch]        dependabot/github_actions/github/codeql-action-4                             -> origin/dependabot/github_actions/github/codeql-action-4
+ * [new branch]        dependabot/github_actions/google-github-actions/auth-3                       -> origin/dependabot/github_actions/google-github-actions/auth-3
+ * [new branch]        dependabot/github_actions/google-github-actions/setup-gcloud-3               -> origin/dependabot/github_actions/google-github-actions/setup-gcloud-3
+ * [new branch]        dependabot/npm_and_yarn/apps/edge/cloudflare/workers-types-4.20260603.1      -> origin/dependabot/npm_and_yarn/apps/edge/cloudflare/workers-types-4.20260603.1
+ * [new branch]        dependabot/npm_and_yarn/apps/edge/vitest-4.1.8                               -> origin/dependabot/npm_and_yarn/apps/edge/vitest-4.1.8
+ * [new branch]        dependabot/npm_and_yarn/apps/edge/wrangler-4.97.0                            -> origin/dependabot/npm_and_yarn/apps/edge/wrangler-4.97.0
+ * [new branch]        dependabot/npm_and_yarn/apps/frontend/lucide-react-1.17.0                    -> origin/dependabot/npm_and_yarn/apps/frontend/lucide-react-1.17.0
+ * [new branch]        dependabot/npm_and_yarn/apps/frontend/multi-c336f0d9c2                       -> origin/dependabot/npm_and_yarn/apps/frontend/multi-c336f0d9c2
+ * [new branch]        dependabot/npm_and_yarn/apps/frontend/react-router-dom-7.16.0                -> origin/dependabot/npm_and_yarn/apps/frontend/react-router-dom-7.16.0
+ * [new branch]        dependabot/npm_and_yarn/apps/frontend/tailwind-merge-3.6.0                   -> origin/dependabot/npm_and_yarn/apps/frontend/tailwind-merge-3.6.0
+ * [new branch]        dependabot/npm_and_yarn/apps/frontend/tailwindcss-4.3.0                      -> origin/dependabot/npm_and_yarn/apps/frontend/tailwindcss-4.3.0
+ * [new branch]        dependabot/npm_and_yarn/main/cloudflare-33da1ff929                           -> origin/dependabot/npm_and_yarn/main/cloudflare-33da1ff929
+ * [new branch]        dependabot/npm_and_yarn/main/mdxeditor/editor-4.0.2                          -> origin/dependabot/npm_and_yarn/main/mdxeditor/editor-4.0.2
+ * [new branch]        dependabot/npm_and_yarn/main/node-non-major-fcdcf7cad7                       -> origin/dependabot/npm_and_yarn/main/node-non-major-fcdcf7cad7
+ * [new branch]        dependabot/npm_and_yarn/vite-8.0.16                                          -> origin/dependabot/npm_and_yarn/vite-8.0.16
+ * [new branch]        dependabot/npm_and_yarn/vitejs/plugin-react-6.0.2                            -> origin/dependabot/npm_and_yarn/vitejs/plugin-react-6.0.2
+ * [new branch]        dependabot/pip/apps/backend/opentelemetry-instrumentation-pymongo-gte-0.63b1 -> origin/dependabot/pip/apps/backend/opentelemetry-instrumentation-pymongo-gte-0.63b1
+Already up to date.
+
+no tests ran in 0.00s
+ERROR: file or directory not found: tests/
+
+(syrabit-venv) founder@instance-20260603-085552:~/syrabit$ 
