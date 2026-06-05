@@ -64,15 +64,15 @@ steps:
       - '--port=8000'
       - '--allow-unauthenticated'
       - '--service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com'
-      - '--set-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=us-central1'
-      # NOTE: Sensitive env vars (MONGODB_URI, JWT_SECRET, REDIS_URL, EDGE_SHARED_SECRET,
-      # GEMINI_API_KEY, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RESEND_API_KEY,
-      # SENTRY_DSN, POSTHOG_API_KEY) must be configured once in Cloud Run via:
+      - '--update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=us-central1'
+      # --update-env-vars adds/updates only the listed vars; all others (including
+      # manually set secrets like JWT_SECRET) are preserved across deployments.
+      # NOTE: Sensitive env vars (MONGODB_URI, EDGE_SHARED_SECRET, SENTRY_DSN,
+      # ADMIN_JWT_SECRET, GOOGLE_APPLICATION_CREDENTIALS_JSON) are set once via
+      # Secret Manager references and preserved by --update-env-vars automatically.
+      # JWT_SECRET is set once manually via:
       #   gcloud run services update syrabit-backend --region=asia-south1 \
-      #     --update-secrets=MONGODB_URI=syrabit-mongodb-uri:latest,...
-      # They are preserved across deploys and NOT overwritten by --set-env-vars.
-      # Non-sensitive vars (VERTEX_PROJECT_ID, VERTEX_LOCATION) are set here so every
-      # deploy picks them up automatically without manual Cloud Run updates.
+      #     --update-env-vars=JWT_SECRET=<value>
 
 images:
   - 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$COMMIT_SHA'
