@@ -31,6 +31,9 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # Only one deploy at a time per ref. Never cancel in progress — let it finish.
 concurrency:
   group: deploy-${{ github.ref }}
@@ -114,16 +117,12 @@ jobs:
           exit 1
 
   # =============================================================================
-  # JOB 2: Edge — Cloudflare Worker (runs in parallel with backend deploy)
+  # JOB 2: Edge — Cloudflare Worker (runs independently of Python dep-check)
   # =============================================================================
   deploy-edge:
     name: Deploy Edge (Cloudflare Worker)
     runs-on: ubuntu-latest
-    needs: [dep-check]
-    if: |
-      always() &&
-      (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
-      github.event.inputs.backend_only != 'true'
+    if: github.event.inputs.backend_only != 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -153,16 +152,12 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
   # =============================================================================
-  # JOB 3: Frontend — Cloudflare Pages (runs in parallel with backend deploy)
+  # JOB 3: Frontend — Cloudflare Pages (runs independently of Python dep-check)
   # =============================================================================
   deploy-frontend:
     name: Deploy Frontend (Cloudflare Pages)
     runs-on: ubuntu-latest
-    needs: [dep-check]
-    if: |
-      always() &&
-      (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
-      github.event.inputs.backend_only != 'true'
+    if: github.event.inputs.backend_only != 'true'
     steps:
       - uses: actions/checkout@v4
 
