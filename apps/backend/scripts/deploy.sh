@@ -121,9 +121,9 @@ gcloud run deploy "$SERVICE" \
   --update-env-vars="VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}" \
   --update-env-vars="VERTEX_GEMINI_MODEL=${VERTEX_GEMINI_MODEL:-gemini-2.5-flash}" \
   --update-env-vars="JWT_SECRET=${JWT_SECRET}" \
-  --set-secrets="MONGODB_URI=MONGODB_URI:latest" \
-  --set-secrets="GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest" \
-  --set-secrets="SENTRY_DSN=SENTRY_DSN:latest" \
+  --update-secrets="MONGODB_URI=MONGODB_URI:latest" \
+  --update-secrets="GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest" \
+  --update-secrets="SENTRY_DSN=SENTRY_DSN:latest" \
   --quiet
 
 SERVICE_URL="$(gcloud run services describe "$SERVICE" \
