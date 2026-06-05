@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "S7ovUJ44LN6nNmlsBKwZX"
+uri = "file://scripts/fullstack-layer-test.txt"
+type = "text"
+title = "fullstack-layer-test.sh (v3 — 1000+ assertions, 22 layers)"
