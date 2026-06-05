@@ -18,7 +18,7 @@ set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────────────
 PROJECT="blissful-acumen-495019-t6"
-REGION="asia-east1"
+REGION="asia-south1"
 SERVICE="syrabit-backend"
 SA_EMAIL="syrabit-backend-sa@${PROJECT}.iam.gserviceaccount.com"
 # Artifact Registry repo lives in us-central1 (where it was created)
