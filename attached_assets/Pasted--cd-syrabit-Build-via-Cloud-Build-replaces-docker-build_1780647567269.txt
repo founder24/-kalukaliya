@@ -1,0 +1,34 @@
+ cd ~/syrabit
+
+# Build via Cloud Build (replaces docker build + docker push)
+TAG="us-central1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$(date +%Y%m%d-%H%M%S)"
+gcloud builds submit apps/backend/ \
+  --tag="$TAG" \
+  --project="blissful-acumen-495019-t6"
+
+# Deploy — removes JWT_SECRET from Secret Manager refs first, then sets it as plain env var
+gcloud run deploy syrabit-backend \
+  --image="$TAG" \
+  --region=asia-south1 \
+  --project=blissful-acumen-495019-t6 \
+  --service-account="syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com" \
+  --platform=managed \
+  --allow-unauthenticated \
+  --memory=1Gi --cpu=1 --concurrency=80 \
+  --min-instances=0 --max-instances=10 \
+  --port=8000 --timeout=30 \
+  --remove-secrets="JWT_SECRET" \
+  --update-env-vars="APP_ENV=production,MONGODB_DB_NAME=syrabit_prod,JWT_ALGORITHM=HS256,JWT_EXPIRY_MINUTES=60,REFRESH_TOKEN_EXPIRY_DAYS=7,VERTEX_LOCATION=us-central1,VERTEX_GEMINI_MODEL=gemini-2.5-flash,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,JWT_SECRET=${JWT_SECRET}" \
+  --update-secrets="MONGODB_URI=MONGODB_URI:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SENTRY_DSN=SENTRY_DSN:latest" \
+  --quiet
+Creating temporary archive of 142 file(s) totalling 857.8 KiB before compression.
+Uploading tarball of [apps/backend/] to [gs://blissful-acumen-495019-t6_cloudbuild/source/1780647522.643808-9b42dd0dc71a4f3c83c99b04cfda8921.tgz]
+ERROR: (gcloud.builds.submit) NOT_FOUND: Requested entity was not found. This command is authenticated as founder@syrabit.ai which is the active account specified by the [core/account] property.
+Deploying container to Cloud Run service [syrabit-backend] in project [blissful-acumen-495019-t6] region [asia-south1]
+X Deploying...                                                                                                                                                                                                     
+  . Creating Revision...                                                                                                                                                                                           
+  . Routing traffic...                                                                                                                                                                                             
+  . Setting IAM Policy...                                                                                                                                                                                          
+Deployment failed                                                                                                                                                                                                  
+ERROR: (gcloud.run.deploy) Cannot update environment variable [JWT_SECRET] to string literal because it has already been set with a different type.
+founder@instance-20260603-085552:~/syrabit$ 
