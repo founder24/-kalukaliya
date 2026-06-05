@@ -1,0 +1,111 @@
+sudo apt install -y python3.11-venv
+
+# Then the venv works
+python3 -m venv ~/syrabit-venv
+source ~/syrabit-venv/bin/activate
+pip install pytest pytest-asyncio anyio httpx
+
+cd ~/syrabit/apps/backend && pytest tests/ -q --tb=short -x \
+  --ignore=tests/locustfile.py \
+  --ignore=tests/test_english_chat_integration.py \
+  --ignore=tests/test_latency_audit.py \
+  --ignore=tests/test_latency_comparison.py
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+  python3-distutils python3-lib2to3 python3-pip-whl python3-setuptools-whl
+The following NEW packages will be installed:
+  python3-distutils python3-lib2to3 python3-pip-whl python3-setuptools-whl python3.11-venv
+0 upgraded, 5 newly installed, 0 to remove and 1 not upgraded.
+Need to get 3042 kB of archives.
+After this operation, 4192 kB of additional disk space will be used.
+Get:1 file:/etc/apt/mirrors/debian.list Mirrorlist [30 B]
+Get:2 https://deb.debian.org/debian bookworm/main amd64 python3-lib2to3 all 3.11.2-3 [76.3 kB]
+Get:3 https://deb.debian.org/debian bookworm/main amd64 python3-distutils all 3.11.2-3 [131 kB]
+Get:4 https://deb.debian.org/debian bookworm/main amd64 python3-pip-whl all 23.0.1+dfsg-1 [1717 kB]
+Get:5 https://deb.debian.org/debian bookworm/main amd64 python3-setuptools-whl all 66.1.1-1+deb12u2 [1112 kB]
+Get:6 https://deb.debian.org/debian bookworm/main amd64 python3.11-venv amd64 3.11.2-6+deb12u7 [5892 B]
+Fetched 3042 kB in 0s (15.0 MB/s)         
+Selecting previously unselected package python3-lib2to3.
+(Reading database ... 61574 files and directories currently installed.)
+Preparing to unpack .../python3-lib2to3_3.11.2-3_all.deb ...
+Unpacking python3-lib2to3 (3.11.2-3) ...
+Selecting previously unselected package python3-distutils.
+Preparing to unpack .../python3-distutils_3.11.2-3_all.deb ...
+Unpacking python3-distutils (3.11.2-3) ...
+Selecting previously unselected package python3-pip-whl.
+Preparing to unpack .../python3-pip-whl_23.0.1+dfsg-1_all.deb ...
+Unpacking python3-pip-whl (23.0.1+dfsg-1) ...
+Selecting previously unselected package python3-setuptools-whl.
+Preparing to unpack .../python3-setuptools-whl_66.1.1-1+deb12u2_all.deb ...
+Unpacking python3-setuptools-whl (66.1.1-1+deb12u2) ...
+Selecting previously unselected package python3.11-venv.
+Preparing to unpack .../python3.11-venv_3.11.2-6+deb12u7_amd64.deb ...
+Unpacking python3.11-venv (3.11.2-6+deb12u7) ...
+Setting up python3-setuptools-whl (66.1.1-1+deb12u2) ...
+Setting up python3-pip-whl (23.0.1+dfsg-1) ...
+Setting up python3-lib2to3 (3.11.2-3) ...
+Setting up python3-distutils (3.11.2-3) ...
+Setting up python3.11-venv (3.11.2-6+deb12u7) ...
+Collecting pytest
+  Downloading pytest-9.0.3-py3-none-any.whl (375 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 375.2/375.2 kB 6.6 MB/s eta 0:00:00
+Collecting pytest-asyncio
+  Downloading pytest_asyncio-1.4.0-py3-none-any.whl (16 kB)
+Collecting anyio
+  Downloading anyio-4.13.0-py3-none-any.whl (114 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 114.4/114.4 kB 11.6 MB/s eta 0:00:00
+Collecting httpx
+  Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.5/73.5 kB 10.2 MB/s eta 0:00:00
+Collecting iniconfig>=1.0.1
+  Downloading iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+Collecting packaging>=22
+  Downloading packaging-26.2-py3-none-any.whl (100 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100.2/100.2 kB 13.5 MB/s eta 0:00:00
+Collecting pluggy<2,>=1.5
+  Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+Collecting pygments>=2.7.2
+  Downloading pygments-2.20.0-py3-none-any.whl (1.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 12.4 MB/s eta 0:00:00
+Collecting typing-extensions>=4.12
+  Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.6/44.6 kB 7.6 MB/s eta 0:00:00
+Collecting idna>=2.8
+  Downloading idna-3.18-py3-none-any.whl (65 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 65.5/65.5 kB 11.2 MB/s eta 0:00:00
+Collecting certifi
+  Downloading certifi-2026.5.20-py3-none-any.whl (134 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.1/134.1 kB 17.7 MB/s eta 0:00:00
+Collecting httpcore==1.*
+  Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.8/78.8 kB 12.4 MB/s eta 0:00:00
+Collecting h11>=0.16
+  Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Installing collected packages: typing-extensions, pygments, pluggy, packaging, iniconfig, idna, h11, certifi, pytest, httpcore, anyio, pytest-asyncio, httpx
+Successfully installed anyio-4.13.0 certifi-2026.5.20 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.18 iniconfig-2.3.0 packaging-26.2 pluggy-1.6.0 pygments-2.20.0 pytest-9.0.3 pytest-asyncio-1.4.0 typing-extensions-4.15.0
+
+====================================================================================================== ERRORS ======================================================================================================
+__________________________________________________________________________________ ERROR collecting tests/test_admin_endpoints.py __________________________________________________________________________________
+ImportError while importing test module '/home/founder/syrabit/apps/backend/tests/test_admin_endpoints.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_admin_endpoints.py:8: in <module>
+    from fastapi.testclient import TestClient
+E   ModuleNotFoundError: No module named 'fastapi'
+================================================================================================= warnings summary =================================================================================================
+../../../syrabit-venv/lib/python3.11/site-packages/_pytest/config/__init__.py:1434
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: env
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================================================================================= short test summary info ==============================================================================================
+ERROR tests/test_admin_endpoints.py
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 warning, 1 error in 0.06s
+(syrabit-venv) founder@instance-20260603-085552:~/syrabit/apps/backend$ 
