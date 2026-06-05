@@ -46,7 +46,6 @@ fi
 
 PIP_COMPILE_CMD=(
   pip-compile
-  --python-version 3.12
   --strip-extras
   --no-header
   --output-file "$REQUIREMENTS_TXT"
@@ -109,7 +108,6 @@ if [[ "$MODE" == "check" ]]; then
   # pip-compile --dry-run only prints to stdout without resolving properly.
   # Instead, compile to a temp file then compare — this is the reliable approach.
   if ! pip-compile \
-      --python-version 3.12 \
       --strip-extras \
       --no-header \
       --quiet \
