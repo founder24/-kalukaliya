@@ -120,6 +120,7 @@ gcloud run deploy "$SERVICE" \
   --update-env-vars="REFRESH_TOKEN_EXPIRY_DAYS=${REFRESH_TOKEN_EXPIRY_DAYS:-7}" \
   --update-env-vars="VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}" \
   --update-env-vars="VERTEX_GEMINI_MODEL=${VERTEX_GEMINI_MODEL:-gemini-2.5-flash}" \
+  --update-env-vars="VERTEX_PROJECT_ID=${VERTEX_PROJECT_ID:-blissful-acumen-495019-t6}" \
   --update-env-vars="JWT_SECRET=${JWT_SECRET}" \
   --update-secrets="MONGODB_URI=MONGODB_URI:latest" \
   --update-secrets="GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest" \

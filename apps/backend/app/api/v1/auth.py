@@ -426,7 +426,8 @@ async def get_current_user_optional(
 async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) -> None:
     """
     IP-based rate limiting using Upstash Redis.
-    Raises HTTP 429 if limit exceeded. Raises HTTP 503 if Redis unavailable (fail-closed).
+    Raises HTTP 429 if limit exceeded. Fails open (logs warning, allows request)
+    if Redis is unavailable — blocking auth entirely is worse than a brief burst.
     In development mode, rate limiting is skipped entirely so local/Replit dev works
     without Redis configured.
     """
@@ -457,10 +458,13 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
     except HTTPException:
         raise  # Re-raise 429
     except Exception as e:
-        # Fail-closed: if Redis is unavailable, reject the request rather than
-        # allowing unlimited unauthenticated attempts.
-        logger.warning(f"Rate limiting unavailable ({endpoint}): {type(e).__name__}")
-        raise HTTPException(status_code=503, detail="Rate limiting service unavailable")
+        # Fail-open: Redis unavailable → log and allow the request through.
+        # Blocking auth entirely when Redis is down is worse than the risk of
+        # a burst of unauthenticated attempts; bcrypt cost still throttles
+        # brute-force, and Cloudflare WAF provides an outer rate-limit layer.
+        logger.warning(
+            f"Rate limiting unavailable ({endpoint}), failing open: {type(e).__name__}"
+        )
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
