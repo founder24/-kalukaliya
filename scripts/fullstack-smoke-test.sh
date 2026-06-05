@@ -18,9 +18,9 @@ GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m';  BOLD='\033[1m';   RESET='\033[0m'
 
 # ── Helpers ────────────────────────────────────────────────────────────────
-pass() { echo -e "  ${GREEN}✓${RESET}  $1"; ((PASS++)); }
-fail() { echo -e "  ${RED}✗${RESET}  $1"; ((FAIL++)); }
-skip() { echo -e "  ${YELLOW}–${RESET}  $1 (skipped)"; ((SKIP++)); }
+pass() { echo -e "  ${GREEN}✓${RESET}  $1"; PASS=$((PASS+1)); }
+fail() { echo -e "  ${RED}✗${RESET}  $1"; FAIL=$((FAIL+1)); }
+skip() { echo -e "  ${YELLOW}–${RESET}  $1 (skipped)"; SKIP=$((SKIP+1)); }
 header() { echo -e "\n${CYAN}${BOLD}── $1 ──${RESET}"; }
 
 http_status() { curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$@"; }
