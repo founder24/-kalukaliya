@@ -49,18 +49,18 @@ if [ ${#JWT_SECRET} -lt 32 ]; then
 fi
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
+# If a service account key is provided (Replit env) use it; otherwise trust the
+# existing gcloud session (Cloud Shell / local terminal with `gcloud auth login`).
 KEY_JSON="${GCP_SERVICE_ACCOUNT_KEY:-${GOOGLE_APPLICATION_CREDENTIALS_JSON:-}}"
-if [ -z "$KEY_JSON" ]; then
-  echo "❌  Neither GCP_SERVICE_ACCOUNT_KEY nor GOOGLE_APPLICATION_CREDENTIALS_JSON is set." >&2
-  exit 1
+if [ -n "$KEY_JSON" ]; then
+  KEY_FILE="$(mktemp /tmp/gcp-key-XXXXXX.json)"
+  trap 'rm -f "$KEY_FILE"' EXIT
+  printf '%s' "$KEY_JSON" > "$KEY_FILE"
+  echo "🔑 Authenticating with service account key..."
+  gcloud auth activate-service-account "$SA_EMAIL" --key-file="$KEY_FILE" --quiet
+else
+  echo "🔑 Using existing gcloud session ($(gcloud config get-value account 2>/dev/null))..."
 fi
-
-KEY_FILE="$(mktemp /tmp/gcp-key-XXXXXX.json)"
-trap 'rm -f "$KEY_FILE"' EXIT
-printf '%s' "$KEY_JSON" > "$KEY_FILE"
-
-echo "🔑 Authenticating with service account..."
-gcloud auth activate-service-account "$SA_EMAIL" --key-file="$KEY_FILE" --quiet
 gcloud config set project "$PROJECT" --quiet
 
 # ── Docker auth ───────────────────────────────────────────────────────────────
