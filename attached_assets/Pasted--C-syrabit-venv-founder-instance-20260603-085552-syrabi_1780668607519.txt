@@ -1,0 +1,610 @@
+^C
+(syrabit-venv) founder@instance-20260603-085552:~/syrabit/apps/backend$ cd ~/syrabit/apps/backend
+
+python3 - << 'PYEOF'
+# Fix chat.py — wrap DB calls instead of pre-checking
+with open("app/api/v1/chat.py", "r") as f:
+    content = f.read()
+
+old = '''    """Get paginated chat history for the current user or anonymous user."""
+    from app.models.chat import Chat
+    from app.db.mongo import get_mongo_client
+    try:
+        get_mongo_client()
+    except RuntimeError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    if user:
+        # Authenticated user: full paginated access
+        limit = min(limit, 100)
+
+        chats = (
+            await Chat.find({"user_id": str(user.id)})
+            .sort("-updated_at")
+            .skip(skip)
+            .limit(limit)
+            .to_list()
+        )
+
+        total = await Chat.find({"user_id": str(user.id)}).count()
+    else:
+        # Anonymous user: resolve identity via IP (primary) then fallback chain
+        anon_id = resolve_anon_id(http_request)
+        if not anon_id or not ANON_ID_PATTERN.match(anon_id):
+            return {
+                "chats": [],
+                "pagination": {"skip": 0, "limit": 0, "total": 0, "has_more": False},
+            }
+
+        limit = ANON_HISTORY_LIMIT
+        skip = 0
+
+        chats = (
+            await Chat.find({"user_id": anon_id})
+            .sort("-updated_at")
+            .skip(skip)
+            .limit(limit)
+            .to_list()
+  --ignore=tests/test_latency_comparison.pyion.py \="Database unavailable")'''ss)."""se},
+chat.py patched
+conversations.py patched
+............................................................................................F...................................................................F................................F.......... [ 88%]
+..........................                                                                                                                                                                                   [100%]
+===================================================================================================== FAILURES =====================================================================================================
+____________________________________________________________________________________________ test_get_endpoints_no_500 _____________________________________________________________________________________________
+tests/test_endpoints_audit.py:89: in test_get_endpoints_no_500
+    assert not failures, "The following endpoints returned 500:\n" + "\n".join(failures)
+E   AssertionError: The following endpoints returned 500:
+E     /api/v1/chat/history returned 500: Internal Server Error
+E     /api/v1/chat/conversations returned 500: Internal Server Error
+E     /api/v1/ai/chat/history returned 500: Internal Server Error
+E     /api/v1/ai/chat/conversations returned 500: Internal Server Error
+E     /api/v1/conversations/anon returned 500: Internal Server Error
+E   assert not ['/api/v1/chat/history returned 500: Internal Server Error', '/api/v1/chat/conversations returned 500: Internal Server...t/conversations returned 500: Internal Server Error', '/api/v1/conversations/anon returned 500: Internal Server Error']
+---------------------------------------------------------------------------------------------- Captured stdout setup -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T14:09:30.275810+00:00", "level": "WARNING", "logger": "app.db.mongo", "message": "MONGODB_URI not set \u2014 MongoDB disabled", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.276158+00:00", "level": "INFO", "logger": "app.main", "message": "MongoDB initialized successfully", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.276282+00:00", "level": "WARNING", "logger": "app.db.redis", "message": "UPSTASH_REDIS_REST_URL/TOKEN not set \u2014 Redis disabled", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.276357+00:00", "level": "INFO", "logger": "app.main", "message": "Redis initialized successfully", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.276435+00:00", "level": "INFO", "logger": "app.main", "message": "Vertex AI Search warmed up successfully", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.276515+00:00", "level": "WARNING", "logger": "app.main", "message": "Vertex AI token warm-up failed: Vertex AI credentials not configured. Set GEMINI_API_KEY for the Generative Language API, or GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_APPLICATION_CREDENTIALS_JSON for the Vertex AI SDK.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log setup ------------------------------------------------------------------------------------------------
+WARNING  app.db.mongo:mongo.py:34 MONGODB_URI not set — MongoDB disabled
+INFO     app.main:main.py:64 MongoDB initialized successfully
+WARNING  app.db.redis:redis.py:20 UPSTASH_REDIS_REST_URL/TOKEN not set — Redis disabled
+INFO     app.main:main.py:78 Redis initialized successfully
+INFO     app.main:main.py:91 Vertex AI Search warmed up successfully
+WARNING  app.main:main.py:102 Vertex AI token warm-up failed: Vertex AI credentials not configured. Set GEMINI_API_KEY for the Generative Language API, or GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_APPLICATION_CREDENTIALS_JSON for the Vertex AI SDK.
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T14:09:30.280083+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/chat/history \"HTTP/1.1 500 Internal Server Error\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.282470+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/chat/conversations \"HTTP/1.1 500 Internal Server Error\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.285054+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/ai/chat/history \"HTTP/1.1 500 Internal Server Error\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.287492+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/ai/chat/conversations \"HTTP/1.1 500 Internal Server Error\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.289916+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "71285e25-740e-4033-8fb3-ff907d0b8b58", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/conversations", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.290459+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/conversations \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.292280+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/conversations/anon \"HTTP/1.1 500 Internal Server Error\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.294262+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "ebc50039-da09-4492-923a-c99cda17a6eb", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/edu/settings", "status": 501}
+{"timestamp": "2026-06-05T14:09:30.294785+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/edu/settings \"HTTP/1.1 501 Not Implemented\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.297325+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "535cbdaf-3c3f-492b-9aa5-86b8f48f24e4", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/subscription/plans", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.297928+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/subscription/plans \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.301624+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "23c5465f-dc1e-4e15-ab96-bad66db27172", "user_id": null, "lang": null, "provider": null, "latency_ms": 2, "method": "GET", "path": "/api/v1/subscription/status", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.302291+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/subscription/status \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.303705+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "77f742e6-f85c-45c2-bdc5-5d8332b6f3db", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/users/me", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.304276+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/users/me \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.306662+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "64459d22-95df-451e-8799-e738adb3ff68", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/users/credits", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.307204+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/users/credits \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.308606+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "b1bb30cc-f377-4d82-873a-b8131a19bd17", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/health", "status": 503}
+{"timestamp": "2026-06-05T14:09:30.309151+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/health \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.310437+00:00", "level": "ERROR", "logger": "app.api.v1.health", "message": "MongoDB not initialized: MongoDB not initialized. Call init_mongo() first.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.310567+00:00", "level": "ERROR", "logger": "app.api.v1.health", "message": "Redis ping failed: Redis not initialized. Call init_redis() first.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.310859+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "35454177-bed4-413a-8156-00b137b761a5", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/health/deep", "status": 503}
+{"timestamp": "2026-06-05T14:09:30.311292+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/health/deep \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.313130+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "6ab1f813-1b92-4bd3-875d-206a2334b62c", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/health/circuit-breakers", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.313589+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/health/circuit-breakers \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.314849+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "6d0ffb62-93c8-4242-8f74-9c4d4908b05d", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/health", "status": 503}
+{"timestamp": "2026-06-05T14:09:30.315308+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/health \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.316758+00:00", "level": "ERROR", "logger": "app.api.v1.health", "message": "MongoDB not initialized: MongoDB not initialized. Call init_mongo() first.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.317013+00:00", "level": "ERROR", "logger": "app.api.v1.health", "message": "Redis ping failed: Redis not initialized. Call init_redis() first.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.317390+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "c71f7a63-dc99-4fa0-ad84-ca3ad0f0d517", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/health/deep", "status": 503}
+{"timestamp": "2026-06-05T14:09:30.317865+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/health/deep \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.319198+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "0ef4997e-01f6-49fc-83f1-45ed00f11173", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/health/circuit-breakers", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.319657+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/health/circuit-breakers \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.322504+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "0c7acad7-6b03-45df-a5ba-15f07a5426d6", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/chat/feedback/stats", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.323052+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/chat/feedback/stats \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.324954+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "193a92a0-ce49-463e-83be-0a662d0fd36b", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/verify", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.325451+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/verify \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.327011+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "bf1bbfb5-55ba-4d6e-8c1b-2c5e51a1c2ac", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/dashboard", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.327475+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/dashboard \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.328836+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "773161fe-d4fe-4833-a2b3-c3acae41fc50", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/health", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.329321+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/health \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.330846+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "3201a0e4-7e26-4859-ba11-d6b11429ad09", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/cf-overview", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.331449+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/cf-overview \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.333173+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "67e24fa6-db19-4b1f-9f9a-1f6e69d873bf", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/users", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.333750+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/users \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.335266+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "8abf6013-1f9d-467f-a3e4-ea959acfe9f0", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/conversations", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.335746+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/conversations \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.337124+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "fe929a52-e50e-4843-8658-b245918510ef", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/content/boards", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.337594+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/content/boards \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.339623+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "470543ec-446c-483d-a12d-ff6fac941f76", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/content/classes", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.340173+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/content/classes \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.342207+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "e296bd6d-ba0c-4f2a-a781-b5a9a90fbb36", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/content/streams", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.342727+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/content/streams \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.344748+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "4690154c-3b13-452d-818d-621c5d880dc9", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/content/subjects", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.345448+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/content/subjects \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.348770+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "716ab699-4f29-4b69-878b-5247a745c258", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/content/chapters", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.349308+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/content/chapters \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.351785+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "d4a48be2-86b2-40ae-a744-435dbeda56e8", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/content/pipeline/status", "status": 422}
+{"timestamp": "2026-06-05T14:09:30.352413+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/content/pipeline/status \"HTTP/1.1 422 Unprocessable Entity\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.354759+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "66853a66-602a-4c26-91f0-acfe93a05c31", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/content/cms-documents", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.355294+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/content/cms-documents \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.356943+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "f11c95c5-d22a-4f97-a6df-baf9f652da70", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/analytics", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.357551+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/analytics \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.359446+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "19c871c7-8486-4d9c-99e7-a8baad4394dd", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/analytics/daily", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.360152+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/analytics/daily \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.362051+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "7087d921-37df-465e-8880-a7e38e75e8f3", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/analytics/revenue", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.362639+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/analytics/revenue \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.364609+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "fe84ddf5-adeb-4789-9720-f022c69b9233", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/analytics/predictor", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.365226+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/analytics/predictor \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.367290+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "145742b0-ff0f-493a-b4db-050f3fd7773a", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/analytics/cf-status", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.368098+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/analytics/cf-status \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.370133+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "9f91fcac-c9db-42c9-881b-e0b54aae342c", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/analytics/cf-overview", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.370740+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/analytics/cf-overview \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.372721+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "82098193-88de-411c-9267-62c653a30373", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/analytics/bot-traffic", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.373387+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/analytics/bot-traffic \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.375340+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "7a885a18-9feb-42f7-9a02-c1cd95933368", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/analytics/hydrate-stats", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.375926+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/analytics/hydrate-stats \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.377977+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "fbb34434-e0a1-458e-9eeb-1a3980575526", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/analytics/review-prompt-stats", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.378564+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/analytics/review-prompt-stats \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.380471+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "86fbea4c-4f92-42ea-9ef2-4cccaa2fb1bf", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/analytics/content-card-views", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.380987+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/analytics/content-card-views \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.382946+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "607857f1-a293-472d-9f93-aeac4d0b2b0f", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/settings", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.383458+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/settings \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.385335+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "42ae5d58-f1a0-4c18-9156-b336ac599123", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/diagnostics", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.385888+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/diagnostics \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.387976+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "0da9e548-288d-4ed1-9660-22f9b7aca1f7", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/roadmap", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.388562+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/roadmap \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.390760+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "3487261c-cb4c-496c-9870-c086b9a83470", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/plan-config", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.391317+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/plan-config \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.393467+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "55f0ab8f-6a06-4815-8803-44a2dc985550", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/api-config", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.394115+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/api-config \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.396421+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "35d1f7b8-93e9-458e-9a58-10fcebd9177f", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/activity-log", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.397029+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/activity-log \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.398732+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "51155ecf-07bd-44f5-9961-125fac038391", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/notifications", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.399326+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/notifications \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.401004+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "17c62c1c-15d7-4387-8e09-ff84947579da", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/seo/entity/status", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.401572+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/seo/entity/status \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.403082+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "3f4ac89b-6a0b-4687-bacb-a13d85a9a1ef", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/seo/entity/history", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.403658+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/seo/entity/history \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.405430+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "65e01572-8cb7-47d7-8406-e863d70a56bd", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/seo/pipeline-status", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.406018+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/seo/pipeline-status \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.408895+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "33fb3111-61fc-4c8b-87c6-6f257906a193", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/seo/coverage", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.409447+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/seo/coverage \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.411558+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "9926a7b2-e2f5-4f53-bb98-bfb5c70faa35", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/seo/deep-scan-history", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.412175+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/seo/deep-scan-history \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.414298+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "7e5dc610-de35-4d8f-ab92-862f320105c6", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/ai/providers", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.414964+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/ai/providers \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.416985+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "1747b488-982b-4b0e-9d05-dd066d180ba8", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/ai/status", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.417509+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/ai/status \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.419191+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "e86a0be7-56c4-464e-bb30-3961f1d876bc", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/revenue/overview", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.419773+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/revenue/overview \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.421716+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "122d9456-eaa1-4a9f-aad4-d4d9a78b7e03", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/revenue/subscriptions", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.422353+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/revenue/subscriptions \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.424064+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "cd7b6704-135d-4927-9470-c0e3b7c4cd56", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/alerts/unacknowledged/count", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.424607+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/alerts/unacknowledged/count \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.426146+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "5d00cb44-c40b-40b3-8ba4-4df53da08bcd", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/admin/alerts/cooldowns", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.426949+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/alerts/cooldowns \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.429574+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "70d71d2f-7153-4f08-9a39-a8133e076d9e", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/seo/sitemap.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.430189+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/seo/sitemap.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.432234+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "4231099a-f72b-4015-a538-4d982bd092f0", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/seo/sitemap-static.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.432906+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/seo/sitemap-static.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.435576+00:00", "level": "WARNING", "logger": "app.api.v1.seo", "message": "Failed to generate subjects sitemap from DB: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.436116+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "f9dbf381-6eb9-430a-a2b6-b9d534ddb33d", "user_id": null, "lang": null, "provider": null, "latency_ms": 2, "method": "GET", "path": "/api/v1/seo/sitemap-subjects.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.436718+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/seo/sitemap-subjects.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.439435+00:00", "level": "WARNING", "logger": "app.api.v1.seo", "message": "Failed to generate chapters sitemap from DB: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.439835+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "0e1a1360-6bb1-4679-91cf-7d4d04068608", "user_id": null, "lang": null, "provider": null, "latency_ms": 2, "method": "GET", "path": "/api/v1/seo/sitemap-chapters.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.440432+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/seo/sitemap-chapters.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.443223+00:00", "level": "WARNING", "logger": "app.api.v1.seo", "message": "Failed to generate topics sitemap: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.443614+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "af034a29-7d1d-4a10-8b9e-24d522176ac8", "user_id": null, "lang": null, "provider": null, "latency_ms": 2, "method": "GET", "path": "/api/v1/seo/sitemap-topics.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.444177+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/seo/sitemap-topics.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.446932+00:00", "level": "WARNING", "logger": "app.api.v1.seo", "message": "Failed to generate RSS feed: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.447414+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "ec529464-a456-4a84-91b1-05c3e262f859", "user_id": null, "lang": null, "provider": null, "latency_ms": 2, "method": "GET", "path": "/api/v1/seo/feed.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.448130+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/seo/feed.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.451065+00:00", "level": "WARNING", "logger": "app.api.v1.seo", "message": "Failed to generate JSON feed: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.451780+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "b0368d89-1d9a-4324-9b93-2b6a87fd2198", "user_id": null, "lang": null, "provider": null, "latency_ms": 2, "method": "GET", "path": "/api/v1/seo/feed.json", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.452415+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/seo/feed.json \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.454190+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "628303e1-de00-4556-beeb-241709e1d334", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/sitemap.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.454792+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/sitemap.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.456555+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "e29da982-8f52-4795-96ad-ce8fcf422edb", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/sitemap-static.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.457268+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/sitemap-static.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.458817+00:00", "level": "WARNING", "logger": "app.api.v1.seo", "message": "Failed to generate subjects sitemap from DB: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.459203+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "df30a277-15e9-4b2b-9824-a5f83a59c486", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/sitemap-subjects.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.459685+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/sitemap-subjects.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.461199+00:00", "level": "WARNING", "logger": "app.api.v1.seo", "message": "Failed to generate chapters sitemap from DB: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.461571+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "7332fb02-e28c-4775-abb9-d4beafe23214", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/sitemap-chapters.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.462047+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/sitemap-chapters.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.463436+00:00", "level": "WARNING", "logger": "app.api.v1.seo", "message": "Failed to generate topics sitemap: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.463709+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "8b540bb5-b5e7-437c-b19c-9692f98e7f6b", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/sitemap-topics.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.464236+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/sitemap-topics.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.465618+00:00", "level": "WARNING", "logger": "app.api.v1.seo", "message": "Failed to generate RSS feed: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.465901+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "620e1bda-771c-48bc-b592-60813782d9ed", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/feed.xml", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.466384+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/feed.xml \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.467779+00:00", "level": "WARNING", "logger": "app.api.v1.seo", "message": "Failed to generate JSON feed: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.468184+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "623747ba-fa6d-4370-aaa7-b75b25aa0629", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/feed.json", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.468728+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/feed.json \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.475929+00:00", "level": "WARNING", "logger": "app.api.v1.public_content", "message": "Library bundle DB query failed (DB may not be ready): ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.476519+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "dbe5df5d-0b06-481d-b14b-0102227da857", "user_id": null, "lang": null, "provider": null, "latency_ms": 6, "method": "GET", "path": "/api/v1/content/library-bundle", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.477113+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/content/library-bundle \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.480076+00:00", "level": "WARNING", "logger": "app.api.v1.public_content", "message": "Question papers DB query failed: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.480583+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "62ca6f90-ed3f-4536-a90f-bbcd813b24d3", "user_id": null, "lang": null, "provider": null, "latency_ms": 2, "method": "GET", "path": "/api/v1/content/question-papers", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.481240+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/content/question-papers \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.484090+00:00", "level": "WARNING", "logger": "app.api.v1.public_content", "message": "CMS posts query failed (DB may not be ready): ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.484496+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "8d955bac-80d9-496f-a076-7029cd50e15c", "user_id": null, "lang": null, "provider": null, "latency_ms": 2, "method": "GET", "path": "/api/v1/content/cms/posts", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.485011+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/content/cms/posts \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.487245+00:00", "level": "WARNING", "logger": "app.api.v1.public_content", "message": "CMS posts query failed (DB may not be ready): ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.487706+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "3bc4b026-f537-4eea-885e-b5f6b515dbf1", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/content/cms-library", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.488395+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/content/cms-library \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.490591+00:00", "level": "WARNING", "logger": "app.api.v1.public_content", "message": "Library bundle DB query failed (DB may not be ready): ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.491042+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "e52e54c3-9f95-4750-b4ad-d164cce7279a", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/content/library-bundle", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.491558+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/content/library-bundle \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.493425+00:00", "level": "WARNING", "logger": "app.api.v1.public_content", "message": "Question papers DB query failed: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.493747+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "7f3f59b1-fe80-40c1-bd65-0a1cf074af0f", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/content/question-papers", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.494240+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/content/question-papers \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.495998+00:00", "level": "WARNING", "logger": "app.api.v1.public_content", "message": "CMS posts query failed (DB may not be ready): ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.496423+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "31e1fd69-584d-49b4-a48e-1dced3c18e0d", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/content/cms/posts", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.496969+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/content/cms/posts \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.498612+00:00", "level": "WARNING", "logger": "app.api.v1.public_content", "message": "CMS posts query failed (DB may not be ready): ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.498942+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "386a97a7-9093-4dbc-ba45-b478ca1e2e82", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/content/cms-library", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.499430+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/content/cms-library \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.502336+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "a99d0bc2-9644-4131-b7bf-3238fcf2bec5", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/content/knowledge", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.502886+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/content/knowledge \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.505269+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "70622189-04ec-41d7-b10c-35ebff8cae1d", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/content/translate/status", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.505800+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/content/translate/status \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.508259+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "607c4fba-8c47-40dd-a3af-b967f41484c6", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/dead-letters", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.508866+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/dead-letters \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.510931+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "b9ba2885-8e43-403f-86ac-046bf63fde76", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/changelog", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.511506+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/changelog \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.514256+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "1ab2f46f-6cf3-4d46-ab31-bd3ddc7bcee3", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/payments/history", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.514859+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/payments/history \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.517390+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "1a3cfd20-e158-4cd0-8199-5a34e2e9c7a0", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/security/spoofed-bots", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.518171+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/security/spoofed-bots \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.521019+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "9b03087c-bd27-43d1-993f-4c40f107cbc4", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/security/blocked-ips", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.521792+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/security/blocked-ips \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.524146+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "7c48c8e0-6b53-4d43-84e1-3e26b48aea8f", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/security/block-trends", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.524933+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/security/block-trends \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.527565+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "6e1b3d48-d165-4d26-a6d4-a31f63d62d74", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/security/ttl-monitor", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.528255+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/security/ttl-monitor \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.530454+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "3ba65925-d4e9-4170-93c7-21e904cc5cf4", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/security/collection-size-history", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.531088+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/security/collection-size-history \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.532918+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "8fe7f19a-d096-4fdd-87cf-dd27d66dd7c5", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/user/me", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.533526+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/user/me \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.535459+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "a0d1b53d-c0f9-4172-bd2f-d580f508b702", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/v1/user/credits", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.536016+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/user/credits \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.538441+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "aea21a16-4a4b-49c0-85b0-736858aa83ee", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/config/trustpilot", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.538945+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/config/trustpilot \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.541364+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "877c3997-8965-4302-9c19-0575320c475f", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/config/trustpilot/aggregate", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.541946+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/config/trustpilot/aggregate \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.545137+00:00", "level": "WARNING", "logger": "app.api.v1.admin_corpus", "message": "corpus/assamese health query failed: ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.545557+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "d127477a-21ed-497a-89c8-b6572f25405b", "user_id": null, "lang": null, "provider": null, "latency_ms": 2, "method": "GET", "path": "/api/v1/health/corpus/assamese", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.546095+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/health/corpus/assamese \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.548490+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "817f20c1-1b12-4134-b4e4-35c1f4637da5", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/admin/corpus/assamese/progress", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.549069+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/corpus/assamese/progress \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.552506+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "93b568f1-9891-47d8-b627-9224c8d8d93d", "user_id": null, "lang": null, "provider": null, "latency_ms": 2, "method": "GET", "path": "/api/v1/admin/db-health", "status": 401}
+{"timestamp": "2026-06-05T14:09:30.553118+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/admin/db-health \"HTTP/1.1 401 Unauthorized\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.555184+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "40743771-0081-4152-b12a-6d23fe596d0a", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/api/health", "status": 301}
+{"timestamp": "2026-06-05T14:09:30.555820+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/health \"HTTP/1.1 301 Moved Permanently\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.557760+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "6596d3fa-48c9-4881-87d9-bc4a1638719a", "user_id": null, "lang": null, "provider": null, "latency_ms": 0, "method": "GET", "path": "/health", "status": 503}
+{"timestamp": "2026-06-05T14:09:30.558506+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/health \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.560863+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "30a25f1b-4a40-4329-a346-22a68e4d2690", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/health/deep", "status": 301}
+{"timestamp": "2026-06-05T14:09:30.561577+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/health/deep \"HTTP/1.1 301 Moved Permanently\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.563548+00:00", "level": "ERROR", "logger": "app.api.v1.health", "message": "MongoDB not initialized: MongoDB not initialized. Call init_mongo() first.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.563827+00:00", "level": "ERROR", "logger": "app.api.v1.health", "message": "Redis ping failed: Redis not initialized. Call init_redis() first.", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.564280+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "7c780143-737e-4174-a8c4-d10e9b928a33", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/health/deep", "status": 503}
+{"timestamp": "2026-06-05T14:09:30.564798+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/health/deep \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.567066+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "b123aaaf-d17e-458f-8ce7-d5767c5ba3ac", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/cms/posts", "status": 307}
+{"timestamp": "2026-06-05T14:09:30.567782+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/cms/posts \"HTTP/1.1 307 Temporary Redirect\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.569662+00:00", "level": "WARNING", "logger": "app.api.v1.public_content", "message": "CMS posts query failed (DB may not be ready): ", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.570070+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "1017c71a-5782-4864-8103-ebe3eec14285", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "GET", "path": "/api/v1/content/cms/posts", "status": 200}
+{"timestamp": "2026-06-05T14:09:30.570585+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://testserver/api/v1/content/cms/posts \"HTTP/1.1 200 OK\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/chat/history "HTTP/1.1 500 Internal Server Error"
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/chat/conversations "HTTP/1.1 500 Internal Server Error"
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/ai/chat/history "HTTP/1.1 500 Internal Server Error"
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/ai/chat/conversations "HTTP/1.1 500 Internal Server Error"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/conversations "HTTP/1.1 401 Unauthorized"
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/conversations/anon "HTTP/1.1 500 Internal Server Error"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/edu/settings "HTTP/1.1 501 Not Implemented"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/subscription/plans "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/subscription/status "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/users/me "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/users/credits "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/health "HTTP/1.1 503 Service Unavailable"
+ERROR    app.api.v1.health:health.py:46 MongoDB not initialized: MongoDB not initialized. Call init_mongo() first.
+ERROR    app.api.v1.health:health.py:67 Redis ping failed: Redis not initialized. Call init_redis() first.
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/health/deep "HTTP/1.1 503 Service Unavailable"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/health/circuit-breakers "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/health "HTTP/1.1 503 Service Unavailable"
+ERROR    app.api.v1.health:health.py:46 MongoDB not initialized: MongoDB not initialized. Call init_mongo() first.
+ERROR    app.api.v1.health:health.py:67 Redis ping failed: Redis not initialized. Call init_redis() first.
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/health/deep "HTTP/1.1 503 Service Unavailable"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/health/circuit-breakers "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/chat/feedback/stats "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/verify "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/dashboard "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/health "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/cf-overview "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/users "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/conversations "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/content/boards "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/content/classes "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/content/streams "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/content/subjects "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/content/chapters "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/content/pipeline/status "HTTP/1.1 422 Unprocessable Entity"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/content/cms-documents "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/analytics "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/analytics/daily "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/analytics/revenue "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/analytics/predictor "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/analytics/cf-status "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/analytics/cf-overview "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/analytics/bot-traffic "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/analytics/hydrate-stats "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/analytics/review-prompt-stats "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/analytics/content-card-views "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/settings "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/diagnostics "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/roadmap "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/plan-config "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/api-config "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/activity-log "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/notifications "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/seo/entity/status "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/seo/entity/history "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/seo/pipeline-status "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/seo/coverage "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/seo/deep-scan-history "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/ai/providers "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/ai/status "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/revenue/overview "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/revenue/subscriptions "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/alerts/unacknowledged/count "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/alerts/cooldowns "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/seo/sitemap.xml "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/seo/sitemap-static.xml "HTTP/1.1 200 OK"
+WARNING  app.api.v1.seo:seo.py:169 Failed to generate subjects sitemap from DB: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/seo/sitemap-subjects.xml "HTTP/1.1 200 OK"
+WARNING  app.api.v1.seo:seo.py:243 Failed to generate chapters sitemap from DB: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/seo/sitemap-chapters.xml "HTTP/1.1 200 OK"
+WARNING  app.api.v1.seo:seo.py:329 Failed to generate topics sitemap: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/seo/sitemap-topics.xml "HTTP/1.1 200 OK"
+WARNING  app.api.v1.seo:seo.py:398 Failed to generate RSS feed: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/seo/feed.xml "HTTP/1.1 200 OK"
+WARNING  app.api.v1.seo:seo.py:541 Failed to generate JSON feed: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/seo/feed.json "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/sitemap.xml "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/sitemap-static.xml "HTTP/1.1 200 OK"
+WARNING  app.api.v1.seo:seo.py:169 Failed to generate subjects sitemap from DB: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/sitemap-subjects.xml "HTTP/1.1 200 OK"
+WARNING  app.api.v1.seo:seo.py:243 Failed to generate chapters sitemap from DB: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/sitemap-chapters.xml "HTTP/1.1 200 OK"
+WARNING  app.api.v1.seo:seo.py:329 Failed to generate topics sitemap: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/sitemap-topics.xml "HTTP/1.1 200 OK"
+WARNING  app.api.v1.seo:seo.py:398 Failed to generate RSS feed: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/feed.xml "HTTP/1.1 200 OK"
+WARNING  app.api.v1.seo:seo.py:541 Failed to generate JSON feed: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/feed.json "HTTP/1.1 200 OK"
+WARNING  app.api.v1.public_content:public_content.py:57 Library bundle DB query failed (DB may not be ready): 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/content/library-bundle "HTTP/1.1 200 OK"
+WARNING  app.api.v1.public_content:public_content.py:747 Question papers DB query failed: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/content/question-papers "HTTP/1.1 200 OK"
+WARNING  app.api.v1.public_content:public_content.py:810 CMS posts query failed (DB may not be ready): 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/content/cms/posts "HTTP/1.1 200 OK"
+WARNING  app.api.v1.public_content:public_content.py:810 CMS posts query failed (DB may not be ready): 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/content/cms-library "HTTP/1.1 200 OK"
+WARNING  app.api.v1.public_content:public_content.py:57 Library bundle DB query failed (DB may not be ready): 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/content/library-bundle "HTTP/1.1 200 OK"
+WARNING  app.api.v1.public_content:public_content.py:747 Question papers DB query failed: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/content/question-papers "HTTP/1.1 200 OK"
+WARNING  app.api.v1.public_content:public_content.py:810 CMS posts query failed (DB may not be ready): 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/content/cms/posts "HTTP/1.1 200 OK"
+WARNING  app.api.v1.public_content:public_content.py:810 CMS posts query failed (DB may not be ready): 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/content/cms-library "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/content/knowledge "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/content/translate/status "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/dead-letters "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/changelog "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/payments/history "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/security/spoofed-bots "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/security/blocked-ips "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/security/block-trends "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/security/ttl-monitor "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/security/collection-size-history "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/user/me "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/user/credits "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/config/trustpilot "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/config/trustpilot/aggregate "HTTP/1.1 200 OK"
+WARNING  app.api.v1.admin_corpus:admin_corpus.py:68 corpus/assamese health query failed: 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/health/corpus/assamese "HTTP/1.1 200 OK"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/corpus/assamese/progress "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/admin/db-health "HTTP/1.1 401 Unauthorized"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/health "HTTP/1.1 301 Moved Permanently"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/health "HTTP/1.1 503 Service Unavailable"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/health/deep "HTTP/1.1 301 Moved Permanently"
+ERROR    app.api.v1.health:health.py:46 MongoDB not initialized: MongoDB not initialized. Call init_mongo() first.
+ERROR    app.api.v1.health:health.py:67 Redis ping failed: Redis not initialized. Call init_redis() first.
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/health/deep "HTTP/1.1 503 Service Unavailable"
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/cms/posts "HTTP/1.1 307 Temporary Redirect"
+WARNING  app.api.v1.public_content:public_content.py:810 CMS posts query failed (DB may not be ready): 
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/content/cms/posts "HTTP/1.1 200 OK"
+--------------------------------------------------------------------------------------------- Captured stdout teardown ---------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T14:09:30.634511+00:00", "level": "INFO", "logger": "app.db.redis", "message": "Redis connection closed", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:30.634806+00:00", "level": "INFO", "logger": "app.main", "message": "Application shutdown complete", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+---------------------------------------------------------------------------------------------- Captured log teardown -----------------------------------------------------------------------------------------------
+INFO     app.db.redis:redis.py:45 Redis connection closed
+INFO     app.main:main.py:184 Application shutdown complete
+________________________________________________________________________________ test_rate_limit_returns_503_when_redis_unavailable ________________________________________________________________________________
+tests/test_rate_limiter.py:19: in test_rate_limit_returns_503_when_redis_unavailable
+    with pytest.raises(HTTPException) as exc_info:
+E   Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T14:09:31.673139+00:00", "level": "WARNING", "logger": "app.api.v1.auth", "message": "Rate limiting unavailable (login), failing open: ConnectionError", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+WARNING  app.api.v1.auth:auth.py:465 Rate limiting unavailable (login), failing open: ConnectionError
+________________________________________________________________________________________ test_redis_unavailable_returns_503 ________________________________________________________________________________________
+tests/test_service_degradation.py:94: in test_redis_unavailable_returns_503
+    assert "Rate limiting service unavailable" in response.json()["detail"]
+E   AssertionError: assert 'Rate limiting service unavailable' in 'Database service unavailable'
+----------------------------------------------------------------------------------------------- Captured stdout call -----------------------------------------------------------------------------------------------
+{"timestamp": "2026-06-05T14:09:31.808435+00:00", "level": "WARNING", "logger": "app.api.v1.auth", "message": "Rate limiting unavailable (login), failing open: RuntimeError", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+{"timestamp": "2026-06-05T14:09:31.808879+00:00", "level": "INFO", "logger": "app.main", "message": "request_completed", "request_id": "70b95bf4-17b3-4883-b8a7-79eb14e364cd", "user_id": null, "lang": null, "provider": null, "latency_ms": 1, "method": "POST", "path": "/api/v1/auth/login", "status": 503}
+{"timestamp": "2026-06-05T14:09:31.809359+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://test/api/v1/auth/login \"HTTP/1.1 503 Service Unavailable\"", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------------------------------------------------------------------------ Captured log call -------------------------------------------------------------------------------------------------
+WARNING  app.api.v1.auth:auth.py:465 Rate limiting unavailable (login), failing open: RuntimeError
+INFO     app.main:main.py:247 request_completed
+INFO     httpx:_client.py:1740 HTTP Request: POST http://test/api/v1/auth/login "HTTP/1.1 503 Service Unavailable"
+================================================================================================= warnings summary =================================================================================================
+../../../syrabit-venv/lib/python3.11/site-packages/_pytest/config/__init__.py:1434
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: env
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../../syrabit-venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_admin_endpoints.py: 8 warnings
+tests/test_anon_access.py: 1 warning
+tests/test_service_degradation.py: 3 warnings
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/jwt/api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 20 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_admin_endpoints.py::TestResponseShapes::test_dashboard_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_users_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_ai_providers_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_ai_status_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_seo_entity_status_placeholder
+tests/test_admin_endpoints.py::TestResponseShapes::test_cf_overview_placeholder
+tests/test_admin_endpoints.py::TestResponseShapes::test_settings_response_shape
+tests/test_admin_endpoints.py::TestResponseShapes::test_alerts_count_response
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/starlette/testclient.py:459: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+tests/test_admin_endpoints.py: 8 warnings
+tests/test_anon_access.py: 1 warning
+tests/test_service_degradation.py: 3 warnings
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/jwt/api_jwt.py:368: InsecureKeyLengthWarning: The HMAC key is 20 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/test_service_degradation.py::test_admin_verify_valid_cookie_returns_200
+tests/test_service_degradation.py::test_admin_verify_non_admin_token_returns_403
+tests/test_service_degradation.py::test_admin_verify_expired_cookie_returns_401
+  /home/founder/syrabit-venv/lib/python3.11/site-packages/httpx/_client.py:1768: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================================================================================= short test summary info ==============================================================================================
+FAILED tests/test_endpoints_audit.py::test_get_endpoints_no_500 - AssertionError: The following endpoints returned 500:
+FAILED tests/test_rate_limiter.py::test_rate_limit_returns_503_when_redis_unavailable - Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+FAILED tests/test_service_degradation.py::test_redis_unavailable_returns_503 - AssertionError: assert 'Rate limiting service unavailable' in 'Database service unavailable'
+3 failed, 227 passed, 37 warnings in 7.14s
+(syrabit-venv) founder@instance-20260603-085552:~/syrabit/apps/backend$ 

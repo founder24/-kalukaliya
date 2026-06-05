@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
+from beanie.exceptions import CollectionWasNotInitialized
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Literal
@@ -746,7 +747,7 @@ async def get_chat_history(
             )
 
             total = await Chat.find({"user_id": anon_id}).count()
-    except RuntimeError:
+    except (RuntimeError, CollectionWasNotInitialized):
         raise HTTPException(status_code=503, detail="Database unavailable")
 
     return {

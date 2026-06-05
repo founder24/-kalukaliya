@@ -4,6 +4,7 @@ Provides endpoints for authenticated and anonymous users to manage their chat co
 """
 
 from fastapi import APIRouter, HTTPException, Request, Depends
+from beanie.exceptions import CollectionWasNotInitialized
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
@@ -103,7 +104,7 @@ async def list_anon_conversations(
         )
 
         total = await Chat.find({"user_id": anon_id}).count()
-    except RuntimeError:
+    except (RuntimeError, CollectionWasNotInitialized):
         raise HTTPException(status_code=503, detail="Database unavailable")
 
     return {
