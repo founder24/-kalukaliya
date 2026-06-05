@@ -1,0 +1,69 @@
+#!/bin/bash
+# Run this on your GCP instance (founder@instance-20260603-085552)
+# Replace YOUR_GITHUB_TOKEN and YOUR_GITHUB_REPO below
+
+GITHUB_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"   # your GitHub personal access token
+GITHUB_REPO="founder24/-kalukaliya"        # owner/repo
+
+PROJECT_ID="blissful-acumen-495019-t6"
+PROJECT_NUMBER="851687450401"
+POOL_ID="github-actions-pool"
+PROVIDER_ID="github-actions-provider"
+
+# --- Get real service account email ---
+SA=$(gcloud iam service-accounts list \
+  --project=$PROJECT_ID \
+  --format="value(email)" | head -1)
+
+echo "Found service account: $SA"
+
+# --- Build the two secret values ---
+WIF_PROVIDER="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
+
+# --- Get GitHub repo public key for secret encryption ---
+PUB_KEY_RESP=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/${GITHUB_REPO}/actions/secrets/public-key")
+
+KEY_ID=$(echo $PUB_KEY_RESP | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['key_id'])")
+PUB_KEY=$(echo $PUB_KEY_RESP | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['key'])")
+
+# --- Encrypt and push secrets using PyNaCl ---
+pip install pynacl -q
+python3 << PYEOF
+import base64, json
+from nacl import encoding, public
+
+def encrypt(pub_key_b64, secret_value):
+    pub_key = public.PublicKey(pub_key_b64.encode(), encoding.Base64Encoder())
+    box = public.SealedBox(pub_key)
+    return base64.b64encode(box.encrypt(secret_value.encode())).decode()
+
+key_id = "$KEY_ID"
+pub_key = "$PUB_KEY"
+token = "$GITHUB_TOKEN"
+repo = "$GITHUB_REPO"
+
+secrets = {
+    "GCP_WORKLOAD_IDENTITY_PROVIDER": "$WIF_PROVIDER",
+    "GCP_SERVICE_ACCOUNT": "$SA",
+}
+
+import urllib.request
+for name, value in secrets.items():
+    encrypted = encrypt(pub_key, value)
+    payload = json.dumps({"encrypted_value": encrypted, "key_id": key_id}).encode()
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{repo}/actions/secrets/{name}",
+        data=payload, method="PUT",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+        }
+    )
+    with urllib.request.urlopen(req) as r:
+        print(f"  {name}: {'OK' if r.status in (201,204) else 'FAILED (' + str(r.status) + ')'}")
+
+print("Done. Check GitHub → Settings → Secrets → Actions")
+PYEOF
