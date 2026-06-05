@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# deploy.sh — Deploy syrabit-backend to Cloud Run from Replit
+# deploy.sh — Deploy syrabit-backend to Cloud Run
 #
-# Prerequisites (all already configured):
-#   - GCP_SERVICE_ACCOUNT_KEY or GOOGLE_APPLICATION_CREDENTIALS_JSON secret set in Replit
-#   - JWT_SECRET secret set in Replit (passed directly to Cloud Run — no Secret Manager needed)
-#   - gcloud installed (nix package: google-cloud-sdk)
+# Build strategy: Cloud Build (gcloud builds submit) — no local Docker needed.
+# Works from: Replit, Cloud Shell, any machine with gcloud authenticated.
+#
+# Prerequisites:
+#   - gcloud authenticated (service account key OR gcloud auth login)
+#   - JWT_SECRET env var set (min 32 chars)
+#   - GCP_SERVICE_ACCOUNT_KEY or GOOGLE_APPLICATION_CREDENTIALS_JSON (optional —
+#     only needed when not already authenticated via gcloud auth login / Cloud Shell)
 #
 # Usage:
-#   bash apps/backend/scripts/deploy.sh            # deploy with defaults
-#   bash apps/backend/scripts/deploy.sh --no-build # skip Docker build (re-deploy existing image)
+#   bash apps/backend/scripts/deploy.sh            # build + deploy
+#   bash apps/backend/scripts/deploy.sh --no-build # skip build, re-deploy latest image
 #
-# After deploy, ALSO sync the Cloudflare Worker secret so both sides use the same JWT key:
+# After deploy, sync the Cloudflare Worker secret to match:
 #   cd apps/edge && npx wrangler secret put JWT_SECRET --env production
-#   (paste the same value as the Replit JWT_SECRET secret)
 
 set -euo pipefail
 
@@ -77,26 +80,29 @@ if ! gcloud artifacts repositories describe syrabit --location="us-central1" --p
     --quiet
 fi
 
-# ── Build & push ──────────────────────────────────────────────────────────────
+# ── Build & push via Cloud Build (no local Docker required) ───────────────────
 if [ "$NO_BUILD" = false ]; then
-  echo "🔨 Building Docker image..."
-  docker build \
-    --platform linux/amd64 \
-    -t "$TAG" \
-    -t "$LATEST" \
-    apps/backend/
-
-  echo "📤 Pushing image to Artifact Registry..."
-  docker push "$TAG"
-  docker push "$LATEST"
+  echo "🔨 Building image via Cloud Build (no local Docker needed)..."
+  gcloud builds submit apps/backend/ \
+    --tag="$TAG" \
+    --project="$PROJECT" \
+    --quiet
+  echo "📤 Tagging as :latest..."
+  gcloud artifacts tags create latest \
+    --package=backend \
+    --version="$(basename "$TAG")" \
+    --location=us-central1 \
+    --repository=syrabit \
+    --project="$PROJECT" 2>/dev/null || true
 else
   echo "⏭  Skipping build (--no-build). Using existing: $LATEST"
   TAG="$LATEST"
 fi
 
 # ── Deploy to Cloud Run ───────────────────────────────────────────────────────
-# JWT_SECRET is injected directly from the Replit environment variable.
-# GCP Secret Manager does NOT have a JWT_SECRET entry — do not use --set-secrets for it.
+# JWT_SECRET is a plain env var (NOT in Secret Manager).
+# --remove-secrets ensures we clear any old Secret Manager reference for JWT_SECRET
+# before setting it as a literal env var (mixing types causes a Cloud Run error).
 # MONGODB_URI, GOOGLE_APPLICATION_CREDENTIALS_JSON, SENTRY_DSN live in Secret Manager.
 echo "☁️  Deploying to Cloud Run ($REGION)..."
 gcloud run deploy "$SERVICE" \
@@ -113,18 +119,9 @@ gcloud run deploy "$SERVICE" \
   --max-instances=10 \
   --port=8000 \
   --timeout=30 \
-  --update-env-vars="APP_ENV=production" \
-  --update-env-vars="MONGODB_DB_NAME=${MONGODB_DB_NAME:-syrabit_prod}" \
-  --update-env-vars="JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}" \
-  --update-env-vars="JWT_EXPIRY_MINUTES=${JWT_EXPIRY_MINUTES:-60}" \
-  --update-env-vars="REFRESH_TOKEN_EXPIRY_DAYS=${REFRESH_TOKEN_EXPIRY_DAYS:-7}" \
-  --update-env-vars="VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}" \
-  --update-env-vars="VERTEX_GEMINI_MODEL=${VERTEX_GEMINI_MODEL:-gemini-2.5-flash}" \
-  --update-env-vars="VERTEX_PROJECT_ID=${VERTEX_PROJECT_ID:-blissful-acumen-495019-t6}" \
-  --update-env-vars="JWT_SECRET=${JWT_SECRET}" \
-  --update-secrets="MONGODB_URI=MONGODB_URI:latest" \
-  --update-secrets="GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest" \
-  --update-secrets="SENTRY_DSN=SENTRY_DSN:latest" \
+  --remove-secrets="JWT_SECRET" \
+  --update-env-vars="APP_ENV=production,MONGODB_DB_NAME=${MONGODB_DB_NAME:-syrabit_prod},JWT_ALGORITHM=${JWT_ALGORITHM:-HS256},JWT_EXPIRY_MINUTES=${JWT_EXPIRY_MINUTES:-60},REFRESH_TOKEN_EXPIRY_DAYS=${REFRESH_TOKEN_EXPIRY_DAYS:-7},VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1},VERTEX_GEMINI_MODEL=${VERTEX_GEMINI_MODEL:-gemini-2.5-flash},VERTEX_PROJECT_ID=${VERTEX_PROJECT_ID:-blissful-acumen-495019-t6},JWT_SECRET=${JWT_SECRET}" \
+  --update-secrets="MONGODB_URI=MONGODB_URI:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SENTRY_DSN=SENTRY_DSN:latest" \
   --quiet
 
 SERVICE_URL="$(gcloud run services describe "$SERVICE" \
