@@ -243,14 +243,7 @@ jobs:
           for attempt in 1 2 3 4 5; do
             HTTP=$(curl -s -o /tmp/edge-health.json -w "%{http_code}" \
               "https://api.syrabit.ai/health" --max-time 15 2>/dev/null || echo "000")
-            REACHABLE=$(python3 -c "
-import json
-try:
-  d = json.load(open('/tmp/edge-health.json'))
-  print(str(d.get('backend_reachable', False)).lower())
-except Exception:
-  print('false')
-" 2>/dev/null || echo "false")
+            REACHABLE=$(python3 -c "import json,sys;d=json.load(open('/tmp/edge-health.json'));print(str(d.get('backend_reachable',False)).lower())" 2>/dev/null || echo "false")
             echo "  Attempt ${attempt}/5 — HTTP ${HTTP}, backend_reachable=${REACHABLE}"
             if [ "$HTTP" = "200" ] && [ "$REACHABLE" = "true" ]; then
               echo "✔ Edge healthy, backend reachable"
