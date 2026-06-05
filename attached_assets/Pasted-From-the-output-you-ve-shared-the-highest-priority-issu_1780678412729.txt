@@ -1,0 +1,294 @@
+From the output you've shared, the **highest-priority issues are not the SKIPs**. Most SKIPs happened because you didn't provide test credentials/tokens.
+
+## 🔴 Critical Failures / Production Issues
+
+### 1. `/health/deep` returning 503
+
+Your test reports:
+
+```json
+WARN GET /health/deep returns 503
+WARN Redis status: unhealthy
+WARN Vertex AI status: degraded
+WARN Vertex Search status: degraded
+```
+
+But earlier you manually tested:
+
+```bash
+curl -s https://api.syrabit.ai/health/deep | jq
+```
+
+and got:
+
+```json
+{
+  "status":"healthy",
+  "checks":{
+    "mongodb":{"status":"healthy"},
+    "redis":{"status":"healthy"},
+    "vertex_search":{"status":"healthy"},
+    "vertex_ai":{"status":"healthy"}
+  }
+}
+```
+
+### Action
+
+Verify right now:
+
+```bash
+curl -s https://api.syrabit.ai/health/deep | jq
+```
+
+If healthy now, the test suite hit an older revision or temporary failure.
+
+Also inspect Cloud Run logs:
+
+```bash
+gcloud run services logs read syrabit-backend \
+  --region asia-south1 \
+  --limit=100
+```
+
+---
+
+### 2. Chat API returning 502
+
+Most important production issue:
+
+```text
+WARN Anon chat returned HTTP 502
+WARN Invalid language returned HTTP 502
+WARN Emoji message returned HTTP 502
+WARN Assamese chat returned HTTP 502
+WARN Null byte message returned HTTP 502
+WARN Special chars message returned HTTP 502
+```
+
+This means:
+
+* Frontend loads
+* Backend health works
+* Authentication works
+
+but **actual AI generation is failing**.
+
+### Check immediately
+
+```bash
+gcloud run services logs read syrabit-backend \
+  --region asia-south1 \
+  --limit=200 | grep -i "chat\|gemini\|vertex\|sarvam\|error"
+```
+
+Also:
+
+```bash
+curl -X POST https://api.syrabit.ai/api/v1/chat/ \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hello"}'
+```
+
+Show the full response.
+
+---
+
+### 3. Razorpay webhooks returning 503
+
+Every webhook test failed:
+
+```text
+WARN Webhook without sig returned HTTP 503
+WARN Invalid signature returned HTTP 503
+WARN payment.captured returned HTTP 503
+WARN subscription.activated returned HTTP 503
+```
+
+Expected behavior should be:
+
+```text
+401
+403
+422
+```
+
+not
+
+```text
+503
+```
+
+This suggests webhook handler is crashing.
+
+Check:
+
+```bash
+gcloud run services logs read syrabit-backend \
+  --region asia-south1 \
+  --limit=200 | grep -i webhook
+```
+
+---
+
+## 🟡 Medium Severity Warnings
+
+### Edge health missing backend_reachable
+
+```text
+WARN /health missing backend_reachable field
+```
+
+Not a bug unless your specification requires it.
+
+---
+
+### Path traversal returns 302
+
+```text
+WARN Path traversal returned HTTP 302
+```
+
+Likely Cloudflare redirecting.
+
+Verify:
+
+```bash
+curl -I https://api.syrabit.ai/../../etc/passwd
+```
+
+If it eventually becomes 404/403 you're okay.
+
+---
+
+### No ETag
+
+```text
+WARN No ETag or Last-Modified
+```
+
+Performance optimization only.
+
+---
+
+### Static assets missing Cache-Control
+
+```text
+WARN No Cache-Control on static asset
+```
+
+Should be fixed for CDN efficiency.
+
+---
+
+### Plans endpoint missing cache header
+
+```text
+WARN Plans missing Cache-Control
+```
+
+Easy optimization.
+
+---
+
+### Sitemap missing changefreq/priority
+
+```text
+WARN Sitemap missing changefreq/priority
+```
+
+SEO improvement only.
+
+---
+
+## 🟢 SKIPs That Are Not Problems
+
+These are skipped because credentials were not provided:
+
+### Authentication tests
+
+```text
+SKIP TEST_JWT_TOKEN not set
+```
+
+Generate:
+
+```bash
+export TEST_JWT_TOKEN=$(gcloud auth print-identity-token)
+```
+
+---
+
+### Admin tests
+
+```text
+SKIP Admin dashboard (no admin token)
+```
+
+Need valid admin JWT.
+
+---
+
+### RAG tests
+
+```text
+SKIP RAG query (no auth token)
+```
+
+Need authenticated user token.
+
+---
+
+### Subscription tests
+
+```text
+SKIP Create order with auth
+```
+
+Need authenticated user.
+
+---
+
+### Feedback tests
+
+```text
+SKIP Feedback submit with auth
+```
+
+Need authenticated user.
+
+---
+
+## Priority Ranking
+
+### P0 (Fix Immediately)
+
+1. Chat endpoint returns 502
+2. Webhook endpoint returns 503
+3. Investigate health/deep inconsistency
+
+### P1
+
+4. Verify Redis connectivity
+5. Verify Vertex AI generation path
+6. Verify Sarvam routing
+
+### P2
+
+7. Cache-Control headers
+8. ETag support
+9. Sitemap improvements
+
+---
+
+### Next command I would run
+
+```bash
+gcloud run services logs read syrabit-backend \
+  --region asia-south1 \
+  --limit=300 > backend.log
+
+grep -iE "ERROR|Exception|Traceback|Gemini|Vertex|Sarvam|Webhook" backend.log | tail -100
+```
+
+That will usually reveal the root cause of the 502 chat failures and 503 webhook failures within a few lines.

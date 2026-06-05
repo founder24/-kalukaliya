@@ -2,7 +2,4 @@
 - [Syrabit content architecture](syrabit-content-arch.md) — Chapter model, KnowledgeObject vs Chapter split, translation pipeline
 - [Syrabit chat+auth pipeline bugs](syrabit-pipeline-bugs.md) — Fixed bugs: analytics 404s, conversation_id/session_id mismatch, logout null-token crash
 - [Syrabit Cloud Run deploy fixes](syrabit-cloudrun-fixes.md) — motor missing, pymongo compat, JWT RS256 degraded mode, Atlas index conflicts
-- [Syrabit edge proxy audit fixes](syrabit-edge-proxy-audit.md) — Root cause of 14/47 prod failures: wrong BACKEND_URL format + GCP HTML error passthrough
-- [Replit git-commit workaround](replit-git-commit-workaround.md) — git commit is blocked in main agent; use GitHub REST API (blobs → tree → commit → ref PATCH) with GITHUB_TOKEN from bash env
-- [Syrabit anon user auth](syrabit-anon-auth.md) — IP-primary anon identity: core/anon.py resolve_anon_id(), 6 bugs fixed, rate-limit + conversation storage keyed by ip_* format
-- [Syrabit frontend test runner](syrabit-frontend-test-runner.md) — 66-file vitest suite OOMs in Replit; run via pnpm test:all (scripts/test-all.sh) in 6 batches of ~12 files
+- [Syrabit Cloud Run env var strategy](syrabit-cloudrun-envvars.md) — VERTEX_PROJECT_ID + JWT_SECRET must both be set; cloudbuild uses --update-env-vars
