@@ -105,12 +105,19 @@ if [[ "$MODE" == "check" ]]; then
   echo -e "  Source: ${CYAN}${REQUIREMENTS_IN}${NC}"
   echo ""
 
+  # Pre-seed the temp file with the committed requirements.txt so that
+  # --no-upgrade preserves existing pinned versions.  This means the diff only
+  # flags NEW direct dependencies that are in requirements.in but missing from
+  # requirements.txt — not routine patch-version bumps from PyPI.
+  cp "$REQUIREMENTS_TXT" "$TMP_OUT"
+
   # pip-compile --dry-run only prints to stdout without resolving properly.
   # Instead, compile to a temp file then compare — this is the reliable approach.
   if ! pip-compile \
       --strip-extras \
       --no-header \
       --quiet \
+      --no-upgrade \
       --output-file "$TMP_OUT" \
       "$REQUIREMENTS_IN" 2>&1; then
     rm -f "$TMP_OUT"
