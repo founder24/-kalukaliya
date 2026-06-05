@@ -388,45 +388,66 @@ async def chat(
 
     except HTTPException:
         raise
-    except RuntimeError as e:
+    except Exception as e:  # noqa: BLE001 — broad catch is intentional; narrow cases below
+        from app.core.circuit_breaker import CircuitBreakerError
+
         error_msg = str(e)
-        logger.error(
-            "chat_upstream_failure", extra={"user_id": user_id, "error": error_msg}
-        )
-        if "embedding" in error_msg.lower():
-            raise HTTPException(status_code=502, detail="Embedding service unavailable")
-        elif "search" in error_msg.lower():
-            raise HTTPException(
-                status_code=503, detail="Knowledge base temporarily unavailable"
+
+        if isinstance(e, CircuitBreakerError):
+            logger.warning(
+                "chat_circuit_open", extra={"user_id": user_id, "error": error_msg}
             )
-        elif "timeout" in error_msg.lower():
-            raise HTTPException(status_code=504, detail="Request timed out")
+            raise HTTPException(
+                status_code=503,
+                detail="AI service temporarily unavailable. Please try again shortly.",
+                headers={"Retry-After": "30"},
+            )
+        elif isinstance(e, asyncio.TimeoutError):
+            logger.error("chat_timeout", extra={"user_id": user_id})
+            raise HTTPException(
+                status_code=504,
+                detail="Request timed out. Please try a shorter question.",
+            )
+        elif isinstance(e, httpx.HTTPStatusError):
+            logger.error(
+                "chat_upstream_http_error",
+                extra={"user_id": user_id, "status": e.response.status_code},
+            )
+            raise HTTPException(status_code=502, detail="Upstream service error")
+        elif isinstance(e, ValueError):
+            logger.warning(
+                "chat_value_error", extra={"user_id": user_id, "error": error_msg}
+            )
+            raise HTTPException(status_code=400, detail=error_msg)
+        elif isinstance(e, RuntimeError):
+            logger.error(
+                "chat_upstream_failure",
+                extra={"user_id": user_id, "error": error_msg},
+            )
+            if "embedding" in error_msg.lower():
+                raise HTTPException(
+                    status_code=502, detail="Embedding service unavailable"
+                )
+            elif "search" in error_msg.lower():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Knowledge base temporarily unavailable",
+                )
+            elif "timeout" in error_msg.lower():
+                raise HTTPException(status_code=504, detail="Request timed out")
+            else:
+                raise HTTPException(
+                    status_code=502, detail="AI service temporarily unavailable"
+                )
         else:
-            raise HTTPException(
-                status_code=502, detail="AI service temporarily unavailable"
+            logger.error(
+                "chat_unexpected_error",
+                extra={"user_id": user_id, "error": error_msg},
             )
-    except asyncio.TimeoutError:
-        logger.error("chat_timeout", extra={"user_id": user_id})
-        raise HTTPException(
-            status_code=504, detail="Request timed out. Please try a shorter question."
-        )
-    except httpx.HTTPStatusError as e:
-        logger.error(
-            "chat_upstream_http_error",
-            extra={"user_id": user_id, "status": e.response.status_code},
-        )
-        raise HTTPException(status_code=502, detail="Upstream service error")
-    except ValueError as e:
-        logger.warning("chat_value_error", extra={"user_id": user_id, "error": str(e)})
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(
-            "chat_unexpected_error", extra={"user_id": user_id, "error": str(e)}
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="An internal error occurred. Please try again later.",
-        )
+            raise HTTPException(
+                status_code=500,
+                detail="An internal error occurred. Please try again later.",
+            )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -479,6 +500,18 @@ async def chat_stream(
                 "X-RateLimit-Remaining": "0",
                 "Retry-After": "3600",
             },
+        )
+
+    # Pre-flight circuit breaker check — if Vertex AI is OPEN, return 503 immediately
+    # before streaming starts (once streaming begins the HTTP 200 header is already sent
+    # and the client cannot see a later status change).
+    from app.core.circuit_breaker import vertex_circuit_breaker, CircuitState
+
+    if vertex_circuit_breaker.state == CircuitState.OPEN:
+        raise HTTPException(
+            status_code=503,
+            detail="AI service temporarily unavailable. Please try again shortly.",
+            headers={"Retry-After": "30"},
         )
 
     # Sanitize input to prevent prompt injection

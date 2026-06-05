@@ -41,7 +41,7 @@ async def handle_razorpay_webhook(request: Request):
     Verifies signature and updates subscription status
     """
     if not settings.RAZORPAY_WEBHOOK_SECRET:
-        raise HTTPException(status_code=503, detail="Webhook not configured")
+        raise HTTPException(status_code=501, detail="Webhook not configured")
 
     # HF-025: Body size limit
     content_length = request.headers.get("content-length")
