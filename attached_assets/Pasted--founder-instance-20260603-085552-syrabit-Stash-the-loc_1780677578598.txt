@@ -1,0 +1,53 @@
+
+founder@instance-20260603-085552:~/syrabit$ # Stash the local changes
+git stash
+
+# Now pull cleanly
+git pull origin main
+
+# Restore your local edits on top
+git stash pop
+Saved working directory and index state WIP on main: 00728c6b Add script to automatically configure GitHub secrets with GCP service account
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+Updating 00728c6b..1803233f
+Fast-forward
+ .agents/agent_assets_metadata.toml                                                               |   8 +
+ apps/backend/app/api/v1/chat.py                                                                  |  68 +++++----
+ apps/backend/app/api/v1/conversations.py                                                         |  20 ++-
+ attached_assets/Pasted--C-syrabit-venv-founder-instance-20260603-085552-syrabi_1780667440044.txt | 559 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ attached_assets/Pasted--C-syrabit-venv-founder-instance-20260603-085552-syrabi_1780667772706.txt |  41 ++++++
+ attached_assets/Pasted--C-syrabit-venv-founder-instance-20260603-085552-syrabi_1780668607519.txt | 610 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ attached_assets/Pasted-cd-syrabit-apps-backend-Patch-chat-py-python3-PYEOF-imp_1780667848442.txt | 203 ++++++++++++++++++++++++++
+ attached_assets/Pasted-pytest-tests-q-tb-short-x-ignore-tests-locustfile-py-ig_1780667310973.txt | 524 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ attached_assets/Pasted-sudo-apt-install-y-python3-11-venv-Then-the-venv-works-_1780666579178.txt | 111 ++++++++++++++
+ attached_assets/Pasted-sudo-apt-install-y-python3-11-venv-Then-the-venv-works-_1780666919460.txt | 850 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 10 files changed, 2954 insertions(+), 40 deletions(-)
+ create mode 100644 .agents/agent_assets_metadata.toml
+ create mode 100644 attached_assets/Pasted--C-syrabit-venv-founder-instance-20260603-085552-syrabi_1780667440044.txt
+ create mode 100644 attached_assets/Pasted--C-syrabit-venv-founder-instance-20260603-085552-syrabi_1780667772706.txt
+ create mode 100644 attached_assets/Pasted--C-syrabit-venv-founder-instance-20260603-085552-syrabi_1780668607519.txt
+ create mode 100644 attached_assets/Pasted-cd-syrabit-apps-backend-Patch-chat-py-python3-PYEOF-imp_1780667848442.txt
+ create mode 100644 attached_assets/Pasted-pytest-tests-q-tb-short-x-ignore-tests-locustfile-py-ig_1780667310973.txt
+ create mode 100644 attached_assets/Pasted-sudo-apt-install-y-python3-11-venv-Then-the-venv-works-_1780666579178.txt
+ create mode 100644 attached_assets/Pasted-sudo-apt-install-y-python3-11-venv-Then-the-venv-works-_1780666919460.txt
+Auto-merging apps/backend/app/api/v1/chat.py
+CONFLICT (content): Merge conflict in apps/backend/app/api/v1/chat.py
+Auto-merging apps/backend/app/api/v1/conversations.py
+CONFLICT (content): Merge conflict in apps/backend/app/api/v1/conversations.py
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Unmerged paths:
+  (use "git restore --staged <file>..." to unstage)
+  (use "git add <file>..." to mark resolution)
+        both modified:   apps/backend/app/api/v1/chat.py
+        both modified:   apps/backend/app/api/v1/conversations.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        apps/edge/-kalukaliya/
+
+no changes added to commit (use "git add" and/or "git commit -a")
+The stash entry is kept in case you need it again.
+founder@instance-20260603-085552:~/syrabit$ 
