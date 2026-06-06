@@ -811,6 +811,51 @@ async def get_cms_posts(
         return {"items": [], "total": 0}
 
 
+@router.get("/search")
+async def search_content(
+    response: Response,
+    q: str = Query(..., min_length=2, max_length=200, description="Search query"),
+    board: Optional[str] = Query(None, description="Filter by board slug"),
+    limit: int = Query(10, ge=1, le=20),
+):
+    """
+    Public full-text search backed by Vertex AI Search (Discovery Engine).
+    Returns content chunks with title, snippet, and canonical URL.
+    No authentication required — results filtered to free-tier content.
+    """
+    response.headers["Cache-Control"] = "public, max-age=30, s-maxage=120"
+    query = q.strip()
+
+    from app.services.search.vertex_search import search_service
+
+    if not search_service.is_available():
+        logger.warning("Public search called but Vertex Search is not available")
+        return {"query": query, "results": [], "total": 0, "available": False}
+
+    try:
+        raw = await search_service.search_context(
+            query=query,
+            text=query,
+            user_tier="free",
+            limit=limit,
+        )
+        results = [
+            {
+                "id": r.get("id", ""),
+                "title": r.get("title", ""),
+                "snippet": (r.get("content", "") or "")[:300].strip(),
+                "url": r.get("url", ""),
+                "score": r.get("score", 0.0),
+            }
+            for r in raw
+            if r.get("title") or r.get("content")
+        ]
+        return {"query": query, "results": results, "total": len(results), "available": True}
+    except Exception as e:
+        logger.warning(f"Public search failed for query '{query[:40]}': {e}")
+        return {"query": query, "results": [], "total": 0, "available": True}
+
+
 @router.get("/cms-library")
 async def get_cms_library(
     response: Response,

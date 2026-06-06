@@ -1,0 +1,33 @@
+Issues Found — Prioritised
+🔴 1. Sarvam AI returning HTTP 400 — Assamese chat degraded
+Every Assamese (lang=as) request hits Sarvam, gets HTTP 400, then falls back to Gemini. Assamese users get answers but from the wrong model — Gemini responds in Assamese but with less cultural/linguistic precision than Sarvam. The circuit breaker will trip after 5 failures and stop trying for 60s.
+
+The Sarvam API itself returns 403 for unauthenticated requests (correct), which means the key is valid — the 400 is a bad request format. Sarvam's sarvam-m model likely changed its accepted payload (model name renamed, or max_tokens → max_completion_tokens, or system role not supported).
+
+Fix: Update the Sarvam model name or request payload. I can check their current API docs and patch sarvam_client.py.
+
+🔴 2. Frontend calling dead auth routes
+The frontend is calling:
+
+POST /api/v1/auth/register → 404 (route doesn't exist)
+GET /api/v1/auth/me → 404 (route doesn't exist)
+The correct live routes are:
+
+POST /api/v1/auth/signup ✅
+GET /api/v1/users/me ✅
+Any user trying to register from the UI gets a silent 404. This is a registration blocker.
+
+Fix: Update the frontend API client to use the correct paths.
+
+🟡 3. No public content search endpoint
+/api/v1/content/search → 404 at all variations tested. The only search-indexing route is admin-only (/admin/content/chapters/{id}/publish/search-index). Vertex Search is configured and healthy but not exposed to users.
+
+Fix: Add a public GET /api/v1/content/search?q= endpoint that calls the Vertex Search service.
+
+🟡 4. CMS posts and cms-library returning empty
+{"items": [], "total": 0}
+
+Both /api/v1/cms/posts and /api/v1/content/cms-library work (200) but return no content. Either no blog/CMS content has been published yet, or there's a query filter issue.
+
+🟡 5. Cloudflare Pages had one failed build on latest commit
+Build 4afd2d21 (failed) then 83741947 (success) — both on the same commit "Normalize JWT secret by removing trailing whitespace". Live site is on the successful build. Low risk but worth monitoring.

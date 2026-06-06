@@ -77,7 +77,14 @@ class SarvamAIClient:
         except CircuitBreakerError as e:
             raise RuntimeError(f"Sarvam AI unavailable: {e}")
         except httpx.HTTPStatusError as e:
-            logger.error(f"Sarvam API HTTP error: {e.response.status_code}")
+            body = ""
+            try:
+                body = e.response.text[:500]
+            except Exception:
+                pass
+            logger.error(
+                f"Sarvam API HTTP error: {e.response.status_code} | model={self.model} | body={body}"
+            )
             raise RuntimeError(f"Sarvam API error: {e.response.status_code}")
         except Exception as e:
             logger.error(f"Sarvam AI error: {str(e)}")
@@ -184,7 +191,14 @@ class SarvamAIClient:
         except Exception as e:
             sarvam_circuit_breaker._on_failure()
             if isinstance(e, httpx.HTTPStatusError):
-                logger.error(f"Sarvam stream HTTP error: {e.response.status_code}")
+                body = ""
+                try:
+                    body = e.response.text[:500]
+                except Exception:
+                    pass
+                logger.error(
+                    f"Sarvam stream HTTP error: {e.response.status_code} | model={self.model} | body={body}"
+                )
                 raise RuntimeError(
                     f"Sarvam stream failed: HTTP {e.response.status_code}"
                 )

@@ -35,6 +35,8 @@ ENV_VARS=(
   "VERTEX_SEARCH_DATASTORE_ID=syrabit-edu-datastore"
   "VERTEX_SEARCH_LOCATION=global"
   "VERTEX_SEARCH_SERVING_CONFIG=default_search"
+  # sarvam-m was deprecated; confirmed models: sarvam-m1, sarvam-105b, sarvam-30b
+  "SARVAM_MODEL=sarvam-m1"
 )
 
 # =============================================================================

@@ -959,6 +959,13 @@ export const adminGetQuizQuota = (token, userId) =>
 export const adminResetQuizQuota = (token, userId) =>
   axios.post(`${API_BASE}/admin/users/${userId}/quiz-quota/reset`, {}, { headers: adminHeaders(token), withCredentials: true });
 
+// ── Public Content Search ────────────────────────────────────────────────────
+export const searchContent = (q, { board, limit = 10 } = {}) =>
+  axios.get(`${WORKER_API}/content/search`, {
+    params: { q, ...(board ? { board } : {}), limit },
+    withCredentials: false,
+  });
+
 // ── Personalized CMS ────────────────────────────────────────────────────────
 const cmsPersonalize = (body) =>
   apiClient().post('/cms/personalize', body);
