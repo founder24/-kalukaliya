@@ -284,10 +284,19 @@ async def get_current_user(
             raise HTTPException(status_code=401, detail="Invalid edge signature")
 
     # No edge trust -- require credentials
-    if credentials is None:
+    # X-User-JWT is set by the CF edge proxy to preserve the user's original JWT
+    # when it overwrites Authorization with the Cloud Run OIDC identity token.
+    user_jwt_header = request.headers.get("X-User-JWT", "")
+    if user_jwt_header.startswith("Bearer "):
+        user_jwt_header = user_jwt_header[7:]
+
+    # Prefer X-User-JWT (original user token) if present; fall back to Authorization
+    raw_token = user_jwt_header or (credentials.credentials if credentials else None)
+
+    if raw_token is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    token = credentials.credentials
+    token = raw_token
     try:
         key, algorithm = _get_verification_key()
         payload = jwt.decode(token, key, algorithms=[algorithm])
@@ -386,13 +395,18 @@ async def get_current_user_optional(
         # Signature present but invalid
         return None
 
-    if credentials is None:
+    # X-User-JWT fallback: CF edge proxy preserves original user JWT here
+    # when it overwrites Authorization with Cloud Run OIDC identity token.
+    user_jwt_opt = request.headers.get("X-User-JWT", "")
+    if user_jwt_opt.startswith("Bearer "):
+        user_jwt_opt = user_jwt_opt[7:]
+
+    raw_token_opt = user_jwt_opt or (credentials.credentials if credentials else None)
+
+    if not raw_token_opt:
         return None
 
-    token = credentials.credentials
-    if not token:
-        return None
-
+    token = raw_token_opt
     try:
         key, algorithm = _get_verification_key()
         payload = jwt.decode(token, key, algorithms=[algorithm])
