@@ -260,7 +260,7 @@ function ConversationCard({ conv, onOpen, onStar, onArchive, onDelete, onRename,
 
 // ── HistoryPage ───────────────────────────────────────────────────────────────
 export default function HistoryPage() {
-  const { user } = useAuth();
+  const { user, authChecked } = useAuth();
   const navigate = useNavigate();
 
   // ── 7 state variables ─────────────────────────────────────────────────────
@@ -274,9 +274,14 @@ export default function HistoryPage() {
 
   const searchRef = useRef(null);
 
-  const isAnon = !user;
+  // Wait for auth check to settle before deciding anon vs. logged-in.
+  // Without this guard, user=null on first render causes getAnonConversations()
+  // to fire even for logged-in users, producing a double-request and a flash
+  // of anonymous conversations before the real ones load.
+  const isAnon = authChecked ? !user : null; // null = "still checking"
 
   const loadConversations = useCallback(async () => {
+    if (isAnon === null) return; // auth not yet resolved
     try {
       const res = isAnon ? await getAnonConversations() : await getConversations();
       const data = (res.data || []).map((c) => ({

@@ -226,7 +226,7 @@ function getOnboardingProfile() {
 
 export default function LibraryPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, authChecked } = useAuth();
   const { contentLang, switchLang } = useContentLang();
   const t = _t[contentLang] || _t.en;
 
@@ -644,7 +644,7 @@ export default function LibraryPage() {
                   }
                 </div>
 
-                {activeFilter === 'saved' && !user ? (
+                {activeFilter === 'saved' && authChecked && !user ? (
                   <>
                     <h3 className="text-foreground font-semibold text-lg">{t.savedSignIn}</h3>
                     <p className="text-sm text-muted-foreground/60 mt-1.5 max-w-xs">

@@ -185,6 +185,7 @@ export default function ChatPage() {
   }, [subjectId]);
 
   useEffect(() => {
+    if (!authChecked) return; // wait for auth to settle before choosing anon vs. user fetcher
     if (!convId) return;
     // Skip server reload for conversations we just created locally —
     // their messages are already in state and the DB copy may be
@@ -195,7 +196,7 @@ export default function ChatPage() {
     fetcher
       .then((r) => { const conv = r.data; setConversationId(conv.id); setMessages(conv.messages || []); setSyncState('idle'); })
       .catch(() => setSyncState('offline'));
-  }, [convId, user]);
+  }, [convId, user, authChecked]);
 
   useEffect(() => {
     const check = () => {

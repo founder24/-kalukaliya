@@ -17,6 +17,13 @@
 /docker-compose.yml  /index.html  404
 /.dockerignore  /index.html  404
 
+# Homepage redirect — send bare root to /library server-side (301).
+# Must come BEFORE the SPA catch-all so CF Pages processes it first.
+# This is safe: / has no prerendered /index.html asset that would loop.
+# Bots are handled by _worker.js (bot-render path) before _redirects fires,
+# so they still receive the prerendered homepage HTML.
+/     /library     301
+
 # SPA catch-all — serve index.html for all client-side routes.
 # This MUST be the last rule. Cloudflare Pages processes rules top-to-bottom
 # and the first match wins. The catch-all ensures React Router handles all
