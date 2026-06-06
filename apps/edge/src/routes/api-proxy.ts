@@ -58,6 +58,14 @@ export async function proxyRequest(
     headers.set('X-Edge-Signature', signatureHex);
   }
 
+  // Preserve user's JWT before OIDC overwrite so backend can still verify it
+  // Cloud Run IAM requires OIDC in Authorization, but the app needs the user JWT.
+  // Backend reads X-User-JWT as fallback when edge-trust HMAC doesn't match.
+  const originalAuth = headers.get('Authorization');
+  if (originalAuth && originalAuth.startsWith('Bearer ')) {
+    headers.set('X-User-JWT', originalAuth);
+  }
+
   // Inject Google identity token for Cloud Run authentication
   const idToken = await getIdentityToken(env);
   if (idToken) {
