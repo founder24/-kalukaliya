@@ -58,21 +58,49 @@ class VertexAIClient:
     async def generate(
         self, system_prompt: str, user_message: str, stream: bool = False
     ) -> str:
-        """Generate response using Gemini"""
-        try:
+        """Generate response using Gemini with one retry on transient errors.
 
-            async def _do_generate():
-                if self._use_genai_api:
-                    return await self._generate_via_genai(system_prompt, user_message)
-                return await self._generate_via_vertex(system_prompt, user_message)
+        Retry policy:
+          - 429 Too Many Requests → wait 3 s then retry once
+          - 500 / 502 / 503 from Gemini → wait 2 s then retry once
+        After retry exhaustion, httpx.HTTPStatusError is re-raised as-is so
+        the chat endpoint can inspect the status code and return an appropriate
+        response to the client (e.g. 503 with Retry-After) instead of a generic 502.
+        """
+        async def _do_generate():
+            if self._use_genai_api:
+                return await self._generate_via_genai(system_prompt, user_message)
+            return await self._generate_via_vertex(system_prompt, user_message)
 
-            result = await vertex_circuit_breaker.call(_do_generate)
-            return result
-        except CircuitBreakerError as e:
-            raise RuntimeError(f"Vertex AI unavailable: {e}")
-        except Exception as e:
-            logger.error(f"Vertex AI error: {str(e)}")
-            raise RuntimeError(f"Vertex AI service failed: {e}")
+        _last_http_exc: httpx.HTTPStatusError | None = None
+
+        for attempt in range(2):
+            try:
+                return await vertex_circuit_breaker.call(_do_generate)
+            except CircuitBreakerError as e:
+                raise RuntimeError(f"Vertex AI unavailable: {e}")
+            except httpx.HTTPStatusError as e:
+                _last_http_exc = e
+                status = e.response.status_code
+                if status in (429, 500, 502, 503) and attempt == 0:
+                    wait = 3 if status == 429 else 2
+                    logger.warning(
+                        f"Gemini API returned HTTP {status} on attempt 1; "
+                        f"retrying after {wait}s",
+                        extra={"gemini_status": status, "attempt": attempt + 1},
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error(
+                    f"Gemini API HTTP {status} error "
+                    f"({'retries exhausted' if attempt > 0 else 'non-retryable'})"
+                )
+                raise
+            except Exception as e:
+                logger.error(f"Vertex AI error: {str(e)}")
+                raise RuntimeError(f"Vertex AI service failed: {e}")
+
+        raise _last_http_exc or RuntimeError("Vertex AI generate: exhausted retries")
 
     async def generate_direct(self, system_prompt: str, user_message: str) -> str:
         """

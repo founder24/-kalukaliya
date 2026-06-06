@@ -411,10 +411,17 @@ async def chat(
                 detail="Request timed out. Please try a shorter question.",
             )
         elif isinstance(e, httpx.HTTPStatusError):
+            upstream_status = e.response.status_code
             logger.error(
                 "chat_upstream_http_error",
-                extra={"user_id": user_id, "status": e.response.status_code},
+                extra={"user_id": user_id, "status": upstream_status},
             )
+            if upstream_status == 429:
+                raise HTTPException(
+                    status_code=503,
+                    detail="AI service temporarily unavailable. Please try again shortly.",
+                    headers={"Retry-After": "10"},
+                )
             raise HTTPException(status_code=502, detail="Upstream service error")
         elif isinstance(e, ValueError):
             logger.warning(
