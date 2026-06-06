@@ -1,0 +1,51 @@
+
+founder@instance-20260603-085552:~/syrabit$ # 1. Check EXACTLY how JWT_SECRET is configured in Cloud Run
+gcloud run services describe syrabit-backend \
+  --region=asia-south1 \
+  --format="yaml" | grep -A 2 -i "jwt"
+
+# 2. List all versions of jwt-secret — maybe the backend uses an older one
+gcloud secrets versions list jwt-secret \
+  --project=blissful-acumen-495019-t6
+
+# 3. Get the Cloud Run revision's actual env var value (if set as plain var)
+gcloud run services describe syrabit-backend \
+  --region=asia-south1 \
+  --format="value(spec.template.spec.containers[0].env)"
+        - name: ADMIN_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+--
+              name: ADMIN_JWT_SECRET
+        - name: EDGE_SHARED_SECRET
+          valueFrom:
+--
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+--
+              name: jwt-secret
+        - name: GEMINI_API_KEY
+          valueFrom:
+--
+        - name: JWT_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+--
+              name: jwt-private-key
+        - name: JWT_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+--
+              name: jwt-public-key
+        - name: POSTHOG_API_KEY
+          valueFrom:
+--
+        - name: JWT_ALGORITHM
+          value: HS256
+        - name: VERTEX_PROJECT_ID
+NAME  STATE    CREATED              DESTROYED
+2     enabled  2026-05-29T10:05:56  -
+1     enabled  2026-05-29T08:52:29  -
+{'name': 'MONGODB_URI', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'MONGODB_URI'}}};{'name': 'GOOGLE_APPLICATION_CREDENTIALS_JSON', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'GOOGLE_APPLICATION_CREDENTIALS_JSON'}}};{'name': 'SENTRY_DSN', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'SENTRY_DSN'}}};{'name': 'ADMIN_JWT_SECRET', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'ADMIN_JWT_SECRET'}}};{'name': 'EDGE_SHARED_SECRET', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'edge-shared-secret'}}};{'name': 'SARVAM_API_KEY', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'SARVAM_API_KEY'}}};{'name': 'UPSTASH_REDIS_REST_URL', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'UPSTASH_REDIS_REST_URL'}}};{'name': 'UPSTASH_REDIS_REST_TOKEN', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'UPSTASH_REDIS_REST_TOKEN'}}};{'name': 'JWT_SECRET', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'jwt-secret'}}};{'name': 'GEMINI_API_KEY', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'gemini-api-key'}}};{'name': 'RAZORPAY_KEY_ID', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'RAZORPAY_KEY_ID'}}};{'name': 'RAZORPAY_KEY_SECRET', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'RAZORPAY_KEY_SECRET'}}};{'name': 'RAZORPAY_WEBHOOK_SECRET', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'RAZORPAY_WEBHOOK_SECRET'}}};{'name': 'RESEND_API_KEY', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'RESEND_API_KEY'}}};{'name': 'RESET_TOKEN_SECRET', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'RESET_TOKEN_SECRET'}}};{'name': 'JWT_PRIVATE_KEY', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'jwt-private-key'}}};{'name': 'JWT_PUBLIC_KEY', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'jwt-public-key'}}};{'name': 'POSTHOG_API_KEY', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'POSTHOG_API_KEY'}}};{'name': 'INDEXNOW_API_KEY', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'INDEXNOW_API_KEY'}}};{'name': 'INDEXNOW_INTERNAL_SECRET', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'INDEXNOW_INTERNAL_SECRET'}}};{'name': 'TRANSLATE_CRON_SECRET', 'valueFrom': {'secretKeyRef': {'key': 'latest', 'name': 'TRANSLATE_CRON_SECRET'}}};{'name': 'APP_ENV', 'value': 'production'};{'name': 'JWT_ALGORITHM', 'value': 'HS256'};{'name': 'VERTEX_PROJECT_ID', 'value': 'blissful-acumen-495019-t6'};{'name': 'VERTEX_LOCATION', 'value': 'us-central1'};{'name': 'VERTEX_SEARCH_DATASTORE_ID', 'value': 'syrabit-edu-datastore'};{'name': 'VERTEX_SEARCH_LOCATION', 'value': 'global'};{'name': 'VERTEX_SEARCH_SERVING_CONFIG', 'value': 'default_search'}
+founder@instance-20260603-085552:~/syrabit$ 
