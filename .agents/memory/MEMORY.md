@@ -3,3 +3,5 @@
 - [Syrabit chat+auth pipeline bugs](syrabit-pipeline-bugs.md) — Fixed bugs: analytics 404s, conversation_id/session_id mismatch, logout null-token crash
 - [Syrabit Cloud Run deploy fixes](syrabit-cloudrun-fixes.md) — motor missing, pymongo compat, JWT RS256 degraded mode, Atlas index conflicts
 - [Syrabit Cloud Run env var strategy](syrabit-cloudrun-envvars.md) — VERTEX_PROJECT_ID + JWT_SECRET must both be set; cloudbuild uses --update-env-vars
+- [Syrabit content model FlexId](syrabit-flexid.md) — DB uses legacy string IDs (e.g. 's13', UUID) not ObjectIds; all reference fields must use FlexId
+- [Syrabit credential map](syrabit-credentials.md) — Full credential map: GCP secrets, Cloudflare Worker secrets, Pages env vars, GitHub secrets
