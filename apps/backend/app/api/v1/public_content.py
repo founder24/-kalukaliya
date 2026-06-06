@@ -26,6 +26,89 @@ def _slugify(text: str) -> str:
     return re.sub(r"-+", "-", text).strip("-")
 
 
+@router.get("/boards")
+async def get_boards(response: Response):
+    """Return all active/published boards."""
+    response.headers["Cache-Control"] = "public, max-age=300, s-maxage=600"
+    try:
+        boards = await Board.find({"status": {"$in": ["active", "published"]}}).to_list()
+        return [
+            {"id": str(b.id), "name": b.name, "slug": b.slug, "status": b.status}
+            for b in boards
+        ]
+    except Exception as e:
+        logger.warning(f"get_boards failed: {e}")
+        return []
+
+
+@router.get("/classes")
+async def get_classes(response: Response, board_id: Optional[str] = Query(None)):
+    """Return all active/published classes, optionally filtered by board_id."""
+    response.headers["Cache-Control"] = "public, max-age=300, s-maxage=600"
+    try:
+        query: dict = {"status": {"$in": ["active", "published"]}}
+        if board_id:
+            query["board_id"] = board_id
+        classes = await Class.find(query).to_list()
+        return [
+            {"id": str(c.id), "name": c.name, "board_id": str(c.board_id), "status": c.status}
+            for c in classes
+        ]
+    except Exception as e:
+        logger.warning(f"get_classes failed: {e}")
+        return []
+
+
+@router.get("/streams")
+async def get_streams(response: Response, class_id: Optional[str] = Query(None)):
+    """Return all active/published streams, optionally filtered by class_id."""
+    response.headers["Cache-Control"] = "public, max-age=300, s-maxage=600"
+    try:
+        query: dict = {"status": {"$in": ["active", "published"]}}
+        if class_id:
+            query["class_id"] = class_id
+        streams = await Stream.find(query).to_list()
+        return [
+            {"id": str(s.id), "name": s.name, "class_id": str(s.class_id), "status": s.status}
+            for s in streams
+        ]
+    except Exception as e:
+        logger.warning(f"get_streams failed: {e}")
+        return []
+
+
+@router.get("/subjects")
+async def get_subjects(
+    response: Response,
+    stream_id: Optional[str] = Query(None),
+    board_id: Optional[str] = Query(None),
+):
+    """Return all active/published subjects, optionally filtered by stream_id or board_id."""
+    response.headers["Cache-Control"] = "public, max-age=300, s-maxage=600"
+    try:
+        query: dict = {"status": {"$in": ["active", "published"]}}
+        if stream_id:
+            query["stream_id"] = stream_id
+        subjects = await Subject.find(query).to_list()
+        return [
+            {
+                "id": str(s.id),
+                "name": s.name,
+                "slug": s.slug,
+                "stream_id": str(s.stream_id) if s.stream_id else None,
+                "status": s.status,
+                "description": s.description,
+                "icon": s.icon,
+                "thumbnail_url": s.thumbnail_url,
+                "tags": s.tags,
+            }
+            for s in subjects
+        ]
+    except Exception as e:
+        logger.warning(f"get_subjects failed: {e}")
+        return []
+
+
 @router.get("/library-bundle")
 async def get_library_bundle(
     response: Response,
