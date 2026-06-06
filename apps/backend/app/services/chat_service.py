@@ -263,7 +263,10 @@ class ChatService:
                 from app.services.ai.vertex_client import vertex_client
 
                 actual_model = settings.VERTEX_GEMINI_MODEL
-                response_text = await vertex_client.generate(
+                # Use generate_direct to bypass the vertex_circuit_breaker — the
+                # normal circuit-protected path may be tripped by concurrent failures,
+                # but we still want to attempt Vertex AI for this Assamese fallback.
+                response_text = await vertex_client.generate_direct(
                     system_prompt=system_prompt,
                     user_message=sanitized_message,
                 )
