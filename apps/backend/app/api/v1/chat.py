@@ -220,7 +220,9 @@ async def chat(
 
             # Check rate limit result - always enforced, even for cache hits
             allowed, current_count, limit, limit_type = rate_result
-            if not allowed:
+            # Admin/staff users are never rate-limited
+            _is_admin = user and getattr(user, "role", None) in ("admin", "staff")
+            if not allowed and not _is_admin:
                 raise HTTPException(
                     status_code=429,
                     detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
@@ -491,7 +493,8 @@ async def chat_stream(
     allowed, current_count, limit, limit_type = await check_rate_limit(
         user_id, user_tier, client_ip, request=http_request
     )
-    if not allowed:
+    _is_admin = user and getattr(user, "role", None) in ("admin", "staff")
+    if not allowed and not _is_admin:
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
@@ -902,7 +905,8 @@ async def analyze_image(
     allowed, current_count, limit, limit_type = await check_rate_limit(
         user_id, user_tier, client_ip, request=http_request
     )
-    if not allowed:
+    _is_admin = user and getattr(user, "role", None) in ("admin", "staff")
+    if not allowed and not _is_admin:
         raise HTTPException(status_code=429, detail="Rate limit exceeded.")
 
     sanitized_prompt = sanitize_user_input(prompt)
@@ -957,7 +961,8 @@ async def text_to_speech(
     allowed, current_count, limit, limit_type = await check_rate_limit(
         user_id, user_tier, client_ip, request=http_request
     )
-    if not allowed:
+    _is_admin = user and getattr(user, "role", None) in ("admin", "staff")
+    if not allowed and not _is_admin:
         raise HTTPException(status_code=429, detail="Rate limit exceeded.")
 
     try:
