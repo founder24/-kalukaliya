@@ -1,0 +1,74 @@
+
+founder@instance-20260603-085552:~/syrabit$ # DIAGNOSTIC: does the GCP secret value actually match the token's signature?
+JWT_VAL=$(gcloud secrets versions access latest --secret="jwt-secret" \
+  --project=blissful-acumen-495019-t6)
+
+TOKEN=$(curl -s -X POST https://api.syrabit.ai/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"audituser_9x7k@syrabit.ai","password":"AuditPass123!"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+python3 - <<PYEOF
+import hmac, hashlib, base64, sys
+
+secret = b"""$JWT_VAL"""
+token  = "$TOKEN"
+
+header_b64, payload_b64, sig_b64 = token.split('.')
+signing_input = f"{header_b64}.{payload_b64}".encode()
+
+expected = hmac.new(secret, signing_input, hashlib.sha256).digest()
+expected_b64 = base64.urlsafe_b64encode(expected).rstrip(b'=').decode()
+
+pad = 4 - len(sig_b64) % 4
+actual = base64.urlsafe_b64decode(sig_b64 + ('=' * (pad if pad != 4 else 0)))
+actual_b64 = base64.urlsafe_b64encode(actual).rstrip(b'=').decode()
+
+print(f"Match: {expected_b64 == actual_b64}")
+print(f"Secret length: {len(secret)} bytes")
+print(f"Secret preview: {secret[:8]}...{secret[-4:]}")
+PYEOF
+
+# RE-SEND with safe JSON encoding (Python handles escaping)
+CF_TOKEN="<your-cf-api-token>"
+CF_ACCOUNT="<your-cf-account-id>"
+
+python3 - <<PYEOF2
+import json, urllib.request, os, subprocess
+
+secret_val = subprocess.check_output([
+    "gcloud", "secrets", "versions", "access", "latest",
+    "--secret=jwt-secret", "--project=blissful-acumen-495019-t6"
+]).decode()  # no strip — preserve exact bytes
+
+payload = json.dumps({
+    "name": "JWT_SECRET",
+    "text": secret_val,
+    "type": "secret_text"
+}).encode()
+
+PYEOF2int(r.read().decode())req) as r:son"",counts/$CF_ACCOUNT/workers/scripts/syrabitworker-prod/secrets",
+Match: False
+Secret length: 64 bytes
+Secret preview: b'rFGJcyLc'...b'b8PP'
+Traceback (most recent call last):
+  File "<stdin>", line 23, in <module>
+  File "/usr/lib/python3.11/urllib/request.py", line 216, in urlopen
+    return opener.open(url, data, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/urllib/request.py", line 525, in open
+    response = meth(req, response)
+               ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/urllib/request.py", line 634, in http_response
+    response = self.parent.error(
+               ^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/urllib/request.py", line 563, in error
+    return self._call_chain(*args)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/urllib/request.py", line 496, in _call_chain
+    result = func(*args)
+             ^^^^^^^^^^^
+  File "/usr/lib/python3.11/urllib/request.py", line 643, in http_error_default
+    raise HTTPError(req.full_url, code, msg, hdrs, fp)
+urllib.error.HTTPError: HTTP Error 400: Bad Request
+founder@instance-20260603-085552:~/syrabit$ 
