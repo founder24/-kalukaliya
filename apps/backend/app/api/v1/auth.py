@@ -125,7 +125,7 @@ def _get_signing_key() -> tuple[str, str]:
         logger.warning(
             "JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set — falling back to HS256"
         )
-    jwt_secret = settings.JWT_SECRET
+    jwt_secret = settings.JWT_SECRET.strip()
     if settings.APP_ENV == "production":
         if not jwt_secret or jwt_secret in _PLACEHOLDER_SECRETS or len(jwt_secret) < 32:
             # Log critical but do NOT raise — raising here crashes every auth request
@@ -154,7 +154,7 @@ def _get_verification_key() -> tuple[str, str]:
         logger.warning(
             "JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set — falling back to HS256"
         )
-    jwt_secret = settings.JWT_SECRET
+    jwt_secret = settings.JWT_SECRET.strip()
     if settings.APP_ENV == "production":
         if not jwt_secret or jwt_secret in _PLACEHOLDER_SECRETS or len(jwt_secret) < 32:
             logger.critical(

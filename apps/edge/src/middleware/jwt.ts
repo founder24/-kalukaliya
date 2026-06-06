@@ -200,10 +200,12 @@ async function decodeAndVerify(
       throw new Error('Invalid signature');
     }
   } else if (alg === 'HS256') {
-    // HS256 verification
+    // HS256 verification — trim() normalises trailing newlines that GCP Secret Manager
+    // appends when mounting secrets as env vars, ensuring the key matches regardless of
+    // whether the secret was stored with or without a trailing newline.
     const key = await crypto.subtle.importKey(
       'raw',
-      encoder.encode(secret),
+      encoder.encode(secret.trim()),
       { name: 'HMAC', hash: 'SHA-256' },
       false,
       ['verify']
