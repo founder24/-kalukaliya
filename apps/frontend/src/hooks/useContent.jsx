@@ -5,29 +5,45 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/utils/api';
 
-// ── Static-first helper ──────────────────────────────────────────────────────
+// ── Bundle-based content fetchers ────────────────────────────────────────────
+//
+// The individual /content/boards, /content/classes, /content/streams,
+// /content/subjects endpoints share a prefix with the /{slug} catch-all in
+// content.py, causing a router conflict on Cloud Run. Instead, we extract all
+// four collections from the already-working /content/library-bundle?slim=1
+// endpoint. React Query deduplicates the fetch so only one HTTP request is
+// made even when multiple hooks are used on the same page.
 
-/**
- * API fetcher: fetches content from the live API endpoint directly.
- * Previously tried /static/<file>.json from CDN first, but those files
- * froze permanently and served stale data. Now always uses the live API.
- */
-const apiFetcher = (_staticPath, apiPath) => async () => {
-  return apiClient().get(apiPath).then((r) => r.data);
+const fetchBundle = () =>
+  apiClient()
+    .get('/content/library-bundle?slim=1')
+    .then((r) => r.data);
+
+const fetchBoards = async () => {
+  const bundle = await fetchBundle();
+  return (bundle.boards || []).map(({ id, name, slug, status }) => ({ id, name, slug, status }));
 };
 
-// ── Raw fetchers ────────────────────────────────────────────────────────────
-const fetchBoards = apiFetcher('/static/boards.json', '/content/boards');
+const fetchClasses = async () => {
+  const bundle = await fetchBundle();
+  return bundle.classes || [];
+};
 
-const fetchClasses = apiFetcher('/static/classes.json', '/content/classes');
+const fetchStreams = async () => {
+  const bundle = await fetchBundle();
+  return bundle.streams || [];
+};
 
-const fetchStreams = apiFetcher('/static/streams.json', '/content/streams');
+const fetchSubjects = async () => {
+  const bundle = await fetchBundle();
+  return bundle.subjects || [];
+};
 
-const fetchSubjects = apiFetcher('/static/subjects.json', '/content/subjects');
+const fetchLibraryBundle = () =>
+  apiClient().get('/content/library-bundle').then((r) => r.data);
 
-const fetchLibraryBundle = apiFetcher('/static/library-bundle.json', '/content/library-bundle');
-
-const fetchLibraryBundleSlim = apiFetcher('/static/library-bundle-slim.json', '/content/library-bundle?slim=1');
+const fetchLibraryBundleSlim = () =>
+  apiClient().get('/content/library-bundle?slim=1').then((r) => r.data);
 
 const fetchLibraryBundleBoot = (boardId) =>
   apiClient()
