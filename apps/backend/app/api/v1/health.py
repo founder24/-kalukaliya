@@ -110,6 +110,33 @@ async def vertex_ping() -> Dict[str, Any]:
         return {"status": "unhealthy", "error": str(e)}
 
 
+async def sarvam_ping() -> Dict[str, Any]:
+    """Check Sarvam AI configuration and lightweight endpoint reachability"""
+    try:
+        from app.config import settings
+
+        if not settings.SARVAM_API_KEY:
+            return {"status": "degraded", "error": "SARVAM_API_KEY not configured"}
+
+        import httpx
+
+        t0 = time.monotonic()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                settings.SARVAM_BASE_URL,
+                headers={"API-Subscription-Key": settings.SARVAM_API_KEY},
+            )
+        latency_ms = round((time.monotonic() - t0) * 1000, 1)
+
+        # Any non-connection-error response means the endpoint is reachable
+        if resp.status_code < 500:
+            return {"status": "healthy", "latency_ms": latency_ms, "http": resp.status_code}
+        return {"status": "unhealthy", "error": f"HTTP {resp.status_code}", "latency_ms": latency_ms}
+    except Exception as e:
+        logger.warning(f"Sarvam ping failed: {str(e)}")
+        return {"status": "degraded", "error": str(e)[:120]}
+
+
 @router.get("")
 async def basic_health_check():
     """
@@ -166,12 +193,14 @@ async def deep_health_check():
         _safe_check(redis_ping()),
         _safe_check(vertex_search_ping()),
         _safe_check(vertex_ping()),
+        _safe_check(sarvam_ping()),
     )
     checks = {
         "mongodb": results[0],
         "redis": results[1],
         "vertex_search": results[2],
         "vertex_ai": results[3],
+        "sarvam_ai": results[4],
     }
 
     # Determine overall status

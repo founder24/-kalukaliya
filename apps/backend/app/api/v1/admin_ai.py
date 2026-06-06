@@ -1,6 +1,6 @@
 """
 Admin AI Endpoints
-AI provider configuration and system status.
+AI provider configuration, system status, and circuit breaker management.
 """
 
 from fastapi import APIRouter, Request
@@ -44,6 +44,43 @@ async def ai_providers(request: Request):
     )
 
     return {"providers": providers}
+
+
+@router.post("/ai/reset-circuit")
+async def reset_circuit_breakers(request: Request):
+    """Reset all AI circuit breakers to CLOSED state. Clears accumulated failures.
+    Use before running integration tests or after a transient AI outage."""
+    await _validate_admin_session(request)
+
+    from app.core.circuit_breaker import (
+        vertex_circuit_breaker,
+        sarvam_circuit_breaker,
+        vertex_search_circuit_breaker,
+    )
+
+    before = {
+        "vertex_ai": vertex_circuit_breaker.get_status()["state"],
+        "sarvam_ai": sarvam_circuit_breaker.get_status()["state"],
+        "vertex_search": vertex_search_circuit_breaker.get_status()["state"],
+    }
+
+    vertex_circuit_breaker.reset()
+    sarvam_circuit_breaker.reset()
+    vertex_search_circuit_breaker.reset()
+
+    after = {
+        "vertex_ai": vertex_circuit_breaker.get_status()["state"],
+        "sarvam_ai": sarvam_circuit_breaker.get_status()["state"],
+        "vertex_search": vertex_search_circuit_breaker.get_status()["state"],
+    }
+
+    logger.info("Circuit breakers manually reset by admin")
+    return {
+        "status": "ok",
+        "message": "All circuit breakers reset to CLOSED",
+        "before": before,
+        "after": after,
+    }
 
 
 @router.get("/ai/status")

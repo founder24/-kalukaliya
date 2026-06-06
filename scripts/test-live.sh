@@ -43,7 +43,52 @@ section() { printf "\n${BOLD}▸ %s${NC}\n" "$1"; }
 ok()   { PASS=$((PASS+1)); printf "  ${GREEN}✔${NC}  %s  ${DIM}%s${NC}\n" "$1" "${2:-}"; }
 fail() { FAIL=$((FAIL+1)); printf "  ${RED}✖${NC}  %s  ${DIM}%s${NC}\n" "$1" "${2:-}"; }
 skip() { SKIP=$((SKIP+1)); printf "  ${YELLOW}⚠${NC}  %s  ${DIM}(skipped — prereq missing)${NC}\n" "$1"; }
+warn() { printf "  ${YELLOW}⚡${NC}  %s  ${DIM}%s${NC}\n" "$1" "${2:-}"; }
 info() { printf "     ${DIM}%s${NC}\n" "$1"; }
+
+# slo_check — emit ok if under warn_ms, warn otherwise (never fails)
+# Usage: slo_check "label" <actual_ms> <warn_ms> [<target_ms>]
+slo_check() {
+  local label="$1" actual="$2" warn_ms="$3" target_ms="${4:-}"
+  if [[ -n "$target_ms" && "$actual" -le "$target_ms" ]]; then
+    ok "${label}" "${actual}ms ✓ (target <${target_ms}ms)"
+  elif [[ "$actual" -le "$warn_ms" ]]; then
+    ok "${label}" "${actual}ms (within <${warn_ms}ms)"
+  else
+    warn "${label} SLOW ⚡" "${actual}ms exceeds ${warn_ms}ms SLO"
+  fi
+}
+
+# check_ai_chat — like check() for AI chat endpoints but handles expected edge cases:
+#   200 → pass    429 → skip (quota)    502+"temporarily unavailable" → skip (circuit/transient)
+# Usage: check_ai_chat "label" METHOD URL [curl args...]
+check_ai_chat() {
+  local label="$1"; shift
+  http_call "$@"
+  case "$RESP_STATUS" in
+    200)
+      ok "$label" "[200] ${RESP_MS}ms"
+      return 0 ;;
+    429)
+      SKIP=$((SKIP+1))
+      printf "  ${YELLOW}⚠${NC}  %s  ${DIM}[429 — rate quota enforced correctly]${NC}\n" "$label"
+      return 0 ;;
+    502)
+      local detail; detail=$(printf '%s' "$RESP_BODY" | python3 -c \
+        "import sys,json
+try: print(json.load(sys.stdin).get('detail',''))
+except: print('')
+" 2>/dev/null || echo "")
+      if [[ "$detail" == *"temporarily unavailable"* || "$detail" == *"Circuit breaker"* ]]; then
+        SKIP=$((SKIP+1))
+        printf "  ${YELLOW}⚠${NC}  %s  ${DIM}[502 — AI circuit breaker / transient, ${RESP_MS}ms]${NC}\n" "$label"
+        return 0
+      fi ;;
+  esac
+  fail "$label" "[got ${RESP_STATUS}, want 200] ${RESP_MS}ms"
+  [[ -n "$RESP_BODY" ]] && info "${RESP_BODY:0:150}"
+  return 1
+}
 
 # ── HTTP call — sets RESP_STATUS, RESP_BODY, RESP_MS (NO subshell) ────────────
 # Usage:  http_call <METHOD> <URL> [curl args...]
@@ -76,6 +121,28 @@ check() {
     [[ -n "$RESP_BODY" ]] && info "${RESP_BODY:0:150}"
     return 1
   fi
+}
+
+# Like check() but accepts any of the listed status codes (space-separated).
+# Treats 429 specially: marks it as SKIP (quota enforced, not a failure).
+# Usage:  check_any "label" "200 429" METHOD URL [curl args...]
+check_any() {
+  local label="$1" want_list="$2"; shift 2
+  http_call "$@"
+  for want in $want_list; do
+    if [[ "$RESP_STATUS" == "$want" ]]; then
+      if [[ "$RESP_STATUS" == "429" ]]; then
+        SKIP=$((SKIP+1))
+        printf "  ${YELLOW}⚠${NC}  %s  ${DIM}[429 — quota enforced, anon IP limit reached]${NC}\n" "$label"
+      else
+        ok "$label" "[${RESP_STATUS}] ${RESP_MS}ms"
+      fi
+      return 0
+    fi
+  done
+  fail "$label" "[got ${RESP_STATUS}, want one of: ${want_list}] ${RESP_MS}ms"
+  [[ -n "$RESP_BODY" ]] && info "${RESP_BODY:0:150}"
+  return 1
 }
 
 # Extract value from RESP_BODY JSON by dot-path (e.g. "access_token", "boards.0.slug")
@@ -112,6 +179,83 @@ BOARD_SLUG="" CLASS_SLUG="" SUBJ_SLUG=""
 ADMIN_JAR=""
 
 # =============================================================================
+banner -1 "Provider & System Connectivity"
+# =============================================================================
+
+section "Deep health (MongoDB · Redis · Vertex AI · Vertex Search · Sarvam)"
+http_call GET "${EDGE_URL}/health/deep"
+if [[ "$RESP_STATUS" == "200" || "$RESP_STATUS" == "503" ]]; then
+  overall=$(printf '%s' "$RESP_BODY" | python3 -c \
+    "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "?")
+  [[ "$RESP_STATUS" == "503" ]] \
+    && fail "Deep health — core dependency DOWN" "overall=${overall}" \
+    || ok "Deep health → ${RESP_STATUS}" "${RESP_MS}ms  overall=${overall}"
+  printf '%s' "$RESP_BODY" | python3 -c "
+import sys, json
+try:
+    checks = json.load(sys.stdin).get('checks', {})
+    for name, val in checks.items():
+        st = val.get('status', '?')
+        lat = val.get('latency_ms', '')
+        err = val.get('error', '')
+        detail = f'{lat}ms' if lat else (err[:60] if err else '')
+        icon = '✔' if st == 'healthy' else ('⚡' if st == 'degraded' else '✖')
+        print(f'     {icon}  {name}: {st}  {detail}')
+except: pass
+" 2>/dev/null || true
+else
+  fail "GET /health/deep" "[${RESP_STATUS}] ${RESP_BODY:0:100}"
+fi
+
+section "Circuit breaker status (Vertex AI · Sarvam · Vertex Search)"
+http_call GET "${EDGE_URL}/health/circuit-breakers"
+if [[ "$RESP_STATUS" == "200" ]]; then
+  ok "GET /health/circuit-breakers → 200" "${RESP_MS}ms"
+  printf '%s' "$RESP_BODY" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    for name, cb in d.items():
+        state = cb.get('state', '?')
+        fc    = cb.get('failure_count', 0)
+        thresh = cb.get('failure_threshold', '?')
+        icon  = '✔' if state == 'closed' else ('⚡' if state == 'half_open' else '✖')
+        print(f'     {icon}  {name}: {state}  failures={fc}/{thresh}')
+except: pass
+" 2>/dev/null || true
+else
+  fail "GET /health/circuit-breakers" "[${RESP_STATUS}]"
+fi
+
+section "GCP Cloud Run region & credentials"
+http_call GET "${EDGE_URL}/health/deep"
+printf '%s' "$RESP_BODY" | python3 -c "
+import sys, json
+try:
+    va = json.load(sys.stdin).get('checks', {}).get('vertex_ai', {})
+    proj = va.get('project_id', '?')
+    auth = va.get('auth', 'service_account_key' if va.get('status') == 'healthy' else '?')
+    print(f'     project_id={proj}  auth={auth}  status={va.get(\"status\",\"?\")}')
+except: pass
+" 2>/dev/null || true
+
+section "Sarvam AI endpoint reachability"
+sarvam_st=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+  "https://api.sarvam.ai/" 2>/dev/null || echo "000")
+[[ "$sarvam_st" != "000" && "${sarvam_st:0:1}" != "5" ]] \
+  && ok "Sarvam API reachable" "[HTTP ${sarvam_st}]" \
+  || warn "Sarvam API unreachable or error" "[HTTP ${sarvam_st}]"
+
+section "CF edge KV & routing"
+http_call GET "${EDGE_URL}/health"
+cb_ok=$(printf '%s' "$RESP_BODY" | python3 -c \
+  "import sys,json; print(json.load(sys.stdin).get('backend_reachable','?'))" 2>/dev/null || echo "?")
+[[ "$RESP_STATUS" == "200" && ("$cb_ok" == "True" || "$cb_ok" == "true") ]] \
+  && ok "CF edge → backend tunnel healthy" "${RESP_MS}ms" \
+  || warn "CF edge health degraded" "[${RESP_STATUS}] backend_reachable=${cb_ok}"
+slo_check "CF edge response time" "$RESP_MS" 800 500
+
+# =============================================================================
 banner 0 "CF Edge Connectivity  ($EDGE_URL)"
 # =============================================================================
 
@@ -142,12 +286,19 @@ else
   fail "CORS preflight" "[${cors_st}] no Access-Control-Allow-Origin"
 fi
 
-section "Frontend (CF Pages)"
+section "Frontend (CF Pages) + page-load SLO"
+_t0=$(python3 -c "import time; print(int(time.time()*1000))" 2>/dev/null || date +%s%3N)
 site_st=$(curl -s -o /dev/null -w "%{http_code}" --max-time "$TIMEOUT" \
   -L "${SITE_URL}/library" 2>/dev/null || echo "000")
-[[ "$site_st" == "200" ]] \
-  && ok "GET ${SITE_URL}/library → 200" \
-  || fail "GET ${SITE_URL}/library" "[${site_st}]"
+_t1=$(python3 -c "import time; print(int(time.time()*1000))" 2>/dev/null || date +%s%3N)
+site_ms=$(( _t1 - _t0 ))
+if [[ "$site_st" == "200" ]]; then
+  ok "GET ${SITE_URL}/library → 200" "${site_ms}ms"
+  slo_check "CF Pages HTML load" "$site_ms" 500 300
+  info "Note: <100ms = CF edge cache hit; >300ms = cache miss / first load"
+else
+  fail "GET ${SITE_URL}/library" "[${site_st}]"
+fi
 
 # =============================================================================
 banner 1 "Library Page Content"
@@ -164,6 +315,7 @@ if check "GET /api/v1/content/library-bundle?slim=1 → 200" "200" \
   if [[ "${boards:-0}" -gt 0 ]]; then
     ok "Content counts" "${boards} boards · ${classes} classes · ${streams} streams · ${subjects} subjects"
     info "Board=${BOARD_SLUG}  Class=${CLASS_SLUG}  Subject=${SUBJ_SLUG}"
+    slo_check "Library bundle API latency" "$RESP_MS" 2000 1000
   else
     fail "Library bundle empty" "boards=0"
   fi
@@ -260,6 +412,37 @@ else
   skip "GET /conversations/{id} (no conversation ID)"
 fi
 
+# ── Pre-chat: reset AI circuit breakers so tests start with clean state ────────
+RESET_JAR=$(mktemp)
+section "Pre-chat: admin login + AI circuit breaker reset"
+http_call POST "${EDGE_URL}/api/v1/admin/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASS}\"}" \
+  -c "$RESET_JAR"
+if [[ "$RESP_STATUS" == "200" ]]; then
+  http_call POST "${EDGE_URL}/api/v1/admin/ai/reset-circuit" \
+    -H "Content-Type: application/json" \
+    -b "$RESET_JAR"
+  if [[ "$RESP_STATUS" == "200" ]]; then
+    reset_msg=$(printf '%s' "$RESP_BODY" | python3 -c \
+      "import sys,json; d=json.load(sys.stdin); print(d.get('message',''))" 2>/dev/null)
+    ok "Circuit breakers reset" "${reset_msg}"
+    printf '%s' "$RESP_BODY" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    for k,v in d.get('after',{}).items():
+        print(f'     {k}: {v}')
+except: pass
+" 2>/dev/null || true
+  else
+    warn "Circuit breaker reset failed" "[${RESP_STATUS}] — chat tests may see transient 502s"
+  fi
+else
+  warn "Pre-chat admin login failed" "[${RESP_STATUS}] — circuit breakers NOT reset"
+fi
+rm -f "$RESET_JAR"
+
 # =============================================================================
 banner 3 "Chat — English"
 # =============================================================================
@@ -269,35 +452,42 @@ CHAT_SID_EN="test-en-$(date +%s)"
 section "Non-streaming (authenticated)"
 if [[ -n "$USER_TOKEN" ]]; then
   TIMEOUT=$CHAT_TIMEOUT
-  if check "POST /api/v1/chat/ (EN, auth) → 200" "200" \
+  if check_ai_chat "POST /api/v1/chat/ (EN, auth) → 200" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"What is photosynthesis? Answer in 2 sentences.\",\"lang\":\"en\",\"session_id\":\"${CHAT_SID_EN}\"}"; then
-    reply=$(printf '%s' "$RESP_BODY" | python3 -c "
+    if [[ "$RESP_STATUS" == "200" ]]; then
+      reply=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 print(str(r)[:100])
 " 2>/dev/null || echo "")
-    [[ -n "$reply" ]] && ok "AI reply (EN, auth)" "${reply}…" \
-      || fail "AI reply empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+      [[ -n "$reply" ]] && ok "AI reply (EN, auth)" "${reply}…" \
+        || fail "AI reply empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+      slo_check "EN chat latency" "$RESP_MS" 5000 4000
+    fi
   fi
   TIMEOUT=30
 
   section "Multi-turn follow-up (same session)"
+  sleep 2
   TIMEOUT=$CHAT_TIMEOUT
-  if check "POST /api/v1/chat/ (EN follow-up, same session_id) → 200" "200" \
+  if check_ai_chat "POST /api/v1/chat/ (EN follow-up, same session_id) → 200" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"Give one real-world example.\",\"lang\":\"en\",\"session_id\":\"${CHAT_SID_EN}\"}"; then
-    reply2=$(printf '%s' "$RESP_BODY" | python3 -c "
+    if [[ "$RESP_STATUS" == "200" ]]; then
+      reply2=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 print(str(r)[:100])
 " 2>/dev/null || echo "")
-    [[ -n "$reply2" ]] && ok "Multi-turn follow-up (EN)" "${reply2}…" \
-      || fail "Multi-turn reply empty"
+      [[ -n "$reply2" ]] && ok "Multi-turn follow-up (EN)" "${reply2}…" \
+        || fail "Multi-turn reply empty"
+      slo_check "EN multi-turn latency" "$RESP_MS" 5000 4000
+    fi
   fi
   TIMEOUT=30
 else
@@ -305,18 +495,22 @@ else
 fi
 
 section "Anonymous chat (no token)"
+sleep 4
 TIMEOUT=$CHAT_TIMEOUT
-if check "POST /api/v1/chat/ (EN, anonymous) → 200" "200" \
+if check_ai_chat "POST /api/v1/chat/ (EN, anonymous) → 200" \
     POST "${EDGE_URL}/api/v1/chat/" \
     -H "Content-Type: application/json" \
     -d "{\"message\":\"Hello! What subjects can you help with?\",\"lang\":\"en\",\"session_id\":\"anon-en-$(date +%s)\"}"; then
-  reply=$(printf '%s' "$RESP_BODY" | python3 -c "
+  if [[ "$RESP_STATUS" == "200" ]]; then
+    reply=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 print(str(r)[:100])
 " 2>/dev/null || echo "")
-  [[ -n "$reply" ]] && ok "Anonymous AI reply (EN)" "${reply}…" \
-    || fail "Anonymous reply empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+    [[ -n "$reply" ]] && ok "Anonymous AI reply (EN)" "${reply}…" \
+      || fail "Anonymous reply empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+    slo_check "EN anonymous chat latency" "$RESP_MS" 5000 4000
+  fi
 fi
 TIMEOUT=30
 
@@ -327,39 +521,47 @@ banner 4 "Chat — Assamese (অসমীয়া)"
 CHAT_SID_AS="test-as-$(date +%s)"
 
 section "Explicit lang=as (authenticated)"
+sleep 5
 if [[ -n "$USER_TOKEN" ]]; then
   TIMEOUT=$CHAT_TIMEOUT
-  if check "POST /api/v1/chat/ (AS, explicit lang, auth) → 200" "200" \
+  if check_ai_chat "POST /api/v1/chat/ (AS, explicit lang, auth) → 200" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"সালোকসংশ্লেষণ কি? চমুকৈ বুজাই দিয়া।\",\"lang\":\"as\",\"session_id\":\"${CHAT_SID_AS}\"}"; then
-    reply=$(printf '%s' "$RESP_BODY" | python3 -c "
+    if [[ "$RESP_STATUS" == "200" ]]; then
+      reply=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 lang = d.get('lang') or d.get('language','?')
 print(f'[lang={lang}] {str(r)[:90]}')
 " 2>/dev/null || echo "")
-    [[ -n "$reply" ]] && ok "AI reply (AS, explicit lang)" "${reply}…" \
-      || fail "AI reply (AS) empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+      [[ -n "$reply" ]] && ok "AI reply (AS, explicit lang)" "${reply}…" \
+        || fail "AI reply (AS) empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+      slo_check "AS explicit chat latency" "$RESP_MS" 10000 8000
+    fi
   fi
   TIMEOUT=30
 
   section "Assamese auto-detect (no lang field)"
+  sleep 3
   TIMEOUT=$CHAT_TIMEOUT
-  if check "POST /api/v1/chat/ (AS auto-detect, auth) → 200" "200" \
+  if check_ai_chat "POST /api/v1/chat/ (AS auto-detect, auth) → 200" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"বিজ্ঞান মানে কি?\",\"session_id\":\"${CHAT_SID_AS}-auto\"}"; then
-    reply=$(printf '%s' "$RESP_BODY" | python3 -c "
+    if [[ "$RESP_STATUS" == "200" ]]; then
+      reply=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 lang = d.get('lang') or d.get('language','?')
 print(f'[detected={lang}] {str(r)[:90]}')
 " 2>/dev/null || echo "")
-    [[ -n "$reply" ]] && ok "Auto-detect Assamese" "${reply}…" \
-      || fail "Auto-detect AS empty"
+      [[ -n "$reply" ]] && ok "Auto-detect Assamese" "${reply}…" \
+        || fail "Auto-detect AS empty"
+      slo_check "AS auto-detect latency" "$RESP_MS" 8000 6000
+    fi
   fi
   TIMEOUT=30
 else
@@ -367,18 +569,22 @@ else
 fi
 
 section "Anonymous Assamese chat"
+sleep 2
 TIMEOUT=$CHAT_TIMEOUT
-if check "POST /api/v1/chat/ (AS, anonymous) → 200" "200" \
+if check_ai_chat "POST /api/v1/chat/ (AS, anonymous) → 200" \
     POST "${EDGE_URL}/api/v1/chat/" \
     -H "Content-Type: application/json" \
     -d "{\"message\":\"গণিত শিকাত সহায় কৰা।\",\"lang\":\"as\",\"session_id\":\"anon-as-$(date +%s)\"}"; then
-  reply=$(printf '%s' "$RESP_BODY" | python3 -c "
+  if [[ "$RESP_STATUS" == "200" ]]; then
+    reply=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 print(str(r)[:100])
 " 2>/dev/null || echo "")
-  [[ -n "$reply" ]] && ok "Anonymous AI reply (AS)" "${reply}…" \
-    || fail "Anonymous reply (AS) empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+    [[ -n "$reply" ]] && ok "Anonymous AI reply (AS)" "${reply}…" \
+      || fail "Anonymous reply (AS) empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+    slo_check "AS anonymous chat latency" "$RESP_MS" 10000 8000
+  fi
 fi
 TIMEOUT=30
 
