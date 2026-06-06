@@ -1,0 +1,162 @@
+/syrabit$  bash scripts/test-live.sh
+
+══════════════════════════════════════════════════════
+  LAYER 0: CF Edge Connectivity  (https://api.syrabit.ai)
+══════════════════════════════════════════════════════
+
+▸ Backend reachability
+  ✔  GET /health → 200  1026ms
+  ✔  backend_reachable: true  
+
+▸ CORS preflight
+  ✔  CORS preflight → 200  access-control-allow-origin: https://syrabit.ai
+
+▸ Frontend (CF Pages)
+  ✔  GET https://syrabit.ai/library → 200  
+
+══════════════════════════════════════════════════════
+  LAYER 1: Library Page Content
+══════════════════════════════════════════════════════
+
+▸ Library bundle (unauthenticated)
+  ✔  GET /api/v1/content/library-bundle?slim=1 → 200  [200] 1304ms
+  ✔  Content counts  3 boards · 10 classes · 26 streams · 109 subjects
+     Board=ahsec  Class=hs-1st-year  Subject=physics
+
+▸ Subject drill-down resolution
+  ✔  GET /content/resolve-subject/ahsec/hs-1st-year/physics → 200  [200] 440ms
+
+▸ Content search
+  ✔  GET /content/search?q=science → 200  [200] 1635ms
+
+▸ Question papers
+  ✔  GET /content/question-papers → 200  [200] 425ms
+
+══════════════════════════════════════════════════════
+  LAYER 2: User Auth  (founder@syrabit.ai)
+══════════════════════════════════════════════════════
+
+▸ Login
+  ✔  POST /api/v1/auth/login → 200  [200] 1395ms
+  ✔  access_token received  eyJhbGciOiJIUzI1NiIsInR5c…
+
+▸ GET /api/v1/users/me (authenticated)
+  ✔  GET /api/v1/users/me → 200  [200] 880ms
+     email=founder@syrabit.ai  role=admin
+
+▸ Unauthenticated guard
+  ✔  GET /api/v1/users/me without token → 401  [401] 405ms
+
+▸ Token refresh
+  ✔  POST /api/v1/auth/refresh → 200  [200] 1137ms
+  ✔  Refreshed token  eyJhbGciOiJIUzI1NiIsInR5c…
+
+▸ List conversations
+  ✔  GET /api/v1/conversations → 200  [200] 551ms
+  ✔  Conversations  5 items
+
+▸ Get single conversation
+  ✔  GET /api/v1/conversations/6a24523276d4dc25… → 200  [200] 1173ms
+
+══════════════════════════════════════════════════════
+  LAYER 3: Chat — English
+══════════════════════════════════════════════════════
+
+▸ Non-streaming (authenticated)
+  ✖  POST /api/v1/chat/ (EN, auth) → 200  [got 502, want 200] 3349ms
+     {"detail":"AI service temporarily unavailable"}
+
+▸ Multi-turn follow-up (same session)
+  ✖  POST /api/v1/chat/ (EN follow-up, same session_id) → 200  [got 502, want 200] 2783ms
+     {"detail":"AI service temporarily unavailable"}
+
+▸ Anonymous chat (no token)
+  ✔  POST /api/v1/chat/ (EN, anonymous) → 200  [200] 3750ms
+  ✔  Anonymous AI reply (EN)  Hello! As Syrabit, an educational AI designed to support Assamese students, I can help you with a wi…
+
+══════════════════════════════════════════════════════
+  LAYER 4: Chat — Assamese (অসমীয়া)
+══════════════════════════════════════════════════════
+
+▸ Explicit lang=as (authenticated)
+  ✔  POST /api/v1/chat/ (AS, explicit lang, auth) → 200  [200] 6121ms
+  ✔  AI reply (AS, explicit lang)  [lang=?] সালোকসংশ্লেষণ (Photosynthesis) হৈছে সেউজীয়া উদ্ভিদ আৰু কিছুমান আন জীৱই সূৰ্যৰ পোহৰ শক্তি …
+
+▸ Assamese auto-detect (no lang field)
+  ✔  POST /api/v1/chat/ (AS auto-detect, auth) → 200  [200] 4047ms
+  ✔  Auto-detect Assamese  [detected=?] বিজ্ঞান হৈছে প্ৰাকৃতিক জগতখনক বুজিবলৈ এক পদ্ধতিগত প্ৰচেষ্টা। ই পৰ্যবেক্ষণ, পৰীক্ষা-নিৰীক্ষ…
+
+▸ Anonymous Assamese chat
+  ✔  POST /api/v1/chat/ (AS, anonymous) → 200  [200] 5878ms
+  ✔  Anonymous AI reply (AS)  গণিত শিকাৰ ক্ষেত্ৰত সহায় কৰিবলৈ মই ইয়াত আছো! গণিত শিকাৰ বাবে কিছুমান সাধাৰণ পৰামৰ্শ তলত দিয়া হ'ল:…
+
+══════════════════════════════════════════════════════
+  LAYER 5: Admin Auth  (founder@syrabit.ai)
+══════════════════════════════════════════════════════
+
+▸ Admin login
+  ✔  POST /api/v1/admin/login → 200  1139ms
+  ✔  Response status=ok  
+  ✔  Admin session cookie stored in jar  
+
+▸ Admin verify (session check)
+  ✔  GET /api/v1/admin/verify → 200  (session valid)
+     {"status":"ok","user_id":"6a19a5d4d6908af60f888466"}
+
+▸ Admin guard (no session)
+  ✔  GET /api/v1/admin/verify without session → 401  (guard active)
+
+══════════════════════════════════════════════════════
+  LAYER 6: Admin Panel Endpoints
+══════════════════════════════════════════════════════
+
+▸ Dashboard
+  ✔  GET /api/v1/admin/dashboard → 200  422ms
+     total_users=?
+
+▸ Users list
+  ✔  GET /api/v1/admin/users?limit=5 → 200  977ms
+     5 users returned
+
+▸ Analytics overview
+  ✔  GET /api/v1/admin/analytics → 200  412ms
+
+▸ Analytics daily
+  ✔  GET /api/v1/admin/analytics/daily → 200  416ms
+
+▸ Conversations
+  ✔  GET /api/v1/admin/conversations?limit=5 → 200  952ms
+     5 conversations
+
+▸ Internal health
+  ✔  GET /api/v1/admin/health → 200  841ms
+     mongo: healthy
+     redis: healthy
+
+▸ AI providers
+  ✔  GET /api/v1/admin/ai/providers → 200  402ms
+
+▸ Admin logout
+  ✔  POST /api/v1/admin/logout → 200  (session cleared)
+
+══════════════════════════════════════════════════════
+  LAYER 7: Security Guards
+══════════════════════════════════════════════════════
+
+▸ Tampered JWT rejected
+  ✔  GET /users/me with tampered JWT → 401  (correctly rejected)
+
+▸ Admin endpoint without session
+  ✔  GET /admin/dashboard without session → 401  (correctly blocked)
+
+══════════════════════════════════════════════════════
+  RESULTS
+══════════════════════════════════════════════════════
+  Total   : 43
+  Passed  : 41
+  Failed  : 2
+  Skipped : 0
+
+  2 CHECK(S) FAILED ✖
+
+founder@instance-20260603-085552:~/syrabit$ 

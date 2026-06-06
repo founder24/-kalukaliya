@@ -74,6 +74,22 @@ class VertexAIClient:
             logger.error(f"Vertex AI error: {str(e)}")
             raise RuntimeError(f"Vertex AI service failed: {e}")
 
+    async def generate_direct(self, system_prompt: str, user_message: str) -> str:
+        """
+        Generate response bypassing the circuit breaker.
+
+        Use ONLY in fallback paths (e.g. Sarvam → Vertex) where the normal
+        circuit-breaker-protected path has already failed and we still want to
+        attempt generation without being blocked by a tripped breaker.
+        """
+        try:
+            if self._use_genai_api:
+                return await self._generate_via_genai(system_prompt, user_message)
+            return await self._generate_via_vertex(system_prompt, user_message)
+        except Exception as e:
+            logger.error(f"Vertex AI direct generate error: {str(e)}")
+            raise RuntimeError(f"Vertex AI service failed: {e}")
+
     async def _generate_via_genai(self, system_prompt: str, user_message: str) -> str:
         """Generate using the Generative Language API (API key)."""
         url = f"{GENAI_BASE_URL}/{self.model}:generateContent?key={self._api_key}"

@@ -432,6 +432,18 @@ function App() {
   useEffect(() => { prefetchCriticalRoutes(); }, []); // eslint-disable-line
 
   useEffect(() => {
+    // Prefetch the slim bundle immediately at idle priority so it is already
+    // in the React Query cache when the user navigates to /library. The slim
+    // payload is small (~50-100 KB) and does not block hydration.
+    const idle = window.requestIdleCallback || ((cb) => setTimeout(cb, 1));
+    const slimHandle = idle(() => {
+      queryClient.prefetchQuery({
+        queryKey: ['library-bundle-slim'],
+        queryFn: () => apiClient().get('/content/library-bundle?slim=1').then((r) => r.data),
+        staleTime: 30 * 60 * 1000,
+      });
+    }, { timeout: 2000 });
+
     const prefetchBundle = () => {
       queryClient.prefetchQuery({
         queryKey: ['library-bundle'],
@@ -442,21 +454,18 @@ function App() {
 
     const isOnLibrary = window.location.pathname === '/library' || window.location.pathname === '/browser' || window.location.pathname.match(/^\/[a-z]+\/[a-z]/);
     if (isOnLibrary) {
-      // Task #496: defer the full (non-slim) library-bundle prefetch to
-      // idle so it doesn't compete with React hydration on the main
-      // thread for /library and the prerendered subject + chapter
-      // routes. The slim bundle is already inlined into the SSR HTML
-      // (window.__LIBRARY_BUNDLE__ / __SSR_QUERIES__), so first render
-      // doesn't need this full payload — it's only used for later
-      // interactions (search across all subjects, filter chips, etc.).
-      // Firing it immediately on mount was the dominant TBT contributor
-      // on /library (3990 ms in the 2026-04-18 audit) because both
-      // network parse + JSON-decode of the larger bundle landed on the
-      // hydration critical path.
-      const idle = window.requestIdleCallback || ((cb) => setTimeout(cb, 1));
-      const handle = idle(() => prefetchBundle(), { timeout: 4000 });
+      // Defer the full (non-slim) library-bundle prefetch to idle so it doesn't
+      // compete with React hydration on the main thread for /library and the
+      // prerendered subject + chapter routes. The slim bundle is already
+      // prefetched above (or inlined into the SSR HTML), so first render doesn't
+      // need this full payload — it's only used for later interactions (search
+      // across all subjects, filter chips, etc.).
+      const fullHandle = idle(() => prefetchBundle(), { timeout: 4000 });
       return () => {
-        if (window.cancelIdleCallback) window.cancelIdleCallback(handle);
+        if (window.cancelIdleCallback) {
+          window.cancelIdleCallback(slimHandle);
+          window.cancelIdleCallback(fullHandle);
+        }
       };
     }
 
@@ -482,7 +491,11 @@ function App() {
     const fallback = setTimeout(() => {
       if (!done) { done = true; prefetchBundle(); detach(); }
     }, 4000);
-    return () => { clearTimeout(fallback); detach(); };
+    return () => {
+      clearTimeout(fallback);
+      detach();
+      if (window.cancelIdleCallback) window.cancelIdleCallback(slimHandle);
+    };
   }, []);
 
   return (

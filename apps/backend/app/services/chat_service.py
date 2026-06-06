@@ -121,9 +121,15 @@ class ChatService:
         Returns match info dict (with score, topic metadata) if a topic matches
         above the 0.70 threshold, otherwise None.
 
-        Uses a 0.5s timeout to fail fast if Vertex AI is slow, so that the
-        total RAG phase stays within the intended latency budget.
+        Short-circuits immediately when the search service is not configured so
+        no embedding API call is made and zero latency is added to the chat path.
         """
+        # Skip embedding entirely when RAG search is unavailable — avoids the
+        # 0.5s timeout wait that was being added to every chat request when
+        # VERTEX_SEARCH_DATASTORE_ID is not set.
+        if not search_service.is_available():
+            return None
+
         try:
             from app.services.ai.embedder import generate_embedding_vector
             from app.services.ai.topic_matcher import topic_matcher
@@ -205,18 +211,18 @@ class ChatService:
             if detected_lang == "en":
                 return (
                     "IMPORTANT: You MUST respond in English only. Do NOT respond in any other language including Bengali, Assamese, or Hindi. "
-                    "You are Syrabit, an educational AI for Assamese students. "
-                    "Answer clearly and concisely. "
-                    "State when you cannot verify against course materials."
+                    "You are Syrabit, an expert educational AI for Assamese students covering AHSEC, SEBA, and CBSE curricula. "
+                    "Answer the student's question directly and thoroughly using your training knowledge. "
+                    "Be accurate, educational, and helpful. Do not add unnecessary disclaimers."
                 )
             else:
                 return (
-                    "You are Syrabit, an educational assistant for Assamese students. "
+                    "You are Syrabit, an educational assistant for Assamese students covering AHSEC, SEBA, and CBSE curricula. "
                     "You can understand questions in any language (English, Hindi, Assamese, etc.) "
                     "but you MUST always respond in Assamese (\u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be) script only. "
                     "Never respond in English or any other language. "
-                    "\u09b8\u09cd\u09aa\u09b7\u09cd\u099f \u0986\u09f0\u09c1 \u09b8\u0982\u0995\u09cd\u09b7\u09c7\u09aa\u09c7 \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964 "
-                    "\u09aa\u09be\u09a0\u09cd\u09af\u0995\u09cd\u09f0\u09ae\u09f0 \u09b8\u09be\u09ae\u0997\u09cd\u09f0\u09c0\u09f0 \u09b2\u0997\u09a4 \u09af\u09be\u099a\u09be\u0987 \u0995\u09f0\u09bf\u09ac \u09a8\u09cb\u09f1\u09be\u09f0\u09be \u09b8\u09cd\u09aa\u09b7\u09cd\u099f\u0995\u09c8 \u0995\u0993\u0995\u0964"
+                    "\u099b\u09be\u09a4\u09cd\u09f0\u09f0 \u09aa\u09cd\u09f0\u09b6\u09cd\u09a8\u09f0 \u09b8\u09a0\u09bf\u0995 \u0986\u09f0\u09c1 \u09b8\u09b9\u09be\u09af\u09bc\u0995\u09be\u09f0\u09c0 \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964 "
+                    "\u09b8\u09cd\u09aa\u09b7\u09cd\u099f, \u09a4\u09a5\u09cd\u09af\u09aa\u09c2\u09f0\u09cd\u09a3 \u0986\u09f0\u09c1 \u09b6\u09bf\u0995\u09cd\u09b7\u09be\u09ae\u09c2\u09b2\u0995 \u09ac\u09cd\u09af\u09be\u0996\u09cd\u09af\u09be \u09a6\u09bf\u09af\u09bc\u0995\u0964"
                 )
 
         context_text = "\n".join(
@@ -257,7 +263,10 @@ class ChatService:
                 from app.services.ai.vertex_client import vertex_client
 
                 actual_model = settings.VERTEX_GEMINI_MODEL
-                response_text = await vertex_client.generate(
+                # Use generate_direct to bypass the vertex_circuit_breaker — the
+                # normal circuit-protected path may be tripped by concurrent failures,
+                # but we still want to attempt Vertex AI for this Assamese fallback.
+                response_text = await vertex_client.generate_direct(
                     system_prompt=system_prompt,
                     user_message=sanitized_message,
                 )

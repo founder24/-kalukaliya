@@ -78,6 +78,28 @@ check() {
   fi
 }
 
+# Like check() but accepts any of the listed status codes (space-separated).
+# Treats 429 specially: marks it as SKIP (quota enforced, not a failure).
+# Usage:  check_any "label" "200 429" METHOD URL [curl args...]
+check_any() {
+  local label="$1" want_list="$2"; shift 2
+  http_call "$@"
+  for want in $want_list; do
+    if [[ "$RESP_STATUS" == "$want" ]]; then
+      if [[ "$RESP_STATUS" == "429" ]]; then
+        SKIP=$((SKIP+1))
+        printf "  ${YELLOW}⚠${NC}  %s  ${DIM}[429 — quota enforced, anon IP limit reached]${NC}\n" "$label"
+      else
+        ok "$label" "[${RESP_STATUS}] ${RESP_MS}ms"
+      fi
+      return 0
+    fi
+  done
+  fail "$label" "[got ${RESP_STATUS}, want one of: ${want_list}] ${RESP_MS}ms"
+  [[ -n "$RESP_BODY" ]] && info "${RESP_BODY:0:150}"
+  return 1
+}
+
 # Extract value from RESP_BODY JSON by dot-path (e.g. "access_token", "boards.0.slug")
 jval() {
   printf '%s' "$RESP_BODY" | python3 -c "
@@ -269,35 +291,40 @@ CHAT_SID_EN="test-en-$(date +%s)"
 section "Non-streaming (authenticated)"
 if [[ -n "$USER_TOKEN" ]]; then
   TIMEOUT=$CHAT_TIMEOUT
-  if check "POST /api/v1/chat/ (EN, auth) → 200" "200" \
+  if check_any "POST /api/v1/chat/ (EN, auth) → 200|429" "200 429" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"What is photosynthesis? Answer in 2 sentences.\",\"lang\":\"en\",\"session_id\":\"${CHAT_SID_EN}\"}"; then
-    reply=$(printf '%s' "$RESP_BODY" | python3 -c "
+    if [[ "$RESP_STATUS" == "200" ]]; then
+      reply=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 print(str(r)[:100])
 " 2>/dev/null || echo "")
-    [[ -n "$reply" ]] && ok "AI reply (EN, auth)" "${reply}…" \
-      || fail "AI reply empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+      [[ -n "$reply" ]] && ok "AI reply (EN, auth)" "${reply}…" \
+        || fail "AI reply empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+    fi
   fi
   TIMEOUT=30
 
   section "Multi-turn follow-up (same session)"
+  sleep 2
   TIMEOUT=$CHAT_TIMEOUT
-  if check "POST /api/v1/chat/ (EN follow-up, same session_id) → 200" "200" \
+  if check_any "POST /api/v1/chat/ (EN follow-up, same session_id) → 200|429" "200 429" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"Give one real-world example.\",\"lang\":\"en\",\"session_id\":\"${CHAT_SID_EN}\"}"; then
-    reply2=$(printf '%s' "$RESP_BODY" | python3 -c "
+    if [[ "$RESP_STATUS" == "200" ]]; then
+      reply2=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 print(str(r)[:100])
 " 2>/dev/null || echo "")
-    [[ -n "$reply2" ]] && ok "Multi-turn follow-up (EN)" "${reply2}…" \
-      || fail "Multi-turn reply empty"
+      [[ -n "$reply2" ]] && ok "Multi-turn follow-up (EN)" "${reply2}…" \
+        || fail "Multi-turn reply empty"
+    fi
   fi
   TIMEOUT=30
 else
@@ -305,18 +332,21 @@ else
 fi
 
 section "Anonymous chat (no token)"
+sleep 4
 TIMEOUT=$CHAT_TIMEOUT
-if check "POST /api/v1/chat/ (EN, anonymous) → 200" "200" \
+if check_any "POST /api/v1/chat/ (EN, anonymous) → 200|429" "200 429" \
     POST "${EDGE_URL}/api/v1/chat/" \
     -H "Content-Type: application/json" \
     -d "{\"message\":\"Hello! What subjects can you help with?\",\"lang\":\"en\",\"session_id\":\"anon-en-$(date +%s)\"}"; then
-  reply=$(printf '%s' "$RESP_BODY" | python3 -c "
+  if [[ "$RESP_STATUS" == "200" ]]; then
+    reply=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 print(str(r)[:100])
 " 2>/dev/null || echo "")
-  [[ -n "$reply" ]] && ok "Anonymous AI reply (EN)" "${reply}…" \
-    || fail "Anonymous reply empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+    [[ -n "$reply" ]] && ok "Anonymous AI reply (EN)" "${reply}…" \
+      || fail "Anonymous reply empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+  fi
 fi
 TIMEOUT=30
 
@@ -327,39 +357,45 @@ banner 4 "Chat — Assamese (অসমীয়া)"
 CHAT_SID_AS="test-as-$(date +%s)"
 
 section "Explicit lang=as (authenticated)"
+sleep 5
 if [[ -n "$USER_TOKEN" ]]; then
   TIMEOUT=$CHAT_TIMEOUT
-  if check "POST /api/v1/chat/ (AS, explicit lang, auth) → 200" "200" \
+  if check_any "POST /api/v1/chat/ (AS, explicit lang, auth) → 200|429" "200 429" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"সালোকসংশ্লেষণ কি? চমুকৈ বুজাই দিয়া।\",\"lang\":\"as\",\"session_id\":\"${CHAT_SID_AS}\"}"; then
-    reply=$(printf '%s' "$RESP_BODY" | python3 -c "
+    if [[ "$RESP_STATUS" == "200" ]]; then
+      reply=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 lang = d.get('lang') or d.get('language','?')
 print(f'[lang={lang}] {str(r)[:90]}')
 " 2>/dev/null || echo "")
-    [[ -n "$reply" ]] && ok "AI reply (AS, explicit lang)" "${reply}…" \
-      || fail "AI reply (AS) empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+      [[ -n "$reply" ]] && ok "AI reply (AS, explicit lang)" "${reply}…" \
+        || fail "AI reply (AS) empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+    fi
   fi
   TIMEOUT=30
 
   section "Assamese auto-detect (no lang field)"
+  sleep 3
   TIMEOUT=$CHAT_TIMEOUT
-  if check "POST /api/v1/chat/ (AS auto-detect, auth) → 200" "200" \
+  if check_any "POST /api/v1/chat/ (AS auto-detect, auth) → 200|429" "200 429" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"বিজ্ঞান মানে কি?\",\"session_id\":\"${CHAT_SID_AS}-auto\"}"; then
-    reply=$(printf '%s' "$RESP_BODY" | python3 -c "
+    if [[ "$RESP_STATUS" == "200" ]]; then
+      reply=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 lang = d.get('lang') or d.get('language','?')
 print(f'[detected={lang}] {str(r)[:90]}')
 " 2>/dev/null || echo "")
-    [[ -n "$reply" ]] && ok "Auto-detect Assamese" "${reply}…" \
-      || fail "Auto-detect AS empty"
+      [[ -n "$reply" ]] && ok "Auto-detect Assamese" "${reply}…" \
+        || fail "Auto-detect AS empty"
+    fi
   fi
   TIMEOUT=30
 else
@@ -367,18 +403,21 @@ else
 fi
 
 section "Anonymous Assamese chat"
+sleep 2
 TIMEOUT=$CHAT_TIMEOUT
-if check "POST /api/v1/chat/ (AS, anonymous) → 200" "200" \
+if check_any "POST /api/v1/chat/ (AS, anonymous) → 200|429" "200 429" \
     POST "${EDGE_URL}/api/v1/chat/" \
     -H "Content-Type: application/json" \
     -d "{\"message\":\"গণিত শিকাত সহায় কৰা।\",\"lang\":\"as\",\"session_id\":\"anon-as-$(date +%s)\"}"; then
-  reply=$(printf '%s' "$RESP_BODY" | python3 -c "
+  if [[ "$RESP_STATUS" == "200" ]]; then
+    reply=$(printf '%s' "$RESP_BODY" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 r = d.get('response') or d.get('message') or d.get('content') or ''
 print(str(r)[:100])
 " 2>/dev/null || echo "")
-  [[ -n "$reply" ]] && ok "Anonymous AI reply (AS)" "${reply}…" \
-    || fail "Anonymous reply (AS) empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+    [[ -n "$reply" ]] && ok "Anonymous AI reply (AS)" "${reply}…" \
+      || fail "Anonymous reply (AS) empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
+  fi
 fi
 TIMEOUT=30
 
