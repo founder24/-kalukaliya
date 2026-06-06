@@ -1,0 +1,30 @@
+# Find your repo (run once if you're not sure)
+ls ~/syrabit* 2>/dev/null || find ~ -maxdepth 3 -name "deploy.sh" 2>/dev/null
+
+# Then run it (replace with your actual repo path)
+cd ~/syrabit          # or wherever the repo is cloned
+./infra/gcp/deploy.sh
+/home/founder/syrabit:
+ARCHITECTURE_VERIFICATION.md   COMPREHENSIVE_CODE_AUDIT.md         HIDDEN_FUNCTIONALITY_AUDIT.md  README.md                   attached_assets         main.py              run_tests.sh
+AUDIT_BUILD_VERIFICATION.md    FIXES_IMPLEMENTATION_REPORT.md      HIDDEN_ISSUES_DEEP_AUDIT.md    REMEDIATION_PLAN.md         chat-pipeline-audit.sh  node_modules         scripts
+AUDIT_EXECUTIVE_SUMMARY.txt    FULLSTACK_ARCHITECTURE_AUDIT.md     IMPLEMENTATION_PLAN.md         REPLIT_DEPLOYMENT_AUDIT.md  cloud_smoke.sh          package-lock.json    service.yaml
+AUDIT_INDEX.md                 FULLSTACK_AUDIT_REPORT.md           ISSUES_CHECKLIST.md            ROUTE_CONSISTENCY_AUDIT.md  cloudbuild.yaml         package.json         start-backend.sh
+BACKEND_DIAGNOSIS_REPORT.md    FULLSTACK_DEEP_AUDIT_REPORT.md      LIVE_DEPLOYMENT_AUDIT.md       SECURITY_PATCH_REPORT.md    docker-compose.yml      pnpm-lock.yaml       tsconfig.base.json
+BUILD_AUDIT_REPORT.md          FULLSTACK_LIVE_DEPLOYMENT_AUDIT.md  PHASE_1_COMPLETE.txt           STACKBLITZ_SETUP.md         docs                    pnpm-workspace.yaml  uv.lock
+CLOUDFLARE_DEPLOYMENT_FIX.md   FULL_STACK_AUDIT.md                 PHASE_1_FIXES_COMPLETE.md      apps                        frontend                pyproject.toml
+COMPREHENSIVE_AUDIT_REPORT.md  FULL_STACK_FUNCTIONALITY_AUDIT.md   PORT_4000_FIX.md               artifacts                   infra                   replit.nix
+
+/home/founder/syrabit-fresh:
+ARCHITECTURE_VERIFICATION.md   COMPREHENSIVE_CODE_AUDIT.md         HIDDEN_FUNCTIONALITY_AUDIT.md  README.md                   attached_assets         main.py              run_tests.sh
+AUDIT_BUILD_VERIFICATION.md    FIXES_IMPLEMENTATION_REPORT.md      HIDDEN_ISSUES_DEEP_AUDIT.md    REMEDIATION_PLAN.md         chat-pipeline-audit.sh  node_modules         scripts
+AUDIT_EXECUTIVE_SUMMARY.txt    FULLSTACK_ARCHITECTURE_AUDIT.md     IMPLEMENTATION_PLAN.md         REPLIT_DEPLOYMENT_AUDIT.md  cloud_smoke.sh          package-lock.json    start-backend.sh
+AUDIT_INDEX.md                 FULLSTACK_AUDIT_REPORT.md           ISSUES_CHECKLIST.md            ROUTE_CONSISTENCY_AUDIT.md  cloudbuild.yaml         package.json         tsconfig.base.json
+BACKEND_DIAGNOSIS_REPORT.md    FULLSTACK_DEEP_AUDIT_REPORT.md      LIVE_DEPLOYMENT_AUDIT.md       SECURITY_PATCH_REPORT.md    docker-compose.yml      pnpm-lock.yaml       uv.lock
+BUILD_AUDIT_REPORT.md          FULLSTACK_LIVE_DEPLOYMENT_AUDIT.md  PHASE_1_COMPLETE.txt           STACKBLITZ_SETUP.md         docs                    pnpm-workspace.yaml
+CLOUDFLARE_DEPLOYMENT_FIX.md   FULL_STACK_AUDIT.md                 PHASE_1_FIXES_COMPLETE.md      apps                        frontend                pyproject.toml
+COMPREHENSIVE_AUDIT_REPORT.md  FULL_STACK_FUNCTIONALITY_AUDIT.md   PORT_4000_FIX.md               artifacts                   infra                   replit.nix
+
+/home/founder/syrabit-venv:
+bin  include  lib  lib64  pyvenv.cfg
+-bash: ./infra/gcp/deploy.sh: No such file or directory
+founder@instance-20260603-085552:~/syrabit$ 
