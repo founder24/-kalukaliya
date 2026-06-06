@@ -1,6 +1,6 @@
 ---
 name: Syrabit chat+auth pipeline bugs
-description: Bugs fixed in the chat pipeline and auth/analytics endpoints during the June 2026 audit
+description: Bugs fixed in the chat pipeline, auth/analytics endpoints, and the critical CF Worker OIDC/JWT overwrite issue
 ---
 
 ## conversation_id vs session_id in ChatRequest
@@ -19,3 +19,32 @@ Frontend `TrustpilotReviewsSection` and `ReviewPrompt` fetch `GET /api/v1/config
 
 ## LLM knowledge fallback — needs GEMINI_API_KEY
 When Vertex Search has no credentials, `check_topic_match` returns `None` → `context_chunks = []` → `build_system_prompt` uses LLM-knowledge-only prompt. This is the intended fallback. BUT the LLM call itself (vertex_client) also needs `GEMINI_API_KEY` or `GOOGLE_APPLICATION_CREDENTIALS`. Without either, chat always errors with "Service temporarily unavailable." The architecture is correct; credentials are required.
+
+## CRITICAL: CF Worker OIDC overwrites user JWT → 401 "Invalid token" (fixed Jun 2026)
+
+**Root cause**: The Cloudflare Worker edge proxy (`apps/edge/src/routes/api-proxy.ts`) generates a Google OIDC identity token for Cloud Run IAM auth and writes it into `Authorization: Bearer <oidc-token>`, **overwriting** the user's JWT. The backend then tries to decode the OIDC token as a user JWT → fails → 401 "Invalid token".
+
+**Why edge-trust HMAC path also fails**: `EDGE_SHARED_SECRET` in CF Worker secrets ≠ value in Cloud Run GCP Secret Manager. The `hmac.compare_digest` check in `get_current_user` fails → falls through to JWT path → sees OIDC token → "Invalid token".
+
+**Fix applied (both files committed to main)**:
+1. `apps/edge/src/routes/api-proxy.ts`: Save original user JWT in `X-User-JWT` header BEFORE overwriting Authorization with OIDC token.
+2. `apps/backend/app/api/v1/auth.py`: In `get_current_user` and `get_current_user_optional`, read `X-User-JWT` header first; if present and starts with "Bearer ", prefer it over `credentials.credentials`.
+
+**How to apply**: Any future auth change must preserve this — if OIDC overwrites Authorization for Cloud Run IAM, always save user JWT in `X-User-JWT` first.
+
+## Cloud Build race condition: concurrent deploys cause ABORTED version conflict
+
+When two GHA deploy jobs run simultaneously (two pushes to main in quick succession), both submit to Cloud Build. The second `gcloud run deploy` step gets ABORTED: "Conflict for resource: version was specified but current version is X". The **image IS built and pushed** successfully before the conflict.
+
+**Fix**: Deploy the already-built image directly using its commit SHA tag:
+```
+gcloud run deploy syrabit-backend \
+  --image="asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:<COMMIT_SHA>" \
+  --region=asia-south1 --project=blissful-acumen-495019-t6
+```
+Find the commit SHA from `gcloud builds log <BUILD_ID> --region=asia-south1 | grep "Successfully tagged"`.
+
+**Why**: Cloud Build's final `gcloud run deploy` step uses `--version` locking; concurrent deploys collide. Image push always succeeds; only the Cloud Run traffic swap fails.
+
+## content/{slug} route intercepts /content/boards etc.
+`content.router` has a `GET /{slug}` catch-all. Even though `public_content.router` is registered first, `/content/boards` returns 404 "Content not found" from the catch-all. Root cause unclear (likely FastAPI router include order interaction). **Frontend workaround**: extract boards/classes/streams/subjects from the `library-bundle` response instead of calling separate endpoints.
