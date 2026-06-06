@@ -47,12 +47,12 @@ steps:
       - 'push'
       - 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$COMMIT_SHA'
 
-  # ── Step 3: Deploy to Cloud Run (public — edge HMAC provides app-layer security) ──
-  # The service allows unauthenticated invocations so the Cloudflare edge worker
-  # can call it without a GOOGLE_SA_KEY OIDC token. Security is enforced at the
-  # application layer via X-Edge-Signature HMAC (EDGE_SHARED_SECRET env var).
-  # All public internet traffic still passes through api.syrabit.ai (Cloudflare
-  # Worker) which rate-limits, validates JWT, and signs requests before forwarding.
+  # ── Step 3: Deploy to Cloud Run ──────────────────────────────────────────────
+  # IMPORTANT: `gcloud run deploy` does NOT preserve Secret Manager references
+  # across deploys — they must be explicitly passed every time via --update-secrets.
+  # Plain env vars set here (--update-env-vars) are additive and safe.
+  # Security: traffic reaches Cloud Run only through api.syrabit.ai (Cloudflare
+  # Worker) which validates JWT and signs requests with EDGE_SHARED_SECRET HMAC.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args:
@@ -64,15 +64,10 @@ steps:
       - '--port=8000'
       - '--allow-unauthenticated'
       - '--service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com'
-      - '--update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=us-central1'
-      # --update-env-vars adds/updates only the listed vars; all others (including
-      # manually set secrets like JWT_SECRET) are preserved across deployments.
-      # NOTE: Sensitive env vars (MONGODB_URI, EDGE_SHARED_SECRET, SENTRY_DSN,
-      # ADMIN_JWT_SECRET, GOOGLE_APPLICATION_CREDENTIALS_JSON) are set once via
-      # Secret Manager references and preserved by --update-env-vars automatically.
-      # JWT_SECRET is set once manually via:
-      #   gcloud run services update syrabit-backend --region=asia-south1 \
-      #     --update-env-vars=JWT_SECRET=<value>
+      - >-
+        --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=us-central1,VERTEX_SEARCH_DATASTORE_ID=syrabit-edu-datastore,VERTEX_SEARCH_LOCATION=global,VERTEX_SEARCH_SERVING_CONFIG=default_search
+      - >-
+        --update-secrets=MONGODB_URI=MONGODB_URI:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=ADMIN_JWT_SECRET:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=SARVAM_API_KEY:latest,UPSTASH_REDIS_REST_URL=UPSTASH_REDIS_REST_URL:latest,UPSTASH_REDIS_REST_TOKEN=UPSTASH_REDIS_REST_TOKEN:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest,RESET_TOKEN_SECRET=RESET_TOKEN_SECRET:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=TRANSLATE_CRON_SECRET:latest,INDEXNOW_API_KEY=INDEXNOW_API_KEY:latest,INDEXNOW_INTERNAL_SECRET=INDEXNOW_INTERNAL_SECRET:latest,POSTHOG_API_KEY=POSTHOG_API_KEY:latest,SENTRY_DSN=SENTRY_DSN:latest
 
 images:
   - 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$COMMIT_SHA'
