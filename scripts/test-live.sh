@@ -60,7 +60,10 @@ slo_check() {
 }
 
 # check_ai_chat — like check() for AI chat endpoints but handles expected edge cases:
-#   200 → pass    429 → skip (quota)    502+"temporarily unavailable" → skip (circuit/transient)
+#   200 → pass
+#   429 → skip (edge rate quota)
+#   502 + "temporarily unavailable" → skip (circuit breaker / transient Gemini error)
+#   503 + "temporarily unavailable" → skip (Gemini 429 rate-limit after retry, or CB open)
 # Usage: check_ai_chat "label" METHOD URL [curl args...]
 check_ai_chat() {
   local label="$1"; shift
@@ -73,15 +76,15 @@ check_ai_chat() {
       SKIP=$((SKIP+1))
       printf "  ${YELLOW}⚠${NC}  %s  ${DIM}[429 — rate quota enforced correctly]${NC}\n" "$label"
       return 0 ;;
-    502)
+    502|503)
       local detail; detail=$(printf '%s' "$RESP_BODY" | python3 -c \
         "import sys,json
 try: print(json.load(sys.stdin).get('detail',''))
 except: print('')
 " 2>/dev/null || echo "")
-      if [[ "$detail" == *"temporarily unavailable"* || "$detail" == *"Circuit breaker"* ]]; then
+      if [[ "$detail" == *"temporarily unavailable"* || "$detail" == *"Circuit breaker"* || "$detail" == *"try again"* ]]; then
         SKIP=$((SKIP+1))
-        printf "  ${YELLOW}⚠${NC}  %s  ${DIM}[502 — AI circuit breaker / transient, ${RESP_MS}ms]${NC}\n" "$label"
+        printf "  ${YELLOW}⚠${NC}  %s  ${DIM}[${RESP_STATUS} — AI transient / rate-limit, ${RESP_MS}ms]${NC}\n" "$label"
         return 0
       fi ;;
   esac
