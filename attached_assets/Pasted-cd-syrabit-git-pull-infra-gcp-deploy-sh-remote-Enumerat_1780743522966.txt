@@ -1,0 +1,105 @@
+cd ~/syrabit
+git pull
+./infra/gcp/deploy.sh
+remote: Enumerating objects: 43, done.
+remote: Counting objects: 100% (30/30), done.
+remote: Compressing objects: 100% (16/16), done.
+remote: Total 43 (delta 18), reused 20 (delta 14), pack-reused 13 (from 1)
+Unpacking objects: 100% (43/43), 108.46 KiB | 1.87 MiB/s, done.
+From https://github.com/founder24/-kalukaliya
+   fc497117..9ffde531  main                                                   -> origin/main
+ + dc7dd703...ae363be9 dependabot/npm_and_yarn/main/node-non-major-fcdcf7cad7 -> origin/dependabot/npm_and_yarn/main/node-non-major-fcdcf7cad7  (forced update)
+ + e7d5d0bd...49effc17 dependabot/npm_and_yarn/vite-8.0.16                    -> origin/dependabot/npm_and_yarn/vite-8.0.16  (forced update)
+Updating fc497117..9ffde531
+Fast-forward
+ .agents/memory/MEMORY.md                                              |    2 +
+ .agents/memory/syrabit-credentials.md                                 |   60 ++++
+ .agents/memory/syrabit-flexid.md                                      |   28 ++
+ .replit                                                               |   10 +-
+ apps/frontend/package.json                                            |    1 -
+ apps/frontend/src/components/admin/AdminCmsDocEditor.jsx              |    1 -
+ apps/frontend/src/components/admin/cms-editor/ContentTab.jsx          |   49 ++--
+ apps/frontend/src/components/admin/cms-editor/MdxToolbar.jsx          |   26 +-
+ apps/frontend/src/components/admin/cms-editor/useCmsEditor.jsx        |   14 +-
+ apps/frontend/src/components/admin/content-editor/ChapterEditForm.jsx |  100 ++-----
+ infra/gcp/deploy.sh                                                   |  313 ++++++++++++++++++++
+ pnpm-lock.yaml                                                        | 2123 -------------------------------------------------------------------------------------------------------------------------------------
+ 12 files changed, 467 insertions(+), 2260 deletions(-)
+ create mode 100644 .agents/memory/syrabit-credentials.md
+ create mode 100644 .agents/memory/syrabit-flexid.md
+ create mode 100755 infra/gcp/deploy.sh
+
+══ Checking prerequisites ══
+[OK]      Authenticated as: founder@syrabit.ai
+[OK]      Source directory: apps/backend
+
+══ Verifying secrets in Secret Manager ══
+[OK]      Found: MONGODB_URI
+[OK]      Found: jwt-secret
+[OK]      Found: edge-shared-secret
+[OK]      Found: ADMIN_JWT_SECRET
+[OK]      Found: GOOGLE_APPLICATION_CREDENTIALS_JSON
+[OK]      Found: SARVAM_API_KEY
+[OK]      Found: UPSTASH_REDIS_REST_URL
+[OK]      Found: UPSTASH_REDIS_REST_TOKEN
+[OK]      Found: gemini-api-key
+[OK]      Found: RAZORPAY_KEY_ID
+[OK]      Found: RAZORPAY_KEY_SECRET
+[OK]      Found: RAZORPAY_WEBHOOK_SECRET
+[OK]      Found: RESEND_API_KEY
+[OK]      Found: RESET_TOKEN_SECRET
+[OK]      Found: TRANSLATE_CRON_SECRET
+[OK]      Found: INDEXNOW_API_KEY
+[OK]      Found: INDEXNOW_INTERNAL_SECRET
+[OK]      Found: jwt-private-key
+[OK]      Found: jwt-public-key
+[OK]      All required secrets verified.
+
+══ Deploying from source: apps/backend ══
+Building using Dockerfile and deploying container to Cloud Run service [syrabit-backend] in project [blissful-acumen-495019-t6] region [asia-south1]
+✓ Building and deploying... Done.                                                                                                                                                                                  
+  ✓ Validating configuration...                                                                                                                                                                                    
+  ✓ Uploading sources...                                                                                                                                                                                           
+  ✓ Building Container... Logs are available at [ https://console.cloud.google.com/cloud-build/builds;region=asia-south1/b932e02f-a706-4446-93c4-ee7437c6cc4a?project=851687450401 ].                              
+  ✓ Creating Revision...                                                                                                                                                                                           
+  ✓ Routing traffic...                                                                                                                                                                                             
+  ✓ Setting IAM Policy...                                                                                                                                                                                          
+Done.                                                                                                                                                                                                              
+Service [syrabit-backend] revision [syrabit-backend-00225-ngk] has been deployed and is serving 100 percent of traffic.
+Service URL: https://syrabit-backend-851687450401.asia-south1.run.app
+[OK]      Source deploy complete.
+
+══ Re-applying all secrets to Cloud Run service ══
+✓ Deploying... Done.                                                                                                                                                                                               
+  ✓ Creating Revision...                                                                                                                                                                                           
+  ✓ Routing traffic...                                                                                                                                                                                             
+Done.                                                                                                                                                                                                              
+Service [syrabit-backend] revision [syrabit-backend-00226-l7g] has been deployed and is serving 100 percent of traffic.
+Service URL: https://syrabit-backend-851687450401.asia-south1.run.app
+[OK]      All secrets re-applied.
+[INFO]    Optional secrets applied: SENTRY_DSN POSTHOG_API_KEY
+[WARN]    Optional secrets not yet in Secret Manager (skipped): ADMIN_EMAIL ADMIN_PASSWORD CF_PAGES_DEPLOY_HOOK VERTEX_SEARCH_DATASTORE_ID
+
+══ Verifying deployment ══
+[INFO]    Waiting 10s for new revision to serve traffic...
+[WARN]    Health check returned HTTP 000000 — service may still be starting.
+[INFO]    Check manually: curl https://syrabit-backend-851687450401.asia-south1.run.app/health
+[INFO]    Active revision: syrabit-backend-00226-l7g
+
+══════════════════════════════════════════════════
+  Deploy complete — syrabit-backend
+══════════════════════════════════════════════════
+
+  Service URL : https://syrabit-backend-851687450401.asia-south1.run.app
+  Health      : https://syrabit-backend-851687450401.asia-south1.run.app/health
+  Full health : https://api.syrabit.ai/health/full
+  Region      : asia-south1
+  Project     : blissful-acumen-495019-t6
+
+  Required secrets applied : 19
+  Optional secrets applied : 2
+  Optional secrets skipped : 4 (ADMIN_EMAIL ADMIN_PASSWORD CF_PAGES_DEPLOY_HOOK VERTEX_SEARCH_DATASTORE_ID)
+
+founder@instance-20260603-085552:~/syrabit$ ^C
+founder@instance-20260603-085552:~/syrabit$ curl https://syrabit-backend-851687450401.asia-south1.run.app/health
+{"status":"healthy","service":"syrabit-backend","timestamp":"2026-06-06T10:25:09.270486Z"}founder@instance-20260603-085552:~/syrabit$ 
