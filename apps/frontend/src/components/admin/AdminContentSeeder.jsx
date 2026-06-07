@@ -400,14 +400,21 @@ export default function AdminContentSeeder({ adminToken }) {
           )}
 
           {!loadingCh && chapters.length > 0 && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-              {chapters.map(ch => (
-                <ChapterCard
-                  key={ch.id}
-                  chapter={ch}
-                  adminToken={adminToken}
-                  onDone={() => loadChapters(selectedId)}
-                />
+            <div className="flex flex-col gap-3">
+              {chapters.map((ch, idx) => (
+                <div key={ch.id} className="flex items-start gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold mt-1"
+                    style={{ background: '#ede9fe', color: '#7c3aed' }}>
+                    {idx + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <ChapterCard
+                      chapter={ch}
+                      adminToken={adminToken}
+                      onDone={() => loadChapters(selectedId)}
+                    />
+                  </div>
+                </div>
               ))}
             </div>
           )}
