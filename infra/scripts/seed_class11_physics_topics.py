@@ -74,40 +74,82 @@ SECRET_MAP = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 1. SECRET LOADING
+# 1. SECRET LOADING  (uses gcloud CLI — same auth as update-and-test.sh)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def load_secrets() -> dict:
-    """Pull every secret from GCP Secret Manager into a dict."""
-    env = {}
+def _gcloud_secret(gcp_name: str) -> str | None:
+    """Fetch one secret via `gcloud secrets versions access` (uses gcloud token, not ADC)."""
+    import subprocess
     try:
-        from google.cloud import secretmanager
-        client = secretmanager.SecretManagerServiceClient()
-        loaded = 0
+        result = subprocess.run(
+            [
+                "gcloud", "secrets", "versions", "access", "latest",
+                f"--secret={gcp_name}",
+                f"--project={GCP_PROJECT}",
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        log.debug(f"  gcloud stderr for {gcp_name}: {result.stderr.strip()[:120]}")
+        return None
+    except FileNotFoundError:
+        return None   # gcloud not installed
+    except Exception as e:
+        log.debug(f"  gcloud error for {gcp_name}: {e}")
+        return None
+
+
+def load_secrets() -> dict:
+    """
+    Pull every secret from GCP Secret Manager using the gcloud CLI.
+    This avoids the ADC scope issue (ACCESS_TOKEN_SCOPE_INSUFFICIENT) that
+    the Python SDK hits in Cloud Shell — gcloud uses its own auth token.
+    Falls back to environment variables for any secret not found.
+    """
+    import shutil
+    env = {}
+    loaded = skipped = 0
+
+    if not shutil.which("gcloud"):
+        log.warning("gcloud CLI not found — falling back to environment variables only")
+    else:
+        account = ""
+        try:
+            import subprocess
+            r = subprocess.run(
+                ["gcloud", "config", "get-value", "account"],
+                capture_output=True, text=True, timeout=5,
+            )
+            account = r.stdout.strip()
+        except Exception:
+            pass
+        log.info(f"  gcloud account: {account or '(unknown)'}")
+
         for gcp_name, env_name in SECRET_MAP.items():
-            try:
-                name = f"projects/{GCP_PROJECT}/secrets/{gcp_name}/versions/latest"
-                resp = client.access_secret_version(request={"name": name})
-                value = resp.payload.data.decode("utf-8").strip()
+            value = _gcloud_secret(gcp_name)
+            if value:
                 env[env_name] = value
                 os.environ[env_name] = value
                 loaded += 1
                 log.info(f"  ✓ {gcp_name} → {env_name}")
-            except Exception as e:
-                log.warning(f"  ✗ {gcp_name} not found in Secret Manager: {e}")
-                # Fall back to existing env var if set
-                if os.environ.get(env_name):
-                    env[env_name] = os.environ[env_name]
-                    log.info(f"    ↳ using existing env var {env_name}")
-        log.info(f"Secrets loaded: {loaded}/{len(SECRET_MAP)}")
-    except ImportError:
-        log.error("google-cloud-secret-manager not installed. Run: pip install google-cloud-secret-manager")
-        sys.exit(1)
-    except Exception as e:
-        log.error(f"Secret Manager unavailable: {e}. Falling back to environment variables.")
-        for env_name in SECRET_MAP.values():
-            if os.environ.get(env_name):
-                env[env_name] = os.environ[env_name]
+            else:
+                # Fall back to existing env var
+                existing = os.environ.get(env_name, "")
+                if existing:
+                    env[env_name] = existing
+                    skipped += 1
+                    log.info(f"  ~ {gcp_name} not in SM — using env var {env_name}")
+                else:
+                    skipped += 1
+                    log.warning(f"  ✗ {gcp_name} not found (SM or env)")
+
+    # Env-var-only fallback (when gcloud absent)
+    for env_name in SECRET_MAP.values():
+        if env_name not in env and os.environ.get(env_name):
+            env[env_name] = os.environ[env_name]
+
+    log.info(f"Secrets loaded: {loaded} from SM, {skipped} fallback/missing")
     return env
 
 
