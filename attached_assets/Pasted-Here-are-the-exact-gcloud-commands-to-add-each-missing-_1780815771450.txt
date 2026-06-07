@@ -1,0 +1,43 @@
+Here are the exact gcloud commands to add each missing secret. Run them one by one in Cloud Shell, replacing the placeholder values with your real ones:
+
+# 1. GCS Content Bucket name (the bucket Vertex AI indexes from)
+#    Find it: gcloud storage buckets list --project=blissful-acumen-495019-t6
+echo -n "YOUR_BUCKET_NAME" | gcloud secrets create GCS_CONTENT_BUCKET \
+  --replication-policy=automatic --data-file=- --project=blissful-acumen-495019-t6
+# 2. Vertex AI Search Datastore ID
+#    Find it: https://console.cloud.google.com/gen-app-builder/data-stores
+echo -n "YOUR_DATASTORE_ID" | gcloud secrets create VERTEX_SEARCH_DATASTORE_ID \
+  --replication-policy=automatic --data-file=- --project=blissful-acumen-495019-t6
+# 3. Cloudflare Account ID
+#    Find it: Cloudflare dashboard → right sidebar on any zone page
+echo -n "YOUR_CF_ACCOUNT_ID" | gcloud secrets create CF_ACCOUNT_ID \
+  --replication-policy=automatic --data-file=- --project=blissful-acumen-495019-t6
+# 4. Cloudflare KV API Token (needs Workers KV Storage:Edit permission)
+#    Create it: https://dash.cloudflare.com/profile/api-tokens
+echo -n "YOUR_CF_KV_TOKEN" | gcloud secrets create CF_KV_API_TOKEN \
+  --replication-policy=automatic --data-file=- --project=blissful-acumen-495019-t6
+# 5. Cloudflare KV Namespace ID
+#    Find it: Cloudflare dashboard → Workers & Pages → KV → your namespace
+echo -n "YOUR_KV_NAMESPACE_ID" | gcloud secrets create CF_KV_NAMESPACE_ID \
+  --replication-policy=automatic --data-file=- --project=blissful-acumen-495019-t6
+
+Quick way to find the values you don't have:
+
+# GCS bucket — list all buckets in your project
+gcloud storage buckets list --project=blissful-acumen-495019-t6 --format="value(name)"
+# Vertex Search datastore ID — list all datastores
+gcloud alpha discovery-engine data-stores list \
+  --project=blissful-acumen-495019-t6 --location=global 2>/dev/null || \
+  echo "Visit: https://console.cloud.google.com/gen-app-builder/data-stores"
+# Cloudflare — check existing config file in the repo
+grep -r "CLOUDFLARE\|CF_ACCOUNT\|CF_KV\|namespace" apps/backend/app/config.py apps/edge/wrangler.toml 2>/dev/null | head -20
+
+If any secret already exists with a different name and you just want to add a new version:
+
+# Update existing secret (if it was already created)
+echo -n "NEW_VALUE" | gcloud secrets versions add SECRET_NAME \
+  --data-file=- --project=blissful-acumen-495019-t6
+
+Once all 5 are added, re-run:
+
+python3 infra/scripts/seed_class11_physics_topics.py --diagnose

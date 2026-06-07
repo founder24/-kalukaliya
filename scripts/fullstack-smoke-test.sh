@@ -23,10 +23,10 @@ fail() { echo -e "  ${RED}✗${RESET}  $1"; FAIL=$((FAIL+1)); }
 skip() { echo -e "  ${YELLOW}–${RESET}  $1 (skipped)"; SKIP=$((SKIP+1)); }
 header() { echo -e "\n${CYAN}${BOLD}── $1 ──${RESET}"; }
 
-http_status()        { curl -s  -o /dev/null -w "%{http_code}" --max-time 10 "$@"; }
-http_status_follow() { curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "$@"; }
-http_body()   { curl -s --max-time 10 "$@"; }
-http_headers(){ curl -sI --max-time 10 "$@"; }
+http_status()        { curl -s  -o /dev/null -w "%{http_code}" --max-time 15 "$@" || echo "000"; }
+http_status_follow() { curl -sL -o /dev/null -w "%{http_code}" --max-time 15 "$@" || echo "000"; }
+http_body()   { curl -s --max-time 30 "$@" || echo "{}"; }
+http_headers(){ curl -sI --max-time 15 "$@" || echo ""; }
 
 json_field() {
   # json_field <json_string> <python_expr_on_d>
@@ -112,9 +112,38 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 5. Library Bundle (core content test)
+# 5. MongoDB Deep Health (must pass before content tests)
 # ═══════════════════════════════════════════════════════════════════════════
-header "5. Library Bundle"
+header "5. MongoDB / Deep Health"
+
+DEEP_BODY=$(http_body "$BASE_URL/api/v1/health/deep")
+MONGO_STATUS=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('mongodb',{}).get('status','')")
+if [ "$MONGO_STATUS" = "healthy" ]; then
+  MONGO_LATENCY=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('mongodb',{}).get('latency_ms','')")
+  pass "MongoDB healthy (${MONGO_LATENCY}ms)"
+else
+  MONGO_ERR=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('mongodb',{}).get('error','')")
+  fail "MongoDB UNHEALTHY — $MONGO_ERR"
+  echo ""
+  echo -e "  ${RED}CRITICAL: MongoDB is not initialized in production.${RESET}"
+  echo    "  Likely causes:"
+  echo    "    1. MONGODB_URI secret not set in GCP Secret Manager (secret name: MONGODB_URI)"
+  echo    "    2. Atlas cluster IP allowlist not allowing Cloud Run outbound IPs"
+  echo    "    3. Atlas cluster paused / credentials rotated"
+  echo    "  Action: check /health/deep for full status, review Cloud Run logs for init error."
+fi
+
+REDIS_STATUS=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('redis',{}).get('status','')")
+if [ "$REDIS_STATUS" = "healthy" ]; then
+  pass "Redis healthy"
+else
+  fail "Redis unhealthy: $(json_field "$DEEP_BODY" "d.get('checks',{}).get('redis',{}).get('error','')")"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 6. Library Bundle (core content test)
+# ═══════════════════════════════════════════════════════════════════════════
+header "6. Library Bundle"
 
 LIB_STATUS=$(http_status "$BASE_URL/api/v1/content/library-bundle")
 assert_eq "$LIB_STATUS" "200" "GET /api/v1/content/library-bundle → 200"
@@ -136,9 +165,9 @@ FIRST_SUBJECT=$(json_field "$LIB_BODY" "d['subjects'][0]['slug']" 2>/dev/null ||
 FIRST_CLASS=$(json_field   "$LIB_BODY" "d['subjects'][0].get('class_slug','class-9')" 2>/dev/null || echo "class-9")
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 6. Content Endpoints
+# 7. Content Endpoints
 # ═══════════════════════════════════════════════════════════════════════════
-header "6. Content Endpoints"
+header "7. Content Endpoints"
 
 # CMS posts
 CMS_STATUS=$(http_status "$BASE_URL/api/v1/content/cms/posts")
@@ -165,9 +194,9 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 7. Auth Endpoints
+# 8. Auth Endpoints
 # ═══════════════════════════════════════════════════════════════════════════
-header "7. Auth Endpoints"
+header "8. Auth Endpoints"
 
 # Anonymous session ping (POST — analytics endpoint, expect 200/401/422)
 ANON_STATUS=$(http_status -X POST "$BASE_URL/api/v1/analytics/session-ping" \
@@ -189,9 +218,9 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 8. Security Headers
+# 9. Security Headers
 # ═══════════════════════════════════════════════════════════════════════════
-header "8. Security Headers"
+header "9. Security Headers"
 
 ALL_HEADERS=$(http_headers "$BASE_URL/api/v1/health")
 
@@ -201,9 +230,9 @@ assert_contains "$ALL_HEADERS" "strict-transport-security" "strict-transport-sec
 assert_contains "$ALL_HEADERS" "x-robots-tag"           "x-robots-tag (API not indexed)"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 9. CORS
+# 10. CORS
 # ═══════════════════════════════════════════════════════════════════════════
-header "9. CORS"
+header "10. CORS"
 
 CORS_HEADERS=$(http_headers -X OPTIONS "$BASE_URL/api/v1/content/library-bundle" \
   -H "Origin: https://syrabit.ai" \
@@ -213,9 +242,9 @@ assert_contains "$CORS_HEADERS" "access-control-allow-origin" "CORS allow-origin
 assert_contains "$CORS_HEADERS" "syrabit.ai"                  "CORS allows syrabit.ai origin"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 10. Frontend
+# 11. Frontend
 # ═══════════════════════════════════════════════════════════════════════════
-header "10. Frontend (${FRONTEND_URL})"
+header "11. Frontend (${FRONTEND_URL})"
 
 # Follow redirects: syrabit.ai → 301 → /library/ → 200
 FRONT_STATUS=$(http_status_follow "$FRONTEND_URL")
@@ -238,9 +267,9 @@ SAWORKER_STATUS=$(http_status "$FRONTEND_URL/api/v1/health")
 assert_eq "$SAWORKER_STATUS" "200" "syrabit.ai/api/v1/health (Worker route on main domain)"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 11. Edge Health Endpoint
+# 12. Edge Worker Health
 # ═══════════════════════════════════════════════════════════════════════════
-header "11. Edge Worker Health"
+header "12. Edge Worker Health"
 
 EDGE_STATUS=$(http_status "$BASE_URL/health")
 assert_eq "$EDGE_STATUS" "200" "GET /health (Worker edge health)"

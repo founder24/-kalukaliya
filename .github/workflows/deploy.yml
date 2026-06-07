@@ -114,21 +114,21 @@ jobs:
           echo "service_url=${URL}" >> "$GITHUB_OUTPUT"
           echo "Cloud Run URL: ${URL}"
 
-      - name: Wait for healthy revision (up to 2 min)
+      - name: Wait for healthy revision (up to 3 min)
         run: |
           SERVICE_URL="${{ steps.get-url.outputs.service_url }}"
           echo "Polling ${SERVICE_URL}/health ..."
-          for i in $(seq 1 24); do
+          for i in $(seq 1 36); do
             HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
               "${SERVICE_URL}/health" --max-time 8 2>/dev/null || echo "000")
             if [[ "$HTTP" == "200" ]]; then
               echo "✔ Backend healthy after $((i * 5))s (HTTP 200)"
               exit 0
             fi
-            echo "  Attempt ${i}/24 — HTTP ${HTTP}, retrying in 5s..."
+            echo "  Attempt ${i}/36 — HTTP ${HTTP}, retrying in 5s..."
             sleep 5
           done
-          echo "✘ Backend failed health check after 120s"
+          echo "✘ Backend failed health check after 180s"
           exit 1
 
   # =============================================================================

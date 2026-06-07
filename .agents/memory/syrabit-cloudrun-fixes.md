@@ -30,6 +30,21 @@ This caused IndexKeySpecsConflict (code 86) on every startup, crashing init_bean
 Manage all indexes exclusively in `create_indexes()` in mongo.py.
 Match existing Atlas index options exactly (e.g. `sparse=True` for email, non-sparse for razorpay).
 
+## Beanie TTL conflict: plain model index vs. TTL index is a two-deploy time-bomb
+
+**Pattern:** `ChatFeedback.Settings.indexes` had `[("timestamp", 1)]` (plain, no TTL).
+`create_indexes()` also called `_ensure_ttl_index(db.chat_feedback, [("timestamp", ASCENDING)], 2592000)`.
+
+**Sequence:**
+1. Deploy 1: `init_beanie()` creates plain `timestamp_1` → `_ensure_ttl_index` sees code 85 (plain conflicts with requested TTL) → drops plain, creates TTL ✓
+2. Deploy 2+: `init_beanie()` tries to create plain `timestamp_1` → **code 85** (TTL already exists) → exception escapes `init_beanie()` → `_client = None` → MongoDB not initialized → every collection query throws RuntimeError → library-bundle returns `{boards:[]}` silently.
+
+**Why it was invisible:** The old `/health` endpoint returned 200 regardless (no `_client` check). The exception handler in library-bundle caught the RuntimeError and returned `{"boards":[]}` without logging. Basic health looked green, deep health revealed the truth.
+
+**Fix:** Remove any plain `[("timestamp", 1)]` from `ChatFeedback.Settings.indexes`. The rule: if `create_indexes()` manages a TTL index on a field, that field must NOT appear in the Beanie model's `Settings.indexes` at all — not even as a plain index. Dual ownership always causes a second-deploy conflict.
+
+**How to catch:** `/api/v1/health` now returns `503 + mongodb_initialized:false` when `_client` is None. `/api/v1/health/deep` shows the exact error. The smoke test section 5 checks this.
+
 ## AsyncMongoClient.close() is async in pymongo 4.x
 
 Use `await _client.close()` not `_client.close()` — the latter creates an unawaited coroutine.

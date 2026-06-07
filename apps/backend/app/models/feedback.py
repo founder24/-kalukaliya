@@ -32,8 +32,9 @@ class ChatFeedback(Document):
             [("lang", 1), ("model_provider", 1), ("timestamp", 1)],
             # User feedback history
             [("user_id", 1), ("timestamp", -1)],
-            # TTL: auto-delete after 30 days (MongoDB handles this)
-            # Note: TTL index must be created via mongosh script
-            # as Beanie doesn't support expireAfterSeconds directly
-            [("timestamp", 1)],
+            # NOTE: The TTL index on (timestamp, 30d) is managed exclusively by
+            # _ensure_ttl_index() in mongo.py create_indexes(). Do NOT add a plain
+            # [("timestamp", 1)] entry here — Beanie would create it as a non-TTL
+            # index, which conflicts (IndexOptionsConflict code 85) with the TTL
+            # version on every restart after the first deployment.
         ]

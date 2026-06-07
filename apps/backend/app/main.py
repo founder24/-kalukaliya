@@ -68,10 +68,12 @@ async def lifespan(app: FastAPI):
         # as running but degraded. This prevents a missing MONGODB_URI env var from
         # causing Cloud Run to report 0 healthy instances (and serve Google's 404 page).
         # Operators can detect the degraded state via /health/deep or Sentry alerts.
-        logger.critical(
+        err_msg = (
             f"MongoDB initialization failed ({settings.APP_ENV}): {e} — "
-            "service is DEGRADED. Set MONGODB_URI env var to restore full functionality."
+            "service is DEGRADED. Check Atlas connectivity/IP allowlist and MONGODB_URI secret."
         )
+        logger.critical(err_msg)
+        settings.startup_errors.append(err_msg)
 
     try:
         await init_redis()

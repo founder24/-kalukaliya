@@ -155,13 +155,29 @@ async def basic_health_check():
         if not getattr(settings, "JWT_PUBLIC_KEY", None):
             warnings.append("JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set")
 
-    if settings.startup_errors:
+    # Check MongoDB initialization state (fast — no I/O, just reads module-level flag)
+    try:
+        from app.db.mongo import get_mongo_client
+        get_mongo_client()
+        mongodb_ok = True
+    except RuntimeError:
+        mongodb_ok = False
+
+    if settings.startup_errors or not mongodb_ok:
+        errors = list(settings.startup_errors)
+        if not mongodb_ok and not any("MongoDB" in e for e in errors):
+            errors.append(
+                "MongoDB not initialized — check Atlas connectivity/IP allowlist and MONGODB_URI secret. "
+                "Hit /api/v1/health/deep for full dependency status."
+            )
         return JSONResponse(
             status_code=503,
             content={
                 "status": "degraded",
                 "service": "syrabit-backend",
-                "config_error_count": len(settings.startup_errors),
+                "mongodb_initialized": mongodb_ok,
+                "error_count": len(errors),
+                "errors": errors,
                 "warnings": warnings,
             },
         )
@@ -169,6 +185,7 @@ async def basic_health_check():
     response = {
         "status": "healthy",
         "service": "syrabit-backend",
+        "mongodb_initialized": True,
         "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
     }
     if warnings:

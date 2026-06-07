@@ -130,6 +130,7 @@ export const AuthProvider = ({ children }) => {
       // Fetch user profile immediately
       const profileRes = await axios.get(`${API_BASE}/users/me`, {
         headers: { Authorization: `Bearer ${access_token}` },
+        withCredentials: true,
       });
       const userData = profileRes.data;
       setUser(userData);
@@ -159,6 +160,7 @@ export const AuthProvider = ({ children }) => {
       // Fetch user profile immediately
       const profileRes = await axios.get(`${API_BASE}/users/me`, {
         headers: { Authorization: `Bearer ${access_token}` },
+        withCredentials: true,
       });
       const userData = profileRes.data;
       setUser(userData);

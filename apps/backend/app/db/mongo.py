@@ -31,7 +31,12 @@ async def init_mongo() -> None:
     global _client
 
     if not settings.MONGODB_URI:
-        logger.warning("MONGODB_URI not set — MongoDB disabled")
+        if settings.APP_ENV in ("production", "staging"):
+            msg = "CRITICAL: MONGODB_URI is not configured in this environment. Check GCP Secret Manager secret 'MONGODB_URI'."
+            logger.critical(msg)
+            settings.startup_errors.append(msg)
+        else:
+            logger.warning("MONGODB_URI not set — MongoDB disabled")
         return
 
     import asyncio
@@ -105,25 +110,57 @@ async def init_mongo() -> None:
             raise
 
 
+async def _ensure_ttl_index(collection, key_spec: list, expire_after_seconds: int) -> None:
+    """Create a TTL index, auto-healing any conflicting non-TTL index.
+
+    MongoDB error code 85 (IndexOptionsConflict) is raised when an index with
+    the same key spec already exists WITHOUT expireAfterSeconds. This commonly
+    happens when an Atlas cluster was bootstrapped before TTL was added to the
+    code. We drop the conflicting index and recreate it so the TTL is actually
+    applied rather than silently skipped.
+    """
+    try:
+        await collection.create_index(key_spec, expireAfterSeconds=expire_after_seconds)
+    except Exception as e:
+        if getattr(e, "code", None) == 85 or "IndexOptionsConflict" in str(e):
+            index_name = "_".join(f"{field}_{direction}" for field, direction in key_spec)
+            coll_name = collection.name
+            logger.warning(
+                f"Dropping conflicting non-TTL index '{index_name}' on "
+                f"'{coll_name}' to apply {expire_after_seconds}s TTL retention"
+            )
+            await collection.drop_index(index_name)
+            await collection.create_index(
+                key_spec, expireAfterSeconds=expire_after_seconds
+            )
+            logger.info(
+                f"TTL index '{index_name}' recreated on '{coll_name}' "
+                f"({expire_after_seconds // 86400}d retention)"
+            )
+        else:
+            raise
+
+
 async def create_indexes() -> None:
-    """Create necessary database indexes"""
+    """Create necessary database indexes.
+
+    Each index group is wrapped in its own try/except so a conflict on one
+    collection never prevents indexes on subsequent collections from being
+    created. TTL indexes use _ensure_ttl_index() which auto-heals conflicts.
+    """
     db = _client[settings.MONGODB_DB_NAME] if _client else None
 
     if db is None:
         return
 
-    # Users collection indexes
-    # sparse=True means users without an email field are excluded from the index,
-    # which allows multiple anonymous users (email=None) to coexist.
-    # This must match the index already on Atlas: unique=True, sparse=True.
+    # ── Users ────────────────────────────────────────────────────────────────
+    # sparse=True: users without an email (anonymous) are excluded from the
+    # unique index, allowing multiple email=None docs to coexist.
     try:
         await db.users.create_index(
             [("email", ASCENDING)], unique=True, sparse=True
         )
     except Exception as e:
-        # IndexKeySpecsConflict (code 86) means an index with the same name
-        # but different options already exists — treat as non-fatal since
-        # the existing index on Atlas is already correct.
         err_str = str(e)
         if "IndexKeySpecsConflict" in err_str or "code: 86" in err_str or getattr(e, "code", None) == 86:
             logger.info("Email unique+sparse index already exists on Atlas with compatible spec — skipping")
@@ -132,56 +169,79 @@ async def create_indexes() -> None:
             raise
         else:
             logger.warning(f"Email unique index creation failed (non-prod): {e}")
-    # Not sparse — matches the existing Atlas index (non-sparse).
-    await db.users.create_index([("razorpay_subscription_id", ASCENDING)])
-    await db.users.create_index([("profile.preferences.language", ASCENDING)])
-    await db.users.create_index([("created_at", DESCENDING)])
 
-    # Chats collection indexes
-    await db.chats.create_index([("user_id", ASCENDING), ("updated_at", DESCENDING)])
-    await db.chats.create_index([("session_id", ASCENDING)])
-    await db.chats.create_index([("updated_at", DESCENDING)])
-    # TTL index: auto-delete chats older than 90 days
-    await db.chats.create_index(
-        [("created_at", ASCENDING)], expireAfterSeconds=90 * 24 * 60 * 60
+    try:
+        await db.users.create_index([("razorpay_subscription_id", ASCENDING)])
+        await db.users.create_index([("preferred_language", ASCENDING)])
+        await db.users.create_index([("created_at", DESCENDING)])
+    except Exception as e:
+        logger.warning(f"Users secondary index creation failed (non-fatal): {e}")
+
+    # ── Chats ─────────────────────────────────────────────────────────────────
+    try:
+        await db.chats.create_index([("user_id", ASCENDING), ("updated_at", DESCENDING)])
+        await db.chats.create_index([("session_id", ASCENDING)])
+        await db.chats.create_index([("updated_at", DESCENDING)])
+    except Exception as e:
+        logger.warning(f"Chats query index creation failed (non-fatal): {e}")
+
+    await _ensure_ttl_index(
+        db.chats, [("created_at", ASCENDING)], 90 * 24 * 60 * 60
     )
 
-    # Dead letters collection indexes
-    await db.dead_letters.create_index(
-        [("timestamp", DESCENDING)], expireAfterSeconds=30 * 24 * 60 * 60
-    )  # 30 day TTL
-    await db.dead_letters.create_index(
-        [("user_id", ASCENDING), ("timestamp", DESCENDING)]
+    # ── Dead letters ──────────────────────────────────────────────────────────
+    await _ensure_ttl_index(
+        db.dead_letters, [("timestamp", DESCENDING)], 30 * 24 * 60 * 60
     )
-    await db.dead_letters.create_index(
-        [("status", ASCENDING), ("timestamp", DESCENDING)]
+    try:
+        await db.dead_letters.create_index(
+            [("user_id", ASCENDING), ("timestamp", DESCENDING)]
+        )
+        await db.dead_letters.create_index(
+            [("status", ASCENDING), ("timestamp", DESCENDING)]
+        )
+    except Exception as e:
+        logger.warning(f"Dead-letters query index creation failed (non-fatal): {e}")
+
+    # ── Chat feedback ─────────────────────────────────────────────────────────
+    await _ensure_ttl_index(
+        db.chat_feedback, [("timestamp", ASCENDING)], 30 * 24 * 60 * 60
     )
 
-    # Chat feedback TTL index (HF-038)
-    await db.chat_feedback.create_index(
-        [("timestamp", 1)], expireAfterSeconds=30 * 24 * 60 * 60
+    # ── Audit logs ────────────────────────────────────────────────────────────
+    await _ensure_ttl_index(
+        db.audit_logs, [("timestamp", ASCENDING)], 180 * 24 * 60 * 60
     )
 
-    # Content hierarchy indexes
-    await db.boards.create_index([("slug", ASCENDING)], unique=True)
-    await db.classes.create_index([("board_id", ASCENDING)])
-    await db.streams.create_index([("class_id", ASCENDING)])
-    await db.subjects.create_index([("stream_id", ASCENDING)])
-    await db.chapters.create_index([("subject_id", ASCENDING), ("status", ASCENDING)])
+    # ── Content hierarchy ─────────────────────────────────────────────────────
+    try:
+        await db.boards.create_index([("slug", ASCENDING)], unique=True)
+        await db.classes.create_index([("board_id", ASCENDING)])
+        await db.streams.create_index([("class_id", ASCENDING)])
+        await db.subjects.create_index([("stream_id", ASCENDING)])
+        await db.chapters.create_index([("subject_id", ASCENDING), ("status", ASCENDING)])
+    except Exception as e:
+        logger.warning(f"Content hierarchy index creation failed (non-fatal): {e}")
 
-    # Question papers indexes
-    await db.question_papers.create_index(
-        [
-            ("board", ASCENDING),
-            ("class_level", ASCENDING),
-            ("subject", ASCENDING),
-            ("year", ASCENDING),
-        ]
-    )
-    await db.question_papers.create_index([("status", ASCENDING)])
+    # ── Question papers ───────────────────────────────────────────────────────
+    try:
+        await db.question_papers.create_index(
+            [
+                ("board", ASCENDING),
+                ("class_level", ASCENDING),
+                ("subject", ASCENDING),
+                ("year", ASCENDING),
+            ]
+        )
+        await db.question_papers.create_index([("status", ASCENDING)])
+    except Exception as e:
+        logger.warning(f"Question-papers index creation failed (non-fatal): {e}")
 
-    # Topic embeddings index for efficient lookup by topic_id
-    await db.topic_embeddings.create_index([("topic_id", ASCENDING)])
+    # ── Topic embeddings ──────────────────────────────────────────────────────
+    try:
+        await db.topic_embeddings.create_index([("topic_id", ASCENDING)])
+    except Exception as e:
+        logger.warning(f"Topic-embeddings index creation failed (non-fatal): {e}")
 
     logger.info("MongoDB indexes created/verified")
 
