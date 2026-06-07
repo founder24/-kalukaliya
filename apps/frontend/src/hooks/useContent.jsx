@@ -214,6 +214,7 @@ export function prefetchSubjectData(queryClient, board, classSlug, subjectSlug) 
 const fetchCmsLibrary = () =>
   apiClient().get('/content/cms-library').then((r) => {
     const d = r.data;
+    if (d && Array.isArray(d.items)) return d.items;
     return Array.isArray(d) ? d : [];
   });
 

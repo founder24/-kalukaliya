@@ -1,6 +1,6 @@
 ---
 name: Syrabit chat+auth pipeline bugs and audit fixes
-description: Fixed bugs (analytics 404s, conversation/session mismatch, logout crash) + Layer 0–6 audit fixes
+description: Fixed bugs (analytics 404s, conversation/session mismatch, logout crash) + Layer 0–6 audit fixes + frontend audit fixes
 ---
 
 ## Fixed bugs (prior sessions)
@@ -64,3 +64,23 @@ description: Fixed bugs (analytics 404s, conversation/session mismatch, logout c
 **Fix (code):** Added guard in `verifyJWT()` — if neither `jwtSecret` nor `jwtPublicKey` is set, return the pass-through error string so the backend handles auth. See `apps/edge/src/middleware/jwt.ts`.
 
 **Fix (infra — DONE 2026-06-07):** CI deploy-edge job in `.github/workflows/deploy.yml` now authenticates to GCP (using `secrets.GCP_SA_KEY`) then pipes each GCP secret value into `wrangler secret put --env production` via stdin. Runs after every edge deploy — JWT_SECRET and EDGE_SHARED_SECRET stay in sync permanently. The first successful run was commit 371c06ec152f.
+
+## Frontend audit fixes (2026-06-07 session)
+
+### Bug: Missing /content/chapters/{subject_id} endpoint (SubjectLandingPage broken)
+- public_content.py had a comment "use GET /content/chapters/{subject_id}" but endpoint never existed → 404
+- Added @router.get("/chapters/{subject_id}") in public_content.py
+- Returns chapters sorted by chapter_number; uses PydanticObjectId(subject_id) for Beanie query
+- Chapter.subject_id is FlexId = Union[PydanticObjectId, str] — passing PydanticObjectId works
+- Verified: 14 chapters for physics subject_id 6a19e0d74d8e6ddb2deb7d04
+
+### Bug: CMS library format mismatch (useCmsLibrary silently returned [])
+- Backend /content/cms-library returns {"items": [...], "total": N} (pagination object)
+- Frontend fetchCmsLibrary used Array.isArray(d) → returned [] for the object, dropping all posts
+- Fixed in useContent.jsx: check d?.items array first, fall back to legacy array shape
+
+## Remaining known 404s (silent failures, no fix needed)
+- /edu/allowlist → 404: BrowserPage catches with .catch(()=>{}) — browser still works
+- /seo/topics/{board}/{class}/{subject} → 404: only in prefetchSubjectData prefetch, not rendered
+- Chapter page shows "Failed to load chapter" in screenshot tool — screenshot tool bot-protection
+  artifact; chapter-by-slug returns HTTP 200 correctly from real browsers (curl confirmed)

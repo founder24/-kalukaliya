@@ -494,6 +494,42 @@ async def resolve_subject(
     }
 
 
+@router.get("/chapters/{subject_id}")
+async def get_chapters_by_subject(
+    subject_id: str,
+    response: Response,
+):
+    """
+    Return the list of chapters for a given subject (by MongoDB ObjectId string).
+
+    Used by SubjectLandingPage and chapter prefetch hooks.
+    No authentication required — subject pages are publicly accessible.
+    """
+    response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
+    try:
+        subject_oid = PydanticObjectId(subject_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid subject_id")
+
+    chapters = (
+        await Chapter.find({"subject_id": subject_oid})
+        .sort([("chapter_number", 1)])
+        .to_list()
+    )
+    return [
+        {
+            "chapter_id": str(ch.id),
+            "title": ch.title,
+            "title_as": ch.title_as,
+            "slug": ch.slug or _slugify(ch.title),
+            "chapter_number": ch.chapter_number,
+            "notes_generated": ch.notes_generated,
+            "has_assamese": bool(ch.content_as),
+        }
+        for ch in chapters
+    ]
+
+
 @router.get("/chapter-by-slug/{board}/{class_slug}/{subject_slug}/{chapter_slug}")
 async def get_chapter_by_slug(
     board: str,
