@@ -1,4 +1,4 @@
-# Syrabit AI - Educational Assistant for Assamese Students
+# Syrabit AI — Educational Browser for Assam Board Students
 
 **Version**: 3.0 | **Classification**: Production Ready | **Target Scale**: 100k DAU
 
@@ -62,7 +62,7 @@ Syrabit uses a **9-Pillar Hybrid Architecture**:
 
 - **Hybrid RAG**: +35% quality gain over vector-only search
 - **Sub-2s TTFB**: Streaming responses with min-instances=1
-- **Multi-language**: Automatic Assamese/English detection
+- **Multi-language**: Automatic Assamese/English detection, built for SEBA/AHSEC/CBSE boards
 - **Rate Limiting**: Token bucket algorithm via Upstash
 - **Bot Protection**: Cloudflare Turnstile integration
 - **Payment Ready**: Razorpay subscription management
@@ -172,8 +172,24 @@ See `.env.shared` for the complete list with descriptions. Never commit actual s
 
 ### Frontend (Cloudflare Pages)
 
-- Deployed via Cloudflare Pages
-- Production URL: `https://syrabit.ai`
+Syrabit's frontend is hosted on **Cloudflare Pages**, serving students directly from Cloudflare's global edge network — zero cold starts, instant loads worldwide.
+
+| Detail | Value |
+|--------|-------|
+| Production URL | `https://syrabit.ai` |
+| Deploy trigger | Push to `main` → GitHub Actions → `CF_PAGES_DEPLOY_HOOK` |
+| Build command | `pnpm --filter frontend build` |
+| Output dir | `apps/frontend/dist` |
+| Edge caching | Cloudflare global CDN (200+ PoPs) |
+| Custom domain | `syrabit.ai` + `www.syrabit.ai` via Cloudflare DNS |
+
+Static assets (JS, CSS, images) are cached at the edge. API calls from the browser go to `api.syrabit.ai` (Cloudflare Worker), which proxies to Cloud Run — the frontend never talks to Cloud Run directly.
+
+**Manual deploy:**
+```bash
+# Trigger a Pages deploy via webhook
+curl -X POST "$CF_PAGES_DEPLOY_HOOK"
+```
 
 ### Edge (Cloudflare Workers)
 
@@ -256,6 +272,6 @@ This is a private repository. Contact the founding team for access.
 
 ---
 
-**Built for Assamese students**
+**Built for Assam Board students — SEBA, AHSEC, CBSE**
 
 *For detailed architecture, see [docs/architecture.md](docs/architecture.md)*
