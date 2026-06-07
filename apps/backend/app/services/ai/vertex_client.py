@@ -18,6 +18,22 @@ logger = logging.getLogger(__name__)
 GENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
+def _thinking_config(model: str) -> dict:
+    """Return thinkingConfig that disables the thinking/reasoning phase.
+
+    Gemini 2.5 Flash runs a mandatory internal reasoning pass before emitting
+    the first output token, adding ~6-8 s of TTFB.  Setting thinkingBudget=0
+    disables it entirely and brings TTFB in line with 2.0 Flash (~0.5-1.5 s).
+
+    For Gemini 2.0 Flash and earlier the key is silently ignored by the API,
+    so it is safe to include unconditionally.  We still gate on "2.5" to avoid
+    any future API stricter validation on unsupported models.
+    """
+    if "2.5" in model:
+        return {"thinkingConfig": {"thinkingBudget": 0}}
+    return {}
+
+
 class VertexAIClient:
     """Vertex AI / Generative Language API Gemini Client for English content.
 
@@ -127,6 +143,7 @@ class VertexAIClient:
             "generationConfig": {
                 "temperature": 0.3,
                 "maxOutputTokens": 2048,
+                **_thinking_config(self.model),
             },
         }
 
@@ -156,6 +173,7 @@ class VertexAIClient:
                 "generationConfig": {
                     "temperature": 0.3,
                     "maxOutputTokens": 2048,
+                    **_thinking_config(self.model),
                 },
             },
         )
@@ -373,6 +391,7 @@ class VertexAIClient:
             "generationConfig": {
                 "temperature": 0.3,
                 "maxOutputTokens": 2048,
+                **_thinking_config(self.model),
             },
         }
 
@@ -427,6 +446,7 @@ class VertexAIClient:
             "generationConfig": {
                 "temperature": 0.3,
                 "maxOutputTokens": 2048,
+                **_thinking_config(self.model),
             },
         }
 
