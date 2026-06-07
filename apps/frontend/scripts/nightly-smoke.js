@@ -622,6 +622,77 @@ async function main() {
     }
   }
 
+  // ── Phase 6e: Live CDN image transform probe (no token required) ──────
+  // Fetches a known image through /cdn-cgi/image/ and verifies the
+  // `cf-resized: internal=ok/...` header is present — the same signal the
+  // frontend probeImageResizer() uses to auto-activate CDN transforms.
+  // A missing header means Image Resizing is inactive despite the zone
+  // setting reporting "on" (plan add-on may have lapsed or been disabled
+  // from the dashboard).
+  //
+  // Also measures the mobile byte savings to catch regressions where
+  // images are being passed through without resizing.
+  //
+  // Baseline (2026-06-07, opengraph.jpg 39.9 KB):
+  //   w=320 → 4.2 KB (89.4% saving)
+  //   w=640 → 12.3 KB (69.2% saving)
+  console.log('\nPhase 6e — Live CDN image transform probe:');
+  {
+    const SITE          = 'https://syrabit.ai';
+    const testImageUrl  = `${SITE}/opengraph.jpg`;
+    const cdnTestUrl    = `${SITE}/cdn-cgi/image/width=320,quality=85,format=auto,fit=cover/${testImageUrl}`;
+    const MOBILE_MIN_SAVING_PCT = 70;
+
+    try {
+      // Fetch original for baseline
+      const [origRes, cdnRes] = await Promise.all([
+        fetch(testImageUrl,  { signal: AbortSignal.timeout(15000) }),
+        fetch(cdnTestUrl,    { signal: AbortSignal.timeout(15000) }),
+      ]);
+
+      if (!origRes.ok || !cdnRes.ok) {
+        warn('CDN image transform probe',
+          `fetch failed — orig=${origRes.status} cdn=${cdnRes.status}`);
+      } else {
+        const [origBuf, cdnBuf] = await Promise.all([origRes.arrayBuffer(), cdnRes.arrayBuffer()]);
+        const origSize    = origBuf.byteLength;
+        const cdnSize     = cdnBuf.byteLength;
+        const cfResized   = cdnRes.headers.get('cf-resized') || '';
+        const isActive    = cfResized.startsWith('internal=ok') || cfResized.startsWith('internal=ram');
+        const savedPct    = ((origSize - cdnSize) / origSize * 100).toFixed(1);
+        const savingPass  = parseFloat(savedPct) >= MOBILE_MIN_SAVING_PCT;
+
+        if (!isActive) {
+          failures.push(
+            'CDN image transform probe: cf-resized header absent — ' +
+            'Image Resizing may be inactive despite zone setting reporting "on". ' +
+            'Check: dash.cloudflare.com → Speed → Optimization → Image Resizing.',
+          );
+          console.log(
+            '  ✗  CDN transform: cf-resized header absent — Image Resizing not active on edge',
+          );
+        } else if (!savingPass) {
+          failures.push(
+            `CDN image transform probe: only ${savedPct}% saving at w=320 ` +
+            `(need ≥${MOBILE_MIN_SAVING_PCT}%) — images may not be resizing correctly`,
+          );
+          console.log(
+            `  ✗  CDN transform: ${savedPct}% saving at w=320 ` +
+            `(need ≥${MOBILE_MIN_SAVING_PCT}%)  cf-resized: ${cfResized.slice(0, 40)}`,
+          );
+        } else {
+          console.log(
+            `  ✓  CDN transform active: w=320 ${cdnSize.toLocaleString()} B ` +
+            `(-${savedPct}% from ${origSize.toLocaleString()} B)  ` +
+            `cf-resized: ${cfResized.split(' ').slice(0, 3).join(' ')}`,
+          );
+        }
+      }
+    } catch (e) {
+      warn('CDN image transform probe', `network error: ${e.message}`);
+    }
+  }
+
   // ── Task #87: Cloudflare token scope verification ────────────────────
   // Ports verify_cf_tokens.sh into the nightly smoke pipeline so permission
   // regressions (e.g. a rotated token that lost the Load Balancer:Read scope)

@@ -1,9 +1,8 @@
-// Bumped to v15 (2026-04-24) to drop the 13-line PropellerAds-disabled
-// header block that shipped dead bytes to every device on every SW update.
-// The PropellerAds push integration was removed 2026-04-19; this is the
-// final sweep of associated commentary. First-party Web Push handlers
-// (`push`, `notificationclick`) below are unaffected.
-const CACHE_VERSION = '16';
+// v16 (2026-04-24): dropped PropellerAds header block.
+// v17 (2026-06-07): added library-bundle to CACHED_API_PATTERNS and precacheApiData
+//   so the 130ms+ round-trip for boards/classes/subjects meta on every page load
+//   is served from the SW API cache on repeat visits (stale-while-revalidate, 5min TTL).
+const CACHE_VERSION = '17';
 const STATIC_CACHE = 'syrabit-static-v' + CACHE_VERSION;
 const RUNTIME_CACHE = 'syrabit-runtime-v' + CACHE_VERSION;
 const API_CACHE = 'syrabit-api-v' + CACHE_VERSION;
@@ -14,6 +13,10 @@ const PRECACHE_URLS = [
 ];
 
 const CACHED_API_PATTERNS = [
+  // library-bundle is fetched on every page load by useBoards/useClasses/useStreams/useSubjects.
+  // Caching with stale-while-revalidate eliminates the 130ms+ round-trip on repeat visits.
+  // Covers both the slim variant (?slim=1) and the full bundle (?boot=...).
+  /^\/api\/content\/library-bundle/,
   /^\/api\/content\/boards$/,
   /^\/api\/content\/classes/,
   /^\/api\/content\/streams/,
@@ -352,6 +355,10 @@ self.addEventListener('message', (event) => {
 
 async function precacheApiData() {
   const apiUrls = [
+    // library-bundle?slim=1 is the single fetch that backs useBoards, useClasses,
+    // useStreams and useSubjects on every page — prime it first so all four hooks
+    // hit the cache on mount rather than racing to the network.
+    '/api/content/library-bundle?slim=1',
     '/api/content/boards',
     '/api/content/subjects',
   ];
