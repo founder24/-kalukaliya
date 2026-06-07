@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import {
   PenTool, FileText, ArrowRight,
-  Loader2, Globe, Languages,
+  Loader2, Globe, Languages, Sprout,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
@@ -13,18 +13,21 @@ const AdminContentEditor = lazy(() => import('./AdminContentEditor'));
 const AdminCmsDocEditor  = lazy(() => import('./AdminCmsDocEditor'));
 const BlogPublishWizard  = lazy(() => import('./BlogPublishWizard'));
 const AssameseBackfillPanel = lazy(() => import('./AssameseBackfillPanel'));
+const AdminContentSeeder = lazy(() => import('./AdminContentSeeder'));
 
 
 const API = API_BASE;
 
 const TABS = [
   { id: 'editor',      label: 'Content Editor',  icon: PenTool,     color: 'violet',  desc: 'Write & edit chapter-level markdown content' },
+  { id: 'seeder',      label: 'Seeder',          icon: Sprout,      color: 'rose',    desc: 'Seed topics & generate notes for first 4 chapters' },
   { id: 'cms',         label: 'CMS / Docs',      icon: FileText,    color: 'emerald', desc: 'Manage published pages, SEO docs & blog posts' },
   { id: 'blog',        label: 'Blog Publisher',  icon: Globe,       color: 'sky',     desc: 'SEO & GEO-rich 5-step blog publish wizard' },
   { id: 'translation', label: 'Assamese',        icon: Languages,   color: 'amber',   desc: 'Bulk translate English chapters to Assamese via Sarvam AI' },
 ];
 
 const FLOW = [
+  { label: 'Seeder',        sub: 'Seed topics',        tab: 'seeder',      arrow: true  },
   { label: 'Editor',        sub: 'Write content',      tab: 'editor',      arrow: true  },
   { label: 'CMS / Docs',   sub: 'Manage docs',        tab: 'cms',         arrow: true  },
   { label: 'Blog Publisher', sub: 'SEO & publish',    tab: 'blog',        arrow: true  },
@@ -63,7 +66,7 @@ function loadPersistedCtx() {
   } catch { return EMPTY_CTX; }
 }
 
-const INTERNAL_TABS = new Set(['editor', 'cms', 'blog', 'translation']);
+const INTERNAL_TABS = new Set(['editor', 'seeder', 'cms', 'blog', 'translation']);
 
 export default function AdminContentHub({ adminToken, onNavigate: topNavigate, navContext }) {
   const [activeTab, setActiveTab] = useState(navContext?.initialTab || 'editor');
@@ -214,6 +217,12 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
                   onHubContext={setHubContext}
                   onHierarchyChange={reloadHierarchy}
                 />
+              </div>
+            )}
+
+            {activeTab === 'seeder' && (
+              <div className="h-full overflow-y-auto">
+                <AdminContentSeeder adminToken={adminToken} />
               </div>
             )}
 
