@@ -487,7 +487,24 @@ export default function ChatPage() {
           setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
           return;
         }
-        throw new Error(errData.detail || 'Stream failed');
+        // CF Worker infrastructure error (cold-start or Cloud Run 502 converted
+        // to 503). These use {"error":"...","status":...} without a `detail` field.
+        // Show a user-friendly message and auto-retry once after 5 s.
+        if (response.status >= 500 && !errData.detail) {
+          const infraMsg = 'Server temporarily unavailable — retrying in a moment…';
+          toast.error(infraMsg, { duration: 5000 });
+          setMessages((prev) => prev.map((m) =>
+            m.id === aiMsgId ? { ...m, content: '', isAiUnavailable: true, retryText: text, streaming: false } : m
+          ));
+          if (autoRetryTimerRef.current) clearTimeout(autoRetryTimerRef.current);
+          autoRetryTimerRef.current = setTimeout(() => {
+            autoRetryTimerRef.current = null;
+            setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
+            sendMsgRef.current?.(text);
+          }, 5000);
+          return;
+        }
+        throw new Error(errData.detail || errData.error || 'Stream failed');
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();

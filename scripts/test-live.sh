@@ -459,6 +459,7 @@ if [[ -n "$USER_TOKEN" ]]; then
   if check_ai_chat "POST /api/v1/chat/ (EN, auth) → 200" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
+      -H "Origin: https://syrabit.ai" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"What is photosynthesis? Answer in 2 sentences.\",\"lang\":\"en\",\"session_id\":\"${CHAT_SID_EN}\"}"; then
     if [[ "$RESP_STATUS" == "200" ]]; then
@@ -480,6 +481,7 @@ print(str(r)[:100])
   if check_ai_chat "POST /api/v1/chat/ (EN follow-up, same session_id) → 200" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
+      -H "Origin: https://syrabit.ai" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"Give one real-world example.\",\"lang\":\"en\",\"session_id\":\"${CHAT_SID_EN}\"}"; then
     if [[ "$RESP_STATUS" == "200" ]]; then
@@ -503,6 +505,7 @@ sleep 4
 TIMEOUT=$CHAT_TIMEOUT
 if check_ai_chat "POST /api/v1/chat/ (EN, anonymous) → 200" \
     POST "${EDGE_URL}/api/v1/chat/" \
+    -H "Origin: https://syrabit.ai" \
     -H "Content-Type: application/json" \
     -d "{\"message\":\"Hello! What subjects can you help with?\",\"lang\":\"en\",\"session_id\":\"anon-en-$(date +%s)\"}"; then
   if [[ "$RESP_STATUS" == "200" ]]; then
@@ -515,6 +518,34 @@ print(str(r)[:100])
       || fail "Anonymous reply empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
     slo_check "EN anonymous chat latency" "$RESP_MS" 8000 5000
   fi
+fi
+TIMEOUT=30
+
+section "Streaming endpoint — browser-simulated (Origin header)"
+sleep 2
+TIMEOUT=$CHAT_TIMEOUT
+# The browser ALWAYS uses /chat/stream (not /chat/).
+# This test sends an Origin header exactly as a browser would.
+# A CORS failure here would show "Failed to fetch" in the live app
+# even though non-streaming curl tests above pass.
+STREAM_RESP=$(curl -s -w "\n__STATUS__%{http_code}__MS__%{time_total}" \
+    --max-time 20 \
+    -X POST "${EDGE_URL}/api/v1/chat/stream" \
+    -H "Origin: https://syrabit.ai" \
+    -H "Referer: https://syrabit.ai/chat" \
+    -H "Content-Type: application/json" \
+    -H "Accept: text/event-stream" \
+    -d "{\"message\":\"Hi\",\"lang\":\"en\",\"session_id\":\"stream-browser-$(date +%s)\"}" 2>/dev/null)
+STREAM_ST=$(printf '%s' "$STREAM_RESP" | grep -o '__STATUS__[0-9]*' | grep -o '[0-9]*')
+STREAM_MS=$(python3 -c "t='$(printf '%s' "$STREAM_RESP" | grep -o '__MS__[0-9.]*' | grep -o '[0-9.]*')'; print(int(float(t)*1000) if t else 0)" 2>/dev/null || echo 0)
+STREAM_HAS_DATA=$(printf '%s' "$STREAM_RESP" | grep -c "^data:" 2>/dev/null || echo 0)
+if [[ "$STREAM_ST" == "200" && "$STREAM_HAS_DATA" -gt 0 ]]; then
+  ok "POST /api/v1/chat/stream (Origin: syrabit.ai) → 200  SSE chunks=${STREAM_HAS_DATA}" "${STREAM_MS}ms"
+  slo_check "Streaming first-byte latency" "$STREAM_MS" 8000 5000
+elif [[ "$STREAM_ST" == "200" ]]; then
+  warn "POST /api/v1/chat/stream → 200 but no SSE data chunks (body empty?)"
+else
+  fail "POST /api/v1/chat/stream (browser Origin)" "[${STREAM_ST:-timeout}] — browser would show 'Failed to fetch'"
 fi
 TIMEOUT=30
 
@@ -531,6 +562,7 @@ if [[ -n "$USER_TOKEN" ]]; then
   if check_ai_chat "POST /api/v1/chat/ (AS, explicit lang, auth) → 200" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
+      -H "Origin: https://syrabit.ai" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"সালোকসংশ্লেষণ কি? চমুকৈ বুজাই দিয়া।\",\"lang\":\"as\",\"session_id\":\"${CHAT_SID_AS}\"}"; then
     if [[ "$RESP_STATUS" == "200" ]]; then
@@ -553,6 +585,7 @@ print(f'[lang={lang}] {str(r)[:90]}')
   if check_ai_chat "POST /api/v1/chat/ (AS auto-detect, auth) → 200" \
       POST "${EDGE_URL}/api/v1/chat/" \
       -H "Authorization: Bearer ${USER_TOKEN}" \
+      -H "Origin: https://syrabit.ai" \
       -H "Content-Type: application/json" \
       -d "{\"message\":\"বিজ্ঞান মানে কি?\",\"session_id\":\"${CHAT_SID_AS}-auto\"}"; then
     if [[ "$RESP_STATUS" == "200" ]]; then
@@ -577,6 +610,7 @@ sleep 2
 TIMEOUT=$CHAT_TIMEOUT
 if check_ai_chat "POST /api/v1/chat/ (AS, anonymous) → 200" \
     POST "${EDGE_URL}/api/v1/chat/" \
+    -H "Origin: https://syrabit.ai" \
     -H "Content-Type: application/json" \
     -d "{\"message\":\"গণিত শিকাত সহায় কৰা।\",\"lang\":\"as\",\"session_id\":\"anon-as-$(date +%s)\"}"; then
   if [[ "$RESP_STATUS" == "200" ]]; then

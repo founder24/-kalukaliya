@@ -54,6 +54,7 @@ export default {
         headers: { 'Content-Type': 'application/json' },
       });
       errResponse.headers.set('X-Request-ID', requestId);
+      applyCorsHeaders(errResponse.headers, request.headers.get('Origin') || '');
       return errResponse;
     }
 
@@ -65,6 +66,7 @@ export default {
         // Token was provided but is invalid/expired — reject
         const errResp = jsonResponse(401, { error: jwtResult.error || 'Unauthorized' });
         errResp.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(errResp.headers, request.headers.get('Origin') || '');
         return errResp;
       }
 
@@ -108,7 +110,11 @@ export default {
         // Body parsing failed — default to 'en'
       }
 
-      const rl = await checkRateLimit(env.RATE_LIMIT_KV, userId, lang);
+      // Authenticated users get a much higher hourly limit — their usage is
+      // traceable and the backend's monthly quota is the real enforcement gate.
+      // Anonymous users keep the strict 30 req/hr burst-protection limit.
+      const edgeLimit = userId === 'anonymous' ? 30 : 500;
+      const rl = await checkRateLimit(env.RATE_LIMIT_KV, userId, lang, edgeLimit);
       if (!rl.allowed) {
         const rlResponse = new Response(
           JSON.stringify({ error: 'Rate limit exceeded' }),
@@ -116,11 +122,12 @@ export default {
             status: 429,
             headers: {
               'Content-Type': 'application/json',
-              ...rateLimitHeaders(rl),
+              ...rateLimitHeaders(rl, edgeLimit),
             },
           }
         );
         rlResponse.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(rlResponse.headers, request.headers.get('Origin') || '');
         return rlResponse;
       }
 

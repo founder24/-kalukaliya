@@ -111,6 +111,24 @@ export async function proxyRequest(
       }
     }
 
+    // Cold-start retry: if Cloud Run returns a non-JSON 502/503 (infrastructure
+    // error while a new instance is starting up), wait 3 s and retry once.
+    // Only retries non-streaming requests — streams are connection-bound and
+    // cannot be replayed after the body has been consumed.
+    if (!isStreamRequest && (response.status === 502 || response.status === 503)) {
+      const ct = response.headers.get('Content-Type') || '';
+      if (!ct.includes('application/json')) {
+        await new Promise(r => setTimeout(r, 3000));
+        response = await fetch(targetUrl, {
+          method: request.method,
+          headers,
+          body,
+          redirect: 'manual',
+          signal: controller.signal,
+        });
+      }
+    }
+
     clearTimeout(timeout);
 
     // Normalize non-JSON error responses from Cloud Run infrastructure (e.g.
