@@ -50,8 +50,15 @@ Set at: Pages → syrabit → Settings → Environment Variables → Production
 
 ## GitHub Secrets (for future CI/CD — no workflows yet)
 - `GCP_SA_KEY` — JSON of a SA with `roles/run.developer` for auto-deploy
-- `CLOUDFLARE_API_TOKEN` — Wrangler deploy
-- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_API_TOKEN` — Wrangler deploy (now also stored in Replit Secrets)
+- `CLOUDFLARE_ACCOUNT_ID` — stored in Replit env vars as "syrabit" (alias), real ID: `d66e40eac539fff1db270fddf384a5ec`
+
+## CF Pages deploy process (June 2026)
+- Git-push builds ALWAYS fail (pyproject.toml in repo root triggers `pip install .` which fails on multi-package flat layout)
+- All production deploys are **direct uploads** via wrangler CLI
+- Command: `CLOUDFLARE_ACCOUNT_ID=d66e40eac539fff1db270fddf384a5ec apps/edge/node_modules/.bin/wrangler pages deploy apps/frontend/dist --project-name syrabitfrontend --branch main --commit-dirty=true`
+- Requires Node.js ≥ 22 (use nodejs-22 module); Node 20 rejects wrangler 4.x
+- The local `apps/frontend/dist` already has `VITE_BACKEND_URL=https://api.syrabit.ai` baked in via `.env.production`
 
 ## Key relationships
 - `JWT_SECRET` must be IDENTICAL in GCP Secret Manager AND Cloudflare Worker
