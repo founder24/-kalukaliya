@@ -51,7 +51,7 @@ APIS=(
   monitoring.googleapis.com
   cloudtrace.googleapis.com
 )
-gcloud services enable "${APIS[@]}" --project="$PROJECT" --quiet
+gcloud services enable "${APIS[@]}" --project="$PROJECT" --quiet >/dev/null
 echo -e "  ${G}✓ All APIs enabled${X}"
 
 # ── 2. Grant backend SA all required project-level IAM roles ──────────────────
@@ -79,7 +79,8 @@ for ROLE in "${ROLES[@]}"; do
     --member="serviceAccount:$SA" \
     --role="$ROLE" \
     --condition=None \
-    --quiet && echo -e "  ${G}✓${X} $ROLE" || echo -e "  ${Y}⚠${X} $ROLE (already bound or error)"
+    --quiet >/dev/null && echo -e "  ${G}✓${X} $ROLE" \
+    || echo -e "  ${R}✗${X} $ROLE — failed (see error above)"
 done
 
 # ── 3. Grant Cloud Build SA permission to use the backend SA ──────────────────
@@ -161,11 +162,15 @@ ALL_SECRETS=$(gcloud secrets list --project="$PROJECT" --format="value(name)" 2>
 COUNT=0
 for SECRET_PATH in $ALL_SECRETS; do
   SECRET_NAME=$(basename "$SECRET_PATH")
-  gcloud secrets add-iam-policy-binding "$SECRET_PATH" \
-    --member="serviceAccount:$SA" \
-    --role="roles/secretmanager.secretAccessor" \
-    --project="$PROJECT" \
-    --quiet 2>/dev/null && COUNT=$((COUNT+1))
+  if gcloud secrets add-iam-policy-binding "$SECRET_PATH" \
+      --member="serviceAccount:$SA" \
+      --role="roles/secretmanager.secretAccessor" \
+      --project="$PROJECT" \
+      --quiet >/dev/null; then
+    COUNT=$((COUNT+1))
+  else
+    echo -e "  ${Y}⚠${X} Could not grant access to $SECRET_NAME (check permissions)" >&2
+  fi
 done
 echo -e "  ${G}✓${X} Granted secretAccessor on $COUNT secrets"
 
