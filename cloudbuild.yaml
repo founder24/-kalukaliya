@@ -1,5 +1,37 @@
 steps:
-  # ── Step 0: Pre-flight — validate all pinned versions exist on PyPI ───────
+  # ── Step 0 (SSH setup): Configure SSH deploy key for GitHub ──────────────
+  # Uses a read-only deploy key stored in Secret Manager so all subsequent
+  # git operations inside the build can authenticate over SSH.
+  #
+  # ONE-TIME SETUP (run once in Cloud Shell, then add the public key to GitHub):
+  #   ssh-keygen -t ed25519 -C "cloud-build@syrabit" -f /tmp/syrabit_deploy_key -N ""
+  #   gcloud secrets create GITHUB_DEPLOY_SSH_KEY \
+  #     --replication-policy=automatic \
+  #     --data-file=/tmp/syrabit_deploy_key \
+  #     --project=blissful-acumen-495019-t6
+  #   cat /tmp/syrabit_deploy_key.pub
+  #   # → Go to GitHub: founder24/-kalukaliya → Settings → Deploy keys → Add deploy key
+  #   #   Title: "Cloud Build (read-only)", paste the public key, leave "Allow write access" unchecked.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    secretEnv:
+      - 'GITHUB_DEPLOY_SSH_KEY'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        echo "=== SSH setup: configuring deploy key for GitHub ==="
+        mkdir -p /root/.ssh
+        echo "$$GITHUB_DEPLOY_SSH_KEY" > /root/.ssh/id_rsa
+        chmod 600 /root/.ssh/id_rsa
+        ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null
+        chmod 644 /root/.ssh/known_hosts
+        ssh -T git@github.com -o StrictHostKeyChecking=yes 2>&1 | grep -q "successfully authenticated" \
+          && echo "  ✓ GitHub SSH connectivity verified" \
+          || echo "  ⚠ GitHub SSH test returned non-zero (expected for read-only deploy keys — connection still works)"
+        echo "=== SSH setup complete ==="
+
+  # ── Step 1: Pre-flight — validate all pinned versions exist on PyPI ───────
   # Runs BEFORE the Docker build to catch version-not-found errors fast
   # (seconds) instead of failing 5+ minutes into the Docker layer cache.
   #
@@ -31,7 +63,7 @@ steps:
 
         echo "=== Pre-flight PASSED — all versions found on PyPI ==="
 
-  # ── Step 1: Build the backend Docker image ────────────────────────────────
+  # ── Step 2: Build the backend Docker image ────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
@@ -41,13 +73,13 @@ steps:
       - 'apps/backend/Dockerfile'
       - 'apps/backend'
 
-  # ── Step 2: Push image to Artifact Registry ───────────────────────────────
+  # ── Step 3: Push image to Artifact Registry ───────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
       - 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$COMMIT_SHA'
 
-  # ── Step 3: Deploy to Cloud Run (core secrets only) ───────────────────────
+  # ── Step 4: Deploy to Cloud Run (core secrets only) ───────────────────────
   # IMPORTANT: `gcloud run deploy` does NOT preserve Secret Manager references
   # across deploys — they must be explicitly passed every time via --update-secrets.
   # Plain env vars set here (--update-env-vars) are additive and safe.
@@ -68,9 +100,10 @@ steps:
       - >-
         --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=us-central1,VERTEX_SEARCH_DATASTORE_ID=syrabit-edu-datastore,VERTEX_SEARCH_LOCATION=global,VERTEX_SEARCH_SERVING_CONFIG=default_search,SARVAM_MODEL=sarvam-m1
       - >-
-        --update-secrets=MONGODB_URI=MONGODB_URI:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=ADMIN_JWT_SECRET:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=SARVAM_API_KEY:latest,UPSTASH_REDIS_REST_URL=UPSTASH_REDIS_REST_URL:latest,UPSTASH_REDIS_REST_TOKEN=UPSTASH_REDIS_REST_TOKEN:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest,RESET_TOKEN_SECRET=RESET_TOKEN_SECRET:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=TRANSLATE_CRON_SECRET:latest,INDEXNOW_API_KEY=INDEXNOW_API_KEY:latest,INDEXNOW_INTERNAL_SECRET=INDEXNOW_INTERNAL_SECRET:latest,POSTHOG_API_KEY=POSTHOG_API_KEY:latest,SENTRY_DSN=SENTRY_DSN:latest,CF_PAGES_DEPLOY_HOOK=cf-pages-deploy-hook:latest
+        --update-secrets=MONGODB_URI=MONGODB_URI:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=ADMIN_JWT_SECRET:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=SARVAM_API_KEY:latest,UPSTASH_REDIS_REST_URL=UPSTASH_REDIS_REST_URL:latest,UPSTASH_REDIS_REST_TOKEN=UPSTASH_REDIS_REST_TOKEN:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest,RESET_TOKEN_SECRET=RESET_TOKEN_SECRET:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=TRANSLATE_CRON_SECRET:latest,INDEXNOW_API_KEY=INDEXNOW_API_KEY:latest,INDEXNOW_INTERNAL_SECRET=INDEXNOW_INTERNAL_SECRET:latest,POSTHOG_API_KEY=POSTHOG_API_KEY:latest,SENTRY_DSN=SENTRY_DSN:latest
+      - '--remove-secrets=CF_PAGES_DEPLOY_HOOK'
 
-  # ── Step 4: Attach optional content-pipeline secrets (CF KV + GCS) ────────
+  # ── Step 5: Attach optional secrets (CF KV + GCS + CF Pages) ─────────────
   # These secrets may not exist yet in Secret Manager. This step probes for
   # each one before attaching so the deploy never hard-fails on a missing secret.
   # Once you create them (see commands below), they are picked up next deploy.
@@ -80,6 +113,7 @@ steps:
   #   echo -n 'YOUR_KV_TOKEN'        | gcloud secrets create CF_KV_API_TOKEN     --replication-policy=automatic --data-file=- --project=blissful-acumen-495019-t6
   #   echo -n 'YOUR_NAMESPACE_ID'    | gcloud secrets create CF_KV_NAMESPACE_ID  --replication-policy=automatic --data-file=- --project=blissful-acumen-495019-t6
   #   echo -n 'YOUR_BUCKET_NAME'     | gcloud secrets create GCS_CONTENT_BUCKET  --replication-policy=automatic --data-file=- --project=blissful-acumen-495019-t6
+  #   echo -n 'YOUR_DEPLOY_HOOK_URL' | gcloud secrets create CF_PAGES_DEPLOY_HOOK --replication-policy=automatic --data-file=- --project=blissful-acumen-495019-t6
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -123,14 +157,27 @@ steps:
           echo "  ⚠ GCS_CONTENT_BUCKET not in SM — GCS chapter storage disabled"
         fi
 
+        # CF_PAGES_DEPLOY_HOOK → CF_PAGES_DEPLOY_HOOK (Cloudflare Pages deploy trigger)
+        if gcloud secrets describe CF_PAGES_DEPLOY_HOOK --project="$$PROJECT" >/dev/null 2>&1; then
+          UPDATES="$${UPDATES:+$$UPDATES,}CF_PAGES_DEPLOY_HOOK=CF_PAGES_DEPLOY_HOOK:latest"
+          echo "  ✓ CF_PAGES_DEPLOY_HOOK"
+        else
+          echo "  ⚠ CF_PAGES_DEPLOY_HOOK not in SM — Cloudflare Pages deploy hook disabled"
+        fi
+
         if [ -n "$$UPDATES" ]; then
           gcloud run services update syrabit-backend \
             --region="$$REGION" --project="$$PROJECT" \
             --update-secrets="$$UPDATES"
-          echo "Content-pipeline secrets attached: $$UPDATES"
+          echo "Optional secrets attached: $$UPDATES"
         else
-          echo "No optional content-pipeline secrets found yet. See comments above for create commands."
+          echo "No optional secrets found yet. See comments above for create commands."
         fi
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/blissful-acumen-495019-t6/secrets/GITHUB_DEPLOY_SSH_KEY/versions/latest
+      env: 'GITHUB_DEPLOY_SSH_KEY'
 
 images:
   - 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$COMMIT_SHA'
