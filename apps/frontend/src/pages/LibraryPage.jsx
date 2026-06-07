@@ -234,7 +234,7 @@ export default function LibraryPage() {
   const [, startTransition] = useTransition();
 
   // Tier 1 — slim metadata: tiny, always-fetched first paint payload.
-  const { data: slimBundle, isLoading: slimLoading } = useLibraryBundleSlim();
+  const { data: slimBundle, isLoading: slimLoading, refetch: refetchSlim } = useLibraryBundleSlim();
 
   // Tier 2 — boot bundle: slim metadata + chapters scoped to the user's
   // active board only. Fetched in parallel with slim when an onboarding
@@ -496,7 +496,7 @@ export default function LibraryPage() {
             {contentLang === 'as' ? 'ছাৰ্ভাৰৰ সৈতে সংযোগ কৰিব পৰা নগ\'ল। আপোনাৰ সংযোগ পৰীক্ষা কৰি পুনৰ চেষ্টা কৰক।' : 'We couldn\'t reach the server. Please check your connection and try again.'}
           </p>
           <button
-            onClick={() => refetchBundle()}
+            onClick={() => { refetchSlim(); refetchBundle(); }}
             className="h-11 px-5 rounded-xl text-sm font-medium text-white bg-violet-600 hover:bg-violet-500 transition-all flex items-center gap-2 active:scale-95"
           >
             {contentLang === 'as' ? 'পুনৰ চেষ্টা কৰক' : 'Try Again'}
