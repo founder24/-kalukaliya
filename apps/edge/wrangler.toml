@@ -85,9 +85,4 @@ bucket_name = "syrabit-assets"
 
 [env.production.vars]
 ALLOWED_ORIGIN = "https://syrabit.ai"
-# BACKEND_URL is intentionally NOT set here as a var — it is managed exclusively
-# as a Wrangler secret so it can be updated via the infra script without a redeploy.
-# Set/update it with:
-#   npx wrangler secret put BACKEND_URL --env production
-#   (value: output of `gcloud run services describe syrabit-backend --region asia-south1 --format='value(status.url)'`)
-# Current Cloud Run URL: https://syrabit-backend-bl6wu3psza-el.a.run.app
+BACKEND_URL = "https://syrabit-backend-bl6wu3psza-el.a.run.app"
