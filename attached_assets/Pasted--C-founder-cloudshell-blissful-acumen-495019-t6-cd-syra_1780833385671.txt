@@ -1,0 +1,75 @@
+^C
+founder@cloudshell:~ (blissful-acumen-495019-t6)$ cd ~/syrabit
+bash scripts/fullstack-smoke-test.sh
+Syrabit Full-Stack Smoke Test
+  Base URL   : https://api.syrabit.ai
+  Frontend   : https://syrabit.ai
+  Direct GCR : https://syrabit-backend-bl6wu3psza-el.a.run.app
+
+── 1. DNS Resolution ──
+  ✓  api.syrabit.ai resolves to Cloudflare IP
+     IPs: 104.18.19.233 104.18.18.233 
+  ✓  syrabit.ai DNS resolves
+
+── 2. Cloudflare Worker ──
+  ✓  cf-ray header present (Worker is proxying)
+  ✓  server: cloudflare header
+
+── 3. Backend Health (via Worker — https://api.syrabit.ai) ──
+  ✓  GET /api/v1/health → 200
+  ✓  /api/v1/health status=healthy
+  ✓  /api/v1/health has service field
+
+── 4. Backend Health (direct Cloud Run — https://syrabit-backend-bl6wu3psza-el.a.run.app) ──
+  ✓  Direct Cloud Run /health → 200
+
+── 5. MongoDB / Deep Health ──
+  ✓  MongoDB healthy (10.3ms)
+  ✓  Redis healthy
+
+── 6. Library Bundle ──
+  ✓  GET /api/v1/content/library-bundle → 200
+  ✓  boards count (3 >= 1)
+  ✓  subjects count (109 >= 50)
+  ✓  chapters count (479 >= 200)
+     boards=3  subjects=109  chapters=479
+
+── 7. Content Endpoints ──
+  ✓  GET /api/v1/content/cms/posts → 200
+  ✓  GET /api/v1/content/cms-library → 200
+  ✓  GET /api/v1/content/question-papers → 200
+  ✓  GET /resolve-subject/ahsec/class-9/physics → 404
+
+── 8. Auth Endpoints ──
+  ✓  POST /analytics/session-ping reachable (200)
+  ✓  POST /auth/login with bad creds → 422 (not 5xx)
+
+── 9. Security Headers ──
+  ✓  x-content-type-options header
+  ✓  x-frame-options header
+  ✓  strict-transport-security (HSTS)
+  ✓  x-robots-tag (API not indexed)
+
+── 10. CORS ──
+  ✓  CORS allow-origin header
+  ✓  CORS allows syrabit.ai origin
+
+── 11. Frontend (https://syrabit.ai) ──
+  ✓  syrabit.ai → 200 (after redirect)
+  ✓  syrabit.ai/library → 200 (after redirect)
+  ✓  syrabit.ai/api/v1/health (Worker route on main domain)
+
+── 12. Edge Worker Health ──
+  ✓  GET /health (Worker edge health)
+  ✓  Edge /health has service field
+  ✓  Edge reports backend_reachable=true
+
+════════════════════════════════════
+  Results: 32 checks
+  ✓ Passed : 32
+  ✗ Failed : 0
+  – Skipped: 0
+════════════════════════════════════
+
+ALL CHECKS PASSED
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ 
