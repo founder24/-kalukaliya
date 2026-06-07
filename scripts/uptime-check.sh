@@ -9,8 +9,10 @@ set -euo pipefail
 
 ENDPOINTS=(
   "https://api.syrabit.ai/health"
+  "https://api.syrabit.ai/health/deep"
   "https://syrabit.ai"
-  "https://api.syrabit.ai/api/content/boards"
+  "https://api.syrabit.ai/api/v1/content/library-bundle?slim=1"
+  "https://api.syrabit.ai/api/v1/health/circuit-breakers"
 )
 
 TIMEOUT=10

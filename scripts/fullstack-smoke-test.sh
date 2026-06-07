@@ -59,16 +59,21 @@ echo    "  Direct GCR : $DIRECT_URL"
 # ═══════════════════════════════════════════════════════════════════════════
 header "1. DNS Resolution"
 
-CF_IPS=$(dig api.syrabit.ai +short 2>/dev/null || echo "")
-if echo "$CF_IPS" | grep -qE "^(104\.|172\.)"; then
-  pass "api.syrabit.ai resolves to Cloudflare IP"
-  echo "     IPs: $(echo $CF_IPS | tr '\n' ' ')"
+if ! command -v dig &>/dev/null; then
+  skip "api.syrabit.ai resolves to Cloudflare IP (dig not in PATH — install dnsutils)"
+  skip "syrabit.ai DNS resolves (dig not in PATH)"
 else
-  fail "api.syrabit.ai not resolving to Cloudflare (got: $CF_IPS)"
-fi
+  CF_IPS=$(dig api.syrabit.ai +short 2>/dev/null || echo "")
+  if echo "$CF_IPS" | grep -qE "^(104\.|172\.)"; then
+    pass "api.syrabit.ai resolves to Cloudflare IP"
+    echo "     IPs: $(echo $CF_IPS | tr '\n' ' ')"
+  else
+    fail "api.syrabit.ai not resolving to Cloudflare (got: $CF_IPS)"
+  fi
 
-FRONT_IPS=$(dig syrabit.ai +short 2>/dev/null || echo "")
-assert_nonempty "$FRONT_IPS" "syrabit.ai DNS resolves"
+  FRONT_IPS=$(dig syrabit.ai +short 2>/dev/null || echo "")
+  assert_nonempty "$FRONT_IPS" "syrabit.ai DNS resolves"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. Cloudflare Worker
