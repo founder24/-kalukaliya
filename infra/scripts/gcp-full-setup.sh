@@ -88,20 +88,23 @@ gcloud iam service-accounts add-iam-policy-binding "$SA" \
   --member="serviceAccount:$CB_SA" \
   --role="roles/iam.serviceAccountUser" \
   --project="$PROJECT" \
-  --quiet && echo -e "  ${G}✓${X} Cloud Build SA → serviceAccountUser on backend SA"
+  --quiet && echo -e "  ${G}✓${X} Cloud Build SA → serviceAccountUser on backend SA" \
+  || echo -e "  ${Y}⚠${X} serviceAccountUser on backend SA (already bound or error — skipping)"
 
 # Cloud Build SA also needs to deploy Cloud Run
 gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:$CB_SA" \
   --role="roles/run.admin" \
   --condition=None \
-  --quiet && echo -e "  ${G}✓${X} Cloud Build SA → roles/run.admin"
+  --quiet && echo -e "  ${G}✓${X} Cloud Build SA → roles/run.admin" \
+  || echo -e "  ${Y}⚠${X} roles/run.admin (already bound or error — skipping)"
 
 gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:$CB_SA" \
   --role="roles/secretmanager.secretAccessor" \
   --condition=None \
-  --quiet && echo -e "  ${G}✓${X} Cloud Build SA → roles/secretmanager.secretAccessor"
+  --quiet && echo -e "  ${G}✓${X} Cloud Build SA → roles/secretmanager.secretAccessor" \
+  || echo -e "  ${Y}⚠${X} roles/secretmanager.secretAccessor (already bound or error — skipping)"
 
 # ── 4. Create missing optional Secret Manager secrets ────────────────────────
 echo -e "\n${B}[4/5] Checking optional Secret Manager secrets...${X}"
