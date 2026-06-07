@@ -1,0 +1,243 @@
+
+                                                          git pull origin main --ff-only && bash scripts/update-and-test.sh --master --only chat
+remote: Enumerating objects: 24, done.
+remote: Counting objects: 100% (24/24), done.
+remote: Compressing objects: 100% (4/4), done.
+remote: Total 13 (delta 9), reused 13 (delta 9), pack-reused 0 (from 0)
+Unpacking objects: 100% (13/13), 7.61 KiB | 1.09 MiB/s, done.
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+   ba9ed4f3..cd174c59  main       -> origin/main
+Updating ba9ed4f3..cd174c59
+Fast-forward
+ .agents/memory/syrabit-pipeline-bugs.md            |  12 +
+ apps/backend/app/services/ai/vertex_client.py      |  51 +-
+ ...-passes-or-surfaces-failures-_1780840059862.txt | 603 +++++++++++++++++++++
+ 3 files changed, 649 insertions(+), 17 deletions(-)
+ create mode 100644 attached_assets/Pasted--1-Chat-pipeline-see-if-it-passes-or-surfaces-failures-_1780840059862.txt
+
+╔══════════════════════════════════════════════════╗
+║     Syrabit Update & Full-Stack Test Runner      ║
+╚══════════════════════════════════════════════════╝
+  GCP Project : blissful-acumen-495019-t6
+  Backend URL : https://api.syrabit.ai
+  Frontend URL: https://syrabit.ai
+  Date        : 2026-06-07 13:55:21 UTC
+────────────────────────────────────────────────────────
+
+▶ 1. Git — Pull Latest Commits
+    Branch: main
+    Before: cd174c59 — Improve text-to-speech and non-streaming generation stability
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+Already up to date.
+  ✓ Already up to date (cd174c59)
+
+▶ 2. Load Secrets from GCP Secret Manager
+    Authenticated as: founder@syrabit.ai
+      TEST_USER_EMAIL — already set, skipping GCP fetch
+  ✓ RESEND_API_KEY loaded from GCP (RESEND_API_KEY)
+  ✓ CF_TURNSTILE_SECRET loaded from GCP (cf-turnstile-secret)
+  △ INDEXNOW_API_KEY — not found in GCP (INDEXNOW_API_KEY)
+  ✓ GEMINI_API_KEY loaded from GCP (GEMINI_API_KEY)
+  ✓ UPSTASH_REDIS_REST_URL loaded from GCP (upstash-redis-url)
+  ✓ SARVAM_API_KEY loaded from GCP (SARVAM_API_KEY)
+  ✓ GOOGLE_APPLICATION_CREDENTIALS_JSON loaded from GCP (GOOGLE_APPLICATION_CREDENTIALS_JSON)
+  ✓ CRON_SECRET loaded from GCP (TRANSLATE_CRON_SECRET)
+  ✓ SENTRY_DSN loaded from GCP (SENTRY_DSN)
+  ✓ RESET_TOKEN_SECRET loaded from GCP (RESET_TOKEN_SECRET)
+  ✓ ADMIN_JWT_SECRET loaded from GCP (ADMIN_JWT_SECRET)
+  ✓ JWT_SECRET loaded from GCP (jwt-secret)
+  ✓ RAZORPAY_KEY_ID loaded from GCP (RAZORPAY_KEY_ID)
+  ✓ RAZORPAY_WEBHOOK_SECRET loaded from GCP (RAZORPAY_WEBHOOK_SECRET)
+  ✓ POSTHOG_API_KEY loaded from GCP (POSTHOG_API_KEY)
+      TEST_ADMIN_EMAIL — already set, skipping GCP fetch
+  ✓ VERTEX_PROJECT_ID loaded from GCP (VERTEX_PROJECT_ID)
+      TEST_USER_PASSWORD — already set, skipping GCP fetch
+  ✓ EDGE_SHARED_SECRET loaded from GCP (edge-shared-secret)
+  ✓ UPSTASH_REDIS_REST_TOKEN loaded from GCP (upstash-redis-token)
+  △ INDEXNOW_INTERNAL_SECRET — not found in GCP (INDEXNOW_INTERNAL_SECRET)
+      TEST_ADMIN_PASSWORD — already set, skipping GCP fetch
+  ✓ RAZORPAY_KEY_SECRET loaded from GCP (RAZORPAY_KEY_SECRET)
+  ✓ Secrets: 18 loaded, 4 already set
+
+▶ 3. Wait for Backend to Be Healthy
+    Polling https://api.syrabit.ai/health (max 60s)...
+  ✓ Backend healthy in 0s (status=healthy)
+  Deep health:
+    ✓ mongodb: healthy
+    ✓ redis: healthy
+    ✓ vertex_search: healthy
+    ✓ vertex_ai: healthy
+    ✓ sarvam_ai: healthy
+
+▶ 4. Frontend Reachability Check
+  △ Frontend https://syrabit.ai → 301
+
+▶ 5. Running Master Live Test Suite (all 8 suites)
+────────────────────────────────────────────────────────
+
+
+════════════════════════════════════════════════════════════════
+  SYRABIT — Master Live Test Runner
+  Target  : https://syrabit.ai
+  Backend : https://api.syrabit.ai
+  Time    : 2026-06-07 13:55:44 UTC
+  Creds   : user=YES  admin=YES
+
+════════════════════════════════════════════════════════════════
+
+══ Suite 8: Chat Pipeline Live Test (EN, AS, stream, history, TTS, multi-turn) ══
+   13:55:44 UTC
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                               !
+!   WARNING: This script tests against PRODUCTION               !
+!   Target: https://syrabit.ai                              !
+!                                                               !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Starting chat pipeline tests against https://syrabit.ai
+Timestamp: 2026-06-07 13:55:44 UTC
+Session ID for multi-turn: test_1780840544_8332
+
+
+=================================================================
+  AUTHENTICATION
+=================================================================
+
+  [PASS] Login successful - access token obtained
+
+=================================================================
+  SECTION 1: Chat (Non-Streaming) - Authenticated
+=================================================================
+
+  [PASS] POST /chat/ English message (lang: en) (HTTP 200)
+  [PASS] Response has 'response' field
+  [PASS] Response has 'model_used' field
+  [PASS] POST /chat/stream - received SSE response (auth, English)
+  [PASS] SSE chunks received (data: prefix found)
+  [PASS] Final SSE event contains done: true
+  [PASS] Final SSE event contains syrabit_done
+  [PASS] POST /chat/stream - Assamese streaming works
+  [PASS] POST /chat/stream anonymous - received response
+
+=================================================================
+  SECTION 4: Chat History
+=================================================================
+
+  [PASS] GET /chat/history with auth (HTTP 200)
+  [PASS] History response has 'chats' array
+  [PASS] History response has 'pagination' object
+  [PASS] GET /chat/history?limit=5 (pagination) (HTTP 200)
+  [PASS] Pagination respects limit (got 5 chats, limit 5)
+  [PASS] GET /chat/history without auth returns 200 (optional auth)
+  [INFO] Anonymous history returned 4 chats
+
+=================================================================
+  SECTION 5: Chat Messages
+=================================================================
+
+  [PASS] GET /chat/{session_id}/messages (test session) (HTTP 200)
+  [INFO] Messages found for test session
+  [PASS] GET /chat/nonexistent-session/messages (HTTP 404)
+
+=================================================================
+  SECTION 6: TTS (Text-to-Speech)
+=================================================================
+
+/home/founder/syrabit/scripts/test-chat-live.sh: line 643: warning: command substitution: ignored null byte in input
+  [PASS] POST /chat/tts English (HTTP 200)
+  [PASS] TTS response content-type is audio
+/home/founder/syrabit/scripts/test-chat-live.sh: line 664: warning: command substitution: ignored null byte in input
+  [PASS] POST /chat/tts Assamese (HTTP 200)
+  [PASS] POST /chat/tts empty text (expect 422) (HTTP 422)
+  [PASS] POST /chat/tts without auth (expect 401) (HTTP 401)
+
+=================================================================
+  SECTION 7: Image Analysis (OCR)
+=================================================================
+
+  [PASS] POST /chat/image without auth (expect 401) (HTTP 401)
+  [PASS] POST /chat/image auth, no file (HTTP 422 - expected 422/400)
+
+=================================================================
+  SECTION 8: Performance & Latency
+=================================================================
+
+  [PASS] Timed non-streaming chat (HTTP 200)
+  [INFO] Wall-clock latency: 2542ms
+  [PASS] latency_ms reported in response: 1559ms
+  [PASS] Streaming first-byte received
+  [INFO] Streaming first-byte latency: ~2961ms
+
+=================================================================
+  SECTION 9: Multi-turn Conversation
+=================================================================
+
+  [PASS] Multi-turn: first message (establish context) (HTTP 200)
+  [PASS] Multi-turn: follow-up message (context recall) (HTTP 200)
+  [PASS] Multi-turn: response correctly recalls context (mentions 'blue')
+
+=================================================================
+  LATENCY STATISTICS
+=================================================================
+
+  Measurements: 4
+  Min latency:  1559ms
+  Max latency:  6715ms
+  Avg latency:  3444ms
+
+=================================================================
+  TEST SUMMARY
+=================================================================
+
+  PASSED:  41
+  FAILED:  0
+  SKIPPED: 0
+  TOTAL:   41
+
+All executed tests PASSED.
+
+  ✔ SUITE PASSED
+
+════════════════════════════════════════════════════════════════
+  Master Test Runner — Final Summary
+  Completed : 2026-06-07 13:57:25 UTC
+
+════════════════════════════════════════════════════════════════
+
+  SUITE         DESCRIPTION                                           RESULT
+  ────────────  ────────────────────────────────────────────────────  ────────
+  uptime        Uptime (5 liveness probes)                            SKIP  --only chat
+  smoke         Fullstack Smoke (infra, content, security, CORS)      SKIP  --only chat
+  frontend      Frontend Features (79 checks)                         SKIP  --only chat
+  bundle        CF Pages Bundle URL                                   SKIP  --only chat
+  deployment    Live Deployment (health, SEO, security, perf)         SKIP  --only chat
+  live          End-to-End Layers (CF · Library · Auth · Chat)     SKIP  --only chat
+  auth          Auth Live (login, refresh, blacklist, logout)         SKIP  --only chat
+  chat          Chat Pipeline (EN, AS, stream, TTS, multi-turn)       PASS
+
+  Suites : 8 total
+  Passed : 1
+  Failed : 0
+  Skipped: 7
+
+  ALL ACTIVE SUITES PASSED
+
+────────────────────────────────────────────────────────
+
+Total time: 124s
+✓ All tests passed
+
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ 
+
+
+
+
+
+
+
+
+
+
