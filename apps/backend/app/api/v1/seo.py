@@ -51,19 +51,19 @@ SITEMAP_INDEX_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <sitemap>
     <loc>{base_url}/sitemap-static.xml</loc>
-    <lastmod>2025-01-15</lastmod>
+    <lastmod>2026-06-07</lastmod>
   </sitemap>
   <sitemap>
     <loc>{base_url}/sitemap-subjects.xml</loc>
-    <lastmod>2025-01-15</lastmod>
+    <lastmod>2026-06-07</lastmod>
   </sitemap>
   <sitemap>
     <loc>{base_url}/sitemap-chapters.xml</loc>
-    <lastmod>2025-01-15</lastmod>
+    <lastmod>2026-06-07</lastmod>
   </sitemap>
   <sitemap>
     <loc>{base_url}/sitemap-topics.xml</loc>
-    <lastmod>2025-01-15</lastmod>
+    <lastmod>2026-06-07</lastmod>
   </sitemap>
 </sitemapindex>"""
 
@@ -71,35 +71,187 @@ SITEMAP_STATIC_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://syrabit.ai/</loc>
-    <lastmod>2025-01-15</lastmod>
+    <lastmod>2026-06-07</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
     <loc>https://syrabit.ai/library</loc>
-    <lastmod>2025-01-15</lastmod>
+    <lastmod>2026-06-07</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
     <loc>https://syrabit.ai/chat</loc>
-    <lastmod>2025-01-15</lastmod>
+    <lastmod>2026-06-07</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://syrabit.ai/pricing</loc>
-    <lastmod>2025-01-15</lastmod>
+    <lastmod>2026-06-07</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://syrabit.ai/about</loc>
-    <lastmod>2025-01-15</lastmod>
+    <lastmod>2026-06-07</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.5</priority>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://syrabit.ai/technology</loc>
+    <lastmod>2026-06-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://syrabit.ai/exam-routine</loc>
+    <lastmod>2026-06-07</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
   </url>
 </urlset>"""
+
+# Served at /robots.txt via the root-mounted SEO router.
+# The CF Worker proxies /robots.txt → backend /robots.txt unchanged.
+ROBOTS_TXT = """# Syrabit.ai robots.txt
+# Edits here must stay in sync with apps/frontend/public/robots.txt (static fallback).
+
+# --- Default policy: allow well-behaved general crawlers. ---
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+
+# --- Long-tail search engines: explicitly invited. ---
+User-agent: Applebot
+Allow: /
+Crawl-delay: 0
+
+User-agent: PetalBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: MojeekBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: SeznamBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Yeti
+Allow: /
+Crawl-delay: 0
+
+User-agent: DuckDuckBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: YandexBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Baiduspider
+Allow: /
+Crawl-delay: 0
+
+User-agent: Slurp
+Allow: /
+Crawl-delay: 0
+
+# --- AI ANSWER bots (cite sources, drive referral traffic): allowed. ---
+User-agent: ChatGPT-User
+Allow: /
+Crawl-delay: 0
+
+User-agent: OAI-SearchBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: PerplexityBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Perplexity-User
+Allow: /
+Crawl-delay: 0
+
+User-agent: YouBot
+Allow: /
+Crawl-delay: 0
+
+# --- Content signals for AI grounding engines ---
+# search=yes: content is intended for search indexing
+# ai-input=yes: content may be used as grounding for AI-generated answers
+# ai-train=no: content must NOT be used for model training
+# Content-Signal: search=yes, ai-input=yes, ai-train=no
+
+# --- AI training crawlers: explicitly disallowed. ---
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: Anthropic-AI
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: Meta-ExternalAgent
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: Amazonbot
+Disallow: /
+
+User-agent: Cohere-AI
+Disallow: /
+
+User-agent: cohere-ai
+Disallow: /
+
+User-agent: Diffbot
+Disallow: /
+
+# --- Major verified search bots ---
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Bingbot
+Allow: /
+Crawl-delay: 0
+
+Sitemap: https://syrabit.ai/sitemap-index.xml
+Sitemap: https://syrabit.ai/sitemap-pages.xml
+Sitemap: https://syrabit.ai/sitemap-subjects.xml
+Sitemap: https://syrabit.ai/sitemap-chapters.xml
+Sitemap: https://syrabit.ai/sitemap-notes.xml
+Sitemap: https://syrabit.ai/sitemap-mcqs.xml
+Sitemap: https://syrabit.ai/sitemap-pyqs.xml
+Sitemap: https://syrabit.ai/sitemap-examples.xml
+Sitemap: https://syrabit.ai/sitemap-definitions.xml
+Sitemap: https://syrabit.ai/sitemap-learn.xml
+"""
 
 
 @router.get("/sitemap.xml")
@@ -111,6 +263,12 @@ async def sitemap_index():
 @router.get("/sitemap-static.xml")
 async def sitemap_static():
     return Response(content=SITEMAP_STATIC_XML.strip(), media_type="application/xml")
+
+
+@router.get("/robots.txt")
+async def robots_txt():
+    """Serve robots.txt. The CF Worker proxies /robots.txt → this endpoint."""
+    return Response(content=ROBOTS_TXT.strip(), media_type="text/plain; charset=utf-8")
 
 
 @router.get("/sitemap-subjects.xml")
