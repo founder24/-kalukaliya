@@ -53,7 +53,7 @@ class VertexAIClient:
         self.base_url = f"https://{self.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.location}/publishers/google/models"
 
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0, connect=3.0),
+            timeout=httpx.Timeout(connect=3.0, read=30.0, write=10.0, pool=5.0),
             limits=httpx.Limits(max_connections=50, max_keepalive_connections=25),
         )
         # HF-075: Token lock queueing concern - consider background refresh
@@ -88,15 +88,29 @@ class VertexAIClient:
                 return await self._generate_via_genai(system_prompt, user_message)
             return await self._generate_via_vertex(system_prompt, user_message)
 
-        _last_http_exc: httpx.HTTPStatusError | None = None
+        _last_exc: Exception | None = None
 
         for attempt in range(2):
             try:
                 return await vertex_circuit_breaker.call(_do_generate)
             except CircuitBreakerError as e:
                 raise RuntimeError(f"Vertex AI unavailable: {e}")
+            except httpx.ReadTimeout as e:
+                # Non-streaming generateContent timed out waiting for full response.
+                # Retry once with a brief pause; if it times out again, let the
+                # chat endpoint return 502 rather than hanging the request.
+                _last_exc = e
+                if attempt == 0:
+                    logger.warning(
+                        "Gemini API ReadTimeout on attempt 1; retrying after 1s",
+                        extra={"attempt": attempt + 1},
+                    )
+                    await asyncio.sleep(1)
+                    continue
+                logger.error("Gemini API ReadTimeout: retries exhausted")
+                raise RuntimeError("Vertex AI generate timed out") from e
             except httpx.HTTPStatusError as e:
-                _last_http_exc = e
+                _last_exc = e
                 status = e.response.status_code
                 if status in (429, 500, 502, 503) and attempt == 0:
                     wait = 3 if status == 429 else 2
@@ -116,7 +130,7 @@ class VertexAIClient:
                 logger.error(f"Vertex AI error: {str(e)}")
                 raise RuntimeError(f"Vertex AI service failed: {e}")
 
-        raise _last_http_exc or RuntimeError("Vertex AI generate: exhausted retries")
+        raise _last_exc or RuntimeError("Vertex AI generate: exhausted retries")
 
     async def generate_direct(self, system_prompt: str, user_message: str) -> str:
         """
@@ -298,7 +312,14 @@ class VertexAIClient:
             raise RuntimeError(f"Vertex AI Vision service failed: {e}")
 
     async def text_to_speech(self, text: str, lang: str = "en") -> bytes:
-        """Convert text to speech using Google Cloud TTS REST API."""
+        """Convert text to speech using Google Cloud TTS REST API.
+
+        Auth: Always uses OAuth2 service account credentials.
+        GEMINI_API_KEY (Generative Language API key) cannot authenticate
+        texttospeech.googleapis.com — it is scoped to a different Google API.
+        The service account in GOOGLE_APPLICATION_CREDENTIALS_JSON must have
+        the Cloud Text-to-Speech API enabled on the project.
+        """
         try:
 
             async def _do_tts():
@@ -322,19 +343,15 @@ class VertexAIClient:
                     },
                 }
 
-                if self._use_genai_api:
-                    url = f"{TTS_BASE_URL}?key={self._api_key}"
-                    headers = {"Content-Type": "application/json"}
-                else:
-                    url = TTS_BASE_URL
-                    headers = {
-                        "Authorization": f"Bearer {await self._get_access_token()}",
-                        "Content-Type": "application/json",
-                    }
-
+                # Cloud TTS requires OAuth2 — GEMINI_API_KEY only works for
+                # generativelanguage.googleapis.com, not texttospeech.googleapis.com.
+                token = await self._get_access_token()
                 response = await self._client.post(
-                    url,
-                    headers=headers,
+                    TTS_BASE_URL,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
                     json=payload,
                     timeout=30.0,
                 )

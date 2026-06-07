@@ -40,3 +40,15 @@ The CF Worker replaces `Authorization` with its own Cloud Run OIDC identity toke
 `admin_logout()` only called `delete_cookie()`, which is a browser instruction. The admin JWT stayed cryptographically valid for 8 hours. Clients holding a copy of the cookie value could replay it. `_validate_admin_session()` had no blacklist check.
 **Fix**: `admin_logout()` writes `blacklisted_admin_token:<sha256>` to Redis with remaining TTL. `_validate_admin_session()` checks blacklist before accepting any session. Fails open if Redis down (8h natural expiry, no lockout).
 Key name pattern: `blacklisted_admin_token:<sha256_of_jwt>` (vs user: `blacklisted_token:<sha256_of_jwt>`).
+
+## TTS 502 — GEMINI_API_KEY wrong API scope (fixed 2026-06-07)
+vertex_client.text_to_speech() used GEMINI_API_KEY for texttospeech.googleapis.com.
+GEMINI_API_KEY is scoped to generativelanguage.googleapis.com only.
+Cloud TTS requires OAuth2 (service account). Fix: removed _use_genai_api branch
+from TTS entirely — always uses _get_access_token() (OAuth2).
+Rule: any Google API other than generativelanguage.googleapis.com needs OAuth2, not GEMINI_API_KEY.
+
+## Non-streaming generate() ReadTimeout not retried (fixed 2026-06-07)
+httpx client had 10s read timeout. Gemini 2.5-flash non-streaming can exceed 10s.
+ReadTimeout was caught by `except Exception` not the retry loop (which only checked HTTPStatusError).
+Fix: explicit httpx.ReadTimeout branch in retry loop + increased read timeout to 30s.
