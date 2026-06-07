@@ -24,7 +24,7 @@ All set via: `gcloud run services update syrabit-backend --region=asia-south1 --
 ### Missing / not yet set (degrade features)
 - `SENTRY_DSN` — no error tracking in production
 - `VERTEX_SEARCH_DATASTORE_ID` — RAG search returns empty (AI chat falls back to Gemini only)
-- `CF_PAGES_DEPLOY_HOOK` — auto-rebuild Cloudflare Pages after content changes
+- `CF_PAGES_DEPLOY_HOOK` — auto-rebuild Cloudflare Pages after content changes (secret name: `cf-pages-deploy-hook`; hook URL must be created in CF Pages dashboard first — see `infra/runbooks/cf-pages-deploy-hook-setup.md`)
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — auto-create admin account on startup
 
 ## Cloudflare Worker Secrets (syrabitworker-prod)

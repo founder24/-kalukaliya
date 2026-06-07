@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from app.api.v1.admin import _validate_admin_session, _csrf_check
 from app.models.knowledge import KnowledgeObject, ContentMetadata, GeneratedContent
 from app.services.content.pipeline import content_pipeline
+from app.services.content_publisher import content_publisher_service
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ async def publish_knowledge(request: Request, slug: str):
     await obj.save()
 
     results = await content_pipeline.run(obj)
+    await content_publisher_service.trigger_pages_rebuild()
     return {"status": "published", "slug": slug, "pipeline": results}
 
 
@@ -127,6 +129,8 @@ async def bulk_publish_knowledge(
 
     for slug in body.slugs:
         background_tasks.add_task(_run_pipeline, slug)
+
+    background_tasks.add_task(content_publisher_service.trigger_pages_rebuild)
 
     return {
         "status": "queued",
