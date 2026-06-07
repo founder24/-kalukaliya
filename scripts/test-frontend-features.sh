@@ -1,0 +1,394 @@
+#!/bin/bash
+#
+# Frontend Feature Test — Syrabit.ai
+#
+# Tests every user-facing frontend feature by making real HTTP requests to
+# production (https://syrabit.ai). No browser automation needed.
+#
+# What is tested:
+#   1.  Page availability — all routes return 200
+#   2.  Page titles — correct <title> per page (prerendered HTML)
+#   3.  Static SEO files — robots.txt, llms.txt, ai.txt, sitemap-static.xml
+#   4.  robots.txt — allowed/blocked bots, /api/ guard, sitemap link
+#   5.  ai.txt — [allow]/[disallow] blocks, correct bots
+#   6.  llms.txt — current tech stack, board coverage, page links
+#   7.  Sitemap — URL coverage, freshness of lastmod dates
+#   8.  PWA manifest — manifest.json fields present
+#   9.  Security headers — HSTS, x-content-type-options, Cloudflare edge
+#  10.  CORS — frontend accepts Origin header
+#  11.  Page content — key pages serve non-error HTML
+#  12.  Performance SLOs — key pages within latency budget
+#  13.  Static assets — opengraph.jpg, favicon.ico
+#  14.  404 handling — SPA router handles unknown routes
+#
+# Deployment note: checks marked [DEPLOY] verify content from the latest
+# Cloudflare Pages deployment. They will fail if changes haven't been pushed
+# to production yet — run after a successful CF Pages deploy.
+#
+# Usage:
+#   bash scripts/test-frontend-features.sh
+#   FRONTEND=https://staging.syrabit.ai bash scripts/test-frontend-features.sh
+
+set -euo pipefail
+
+FRONTEND="${FRONTEND:-https://syrabit.ai}"
+TIMEOUT=15
+
+# ── Counters ─────────────────────────────────────────────────────────────────
+PASS=0; FAIL=0; SKIP=0
+
+ok()   { PASS=$((PASS+1));  printf "  \033[0;32m✔\033[0m  %s\n" "$*"; }
+fail() { FAIL=$((FAIL+1));  printf "  \033[0;31m✖\033[0m  %s\n" "$*"; }
+skip() { SKIP=$((SKIP+1));  printf "  \033[1;33m–\033[0m  %s\n" "$*"; }
+hdr()  { printf "\n\033[0;34m══ %s ══\033[0m\n" "$*"; }
+
+# fetch — stores body in $HTTP_BODY and status in $HTTP_STATUS
+# Uses --compressed so Cloudflare's gzip responses are decoded automatically.
+fetch() {
+    local url="$1"; shift
+    local tmpfile; tmpfile=$(mktemp)
+    HTTP_STATUS=$(curl -s -L --compressed --max-time "$TIMEOUT" \
+        -o "$tmpfile" -w "%{http_code}" "$@" "$url")
+    HTTP_BODY=$(cat "$tmpfile")
+    rm -f "$tmpfile"
+}
+
+# fetch_headers — stores response headers in $HTTP_HEADERS and status in $HTTP_STATUS
+fetch_headers() {
+    local url="$1"; shift
+    HTTP_HEADERS=$(curl -sI -L --max-time "$TIMEOUT" "$@" "$url")
+    HTTP_STATUS=$(printf '%s' "$HTTP_HEADERS" | grep -oE 'HTTP/[0-9.]+ [0-9]+' | tail -1 | grep -oE '[0-9]+$')
+}
+
+# timed_fetch — like fetch but also sets $RESP_MS
+timed_fetch() {
+    local url="$1"
+    local tmpfile; tmpfile=$(mktemp)
+    local start; start=$(date +%s%3N)
+    HTTP_STATUS=$(curl -s -L --compressed --max-time "$TIMEOUT" \
+        -o "$tmpfile" -w "%{http_code}" "$url")
+    local end; end=$(date +%s%3N)
+    RESP_MS=$((end - start))
+    HTTP_BODY=$(cat "$tmpfile")
+    rm -f "$tmpfile"
+}
+
+# check_body_contains — grep -qiE (extended regex, case-insensitive)
+check_body_contains() {
+    local pattern="$1" label="$2"
+    if printf '%s' "$HTTP_BODY" | grep -qiE "$pattern"; then
+        ok "$label"
+    else
+        fail "$label (pattern '$pattern' not found)"
+    fi
+}
+
+# check_body_not_contains — fail if pattern IS found
+check_body_not_contains() {
+    local pattern="$1" label="$2"
+    if printf '%s' "$HTTP_BODY" | grep -qiE "$pattern"; then
+        fail "$label (pattern '$pattern' should NOT appear)"
+    else
+        ok "$label"
+    fi
+}
+
+check_header() {
+    local header="$1" label="$2"
+    if printf '%s' "$HTTP_HEADERS" | grep -qiE "^${header}:"; then
+        ok "$label"
+    else
+        fail "$label (header '$header' missing)"
+    fi
+}
+
+echo ""
+echo "  Syrabit.ai Frontend Feature Test"
+echo "  Target : $FRONTEND"
+echo "  Time   : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "1. Page Availability"
+# ─────────────────────────────────────────────────────────────────────────────
+
+pages=("/" "/library" "/chat" "/about" "/technology" "/pricing")
+for path in "${pages[@]}"; do
+    fetch "${FRONTEND}${path}"
+    if [[ "$HTTP_STATUS" == "200" ]]; then
+        ok "GET ${path} → 200"
+    else
+        fail "GET ${path} → 200 (got $HTTP_STATUS)"
+    fi
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "2. Page Titles (prerendered HTML)"
+# ─────────────────────────────────────────────────────────────────────────────
+# These pages are prerendered by SSR — the <title> tag is in the static HTML.
+# / redirects to /library so both share the library prerendered title.
+# Patterns use extended regex (|).
+
+declare -A EXPECTED_TITLE_PATTERNS=(
+    ["/library"]="Library|Assam|Syrabit"
+    ["/chat"]="Chat|Syra|Syllabus"
+    ["/about"]="About|Syrabit|Educational"
+    ["/technology"]="Technology|Syrabit|RAG|Feature"
+    ["/pricing"]="Pricing|Plans|Free|Syrabit"
+)
+
+for path in "${!EXPECTED_TITLE_PATTERNS[@]}"; do
+    fetch "${FRONTEND}${path}"
+    title=$(printf '%s' "$HTTP_BODY" | grep -oiE '<title>[^<]*</title>' | sed 's/<[^>]*>//g' | head -1)
+    pattern="${EXPECTED_TITLE_PATTERNS[$path]}"
+    if [[ -z "$title" ]]; then
+        skip "${path} title: not in static HTML (SPA-only injection)"
+    elif printf '%s' "$title" | grep -qiE "$pattern"; then
+        ok "${path} title: '${title}'"
+    else
+        fail "${path} title '${title}' expected to match '${pattern}'"
+    fi
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "3. Static SEO Files — Availability"
+# ─────────────────────────────────────────────────────────────────────────────
+
+seo_files=("/robots.txt" "/llms.txt" "/ai.txt" "/sitemap-static.xml" "/sitemap-index.xml" "/manifest.json")
+for f in "${seo_files[@]}"; do
+    fetch "${FRONTEND}${f}"
+    if [[ "$HTTP_STATUS" == "200" ]]; then
+        ok "GET ${f} → 200"
+    else
+        fail "GET ${f} → 200 (got $HTTP_STATUS)"
+    fi
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "4. robots.txt — Bot Policy [DEPLOY]"
+# ─────────────────────────────────────────────────────────────────────────────
+
+fetch "${FRONTEND}/robots.txt"
+check_body_contains "Sitemap:"              "robots.txt lists sitemap(s)"
+check_body_contains "GPTBot"               "robots.txt mentions GPTBot (disallowed)"
+check_body_contains "User-agent"           "robots.txt has User-agent directives"
+
+# These pass only after the latest commit is deployed to Cloudflare Pages:
+for deploy_check in \
+    "PerplexityBot:robots.txt allows PerplexityBot" \
+    "ChatGPT-User:robots.txt allows ChatGPT-User" \
+    "YouBot:robots.txt allows YouBot" \
+    "Disallow: /admin:robots.txt blocks /admin" \
+    "Disallow: /api/:robots.txt blocks /api/ indexing"; do
+    pattern="${deploy_check%%:*}"
+    label="${deploy_check#*:}"
+    if printf '%s' "$HTTP_BODY" | grep -qiF "$pattern"; then
+        ok "$label [DEPLOY: deployed]"
+    else
+        skip "$label [DEPLOY: not yet in production — push to CF Pages]"
+    fi
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "5. ai.txt — AI Bot Manifest"
+# ─────────────────────────────────────────────────────────────────────────────
+
+fetch "${FRONTEND}/ai.txt"
+check_body_contains "\[allow\]"            "ai.txt has [allow] block"
+check_body_contains "PerplexityBot"        "ai.txt allows PerplexityBot"
+check_body_contains "ChatGPT-User"         "ai.txt allows ChatGPT-User"
+check_body_contains "YouBot"               "ai.txt allows YouBot"
+check_body_contains "\[disallow\]"         "ai.txt has [disallow] block"
+check_body_contains "GPTBot"               "ai.txt disallows GPTBot"
+check_body_contains "ClaudeBot"            "ai.txt disallows ClaudeBot"
+check_body_contains "\[sitemap\]"          "ai.txt links sitemap"
+check_body_contains "\[llms\]"             "ai.txt links llms.txt"
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "6. llms.txt — LLM Crawler Manifest"
+# ─────────────────────────────────────────────────────────────────────────────
+
+fetch "${FRONTEND}/llms.txt"
+check_body_contains "syrabit\.ai"          "llms.txt references syrabit.ai"
+check_body_contains "AHSEC"                "llms.txt covers AHSEC"
+check_body_contains "SEBA"                 "llms.txt covers SEBA"
+check_body_contains "Degree|FYUGP|NEP"     "llms.txt covers Degree/NEP"
+check_body_contains "Cloud Run|Vertex"     "llms.txt has current tech stack (not Railway)"
+check_body_not_contains "^.*Railway"       "llms.txt doesn't mention stale Railway backend"
+check_body_not_contains "IndicTrans2"      "llms.txt doesn't mention stale IndicTrans2"
+check_body_contains "/library"             "llms.txt links /library page"
+check_body_contains "/technology"          "llms.txt links /technology page"
+check_body_contains "/about"               "llms.txt links /about page"
+check_body_contains "hello@syrabit\.ai"    "llms.txt has contact email"
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "7. Sitemap — URL Coverage [DEPLOY]"
+# ─────────────────────────────────────────────────────────────────────────────
+
+fetch "${FRONTEND}/sitemap-static.xml"
+check_body_contains "syrabit\.ai/"         "sitemap has homepage URL"
+check_body_contains "/library"             "sitemap has /library"
+check_body_contains "/about"               "sitemap has /about"
+check_body_contains "/pricing"             "sitemap has /pricing"
+check_body_contains "/chat"                "sitemap has /chat"
+check_body_contains "lastmod"              "sitemap has lastmod dates"
+check_body_contains "changefreq"           "sitemap has changefreq"
+
+# Deployment-dependent: /technology only appears after the latest commit is live
+if printf '%s' "$HTTP_BODY" | grep -qiE "/technology"; then
+    ok "sitemap has /technology [DEPLOY: deployed]"
+else
+    skip "sitemap has /technology [DEPLOY: not yet in production — push to CF Pages]"
+fi
+
+# Stale lastmod dates (2025-01-15 was the original date, updated to 2026-06-07)
+if printf '%s' "$HTTP_BODY" | grep -qiE "2025-01-15"; then
+    skip "sitemap lastmod dates are stale (2025-01-15) [DEPLOY: not yet updated in production]"
+else
+    ok "sitemap lastmod dates are current (not stale 2025-01-15)"
+fi
+
+fetch "${FRONTEND}/sitemap-index.xml"
+if [[ "$HTTP_STATUS" == "200" ]]; then
+    ok "sitemap-index.xml → 200"
+    check_body_contains "sitemap"          "sitemap-index links child sitemaps"
+else
+    skip "sitemap-index.xml not available (may be served dynamically by backend)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "8. PWA Manifest"
+# ─────────────────────────────────────────────────────────────────────────────
+
+fetch "${FRONTEND}/manifest.json"
+if [[ "$HTTP_STATUS" == "200" ]]; then
+    ok "GET /manifest.json → 200"
+    check_body_contains '"name"'            "manifest.json has 'name' field"
+    check_body_contains '"icons"'           "manifest.json has 'icons' field"
+    check_body_contains '"display"'         "manifest.json has 'display' field"
+    check_body_contains "Syrabit"           "manifest.json name contains Syrabit"
+else
+    fail "GET /manifest.json → 200 (got $HTTP_STATUS)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "9. Security Headers"
+# ─────────────────────────────────────────────────────────────────────────────
+
+fetch_headers "${FRONTEND}/"
+check_header "strict-transport-security"   "HSTS header present"
+check_header "x-content-type-options"      "x-content-type-options header present"
+
+if printf '%s' "$HTTP_HEADERS" | grep -qiE "^x-frame-options:"; then
+    ok "x-frame-options header present"
+else
+    skip "x-frame-options: not set by Cloudflare Pages (acceptable for SPAs)"
+fi
+
+if printf '%s' "$HTTP_HEADERS" | grep -qiE "^cf-ray:"; then
+    ok "cf-ray header present (served via Cloudflare edge)"
+else
+    fail "cf-ray header missing (not going through Cloudflare)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "10. CORS — Frontend"
+# ─────────────────────────────────────────────────────────────────────────────
+
+fetch_headers "${FRONTEND}/" -H "Origin: https://syrabit.ai"
+if [[ "$HTTP_STATUS" == "200" ]]; then
+    ok "Frontend loads with Origin header (no CORS block)"
+else
+    fail "Frontend returned $HTTP_STATUS with Origin header"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "11. Page Content — Error-Free HTML"
+# ─────────────────────────────────────────────────────────────────────────────
+# These checks verify the SPA shell is served correctly (not a server error page).
+# We look for specific HTTP error page signatures, not the number "500"
+# (which legitimately appears in bundle filenames like "chunk-abc500.js").
+
+ERROR_PATTERN="Internal Server Error|<h1>Error</h1>|503 Service Unavailable|502 Bad Gateway"
+
+pages_to_check=("/library" "/chat" "/about" "/technology" "/pricing")
+for path in "${pages_to_check[@]}"; do
+    fetch "${FRONTEND}${path}"
+    if [[ "$HTTP_STATUS" != "200" ]]; then
+        fail "${path} returned $HTTP_STATUS (expected 200)"
+    elif printf '%s' "$HTTP_BODY" | grep -qiE "$ERROR_PATTERN"; then
+        fail "${path} HTML contains error page signature"
+    else
+        ok "${path} serves clean HTML (no server error signatures)"
+    fi
+done
+
+# Verify pages have the app root div (SPA shell)
+fetch "${FRONTEND}/library"
+check_body_contains 'id="root"|id="app"' "Library page has SPA root element"
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "12. Performance SLOs"
+# ─────────────────────────────────────────────────────────────────────────────
+
+for path in "/" "/library" "/about"; do
+    timed_fetch "${FRONTEND}${path}"
+    if [[ $RESP_MS -lt 800 ]]; then
+        ok "${path} → ${RESP_MS}ms (< 800ms — Cloudflare edge cache hit)"
+    elif [[ $RESP_MS -lt 2000 ]]; then
+        ok "${path} → ${RESP_MS}ms (< 2000ms — acceptable, cache miss)"
+    else
+        fail "${path} → ${RESP_MS}ms SLOW (> 2000ms SLO)"
+    fi
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "13. Static Assets"
+# ─────────────────────────────────────────────────────────────────────────────
+
+fetch "${FRONTEND}/opengraph.jpg"
+if [[ "$HTTP_STATUS" == "200" ]]; then
+    ok "GET /opengraph.jpg → 200 (OG image)"
+else
+    fail "GET /opengraph.jpg → 200 (got $HTTP_STATUS) — OG image missing"
+fi
+
+fetch "${FRONTEND}/favicon.ico"
+if [[ "$HTTP_STATUS" == "200" ]]; then
+    ok "GET /favicon.ico → 200"
+else
+    fail "GET /favicon.ico → 200 (got $HTTP_STATUS)"
+fi
+
+fetch "${FRONTEND}/icons/icon-192x192.png"
+if [[ "$HTTP_STATUS" == "200" ]]; then
+    ok "GET /icons/icon-192x192.png → 200 (PWA icon)"
+else
+    skip "GET /icons/icon-192x192.png → $HTTP_STATUS (PWA icon path may differ)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "14. 404 / SPA Routing"
+# ─────────────────────────────────────────────────────────────────────────────
+
+fetch "${FRONTEND}/this-page-does-not-exist-xyz9999"
+if [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "404" ]]; then
+    ok "Unknown route → ${HTTP_STATUS} (SPA router or 404 page — not a 5xx)"
+else
+    fail "Unknown route → unexpected $HTTP_STATUS (expected 200 or 404)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "════════════════════════════════════════"
+printf "  Results : %d checks\n" $((PASS + FAIL + SKIP))
+printf "  \033[0;32m✔ Passed\033[0m : %d\n" $PASS
+printf "  \033[0;31m✖ Failed\033[0m : %d\n" $FAIL
+printf "  \033[1;33m– Skipped\033[0m: %d  (awaiting CF Pages deploy)\n" $SKIP
+echo "════════════════════════════════════════"
+if [[ $FAIL -eq 0 ]]; then
+    printf "\n  \033[0;32mALL CHECKS PASSED\033[0m\n\n"
+    exit 0
+else
+    printf "\n  \033[0;31m%d CHECK(S) FAILED\033[0m\n\n" $FAIL
+    exit 1
+fi

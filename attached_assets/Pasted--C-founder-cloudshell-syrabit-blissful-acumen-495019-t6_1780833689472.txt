@@ -1,0 +1,129 @@
+^C
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ export TEST_USER_EMAIL="founder@syrabit.ai"
+export TEST_USER_PASSWORD="Rimjhimiya@325544"
+bash scripts/test-chat-live.sh --skip-tts
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                               !
+!   WARNING: This script tests against PRODUCTION               !
+!   Target: https://syrabit.ai                              !
+!                                                               !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Starting chat pipeline tests against https://syrabit.ai
+Timestamp: 2026-06-07 12:00:07 UTC
+Session ID for multi-turn: test_1780833607_26757
+
+
+=================================================================
+  AUTHENTICATION
+=================================================================
+
+  [PASS] Login successful - access token obtained
+
+=================================================================
+  SECTION 1: Chat (Non-Streaming) - Authenticated
+=================================================================
+
+  [FAIL] POST /chat/ English message (lang: en) (expected HTTP 200, got HTTP 502)
+         Response: {"detail":"Upstream service error"}
+  [FAIL] POST /chat/ Assamese message (lang: as) (expected HTTP 200, got HTTP 502)
+         Response: {"detail":"AI service temporarily unavailable"}
+  [FAIL] POST /chat/ auto language detection (no lang field) (expected HTTP 200, got HTTP 502)
+         Response: {"detail":"Upstream service error"}
+  [FAIL] POST /chat/ with session_id (multi-turn) (expected HTTP 200, got HTTP 502)
+         Response: {"detail":"Upstream service error"}
+  [PASS] POST /chat/ empty message (expect 422) (HTTP 422)
+  [PASS] POST /chat/ message > 2000 chars (expect 422) (HTTP 422)
+  [PASS] POST /chat/ invalid session_id (special chars, expect 422) (HTTP 422)
+
+=================================================================
+  SECTION 2: Chat (Non-Streaming) - Anonymous
+=================================================================
+
+  [PASS] POST /chat/ anonymous (no auth token) (HTTP 200)
+  [PASS] Anonymous response has 'response' field
+  [PASS] POST /chat/ anonymous with X-Anon-ID header (HTTP 200)
+
+=================================================================
+  SECTION 3: Streaming Chat (SSE)
+=================================================================
+
+  [PASS] POST /chat/stream - received SSE response (auth, English)
+  [PASS] SSE chunks received (data: prefix found)
+  [PASS] Final SSE event contains done: true
+  [PASS] Final SSE event contains syrabit_done
+  [PASS] POST /chat/stream - Assamese streaming works
+  [PASS] POST /chat/stream anonymous - received response
+
+=================================================================
+  SECTION 4: Chat History
+=================================================================
+
+  [PASS] GET /chat/history with auth (HTTP 200)
+  [PASS] History response has 'chats' array
+  [PASS] History response has 'pagination' object
+  [PASS] GET /chat/history?limit=5 (pagination) (HTTP 200)
+  [PASS] Pagination respects limit (got 5 chats, limit 5)
+  [PASS] GET /chat/history without auth returns 200 (optional auth)
+  [INFO] Anonymous history returned 3 chats
+
+=================================================================
+  SECTION 5: Chat Messages
+=================================================================
+
+  [PASS] GET /chat/{session_id}/messages (test session) (HTTP 404)
+  [INFO] Session not found (messages may not have been persisted yet)
+  [PASS] GET /chat/nonexistent-session/messages (HTTP 404)
+
+=================================================================
+  SECTION 6: TTS (Text-to-Speech)
+=================================================================
+
+  [SKIP] TTS tests skipped (--skip-tts)
+
+=================================================================
+  SECTION 7: Image Analysis (OCR)
+=================================================================
+
+  [PASS] POST /chat/image without auth (expect 401) (HTTP 401)
+  [PASS] POST /chat/image auth, no file (HTTP 422 - expected 422/400)
+
+=================================================================
+  SECTION 8: Performance & Latency
+=================================================================
+
+  [PASS] Timed non-streaming chat (HTTP 200)
+  [INFO] Wall-clock latency: 2588ms
+  [PASS] latency_ms reported in response: 1796ms
+  [PASS] Streaming first-byte received
+  [INFO] Streaming first-byte latency: ~2966ms
+
+=================================================================
+  SECTION 9: Multi-turn Conversation
+=================================================================
+
+  [PASS] Multi-turn: first message (establish context) (HTTP 200)
+  [PASS] Multi-turn: follow-up message (context recall) (HTTP 200)
+  [PASS] Multi-turn: response correctly recalls context (mentions 'blue')
+
+=================================================================
+  LATENCY STATISTICS
+=================================================================
+
+  Measurements: 3
+  Min latency:  1796ms
+  Max latency:  2966ms
+  Avg latency:  2450ms
+
+=================================================================
+  TEST SUMMARY
+=================================================================
+
+  PASSED:  29
+  FAILED:  4
+  SKIPPED: 1
+  TOTAL:   34
+
+Some tests FAILED. Review output above for details.
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ 

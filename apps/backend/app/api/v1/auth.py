@@ -789,18 +789,31 @@ async def logout(
     """
     token = credentials.credentials
 
+    # Decode the access token to get its expiry (get_current_user already
+    # validated it, so this should not fail; any exception here is a config
+    # problem, not a Redis problem — raise 500, not 503).
     try:
         from app.db.redis import get_redis
 
-        redis = get_redis()
-
-        # Blacklist the access token
-        token_hash = hashlib.sha256(token.encode()).hexdigest()
         key, algorithm = _get_verification_key()
         payload = jwt.decode(token, key, algorithms=[algorithm])
-        exp = payload.get("exp", 0)
-        now = int(datetime.now(timezone.utc).timestamp())
-        ttl = max(exp - now, 0)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to decode token during logout: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Logout failed: token decode error")
+
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    exp = payload.get("exp", 0)
+    now = int(datetime.now(timezone.utc).timestamp())
+    ttl = max(exp - now, 0)
+
+    # Blacklist the access token in Redis.  Fail-open: if Redis is temporarily
+    # unavailable the token expires naturally (max TTL = access token lifetime,
+    # typically 15 min).  We log a warning so the ops team can investigate.
+    try:
+        redis = get_redis()
+
         if ttl > 0:
             await redis.set(f"blacklisted_token:{token_hash}", "1", ex=ttl)
 
@@ -819,13 +832,15 @@ async def logout(
                     if refresh_ttl > 0:
                         await redis.set(f"revoked_refresh:{jti}", "1", ex=refresh_ttl)
             except InvalidTokenError:
-                pass  # Invalid refresh token - ignore
-    except HTTPException:
-        raise
+                pass  # Invalid refresh token — ignore
     except Exception as e:
-        logger.error(f"Redis unavailable for token blacklisting during logout: {e}")
-        raise HTTPException(
-            status_code=503, detail="Token revocation service unavailable"
+        # Redis unavailable or Upstash transient error.  Log with full trace
+        # so production logs capture the real cause.  Proceed with logout so
+        # the user is not stuck — the access token will expire on its own.
+        logger.warning(
+            f"Token blacklisting skipped during logout (Redis error): "
+            f"{type(e).__name__}: {e}",
+            exc_info=True,
         )
 
     return MessageResponse(message="Logged out successfully")

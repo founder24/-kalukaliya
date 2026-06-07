@@ -207,6 +207,7 @@ async def admin_logout(request: Request):
     response.delete_cookie(
         key="syrabit_admin_session",
         path="/api/",
+        httponly=True,
         secure=True,
         samesite="strict",
     )

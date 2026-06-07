@@ -1,0 +1,208 @@
+^C
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ bash scripts/test-live.sh
+
+══════════════════════════════════════════════════════
+  LAYER -1: Provider & System Connectivity
+══════════════════════════════════════════════════════
+
+▸ Deep health (MongoDB · Redis · Vertex AI · Vertex Search · Sarvam)
+  ✔  Deep health → 200  13980ms  overall=healthy
+     ✔  mongodb: healthy  19.7ms
+     ✔  redis: healthy  440.1ms
+     ✔  vertex_search: healthy  
+     ✔  vertex_ai: healthy  
+     ✔  sarvam_ai: healthy  88.5ms
+
+▸ Circuit breaker status (Vertex AI · Sarvam · Vertex Search)
+  ✔  GET /health/circuit-breakers → 200  241ms
+     ✔  vertex_ai: CLOSED  failures=0/8
+     ✔  sarvam_ai: CLOSED  failures=0/5
+     ✔  vertex_search: CLOSED  failures=0/3
+
+▸ GCP Cloud Run region & credentials
+     project_id=blissful-acumen-495019-t6  auth=service_account_key  status=healthy
+
+▸ Sarvam AI endpoint reachability
+  ✔  Sarvam API reachable  [HTTP 404]
+
+▸ CF edge KV & routing
+  ✔  CF edge → backend tunnel healthy  480ms
+  ✔  CF edge response time  480ms ✓ (target <800ms)
+
+══════════════════════════════════════════════════════
+  LAYER 0: CF Edge Connectivity  (https://api.syrabit.ai)
+══════════════════════════════════════════════════════
+
+▸ Backend reachability
+  ✔  GET /health → 200  107ms
+  ✔  backend_reachable: true  
+
+▸ CORS preflight
+  ✔  CORS preflight → 200  access-control-allow-origin: https://syrabit.ai
+
+▸ Frontend (CF Pages) + page-load SLO
+  ✔  GET https://syrabit.ai/library → 200  528ms
+  ⚡  CF Pages HTML load SLOW ⚡  528ms exceeds 500ms SLO
+     Note: <100ms = CF edge cache hit; >300ms = cache miss / first load
+
+══════════════════════════════════════════════════════
+  LAYER 1: Library Page Content
+══════════════════════════════════════════════════════
+
+▸ Library bundle (unauthenticated)
+  ✔  GET /api/v1/content/library-bundle?slim=1 → 200  [200] 691ms
+  ✔  Content counts  3 boards · 10 classes · 26 streams · 109 subjects
+     Board=ahsec  Class=hs-1st-year  Subject=physics
+  ✔  Library bundle API latency  691ms ✓ (target <1000ms)
+
+▸ Subject drill-down resolution
+  ✔  GET /content/resolve-subject/ahsec/hs-1st-year/physics → 200  [200] 268ms
+
+▸ Content search
+  ✔  GET /content/search?q=science → 200  [200] 830ms
+
+▸ Question papers
+  ✔  GET /content/question-papers → 200  [200] 246ms
+
+══════════════════════════════════════════════════════
+  LAYER 2: User Auth  (founder@syrabit.ai)
+══════════════════════════════════════════════════════
+
+▸ Login
+  ✔  POST /api/v1/auth/login → 200  [200] 940ms
+  ✔  access_token received  eyJhbGciOiJIUzI1NiIsInR5c…
+
+▸ GET /api/v1/users/me (authenticated)
+  ✔  GET /api/v1/users/me → 200  [200] 656ms
+     email=founder@syrabit.ai  role=admin
+
+▸ Unauthenticated guard
+  ✔  GET /api/v1/users/me without token → 401  [401] 241ms
+
+▸ Token refresh
+  ✔  POST /api/v1/auth/refresh → 200  [200] 659ms
+  ✔  Refreshed token  eyJhbGciOiJIUzI1NiIsInR5c…
+
+▸ List conversations
+  ✔  GET /api/v1/conversations → 200  [200] 395ms
+  ✔  Conversations  5 items
+
+▸ Get single conversation
+  ✔  GET /api/v1/conversations/6a24f7db3ecdd349… → 200  [200] 409ms
+
+▸ Pre-chat: admin login + AI circuit breaker reset
+  ✔  Circuit breakers reset  All circuit breakers reset to CLOSED
+     vertex_ai: CLOSED
+     sarvam_ai: CLOSED
+     vertex_search: CLOSED
+
+══════════════════════════════════════════════════════
+  LAYER 3: Chat — English
+══════════════════════════════════════════════════════
+
+▸ Non-streaming (authenticated)
+  ✖  POST /api/v1/chat/ (EN, auth) → 200  [got 502, want 200] 6659ms
+     {"detail":"Upstream service error"}
+
+▸ Multi-turn follow-up (same session)
+  ✖  POST /api/v1/chat/ (EN follow-up, same session_id) → 200  [got 502, want 200] 6524ms
+     {"detail":"Upstream service error"}
+
+▸ Anonymous chat (no token)
+  ✔  POST /api/v1/chat/ (EN, anonymous) → 200  [200] 5997ms
+  ✔  Anonymous AI reply (EN)  Hello! As Syrabit, an expert educational AI for Assamese students, I can help you with a wide range …
+  ✔  EN anonymous chat latency  5997ms (within <8000ms)
+
+▸ Streaming endpoint — browser-simulated (Origin header)
+  ✔  POST /api/v1/chat/stream (Origin: syrabit.ai) → 200  SSE chunks=4  1952ms
+  ✔  Streaming first-byte latency  1952ms ✓ (target <5000ms)
+
+══════════════════════════════════════════════════════
+  LAYER 4: Chat — Assamese (অসমীয়া)
+══════════════════════════════════════════════════════
+
+▸ Explicit lang=as (authenticated)
+  ✔  POST /api/v1/chat/ (AS, explicit lang, auth) → 200  [200] 7898ms
+  ✔  AI reply (AS, explicit lang)  [lang=?] সালোকসংশ্লেষণ (Photosynthesis) হৈছে এক জৈৱিক প্ৰক্ৰিয়া যাৰ দ্বাৰা সেউজীয়া উদ্ভিদ, শেলাই …
+  ✔  AS explicit chat latency  7898ms ✓ (target <8000ms)
+
+▸ Assamese auto-detect (no lang field)
+  ✔  POST /api/v1/chat/ (AS auto-detect, auth) → 200  [200] 6868ms
+  ✔  Auto-detect Assamese  [detected=?] বিজ্ঞান (Science) হৈছে জ্ঞান আহৰণ কৰাৰ এক পদ্ধতিগত প্ৰচেষ্টা, য'ত আমাৰ চাৰিওফালে থকা প্ৰাক…
+  ✔  AS auto-detect latency  6868ms ✓ (target <10000ms)
+
+▸ Anonymous Assamese chat
+  ✔  POST /api/v1/chat/ (AS, anonymous) → 200  [200] 9656ms
+  ✔  Anonymous AI reply (AS)  গণিত শিকাৰ বাবে মই আপোনাক সহায় কৰিব পাৰো! গণিত শিকাৰ বাবে কিছুমান গুৰুত্বপূৰ্ণ টিপছ আৰু কৌশল তলত দি…
+  ✔  AS anonymous chat latency  9656ms (within <10000ms)
+
+══════════════════════════════════════════════════════
+  LAYER 5: Admin Auth  (founder@syrabit.ai)
+══════════════════════════════════════════════════════
+
+▸ Admin login
+  ✔  POST /api/v1/admin/login → 200  1204ms
+  ✔  Response status=ok  
+  ✔  Admin session cookie stored in jar  
+
+▸ Admin verify (session check)
+  ✔  GET /api/v1/admin/verify → 200  (session valid)
+     {"status":"ok","user_id":"6a19a5d4d6908af60f888466"}
+
+▸ Admin guard (no session)
+  ✔  GET /api/v1/admin/verify without session → 401  (guard active)
+
+══════════════════════════════════════════════════════
+  LAYER 6: Admin Panel Endpoints
+══════════════════════════════════════════════════════
+
+▸ Dashboard
+  ✔  GET /api/v1/admin/dashboard → 200  254ms
+     total_users=?
+
+▸ Users list
+  ✔  GET /api/v1/admin/users?limit=5 → 200  251ms
+     5 users returned
+
+▸ Analytics overview
+  ✔  GET /api/v1/admin/analytics → 200  260ms
+
+▸ Analytics daily
+  ✔  GET /api/v1/admin/analytics/daily → 200  242ms
+
+▸ Conversations
+  ✔  GET /api/v1/admin/conversations?limit=5 → 200  256ms
+     5 conversations
+
+▸ Internal health
+  ✔  GET /api/v1/admin/health → 200  376ms
+     mongo: healthy
+     redis: healthy
+
+▸ AI providers
+  ✔  GET /api/v1/admin/ai/providers → 200  240ms
+
+▸ Admin logout
+  ✔  POST /api/v1/admin/logout → 200  (session cleared)
+
+══════════════════════════════════════════════════════
+  LAYER 7: Security Guards
+══════════════════════════════════════════════════════
+
+▸ Tampered JWT rejected
+  ✔  GET /users/me with tampered JWT → 401  (correctly rejected)
+
+▸ Admin endpoint without session
+  ✔  GET /admin/dashboard without session → 401  (correctly blocked)
+
+══════════════════════════════════════════════════════
+  RESULTS
+══════════════════════════════════════════════════════
+  Total   : 56
+  Passed  : 54
+  Failed  : 2
+  Skipped : 0
+
+  2 CHECK(S) FAILED ✖
+
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ 

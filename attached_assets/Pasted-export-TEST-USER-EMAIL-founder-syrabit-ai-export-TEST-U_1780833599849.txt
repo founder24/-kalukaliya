@@ -1,0 +1,93 @@
+export TEST_USER_EMAIL="founder@syrabit.ai"
+export TEST_USER_PASSWORD="Rimjhimiya@325544"
+export TEST_ADMIN_EMAIL="founder@syrabit.ai"
+export TEST_ADMIN_PASSWORD="Rimjhimiya@325544"
+bash scripts/test-auth-live.sh --skip-destructive
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                               !
+!   WARNING: This script tests against PRODUCTION               !
+!   Target: https://syrabit.ai                              !
+!                                                               !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Starting auth tests against https://syrabit.ai
+Timestamp: 2026-06-07 11:59:32 UTC
+
+
+=================================================================
+  USER AUTH FLOW
+=================================================================
+
+  [PASS] Login with valid credentials (HTTP 200)
+  [PASS] Received access_token and refresh_token
+  [PASS] GET /users/me with valid token (HTTP 200)
+  [PASS] User profile returned (email present)
+  [PASS] GET /users/me with NO token (HTTP 401)
+  [PASS] GET /users/me with INVALID token (HTTP 401)
+  [PASS] GET /users/me with EXPIRED/garbage JWT (HTTP 401)
+  [PASS] POST /auth/refresh with valid tokens (H-1 fix: old token blacklisting) (HTTP 200)
+  [PASS] Received new access_token from refresh
+  [PASS] GET /users/me with NEW token from refresh (HTTP 200)
+  [PASS] GET /users/me with OLD token after refresh - blacklisted (HTTP 401)
+  [FAIL] POST /auth/logout with valid token (expected HTTP 200, got HTTP 503)
+         Response: {"detail":"Token revocation service unavailable"}
+  [FAIL] GET /users/me AFTER logout (token blacklisted) (expected HTTP 401, got HTTP 200)
+         Response: {"id":"6a19a5d4d6908af60f888466","name":"","email":"founder@syrabit.ai","role":"admin","subscription_tier":"free","plan":"free","monthly_message_count":70,"preferred_language":"as","onboarding_done":f
+  [PASS] POST /auth/forgot-password with valid email (HTTP 200)
+  [PASS] POST /auth/forgot-password with nonexistent email (no enumeration) (HTTP 200)
+
+=================================================================
+  RATE LIMITING (USER)
+=================================================================
+
+  [SKIP] Rate limit tests skipped (--skip-destructive)
+
+=================================================================
+  ADMIN AUTH FLOW
+=================================================================
+
+  [PASS] Admin login with valid credentials (HTTP 200)
+  [PASS] Session cookie 'syrabit_admin_session' present in set-cookie
+  [PASS] GET /admin/verify with session cookie (HTTP 200)
+  [PASS] GET /admin/verify WITHOUT cookie (HTTP 401)
+  [PASS] POST /admin/logout with cookie (HTTP 200)
+  [FAIL] GET /admin/verify after logout (expected HTTP 401, got HTTP 200)
+         Response: {"status":"ok","user_id":"6a19a5d4d6908af60f888466"}
+
+=================================================================
+  ADMIN RATE LIMITING (C-1 fix verification)
+=================================================================
+
+  [SKIP] Admin rate limit tests skipped (--skip-admin or --skip-destructive)
+
+=================================================================
+  EDGE CASES
+=================================================================
+
+  [PASS] POST /auth/login with empty body (HTTP 422)
+  [PASS] POST /auth/login missing password (HTTP 422)
+  [PASS] POST /auth/refresh with invalid refresh token (HTTP 401)
+  [PASS] POST /auth/refresh with garbage refresh token (HTTP 401)
+
+=================================================================
+  SECURITY HEADERS CHECK
+=================================================================
+
+  [PASS] Header present: x-content-type-options
+  [INFO] Header not found: x-frame-options (may not apply to this endpoint)
+  [PASS] Header present: strict-transport-security
+  [INFO] Header not found: x-xss-protection (may not apply to this endpoint)
+  [PASS] Header present: content-type
+
+=================================================================
+  TEST SUMMARY
+=================================================================
+
+  PASSED:  25
+  FAILED:  3
+  SKIPPED: 2
+  TOTAL:   30
+
+Some tests FAILED. Review output above for details.
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ 
