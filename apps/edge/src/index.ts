@@ -320,6 +320,93 @@ export default {
       return securedFull;
     }
 
+    // ── Library bundle KV cache (stale-while-revalidate) ─────────────────────
+    // /api/v1/content/library-bundle is static curriculum metadata (~79 KB)
+    // that changes only on admin deploys. Serve from KV to decouple the
+    // library page from backend/MongoDB availability entirely.
+    //
+    // Strategy:
+    //   HIT  (age < FRESH_TTL)  → return cached, no backend call
+    //   STALE (age ≥ FRESH_TTL) → return cached immediately, revalidate in bg
+    //   MISS                    → proxy to backend, populate cache on 200
+    //   MISS + backend error    → return backend error as-is (no data yet)
+    if (
+      url.pathname === '/api/v1/content/library-bundle' &&
+      request.method === 'GET' &&
+      env.ISR_CACHE_KV
+    ) {
+      const FRESH_TTL_S = 300;    // 5 min — serve fresh without revalidation
+      const HARD_TTL_S  = 7200;   // 2 hr  — max KV expiry; KV auto-deletes after
+      const qs = url.search || '';
+      const cacheKey = `api:library-bundle:${qs}`;
+
+      const origin = request.headers.get('Origin') || '';
+
+      const cached = await env.ISR_CACHE_KV.get(cacheKey).catch(() => null);
+      if (cached) {
+        let payload: { body: string; cachedAt: number } | null = null;
+        try { payload = JSON.parse(cached); } catch { /* corrupt — treat as miss */ }
+
+        if (payload) {
+          const ageS = Math.floor(Date.now() / 1000) - payload.cachedAt;
+          const isStale = ageS >= FRESH_TTL_S;
+
+          if (isStale) {
+            // Background revalidation — do NOT await; user already has the response
+            ctx.waitUntil(
+              proxyRequest(new Request(request.url, request), env.BACKEND_URL, env)
+                .then(async r => {
+                  if (r.status === 200) {
+                    const freshBody = await r.text();
+                    const entry = JSON.stringify({ body: freshBody, cachedAt: Math.floor(Date.now() / 1000) });
+                    return env.ISR_CACHE_KV.put(cacheKey, entry, { expirationTtl: HARD_TTL_S });
+                  }
+                })
+                .catch(() => { /* revalidation failed — stale cache stays */ })
+            );
+          }
+
+          const resp = new Response(payload.body, {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Cache': isStale ? 'STALE' : 'HIT',
+              'X-Cache-Age': String(ageS),
+            },
+          });
+          const secured = addSecurityHeaders(resp);
+          applyCorsHeaders(secured.headers, origin);
+          secured.headers.set('X-Request-ID', requestId);
+          return secured;
+        }
+      }
+
+      // Cache MISS — proxy to backend and populate cache on success
+      const backendResp = await proxyRequest(request, env.BACKEND_URL, env);
+      if (backendResp.status === 200) {
+        const body = await backendResp.text();
+        const entry = JSON.stringify({ body, cachedAt: Math.floor(Date.now() / 1000) });
+        ctx.waitUntil(
+          env.ISR_CACHE_KV.put(cacheKey, entry, { expirationTtl: HARD_TTL_S })
+            .catch(() => { /* KV write failure is non-fatal */ })
+        );
+        const missResp = new Response(body, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'X-Cache': 'MISS' },
+        });
+        const secured = addSecurityHeaders(missResp);
+        applyCorsHeaders(secured.headers, origin);
+        secured.headers.set('X-Request-ID', requestId);
+        return secured;
+      }
+
+      // Backend error and no cache — pass the error through as-is
+      const secured = addSecurityHeaders(backendResp);
+      applyCorsHeaders(secured.headers, origin);
+      secured.headers.set('X-Request-ID', requestId);
+      return secured;
+    }
+
     // API routes → proxy to backend
     // Note: /health/full is handled above; remaining /health/ sub-paths (e.g. /health/deep)
     // are proxied to backend. /health is handled at edge above.
