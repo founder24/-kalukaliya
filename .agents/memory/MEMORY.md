@@ -12,3 +12,6 @@
 - [CF Worker CORS gaps](cf-worker-cors-gaps.md) — rate-limit 429/JWT 401/safety 503 returned before applyCorsHeaders; browser got TypeError(Failed to fetch)
 - [Syrabit Vertex Search Standard tier](syrabit-vertex-search-tier.md) — Engine is STANDARD not Enterprise; ExtractiveContentSpec causes 400; use SnippetSpec only + struct_data["content"]
 - [Syrabit GCP SA setup](syrabit-gcp-sa-setup.md) — Full IAM role list + one-shot setup script for syrabit-backend-sa; Cloudflare Worker secrets script pulls from SM automatically
+- [CF Worker missing BACKEND_URL](cf-worker-backend-url.md) — syrabitworker-prod had no BACKEND_URL binding; all API calls 503'd; fix: CF API multipart PATCH /settings
+- [MongoDB Atlas IP allowlist for Cloud Run](atlas-ip-allowlist.md) — Cloud Run uses dynamic Google IPs; Atlas must allow 0.0.0.0/0 or GCP IP range; without it init_mongo() silently fails → mongodb_initialized:false → empty API responses
+- [Cloud Run deploy root causes](syrabit-cloudrun-deploy-root-causes.md) — REST API secret patches create full-path refs that crash gcloud; wrangler [vars] inherited by production env; deploy.yml MONGODB_URI case mismatch
