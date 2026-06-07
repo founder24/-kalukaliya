@@ -31,9 +31,14 @@ export default function AdminLoginPage() {
       });
       navigate('/admin');
     } catch (err) {
-      const detail = err.response?.data?.detail;
+      const status = err.response?.status;
+      const data   = err.response?.data || {};
+      // `detail` is FastAPI's error field; `error` is the edge-worker's
+      // normalised field for infra errors (cold-start 503, etc.)
+      const detail = data.detail || data.error;
       const msg = (detail && typeof detail === 'object' && detail.message)
         || (typeof detail === 'string' ? detail : null)
+        || (status >= 500 ? 'Service temporarily unavailable — please try again' : null)
         || 'Invalid credentials';
       setError(msg);
     } finally {
