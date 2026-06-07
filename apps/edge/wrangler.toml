@@ -85,15 +85,9 @@ bucket_name = "syrabit-assets"
 
 [env.production.vars]
 ALLOWED_ORIGIN = "https://syrabit.ai"
-# REQUIRED: Set this to your Cloud Run service URL.
-# This MUST be overridden by a Wrangler secret in production.
-# If not set, the worker will reject all API requests with 503.
-#
-# Obtain the current stable service URL with:
-#   gcloud run services describe syrabit-backend --region asia-south1 --format='value(status.url)'
-# Override at runtime (highest priority) with a Wrangler secret:
+# BACKEND_URL is intentionally NOT set here as a var — it is managed exclusively
+# as a Wrangler secret so it can be updated via the infra script without a redeploy.
+# Set/update it with:
 #   npx wrangler secret put BACKEND_URL --env production
-#
-# Current active Cloud Run service (asia-south1):
-#   https://syrabit-backend-bl6wu3psza-el.a.run.app
-BACKEND_URL = "https://syrabit-backend-bl6wu3psza-el.a.run.app"
+#   (value: output of `gcloud run services describe syrabit-backend --region asia-south1 --format='value(status.url)'`)
+# Current Cloud Run URL: https://syrabit-backend-bl6wu3psza-el.a.run.app
