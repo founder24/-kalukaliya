@@ -42,7 +42,7 @@ async def lookup_wikidata_uri(topic_title: str) -> Optional[str]:
                 WIKIDATA_SEARCH_URL,
                 params=params,
                 headers={
-                    "User-Agent": "SyrabitBot/1.0 (https://syrabit.ai; contact@syrabit.ai)"
+                    "User-Agent": "SyrabitBot/1.0 (https://syrabit.ai; founder@syrabit.ai)"
                 },
             )
             if response.status_code != 200:

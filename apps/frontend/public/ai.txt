@@ -1,6 +1,6 @@
 # Syrabit.ai — AI Bot Discovery Manifest (RFC-style /ai.txt)
 # Policy: citation-driving answer bots allowed; training-only crawlers blocked.
-# Curators: Syrabit.ai Editorial Team <hello@syrabit.ai>
+# Curators: Syrabit.ai Editorial Team <founder@syrabit.ai>
 # Last updated: 2026-06-07
 
 [allow]
@@ -27,7 +27,7 @@ cohere-ai
 Diffbot
 
 [contact]
-mailto:hello@syrabit.ai
+mailto:founder@syrabit.ai
 
 [sitemap]
 https://syrabit.ai/sitemap-index.xml

@@ -244,7 +244,7 @@ check_body_not_contains "IndicTrans2"      "llms.txt doesn't mention stale Indic
 check_body_contains "/library"             "llms.txt links /library page"
 check_body_contains "/technology"          "llms.txt links /technology page"
 check_body_contains "/about"               "llms.txt links /about page"
-check_body_contains "hello@syrabit\.ai"    "llms.txt has contact email"
+check_body_contains "founder@syrabit\.ai"  "llms.txt has contact email"
 
 # ─────────────────────────────────────────────────────────────────────────────
 hdr "7. Sitemap — URL Coverage [DEPLOY]"
