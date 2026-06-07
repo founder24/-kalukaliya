@@ -1,34 +1,35 @@
 steps:
   # ── Step 0 (SSH setup): Configure SSH deploy key for GitHub ──────────────
-  # Uses a read-only deploy key stored in Secret Manager so all subsequent
-  # git operations inside the build can authenticate over SSH.
+  # Uses a read-only deploy key stored in Secret Manager.
+  # This step is OPTIONAL — it gracefully skips if the secret does not exist yet.
   #
   # ONE-TIME SETUP (run once in Cloud Shell, then add the public key to GitHub):
-  #   ssh-keygen -t ed25519 -C "cloud-build@syrabit" -f /tmp/syrabit_deploy_key -N ""
-  #   gcloud secrets create GITHUB_DEPLOY_SSH_KEY \
-  #     --replication-policy=automatic \
-  #     --data-file=/tmp/syrabit_deploy_key \
-  #     --project=blissful-acumen-495019-t6
-  #   cat /tmp/syrabit_deploy_key.pub
+  #   bash infra/scripts/setup-github-deploy-key.sh
   #   # → Go to GitHub: founder24/-kalukaliya → Settings → Deploy keys → Add deploy key
-  #   #   Title: "Cloud Build (read-only)", paste the public key, leave "Allow write access" unchecked.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
-    secretEnv:
-      - 'GITHUB_DEPLOY_SSH_KEY'
     args:
       - '-c'
       - |
-        set -euo pipefail
-        echo "=== SSH setup: configuring deploy key for GitHub ==="
+        set -uo pipefail
+        echo "=== SSH setup: checking for deploy key ==="
+        KEY=$(gcloud secrets versions access latest \
+          --secret=GITHUB_DEPLOY_SSH_KEY \
+          --project=blissful-acumen-495019-t6 2>/dev/null || echo "")
+        if [ -z "$KEY" ]; then
+          echo "  ⚠ GITHUB_DEPLOY_SSH_KEY not found in Secret Manager — skipping SSH setup"
+          echo "    Run: bash infra/scripts/setup-github-deploy-key.sh"
+          echo "=== SSH setup skipped (non-fatal) ==="
+          exit 0
+        fi
         mkdir -p /root/.ssh
-        echo "$$GITHUB_DEPLOY_SSH_KEY" > /root/.ssh/id_rsa
+        echo "$KEY" > /root/.ssh/id_rsa
         chmod 600 /root/.ssh/id_rsa
         ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null
         chmod 644 /root/.ssh/known_hosts
         ssh -T git@github.com -o StrictHostKeyChecking=yes 2>&1 | grep -q "successfully authenticated" \
           && echo "  ✓ GitHub SSH connectivity verified" \
-          || echo "  ⚠ GitHub SSH test returned non-zero (expected for read-only deploy keys — connection still works)"
+          || echo "  ⚠ GitHub SSH test returned non-zero (expected for read-only deploy keys)"
         echo "=== SSH setup complete ==="
 
   # ── Step 1: Pre-flight — validate all pinned versions exist on PyPI ───────
@@ -173,11 +174,6 @@ steps:
         else
           echo "No optional secrets found yet. See comments above for create commands."
         fi
-
-availableSecrets:
-  secretManager:
-    - versionName: projects/blissful-acumen-495019-t6/secrets/GITHUB_DEPLOY_SSH_KEY/versions/latest
-      env: 'GITHUB_DEPLOY_SSH_KEY'
 
 images:
   - 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$COMMIT_SHA'
