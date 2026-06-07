@@ -6,5 +6,6 @@
 - [Syrabit Cloud Run secrets strategy](syrabit-cloudrun-envvars.md) — gcloud run deploy DROPS all Secret Manager refs every deploy; must pass --update-secrets explicitly in cloudbuild.yaml every time
 - [Syrabit content model FlexId](syrabit-flexid.md) — DB uses legacy string IDs (e.g. 's13', UUID) not ObjectIds; all reference fields must use FlexId
 - [Syrabit credential map](syrabit-credentials.md) — Full credential map: GCP secrets, Cloudflare Worker secrets, Pages env vars, GitHub secrets
+- [Syrabit GitHub repo + deploy fix](syrabit-github-deploy.md) — Repo is founder24/-kalukaliya; deploy.yml optional-secrets pattern + --remove-secrets guard
 
 - [CF Worker CORS gaps](cf-worker-cors-gaps.md) — rate-limit 429/JWT 401/safety 503 returned before applyCorsHeaders; browser got TypeError(Failed to fetch)

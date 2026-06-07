@@ -561,43 +561,56 @@ async def section_github():
     }
     base = "https://api.github.com"
 
-    # Find repos
+    REPO = "founder24/-kalukaliya"
     t0 = time.time()
     try:
         async with make_client(10) as c:
-            resp = await c.get(f"{base}/user/repos?sort=pushed&per_page=10",
-                               headers=headers)
+            resp = await c.get(f"{base}/repos/{REPO}", headers=headers)
         ms = (time.time() - t0) * 1000
-        repos = resp.json()
-        if isinstance(repos, list):
-            syrabit_repos = [r for r in repos if "syrabit" in r.get("name","").lower()
-                             or "syrabit" in r.get("full_name","").lower()]
-            ok(f"GitHub API reachable ({ms:.0f}ms)  found {len(syrabit_repos)} syrabit repo(s)")
-            record("github", "api_access", "ok", ms, f"repos={[r['full_name'] for r in syrabit_repos]}")
-            for repo in syrabit_repos[:2]:
-                full = repo["full_name"]
-                # Check latest workflow runs
-                t1 = time.time()
-                try:
-                    async with make_client(10) as c:
-                        r2 = await c.get(f"{base}/repos/{full}/actions/runs?per_page=3",
-                                         headers=headers)
-                    runs_ms = (time.time() - t1) * 1000
-                    runs = r2.json().get("workflow_runs", [])
-                    for run in runs[:2]:
-                        name    = run.get("name", "?")
-                        status  = run.get("status", "?")
-                        concl   = run.get("conclusion", "?")
-                        created = run.get("created_at", "?")[:16]
-                        icon = G+"✓"+X if concl == "success" else (Y+"⚠"+X if concl == "skipped" else R+"✗"+X)
-                        print(f"    {icon} [{full}] {name}: {status}/{concl} @ {created}")
-                        record("github", f"run_{name}", "ok" if concl=="success" else "warn",
-                               runs_ms, f"{status}/{concl}")
-                except Exception as e:
-                    warn(f"  Workflow runs for {full}: {e}")
-        elif isinstance(repos, dict) and "message" in repos:
-            fail(f"GitHub API: {repos['message']}")
-            record("github", "api_access", "fail", ms, repos["message"])
+        repo = resp.json()
+        if resp.status_code == 200:
+            ok(f"Repo {REPO} — pushed_at={repo.get('pushed_at','?')[:16]}  branch={repo.get('default_branch','?')} ({ms:.0f}ms)")
+            record("github", "repo_access", "ok", ms, f"pushed={repo.get('pushed_at','?')[:16]}")
+        else:
+            fail(f"Repo access: {repo.get('message','?')} ({ms:.0f}ms)")
+            record("github", "repo_access", "fail", ms, repo.get("message","?"))
+            return
+
+        # Latest workflow runs — flag failures
+        t1 = time.time()
+        async with make_client(10) as c:
+            r2 = await c.get(f"{base}/repos/{REPO}/actions/runs?per_page=8", headers=headers)
+        runs_ms = (time.time() - t1) * 1000
+        runs = r2.json().get("workflow_runs", [])
+        total_runs = r2.json().get("total_count", 0)
+        info(f"Total workflow runs: {total_runs}")
+        for run in runs[:6]:
+            name    = run.get("name", "?")
+            concl   = run.get("conclusion", "in_progress")
+            created = run.get("created_at", "?")[:16]
+            branch  = run.get("head_branch", "?")
+            run_id  = run.get("id")
+            icon = G+"✓"+X if concl=="success" else (Y+"·"+X if concl in ("skipped","cancelled") else R+"✗"+X)
+            print(f"    {icon} {name}: {concl} @ {created} [{branch}]")
+            record("github", f"workflow_{name}", "ok" if concl=="success" else ("warn" if concl in ("skipped","cancelled","in_progress") else "fail"),
+                   runs_ms, f"{concl} @ {created}")
+
+            # Drill into failed run jobs
+            if concl == "failure":
+                async with make_client(10) as c:
+                    r3 = await c.get(f"{base}/repos/{REPO}/actions/runs/{run_id}/jobs", headers=headers)
+                jobs = r3.json().get("jobs", [])
+                for j in jobs:
+                    j_concl = j.get("conclusion","?")
+                    j_icon  = G+"✓"+X if j_concl=="success" else R+"✗"+X
+                    print(f"        {j_icon} Job: {j['name']} — {j_concl}")
+                    if j_concl == "failure":
+                        for step in j.get("steps", []):
+                            if step.get("conclusion") == "failure":
+                                print(f"            {R}✗{X} FAILED STEP: {step['name']}")
+                                record("github", f"step_{step['name'][:40]}", "fail", 0,
+                                       f"job={j['name']}")
+
     except Exception as e:
         ms = (time.time() - t0) * 1000
         fail(f"GitHub API error ({ms:.0f}ms): {e}")
