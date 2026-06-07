@@ -467,8 +467,8 @@ export default function LibraryPage() {
     [filteredSubjects, renderLimit]
   );
 
-  const seoTitle = 'Assamboard Subject Library — Notes, MCQs, Definitions & Exam Prep';
-  const seoDescription = `Explore ${subjects.length || ''} Assamboard Class 11-12 and Degree subjects with ${totalSeoTopics || ''} study topics. AI-powered notes, MCQs, definitions, important questions, and examples for Assam students.`.replace(/  +/g, ' ').trim();
+  const seoTitle = 'Assam Board Subject Library — Notes, MCQs, Definitions & Exam Prep';
+  const seoDescription = `Explore ${subjects.length || ''} Assam Board subjects (AHSEC, SEBA, Degree) with ${totalSeoTopics || ''} study topics. AI-powered notes, MCQs, definitions, important questions, and exam prep for Assam students.`.replace(/  +/g, ' ').trim();
   const seoKeywords = 'Assam Board study material, AHSEC notes, SEBA notes, Class 11 notes Assam, Class 12 notes Assam, MCQs Assam Board, definitions, important questions, exam preparation Assam, Syrabit';
 
   if (bundleLoading) {
