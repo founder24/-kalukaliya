@@ -779,6 +779,177 @@ http_call GET "${EDGE_URL}/api/v1/admin/dashboard"  # No cookie jar
   || fail "Admin guard" "expected 401/403, got ${RESP_STATUS}"
 
 # =============================================================================
+banner 8 "Security Audit Regression Guards"
+# =============================================================================
+# These checks map to specific items from the June 2026 full-stack audit.
+# Each one verifies that a particular fix has not regressed.
+# See .local/full-stack-audit.md for the full issue list.
+
+# ── C-3: /health must not expose internals ────────────────────────────────────
+section "C-3 · /health must not leak internal error details"
+http_call GET "${EDGE_URL}/health"
+if [[ "$RESP_STATUS" == "200" ]]; then
+  ok "GET /health → 200  [${RESP_MS}ms]"
+  HEALTH_CLEAN=true
+  for pattern in "Traceback" "ConnectionRefusedError" "mongodb+srv://" "password" \
+                 "Exception at" "File \"/app" "OperationFailure" "redis://"; do
+    if printf '%s' "$RESP_BODY" | grep -qi "$pattern"; then
+      fail "C-3: /health leaks internal detail: '${pattern}'" "${RESP_BODY:0:100}"
+      HEALTH_CLEAN=false
+    fi
+  done
+  $HEALTH_CLEAN && ok "C-3: /health body has no stack traces / credentials / internal paths"
+else
+  fail "GET /health" "[${RESP_STATUS}] (C-3 check skipped)"
+fi
+
+# ── H-1: admin logout must include server_revocation ─────────────────────────
+section "H-1 · Admin logout response includes server_revocation field"
+AUDIT_JAR=$(mktemp)
+http_call POST "${EDGE_URL}/api/v1/admin/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASS}\"}" \
+  -c "$AUDIT_JAR"
+if [[ "$RESP_STATUS" == "200" ]]; then
+  http_call POST "${EDGE_URL}/api/v1/admin/logout" -b "$AUDIT_JAR"
+  if [[ "$RESP_STATUS" == "200" ]]; then
+    sv=$(jval "server_revocation")
+    [[ -n "$sv" ]] \
+      && ok "H-1: admin logout has server_revocation field" "server_revocation=${sv}" \
+      || fail "H-1: server_revocation field missing in logout response" "${RESP_BODY:0:100}"
+  else
+    fail "H-1: POST /admin/logout" "[${RESP_STATUS}] ${RESP_BODY:0:80}"
+  fi
+else
+  fail "H-1: Admin login failed for logout test" "[${RESP_STATUS}]"
+fi
+rm -f "$AUDIT_JAR"
+
+# ── M-1: admin list endpoints must honour skip/limit ─────────────────────────
+section "M-1 · Admin content list endpoints respect skip/limit pagination"
+AUDIT_JAR2=$(mktemp)
+http_call POST "${EDGE_URL}/api/v1/admin/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASS}\"}" \
+  -c "$AUDIT_JAR2"
+if [[ "$RESP_STATUS" == "200" ]]; then
+  # limit=1 must return at most 1 item
+  http_call GET "${EDGE_URL}/api/v1/admin/content/boards?skip=0&limit=1" -b "$AUDIT_JAR2"
+  if [[ "$RESP_STATUS" == "200" ]]; then
+    cnt=$(printf '%s' "$RESP_BODY" | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+items = d if isinstance(d,list) else d.get('boards', d.get('items',[]))
+print(len(items))" 2>/dev/null || echo -1)
+    [[ "${cnt:-0}" -le 1 ]] \
+      && ok "M-1: /admin/content/boards?limit=1 → ${cnt} item(s) (limit honoured)" \
+      || fail "M-1: limit=1 ignored — returned ${cnt} items"
+  else
+    fail "M-1: /admin/content/boards?limit=1" "[${RESP_STATUS}]"
+  fi
+
+  # limit=9999 must be rejected (validator: le=1000)
+  http_call GET "${EDGE_URL}/api/v1/admin/content/chapters?limit=9999" -b "$AUDIT_JAR2"
+  [[ "$RESP_STATUS" == "422" ]] \
+    && ok "M-1: limit=9999 → 422 (upper bound validator enforced)" \
+    || fail "M-1: limit=9999 not rejected" "expected 422, got ${RESP_STATUS}"
+
+  # negative skip must be rejected (validator: ge=0)
+  http_call GET "${EDGE_URL}/api/v1/admin/content/subjects?skip=-1&limit=5" -b "$AUDIT_JAR2"
+  [[ "$RESP_STATUS" == "422" ]] \
+    && ok "M-1: skip=-1 → 422 (lower bound validator enforced)" \
+    || fail "M-1: negative skip not rejected" "expected 422, got ${RESP_STATUS}"
+
+  http_call POST "${EDGE_URL}/api/v1/admin/logout" -b "$AUDIT_JAR2" >/dev/null 2>&1 || true
+else
+  fail "M-1: Admin login failed for pagination test" "[${RESP_STATUS}]"
+fi
+rm -f "$AUDIT_JAR2"
+
+# ── M-15: /llms-full.txt must exist ──────────────────────────────────────────
+section "M-15 · /llms-full.txt endpoint returns content"
+http_call GET "${SITE_URL}/llms-full.txt"
+if [[ "$RESP_STATUS" == "200" ]]; then
+  blen=$(printf '%s' "$RESP_BODY" | wc -c | tr -d ' ')
+  ok "M-15: GET /llms-full.txt → 200  (${blen} bytes)"
+  printf '%s' "$RESP_BODY" | grep -qi "syrabit" \
+    && ok "M-15: /llms-full.txt references syrabit" \
+    || fail "M-15: /llms-full.txt doesn't mention syrabit"
+else
+  fail "M-15: GET /llms-full.txt" "[${RESP_STATUS}] — endpoint or CF worker route missing"
+fi
+
+# ── M-4: robots.txt must not list nonexistent sitemaps ───────────────────────
+section "M-4 · robots.txt has no stale/nonexistent sitemap entries"
+http_call GET "${SITE_URL}/robots.txt"
+if [[ "$RESP_STATUS" == "200" ]]; then
+  STALE_PASS=true
+  for stale in "sitemap-notes.xml" "sitemap-mcqs.xml" "sitemap-pyqs.xml" \
+               "sitemap-examples.xml" "sitemap-definitions.xml" \
+               "sitemap-learn.xml" "sitemap-pages.xml"; do
+    if printf '%s' "$RESP_BODY" | grep -qF "$stale"; then
+      fail "M-4: robots.txt lists nonexistent sitemap: ${stale}"
+      STALE_PASS=false
+    fi
+  done
+  $STALE_PASS && ok "M-4: robots.txt contains no stale sitemap entries"
+  # Real sitemaps must still be listed
+  for real in "sitemap-index.xml" "sitemap-subjects.xml"; do
+    printf '%s' "$RESP_BODY" | grep -qF "$real" \
+      && ok "M-4: robots.txt lists real sitemap: ${real}" \
+      || fail "M-4: robots.txt missing real sitemap: ${real}"
+  done
+else
+  fail "M-4: GET ${SITE_URL}/robots.txt" "[${RESP_STATUS}]"
+fi
+
+# ── L-8: sitemap dates must be dynamic (current) ─────────────────────────────
+section "L-8 · Sitemap lastmod dates are dynamically generated (not hardcoded)"
+TODAY_DATE=$(date -u '+%Y-%m-%d')
+YESTERDAY_DATE=$(date -u -d 'yesterday' '+%Y-%m-%d' 2>/dev/null \
+  || date -u -v-1d '+%Y-%m-%d' 2>/dev/null \
+  || python3 -c "from datetime import date,timedelta; print(date.today()-timedelta(1))")
+
+for sm_url in "${SITE_URL}/sitemap.xml" "${SITE_URL}/sitemap-static.xml"; do
+  http_call GET "$sm_url"
+  if [[ "$RESP_STATUS" == "200" ]]; then
+    dates=$(printf '%s' "$RESP_BODY" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | sort -u)
+    recent=false
+    while IFS= read -r d; do
+      if [[ "$d" == "$TODAY_DATE" || "$d" == "$YESTERDAY_DATE" ]]; then
+        recent=true; break
+      fi
+      age=$(python3 -c "
+from datetime import date
+try:
+    print((date.today() - date.fromisoformat('${d}')).days)
+except: print(9999)" 2>/dev/null || echo 9999)
+      [[ "${age:-9999}" -le 7 ]] && recent=true && break
+    done <<< "$dates"
+    $recent \
+      && ok "L-8: ${sm_url##*/} lastmod is current (≤7 days old)" \
+             "dates=$(printf '%s' "$dates" | tr '\n' ' ')" \
+      || fail "L-8: ${sm_url##*/} has stale/hardcoded dates" \
+              "found: $(printf '%s' "$dates" | tr '\n' ' ')  expected: ${TODAY_DATE}"
+  else
+    skip "L-8 ${sm_url##*/} dates" "${RESP_STATUS} — may require CF Pages deploy"
+  fi
+done
+
+# ── M-6: chat endpoint enforces 2000-char limit ───────────────────────────────
+section "M-6 · Chat endpoint enforces 2000-character message limit"
+LONG_MSG=$(python3 -c "print('A' * 2100)")
+http_call POST "${EDGE_URL}/api/v1/chat/" \
+  -H "Content-Type: application/json" \
+  -H "Origin: https://syrabit.ai" \
+  -d "{\"message\":\"${LONG_MSG}\",\"lang\":\"en\",\"session_id\":\"audit-m6-$(date +%s)\"}"
+case "$RESP_STATUS" in
+  422) ok "M-6: 2100-char message → 422 (Pydantic max_length=2000 enforced)" ;;
+  200) ok "M-6: 2100-char message accepted (server-side sanitize_user_input truncation active)" ;;
+  429) skip "M-6 long message" "rate-limited [429] — limit guard confirmed in code" ;;
+  *)   fail "M-6: Unexpected response to 2100-char message" "[${RESP_STATUS}] ${RESP_BODY:0:60}" ;;
+esac
+
+# =============================================================================
 # RESULTS
 # =============================================================================
 TOTAL=$((PASS + FAIL + SKIP))

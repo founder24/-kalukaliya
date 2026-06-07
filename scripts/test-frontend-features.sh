@@ -188,6 +188,32 @@ for deploy_check in \
     fi
 done
 
+# M-4 audit fix: stale/nonexistent sitemaps must be absent from robots.txt
+# These 7 entries were removed because the backend endpoints never existed.
+for stale in \
+    "sitemap-notes.xml" \
+    "sitemap-mcqs.xml" \
+    "sitemap-pyqs.xml" \
+    "sitemap-examples.xml" \
+    "sitemap-definitions.xml" \
+    "sitemap-learn.xml" \
+    "sitemap-pages.xml"; do
+    if printf '%s' "$HTTP_BODY" | grep -qF "$stale"; then
+        fail "M-4: robots.txt still lists nonexistent sitemap: $stale"
+    else
+        ok "M-4: Stale sitemap absent from robots.txt: $stale"
+    fi
+done
+
+# Real sitemaps that must still be listed
+for real in "sitemap-index.xml" "sitemap-subjects.xml" "sitemap-chapters.xml"; do
+    if printf '%s' "$HTTP_BODY" | grep -qF "$real"; then
+        ok "M-4: Real sitemap present in robots.txt: $real"
+    else
+        fail "M-4: robots.txt missing real sitemap: $real"
+    fi
+done
+
 # ─────────────────────────────────────────────────────────────────────────────
 hdr "5. ai.txt — AI Bot Manifest"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -240,11 +266,31 @@ else
     skip "sitemap has /technology [DEPLOY: not yet in production — push to CF Pages]"
 fi
 
-# Stale lastmod dates (2025-01-15 was the original date, updated to 2026-06-07)
-if printf '%s' "$HTTP_BODY" | grep -qiE "2025-01-15"; then
-    skip "sitemap lastmod dates are stale (2025-01-15) [DEPLOY: not yet updated in production]"
+# L-8 audit fix: lastmod must be dynamically generated, not a hardcoded string.
+# We verify the dates are current (within the last 7 days), not any old hardcoded value.
+_today=$(date -u '+%Y-%m-%d')
+_yesterday=$(date -u -d 'yesterday' '+%Y-%m-%d' 2>/dev/null \
+  || date -u -v-1d '+%Y-%m-%d' 2>/dev/null \
+  || python3 -c "from datetime import date,timedelta; print(date.today()-timedelta(1))")
+_dates=$(printf '%s' "$HTTP_BODY" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | sort -u)
+_recent=false
+while IFS= read -r _d; do
+    if [[ "$_d" == "$_today" || "$_d" == "$_yesterday" ]]; then
+        _recent=true; break
+    fi
+    _age=$(python3 -c "
+from datetime import date
+try: print((date.today() - date.fromisoformat('${_d}')).days)
+except: print(9999)" 2>/dev/null || echo 9999)
+    [[ "${_age:-9999}" -le 7 ]] && _recent=true && break
+done <<< "$_dates"
+if $_recent; then
+    ok "L-8: sitemap-static.xml lastmod is current (≤7 days old, dynamic generation working)"
+elif [[ -z "$_dates" ]]; then
+    fail "L-8: sitemap-static.xml has no date values at all"
 else
-    ok "sitemap lastmod dates are current (not stale 2025-01-15)"
+    fail "L-8: sitemap-static.xml has stale/hardcoded lastmod dates" \
+         "found: $(printf '%s' "$_dates" | tr '\n' ' ')  expected near: ${_today}"
 fi
 
 fetch "${FRONTEND}/sitemap-index.xml"
@@ -375,6 +421,154 @@ if [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "404" ]]; then
     ok "Unknown route → ${HTTP_STATUS} (SPA router or 404 page — not a 5xx)"
 else
     fail "Unknown route → unexpected $HTTP_STATUS (expected 200 or 404)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "15. Security Audit Regression Guards  [AUDIT]"
+# ─────────────────────────────────────────────────────────────────────────────
+# Each check maps to a named issue from the June 2026 full-stack security audit.
+# These verify that specific fixes have not regressed after subsequent deploys.
+
+GOOGLEBOT_UA="Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+
+# ── H-4: Security headers must appear on bot-rendered and sitemap responses ──
+
+_bot_headers=$(curl -sI -L --max-time "$TIMEOUT" \
+    -A "$GOOGLEBOT_UA" \
+    -H "Accept: text/html" \
+    "$FRONTEND/" 2>/dev/null)
+_bot_status=$(printf '%s' "$_bot_headers" | grep -oE 'HTTP/[0-9.]+ [0-9]+' | tail -1 | grep -oE '[0-9]+$')
+
+if [[ "$_bot_status" == "200" ]]; then
+    ok "H-4: GET / with Googlebot UA → 200"
+    for _h in "x-frame-options" "x-content-type-options" "referrer-policy" "permissions-policy"; do
+        if printf '%s' "$_bot_headers" | grep -qiE "^${_h}:"; then
+            _hv=$(printf '%s' "$_bot_headers" | grep -iE "^${_h}:" | head -1 \
+                  | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r')
+            ok "H-4: ${_h} on bot-rendered response" "${_hv}"
+        else
+            fail "H-4: ${_h} missing on bot-rendered response (addSecurityHeaders() not firing)"
+        fi
+    done
+elif [[ "$_bot_status" == "503" ]]; then
+    ok "H-4/M-5: Googlebot got 503 — M-5 fix active (no soft-404 SPA shell)"
+    skip "H-4 security header check on bot path" "bot-render backend returned 503, deferred"
+else
+    fail "H-4: GET / with Googlebot UA returned ${_bot_status:-000}"
+fi
+
+# Sitemap proxy responses must also carry security headers
+_sm_headers=$(curl -sI -L --max-time "$TIMEOUT" \
+    -A "$GOOGLEBOT_UA" \
+    "$FRONTEND/sitemap-subjects.xml" 2>/dev/null)
+_sm_status=$(printf '%s' "$_sm_headers" | grep -oE 'HTTP/[0-9.]+ [0-9]+' | tail -1 | grep -oE '[0-9]+$')
+if [[ "$_sm_status" == "200" ]]; then
+    ok "H-4: GET /sitemap-subjects.xml → 200"
+    for _h in "x-frame-options" "x-content-type-options"; do
+        if printf '%s' "$_sm_headers" | grep -qiE "^${_h}:"; then
+            ok "H-4: ${_h} on sitemap proxy response"
+        else
+            fail "H-4: ${_h} missing on sitemap proxy response"
+        fi
+    done
+else
+    skip "H-4 sitemap security headers" "sitemap-subjects.xml returned ${_sm_status:-000}"
+fi
+
+# ── M-5: Bot UA on unknown path must get 503, not a silent SPA shell ─────────
+
+_m5_body=$(mktemp)
+_m5_status=$(curl -s -o "$_m5_body" -w "%{http_code}" --max-time "$TIMEOUT" \
+    -A "$GOOGLEBOT_UA" \
+    -H "Accept: text/html" \
+    "${FRONTEND}/syrabit-audit-probe-$(date +%s)-xyz" 2>/dev/null || echo "000")
+if [[ "$_m5_status" == "503" ]]; then
+    ok "M-5: Unknown path with bot UA → 503 (no soft-404 SPA shell served)"
+elif [[ "$_m5_status" == "200" ]]; then
+    _is_spa=$(grep -cE 'id="root"|id="app"' "$_m5_body" 2>/dev/null || true)
+    if [[ "$_is_spa" -gt 0 ]]; then
+        fail "M-5: Bot gets SPA shell for unknown path (soft-404) — should be 503"
+    else
+        ok "M-5: 200 with non-SPA body — may be a prerendered snapshot (acceptable)"
+    fi
+else
+    skip "M-5 bot 503 check" "got ${_m5_status} — may be CDN-cached or rate-limited"
+fi
+rm -f "$_m5_body"
+
+# ── M-15: /llms-full.txt must be accessible and contain content ──────────────
+
+fetch "${FRONTEND}/llms-full.txt"
+if [[ "$HTTP_STATUS" == "200" ]]; then
+    _blen=$(printf '%s' "$HTTP_BODY" | wc -c | tr -d ' ')
+    ok "M-15: GET /llms-full.txt → 200  (${_blen} bytes)"
+    if printf '%s' "$HTTP_BODY" | grep -qiE "syrabit"; then
+        ok "M-15: /llms-full.txt contains syrabit content"
+    else
+        fail "M-15: /llms-full.txt body doesn't reference syrabit"
+    fi
+    [[ "${_blen:-0}" -gt 200 ]] \
+        && ok "M-15: /llms-full.txt has substantive content (${_blen} bytes)" \
+        || fail "M-15: /llms-full.txt too short — backend endpoint may not be returning chapters"
+else
+    fail "M-15: GET /llms-full.txt → ${HTTP_STATUS} (endpoint or CF worker proxy missing)"
+fi
+
+# ── L-8: sitemap-index.xml lastmod must also be current (not hardcoded) ──────
+
+fetch "${FRONTEND}/sitemap.xml"
+if [[ "$HTTP_STATUS" == "200" ]]; then
+    _idx_dates=$(printf '%s' "$HTTP_BODY" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | sort -u)
+    _idx_recent=false
+    while IFS= read -r _d; do
+        [[ "$_d" == "$_today" || "$_d" == "$_yesterday" ]] && _idx_recent=true && break
+        _age=$(python3 -c "
+from datetime import date
+try: print((date.today() - date.fromisoformat('${_d}')).days)
+except: print(9999)" 2>/dev/null || echo 9999)
+        [[ "${_age:-9999}" -le 7 ]] && _idx_recent=true && break
+    done <<< "$_idx_dates"
+    if $_idx_recent; then
+        ok "L-8: sitemap-index.xml lastmod is current (dynamic generation working)"
+    else
+        fail "L-8: sitemap-index.xml has stale/hardcoded lastmod" \
+             "found: $(printf '%s' "$_idx_dates" | tr '\n' ' ')  expected near: ${_today}"
+    fi
+else
+    skip "L-8 sitemap-index lastmod" "sitemap.xml returned ${HTTP_STATUS}"
+fi
+
+# ── Sitemap content-type must be application/xml ──────────────────────────────
+
+for _sm in "/sitemap.xml" "/sitemap-static.xml" "/sitemap-subjects.xml"; do
+    fetch_headers "${FRONTEND}${_sm}"
+    if [[ "$HTTP_STATUS" == "200" ]]; then
+        _ct=$(printf '%s' "$HTTP_HEADERS" | grep -i "^content-type:" | head -1 \
+              | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r')
+        if printf '%s' "$_ct" | grep -qiE "xml"; then
+            ok "Sitemap content-type: ${_sm} → ${_ct}"
+        else
+            fail "Sitemap wrong content-type: ${_sm}" "got '${_ct}' expected application/xml"
+        fi
+    else
+        skip "Sitemap content-type ${_sm}" "returned ${HTTP_STATUS}"
+    fi
+done
+
+# ── H-6: XSS-susceptible pages load without server errors ────────────────────
+# DOMPurify runs in the browser — we can't test JS execution, but we verify
+# these pages serve clean HTML (no server-side rendering error that would
+# indicate a DOMPurify import failure crashing the build).
+
+fetch "${FRONTEND}/library"
+if [[ "$HTTP_STATUS" == "200" ]]; then
+    if printf '%s' "$HTTP_BODY" | grep -qiE "Internal Server Error|SyntaxError|ReferenceError"; then
+        fail "H-6: /library HTML contains JS error signature (DOMPurify import may be broken)"
+    else
+        ok "H-6: /library serves clean HTML (DOMPurify not crashing build)"
+    fi
+else
+    fail "H-6: /library → ${HTTP_STATUS}"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
