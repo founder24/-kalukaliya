@@ -40,55 +40,81 @@ class SarvamAIClient:
     async def generate(
         self, system_prompt: str, user_message: str, stream: bool = False
     ) -> str:
-        """Generate response using Sarvam AI (sarvam-m model)"""
+        """Generate response using Sarvam AI (sarvam-m model).
+
+        Retry policy (mirrors vertex_client):
+          - 429 Too Many Requests → wait 3 s then retry once
+          - 500 / 502 / 503 from Sarvam → wait 2 s then retry once
+        httpx.HTTPStatusError is re-raised after exhaustion so chat.py can
+        return an appropriate response to the client.
+        """
         if not self.api_key:
             raise RuntimeError("Sarvam AI not configured (SARVAM_API_KEY is empty)")
 
-        try:
-
-            async def _do_generate():
-                response = await self._client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_message},
-                        ],
-                        "temperature": 0.7,
-                        "max_tokens": 2048,
-                        "stream": stream,
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-
-                # Extract response text
-                if "choices" in data and len(data["choices"]) > 0:
-                    return data["choices"][0]["message"]["content"]
-                return "\u09ae\u0987 \u0995\u09cb\u09a8\u09cb \u0989\u09a4\u09cd\u09a4\u09f0 \u09b8\u09c3\u09b7\u09cd\u099f\u09bf \u0995\u09f0\u09bf\u09ac \u09aa\u09f0\u09be \u09a8\u09be\u0987\u09b2\u09cb\u0964 \u0985\u09a8\u09c1\u0997\u09cd\u09f0\u09b9 \u0995\u09f0\u09bf \u09aa\u09c1\u09a8\u09f0 \u099a\u09c7\u09b7\u09cd\u099f\u09be \u0995\u09f0\u0995\u0964"
-
-            result = await sarvam_circuit_breaker.call(_do_generate)
-            return _strip_think_block(result)
-        except CircuitBreakerError as e:
-            raise RuntimeError(f"Sarvam AI unavailable: {e}")
-        except httpx.HTTPStatusError as e:
-            body = ""
-            try:
-                body = e.response.text[:500]
-            except Exception:
-                pass
-            logger.error(
-                f"Sarvam API HTTP error: {e.response.status_code} | model={self.model} | body={body}"
+        async def _do_generate():
+            response = await self._client.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message},
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 2048,
+                    "stream": stream,
+                },
             )
-            raise RuntimeError(f"Sarvam API error: {e.response.status_code}")
-        except Exception as e:
-            logger.error(f"Sarvam AI error: {str(e)}")
-            raise RuntimeError(f"Sarvam AI service failed: {e}")
+            response.raise_for_status()
+            data = response.json()
+
+            if "choices" in data and len(data["choices"]) > 0:
+                return data["choices"][0]["message"]["content"]
+            return "\u09ae\u0987 \u0995\u09cb\u09a8\u09cb \u0989\u09a4\u09cd\u09a4\u09f0 \u09b8\u09c3\u09b7\u09cd\u099f\u09bf \u0995\u09f0\u09bf\u09ac \u09aa\u09f0\u09be \u09a8\u09be\u0987\u09b2\u09cb\u0964 \u0985\u09a8\u09c1\u0997\u09cd\u09f0\u09b9 \u0995\u09f0\u09bf \u09aa\u09c1\u09a8\u09f0 \u099a\u09c7\u09b7\u09cd\u099f\u09be \u0995\u09f0\u0995\u0964"
+
+        _last_http_exc: httpx.HTTPStatusError | None = None
+
+        for attempt in range(2):
+            try:
+                result = await sarvam_circuit_breaker.call(_do_generate)
+                return _strip_think_block(result)
+            except CircuitBreakerError as e:
+                raise RuntimeError(f"Sarvam AI unavailable: {e}")
+            except httpx.HTTPStatusError as e:
+                _last_http_exc = e
+                status = e.response.status_code
+                if status in (429, 500, 502, 503) and attempt == 0:
+                    wait = 3 if status == 429 else 2
+                    body = ""
+                    try:
+                        body = e.response.text[:200]
+                    except Exception:
+                        pass
+                    logger.warning(
+                        f"Sarvam API HTTP {status} on attempt 1; retrying after {wait}s | body={body}"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                body = ""
+                try:
+                    body = e.response.text[:500]
+                except Exception:
+                    pass
+                logger.error(
+                    f"Sarvam API HTTP {status} "
+                    f"({'retries exhausted' if attempt > 0 else 'non-retryable'}) "
+                    f"| model={self.model} | body={body}"
+                )
+                raise
+            except Exception as e:
+                logger.error(f"Sarvam AI error: {str(e)}")
+                raise RuntimeError(f"Sarvam AI service failed: {e}")
+
+        raise _last_http_exc or RuntimeError("Sarvam AI generate: exhausted retries")
 
     async def stream_generate(
         self,
@@ -210,7 +236,7 @@ class SarvamAIClient:
         system_prompt: str,
         user_message: str,
         max_retries: int = 1,
-        retry_delay: float = 0.3,
+        retry_delay: float = 2.0,
     ) -> AsyncGenerator[str, None]:
         """
         Stream with retry logic for resilience.

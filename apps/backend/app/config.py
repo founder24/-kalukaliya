@@ -21,6 +21,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        env_ignore_empty=True,
     )
 
     # --- P1: Cloudflare (Edge) — not used by backend at runtime ---

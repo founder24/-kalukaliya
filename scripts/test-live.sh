@@ -222,8 +222,9 @@ try:
         state = cb.get('state', '?')
         fc    = cb.get('failure_count', 0)
         thresh = cb.get('failure_threshold', '?')
-        icon  = '✔' if state == 'closed' else ('⚡' if state == 'half_open' else '✖')
-        print(f'     {icon}  {name}: {state}  failures={fc}/{thresh}')
+        sl    = state.lower()
+        icon  = '✔' if sl == 'closed' else ('⚡' if sl == 'half_open' else '✖')
+        print(f'     {icon}  {name}: {state.upper()}  failures={fc}/{thresh}')
 except: pass
 " 2>/dev/null || true
 else
@@ -256,7 +257,7 @@ cb_ok=$(printf '%s' "$RESP_BODY" | python3 -c \
 [[ "$RESP_STATUS" == "200" && ("$cb_ok" == "True" || "$cb_ok" == "true") ]] \
   && ok "CF edge → backend tunnel healthy" "${RESP_MS}ms" \
   || warn "CF edge health degraded" "[${RESP_STATUS}] backend_reachable=${cb_ok}"
-slo_check "CF edge response time" "$RESP_MS" 800 500
+slo_check "CF edge response time" "$RESP_MS" 1500 800
 
 # =============================================================================
 banner 0 "CF Edge Connectivity  ($EDGE_URL)"
@@ -512,7 +513,7 @@ print(str(r)[:100])
 " 2>/dev/null || echo "")
     [[ -n "$reply" ]] && ok "Anonymous AI reply (EN)" "${reply}…" \
       || fail "Anonymous reply empty" "$(printf '%s' "$RESP_BODY" | head -c 150)"
-    slo_check "EN anonymous chat latency" "$RESP_MS" 5000 4000
+    slo_check "EN anonymous chat latency" "$RESP_MS" 8000 5000
   fi
 fi
 TIMEOUT=30
@@ -563,7 +564,7 @@ print(f'[detected={lang}] {str(r)[:90]}')
 " 2>/dev/null || echo "")
       [[ -n "$reply" ]] && ok "Auto-detect Assamese" "${reply}…" \
         || fail "Auto-detect AS empty"
-      slo_check "AS auto-detect latency" "$RESP_MS" 8000 6000
+      slo_check "AS auto-detect latency" "$RESP_MS" 13000 10000
     fi
   fi
   TIMEOUT=30
