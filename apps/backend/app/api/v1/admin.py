@@ -6,6 +6,7 @@ Origin validation is enforced on all mutating (non-GET) requests.
 """
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -62,6 +63,19 @@ async def _csrf_check(request: Request):
             )
 
 
+async def _is_admin_token_blacklisted(token: str) -> bool:
+    """Check if an admin session token has been blacklisted (revoked via logout)."""
+    try:
+        from app.db.redis import get_redis
+        redis = get_redis()
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        result = await redis.get(f"blacklisted_admin_token:{token_hash}")
+        return result is not None
+    except Exception as e:
+        logger.warning(f"Redis unavailable for admin token blacklist check: {e}")
+        return False  # fail-open: token expires naturally (max 8h)
+
+
 async def _validate_admin_session(request: Request) -> dict:
     """Validate admin session cookie and return payload. Raises HTTPException on failure."""
     session_cookie = request.cookies.get("syrabit_admin_session")
@@ -79,6 +93,8 @@ async def _validate_admin_session(request: Request) -> dict:
                 )
                 # For Bearer tokens with type "admin", allow directly
                 if payload.get("type") == "admin" and payload.get("role") == "admin":
+                    if await _is_admin_token_blacklisted(token):
+                        raise HTTPException(status_code=401, detail="Session revoked")
                     return payload
                 # For access tokens, verify user has admin role in DB
                 if payload.get("type") == "access":
@@ -114,6 +130,8 @@ async def _validate_admin_session(request: Request) -> dict:
         )
         if payload.get("type") != "admin" or payload.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if await _is_admin_token_blacklisted(session_cookie):
+            raise HTTPException(status_code=401, detail="Session revoked")
         return payload
     except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
@@ -201,8 +219,29 @@ async def admin_login(request: Request):
 
 @router.post("/logout")
 async def admin_logout(request: Request):
-    """Clear admin session cookie."""
+    """Clear admin session cookie and blacklist the session JWT in Redis."""
     await _csrf_check(request)
+
+    # Blacklist the session JWT so it cannot be replayed even if the client
+    # keeps a copy of the cookie value (e.g. test scripts, compromised device).
+    session_cookie = request.cookies.get("syrabit_admin_session")
+    if session_cookie:
+        try:
+            verify_key, verify_alg = _get_admin_verification_key()
+            payload = jwt.decode(session_cookie, verify_key, algorithms=[verify_alg])
+            exp = payload.get("exp", 0)
+            now = int(datetime.now(timezone.utc).timestamp())
+            ttl = max(exp - now, 1)
+            from app.db.redis import get_redis
+            redis = get_redis()
+            token_hash = hashlib.sha256(session_cookie.encode()).hexdigest()
+            await redis.set(f"blacklisted_admin_token:{token_hash}", "1", ex=ttl)
+            logger.info(f"Admin session blacklisted for user {payload.get('sub')} (ttl={ttl}s)")
+        except Exception as e:
+            # Fail-open: cookie will be cleared in the browser regardless.
+            # The JWT will expire naturally (max 8h).
+            logger.warning(f"Admin logout blacklist failed (fail-open): {type(e).__name__}: {e}")
+
     response = JSONResponse({"status": "ok", "message": "Logged out"})
     response.delete_cookie(
         key="syrabit_admin_session",

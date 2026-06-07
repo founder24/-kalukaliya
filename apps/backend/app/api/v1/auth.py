@@ -778,6 +778,7 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
 
 @router.post("/logout", response_model=MessageResponse)
 async def logout(
+    request: Request,
     body: LogoutRequest,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     user: User = Depends(get_current_user),
@@ -787,7 +788,13 @@ async def logout(
     Revokes the refresh token as well.
     Raises 503 if Redis is unavailable (fail-closed).
     """
-    token = credentials.credentials
+    # The CF Worker replaces Authorization with its own OIDC identity token
+    # and puts the original user JWT in X-User-JWT.  Use the same resolution
+    # order as get_current_user so we always blacklist the user's actual token.
+    user_jwt_header = request.headers.get("X-User-JWT", "")
+    if user_jwt_header.startswith("Bearer "):
+        user_jwt_header = user_jwt_header[7:]
+    token = user_jwt_header or credentials.credentials
 
     # Decode the access token to get its expiry (get_current_user already
     # validated it, so this should not fail; any exception here is a config

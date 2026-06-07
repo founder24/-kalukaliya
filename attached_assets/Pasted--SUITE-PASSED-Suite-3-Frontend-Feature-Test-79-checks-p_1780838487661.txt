@@ -1,0 +1,1022 @@
+
+  ✔ SUITE PASSED
+
+══ Suite 3: Frontend Feature Test (79 checks: pages, SEO files, PWA, headers) ══
+   13:14:56 UTC
+
+  Syrabit.ai Frontend Feature Test
+  Target : https://syrabit.ai
+  Time   : 2026-06-07 13:14:56 UTC
+
+══ 1. Page Availability ══
+  ✔  GET / → 200
+  ✔  GET /library → 200
+  ✔  GET /chat → 200
+  ✔  GET /about → 200
+  ✔  GET /technology → 200
+  ✔  GET /pricing → 200
+
+══ 2. Page Titles (prerendered HTML) ══
+  ✔  /library title: 'Assamboard Subject Library — Notes, MCQs, Definitions &amp; Exam Prep'
+  ✔  /technology title: 'Technology Behind Syrabit.ai — RAG, AI Tutors &amp; Speed'
+  ✔  /pricing title: 'Pricing &amp; Plans — Free, Starter &amp; Pro | Syrabit.ai'
+  ✔  /chat title: 'Syrabit AI Chat — Ask Anything About Your Syllabus'
+  ✔  /about title: 'About Syrabit.ai — The Educational Browser For Assam'
+
+══ 3. Static SEO Files — Availability ══
+  ✔  GET /robots.txt → 200
+  ✔  GET /llms.txt → 200
+  ✔  GET /ai.txt → 200
+  ✔  GET /sitemap-static.xml → 200
+  ✔  GET /sitemap-index.xml → 200
+  ✔  GET /manifest.json → 200
+
+══ 4. robots.txt — Bot Policy [DEPLOY] ══
+  ✔  robots.txt lists sitemap(s)
+  ✔  robots.txt mentions GPTBot (disallowed)
+  ✔  robots.txt has User-agent directives
+  –  robots.txt allows PerplexityBot [DEPLOY: not yet in production — push to CF Pages]
+  –  robots.txt allows ChatGPT-User [DEPLOY: not yet in production — push to CF Pages]
+  –  robots.txt allows YouBot [DEPLOY: not yet in production — push to CF Pages]
+  ✔   /admin:robots.txt blocks /admin [DEPLOY: deployed]
+  ✔   /api/:robots.txt blocks /api/ indexing [DEPLOY: deployed]
+
+══ 5. ai.txt — AI Bot Manifest ══
+  ✔  ai.txt has [allow] block
+  ✔  ai.txt allows PerplexityBot
+  ✔  ai.txt allows ChatGPT-User
+  ✔  ai.txt allows YouBot
+  ✔  ai.txt has [disallow] block
+  ✔  ai.txt disallows GPTBot
+  ✔  ai.txt disallows ClaudeBot
+  ✔  ai.txt links sitemap
+  ✔  ai.txt links llms.txt
+
+══ 6. llms.txt — LLM Crawler Manifest ══
+  ✔  llms.txt references syrabit.ai
+  ✔  llms.txt covers AHSEC
+  ✔  llms.txt covers SEBA
+  ✔  llms.txt covers Degree/NEP
+  ✔  llms.txt has current tech stack (not Railway)
+  ✔  llms.txt doesn't mention stale Railway backend
+  ✔  llms.txt doesn't mention stale IndicTrans2
+  ✔  llms.txt links /library page
+  ✔  llms.txt links /technology page
+  ✔  llms.txt links /about page
+  ✔  llms.txt has contact email
+
+══ 7. Sitemap — URL Coverage [DEPLOY] ══
+  ✔  sitemap has homepage URL
+  ✔  sitemap has /library
+  ✔  sitemap has /about
+  ✔  sitemap has /pricing
+  ✔  sitemap has /chat
+  ✔  sitemap has lastmod dates
+  ✔  sitemap has changefreq
+  –  sitemap has /technology [DEPLOY: not yet in production — push to CF Pages]
+  –  sitemap lastmod dates are stale (2025-01-15) [DEPLOY: not yet updated in production]
+  ✔  sitemap-index.xml → 200
+  ✔  sitemap-index links child sitemaps
+
+══ 8. PWA Manifest ══
+  ✔  GET /manifest.json → 200
+  ✔  manifest.json has 'name' field
+  ✔  manifest.json has 'icons' field
+  ✔  manifest.json has 'display' field
+  ✔  manifest.json name contains Syrabit
+
+══ 9. Security Headers ══
+  ✔  HSTS header present
+  ✔  x-content-type-options header present
+  ✔  x-frame-options header present
+  ✔  cf-ray header present (served via Cloudflare edge)
+
+══ 10. CORS — Frontend ══
+  ✔  Frontend loads with Origin header (no CORS block)
+
+══ 11. Page Content — Error-Free HTML ══
+  ✔  /library serves clean HTML (no server error signatures)
+  ✔  /chat serves clean HTML (no server error signatures)
+  ✔  /about serves clean HTML (no server error signatures)
+  ✔  /technology serves clean HTML (no server error signatures)
+  ✔  /pricing serves clean HTML (no server error signatures)
+  ✔  Library page has SPA root element
+
+══ 12. Performance SLOs ══
+  ✔  / → 229ms (< 800ms — Cloudflare edge cache hit)
+  ✔  /library → 212ms (< 800ms — Cloudflare edge cache hit)
+  ✔  /about → 211ms (< 800ms — Cloudflare edge cache hit)
+
+══ 13. Static Assets ══
+  ✔  GET /opengraph.jpg → 200 (OG image)
+  ✔  GET /favicon.ico → 200
+  ✔  GET /icons/icon-192x192.png → 200 (PWA icon)
+
+══ 14. 404 / SPA Routing ══
+  ✔  Unknown route → 200 (SPA router or 404 page — not a 5xx)
+
+════════════════════════════════════════
+  Results : 79 checks
+  ✔ Passed : 74
+  ✖ Failed : 0
+  – Skipped: 5  (awaiting CF Pages deploy)
+════════════════════════════════════════
+
+  ALL CHECKS PASSED
+
+
+  ✔ SUITE PASSED
+
+══ Suite 4: CF Pages Bundle URL Check (no raw Cloud Run URL in JS bundle) ══
+   13:15:03 UTC
+
+  CF Pages Bundle Verification
+  Target : https://syrabit.ai
+
+  ✔  Bundle found: /assets/index-DpBvFw5G.js
+  ✔  Bundle fetched successfully
+  ✔  VITE_BACKEND_URL → correct Cloud Run host (syrabit-backend-bl6wu3psza-el.a.run.app)
+  ⚠  CF Worker URL (api.syrabit.ai) NOT in bundle — all API calls go directly to Cloud Run
+  ⚠  Consider setting VITE_WORKER_API_URL=api.syrabit.ai in CF Pages env vars
+  ⚠  Current: all browser → Cloud Run (no CF WAF/rate-limit for UI traffic)
+
+  ─────────────────────────────────────
+  ✔ Passed : 3
+  ✖ Failed : 0
+  ⚠ Warned : 3
+  ─────────────────────────────────────
+
+  BUNDLE VERIFIED
+
+
+  ✔ SUITE PASSED
+
+══ Suite 5: Live Deployment Test (health, SEO, security, performance) ══
+   13:15:04 UTC
+
+=================================================================
+  SYRABIT LIVE DEPLOYMENT TEST
+=================================================================
+  Date:       2026-06-07 13:15:04 UTC
+  Backend:    https://api.syrabit.ai
+  Frontend:   https://syrabit.ai
+  Categories: health,seo,security,performance
+=================================================================
+
+--- [health] Health & Basics ---
+
+  PASS /health returns 200 with status field
+  PASS /health/deep returns 200 with JSON response
+  PASS /health/circuit-breakers returns 200 with JSON
+
+--- [seo] SEO & Sitemaps ---
+
+  PASS sitemap.xml returns 200 with XML content-type
+  PASS sitemap-static.xml returns 200
+  PASS sitemap-subjects.xml returns 200
+  PASS sitemap-chapters.xml returns 200
+  PASS sitemap-topics.xml returns 200
+  PASS sitemap.xml contains valid XML markers
+
+--- [security] Security Checks ---
+
+  PASS Server header present but no version leaked
+  PASS HSTS header present on HTTPS responses
+  PASS NoSQL injection attempt blocked (returned 400)
+  PASS path traversal blocked (returned 404)
+  PASS webhook rejects unsigned request (returned 400)
+  PASS error responses are JSON (no stack trace leaked)
+
+--- [performance] Response Times ---
+
+  PASS /health response time: 68ms (< 500ms)
+  PASS sitemap.xml response time: 197ms (< 2000ms)
+  PASS frontend / response time: 100ms (< 1500ms)
+  INFO content render response time: 223ms
+  PASS content render response time: 223ms (< 3000ms)
+
+=================================================================
+  TEST SUMMARY
+=================================================================
+
+  PASSED: 19/19 | FAILED: 0 | WARNINGS: 0
+
+  All critical tests passed.
+
+=================================================================
+
+
+  ✔ SUITE PASSED
+
+  –  Suite: End-to-End Layer Test (test-live.sh, layers 0-7)
+     Skipped: --quick mode: skipped
+
+══ Suite 7: Auth Live Test (login, refresh, blacklist, logout, rate-limit, admin) ══
+   13:15:08 UTC
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                               !
+!   WARNING: This script tests against PRODUCTION               !
+!   Target: https://syrabit.ai                              !
+!                                                               !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Starting auth tests against https://syrabit.ai
+Timestamp: 2026-06-07 13:15:08 UTC
+
+
+=================================================================
+  USER AUTH FLOW
+=================================================================
+
+  [PASS] Login with valid credentials (HTTP 200)
+  [PASS] Received access_token and refresh_token
+  [PASS] GET /users/me with valid token (HTTP 200)
+  [PASS] User profile returned (email present)
+  [PASS] GET /users/me with NO token (HTTP 401)
+  [PASS] GET /users/me with INVALID token (HTTP 401)
+  [PASS] GET /users/me with EXPIRED/garbage JWT (HTTP 401)
+  [PASS] POST /auth/refresh with valid tokens (H-1 fix: old token blacklisting) (HTTP 200)
+  [PASS] Received new access_token from refresh
+  [PASS] GET /users/me with NEW token from refresh (HTTP 200)
+  [PASS] GET /users/me with OLD token after refresh - blacklisted (HTTP 401)
+  [FAIL] POST /auth/logout with valid token (expected HTTP 200, got HTTP 500)
+         Response: {"detail":"Logout failed: token decode error"}
+  [FAIL] GET /users/me AFTER logout (token blacklisted) (expected HTTP 401, got HTTP 200)
+         Response: {"id":"6a19a5d4d6908af60f888466","name":"","email":"founder@syrabit.ai","role":"admin","subscription_tier":"free","plan":"free","monthly_message_count":80,"preferred_language":"as","onboarding_done":f
+  [PASS] POST /auth/forgot-password with valid email (HTTP 200)
+  [PASS] POST /auth/forgot-password with nonexistent email (no enumeration) (HTTP 200)
+
+=================================================================
+  RATE LIMITING (USER)
+=================================================================
+
+  [INFO] Sending 11 rapid login attempts with wrong password...
+  [INFO] This may temporarily lock out the test IP
+  [PASS] Rate limiting triggered on attempt 10 (HTTP 429)
+  [INFO] Sleeping 5s to let rate limit window pass...
+
+=================================================================
+  ADMIN AUTH FLOW
+=================================================================
+
+  [PASS] Admin login with valid credentials (HTTP 200)
+  [PASS] Session cookie 'syrabit_admin_session' present in set-cookie
+  [PASS] GET /admin/verify with session cookie (HTTP 200)
+  [PASS] GET /admin/verify WITHOUT cookie (HTTP 401)
+  [PASS] POST /admin/logout with cookie (HTTP 200)
+  [FAIL] GET /admin/verify after logout (expected HTTP 401, got HTTP 200)
+         Response: {"status":"ok","user_id":"6a19a5d4d6908af60f888466"}
+
+=================================================================
+  ADMIN RATE LIMITING (C-1 fix verification)
+=================================================================
+
+  [INFO] Sending rapid wrong-password admin login attempts...
+  [PASS] Admin rate limiting triggered on attempt 4 (HTTP 429)
+  [INFO] Sleeping 5s to let rate limit window pass...
+
+=================================================================
+  EDGE CASES
+=================================================================
+
+  [PASS] POST /auth/login with empty body (HTTP 422)
+  [PASS] POST /auth/login missing password (HTTP 422)
+  [PASS] POST /auth/refresh with invalid refresh token (HTTP 401)
+  [PASS] POST /auth/refresh with garbage refresh token (HTTP 401)
+
+=================================================================
+  SECURITY HEADERS CHECK
+=================================================================
+
+  [PASS] Header present: x-content-type-options
+  [INFO] Header not found: x-frame-options (may not apply to this endpoint)
+  [PASS] Header present: strict-transport-security
+  [INFO] Header not found: x-xss-protection (may not apply to this endpoint)
+  [PASS] Header present: content-type
+
+=================================================================
+  TEST SUMMARY
+=================================================================
+
+  PASSED:  27
+  FAILED:  3
+  SKIPPED: 0
+  TOTAL:   30
+
+Some tests FAILED. Review output above for details.
+
+  ✖ SUITE FAILED (exit 1)
+
+══ Suite 8: Chat Pipeline Live Test (EN, AS, stream, history, TTS, multi-turn) ══
+   13:15:40 UTC
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                               !
+!   WARNING: This script tests against PRODUCTION               !
+!   Target: https://syrabit.ai                              !
+!                                                               !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Starting chat pipeline tests against https://syrabit.ai
+Timestamp: 2026-06-07 13:15:40 UTC
+Session ID for multi-turn: test_1780838140_18570
+
+
+=================================================================
+  AUTHENTICATION
+=================================================================
+
+  [FAIL] Login failed (expected HTTP 200, got HTTP 429)
+  Cannot proceed with authenticated tests
+         Response: {"detail":"Too many login attempts. Please try again in 1 minute."}
+
+=================================================================
+  SECTION 1: Chat (Non-Streaming) - Authenticated
+=================================================================
+
+  [SKIP] All authenticated chat tests skipped - no token
+
+=================================================================
+  SECTION 2: Chat (Non-Streaming) - Anonymous
+=================================================================
+
+  [PASS] POST /chat/ anonymous (no auth token) (HTTP 200)
+  [PASS] Anonymous response has 'response' field
+  [PASS] POST /chat/ anonymous with X-Anon-ID header (HTTP 200)
+
+=================================================================
+  SECTION 3: Streaming Chat (SSE)
+=================================================================
+
+  [SKIP] Authenticated streaming tests skipped - no token
+  [PASS] POST /chat/stream anonymous - received response
+
+=================================================================
+  SECTION 4: Chat History
+=================================================================
+
+  [SKIP] Authenticated history tests skipped - no token
+  [PASS] GET /chat/history without auth returns 200 (optional auth)
+  [INFO] Anonymous history returned 4 chats
+
+=================================================================
+  SECTION 5: Chat Messages
+=================================================================
+
+  [SKIP] Chat messages tests skipped - no token
+  [PASS] GET /chat/nonexistent-session/messages (HTTP 404)
+
+=================================================================
+  SECTION 6: TTS (Text-to-Speech)
+=================================================================
+
+  [SKIP] Authenticated TTS tests skipped - no token
+  [PASS] POST /chat/tts without auth (expect 401) (HTTP 401)
+
+=================================================================
+  SECTION 7: Image Analysis (OCR)
+=================================================================
+
+  [PASS] POST /chat/image without auth (expect 401) (HTTP 401)
+  [SKIP] Image with auth test skipped - no token
+
+=================================================================
+  SECTION 8: Performance & Latency
+=================================================================
+
+  [SKIP] Performance tests skipped - no token
+
+=================================================================
+  SECTION 9: Multi-turn Conversation
+=================================================================
+
+  [SKIP] Multi-turn tests skipped - no token
+
+=================================================================
+  LATENCY STATISTICS
+=================================================================
+
+  [INFO] No latency measurements collected
+
+=================================================================
+  TEST SUMMARY
+=================================================================
+
+  PASSED:  8
+  FAILED:  1
+  SKIPPED: 8
+  TOTAL:   17
+
+Some tests FAILED. Review output above for details.
+
+  ✖ SUITE FAILED (exit 1)
+
+════════════════════════════════════════════════════════════════
+  Master Test Runner — Final Summary
+  Completed : 2026-06-07 13:15:48 UTC
+
+════════════════════════════════════════════════════════════════
+
+  SUITE         DESCRIPTION                                           RESULT
+  ────────────  ────────────────────────────────────────────────────  ────────
+  uptime        Uptime (5 liveness probes)                            PASS
+  smoke         Fullstack Smoke (infra, content, security, CORS)      PASS
+  frontend      Frontend Features (79 checks)                         PASS
+  bundle        CF Pages Bundle URL                                   PASS
+  deployment    Live Deployment (health, SEO, security, perf)         PASS
+  live          End-to-End Layers (CF · Library · Auth · Chat)     SKIP  --quick mode: skipped
+  auth          Auth Live (login, refresh, blacklist, logout)         FAIL
+  chat          Chat Pipeline (EN, AS, stream, TTS, multi-turn)       FAIL
+
+  Suites : 8 total
+  Passed : 5
+  Failed : 2
+  Skipped: 1
+
+  2 SUITE(S) FAILED
+
+────────────────────────────────────────────────────────
+
+Total time: 84s
+✗ Tests reported failures (exit 1)
+  Review the output above for details.
+
+
+╔══════════════════════════════════════════════════╗
+║     Syrabit Update & Full-Stack Test Runner      ║
+╚══════════════════════════════════════════════════╝
+  GCP Project : blissful-acumen-495019-t6
+  Backend URL : https://api.syrabit.ai
+  Frontend URL: https://syrabit.ai
+  Date        : 2026-06-07 13:15:48 UTC
+────────────────────────────────────────────────────────
+
+▶ 1. Git — Pull Latest Commits
+    Branch: main
+    Before: 35acef32 — Add master test runner option to script
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+Already up to date.
+  ✓ Already up to date (35acef32)
+
+▶ 2. Load Secrets from GCP Secret Manager
+    Authenticated as: founder@syrabit.ai
+      TEST_USER_EMAIL — already set, skipping GCP fetch
+  ✓ RESEND_API_KEY loaded from GCP (RESEND_API_KEY)
+  ✓ CF_TURNSTILE_SECRET loaded from GCP (cf-turnstile-secret)
+  △ INDEXNOW_API_KEY — not found in GCP (INDEXNOW_API_KEY)
+  ✓ GEMINI_API_KEY loaded from GCP (GEMINI_API_KEY)
+  ✓ UPSTASH_REDIS_REST_URL loaded from GCP (upstash-redis-url)
+  ✓ SARVAM_API_KEY loaded from GCP (SARVAM_API_KEY)
+  ✓ GOOGLE_APPLICATION_CREDENTIALS_JSON loaded from GCP (GOOGLE_APPLICATION_CREDENTIALS_JSON)
+  ✓ CRON_SECRET loaded from GCP (TRANSLATE_CRON_SECRET)
+  ✓ SENTRY_DSN loaded from GCP (SENTRY_DSN)
+  ✓ RESET_TOKEN_SECRET loaded from GCP (RESET_TOKEN_SECRET)
+  ✓ ADMIN_JWT_SECRET loaded from GCP (ADMIN_JWT_SECRET)
+  ✓ JWT_SECRET loaded from GCP (jwt-secret)
+  ✓ RAZORPAY_KEY_ID loaded from GCP (RAZORPAY_KEY_ID)
+  ✓ RAZORPAY_WEBHOOK_SECRET loaded from GCP (RAZORPAY_WEBHOOK_SECRET)
+  ✓ POSTHOG_API_KEY loaded from GCP (POSTHOG_API_KEY)
+      TEST_ADMIN_EMAIL — already set, skipping GCP fetch
+  ✓ VERTEX_PROJECT_ID loaded from GCP (VERTEX_PROJECT_ID)
+      TEST_USER_PASSWORD — already set, skipping GCP fetch
+  ✓ EDGE_SHARED_SECRET loaded from GCP (edge-shared-secret)
+  ✓ UPSTASH_REDIS_REST_TOKEN loaded from GCP (upstash-redis-token)
+  △ INDEXNOW_INTERNAL_SECRET — not found in GCP (INDEXNOW_INTERNAL_SECRET)
+      TEST_ADMIN_PASSWORD — already set, skipping GCP fetch
+  ✓ RAZORPAY_KEY_SECRET loaded from GCP (RAZORPAY_KEY_SECRET)
+  ✓ Secrets: 18 loaded, 4 already set
+
+▶ 3. Wait for Backend to Be Healthy
+    Polling https://api.syrabit.ai/health (max 60s)...
+  ✓ Backend healthy in 0s (status=healthy)
+  Deep health:
+    ✓ mongodb: healthy
+    ✓ redis: healthy
+    ✓ vertex_search: healthy
+    ✓ vertex_ai: healthy
+    ✓ sarvam_ai: healthy
+
+▶ 4. Frontend Reachability Check
+  △ Frontend https://syrabit.ai → 301
+
+▶ 5. Running Master Live Test Suite (all 8 suites)
+────────────────────────────────────────────────────────
+
+
+════════════════════════════════════════════════════════════════
+  SYRABIT — Master Live Test Runner
+  Target  : https://syrabit.ai
+  Backend : https://api.syrabit.ai
+  Time    : 2026-06-07 13:16:10 UTC
+  Creds   : user=YES  admin=YES
+
+════════════════════════════════════════════════════════════════
+
+══ Suite 2: Fullstack Smoke Test (infra, content, security, CORS) ══
+   13:16:10 UTC
+Syrabit Full-Stack Smoke Test
+  Base URL   : https://api.syrabit.ai
+  Frontend   : https://syrabit.ai
+  Direct GCR : https://syrabit-backend-bl6wu3psza-el.a.run.app
+
+── 1. DNS Resolution ──
+  ✓  api.syrabit.ai resolves to Cloudflare IP
+     IPs: 104.18.18.233 104.18.19.233 
+  ✓  syrabit.ai DNS resolves
+
+── 2. Cloudflare Worker ──
+  ✓  cf-ray header present (Worker is proxying)
+  ✓  server: cloudflare header
+
+── 3. Backend Health (via Worker — https://api.syrabit.ai) ──
+  ✓  GET /api/v1/health → 200
+  ✓  /api/v1/health status=healthy
+  ✓  /api/v1/health has service field
+
+── 4. Backend Health (direct Cloud Run — https://syrabit-backend-bl6wu3psza-el.a.run.app) ──
+  ✓  Direct Cloud Run /health → 200
+
+── 5. MongoDB / Deep Health ──
+  ✓  MongoDB healthy (14.1ms)
+  ✓  Redis healthy
+
+── 6. Library Bundle ──
+  ✓  GET /api/v1/content/library-bundle → 200
+  ✓  boards count (3 >= 1)
+  ✓  subjects count (109 >= 50)
+  ✓  chapters count (479 >= 200)
+     boards=3  subjects=109  chapters=479
+
+── 7. Content Endpoints ──
+  ✓  GET /api/v1/content/cms/posts → 200
+  ✓  GET /api/v1/content/cms-library → 200
+  ✓  GET /api/v1/content/question-papers → 200
+  ✓  GET /resolve-subject/ahsec/class-9/physics → 404
+
+── 8. Auth Endpoints ──
+  ✓  POST /analytics/session-ping reachable (200)
+  ✓  POST /auth/login with bad creds → 422 (not 5xx)
+
+── 9. Security Headers ──
+  ✓  x-content-type-options header
+  ✓  x-frame-options header
+  ✓  strict-transport-security (HSTS)
+  ✓  x-robots-tag (API not indexed)
+
+── 10. CORS ──
+  ✓  CORS allow-origin header
+  ✓  CORS allows syrabit.ai origin
+
+── 11. Frontend (https://syrabit.ai) ──
+  ✓  syrabit.ai → 200 (after redirect)
+  ✓  syrabit.ai/library → 200 (after redirect)
+  ✓  syrabit.ai/api/v1/health (Worker route on main domain)
+
+── 12. Edge Worker Health ──
+  ✓  GET /health (Worker edge health)
+  ✓  Edge /health has service field
+  ✓  Edge reports backend_reachable=true
+
+════════════════════════════════════
+  Results: 32 checks
+  ✓ Passed : 32
+  ✗ Failed : 0
+  – Skipped: 0
+════════════════════════════════════
+
+ALL CHECKS PASSED
+
+  ✔ SUITE PASSED
+
+════════════════════════════════════════════════════════════════
+  Master Test Runner — Final Summary
+  Completed : 2026-06-07 13:16:18 UTC
+
+════════════════════════════════════════════════════════════════
+
+  SUITE         DESCRIPTION                                           RESULT
+  ────────────  ────────────────────────────────────────────────────  ────────
+  uptime        Uptime (5 liveness probes)                            SKIP  --only smoke
+  smoke         Fullstack Smoke (infra, content, security, CORS)      PASS
+  frontend      Frontend Features (79 checks)                         SKIP  --only smoke
+  bundle        CF Pages Bundle URL                                   SKIP  --only smoke
+  deployment    Live Deployment (health, SEO, security, perf)         SKIP  --only smoke
+  live          End-to-End Layers (CF · Library · Auth · Chat)     SKIP  --only smoke
+  auth          Auth Live (login, refresh, blacklist, logout)         SKIP  --only smoke
+  chat          Chat Pipeline (EN, AS, stream, TTS, multi-turn)       SKIP  --only smoke
+
+  Suites : 8 total
+  Passed : 1
+  Failed : 0
+  Skipped: 7
+
+  ALL ACTIVE SUITES PASSED
+
+────────────────────────────────────────────────────────
+
+Total time: 30s
+✓ All tests passed
+
+
+╔══════════════════════════════════════════════════╗
+║     Syrabit Update & Full-Stack Test Runner      ║
+╚══════════════════════════════════════════════════╝
+  GCP Project : blissful-acumen-495019-t6
+  Backend URL : https://api.syrabit.ai
+  Frontend URL: https://syrabit.ai
+  Date        : 2026-06-07 13:16:18 UTC
+────────────────────────────────────────────────────────
+
+▶ 1. Git — Pull Latest Commits
+    Branch: main
+    Before: 35acef32 — Add master test runner option to script
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+Already up to date.
+  ✓ Already up to date (35acef32)
+
+▶ 2. Load Secrets from GCP Secret Manager
+    Authenticated as: founder@syrabit.ai
+      TEST_USER_EMAIL — already set, skipping GCP fetch
+  ✓ RESEND_API_KEY loaded from GCP (RESEND_API_KEY)
+  ✓ CF_TURNSTILE_SECRET loaded from GCP (cf-turnstile-secret)
+  △ INDEXNOW_API_KEY — not found in GCP (INDEXNOW_API_KEY)
+  ✓ GEMINI_API_KEY loaded from GCP (GEMINI_API_KEY)
+  ✓ UPSTASH_REDIS_REST_URL loaded from GCP (upstash-redis-url)
+  ✓ SARVAM_API_KEY loaded from GCP (SARVAM_API_KEY)
+  ✓ GOOGLE_APPLICATION_CREDENTIALS_JSON loaded from GCP (GOOGLE_APPLICATION_CREDENTIALS_JSON)
+  ✓ CRON_SECRET loaded from GCP (TRANSLATE_CRON_SECRET)
+  ✓ SENTRY_DSN loaded from GCP (SENTRY_DSN)
+  ✓ RESET_TOKEN_SECRET loaded from GCP (RESET_TOKEN_SECRET)
+  ✓ ADMIN_JWT_SECRET loaded from GCP (ADMIN_JWT_SECRET)
+  ✓ JWT_SECRET loaded from GCP (jwt-secret)
+  ✓ RAZORPAY_KEY_ID loaded from GCP (RAZORPAY_KEY_ID)
+  ✓ RAZORPAY_WEBHOOK_SECRET loaded from GCP (RAZORPAY_WEBHOOK_SECRET)
+  ✓ POSTHOG_API_KEY loaded from GCP (POSTHOG_API_KEY)
+      TEST_ADMIN_EMAIL — already set, skipping GCP fetch
+  ✓ VERTEX_PROJECT_ID loaded from GCP (VERTEX_PROJECT_ID)
+      TEST_USER_PASSWORD — already set, skipping GCP fetch
+  ✓ EDGE_SHARED_SECRET loaded from GCP (edge-shared-secret)
+  ✓ UPSTASH_REDIS_REST_TOKEN loaded from GCP (upstash-redis-token)
+  △ INDEXNOW_INTERNAL_SECRET — not found in GCP (INDEXNOW_INTERNAL_SECRET)
+      TEST_ADMIN_PASSWORD — already set, skipping GCP fetch
+  ✓ RAZORPAY_KEY_SECRET loaded from GCP (RAZORPAY_KEY_SECRET)
+  ✓ Secrets: 18 loaded, 4 already set
+
+▶ 3. Wait for Backend to Be Healthy
+    Polling https://api.syrabit.ai/health (max 60s)...
+  ✓ Backend healthy in 0s (status=healthy)
+  Deep health:
+    ✓ mongodb: healthy
+    ✓ redis: healthy
+    ✓ vertex_search: healthy
+    ✓ vertex_ai: healthy
+    ✓ sarvam_ai: healthy
+
+▶ 4. Frontend Reachability Check
+  △ Frontend https://syrabit.ai → 301
+
+▶ 5. Running Master Live Test Suite (all 8 suites)
+────────────────────────────────────────────────────────
+
+
+════════════════════════════════════════════════════════════════
+  SYRABIT — Master Live Test Runner
+  Target  : https://syrabit.ai
+  Backend : https://api.syrabit.ai
+  Time    : 2026-06-07 13:16:39 UTC
+  Creds   : user=YES  admin=YES
+
+════════════════════════════════════════════════════════════════
+
+══ Suite 7: Auth Live Test (login, refresh, blacklist, logout, rate-limit, admin) ══
+   13:16:39 UTC
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                               !
+!   WARNING: This script tests against PRODUCTION               !
+!   Target: https://syrabit.ai                              !
+!                                                               !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Starting auth tests against https://syrabit.ai
+Timestamp: 2026-06-07 13:16:39 UTC
+
+
+=================================================================
+  USER AUTH FLOW
+=================================================================
+
+  [PASS] Login with valid credentials (HTTP 200)
+  [PASS] Received access_token and refresh_token
+  [PASS] GET /users/me with valid token (HTTP 200)
+  [PASS] User profile returned (email present)
+  [PASS] GET /users/me with NO token (HTTP 401)
+  [PASS] GET /users/me with INVALID token (HTTP 401)
+  [PASS] GET /users/me with EXPIRED/garbage JWT (HTTP 401)
+  [PASS] POST /auth/refresh with valid tokens (H-1 fix: old token blacklisting) (HTTP 200)
+  [PASS] Received new access_token from refresh
+  [PASS] GET /users/me with NEW token from refresh (HTTP 200)
+  [PASS] GET /users/me with OLD token after refresh - blacklisted (HTTP 401)
+  [FAIL] POST /auth/logout with valid token (expected HTTP 200, got HTTP 500)
+         Response: {"detail":"Logout failed: token decode error"}
+  [FAIL] GET /users/me AFTER logout (token blacklisted) (expected HTTP 401, got HTTP 200)
+         Response: {"id":"6a19a5d4d6908af60f888466","name":"","email":"founder@syrabit.ai","role":"admin","subscription_tier":"free","plan":"free","monthly_message_count":80,"preferred_language":"as","onboarding_done":f
+  [PASS] POST /auth/forgot-password with valid email (HTTP 200)
+  [PASS] POST /auth/forgot-password with nonexistent email (no enumeration) (HTTP 200)
+
+=================================================================
+  RATE LIMITING (USER)
+=================================================================
+
+  [INFO] Sending 11 rapid login attempts with wrong password...
+  [INFO] This may temporarily lock out the test IP
+  [PASS] Rate limiting triggered on attempt 10 (HTTP 429)
+  [INFO] Sleeping 5s to let rate limit window pass...
+
+=================================================================
+  ADMIN AUTH FLOW
+=================================================================
+
+  [PASS] Admin login with valid credentials (HTTP 200)
+  [PASS] Session cookie 'syrabit_admin_session' present in set-cookie
+  [PASS] GET /admin/verify with session cookie (HTTP 200)
+  [PASS] GET /admin/verify WITHOUT cookie (HTTP 401)
+  [PASS] POST /admin/logout with cookie (HTTP 200)
+  [FAIL] GET /admin/verify after logout (expected HTTP 401, got HTTP 200)
+         Response: {"status":"ok","user_id":"6a19a5d4d6908af60f888466"}
+
+=================================================================
+  ADMIN RATE LIMITING (C-1 fix verification)
+=================================================================
+
+  [INFO] Sending rapid wrong-password admin login attempts...
+  [PASS] Admin rate limiting triggered on attempt 6 (HTTP 429)
+  [INFO] Sleeping 5s to let rate limit window pass...
+
+=================================================================
+  EDGE CASES
+=================================================================
+
+  [PASS] POST /auth/login with empty body (HTTP 422)
+  [PASS] POST /auth/login missing password (HTTP 422)
+  [PASS] POST /auth/refresh with invalid refresh token (HTTP 401)
+  [PASS] POST /auth/refresh with garbage refresh token (HTTP 401)
+
+=================================================================
+  SECURITY HEADERS CHECK
+=================================================================
+
+  [PASS] Header present: x-content-type-options
+  [INFO] Header not found: x-frame-options (may not apply to this endpoint)
+  [PASS] Header present: strict-transport-security
+  [INFO] Header not found: x-xss-protection (may not apply to this endpoint)
+  [PASS] Header present: content-type
+
+=================================================================
+  TEST SUMMARY
+=================================================================
+
+  PASSED:  27
+  FAILED:  3
+  SKIPPED: 0
+  TOTAL:   30
+
+Some tests FAILED. Review output above for details.
+
+  ✖ SUITE FAILED (exit 1)
+
+════════════════════════════════════════════════════════════════
+  Master Test Runner — Final Summary
+  Completed : 2026-06-07 13:17:12 UTC
+
+════════════════════════════════════════════════════════════════
+
+  SUITE         DESCRIPTION                                           RESULT
+  ────────────  ────────────────────────────────────────────────────  ────────
+  uptime        Uptime (5 liveness probes)                            SKIP  --only auth
+  smoke         Fullstack Smoke (infra, content, security, CORS)      SKIP  --only auth
+  frontend      Frontend Features (79 checks)                         SKIP  --only auth
+  bundle        CF Pages Bundle URL                                   SKIP  --only auth
+  deployment    Live Deployment (health, SEO, security, perf)         SKIP  --only auth
+  live          End-to-End Layers (CF · Library · Auth · Chat)     SKIP  --only auth
+  auth          Auth Live (login, refresh, blacklist, logout)         FAIL
+  chat          Chat Pipeline (EN, AS, stream, TTS, multi-turn)       SKIP  --only auth
+
+  Suites : 8 total
+  Passed : 0
+  Failed : 1
+  Skipped: 7
+
+  1 SUITE(S) FAILED
+
+────────────────────────────────────────────────────────
+
+Total time: 54s
+✗ Tests reported failures (exit 1)
+  Review the output above for details.
+
+
+╔══════════════════════════════════════════════════╗
+║     Syrabit Update & Full-Stack Test Runner      ║
+╚══════════════════════════════════════════════════╝
+  GCP Project : blissful-acumen-495019-t6
+  Backend URL : https://api.syrabit.ai
+  Frontend URL: https://syrabit.ai
+  Date        : 2026-06-07 13:17:12 UTC
+────────────────────────────────────────────────────────
+
+▶ 1. Git — Pull Latest Commits
+    Branch: main
+    Before: 35acef32 — Add master test runner option to script
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+Already up to date.
+  ✓ Already up to date (35acef32)
+
+▶ 2. Load Secrets from GCP Secret Manager
+    Authenticated as: founder@syrabit.ai
+      TEST_USER_EMAIL — already set, skipping GCP fetch
+  ✓ RESEND_API_KEY loaded from GCP (RESEND_API_KEY)
+  ✓ CF_TURNSTILE_SECRET loaded from GCP (cf-turnstile-secret)
+  △ INDEXNOW_API_KEY — not found in GCP (INDEXNOW_API_KEY)
+  ✓ GEMINI_API_KEY loaded from GCP (GEMINI_API_KEY)
+  ✓ UPSTASH_REDIS_REST_URL loaded from GCP (upstash-redis-url)
+  ✓ SARVAM_API_KEY loaded from GCP (SARVAM_API_KEY)
+  ✓ GOOGLE_APPLICATION_CREDENTIALS_JSON loaded from GCP (GOOGLE_APPLICATION_CREDENTIALS_JSON)
+  ✓ CRON_SECRET loaded from GCP (TRANSLATE_CRON_SECRET)
+  ✓ SENTRY_DSN loaded from GCP (SENTRY_DSN)
+  ✓ RESET_TOKEN_SECRET loaded from GCP (RESET_TOKEN_SECRET)
+  ✓ ADMIN_JWT_SECRET loaded from GCP (ADMIN_JWT_SECRET)
+  ✓ JWT_SECRET loaded from GCP (jwt-secret)
+  ✓ RAZORPAY_KEY_ID loaded from GCP (RAZORPAY_KEY_ID)
+  ✓ RAZORPAY_WEBHOOK_SECRET loaded from GCP (RAZORPAY_WEBHOOK_SECRET)
+  ✓ POSTHOG_API_KEY loaded from GCP (POSTHOG_API_KEY)
+      TEST_ADMIN_EMAIL — already set, skipping GCP fetch
+  ✓ VERTEX_PROJECT_ID loaded from GCP (VERTEX_PROJECT_ID)
+      TEST_USER_PASSWORD — already set, skipping GCP fetch
+  ✓ EDGE_SHARED_SECRET loaded from GCP (edge-shared-secret)
+  ✓ UPSTASH_REDIS_REST_TOKEN loaded from GCP (upstash-redis-token)
+  △ INDEXNOW_INTERNAL_SECRET — not found in GCP (INDEXNOW_INTERNAL_SECRET)
+      TEST_ADMIN_PASSWORD — already set, skipping GCP fetch
+  ✓ RAZORPAY_KEY_SECRET loaded from GCP (RAZORPAY_KEY_SECRET)
+  ✓ Secrets: 18 loaded, 4 already set
+
+▶ 3. Wait for Backend to Be Healthy
+    Polling https://api.syrabit.ai/health (max 60s)...
+  ✓ Backend healthy in 0s (status=healthy)
+  Deep health:
+    ✓ mongodb: healthy
+    ✓ redis: healthy
+    ✓ vertex_search: healthy
+    ✓ vertex_ai: healthy
+    ✓ sarvam_ai: healthy
+
+▶ 4. Frontend Reachability Check
+  △ Frontend https://syrabit.ai → 301
+
+▶ 5. Running Master Live Test Suite (all 8 suites)
+────────────────────────────────────────────────────────
+
+
+════════════════════════════════════════════════════════════════
+  SYRABIT — Master Live Test Runner
+  Target  : https://syrabit.ai
+  Backend : https://api.syrabit.ai
+  Time    : 2026-06-07 13:17:33 UTC
+  Creds   : user=YES  admin=YES
+
+════════════════════════════════════════════════════════════════
+
+══ Suite 8: Chat Pipeline Live Test (EN, AS, stream, history, TTS, multi-turn) ══
+   13:17:33 UTC
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                               !
+!   WARNING: This script tests against PRODUCTION               !
+!   Target: https://syrabit.ai                              !
+║     Syrabit Update & Full-Stack Test Runner      ║
+╚══════════════════════════════════════════════════╝
+  GCP Project : blissful-acumen-495019-t6
+  Backend URL : https://api.syrabit.ai
+  Frontend URL: https://syrabit.ai
+  Date        : 2026-06-07 13:18:30 UTC
+────────────────────────────────────────────────────────
+
+▶ 1. Git — Pull Latest Commits
+    Branch: main
+    Before: 35acef32 — Add master test runner option to script
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+Already up to date.
+  ✓ Already up to date (35acef32)
+
+▶ 2. Load Secrets from GCP Secret Manager
+    Authenticated as: founder@syrabit.ai
+      TEST_USER_EMAIL — already set, skipping GCP fetch
+  ✓ RESEND_API_KEY loaded from GCP (RESEND_API_KEY)
+  ✓ CF_TURNSTILE_SECRET loaded from GCP (cf-turnstile-secret)
+  △ INDEXNOW_API_KEY — not found in GCP (INDEXNOW_API_KEY)
+  ✓ GEMINI_API_KEY loaded from GCP (GEMINI_API_KEY)
+  ✓ UPSTASH_REDIS_REST_URL loaded from GCP (upstash-redis-url)
+  ✓ SARVAM_API_KEY loaded from GCP (SARVAM_API_KEY)
+  ✓ GOOGLE_APPLICATION_CREDENTIALS_JSON loaded from GCP (GOOGLE_APPLICATION_CREDENTIALS_JSON)
+  ✓ CRON_SECRET loaded from GCP (TRANSLATE_CRON_SECRET)
+  ✓ SENTRY_DSN loaded from GCP (SENTRY_DSN)
+  ✓ RESET_TOKEN_SECRET loaded from GCP (RESET_TOKEN_SECRET)
+  ✓ ADMIN_JWT_SECRET loaded from GCP (ADMIN_JWT_SECRET)
+  ✓ JWT_SECRET loaded from GCP (jwt-secret)
+  ✓ RAZORPAY_KEY_ID loaded from GCP (RAZORPAY_KEY_ID)
+  ✓ RAZORPAY_WEBHOOK_SECRET loaded from GCP (RAZORPAY_WEBHOOK_SECRET)
+  ✓ POSTHOG_API_KEY loaded from GCP (POSTHOG_API_KEY)
+      TEST_ADMIN_EMAIL — already set, skipping GCP fetch
+  ✓ VERTEX_PROJECT_ID loaded from GCP (VERTEX_PROJECT_ID)
+      TEST_USER_PASSWORD — already set, skipping GCP fetch
+  ✓ EDGE_SHARED_SECRET loaded from GCP (edge-shared-secret)
+  ✓ UPSTASH_REDIS_REST_TOKEN loaded from GCP (upstash-redis-token)
+  △ INDEXNOW_INTERNAL_SECRET — not found in GCP (INDEXNOW_INTERNAL_SECRET)
+      TEST_ADMIN_PASSWORD — already set, skipping GCP fetch
+  ✓ RAZORPAY_KEY_SECRET loaded from GCP (RAZORPAY_KEY_SECRET)
+  ✓ Secrets: 18 loaded, 4 already set
+
+▶ 3. Wait for Backend to Be Healthy
+    Polling https://api.syrabit.ai/health (max 60s)...
+  ✓ Backend healthy in 0s (status=healthy)
+  Deep health:
+    ✓ mongodb: healthy
+    ✓ redis: healthy
+    ✓ vertex_search: healthy
+    ✓ vertex_ai: healthy
+    ✓ sarvam_ai: healthy
+
+▶ 4. Frontend Reachability Check
+  △ Frontend https://syrabit.ai → 301
+
+▶ 5. Running Full-Stack Layer Test (1000+ assertions)
+────────────────────────────────────────────────────────
+
+
+========================================================================
+  SYRABIT FULLSTACK LAYER-BY-LAYER CLOUD SHELL TEST (v3)
+  1000+ Assertions | 22 Layers (0-21) | 9 Pillars
+========================================================================
+  Date:      2026-06-07 13:18:52 UTC
+  Target:    https://api.syrabit.ai
+  Frontend:  https://syrabit.ai
+========================================================================
+
+== LAYER 0: Prerequisites & Config Validation ==
+
+    PASS curl is installed (8.5.0)
+    PASS jq is installed (jq-1.7)
+    PASS openssl is available (3.0.13)
+    PASS BASE_URL is valid URL format: https://api.syrabit.ai
+    PASS FRONTEND_URL is valid URL format: https://syrabit.ai
+    PASS BASE_URL uses HTTPS
+    PASS FRONTEND_URL uses HTTPS
+    PASS BASE_URL has no trailing slash
+    PASS FRONTEND_URL has no trailing slash
+    SKIP TEST_JWT_TOKEN not set (auth tests will use login flow)
+    SKIP Admin credentials not set (admin tests will be limited)
+    PASS RAZORPAY_WEBHOOK_SECRET provided (28 chars)
+    PASS CRON_SECRET provided
+    PASS Bash version 5.2.21(1)-release (>= 4.x required)
+    PASS dig available for DNS checks
+
+  Configuration:
+    BASE_URL:         https://api.syrabit.ai
+    FRONTEND_URL:     https://syrabit.ai
+    JWT Token:        not set
+    Turnstile Token:  not set
+    Admin Email:      not set
+    Admin Password:   not set
+    Webhook Secret:   ****cret
+    Cron Secret:      ****a9g=
+    Verbose:          0
+    Stress Test:      0
+    Export JSON:       0
+    Quick Mode:       0
+    Skip Auth:        0
+    Skip Admin:       0
+
+
+== LAYER 1: Frontend (P1 Cloudflare CDN) ==
+
+
+  1.1 Page Load & Response
+    PASS Frontend loads (HTTP 301, 112ms TTFB)
+    WARN Frontend returns HTTP 301 (expected 200)
+    PASS Frontend TTFB under 3s (112ms)
+    FAIL Frontend response body too small (23 bytes)
+
+  1.2 Compression
+    WARN No compression detected (content-encoding header missing)
+────────────────────────────────────────────────────────
+
+Total time: 22s
+✗ Tests reported failures (exit 1)
+  Review the output above for details.
+
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ 
