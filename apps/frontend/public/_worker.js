@@ -21,6 +21,19 @@
 // Static assets (/assets/*, /icons/*, sitemaps, feeds, etc.) are
 // excluded in `_routes.json` and never reach this worker.
 
+// ─── SECURITY HEADERS ────────────────────────────────────────────────────────
+// Applied to every response the worker generates (bot-render, sitemap proxy,
+// SPA shell). Prevents clickjacking, MIME sniffing, and referrer leakage.
+// CSP is intentionally omitted here — it lives in _headers (applied by Pages
+// to static assets) and would require keeping two copies in sync.
+function addSecurityHeaders(headers) {
+  headers.set("X-Frame-Options", "SAMEORIGIN");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  return headers;
+}
+
 // ─── CANONICAL BOT REGEX — DO NOT DRIFT ─────────────────────────────────────
 // MUST stay aligned with three other locations:
 //   * artifacts/syrabit-backend/utils.py        → _SEARCH_BOT_UA_RE (Python source of truth)
@@ -137,6 +150,7 @@ async function sitemapProxy(request, env, url) {
       // HEAD parity: never carry a body on a HEAD response (Fetch spec
       // forbids it; some validators reject sitemaps if HEAD lies about
       // the body).
+      addSecurityHeaders(headers);
       const body = request.method === "HEAD" ? null : resp.body;
       return new Response(body, { status: 200, headers });
     }
@@ -229,14 +243,28 @@ async function botRender(request, env, url) {
         headers.set("X-Source", "bot-render");
         headers.set("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600");
         headers.set("X-Robots-Tag", "all, max-snippet:-1, max-image-preview:large");
+        addSecurityHeaders(headers);
         return new Response(resp.body, { status: 200, headers });
       }
     }
   } catch {
-    // Fall through to SPA shell on any backend error — better to
-    // serve the shell than to 5xx Googlebot.
+    // Intentional fall-through — handled below.
   }
-  return null;
+  // Backend miss or non-HTML 200: return a 503 so crawlers retry rather
+  // than indexing an empty SPA shell (M-5 fix — avoids soft 404).
+  return new Response(
+    request.method === "HEAD"
+      ? null
+      : "<!-- bot-render temporarily unavailable, retry later -->",
+    {
+      status: 503,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "public, max-age=60",
+        "Retry-After": "120",
+      },
+    },
+  );
 }
 
 async function spaShellResponse(request, env, url, originalStatus) {
@@ -347,10 +375,10 @@ export default {
         // Fall through to bot-render on any asset-pipeline error.
       }
       // 2) No prerendered snapshot — try the backend bot-render proxy.
+      //    botRender now returns a 503 on failure (M-5 fix) so bots
+      //    never receive an empty SPA shell as the canonical document.
       const rendered = await botRender(request, env, url);
-      if (rendered) return rendered;
-      // 3) Backend miss too → fall through to the asset pipeline /
-      //    SPA shell below so the bot at least gets a valid 200.
+      return rendered;
     }
 
     try {

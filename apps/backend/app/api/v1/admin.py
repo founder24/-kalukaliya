@@ -8,7 +8,7 @@ Origin validation is enforced on all mutating (non-GET) requests.
 from datetime import datetime, timedelta, timezone
 import hashlib
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 import jwt
 from jwt.exceptions import InvalidTokenError
@@ -137,6 +137,21 @@ async def _validate_admin_session(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 
 
+# ── FastAPI Depends guards ─────────────────────────────────────────────────────
+# Use these at the router level so every new endpoint is automatically protected:
+#   router = APIRouter(dependencies=[Depends(require_admin_session), Depends(csrf_guard)])
+
+
+async def require_admin_session(request: Request) -> dict:
+    """FastAPI Depends: validates admin session. Raises 401/403 on failure."""
+    return await _validate_admin_session(request)
+
+
+async def csrf_guard(request: Request) -> None:
+    """FastAPI Depends: CSRF validation for mutating methods (POST/PUT/DELETE)."""
+    await _csrf_check(request)
+
+
 @router.get("/verify")
 async def admin_verify(request: Request):
     """
@@ -225,6 +240,7 @@ async def admin_logout(request: Request):
     # Blacklist the session JWT so it cannot be replayed even if the client
     # keeps a copy of the cookie value (e.g. test scripts, compromised device).
     session_cookie = request.cookies.get("syrabit_admin_session")
+    server_revocation = False
     if session_cookie:
         try:
             verify_key, verify_alg = _get_admin_verification_key()
@@ -236,13 +252,19 @@ async def admin_logout(request: Request):
             redis = get_redis()
             token_hash = hashlib.sha256(session_cookie.encode()).hexdigest()
             await redis.set(f"blacklisted_admin_token:{token_hash}", "1", ex=ttl)
+            server_revocation = True
             logger.info(f"Admin session blacklisted for user {payload.get('sub')} (ttl={ttl}s)")
         except Exception as e:
-            # Fail-open: cookie will be cleared in the browser regardless.
-            # The JWT will expire naturally (max 8h).
-            logger.warning(f"Admin logout blacklist failed (fail-open): {type(e).__name__}: {e}")
+            # Redis unavailable — cookie is still cleared client-side (primary mechanism).
+            # Return partial-success so callers know server-side revocation failed.
+            # The JWT will expire naturally within 8h max.
+            logger.warning(f"Admin logout blacklist failed: {type(e).__name__}: {e}")
 
-    response = JSONResponse({"status": "ok", "message": "Logged out"})
+    response = JSONResponse({
+        "status": "ok",
+        "message": "Logged out",
+        "server_revocation": server_revocation,
+    })
     response.delete_cookie(
         key="syrabit_admin_session",
         path="/api/",

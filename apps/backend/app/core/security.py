@@ -94,8 +94,8 @@ def sanitize_user_input(text: str) -> str:
     # Remove control characters except newlines and tabs
     text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
 
-    # Limit length to prevent DoS (4000 chars should be enough for any query)
-    max_length = 4000
+    # Limit length to match ChatRequest model validator (2000 chars max).
+    max_length = 2000
     if len(text) > max_length:
         text = text[:max_length]
 

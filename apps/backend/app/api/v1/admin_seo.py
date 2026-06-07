@@ -8,17 +8,17 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app.api.v1.admin import _validate_admin_session, _csrf_check
+from app.api.v1.admin import require_admin_session, csrf_guard
 from app.models.content import Chapter, Subject
 from app.services.seo_generator import seo_generator_service
 from app.services.content_publisher import content_publisher_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Admin SEO"])
+router = APIRouter(tags=["Admin SEO"], dependencies=[Depends(require_admin_session), Depends(csrf_guard)])
 
 # In-memory scan history (resets on restart)
 _scan_history: list[dict] = []
@@ -39,7 +39,6 @@ class GenerateSEORequest(BaseModel):
 @router.get("/seo/entity/status")
 async def seo_entity_status(request: Request):
     """SEO entity health from Chapter collection."""
-    await _validate_admin_session(request)
 
     try:
         total = await Chapter.count()
@@ -62,7 +61,6 @@ async def seo_entity_status(request: Request):
 @router.get("/seo/entity/history")
 async def seo_entity_history(request: Request):
     """In-memory scan history."""
-    await _validate_admin_session(request)
 
     return {"history": _scan_history[-50:], "total": len(_scan_history)}
 
@@ -70,7 +68,6 @@ async def seo_entity_history(request: Request):
 @router.get("/seo/pipeline-status")
 async def seo_pipeline_status(request: Request):
     """Generation/publish status per subject."""
-    await _validate_admin_session(request)
 
     try:
         subjects = await Subject.find_all().to_list()
@@ -134,23 +131,26 @@ async def seo_pipeline_status(request: Request):
 @router.post("/seo/bulk-generate")
 async def seo_bulk_generate(request: Request, body: BulkGenerateRequest):
     """Generate SEO pages for given topic_ids."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
-    # Collect topics from chapters
+    # Collect topics from chapters — one $in query instead of N per topic_id.
+    from beanie import PydanticObjectId as _OID
+    try:
+        oid_list = [_OID(tid) for tid in body.topic_ids]
+    except Exception:
+        raise HTTPException(status_code=422, detail="One or more topic_ids are invalid ObjectIds")
+    requested_ids = set(body.topic_ids)
+    chapters = await Chapter.find({"published_topics.id": {"$in": oid_list}}).to_list()
     topics_to_generate = []
-    for topic_id in body.topic_ids:
-        chapters = await Chapter.find({"published_topics.id": topic_id}).to_list()
-        for ch in chapters:
-            for t in ch.published_topics:
-                if t.id == topic_id:
-                    topics_to_generate.append(
-                        {
-                            "title": t.title,
-                            "topic_slug": t.topic_slug,
-                            "definition": t.definition,
-                        }
-                    )
+    for ch in chapters:
+        for t in ch.published_topics:
+            if str(t.id) in requested_ids:
+                topics_to_generate.append(
+                    {
+                        "title": t.title,
+                        "topic_slug": t.topic_slug,
+                        "definition": t.definition,
+                    }
+                )
 
     if not topics_to_generate:
         raise HTTPException(status_code=404, detail="No topics found for given IDs")
@@ -170,7 +170,6 @@ async def seo_bulk_generate(request: Request, body: BulkGenerateRequest):
 @router.get("/seo/coverage")
 async def seo_coverage(request: Request, subject_id: Optional[str] = Query(None)):
     """Published vs draft vs generated coverage per subject."""
-    await _validate_admin_session(request)
 
     try:
         query = {}
@@ -199,8 +198,6 @@ async def seo_coverage(request: Request, subject_id: Optional[str] = Query(None)
 @router.post("/seo/entity/refresh")
 async def seo_entity_refresh(request: Request):
     """Re-probe entity health signals and record scan."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     try:
         total = await Chapter.count()
@@ -224,7 +221,6 @@ async def seo_entity_refresh(request: Request):
 @router.get("/seo/deep-scan-history")
 async def seo_deep_scan_history(request: Request):
     """Full history of entity scans."""
-    await _validate_admin_session(request)
 
     return {"scans": _scan_history, "total": len(_scan_history)}
 
@@ -232,8 +228,6 @@ async def seo_deep_scan_history(request: Request):
 @router.post("/seo/extract")
 async def seo_extract_topics(request: Request, body: ExtractRequest):
     """AI-extract topics from chapter content."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     try:
         topics = await seo_generator_service.extract_topics_from_content(
@@ -250,8 +244,6 @@ async def seo_extract_topics(request: Request, body: ExtractRequest):
 @router.post("/seo/generate")
 async def seo_generate_pages(request: Request, body: GenerateSEORequest):
     """Generate SEO page variations for topics."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     try:
         results = await seo_generator_service.generate_seo_pages(body.topics)
@@ -264,8 +256,6 @@ async def seo_generate_pages(request: Request, body: GenerateSEORequest):
 @router.post("/seo/regenerate-sitemap")
 async def seo_regenerate_sitemap(request: Request):
     """Rebuild sitemaps from published chapters."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     try:
         sitemap_xml = await content_publisher_service.regenerate_sitemap()

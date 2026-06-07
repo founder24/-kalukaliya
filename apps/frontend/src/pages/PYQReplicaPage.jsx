@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import DOMPurify from 'dompurify';
 import { useParams, useNavigate } from 'react-router-dom';
 import { WORKER_API } from '../utils/api';
 import { useShare } from '../hooks/useShare';
@@ -247,7 +248,7 @@ export default function PYQReplicaPage() {
       </div>
 
       <div style={{ paddingTop: '16px' }}>
-        <div dangerouslySetInnerHTML={{ __html: html }} />
+        <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
       </div>
 
       {/* In-content ad — premium AdPushup/Magnite demand. The PYQ body is

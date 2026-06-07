@@ -103,9 +103,14 @@ class LogoutRequest(BaseModel):
 
 _PLACEHOLDER_SECRETS = {
     "dev-only-secret-not-for-production-use-32chars",
+    "super_secret_jwt_key_32_chars_min",
+    "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG",
+    "test-secret-at-least-32-characters-long",
     "changeme",
     "secret",
     "your-secret-key",
+    "your-256-bit-secret",
+    "jwt-secret",
 }
 
 
@@ -509,7 +514,17 @@ async def signup(request_body: SignupRequest, request: Request):
         auth_provider="local",
         consent_dpdp=request_body.consent_dpdp,
     )
-    await user.insert()
+    try:
+        await user.insert()
+    except Exception as e:
+        # Catch MongoDB DuplicateKeyError from unique index on email.
+        # This handles the race condition where two concurrent requests with the
+        # same email both pass the existence check above and then both try to insert.
+        _e_str = str(e).lower()
+        if "duplicate" in _e_str or "11000" in _e_str or "e11000" in _e_str:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        logger.error(f"User insert failed: {e}")
+        raise
 
     # Generate tokens
     access_token = create_access_token(str(user.id))

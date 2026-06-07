@@ -11,17 +11,17 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app.api.v1.admin import _validate_admin_session, _csrf_check
+from app.api.v1.admin import require_admin_session, csrf_guard
 from app.models.content import Board, Class, Stream, Subject, Chapter, Topic
 from app.services.content_generation import content_generation_service
 from app.services.content_publisher import content_publisher_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Admin Content"])
+router = APIRouter(tags=["Admin Content"], dependencies=[Depends(require_admin_session), Depends(csrf_guard)])
 
 
 # --- Helpers ---
@@ -117,8 +117,6 @@ class FAQRequest(BaseModel):
 @router.post("/content/boards")
 async def create_board(request: Request, body: BoardCreate):
     """Create a new board."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     board = Board(name=body.name, slug=_slugify(body.name))
     await board.insert()
@@ -126,11 +124,10 @@ async def create_board(request: Request, body: BoardCreate):
 
 
 @router.get("/content/boards")
-async def list_boards(request: Request):
+async def list_boards(request: Request, skip: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000)):
     """List all boards."""
-    await _validate_admin_session(request)
 
-    boards = await Board.find_all().to_list()
+    boards = await Board.find_all().skip(skip).limit(limit).to_list()
     return {
         "boards": [
             {
@@ -149,8 +146,6 @@ async def list_boards(request: Request):
 @router.patch("/content/boards/{board_id}")
 async def update_board(request: Request, board_id: str, body: BoardUpdate):
     """Update a board."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     board = await Board.get(PydanticObjectId(board_id))
     if not board:
@@ -180,8 +175,6 @@ async def update_board(request: Request, board_id: str, body: BoardUpdate):
 @router.post("/content/classes")
 async def create_class(request: Request, body: ClassCreate):
     """Create a new class."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     cls = Class(name=body.name, board_id=PydanticObjectId(body.board_id))
     await cls.insert()
@@ -189,14 +182,13 @@ async def create_class(request: Request, body: ClassCreate):
 
 
 @router.get("/content/classes")
-async def list_classes(request: Request, board_id: Optional[str] = Query(None)):
+async def list_classes(request: Request, board_id: Optional[str] = Query(None), skip: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000)):
     """List classes, optionally filtered by board_id."""
-    await _validate_admin_session(request)
 
     query = {}
     if board_id:
         query["board_id"] = PydanticObjectId(board_id)
-    classes = await Class.find(query).to_list()
+    classes = await Class.find(query).skip(skip).limit(limit).to_list()
     return {
         "classes": [
             {
@@ -219,8 +211,6 @@ async def list_classes(request: Request, board_id: Optional[str] = Query(None)):
 @router.post("/content/streams")
 async def create_stream(request: Request, body: StreamCreate):
     """Create a new stream."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     stream = Stream(name=body.name, class_id=PydanticObjectId(body.class_id))
     await stream.insert()
@@ -228,14 +218,13 @@ async def create_stream(request: Request, body: StreamCreate):
 
 
 @router.get("/content/streams")
-async def list_streams(request: Request, class_id: Optional[str] = Query(None)):
+async def list_streams(request: Request, class_id: Optional[str] = Query(None), skip: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000)):
     """List streams, optionally filtered by class_id."""
-    await _validate_admin_session(request)
 
     query = {}
     if class_id:
         query["class_id"] = PydanticObjectId(class_id)
-    streams = await Stream.find(query).to_list()
+    streams = await Stream.find(query).skip(skip).limit(limit).to_list()
     return {
         "streams": [
             {
@@ -258,8 +247,6 @@ async def list_streams(request: Request, class_id: Optional[str] = Query(None)):
 @router.post("/content/subjects")
 async def create_subject(request: Request, body: SubjectCreate):
     """Create a new subject."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     subject = Subject(name=body.name, stream_id=PydanticObjectId(body.stream_id))
     await subject.insert()
@@ -271,14 +258,13 @@ async def create_subject(request: Request, body: SubjectCreate):
 
 
 @router.get("/content/subjects")
-async def list_subjects(request: Request, stream_id: Optional[str] = Query(None)):
+async def list_subjects(request: Request, stream_id: Optional[str] = Query(None), skip: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000)):
     """List subjects, optionally filtered by stream_id."""
-    await _validate_admin_session(request)
 
     query = {}
     if stream_id:
         query["stream_id"] = PydanticObjectId(stream_id)
-    subjects = await Subject.find(query).to_list()
+    subjects = await Subject.find(query).skip(skip).limit(limit).to_list()
     return {
         "subjects": [
             {
@@ -301,8 +287,6 @@ async def list_subjects(request: Request, stream_id: Optional[str] = Query(None)
 @router.post("/content/chapters")
 async def create_chapter(request: Request, body: ChapterCreate):
     """Create a new chapter."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     slug = _slugify(body.title)
     chapter = Chapter(
@@ -326,16 +310,17 @@ async def list_chapters(
     request: Request,
     subject_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=1000),
 ):
     """List chapters, optionally filtered by subject_id and/or status."""
-    await _validate_admin_session(request)
 
     query = {}
     if subject_id:
         query["subject_id"] = PydanticObjectId(subject_id)
     if status:
         query["status"] = status
-    chapters = await Chapter.find(query).to_list()
+    chapters = await Chapter.find(query).skip(skip).limit(limit).to_list()
     return {
         "chapters": [
             {
@@ -357,7 +342,6 @@ async def list_chapters(
 @router.get("/content/chapters/{chapter_id}")
 async def get_chapter(request: Request, chapter_id: str):
     """Get a single chapter by ID."""
-    await _validate_admin_session(request)
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -385,8 +369,6 @@ async def get_chapter(request: Request, chapter_id: str):
 @router.patch("/content/chapters/{chapter_id}")
 async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate):
     """Update chapter fields."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -408,8 +390,6 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate)
 @router.delete("/content/chapters/{chapter_id}")
 async def delete_chapter(request: Request, chapter_id: str):
     """Delete a chapter."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -427,8 +407,6 @@ async def delete_chapter(request: Request, chapter_id: str):
 @router.post("/content/chapters/{chapter_id}/topics")
 async def add_topic(request: Request, chapter_id: str, body: TopicCreate):
     """Add a topic to a chapter."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -446,7 +424,6 @@ async def add_topic(request: Request, chapter_id: str, body: TopicCreate):
 @router.get("/content/chapters/{chapter_id}/topics")
 async def list_topics(request: Request, chapter_id: str):
     """List topics for a chapter."""
-    await _validate_admin_session(request)
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -461,8 +438,6 @@ async def list_topics(request: Request, chapter_id: str):
 @router.patch("/content/topics/{topic_id}")
 async def update_topic(request: Request, topic_id: str, body: TopicUpdate):
     """Update a topic by ID (searches across all chapters)."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     # Find the chapter containing this topic
     chapters = await Chapter.find({"published_topics.id": topic_id}).to_list()
@@ -490,8 +465,6 @@ async def update_topic(request: Request, topic_id: str, body: TopicUpdate):
 @router.delete("/content/topics/{topic_id}")
 async def delete_topic(request: Request, topic_id: str):
     """Delete a topic by ID."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     chapters = await Chapter.find({"published_topics.id": topic_id}).to_list()
     if not chapters:
@@ -512,8 +485,6 @@ async def delete_topic(request: Request, topic_id: str):
 @router.put("/content/chapters/{chapter_id}/content/en")
 async def update_content_en(request: Request, chapter_id: str, body: ContentUpdate):
     """Update English content for a chapter."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -530,8 +501,6 @@ async def update_content_en(request: Request, chapter_id: str, body: ContentUpda
 @router.put("/content/chapters/{chapter_id}/content/as")
 async def update_content_as(request: Request, chapter_id: str, body: ContentUpdate):
     """Update Assamese content for a chapter."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -547,7 +516,6 @@ async def update_content_as(request: Request, chapter_id: str, body: ContentUpda
 @router.get("/content/chapters/{chapter_id}/content/{lang}")
 async def get_content(request: Request, chapter_id: str, lang: str):
     """Get content for a chapter in the specified language."""
-    await _validate_admin_session(request)
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -571,7 +539,6 @@ async def get_content(request: Request, chapter_id: str, lang: str):
 @router.get("/content/subjects/{subject_id}/topic-index")
 async def get_topic_index(request: Request, subject_id: str):
     """Get a consolidated topic index for all chapters in a subject."""
-    await _validate_admin_session(request)
 
     chapters = await Chapter.find(
         {"subject_id": PydanticObjectId(subject_id)}
@@ -608,8 +575,6 @@ async def generate_notes(request: Request, chapter_id: str, body: GenerateNotesR
     Pass {"force": true} in the request body to overwrite existing content.
     By default (force=false) the endpoint is a no-op when content_en is already present.
     """
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     force = body.force if body else False
     try:
@@ -639,8 +604,6 @@ async def generate_notes_assamese(request: Request, chapter_id: str, body: Gener
     Pass {"force": true} in the request body to overwrite existing content_as.
     By default (force=false) the endpoint is a no-op when content_as is already present.
     """
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     force = body.force if body else False
     try:
@@ -668,8 +631,6 @@ async def generate_notes_assamese(request: Request, chapter_id: str, body: Gener
 @router.post("/content/chapters/{chapter_id}/publish")
 async def publish_chapter(request: Request, chapter_id: str):
     """Full publish pipeline: Vertex AI Search + Cloudflare + status update."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     try:
         result = await content_publisher_service.publish_chapter(chapter_id)
@@ -684,8 +645,6 @@ async def publish_chapter(request: Request, chapter_id: str):
 @router.post("/content/chapters/{chapter_id}/publish/search-index")
 async def publish_search_index(request: Request, chapter_id: str):
     """Publish chapter to Vertex AI Search index only."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -698,8 +657,6 @@ async def publish_search_index(request: Request, chapter_id: str):
 @router.post("/content/chapters/{chapter_id}/publish/pages")
 async def publish_pages(request: Request, chapter_id: str):
     """Publish chapter pages to Cloudflare only."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -717,8 +674,6 @@ async def publish_pages(request: Request, chapter_id: str):
 @router.post("/content/chapters/{chapter_id}/faq-jsonld")
 async def set_faq_jsonld(request: Request, chapter_id: str, body: FAQRequest):
     """Set FAQ JSON-LD structured data for a chapter."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -760,8 +715,6 @@ async def trigger_pipeline(request: Request, body: PipelineGenerateRequest):
     Pipeline steps: render HTML -> index Vertex AI Search -> compute hashes ->
     submit IndexNow -> push Cloudflare KV -> save to database.
     """
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     try:
         from app.db.mongo import get_mongo_client
@@ -804,7 +757,6 @@ async def get_pipeline_status(request: Request, knowledge_id: str = Query(...)):
     Check content pipeline status for a knowledge object.
     Returns the last pipeline run timestamp and current status.
     """
-    await _validate_admin_session(request)
 
     try:
         from app.models.knowledge import Knowledge
@@ -898,7 +850,6 @@ def _cms_doc_to_dict(doc) -> dict:
 @router.get("/content/cms-documents")
 async def list_cms_documents(request: Request):
     """List all CMS documents (admin)."""
-    await _validate_admin_session(request)
     try:
         from app.models.cms import CmsDocument
         docs = await CmsDocument.find().sort([("updated_at", -1)]).to_list()
@@ -911,8 +862,6 @@ async def list_cms_documents(request: Request):
 @router.post("/content/cms-documents")
 async def create_cms_document(request: Request, body: CmsDocCreate):
     """Create a new CMS document."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
     try:
         from app.models.cms import CmsDocument
         word_count = len(body.content.split()) if body.content else 0
@@ -934,8 +883,6 @@ async def create_cms_document(request: Request, body: CmsDocCreate):
 @router.patch("/content/cms-documents/{doc_id}")
 async def update_cms_document(request: Request, doc_id: str, body: CmsDocUpdate):
     """Update a CMS document."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
     try:
         from app.models.cms import CmsDocument
         from beanie import PydanticObjectId
@@ -964,8 +911,6 @@ async def update_cms_document(request: Request, doc_id: str, body: CmsDocUpdate)
 @router.delete("/content/cms-documents/{doc_id}")
 async def delete_cms_document(request: Request, doc_id: str):
     """Delete a CMS document."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
     try:
         from app.models.cms import CmsDocument
         from beanie import PydanticObjectId
@@ -984,8 +929,6 @@ async def delete_cms_document(request: Request, doc_id: str):
 @router.post("/content/cms-documents/{doc_id}/publish")
 async def toggle_cms_document_publish(request: Request, doc_id: str):
     """Toggle publish state of a CMS document."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
     try:
         from app.models.cms import CmsDocument
         from beanie import PydanticObjectId
@@ -1006,8 +949,6 @@ async def toggle_cms_document_publish(request: Request, doc_id: str):
 @router.post("/content/cms-documents/{doc_id}/revision")
 async def save_cms_document_revision(request: Request, doc_id: str):
     """Save a named revision snapshot (lightweight - just returns the current doc)."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
     try:
         from app.models.cms import CmsDocument
         from beanie import PydanticObjectId
@@ -1029,7 +970,6 @@ async def save_cms_document_revision(request: Request, doc_id: str):
 @router.get("/content/translation-progress")
 async def get_translation_progress(request: Request):
     """Per-subject breakdown of chapters missing Assamese (content_as) translation."""
-    await _validate_admin_session(request)
 
     import asyncio
     from collections import defaultdict
@@ -1115,7 +1055,6 @@ async def ingest_from_agent(request: Request, body: AgentIngestRequest):
     Set trigger_generation=true to queue background note generation for every
     newly created chapter immediately after seeding.
     """
-    await _validate_admin_session(request)
 
     subject = await Subject.get(PydanticObjectId(body.subject_id))
     if not subject:
@@ -1196,8 +1135,6 @@ async def ingest_from_agent(request: Request, body: AgentIngestRequest):
 @router.post("/sync-to-gcs")
 async def sync_to_gcs(request: Request):
     """Sync all content hierarchy and library bundles to GCS."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     try:
         from app.services.content.hierarchy_sync import sync_hierarchy_to_gcs

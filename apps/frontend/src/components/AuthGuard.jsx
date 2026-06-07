@@ -12,7 +12,7 @@ export const AuthGuard = ({ children }) => {
             <div
               className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-2xl pulse-glow overflow-hidden"
             >
-              <img src="/logo-144.webp" alt="" width="56" height="56" className="w-14 h-14 object-cover" />
+              <img src="/logo-144.webp" alt="Syrabit.ai logo" width="56" height="56" className="w-14 h-14 object-cover" />
             </div>
             <div
               className="absolute orbit-ring"

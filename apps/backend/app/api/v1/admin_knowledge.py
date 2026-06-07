@@ -7,17 +7,17 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.api.v1.admin import _validate_admin_session, _csrf_check
+from app.api.v1.admin import require_admin_session, csrf_guard
 from app.models.knowledge import KnowledgeObject, ContentMetadata, GeneratedContent
 from app.services.content.pipeline import content_pipeline
 from app.services.content_publisher import content_publisher_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["Admin Knowledge"], dependencies=[Depends(require_admin_session), Depends(csrf_guard)])
 
 
 class KnowledgeCreateRequest(BaseModel):
@@ -41,8 +41,6 @@ class BulkPublishRequest(BaseModel):
 @router.post("/content/knowledge")
 async def create_or_update_knowledge(request: Request, body: KnowledgeCreateRequest):
     """Create or update a knowledge object."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     existing = await KnowledgeObject.find_one({"slug": body.slug})
 
@@ -85,8 +83,6 @@ async def create_or_update_knowledge(request: Request, body: KnowledgeCreateRequ
 @router.post("/content/knowledge/{slug}/publish")
 async def publish_knowledge(request: Request, slug: str):
     """Trigger the content pipeline for a knowledge object."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     obj = await KnowledgeObject.find_one({"slug": slug})
     if not obj:
@@ -109,8 +105,6 @@ async def bulk_publish_knowledge(
     background_tasks: BackgroundTasks,
 ):
     """Trigger the content pipeline for multiple knowledge objects in background."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
 
     if not body.slugs:
         raise HTTPException(status_code=400, detail="No slugs provided")
@@ -147,7 +141,6 @@ async def list_knowledge(
     status: Optional[str] = None,
 ):
     """List knowledge objects with pagination."""
-    await _validate_admin_session(request)
     limit = min(limit, 100)
 
     query = {}
@@ -189,7 +182,6 @@ async def list_knowledge(
 @router.get("/content/knowledge/{slug}")
 async def get_knowledge(request: Request, slug: str):
     """Get a single knowledge object by slug (admin view - all fields)."""
-    await _validate_admin_session(request)
 
     obj = await KnowledgeObject.find_one({"slug": slug})
     if not obj:

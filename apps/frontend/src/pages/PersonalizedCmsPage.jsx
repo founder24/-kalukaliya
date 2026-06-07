@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import DOMPurify from 'dompurify';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import {
@@ -191,7 +192,7 @@ export default function PersonalizedCmsPage() {
         {/* Content */}
         <article
           className="prose prose-invert prose-sm max-w-none px-0 sm:px-0"
-          dangerouslySetInnerHTML={{ __html: doc.content_html || `<pre>${doc.content}</pre>` }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(doc.content_html || `<pre>${doc.content}</pre>`) }}
           style={{
             '--tw-prose-headings': '#ffffff',
             '--tw-prose-body': 'rgba(255,255,255,0.75)',

@@ -1,8 +1,13 @@
 """
 Database Migration Runner
 
-Simple forward-only migration system for MongoDB.
-Tracks applied migrations in a 'schema_versions' collection.
+Forward-only migration system for MongoDB with optional rollback (down_fn) support.
+Tracks applied migrations in a 'schema_versions' collection with status field:
+  - "pending"  — claimed but not yet finished (crash-safe claim-first pattern)
+  - "applied"  — completed successfully
+  - "failed"   — up_fn raised an exception
+  - "rolled_back" — down_fn ran successfully
+
 Uses Motor directly (not Beanie) since migrations run at startup before Beanie init.
 """
 
@@ -45,23 +50,87 @@ async def apply_migration(
         logger.debug(f"Migration {version} already applied, skipping")
         return False
 
-    logger.info(f"Applying migration {version}: {description}")
+    # Claim the migration slot BEFORE running up_fn (M-13 fix).
+    # If the app crashes between up_fn and the record insert, the next boot would
+    # find a "pending" record and skip re-running — preventing double application.
     try:
-        await up_fn(db)
         await db.schema_versions.insert_one(
             {
                 "version": version,
                 "description": description,
-                "applied_at": datetime.now(timezone.utc),
+                "status": "pending",
+                "started_at": datetime.now(timezone.utc),
             }
+        )
+    except DuplicateKeyError:
+        # Another instance already claimed this migration; let it finish.
+        logger.info(f"Migration {version} was claimed by another instance, skipping")
+        return False
+
+    logger.info(f"Applying migration {version}: {description}")
+    try:
+        await up_fn(db)
+        await db.schema_versions.update_one(
+            {"version": version},
+            {
+                "$set": {
+                    "status": "applied",
+                    "applied_at": datetime.now(timezone.utc),
+                }
+            },
         )
         logger.info(f"Migration {version} applied successfully")
         return True
-    except DuplicateKeyError:
-        logger.info(f"Migration {version} was applied by another instance, skipping")
-        return False
     except Exception as e:
+        # Mark the slot as failed so operators can diagnose; does not re-raise
+        # to allow other migrations to proceed where safe.
         logger.error(f"Migration {version} failed: {e}")
+        try:
+            await db.schema_versions.update_one(
+                {"version": version},
+                {"$set": {"status": "failed", "error": str(e)[:500]}},
+            )
+        except Exception:
+            pass
+        raise
+
+
+async def rollback_migration(
+    db: AsyncDatabase,
+    version: str,
+    down_fn: Callable[[AsyncDatabase], Awaitable[None]],
+) -> bool:
+    """
+    Roll back a single applied migration by running its down_fn.
+
+    Returns True if the rollback ran, False if the migration was not in
+    'applied' state (already rolled back, pending, or never applied).
+
+    Usage (typically from a management script, never called at startup):
+        from app.db.migrations.runner import rollback_migration
+        await rollback_migration(db, "20240101_add_index", down_20240101)
+    """
+    existing = await db.schema_versions.find_one({"version": version})
+    if not existing or existing.get("status") != "applied":
+        logger.info(f"Migration {version} is not in 'applied' state — skipping rollback")
+        return False
+
+    logger.info(f"Rolling back migration {version}")
+    try:
+        await down_fn(db)
+        await db.schema_versions.update_one(
+            {"version": version},
+            {
+                "$set": {
+                    "status": "rolled_back",
+                    "rolled_back_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        logger.info(f"Migration {version} rolled back successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Rollback of migration {version} failed: {e}")
         raise
 
 

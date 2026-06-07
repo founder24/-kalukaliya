@@ -177,7 +177,10 @@ async def basic_health_check():
                 "service": "syrabit-backend",
                 "mongodb_initialized": mongodb_ok,
                 "error_count": len(errors),
-                "errors": errors,
+                # Do NOT expose error details publicly — they can contain
+                # infrastructure hints (URI patterns, IP allowlist messages).
+                # Full details are available at /api/v1/health/deep (admin only).
+                "hint": "Check /api/v1/health/deep for detailed diagnostics.",
                 "warnings": warnings,
             },
         )

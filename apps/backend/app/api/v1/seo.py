@@ -3,6 +3,7 @@ SEO endpoints: XML sitemaps for search engine discovery.
 Queries KnowledgeObject collection for dynamic sitemap generation.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -21,18 +22,23 @@ BASE_URL = "https://syrabit.ai"
 
 _sitemap_cache: dict[str, tuple[float, str]] = {}
 SITEMAP_CACHE_TTL = 600  # 10 minutes
+_sitemap_cache_lock = asyncio.Lock()
 
 
 def _get_cached_sitemap(key: str) -> str | None:
-    if key in _sitemap_cache:
-        ts, content = _sitemap_cache[key]
+    """Non-blocking read; Lock only needed on write."""
+    entry = _sitemap_cache.get(key)
+    if entry:
+        ts, content = entry
         if time.time() - ts < SITEMAP_CACHE_TTL:
             return content
     return None
 
 
-def _set_cached_sitemap(key: str, content: str) -> None:
-    _sitemap_cache[key] = (time.time(), content)
+async def _set_cached_sitemap(key: str, content: str) -> None:
+    """Lock on write to prevent concurrent updates causing RuntimeError."""
+    async with _sitemap_cache_lock:
+        _sitemap_cache[key] = (time.time(), content)
 
 
 def _xml_escape(text: str) -> str:
@@ -51,19 +57,19 @@ SITEMAP_INDEX_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <sitemap>
     <loc>{base_url}/sitemap-static.xml</loc>
-    <lastmod>2026-06-07</lastmod>
+    <lastmod>{today}</lastmod>
   </sitemap>
   <sitemap>
     <loc>{base_url}/sitemap-subjects.xml</loc>
-    <lastmod>2026-06-07</lastmod>
+    <lastmod>{today}</lastmod>
   </sitemap>
   <sitemap>
     <loc>{base_url}/sitemap-chapters.xml</loc>
-    <lastmod>2026-06-07</lastmod>
+    <lastmod>{today}</lastmod>
   </sitemap>
   <sitemap>
     <loc>{base_url}/sitemap-topics.xml</loc>
-    <lastmod>2026-06-07</lastmod>
+    <lastmod>{today}</lastmod>
   </sitemap>
 </sitemapindex>"""
 
@@ -242,27 +248,25 @@ Allow: /
 Crawl-delay: 0
 
 Sitemap: https://syrabit.ai/sitemap-index.xml
-Sitemap: https://syrabit.ai/sitemap-pages.xml
+Sitemap: https://syrabit.ai/sitemap-static.xml
 Sitemap: https://syrabit.ai/sitemap-subjects.xml
 Sitemap: https://syrabit.ai/sitemap-chapters.xml
-Sitemap: https://syrabit.ai/sitemap-notes.xml
-Sitemap: https://syrabit.ai/sitemap-mcqs.xml
-Sitemap: https://syrabit.ai/sitemap-pyqs.xml
-Sitemap: https://syrabit.ai/sitemap-examples.xml
-Sitemap: https://syrabit.ai/sitemap-definitions.xml
-Sitemap: https://syrabit.ai/sitemap-learn.xml
+Sitemap: https://syrabit.ai/sitemap-topics.xml
 """
 
 
 @router.get("/sitemap.xml")
 async def sitemap_index():
-    content = SITEMAP_INDEX_XML.format(base_url=BASE_URL)
+    today = datetime.now(timezone.utc).date().isoformat()
+    content = SITEMAP_INDEX_XML.format(base_url=BASE_URL, today=today)
     return Response(content=content.strip(), media_type="application/xml")
 
 
 @router.get("/sitemap-static.xml")
 async def sitemap_static():
-    return Response(content=SITEMAP_STATIC_XML.strip(), media_type="application/xml")
+    today = datetime.now(timezone.utc).date().isoformat()
+    content = SITEMAP_STATIC_XML.replace("2026-06-07", today)
+    return Response(content=content.strip(), media_type="application/xml")
 
 
 @router.get("/robots.txt")
@@ -320,7 +324,7 @@ async def sitemap_subjects():
             + "\n".join(urls)
             + "\n</urlset>"
         )
-        _set_cached_sitemap("subjects", xml_content)
+        await _set_cached_sitemap("subjects", xml_content)
         return Response(content=xml_content, media_type="application/xml")
 
     except Exception as e:
@@ -394,7 +398,7 @@ async def sitemap_chapters():
             + "\n".join(urls)
             + "\n</urlset>"
         )
-        _set_cached_sitemap("chapters", xml_content)
+        await _set_cached_sitemap("chapters", xml_content)
         return Response(content=xml_content, media_type="application/xml")
 
     except Exception as e:
@@ -481,7 +485,7 @@ async def sitemap_topics():
             + "\n".join(urls)
             + "\n</urlset>"
         )
-        _set_cached_sitemap("topics", xml_content)
+        await _set_cached_sitemap("topics", xml_content)
         return Response(content=xml_content, media_type="application/xml")
     except Exception as e:
         logger.warning(f"Failed to generate topics sitemap: {e}")
@@ -550,7 +554,7 @@ async def feed_xml():
             "  </channel>\n"
             "</rss>"
         )
-        _set_cached_sitemap("feed_xml", xml_content)
+        await _set_cached_sitemap("feed_xml", xml_content)
         return Response(content=xml_content, media_type="application/rss+xml")
     except Exception as e:
         logger.warning(f"Failed to generate RSS feed: {e}")
@@ -623,7 +627,7 @@ async def feed_subject_xml(subject_slug: str):
             "  </channel>\n"
             "</rss>"
         )
-        _set_cached_sitemap(cache_key, xml_content)
+        await _set_cached_sitemap(cache_key, xml_content)
         return Response(content=xml_content, media_type="application/rss+xml")
     except Exception as e:
         logger.warning(f"Failed to generate subject RSS feed for {subject_slug}: {e}")
@@ -693,7 +697,7 @@ async def feed_json():
             "items": items,
         }
         content = json.dumps(feed, ensure_ascii=False)
-        _set_cached_sitemap("feed_json", content)
+        await _set_cached_sitemap("feed_json", content)
         return Response(content=content, media_type="application/feed+json")
     except Exception as e:
         logger.warning(f"Failed to generate JSON feed: {e}")
@@ -705,3 +709,44 @@ async def feed_json():
             }
         )
         return Response(content=fallback, media_type="application/feed+json")
+
+
+@router.get("/llms-full.txt")
+async def llms_full_txt():
+    """Extended LLM-discoverable text — full structured content index.
+    Served at /llms-full.txt via the CF Worker SEO passthrough proxy."""
+    from app.models.knowledge import KnowledgeObject
+
+    try:
+        docs = await KnowledgeObject.find(
+            {"status": "published"},
+            projection={"title": 1, "subject": 1, "board": 1, "class_name": 1, "slug": 1},
+        ).limit(500).to_list()
+        lines = [
+            "# Syrabit.ai — Full Content Index",
+            "",
+            "> AI-crawlable index of published chapters. Each entry links to the",
+            "> canonical chapter page with structured study notes, MCQs, PYQs, and",
+            "> Assamese translations. LLMs may cite; training use is prohibited (see ai.txt).",
+            "",
+            f"Total indexed chapters: {len(docs)}",
+            "",
+            "---",
+            "",
+        ]
+        for doc in docs:
+            slug = doc.slug or ""
+            title = doc.title or "Untitled"
+            board = getattr(doc, "board", "") or ""
+            cls = getattr(doc, "class_name", "") or ""
+            subj = getattr(doc, "subject", "") or ""
+            if slug:
+                lines.append(f"- [{title}](https://syrabit.ai/{slug}) — {board} {cls} {subj}".strip())
+            else:
+                lines.append(f"- {title} — {board} {cls} {subj}".strip())
+        content = "\n".join(lines) + "\n"
+    except Exception as e:
+        logger.warning(f"llms-full.txt: DB error, serving stub: {e}")
+        content = "# Syrabit.ai — Full Content Index\n\n(index temporarily unavailable)\n"
+
+    return Response(content=content, media_type="text/plain; charset=utf-8")

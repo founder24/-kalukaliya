@@ -13,10 +13,23 @@
 
 EDGE_URL="${EDGE_URL:-https://api.syrabit.ai}"
 SITE_URL="${SITE_URL:-https://syrabit.ai}"
-USER_EMAIL="${USER_EMAIL:-founder@syrabit.ai}"
-USER_PASS="${USER_PASS:-Rimjhimiya@325544}"
-ADMIN_EMAIL="${ADMIN_EMAIL:-founder@syrabit.ai}"
-ADMIN_PASS="${ADMIN_PASS:-Rimjhimiya@325544}"
+USER_EMAIL="${USER_EMAIL:-}"
+USER_PASS="${USER_PASS:-}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-}"
+ADMIN_PASS="${ADMIN_PASS:-}"
+
+# Fail fast if credentials are not provided via environment variables.
+# Never hardcode passwords — load them from GCP Secret Manager or CI env.
+if [[ -z "$USER_EMAIL" || -z "$USER_PASS" ]]; then
+  echo "ERROR: USER_EMAIL and USER_PASS must be set as environment variables." >&2
+  echo "  e.g. USER_EMAIL=... USER_PASS=... ./scripts/test-live.sh" >&2
+  exit 1
+fi
+if [[ -z "$ADMIN_EMAIL" || -z "$ADMIN_PASS" ]]; then
+  echo "ERROR: ADMIN_EMAIL and ADMIN_PASS must be set as environment variables." >&2
+  echo "  e.g. ADMIN_EMAIL=... ADMIN_PASS=... ./scripts/test-live.sh" >&2
+  exit 1
+fi
 TIMEOUT=30
 CHAT_TIMEOUT=45
 
@@ -180,6 +193,10 @@ except: print(0)
 USER_TOKEN="" REFRESH_TOKEN="" CONV_ID=""
 BOARD_SLUG="" CLASS_SLUG="" SUBJ_SLUG=""
 ADMIN_JAR=""
+RESET_JAR=""
+
+# Ensure temp cookie jars are always removed, even on early exit or signal.
+trap 'rm -f "$ADMIN_JAR" "$RESET_JAR"' EXIT
 
 # =============================================================================
 banner -1 "Provider & System Connectivity"

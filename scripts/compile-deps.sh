@@ -17,6 +17,10 @@
 
 set -euo pipefail
 
+# L-17: clean up any mktemp files on exit/interrupt so they never leak.
+TMP_REQ=''; TMP_OUT=''; TMP=''
+trap 'rm -f "${TMP_REQ:-}" "${TMP_OUT:-}" "${TMP:-}"' EXIT
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 BACKEND_DIR="$REPO_ROOT/apps/backend"

@@ -18,9 +18,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _slugify(text: str) -> str:
-    """Generate a URL-friendly slug from text."""
-    text = text.lower().strip()
+def _slugify(text: str, max_length: int = 200) -> str:
+    """Generate a URL-friendly slug from text.
+
+    max_length caps the input before regex substitution to prevent
+    catastrophic backtracking on adversarial long strings (L-1 fix).
+    """
+    text = text[:max_length].lower().strip()
     text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"[\s_]+", "-", text)
     return re.sub(r"-+", "-", text).strip("-")
