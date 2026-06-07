@@ -63,4 +63,4 @@ description: Fixed bugs (analytics 404s, conversation/session mismatch, logout c
 
 **Fix (code):** Added guard in `verifyJWT()` — if neither `jwtSecret` nor `jwtPublicKey` is set, return the pass-through error string so the backend handles auth. See `apps/edge/src/middleware/jwt.ts`.
 
-**Fix (infra needed):** Run `npx wrangler secret put JWT_SECRET --env production` with the same value as the backend's `JWT_SECRET` GCP secret. Without this, the edge silently degrades to pass-through (still secure — backend verifies), but loses the edge-level token rejection latency benefit.
+**Fix (infra — DONE 2026-06-07):** CI deploy-edge job in `.github/workflows/deploy.yml` now authenticates to GCP (using `secrets.GCP_SA_KEY`) then pipes each GCP secret value into `wrangler secret put --env production` via stdin. Runs after every edge deploy — JWT_SECRET and EDGE_SHARED_SECRET stay in sync permanently. The first successful run was commit 371c06ec152f.
