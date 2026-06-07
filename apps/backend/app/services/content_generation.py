@@ -137,6 +137,13 @@ class ContentGenerationService:
     async def generate_assamese_only(self, chapter_id: str, force: bool = False) -> Chapter:
         """Translate existing English content to Assamese using Sarvam AI.
 
+        The Sarvam sarvam-30b / sarvam-105b models are reasoning models with a
+        4096-token completion budget on the starter plan.  Sending ~1000-1300
+        English words in one shot exhausts that budget entirely on reasoning,
+        leaving content=null.  We chunk into ~400-word segments so each request
+        fits comfortably: ~600 prompt tokens + ~1500 reasoning + ~900 output ≈
+        3000 tokens, well within the 4096 cap.
+
         Args:
             chapter_id: The chapter to translate.
             force: When False (default), skip translation if content_as already
@@ -162,9 +169,28 @@ class ContentGenerationService:
         translate_prompt = (
             "You are a professional translator. "
             "Translate the following educational content from English to Assamese. "
-            "Maintain the structure and formatting."
+            "Output ONLY the Assamese translation. "
+            "Maintain the structure and formatting exactly."
         )
-        content_as = await sarvam_client.generate(translate_prompt, chapter.content_en)
+
+        # Split into ~400-word chunks so reasoning + output fit in 4096 tokens
+        words = chapter.content_en.split()
+        chunk_size = 400
+        chunks = [
+            " ".join(words[i : i + chunk_size])
+            for i in range(0, len(words), chunk_size)
+        ]
+
+        translated_parts = []
+        for idx, chunk in enumerate(chunks):
+            logger.info(
+                f"Translating chunk {idx + 1}/{len(chunks)} for {chapter.title!r}"
+            )
+            part = await sarvam_client.generate(translate_prompt, chunk)
+            if part and part.strip():
+                translated_parts.append(part.strip())
+
+        content_as = "\n\n".join(translated_parts)
         chapter.content_as = content_as
         chapter.updated_at = datetime.now(timezone.utc)
         await chapter.save()

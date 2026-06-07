@@ -15,8 +15,15 @@ from app.core.circuit_breaker import (
 logger = logging.getLogger(__name__)
 
 
-def _strip_think_block(text: str) -> str:
-    """Remove <think>...</think> reasoning blocks from Sarvam model output."""
+def _strip_think_block(text: str | None) -> str:
+    """Remove <think>...</think> reasoning blocks from Sarvam model output.
+
+    sarvam-30b / sarvam-105b are reasoning models: they may return
+    reasoning_content separately and leave content=null.  This function
+    is null-safe — returns "" if text is None or empty.
+    """
+    if not text:
+        return ""
     cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     return cleaned.strip()
 
@@ -29,7 +36,9 @@ class SarvamAIClient:
         self.base_url = settings.SARVAM_BASE_URL
         self.model = settings.SARVAM_MODEL
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0, connect=3.0),
+            # sarvam-30b / sarvam-105b are reasoning models — they can take
+            # 30-90 s to produce a long translation; raise the read timeout.
+            timeout=httpx.Timeout(120.0, connect=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
@@ -65,7 +74,11 @@ class SarvamAIClient:
                         {"role": "user", "content": user_message},
                     ],
                     "temperature": 0.7,
-                    "max_tokens": 2048,
+                    # sarvam-30b / sarvam-105b are reasoning models that use
+                    # completion tokens for internal thinking before the answer.
+                    # Starter tier cap is 4096; use the full allowance so the
+                    # model can finish reasoning AND emit the translated text.
+                    "max_tokens": 4096,
                     "stream": stream,
                 },
             )
@@ -73,7 +86,12 @@ class SarvamAIClient:
             data = response.json()
 
             if "choices" in data and len(data["choices"]) > 0:
-                return data["choices"][0]["message"]["content"]
+                msg = data["choices"][0]["message"]
+                # sarvam-30b / sarvam-105b: content is the final answer.
+                # reasoning_content is the internal thinking (English) — do NOT
+                # fall back to it, it's not a translation.
+                content = msg.get("content") or ""
+                return content
             return "\u09ae\u0987 \u0995\u09cb\u09a8\u09cb \u0989\u09a4\u09cd\u09a4\u09f0 \u09b8\u09c3\u09b7\u09cd\u099f\u09bf \u0995\u09f0\u09bf\u09ac \u09aa\u09f0\u09be \u09a8\u09be\u0987\u09b2\u09cb\u0964 \u0985\u09a8\u09c1\u0997\u09cd\u09f0\u09b9 \u0995\u09f0\u09bf \u09aa\u09c1\u09a8\u09f0 \u099a\u09c7\u09b7\u09cd\u099f\u09be \u0995\u09f0\u0995\u0964"
 
         _last_http_exc: httpx.HTTPStatusError | None = None
