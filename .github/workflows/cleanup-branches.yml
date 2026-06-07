@@ -1,0 +1,104 @@
+name: Cleanup Stale Branches
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (list branches without deleting)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      protect:
+        description: 'Extra branches to protect (comma-separated, e.g. staging,develop)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cleanup-branches
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Delete All Non-Main Branches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete stale branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          EXTRA_PROTECT: ${{ inputs.protect }}
+        run: |
+          set -euo pipefail
+
+          # Branches that must never be deleted
+          PROTECTED="main master"
+          for b in $(echo "$EXTRA_PROTECT" | tr ',' ' '); do
+            PROTECTED="$PROTECTED $b"
+          done
+
+          echo "=== Protected branches: $PROTECTED ==="
+          echo "=== Dry run: $DRY_RUN ==="
+          echo ""
+
+          # Fetch all remote branches via GitHub API (handles >100 with pagination)
+          ALL_BRANCHES=$(gh api "repos/$REPO/branches" --paginate --jq '.[].name')
+          TOTAL=$(echo "$ALL_BRANCHES" | wc -l)
+          echo "Total branches found: $TOTAL"
+          echo ""
+
+          DELETED=0
+          SKIPPED=0
+          FAILED=0
+
+          while IFS= read -r BRANCH; do
+            # Skip protected
+            SKIP=false
+            for P in $PROTECTED; do
+              if [ "$BRANCH" = "$P" ]; then
+                SKIP=true
+                break
+              fi
+            done
+
+            if [ "$SKIP" = "true" ]; then
+              echo "  ✓ KEPT     $BRANCH"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "  🗑  WOULD DELETE  $BRANCH"
+              DELETED=$((DELETED + 1))
+            else
+              if gh api "repos/$REPO/git/refs/heads/$BRANCH" \
+                  -X DELETE --silent 2>/dev/null; then
+                echo "  🗑  DELETED  $BRANCH"
+                DELETED=$((DELETED + 1))
+              else
+                echo "  ✗  FAILED   $BRANCH"
+                FAILED=$((FAILED + 1))
+              fi
+            fi
+          done <<< "$ALL_BRANCHES"
+
+          echo ""
+          echo "════════════════════════════════"
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "DRY RUN complete:"
+            echo "  Would delete : $DELETED"
+            echo "  Protected    : $SKIPPED"
+          else
+            echo "Cleanup complete:"
+            echo "  Deleted   : $DELETED"
+            echo "  Protected : $SKIPPED"
+            echo "  Failed    : $FAILED"
+          fi
+          echo "════════════════════════════════"
