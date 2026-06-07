@@ -1,12 +1,18 @@
 import axios from 'axios';
 import { toast } from 'sonner';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
-if (!import.meta.env.VITE_BACKEND_URL) {
+const _VITE_BACKEND = import.meta.env.VITE_BACKEND_URL || '';
+const BACKEND_URL = _VITE_BACKEND ||
+  (import.meta.env.PROD ? 'https://api.syrabit.ai' : '');
+if (!_VITE_BACKEND) {
   if (import.meta.env.PROD) {
-    throw new Error('VITE_BACKEND_URL is not set. API calls will fail in production.');
+    console.warn(
+      '[Syrabit] VITE_BACKEND_URL is not set in the CF Pages environment. ' +
+      'Falling back to https://api.syrabit.ai. ' +
+      'Add VITE_BACKEND_URL=https://api.syrabit.ai in CF Pages → Settings → Environment Variables and redeploy to remove this warning.'
+    );
   } else {
-    console.error('[Syrabit] VITE_BACKEND_URL is not set. API requests will use relative paths (/api/v1).');
+    console.error('[Syrabit] VITE_BACKEND_URL is not set. API requests will use relative paths (/api/v1) via the Vite dev proxy.');
   }
 }
 export const API_BASE = `${BACKEND_URL}/api/v1`;
