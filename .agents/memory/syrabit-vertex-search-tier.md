@@ -36,6 +36,19 @@ doc = discoveryengine_v1.Document(
 ```
 Both chapter chunk docs and topic micro-docs need this. The `struct_data["content"]` field is still needed for RAG retrieval (`search_context` reads it back), so set both.
 
+## tier_access filter — do not use
+`search_context()` must NOT apply a `tier_access = "free"` filter. The field is not configured as filterable in the datastore schema, causing a 400 error on every RAG call → circuit breaker trips → zero RAG results everywhere. `filter_expr` is hardcoded to `None` in `vertex_search.py`.
+
+**Why:** Was silently breaking all production RAG. Re-enable only after adding `tier_access` to the datastore's field configuration.
+
+## Topic doc IDs — use topic_slug
+`UpdateDocumentRequest` for topic micro-docs must use `f"{chapter_id}_topic_{topic.topic_slug}"` not `f"{chapter_id}_topic_{topic.id}"`. The `id` field is a UUID auto-assigned by Pydantic; `topic_slug` is the human-readable slug used everywhere else.
+
+## Topic definition extraction
+`generate_notes()` step 2 calls Gemini to extract a 1-2 sentence definition for each topic from the generated notes. Uses individual per-topic calls (not batch) because Gemini stops after the first definition in batch mode.
+
 ## Verification
 After fix: `"Vertex Search warm-up successful"` appears in backend startup logs (was 400 error before).
+RAG: 10/10 test queries pass across Physics and Chemistry.
 Upload verification: `vertex_search: uploaded chunks=N topic_docs=M` in pipeline result.
+Hierarchy in every topic doc: `AHSEC > HS 1st Year > Science > [Subject] > [Chapter] > [Topic]`.

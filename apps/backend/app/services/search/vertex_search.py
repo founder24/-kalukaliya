@@ -215,12 +215,12 @@ class VertexSearchService:
                 logger.warning("Circuit breaker OPEN - returning empty results")
                 return []
 
-            # Validate user_tier
-            if user_tier and user_tier not in VALID_USER_TIERS:
-                logger.warning(f"Invalid user_tier value rejected: {user_tier}")
-                filter_expr = None
-            else:
-                filter_expr = f'tier_access = "{user_tier}"' if user_tier else None
+            # tier_access filter intentionally disabled: the field is not
+            # configured as filterable in the Vertex Search datastore schema.
+            # Applying it causes a 400 "Unsupported field on comparison operators"
+            # which trips the circuit breaker and silences ALL RAG results.
+            # Re-enable once the field is added to the datastore's field config.
+            filter_expr = None
 
             # Execute search in thread pool (client is synchronous)
             try:

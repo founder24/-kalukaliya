@@ -162,7 +162,7 @@ class ContentPublisherService:
 
                 # Index each topic as a micro-document for precise matching
                 for topic in chapter.published_topics or []:
-                    topic_doc_id = f"{str(chapter.id)}_topic_{topic.id}"
+                    topic_doc_id = f"{str(chapter.id)}_topic_{topic.topic_slug}"
                     topic_struct = struct_pb2.Struct()
                     topic_content = topic.definition or (
                         f"{topic.title} is a topic in {chapter.title} "

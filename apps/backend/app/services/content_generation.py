@@ -86,11 +86,12 @@ class ContentGenerationService:
 
         Full pipeline on success:
           1. Vertex AI → English study notes
-          2. Sarvam AI → Assamese translation (chunked, soft-fail)
-          3. Vertex AI → SEO meta description + keywords
-          4. Vertex AI → 5-entry FAQ JSON-LD
-          5. Save to MongoDB (status='generated')
-          6. publish_chapter() → GCS + Vertex Search + CF prerender + embeddings
+          2. Vertex AI → per-topic definitions (1–2 sentences each, soft-fail)
+          3. Sarvam AI → Assamese translation (chunked, soft-fail)
+          4. Vertex AI → SEO meta description + keywords
+          5. Vertex AI → 5-entry FAQ JSON-LD
+          6. Save to MongoDB (status='generated')
+          7. publish_chapter() → GCS + Vertex Search + CF prerender + embeddings
                                → status='published' in MongoDB
 
         Args:
@@ -133,7 +134,36 @@ class ContentGenerationService:
         content_en = await vertex_client.generate(system_prompt, user_message)
         chapter.content_en = content_en
 
-        # ── 3. Assamese translation via Sarvam AI (chunked, soft-fail) ─────────
+        # ── 3. Extract per-topic definitions from generated content ───────────
+        if chapter.published_topics:
+            topics_list = ", ".join(t.title for t in chapter.published_topics)
+            def_prompt = (
+                f"From the study notes below, extract a 1–2 sentence factual definition "
+                f"for each of these topics: {topics_list}\n\n"
+                "Format strictly as:\nTOPIC: <topic title>\nDEF: <definition>\n\n"
+                "Only output the topic/definition pairs. No extra text."
+            )
+            try:
+                def_response = await vertex_client.generate(
+                    "You are an educational content extractor.",
+                    f"{def_prompt}\n\nNotes:\n{content_en[:4000]}",
+                )
+                topic_map = {t.title.lower(): t for t in chapter.published_topics}
+                current_topic = None
+                for line in def_response.split("\n"):
+                    line = line.strip()
+                    if line.startswith("TOPIC:"):
+                        title = line[6:].strip().lower()
+                        current_topic = topic_map.get(title)
+                    elif line.startswith("DEF:") and current_topic:
+                        current_topic.definition = line[4:].strip()
+                        current_topic = None
+                defined = sum(1 for t in chapter.published_topics if t.definition)
+                logger.info(f"Topic definitions extracted: {defined}/{len(chapter.published_topics)} for {chapter.title!r}")
+            except Exception as e:
+                logger.warning(f"Topic definition extraction failed for {chapter.title!r}: {e}")
+
+        # ── 4. Assamese translation via Sarvam AI (chunked, soft-fail) ─────────
         translate_prompt = (
             "You are a professional translator. "
             "Translate the following educational content from English to Assamese. "
