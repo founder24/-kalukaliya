@@ -53,4 +53,7 @@ interface Env {
   R2_BUCKET: R2Bucket;
   RATE_LIMIT_KV: KVNamespace;
   ISR_CACHE_KV: KVNamespace;
+  // Pre-seeded content HTML store (written by backend content pipeline).
+  // Keys: {board}/{class_level}/{subject}/{chapter}/{page_type}
+  CONTENT_KV: KVNamespace;
 }
