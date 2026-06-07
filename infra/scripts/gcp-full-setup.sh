@@ -78,7 +78,8 @@ for ROLE in "${ROLES[@]}"; do
   gcloud projects add-iam-policy-binding "$PROJECT" \
     --member="serviceAccount:$SA" \
     --role="$ROLE" \
-    --quiet 2>/dev/null && echo -e "  ${G}✓${X} $ROLE" || echo -e "  ${Y}⚠${X} $ROLE (already bound or error)"
+    --condition=None \
+    --quiet && echo -e "  ${G}✓${X} $ROLE" || echo -e "  ${Y}⚠${X} $ROLE (already bound or error)"
 done
 
 # ── 3. Grant Cloud Build SA permission to use the backend SA ──────────────────
@@ -93,11 +94,13 @@ gcloud iam service-accounts add-iam-policy-binding "$SA" \
 gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:$CB_SA" \
   --role="roles/run.admin" \
+  --condition=None \
   --quiet && echo -e "  ${G}✓${X} Cloud Build SA → roles/run.admin"
 
 gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:$CB_SA" \
   --role="roles/secretmanager.secretAccessor" \
+  --condition=None \
   --quiet && echo -e "  ${G}✓${X} Cloud Build SA → roles/secretmanager.secretAccessor"
 
 # ── 4. Create missing optional Secret Manager secrets ────────────────────────
