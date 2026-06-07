@@ -39,8 +39,11 @@ const PUBLIC_PATHS = [
   '/api/v1/auth/refresh',
   '/api/v1/auth/forgot-password',
   '/api/v1/auth/reset-password',
-  '/api/v1/admin/login',
-  '/api/v1/admin/logout',
+  // All admin routes use httponly-cookie session auth handled entirely by the
+  // backend — they must NOT be JWT-gated at the edge.  Only login/logout are
+  // listed explicitly for clarity; the prefix match below covers /verify,
+  // /dashboard, /content/*, /studio/*, /seo/*, etc.
+  '/api/v1/admin/',
   '/api/webhooks',
   '/api/v1/content/public',
   '/api/v1/content/boards',

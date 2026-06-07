@@ -98,7 +98,12 @@ async def _validate_admin_session(request: Request) -> dict:
             except HTTPException:
                 raise
             except InvalidTokenError:
-                raise HTTPException(status_code=401, detail="Invalid or expired token")
+                # The edge worker always injects its GCP identity token as the
+                # Authorization header, so this fallback will fire for every
+                # unauthenticated request that went through the worker.  Return
+                # the same generic message as the "no cookie" path so callers
+                # get consistent, non-misleading errors.
+                raise HTTPException(status_code=401, detail="No admin session")
         raise HTTPException(status_code=401, detail="No admin session")
     try:
         verify_key, verify_alg = _get_admin_verification_key()
