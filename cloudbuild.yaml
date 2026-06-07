@@ -13,17 +13,17 @@ steps:
       - |
         set -uo pipefail
         echo "=== SSH setup: checking for deploy key ==="
-        KEY=$(gcloud secrets versions access latest \
+        DEPLOY_KEY=$(gcloud secrets versions access latest \
           --secret=GITHUB_DEPLOY_SSH_KEY \
           --project=blissful-acumen-495019-t6 2>/dev/null || echo "")
-        if [ -z "$KEY" ]; then
+        if [ -z "$$DEPLOY_KEY" ]; then
           echo "  ⚠ GITHUB_DEPLOY_SSH_KEY not found in Secret Manager — skipping SSH setup"
           echo "    Run: bash infra/scripts/setup-github-deploy-key.sh"
           echo "=== SSH setup skipped (non-fatal) ==="
           exit 0
         fi
         mkdir -p /root/.ssh
-        echo "$KEY" > /root/.ssh/id_rsa
+        echo "$$DEPLOY_KEY" > /root/.ssh/id_rsa
         chmod 600 /root/.ssh/id_rsa
         ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null
         chmod 644 /root/.ssh/known_hosts
