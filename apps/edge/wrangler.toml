@@ -25,6 +25,14 @@ binding = "ISR_CACHE_KV"
 id = "093eae4cf7e949ddb9f856cf1ef79a29"
 preview_id = "26b91993d09b4ceeafb06bd9ad6e594c"
 
+# Content HTML store — pre-seeded by the backend content pipeline.
+# Keys: {board}/{class_level}/{subject}/{chapter}/{page_type}
+# e.g. ahsec/hs-1st-year/physics/units-and-measurements/notes
+[[kv_namespaces]]
+binding = "CONTENT_KV"
+id = "981e939bcca445c481d4be818ebefee7"
+preview_id = "981e939bcca445c481d4be818ebefee7"
+
 [[r2_buckets]]
 binding = "R2_BUCKET"
 bucket_name = "syrabit-assets"
@@ -45,6 +53,11 @@ preview_id = "fd70db2acf7045d6a8d6ba4334316297"
 binding = "ISR_CACHE_KV"
 id = "093eae4cf7e949ddb9f856cf1ef79a29"
 preview_id = "26b91993d09b4ceeafb06bd9ad6e594c"
+
+[[env.production.kv_namespaces]]
+binding = "CONTENT_KV"
+id = "981e939bcca445c481d4be818ebefee7"
+preview_id = "981e939bcca445c481d4be818ebefee7"
 
 [[env.production.r2_buckets]]
 binding = "R2_BUCKET"
