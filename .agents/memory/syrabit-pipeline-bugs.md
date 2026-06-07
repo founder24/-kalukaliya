@@ -31,3 +31,12 @@ conversation_id vs session_id key mismatch between frontend and backend.
 
 ### Logout null token (earlier)
 Frontend sent null token on logout; backend rejected it.
+
+## CF Worker JWT forwarding — logout 500 (fixed 2026-06-07)
+The CF Worker replaces `Authorization` with its own Cloud Run OIDC identity token and puts the original user JWT in `X-User-JWT`. Any endpoint that reads `credentials.credentials` (HTTPBearer) will get the OIDC token, not the user JWT. Only `get_current_user()` resolved this correctly. `logout()` was decoded the OIDC token as a user JWT → always 500 on CF-routed requests.
+**Fix**: Any endpoint that needs the raw user token must resolve: `X-User-JWT` first, fall back to `credentials.credentials`.
+
+## Admin session replay after logout (fixed 2026-06-07)
+`admin_logout()` only called `delete_cookie()`, which is a browser instruction. The admin JWT stayed cryptographically valid for 8 hours. Clients holding a copy of the cookie value could replay it. `_validate_admin_session()` had no blacklist check.
+**Fix**: `admin_logout()` writes `blacklisted_admin_token:<sha256>` to Redis with remaining TTL. `_validate_admin_session()` checks blacklist before accepting any session. Fails open if Redis down (8h natural expiry, no lockout).
+Key name pattern: `blacklisted_admin_token:<sha256_of_jwt>` (vs user: `blacklisted_token:<sha256_of_jwt>`).
