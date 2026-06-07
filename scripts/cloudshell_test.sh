@@ -332,11 +332,17 @@ _check "POST /webhooks/razorpay unsigned → 401/403" "401 403 400" \
   -d '{"event":"payment.captured"}' \
   "${API}/api/webhooks/razorpay"
 
-_docs=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 "${API}/docs" 2>/dev/null || echo "000")
+# Follow redirects (-L) so a 302 /docs → /docs/ trailing-slash redirect isn't
+# misreported as "docs visible". The final code after redirect is what matters.
+_docs=$(curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 "${API}/docs" 2>/dev/null || echo "000")
 if [[ "$_docs" == "404" || "$_docs" == "403" ]]; then
   _ok "GET /docs → HTTP ${_docs} (hidden in production)"
+elif [[ "$_docs" == "302" || "$_docs" == "301" ]]; then
+  # Still a redirect even after -L — check where it goes
+  _docs_loc=$(curl -s -o /dev/null -w "%{redirect_url}" --max-time 8 "${API}/docs" 2>/dev/null || echo "")
+  _warn "GET /docs → HTTP ${_docs} → ${_docs_loc} (check redirect destination)"
 else
-  _warn "GET /docs → HTTP ${_docs} (OpenAPI docs visible — ensure APP_ENV=production)"
+  _warn "GET /docs → HTTP ${_docs} (OpenAPI docs may be visible — ensure APP_ENV=production)"
 fi
 
 # =============================================================================
@@ -396,6 +402,9 @@ for t in tests:
         "Content-Type":  "application/json",
         "Origin":        FE,
         "Cache-Control": "no-cache, no-store",
+        # Browser UA required: Cloudflare Bot Fight Mode blocks Python-urllib/3.x
+        # from datacenter IPs (GCP AS15169) with error 1010.
+        "User-Agent":    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 SyrabitTest/1.0",
     }
     if JWT.strip():
         headers["Authorization"] = f"Bearer {JWT.strip()}"
