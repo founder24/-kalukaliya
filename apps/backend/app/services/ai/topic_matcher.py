@@ -16,8 +16,12 @@ from app.models.content import TopicEmbedding
 
 logger = logging.getLogger(__name__)
 
-# Similarity threshold: only return matches at or above this score
-MATCH_THRESHOLD = 0.70
+# Similarity threshold: only return matches at or above this score.
+# Lowered from 0.70 → 0.65: Business Studies topic titles are long and
+# verbose (e.g. "Nature of Services: Difference between Services and Goods")
+# which yields cosine scores ~0.65-0.70 even for directly relevant queries.
+# 0.65 still filters clearly off-topic queries while catching subject-relevant ones.
+MATCH_THRESHOLD = 0.65
 
 # Cache TTL in seconds (5 minutes)
 _CACHE_TTL = 300

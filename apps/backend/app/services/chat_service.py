@@ -32,7 +32,7 @@ _HISTORY_CACHE_TTL = 30 * 60
 _RESPONSE_CACHE_TTL = 10 * 60
 
 # Similarity threshold for filtering low-relevance RAG chunks
-SIMILARITY_THRESHOLD = 0.70
+SIMILARITY_THRESHOLD = 0.60
 
 # Pattern for detecting generic/greeting queries that should skip RAG
 GENERIC_QUERY_PATTERN = re.compile(
@@ -134,14 +134,16 @@ class ChatService:
             from app.services.ai.embedder import generate_embedding_vector
             from app.services.ai.topic_matcher import topic_matcher
 
-            # Bound the embedding call to 0.5s to avoid eating into
-            # the 0.8s RAG budget when Vertex AI is slow.
+            # Bound the embedding call to 2.0s — the 0.5s limit was too
+            # tight on cold GCP instances and caused RAG to be silently
+            # skipped. topic_matcher.match_topic also hits MongoDB on first
+            # call, so we give the full round-trip 2s budget.
             query_embedding = await asyncio.wait_for(
-                generate_embedding_vector(query), timeout=0.5
+                generate_embedding_vector(query), timeout=2.0
             )
             return await topic_matcher.match_topic(query_embedding)
         except asyncio.TimeoutError:
-            logger.warning("Topic match embedding call timed out (0.5s)")
+            logger.warning("Topic match embedding call timed out (2.0s)")
             return None
         except Exception as e:
             logger.warning(f"Topic match check failed: {e}")
@@ -176,10 +178,10 @@ class ChatService:
                 ]
                 return truncate_chunks_to_budget(context_chunks, max_tokens=3000)
 
-            return await asyncio.wait_for(_do_retrieval(), timeout=0.8)
+            return await asyncio.wait_for(_do_retrieval(), timeout=3.0)
         except asyncio.TimeoutError:
             logger.warning(
-                "RAG retrieval timed out after 0.8s, returning empty context"
+                "RAG retrieval timed out after 3.0s, returning empty context"
             )
             return []
         except Exception as e:

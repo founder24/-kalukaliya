@@ -51,6 +51,37 @@ description: Documented bugs found and fixed across the backend API audit
 
 **Fix:** `ch.keywords` is `Optional[str]` (comma-separated), not a list. Parse with `kw_str.split(",")`.
 
+## Fixed: Chat RAG returns 0 sources (fullstack test discovery)
+
+**Root causes (3 layers):**
+
+1. **`MATCH_THRESHOLD = 0.65`** in `topic_matcher.py` (was 0.70)  
+   Business Studies topic titles are long and verbose (e.g. "Nature of Services: Difference between Services and Goods") — cosine similarity scores sit 0.65-0.70 even for directly relevant queries. Physics short noun-phrase topics score higher. 0.65 catches subject-relevant queries while still filtering off-topic ones.
+
+2. **`SIMILARITY_THRESHOLD = 0.60`** in `chat_service.py` (was 0.70)  
+   Vertex Search Standard tier (SnippetSpec) doesn't return a relevance score in the API response. The backend uses a heuristic fallback of 0.65 for results with content_len > 50 chars. This 0.65 was below the 0.70 threshold, filtering out all results.
+
+3. **Timeout too tight for cold GCP**: embedding timeout 0.5s → 2.0s; retrieval timeout 0.8s → 3.0s.  
+   On cold Cloud Run instances, the first Vertex AI embedding call + first MongoDB topic load can take 1-2s. The 0.5s guard silently returned None and skipped RAG.
+
+**How to apply:** Any subject with verbose/long topic titles (Business Studies, Social Sciences) will score 0.65-0.70 in topic_matcher. The 0.65 threshold is calibrated for this. Do not raise it back to 0.70 without checking cosine scores for the new subject's topic titles first.
+
+## Fixed: notes_generated never set True in content_generation.py
+
+**Bug:** `chapter.notes_generated` was never set to `True` in the save path after content was generated.
+
+**Fix:** `chapter.notes_generated = True` added in `content_generation.py` before `save()`.
+
+**Impact:** All chapters generated before the fix appeared missing from sitemaps (filtered by `notes_generated=True`). Backfill required for existing published chapters via direct MongoDB update.
+
+## Fixed: GCP sitemap in-process cache multi-instance race
+
+**Rule:** Sitemap cache is in-process dict (not Redis), TTL=10min. Cloud Run can run multiple instances with independent caches. CF load-balances → CF sitemap may show stale count vs GCP direct.
+
+**Why:** After backfilling `notes_generated=True` in MongoDB, new Cloud Run instances pick up the correct sitemap but old instances serve their cached empty version. Self-resolves within 10 min when all instance caches expire.
+
+**Fix:** No code change needed — this is an operational characteristic. If urgent, deploy a new revision (all instances restart with fresh cache).
+
 ## Previously fixed (earlier sessions)
 - `/content/chapters/{subject_id}` missing endpoint → added to public_content.py
 - CMS library format mismatch → `useContent.jsx` reads `d.items` first

@@ -246,6 +246,7 @@ class ContentGenerationService:
         # ── 6. Save to MongoDB (status=generated) ─────────────────────────────
         chapter.word_count = len(content_en.split())
         chapter.status = "generated"
+        chapter.notes_generated = True
         chapter.updated_at = datetime.now(timezone.utc)
         await chapter.save()
         logger.info(
