@@ -1,11 +1,12 @@
 """
 SEO endpoints: XML sitemaps for search engine discovery.
-Queries KnowledgeObject collection for dynamic sitemap generation.
+Queries the Chapter/Subject/Board/Class content models for dynamic sitemap generation.
 """
 
 import asyncio
 import json
 import logging
+import re as _re
 import time
 from datetime import datetime, timezone
 
@@ -13,6 +14,7 @@ from fastapi import APIRouter
 from fastapi.responses import Response
 
 from app.models.knowledge import KnowledgeObject
+from app.models.content import Board, Class, Stream, Subject, Chapter as ContentChapter
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,55 @@ async def _set_cached_sitemap(key: str, content: str) -> None:
     """Lock on write to prevent concurrent updates causing RuntimeError."""
     async with _sitemap_cache_lock:
         _sitemap_cache[key] = (time.time(), content)
+
+
+def _slugify_seo(text: str) -> str:
+    """Convert text to a URL-safe slug (mirrors public_content._slugify)."""
+    return _re.sub(r"-+", "-", _re.sub(r"[^a-z0-9]+", "-", text.lower())).strip("-")
+
+
+async def _build_chapter_url_map() -> dict:
+    """Load all published chapters with their full path context.
+
+    Hierarchy: Chapter.subject_id → Subject.stream_id → Stream.class_id
+               → Class.board_id → Board
+
+    Returns dict of chapter_id (str) → (canonical_url: str, chapter: ContentChapter).
+    Only chapters where notes_generated=True are included.
+    """
+    boards, classes, streams, subjects, chapters = await asyncio.gather(
+        Board.find().to_list(),
+        Class.find().to_list(),
+        Stream.find().to_list(),
+        Subject.find().to_list(),
+        ContentChapter.find({"notes_generated": True}).to_list(),
+    )
+    board_map = {str(b.id): b for b in boards}
+    class_map = {str(c.id): c for c in classes}
+    stream_map = {str(s.id): s for s in streams}
+    subj_map = {str(s.id): s for s in subjects}
+
+    result: dict = {}
+    for ch in chapters:
+        subj = subj_map.get(str(ch.subject_id))
+        if not subj or not subj.stream_id:
+            continue
+        stream = stream_map.get(str(subj.stream_id))
+        if not stream:
+            continue
+        cls = class_map.get(str(stream.class_id))
+        if not cls:
+            continue
+        board = board_map.get(str(cls.board_id))
+        if not board:
+            continue
+        board_slug = board.slug or _slugify_seo(board.name)
+        class_slug = _slugify_seo(cls.name)
+        subj_slug = subj.slug or _slugify_seo(subj.name)
+        ch_slug = ch.slug or _slugify_seo(ch.title)
+        url = f"{BASE_URL}/{board_slug}/{class_slug}/{subj_slug}/{ch_slug}"
+        result[str(ch.id)] = (url, ch)
+    return result
 
 
 def _xml_escape(text: str) -> str:
@@ -256,6 +307,7 @@ Sitemap: https://syrabit.ai/sitemap-topics.xml
 
 
 @router.get("/sitemap.xml")
+@router.get("/sitemap-index.xml")
 async def sitemap_index():
     today = datetime.now(timezone.utc).date().isoformat()
     content = SITEMAP_INDEX_XML.format(base_url=BASE_URL, today=today)
@@ -283,40 +335,47 @@ async def sitemap_subjects():
         return Response(content=cached, media_type="application/xml")
 
     try:
-        # Use aggregation to get distinct board/class/subject combinations
-        pipeline = [
-            {"$match": {"status": "published"}},
-            {
-                "$group": {
-                    "_id": {
-                        "board": "$metadata.board",
-                        "class_level": "$metadata.class_level",
-                        "subject": "$metadata.subject",
-                    },
-                    "max_updated_at": {"$max": "$updated_at"},
-                }
-            },
-        ]
-        results = await KnowledgeObject.aggregate(pipeline).to_list()
+        boards, classes, streams, subjects = await asyncio.gather(
+            Board.find().to_list(),
+            Class.find().to_list(),
+            Stream.find().to_list(),
+            Subject.find({"status": "active"}).to_list(),
+        )
+        board_map = {str(b.id): b for b in boards}
+        class_map = {str(c.id): c for c in classes}
+        stream_map = {str(s.id): s for s in streams}
 
+        seen_urls: set = set()
         urls = []
-        for item in results:
-            group = item["_id"]
-            board = group.get("board", "")
-            class_level = group.get("class_level", "")
-            subject = group.get("subject", "")
-            if board and class_level and subject:
-                loc = f"{BASE_URL}/render/{board}/{class_level}/{subject}"
-                lastmod_str = ""
-                if item.get("max_updated_at"):
-                    lastmod_str = f"\n    <lastmod>{item['max_updated_at'].strftime('%Y-%m-%d')}</lastmod>"
-                urls.append(
-                    f"  <url>\n"
-                    f"    <loc>{loc}</loc>{lastmod_str}\n"
-                    f"    <changefreq>weekly</changefreq>\n"
-                    f"    <priority>0.8</priority>\n"
-                    f"  </url>"
-                )
+        for subj in subjects:
+            if not subj.stream_id:
+                continue
+            stream = stream_map.get(str(subj.stream_id))
+            if not stream:
+                continue
+            cls = class_map.get(str(stream.class_id))
+            if not cls:
+                continue
+            board = board_map.get(str(cls.board_id))
+            if not board:
+                continue
+            board_slug = board.slug or _slugify_seo(board.name)
+            class_slug = _slugify_seo(cls.name)
+            subj_slug = subj.slug or _slugify_seo(subj.name)
+            loc = f"{BASE_URL}/{board_slug}/{class_slug}/{subj_slug}"
+            if loc in seen_urls:
+                continue
+            seen_urls.add(loc)
+            lastmod_str = ""
+            if subj.updated_at:
+                lastmod_str = f"\n    <lastmod>{subj.updated_at.strftime('%Y-%m-%d')}</lastmod>"
+            urls.append(
+                f"  <url>\n"
+                f"    <loc>{loc}</loc>{lastmod_str}\n"
+                f"    <changefreq>weekly</changefreq>\n"
+                f"    <priority>0.8</priority>\n"
+                f"  </url>"
+            )
 
         xml_content = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -328,7 +387,7 @@ async def sitemap_subjects():
         return Response(content=xml_content, media_type="application/xml")
 
     except Exception as e:
-        logger.warning(f"Failed to generate subjects sitemap from DB: {e}")
+        logger.warning(f"Failed to generate subjects sitemap: {e}")
         # Fallback to empty sitemap
         fallback = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -340,53 +399,25 @@ async def sitemap_subjects():
 
 @router.get("/sitemap-chapters.xml")
 async def sitemap_chapters():
-    """Generate chapters sitemap from published knowledge objects with deduplication."""
+    """Generate chapters sitemap from published Chapter documents."""
     cached = _get_cached_sitemap("chapters")
     if cached:
         return Response(content=cached, media_type="application/xml")
 
     try:
-        # Fetch published objects with only the fields we need
-        objects = (
-            await KnowledgeObject.find({"status": "published"})
-            .project(
-                {
-                    "metadata.board": 1,
-                    "metadata.class_level": 1,
-                    "metadata.subject": 1,
-                    "metadata.chapter": 1,
-                    "updated_at": 1,
-                }
-            )
-            .to_list()
-        )
-
-        seen = set()
+        chapter_map = await _build_chapter_url_map()
+        seen_urls: set = set()
         urls = []
-        for obj in objects:
-            meta = obj.get("metadata", {})
-            board = meta.get("board", "")
-            class_level = meta.get("class_level", "")
-            subject = meta.get("subject", "")
-            chapter = meta.get("chapter", "")
-
-            key = f"{board}/{class_level}/{subject}/{chapter}"
-            if key in seen or not all([board, class_level, subject, chapter]):
+        for _ch_id, (url, ch) in chapter_map.items():
+            if url in seen_urls:
                 continue
-            seen.add(key)
-
-            updated = obj.get("updated_at")
+            seen_urls.add(url)
             lastmod = ""
-            if updated:
-                if isinstance(updated, datetime):
-                    lastmod = f"\n    <lastmod>{updated.strftime('%Y-%m-%d')}</lastmod>"
-                elif isinstance(updated, str):
-                    lastmod = f"\n    <lastmod>{updated[:10]}</lastmod>"
-
-            loc = f"{BASE_URL}/render/{board}/{class_level}/{subject}/{chapter}/notes"
+            if ch.updated_at:
+                lastmod = f"\n    <lastmod>{ch.updated_at.strftime('%Y-%m-%d')}</lastmod>"
             urls.append(
                 f"  <url>\n"
-                f"    <loc>{loc}</loc>{lastmod}\n"
+                f"    <loc>{url}</loc>{lastmod}\n"
                 f"    <changefreq>weekly</changefreq>\n"
                 f"    <priority>0.7</priority>\n"
                 f"  </url>"
@@ -402,7 +433,7 @@ async def sitemap_chapters():
         return Response(content=xml_content, media_type="application/xml")
 
     except Exception as e:
-        logger.warning(f"Failed to generate chapters sitemap from DB: {e}")
+        logger.warning(f"Failed to generate chapters sitemap: {e}")
         fallback = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -413,71 +444,34 @@ async def sitemap_chapters():
 
 @router.get("/sitemap-topics.xml")
 async def sitemap_topics():
-    """Generate topic-level sitemap from published knowledge objects with topic metadata.
-
-    Uses KnowledgeObject (which has full board/class/subject/chapter hierarchy)
-    to produce proper routable URLs. Google does not process #fragment URLs in
-    sitemaps, so we use the chapter notes path instead.
-    """
+    """Generate topic-level sitemap from published Chapter published_topics."""
     cached = _get_cached_sitemap("topics")
     if cached:
         return Response(content=cached, media_type="application/xml")
     try:
-        # Query KnowledgeObjects that have a topic field set
-        objects = (
-            await KnowledgeObject.find(
-                {"status": "published", "metadata.topic": {"$ne": None}}
-            )
-            .project(
-                {
-                    "metadata.board": 1,
-                    "metadata.class_level": 1,
-                    "metadata.subject": 1,
-                    "metadata.chapter": 1,
-                    "metadata.topic": 1,
-                    "updated_at": 1,
-                }
-            )
-            .to_list()
-        )
-
-        seen = set()
+        chapter_map = await _build_chapter_url_map()
+        seen_urls: set = set()
         urls = []
 
-        for obj in objects:
-            meta = obj.get("metadata", {})
-            board = meta.get("board", "")
-            class_level = meta.get("class_level", "")
-            subject = meta.get("subject", "")
-            chapter = meta.get("chapter", "")
-            topic = meta.get("topic", "")
-
-            if not all([board, class_level, subject, chapter, topic]):
-                continue
-
-            key = f"{board}/{class_level}/{subject}/{chapter}/{topic}"
-            if key in seen:
-                continue
-            seen.add(key)
-
-            updated = obj.get("updated_at")
-            lastmod = ""
-            if updated:
-                if isinstance(updated, datetime):
-                    lastmod = f"\n    <lastmod>{updated.strftime('%Y-%m-%d')}</lastmod>"
-                elif isinstance(updated, str):
-                    lastmod = f"\n    <lastmod>{updated[:10]}</lastmod>"
-
-            # Use the chapter notes URL without fragment - Google ignores fragments
-            # in sitemaps but the page renders all topic content
-            loc = f"{BASE_URL}/render/{board}/{class_level}/{subject}/{chapter}/notes"
-            urls.append(
-                f"  <url>\n"
-                f"    <loc>{loc}</loc>{lastmod}\n"
-                f"    <changefreq>weekly</changefreq>\n"
-                f"    <priority>0.6</priority>\n"
-                f"  </url>"
-            )
+        for _ch_id, (ch_url, ch) in chapter_map.items():
+            for topic in (ch.published_topics or []):
+                topic_slug = getattr(topic, "topic_slug", None) or ""
+                if not topic_slug:
+                    continue
+                loc = f"{ch_url}/topic/{topic_slug}"
+                if loc in seen_urls:
+                    continue
+                seen_urls.add(loc)
+                lastmod = ""
+                if ch.updated_at:
+                    lastmod = f"\n    <lastmod>{ch.updated_at.strftime('%Y-%m-%d')}</lastmod>"
+                urls.append(
+                    f"  <url>\n"
+                    f"    <loc>{loc}</loc>{lastmod}\n"
+                    f"    <changefreq>weekly</changefreq>\n"
+                    f"    <priority>0.6</priority>\n"
+                    f"  </url>"
+                )
 
         xml_content = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -500,42 +494,28 @@ async def feed_xml():
     if cached:
         return Response(content=cached, media_type="application/rss+xml")
     try:
-        objects = (
-            await KnowledgeObject.find({"status": "published"})
-            .sort("-updated_at")
-            .limit(50)
-            .project(
-                {
-                    "slug": 1,
-                    "title": 1,
-                    "description": 1,
-                    "metadata": 1,
-                    "updated_at": 1,
-                    "published_at": 1,
-                }
-            )
-            .to_list()
-        )
+        chapter_map = await _build_chapter_url_map()
         items_xml = []
-        for obj in objects:
-            title = obj.get("title", "")
-            desc = obj.get("description", "")[:500]
-            meta = obj.get("metadata", {})
-            link = f"{BASE_URL}/render/{meta.get('board', '')}/{meta.get('class_level', '')}/{meta.get('subject', '')}/{meta.get('chapter', '')}/notes"
-            pub_date = obj.get("published_at") or obj.get("updated_at")
+        # Sort by updated_at descending, take top 50
+        sorted_chs = sorted(
+            chapter_map.values(),
+            key=lambda t: t[1].updated_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )[:50]
+        for url, ch in sorted_chs:
+            title = ch.title or "Untitled"
+            desc = (ch.meta_description or "")[:500]
+            pub_date = ch.updated_at or ch.created_at
             pub_str = ""
             if pub_date:
-                if isinstance(pub_date, datetime):
-                    pub_str = pub_date.strftime("%a, %d %b %Y %H:%M:%S +0000")
-                elif isinstance(pub_date, str):
-                    pub_str = pub_date
+                pub_str = pub_date.strftime("%a, %d %b %Y %H:%M:%S +0000")
             items_xml.append(
                 f"    <item>\n"
                 f"      <title>{_xml_escape(title)}</title>\n"
-                f"      <link>{link}</link>\n"
+                f"      <link>{url}</link>\n"
                 f"      <description>{_xml_escape(desc)}</description>\n"
                 f"      <pubDate>{pub_str}</pubDate>\n"
-                f'      <guid isPermaLink="true">{link}</guid>\n'
+                f'      <guid isPermaLink="true">{url}</guid>\n'
                 f"    </item>"
             )
         now_str = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
@@ -642,36 +622,26 @@ async def feed_json():
     if cached:
         return Response(content=cached, media_type="application/feed+json")
     try:
-        objects = (
-            await KnowledgeObject.find({"status": "published"})
-            .sort("-updated_at")
-            .limit(50)
-            .project(
-                {
-                    "slug": 1,
-                    "title": 1,
-                    "description": 1,
-                    "metadata": 1,
-                    "updated_at": 1,
-                    "published_at": 1,
-                }
-            )
-            .to_list()
-        )
+        chapter_map = await _build_chapter_url_map()
         items = []
-        for obj in objects:
-            title = obj.get("title", "")
-            desc = obj.get("description", "")[:500]
-            meta = obj.get("metadata", {})
-            link = f"{BASE_URL}/render/{meta.get('board', '')}/{meta.get('class_level', '')}/{meta.get('subject', '')}/{meta.get('chapter', '')}/notes"
-            pub_date = obj.get("published_at") or obj.get("updated_at")
-            mod_date = obj.get("updated_at")
+        sorted_chs = sorted(
+            chapter_map.values(),
+            key=lambda t: t[1].updated_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )[:50]
+        for link, ch in sorted_chs:
+            title = ch.title or "Untitled"
+            desc = (ch.meta_description or "")[:500]
+            pub_date = ch.updated_at or ch.created_at
+            mod_date = ch.updated_at
+            kw_str = ch.keywords or ""
+            tags = [k.strip() for k in kw_str.split(",") if k.strip()] if kw_str else []
             item = {
                 "id": link,
                 "url": link,
                 "title": title,
                 "content_text": desc,
-                "tags": [kw for kw in meta.get("keywords", []) if kw],
+                "tags": tags,
             }
             if pub_date:
                 item["date_published"] = (
@@ -715,13 +685,12 @@ async def feed_json():
 async def llms_full_txt():
     """Extended LLM-discoverable text — full structured content index.
     Served at /llms-full.txt via the CF Worker SEO passthrough proxy."""
-    from app.models.knowledge import KnowledgeObject
-
     try:
-        docs = await KnowledgeObject.find(
-            {"status": "published"},
-            projection={"title": 1, "subject": 1, "board": 1, "class_name": 1, "slug": 1},
-        ).limit(500).to_list()
+        chapter_map = await _build_chapter_url_map()
+        sorted_chs = sorted(
+            chapter_map.values(),
+            key=lambda t: t[1].chapter_number,
+        )
         lines = [
             "# Syrabit.ai — Full Content Index",
             "",
@@ -729,24 +698,44 @@ async def llms_full_txt():
             "> canonical chapter page with structured study notes, MCQs, PYQs, and",
             "> Assamese translations. LLMs may cite; training use is prohibited (see ai.txt).",
             "",
-            f"Total indexed chapters: {len(docs)}",
+            f"Total indexed chapters: {len(sorted_chs)}",
             "",
             "---",
             "",
         ]
-        for doc in docs:
-            slug = doc.slug or ""
-            title = doc.title or "Untitled"
-            board = getattr(doc, "board", "") or ""
-            cls = getattr(doc, "class_name", "") or ""
-            subj = getattr(doc, "subject", "") or ""
-            if slug:
-                lines.append(f"- [{title}](https://syrabit.ai/{slug}) — {board} {cls} {subj}".strip())
-            else:
-                lines.append(f"- {title} — {board} {cls} {subj}".strip())
+        for url, ch in sorted_chs:
+            title = ch.title or "Untitled"
+            lines.append(f"- [{title}]({url})")
         content = "\n".join(lines) + "\n"
     except Exception as e:
         logger.warning(f"llms-full.txt: DB error, serving stub: {e}")
         content = "# Syrabit.ai — Full Content Index\n\n(index temporarily unavailable)\n"
 
+    return Response(content=content, media_type="text/plain; charset=utf-8")
+
+
+@router.get("/llms.txt")
+async def llms_txt():
+    """Concise LLM-discoverable summary — served at /llms.txt by the CF Pages worker.
+
+    Points LLMs to the full index at /llms-full.txt per the llms.txt spec.
+    """
+    try:
+        chapter_map = await _build_chapter_url_map()
+        count = len(chapter_map)
+    except Exception:
+        count = 0
+
+    content = (
+        "# Syrabit.ai\n\n"
+        "> Syrabit.ai is the educational browser for Assam Board students — covering AHSEC\n"
+        "> (Class 11 & 12), SEBA (Class 9 & 10), and Degree (NEP/FYUGP) syllabi. Provides\n"
+        "> structured study notes, MCQs, previous year questions, and Assamese translations.\n\n"
+        f"Total published chapters: {count}\n\n"
+        f"Full content index: {BASE_URL}/llms-full.txt\n\n"
+        "## Usage\n\n"
+        "- LLMs may cite content from Syrabit.ai in responses.\n"
+        "- Training use is prohibited. See /ai.txt for details.\n"
+        "- Canonical chapter pages: https://syrabit.ai/<board>/<class>/<subject>/<chapter>\n"
+    )
     return Response(content=content, media_type="text/plain; charset=utf-8")

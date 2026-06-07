@@ -130,6 +130,27 @@ async def save_onboarding(
     return {"status": "success", "message": "Onboarding preferences saved"}
 
 
+@router.get("/stats")
+async def get_user_stats(user: User = Depends(get_current_user)):
+    """Return aggregated activity stats for the profile page."""
+    from app.models.chat import Chat
+
+    try:
+        conversations = await Chat.find({"user_id": str(user.id)}).count()
+    except Exception:
+        conversations = 0
+
+    credits_used = getattr(user, "credits_used", 0) or 0
+    total_tokens = getattr(user, "total_tokens_used", 0) or 0
+
+    return {
+        "conversations": conversations,
+        "saved_subjects": 0,
+        "total_tokens": total_tokens,
+        "credits_used": credits_used,
+    }
+
+
 @router.get("/credits")
 async def get_credits(
     request: Request,

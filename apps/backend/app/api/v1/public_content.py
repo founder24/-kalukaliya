@@ -834,6 +834,53 @@ async def get_published_topics(chapter_id: str):
     }
 
 
+@router.get("/chapters/{chapter_id}/topic-pyqs")
+async def get_topic_pyqs(
+    chapter_id: str,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Return previous year questions scoped to a chapter.
+
+    PYQ data is stored on the Chapter document's faq_jsonld field for now.
+    Returns an empty structure when no PYQ data exists so the frontend
+    ImportantQuestions component renders nothing rather than crashing.
+    """
+    try:
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid chapter_id")
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    pyqs = []
+    mark_wise: dict = {}
+    faq = chapter.faq_jsonld or []
+    for i, item in enumerate(faq[:limit]):
+        question = item.get("question", "")
+        answer = item.get("answer", "")
+        if not question:
+            continue
+        marks = item.get("marks", 2)
+        entry = {
+            "id": f"{chapter_id}-{i}",
+            "question": question,
+            "answer": answer,
+            "marks": marks,
+            "year": item.get("year"),
+            "source": item.get("source", "faq"),
+        }
+        pyqs.append(entry)
+        key = str(marks)
+        mark_wise.setdefault(key, []).append(entry)
+
+    return {
+        "chapter_id": chapter_id,
+        "total": len(pyqs),
+        "pyqs": pyqs,
+        "mark_wise": mark_wise,
+    }
+
+
 @router.get("/question-papers")
 async def get_question_papers(
     response: Response,
