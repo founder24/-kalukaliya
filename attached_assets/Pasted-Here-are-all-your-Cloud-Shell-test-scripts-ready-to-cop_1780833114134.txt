@@ -1,0 +1,89 @@
+Here are all your Cloud Shell test scripts, ready to copy and run:
+
+Script 1: Full-Stack Smoke Test (fastest, ~30s)
+# Run from your repo root in Cloud Shell
+bash scripts/fullstack-smoke-test.sh
+
+Checks DNS, Cloudflare Worker, backend health, MongoDB/Redis, library content, CORS, security headers, and frontend.
+
+Script 2: Live Layer-by-Layer Test (comprehensive)
+# Default credentials are already embedded — just run:
+bash scripts/test-live.sh
+# Or override credentials:
+EDGE_URL=https://api.syrabit.ai \
+USER_EMAIL=founder@syrabit.ai \
+USER_PASS=Rimjhimiya@325544 \
+ADMIN_EMAIL=founder@syrabit.ai \
+ADMIN_PASS=Rimjhimiya@325544 \
+bash scripts/test-live.sh
+
+Covers 7 layers: Provider connectivity → CF Edge → Library → User Auth → English Chat → Assamese Chat → Admin Panel.
+
+Script 3: Auth Flow Test
+export TEST_USER_EMAIL="founder@syrabit.ai"
+export TEST_USER_PASSWORD="Rimjhimiya@325544"
+export TEST_ADMIN_EMAIL="founder@syrabit.ai"
+export TEST_ADMIN_PASSWORD="Rimjhimiya@325544"
+bash scripts/test-auth-live.sh
+# Optional flags:
+bash scripts/test-auth-live.sh --skip-destructive   # skip rate-limit hammering
+bash scripts/test-auth-live.sh --skip-admin         # skip admin tests
+bash scripts/test-auth-live.sh --dry-run            # show test plan only
+
+Tests login, token refresh, logout, blacklisting, forgot-password, rate limiting, and admin cookie sessions.
+
+Script 4: Chat Pipeline Test
+export TEST_USER_EMAIL="founder@syrabit.ai"
+export TEST_USER_PASSWORD="Rimjhimiya@325544"
+bash scripts/test-chat-live.sh
+# Optional flags:
+bash scripts/test-chat-live.sh --skip-tts           # skip TTS (slower)
+bash scripts/test-chat-live.sh --skip-image         # skip OCR tests
+bash scripts/test-chat-live.sh --dry-run            # show test plan only
+
+Tests non-streaming + streaming (SSE), English + Assamese routing, anonymous chat, multi-turn, chat history, TTS, and latency.
+
+Script 5: Chat Pipeline Audit (Python pytest, Cloud Shell specific)
+# Runs pytest-based audit from inside Cloud Shell
+bash scripts/audit-chat-pipeline-cloud-shell.sh
+# Run a specific test class only:
+bash scripts/audit-chat-pipeline-cloud-shell.sh TestChatResponseSpeed
+bash scripts/audit-chat-pipeline-cloud-shell.sh TestAssameseModeChatStream
+
+Spins up a venv, installs deps, and runs structured pytest audit for language routing, Sarvam fallback, RAG degradation, and latency thresholds.
+
+Quick one-liners (no script needed)
+# Health check
+curl -s https://api.syrabit.ai/health/deep | python3 -m json.tool
+# Circuit breaker status
+curl -s https://api.syrabit.ai/health/circuit-breakers | python3 -m json.tool
+# Library content count
+curl -s "https://api.syrabit.ai/api/v1/content/library-bundle?slim=1" | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print('boards:', len(d.get('boards',[])), '| subjects:', len(d.get('subjects',[])), '| chapters:', len(d.get('chapters',[])))"
+# Get a token
+TOKEN=$(curl -s -X POST https://api.syrabit.ai/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"founder@syrabit.ai","password":"Rimjhimiya@325544"}' | \
+  python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+echo "Token: ${TOKEN:0:30}..."
+# Test chat (English)
+curl -s -X POST https://api.syrabit.ai/api/v1/chat/ \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"message":"What is photosynthesis?","lang":"en"}' | python3 -m json.tool
+# Test chat (Assamese) — should show sarvam in model_used
+curl -s -X POST https://api.syrabit.ai/api/v1/chat/ \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"message":"নমস্কাৰ, তুমি কেনে আছা?","lang":"as"}' | python3 -m json.tool
+
+Recommended order in Cloud Shell:
+
+fullstack-smoke-test.sh first — confirms everything is up
+test-live.sh — full layered audit
+test-auth-live.sh + test-chat-live.sh — deep functional checks
+
+Worked for 1 minute
+
+Planning next response generation
+All 5 scripts are ready to use in Cloud Shell. The background job also finished mapping every API endpoint — handy if you want to add targeted curl one-liners for any of those routes (payments, subscriptions, admin, etc.). Just ask if you need scripts for any specific area.
