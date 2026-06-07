@@ -158,13 +158,13 @@ const FEATURE_CATALOG = {
     {
       group: 'AI Study Assistant',
       items: [
-        'Multi-model AI chat (Vertex AI Gemini Flash, Workers AI, xAI)',
+        'Multi-model AI chat (Vertex AI Gemini 2.5 Flash, Sarvam AI)',
         'Source-cited answers grounded in your syllabus',
         'Bilingual conversations (English + Assamese)',
         'Streaming responses with thinking indicator',
         'Conversation history & search',
-        'Sarvam-powered Text-to-Speech in Indic languages',
-        'Audio trim & MP3 playback',
+        'Sarvam AI Text-to-Speech in Assamese & Indic languages',
+        'Audio playback for AI responses',
         'AI credits with daily allowance + top-ups',
         'Conversation export & sharing',
       ],
@@ -266,13 +266,13 @@ const FEATURE_CATALOG = {
     {
       group: 'AI অধ্যয়ন সহায়ক',
       items: [
-        'বহু-মডেল AI চেট (Vertex AI Gemini Flash, Workers AI, xAI)',
+        'বহু-মডেল AI চেট (Vertex AI Gemini 2.5 Flash, Sarvam AI)',
         'আপোনাৰ পাঠ্যক্ৰমত ভিত্তি কৰি উৎস-উদ্ধৃত উত্তৰ',
         'দ্বিভাষিক বাৰ্তালাপ (ইংৰাজী + অসমীয়া)',
         'চিন্তা সূচকৰ সৈতে ষ্ট্ৰীমিং উত্তৰ',
         'বাৰ্তালাপৰ ইতিহাস আৰু সন্ধান',
-        'ইণ্ডিক ভাষাত Sarvam-চালিত পাঠ-টু-স্পীচ',
-        "অডিঅ' ট্ৰিম আৰু MP3 প্লে",
+        'অসমীয়া আৰু ইণ্ডিক ভাষাত Sarvam AI পাঠ-টু-স্পীচ',
+        'AI উত্তৰৰ বাবে অডিঅ\' প্লেবেক',
         'দৈনিক ভাট্টাৰ সৈতে AI ক্ৰেডিট + টপ-আপ',
       ],
     },
@@ -383,9 +383,9 @@ const STATS = {
 const _t = {
   en: {
     pageTitle: 'Technology & Features',
-    pageDescription: 'Explore 159 features across 10 categories powering Syrabit.ai — the AI exam preparation platform for AHSEC, SEBA and Degree students in Assam.',
+    pageDescription: 'Discover the features powering Syrabit.ai — the educational browser for Assam Board students covering AHSEC, SEBA and Degree syllabi with AI-powered study tools.',
     heroHeading: 'What Powers Your Learning',
-    heroSubtext: 'Syrabit.ai brings together 159 features across 21 functional areas, grouped into 10 capability categories, to deliver a complete AI-powered study experience for students in Assam.',
+    heroSubtext: 'Syrabit.ai is built for AHSEC, SEBA and Degree students in Assam — combining structured syllabus content, an AI tutor (Syra), exam tools, and bilingual support into one platform, served instantly from Cloudflare\'s global edge network.',
     categoriesHeading: 'Platform Capabilities',
     categoriesSubtext: 'Every feature is designed to help you study smarter, prepare better, and score higher on your board exams.',
     boardsTitle: 'Built for Your Board',
