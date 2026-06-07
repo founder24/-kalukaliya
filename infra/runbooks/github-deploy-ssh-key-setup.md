@@ -111,9 +111,33 @@ Both service accounts should appear under `roles/secretmanager.secretAccessor`.
 
 ---
 
-## Step 5 — Verify: trigger a build and check Step 0
+## Step 5 — Pre-flight check: verify GCP prerequisites before triggering a build
 
-Push any commit (or trigger manually):
+Before triggering a build, run the verification script in Cloud Shell to confirm
+every GCP-side prerequisite is in place:
+
+```bash
+# From repo root in Cloud Shell:
+bash infra/scripts/verify-github-deploy-key.sh
+```
+
+The script checks:
+1. The secret `GITHUB_DEPLOY_SSH_KEY` exists in Secret Manager
+2. The `latest` version is in `ENABLED` state
+3. The secret value starts with a valid SSH private key header
+4. The default Cloud Build SA (`{project_number}@cloudbuild.gserviceaccount.com`) has `secretAccessor`
+5. The custom trigger SA (`syrabit-backend-sa@...`) has `secretAccessor`
+
+All 5 checks must pass before proceeding. The script prints fix commands for any
+failures and exits non-zero if any check fails.
+
+Also confirm the GitHub deploy key is registered:
+- Go to **https://github.com/founder24/-kalukaliya/settings/keys**
+- "Cloud Build (read-only)" should appear in the list
+
+## Step 6 — Trigger a build and verify Step 0
+
+Once the pre-flight check passes, trigger a build:
 
 ```bash
 gcloud builds submit --no-source \
@@ -130,10 +154,44 @@ In the Cloud Build logs, Step 0 should end with:
 === SSH setup complete ===
 ```
 
+### Option A — Automated log verification (recommended)
+
+After the build completes, run the verification script in Cloud Shell to get a
+machine-readable pass/fail verdict without manual log browsing:
+
+```bash
+bash infra/scripts/verify-step0-passed.sh
+```
+
+The script:
+1. Resolves the most recent build ID automatically (or accepts `BUILD_ID=<id>` env var)
+2. Fetches Step 0 log lines via `gcloud builds log`
+3. Confirms `=== SSH setup complete ===` is present
+4. Confirms no fatal error patterns (permission-denied, secret-not-found, etc.)
+5. Prints a direct link to the Cloud Build console for the build
+
+Exit 0 = Step 0 passed. Exit 1 = failed or inconclusive.
+
+### Option B — Manual log check
+
+```bash
+# View full log for the most recent build:
+BUILD_ID=$(gcloud builds list --project=blissful-acumen-495019-t6 --limit=1 --format="value(id)")
+gcloud builds log "${BUILD_ID}" --project=blissful-acumen-495019-t6 \
+  | grep -A 5 "SSH setup"
+
+# Expected output:
+#   === SSH setup: configuring deploy key for GitHub ===
+#     ✓ GitHub SSH connectivity verified
+#   === SSH setup complete ===
+```
+
 A hard failure (non-zero exit before that line) means either:
 - The secret `GITHUB_DEPLOY_SSH_KEY` doesn't exist yet → check Step 2
 - The SA running the build lacks `secretAccessor` → check Step 4/4a
 - The public key wasn't added to GitHub → check Step 3
+
+Run `bash infra/scripts/verify-github-deploy-key.sh` again to identify the specific gap.
 
 ---
 
