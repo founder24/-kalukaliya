@@ -52,7 +52,7 @@ jobs:
   # JOB 1: Backend — Cloud Build (pre-flight → docker build → push → Cloud Run)
   # =============================================================================
   deploy-backend:
-    name: Deploy Backend (Cloud Build)
+    name: Deploy Backend (Docker → Artifact Registry → Cloud Run)
     runs-on: ubuntu-latest
     needs: [dep-check]
     # Run even when dep-check is skipped (skip_dep_check=true bypasses the job,
@@ -63,6 +63,10 @@ jobs:
       contents: read
     outputs:
       service_url: ${{ steps.get-url.outputs.service_url }}
+    env:
+      IMAGE: asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:${{ github.sha }}
+      PROJECT: blissful-acumen-495019-t6
+      REGION: asia-south1
     steps:
       - uses: actions/checkout@v4
 
@@ -74,26 +78,38 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Submit to Cloud Build
-        # Cloud Build runs our full pipeline:
-        #   Step 0: pre-flight PyPI version validation (fast — fails before Docker starts)
-        #   Step 1: docker build
-        #   Step 2: push to Artifact Registry
-        #   Step 3: gcloud run deploy syrabit-backend
-        # gcloud builds submit is synchronous — this step blocks until done.
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+
+      - name: Build Docker image
         run: |
-          gcloud builds submit \
-            --config cloudbuild.yaml \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions "COMMIT_SHA=${{ github.sha }}" \
-            --timeout 25m
+          docker build \
+            -t "$IMAGE" \
+            -f apps/backend/Dockerfile \
+            apps/backend
+
+      - name: Push to Artifact Registry
+        run: docker push "$IMAGE"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy syrabit-backend \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --project="$PROJECT" \
+            --port=8000 \
+            --allow-unauthenticated \
+            --min-instances=1 \
+            --service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com \
+            --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=us-central1,VERTEX_SEARCH_DATASTORE_ID=syrabit-edu-datastore,VERTEX_SEARCH_LOCATION=global,VERTEX_SEARCH_SERVING_CONFIG=default_search,SARVAM_MODEL=sarvam-m1 \
+            --update-secrets=MONGODB_URI=MONGODB_URI:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=ADMIN_JWT_SECRET:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=SARVAM_API_KEY:latest,UPSTASH_REDIS_REST_URL=UPSTASH_REDIS_REST_URL:latest,UPSTASH_REDIS_REST_TOKEN=UPSTASH_REDIS_REST_TOKEN:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest,RESET_TOKEN_SECRET=RESET_TOKEN_SECRET:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=TRANSLATE_CRON_SECRET:latest,INDEXNOW_API_KEY=INDEXNOW_API_KEY:latest,INDEXNOW_INTERNAL_SECRET=INDEXNOW_INTERNAL_SECRET:latest,POSTHOG_API_KEY=POSTHOG_API_KEY:latest,SENTRY_DSN=SENTRY_DSN:latest
 
       - name: Get Cloud Run service URL
         id: get-url
         run: |
           URL=$(gcloud run services describe syrabit-backend \
-            --region "${{ secrets.GCP_REGION }}" \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "$REGION" \
+            --project "$PROJECT" \
             --format "value(status.url)")
           echo "service_url=${URL}" >> "$GITHUB_OUTPUT"
           echo "Cloud Run URL: ${URL}"
