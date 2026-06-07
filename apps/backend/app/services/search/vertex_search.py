@@ -135,15 +135,19 @@ class VertexSearchService:
     def _execute_search(
         self, query: str, filter_expr: Optional[str], limit: int
     ) -> list:
-        """Execute a synchronous search call (to be run in executor)."""
+        """Execute a synchronous search call (to be run in executor).
+
+        Uses SEARCH_TIER_STANDARD compatible spec only.
+        ExtractiveContentSpec / ExtractiveSegmentSpec require Enterprise tier —
+        omitting them avoids the 400 "enterprise edition features" error.
+        Structured-data documents return content via struct_data["content"].
+        """
         from google.cloud import discoveryengine_v1
 
         content_search_spec = discoveryengine_v1.SearchRequest.ContentSearchSpec(
             snippet_spec=discoveryengine_v1.SearchRequest.ContentSearchSpec.SnippetSpec(
                 return_snippet=True,
-            ),
-            extractive_content_spec=discoveryengine_v1.SearchRequest.ContentSearchSpec.ExtractiveContentSpec(
-                max_extractive_answer_count=1,
+                max_snippet_count=1,
             ),
         )
 
@@ -241,24 +245,16 @@ class VertexSearchService:
                 if doc_data.struct_data:
                     struct_data = dict(doc_data.struct_data)
 
-                # Extract content from extractive answers or struct_data
-                content = ""
-                if (
-                    hasattr(result, "document")
-                    and hasattr(result.document, "derived_struct_data")
-                    and result.document.derived_struct_data
-                ):
+                # Extract content: struct_data["content"] is primary (Standard tier).
+                # SnippetSpec snippets are a bonus for unstructured docs.
+                # extractive_answers / extractive_segments require Enterprise tier —
+                # never accessed here.
+                content = struct_data.get("content", "")
+                if not content and hasattr(result.document, "derived_struct_data") and result.document.derived_struct_data:
                     derived = dict(result.document.derived_struct_data)
-                    extractive_answers = derived.get("extractive_answers", [])
-                    if extractive_answers:
-                        content = extractive_answers[0].get("content", "")
-                    if not content:
-                        snippets = derived.get("snippets", [])
-                        if snippets:
-                            content = snippets[0].get("snippet", "")
-
-                if not content:
-                    content = struct_data.get("content", "")
+                    snippets = derived.get("snippets", [])
+                    if snippets:
+                        content = snippets[0].get("snippet", "")
 
                 score = self._extract_score(result, content, i)
 
@@ -288,22 +284,12 @@ class VertexSearchService:
                         if doc_data.struct_data:
                             struct_data = dict(doc_data.struct_data)
 
-                        content = ""
-                        if (
-                            hasattr(result.document, "derived_struct_data")
-                            and result.document.derived_struct_data
-                        ):
+                        content = struct_data.get("content", "")
+                        if not content and hasattr(result.document, "derived_struct_data") and result.document.derived_struct_data:
                             derived = dict(result.document.derived_struct_data)
-                            extractive_answers = derived.get("extractive_answers", [])
-                            if extractive_answers:
-                                content = extractive_answers[0].get("content", "")
-                            if not content:
-                                snippets = derived.get("snippets", [])
-                                if snippets:
-                                    content = snippets[0].get("snippet", "")
-
-                        if not content:
-                            content = struct_data.get("content", "")
+                            snippets = derived.get("snippets", [])
+                            if snippets:
+                                content = snippets[0].get("snippet", "")
 
                         score = self._extract_score(result, content, i)
 
