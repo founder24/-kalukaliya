@@ -88,3 +88,7 @@ VERTEX_SEARCH_LOCATION = "global"
 VERTEX_SEARCH_SERVING_CONFIG = "default_search"
 CLOUDFLARE_ACCOUNT_ID = "syrabit"
 CLOUDFLARE_KV_NAMESPACE_ID = ""
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000
