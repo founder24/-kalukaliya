@@ -54,3 +54,13 @@ description: Fixed bugs (analytics 404s, conversation/session mismatch, logout c
 - Beanie pagination: .find(query).skip(skip).limit(limit).to_list() is valid chaining
 - seo.py _set_cached_sitemap is async — must await all 6 call sites
 - admin_translate.py deliberately excluded from require_admin_session (has its own Bearer token auth)
+
+## Edge JWT_SECRET not provisioned — crashes auth for all logged-in users
+
+**Symptom:** Every request with a Bearer token returns 401 from the edge, even with a valid token issued by the backend. Anonymous requests work fine.
+
+**Root cause:** `wrangler deploy` (in CI) only deploys code — it does NOT push secrets. If `JWT_SECRET` was never set via `wrangler secret put JWT_SECRET --env production`, `env.JWT_SECRET` is `undefined` in the CF worker. Then `secret.trim()` in jwt.ts throws a TypeError caught as `{ valid: false, error: "Cannot read properties of undefined..." }`. That error !== the pass-through string, so the edge returns 401.
+
+**Fix (code):** Added guard in `verifyJWT()` — if neither `jwtSecret` nor `jwtPublicKey` is set, return the pass-through error string so the backend handles auth. See `apps/edge/src/middleware/jwt.ts`.
+
+**Fix (infra needed):** Run `npx wrangler secret put JWT_SECRET --env production` with the same value as the backend's `JWT_SECRET` GCP secret. Without this, the edge silently degrades to pass-through (still secure — backend verifies), but loses the edge-level token rejection latency benefit.
