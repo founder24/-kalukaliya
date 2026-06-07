@@ -570,7 +570,18 @@ async def get_topic_index(request: Request, subject_id: str):
 
 @router.post("/content/chapters/{chapter_id}/generate-notes")
 async def generate_notes(request: Request, chapter_id: str, body: GenerateNotesRequest = None):
-    """Generate English notes and Assamese translation for a chapter using AI.
+    """Generate English notes + Assamese translation, then auto-publish.
+
+    Full pipeline on success:
+      1. Vertex AI  → English study notes
+      2. Sarvam AI  → Assamese translation (chunked, soft-fail)
+      3. Vertex AI  → SEO meta + keywords + 5-entry FAQ JSON-LD
+      4. MongoDB    → save (status='generated')
+      5. GCS        → upload bilingual JSON (source of truth for CF Pages)
+      6. Vertex AI Search → index content chunks + topic micro-docs (RAG)
+      7. Cloudflare → prerender / KV invalidation
+      8. Topic embeddings → cosine similarity matching
+      9. MongoDB    → status='published'
 
     Pass {"force": true} in the request body to overwrite existing content.
     By default (force=false) the endpoint is a no-op when content_en is already present.
@@ -578,17 +589,26 @@ async def generate_notes(request: Request, chapter_id: str, body: GenerateNotesR
 
     force = body.force if body else False
     try:
-        # Check for existing content BEFORE calling service so we can report correctly
         _ch_before = await Chapter.get(PydanticObjectId(chapter_id))
         had_content = bool(_ch_before and _ch_before.content_en and _ch_before.content_en.strip())
 
         chapter = await content_generation_service.generate_notes(chapter_id, force=force)
         was_skipped = not force and had_content
+
+        publish_result = getattr(chapter, "_publish_result", {})
         return {
-            "status": "skipped_existing" if was_skipped else "generated",
+            "status": "skipped_existing" if was_skipped else "published",
             "chapter_id": chapter_id,
+            "chapter_status": chapter.status,
             "word_count": chapter.word_count,
+            "has_assamese": bool(chapter.content_as),
             "meta_description": chapter.meta_description,
+            "pipeline": {
+                "gcs": publish_result.get("gcs", {}).get("status"),
+                "vertex_search": publish_result.get("vertex_search", {}).get("status"),
+                "cloudflare": publish_result.get("cloudflare", {}).get("status"),
+                "topic_embeddings": publish_result.get("topic_embeddings", {}).get("count", 0),
+            },
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -599,7 +619,11 @@ async def generate_notes(request: Request, chapter_id: str, body: GenerateNotesR
 
 @router.post("/content/chapters/{chapter_id}/generate-notes/as")
 async def generate_notes_assamese(request: Request, chapter_id: str, body: GenerateNotesRequest = None):
-    """Generate Assamese translation only for a chapter.
+    """Translate existing English content to Assamese, then re-sync GCS + Vertex Search.
+
+    After translation the updated bilingual JSON is re-uploaded to GCS (so
+    Cloudflare Pages picks it up) and re-indexed in Vertex AI Search (so RAG
+    serves the latest content).
 
     Pass {"force": true} in the request body to overwrite existing content_as.
     By default (force=false) the endpoint is a no-op when content_as is already present.
@@ -610,11 +634,12 @@ async def generate_notes_assamese(request: Request, chapter_id: str, body: Gener
         _ch_before = await Chapter.get(PydanticObjectId(chapter_id))
         had_content = bool(_ch_before and _ch_before.content_as and _ch_before.content_as.strip())
 
-        await content_generation_service.generate_assamese_only(chapter_id, force=force)
+        chapter = await content_generation_service.generate_assamese_only(chapter_id, force=force)
         was_skipped = not force and had_content
         return {
-            "status": "skipped_existing" if was_skipped else "translated",
+            "status": "skipped_existing" if was_skipped else "translated_and_synced",
             "chapter_id": chapter_id,
+            "assamese_word_count": len((chapter.content_as or "").split()),
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

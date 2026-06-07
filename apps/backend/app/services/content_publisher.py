@@ -144,6 +144,10 @@ class ContentPublisherService:
                 doc = discoveryengine_v1.Document(
                     id=doc_id,
                     struct_data=struct_data,
+                    content=discoveryengine_v1.Document.Content(
+                        raw_bytes=chunk.encode("utf-8"),
+                        mime_type="text/plain",
+                    ),
                 )
                 documents.append(doc)
 
@@ -160,12 +164,15 @@ class ContentPublisherService:
                 for topic in chapter.published_topics or []:
                     topic_doc_id = f"{str(chapter.id)}_topic_{topic.id}"
                     topic_struct = struct_pb2.Struct()
+                    topic_content = topic.definition or (
+                        f"{topic.title} is a topic in {chapter.title} "
+                        f"({subject.name if subject else ''}, {cls.name if cls else ''}, {board.name if board else ''})"
+                    )
                     topic_struct.update(
                         {
                             "chapter_id": str(chapter.id),
                             "title": f"{topic.title} - {chapter.title}",
-                            "content": topic.definition
-                            or f"{topic.title} is a topic in {chapter.title} ({subject.name if subject else ''}, {cls.name if cls else ''}, {board.name if board else ''})",
+                            "content": topic_content,
                             "topic_title": topic.title,
                             "topic_slug": topic.topic_slug,
                             "subject_name": subject.name if subject else "",
@@ -193,6 +200,10 @@ class ContentPublisherService:
                     topic_doc = discoveryengine_v1.Document(
                         id=topic_doc_id,
                         struct_data=topic_struct,
+                        content=discoveryengine_v1.Document.Content(
+                            raw_bytes=topic_content.encode("utf-8"),
+                            mime_type="text/plain",
+                        ),
                     )
                     topic_doc.name = f"{parent}/documents/{topic_doc.id}"
                     request = discoveryengine_v1.UpdateDocumentRequest(
@@ -236,8 +247,8 @@ class ContentPublisherService:
 
     async def publish_to_gcs(self, chapter: Chapter) -> dict:
         """Write chapter content to GCS (source of truth for educational content)."""
-        if not settings.GCS_CONTENT_BUCKET and not settings.VERTEX_PROJECT_ID:
-            logger.warning("GCS not configured, skipping")
+        if not settings.VERTEX_PROJECT_ID or not settings.GOOGLE_APPLICATION_CREDENTIALS_JSON:
+            logger.warning("GCS not configured (missing VERTEX_PROJECT_ID or credentials), skipping")
             return {"status": "skipped", "reason": "not_configured"}
 
         try:

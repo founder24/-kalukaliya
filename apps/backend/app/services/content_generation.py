@@ -1,5 +1,18 @@
 """
 ContentGenerationService - Generates educational content using Vertex AI and Sarvam AI.
+
+Pipeline (fully automatic):
+  generate_notes()          → Vertex AI (EN) + Sarvam AI (AS) → MongoDB
+                              → auto-calls publish_chapter()
+                                 ↳ GCS upload (source of truth for CF Pages)
+                                 ↳ Vertex AI Search indexing (RAG)
+                                 ↳ Cloudflare prerender / KV invalidation
+                                 ↳ Topic embeddings (cosine similarity)
+                                 ↳ status = "published"
+
+  generate_assamese_only()  → Sarvam AI (AS, chunked) → MongoDB
+                              → re-publishes to GCS so CF Pages gets bilingual JSON
+                              → re-indexes in Vertex AI Search with updated content
 """
 
 import logging
@@ -17,14 +30,73 @@ logger = logging.getLogger(__name__)
 class ContentGenerationService:
     """Service for generating chapter notes in English and Assamese."""
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # Helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def _auto_publish(self, chapter_id: str, chapter_title: str) -> dict:
+        """Run the full publish pipeline after generation (soft-fail).
+
+        Always soft-fails so a network/GCS/Vertex hiccup never prevents the
+        generated content from being returned to the caller.  The chapter will
+        be left at status='generated' and can be published later via the admin
+        API if this step fails.
+        """
+        try:
+            from app.services.content_publisher import content_publisher_service
+            result = await content_publisher_service.publish_chapter(chapter_id)
+            logger.info(
+                f"Auto-publish complete for {chapter_title!r}: "
+                f"gcs={result.get('gcs', {}).get('status')} "
+                f"vtx={result.get('vertex_search', {}).get('status')} "
+                f"emb={result.get('topic_embeddings', {}).get('count', 0)}"
+            )
+            return result
+        except Exception as e:
+            logger.warning(
+                f"Auto-publish failed for {chapter_title!r} (chapter will stay "
+                f"at status=generated — re-run /publish to retry): {e}"
+            )
+            return {"status": "error", "detail": str(e)}
+
+    async def _gcs_update(self, chapter: Chapter) -> dict:
+        """Push updated chapter JSON to GCS after an Assamese-only update (soft-fail)."""
+        try:
+            from app.services.content_publisher import content_publisher_service
+            gcs_result = await content_publisher_service.publish_to_gcs(chapter)
+            vtx_result = await content_publisher_service.publish_to_vertex_search(chapter)
+            logger.info(
+                f"GCS/Vertex re-sync after Assamese update for {chapter.title!r}: "
+                f"gcs={gcs_result.get('status')} vtx={vtx_result.get('status')}"
+            )
+            return {"gcs": gcs_result, "vertex_search": vtx_result}
+        except Exception as e:
+            logger.warning(
+                f"GCS/Vertex re-sync failed after Assamese update for "
+                f"{chapter.title!r}: {e}"
+            )
+            return {"status": "error", "detail": str(e)}
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Public API
+    # ──────────────────────────────────────────────────────────────────────────
+
     async def generate_notes(self, chapter_id: str, force: bool = False) -> Chapter:
-        """Generate English notes and Assamese translation for a chapter.
+        """Generate English notes + Assamese translation, then auto-publish.
+
+        Full pipeline on success:
+          1. Vertex AI → English study notes
+          2. Sarvam AI → Assamese translation (chunked, soft-fail)
+          3. Vertex AI → SEO meta description + keywords
+          4. Vertex AI → 5-entry FAQ JSON-LD
+          5. Save to MongoDB (status='generated')
+          6. publish_chapter() → GCS + Vertex Search + CF prerender + embeddings
+                               → status='published' in MongoDB
 
         Args:
             chapter_id: The chapter to generate notes for.
-            force: When False (default), skip generation if content_en already
-                   has text — prevents accidental overwrite of existing notes.
-                   Set to True to regenerate even if content is present.
+            force: When False (default), skip if content_en already exists.
+                   Set True to regenerate and re-publish.
         """
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
         if not chapter:
@@ -38,7 +110,7 @@ class ContentGenerationService:
             )
             return chapter
 
-        # Build prompt from chapter topics
+        # ── 1. Build prompt from published topics ──────────────────────────────
         topics_text = "\n".join(
             f"- {t.title}" + (f": {t.definition}" if t.definition else "")
             for t in chapter.published_topics
@@ -56,49 +128,63 @@ class ContentGenerationService:
             "Generate detailed study notes covering all topics."
         )
 
-        # Generate English content via Vertex AI
+        # ── 2. English content via Vertex AI ───────────────────────────────────
+        logger.info(f"Generating English notes for {chapter.title!r}")
         content_en = await vertex_client.generate(system_prompt, user_message)
         chapter.content_en = content_en
 
-        # Generate Assamese translation via Sarvam AI (soft failure — no key yet is ok)
+        # ── 3. Assamese translation via Sarvam AI (chunked, soft-fail) ─────────
         translate_prompt = (
             "You are a professional translator. "
             "Translate the following educational content from English to Assamese. "
-            "Maintain the structure and formatting."
+            "Output ONLY the Assamese translation. "
+            "Maintain the structure and formatting exactly."
         )
-        try:
-            content_as = await sarvam_client.generate(translate_prompt, content_en)
-            chapter.content_as = content_as
-        except Exception as e:
+        words = content_en.split()
+        chunk_size = 400
+        chunks = [
+            " ".join(words[i : i + chunk_size])
+            for i in range(0, len(words), chunk_size)
+        ]
+        translated_parts = []
+        for idx, chunk in enumerate(chunks):
+            try:
+                part = await sarvam_client.generate(translate_prompt, chunk)
+                if part and part.strip():
+                    translated_parts.append(part.strip())
+            except Exception as e:
+                logger.warning(
+                    f"Assamese chunk {idx + 1}/{len(chunks)} failed for "
+                    f"{chapter.title!r}: {e}"
+                )
+        if translated_parts:
+            chapter.content_as = "\n\n".join(translated_parts)
+        else:
             logger.warning(
-                f"Assamese translation skipped for {chapter.title!r}: {e}. "
-                "Run generate-notes/as once SARVAM_API_KEY is configured."
+                f"Assamese translation produced no output for {chapter.title!r}. "
+                "Run /generate-notes/as once SARVAM_API_KEY is configured."
             )
 
-        # Extract metadata
+        # ── 4. SEO meta + keywords via Vertex AI ───────────────────────────────
         meta_prompt = (
             "Extract a concise meta description (max 160 chars) and "
             "comma-separated keywords from this content. "
             "Format: META: <description>\nKEYWORDS: <keywords>"
         )
-        meta_response = await vertex_client.generate(
-            "You are an SEO specialist.",
-            f"{meta_prompt}\n\nContent:\n{content_en[:2000]}",
-        )
+        try:
+            meta_response = await vertex_client.generate(
+                "You are an SEO specialist.",
+                f"{meta_prompt}\n\nContent:\n{content_en[:2000]}",
+            )
+            for line in meta_response.split("\n"):
+                if line.startswith("META:"):
+                    chapter.meta_description = line[5:].strip()[:160]
+                elif line.startswith("KEYWORDS:"):
+                    chapter.keywords = line[9:].strip()
+        except Exception as e:
+            logger.warning(f"SEO meta generation failed for {chapter.title!r}: {e}")
 
-        # Parse meta response
-        meta_description = ""
-        keywords = ""
-        for line in meta_response.split("\n"):
-            if line.startswith("META:"):
-                meta_description = line[5:].strip()[:160]
-            elif line.startswith("KEYWORDS:"):
-                keywords = line[9:].strip()
-
-        chapter.meta_description = meta_description
-        chapter.keywords = keywords
-
-        # Only generate FAQ if chapter doesn't already have valid entries
+        # ── 5. FAQ JSON-LD via Vertex AI ───────────────────────────────────────
         if not chapter.faq_jsonld or len(chapter.faq_jsonld) < 2:
             faq_prompt = (
                 f"Generate exactly 5 frequently asked questions and answers about: {chapter.title}. "
@@ -125,17 +211,28 @@ class ContentGenerationService:
                 if len(faq_entries) >= 2:
                     chapter.faq_jsonld = faq_entries
             except Exception as e:
-                logger.warning(f"FAQ generation failed for {chapter.title}: {e}")
+                logger.warning(f"FAQ generation failed for {chapter.title!r}: {e}")
 
+        # ── 6. Save to MongoDB (status=generated) ─────────────────────────────
         chapter.word_count = len(content_en.split())
         chapter.status = "generated"
         chapter.updated_at = datetime.now(timezone.utc)
         await chapter.save()
+        logger.info(
+            f"Notes saved to MongoDB for {chapter.title!r} "
+            f"({chapter.word_count} EN words, has_as={bool(chapter.content_as)})"
+        )
 
+        # ── 7. Auto-publish: GCS + Vertex Search + CF + embeddings ────────────
+        publish_result = await self._auto_publish(chapter_id, chapter.title)
+
+        # Re-fetch so the returned object has status=published (if publish succeeded)
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+        chapter._publish_result = publish_result  # attach for caller inspection
         return chapter
 
     async def generate_assamese_only(self, chapter_id: str, force: bool = False) -> Chapter:
-        """Translate existing English content to Assamese using Sarvam AI.
+        """Translate existing English content to Assamese, then re-sync to GCS + Vertex Search.
 
         The Sarvam sarvam-30b / sarvam-105b models are reasoning models with a
         4096-token completion budget on the starter plan.  Sending ~1000-1300
@@ -144,10 +241,14 @@ class ContentGenerationService:
         fits comfortably: ~600 prompt tokens + ~1500 reasoning + ~900 output ≈
         3000 tokens, well within the 4096 cap.
 
+        After a successful translation the chapter JSON is re-uploaded to GCS
+        and re-indexed in Vertex AI Search so that Cloudflare Pages and RAG
+        always serve the latest bilingual content.
+
         Args:
             chapter_id: The chapter to translate.
-            force: When False (default), skip translation if content_as already
-                   has text. Set to True to re-translate.
+            force: When False (default), skip if content_as already exists.
+                   Set True to re-translate and re-publish.
         """
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
         if not chapter:
@@ -194,6 +295,13 @@ class ContentGenerationService:
         chapter.content_as = content_as
         chapter.updated_at = datetime.now(timezone.utc)
         await chapter.save()
+        logger.info(
+            f"Assamese translation saved for {chapter.title!r} "
+            f"({len(content_as.split())} words)"
+        )
+
+        # Re-sync GCS + Vertex Search so CF Pages and RAG pick up the Assamese content
+        await self._gcs_update(chapter)
 
         return chapter
 

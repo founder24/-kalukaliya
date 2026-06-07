@@ -20,5 +20,22 @@ Never use `ExtractiveContentSpec` or `ExtractiveSegmentSpec` in Discovery Engine
 - Serving config: `default_search`
 - Documents: structured (`struct_data`) with fields: `title`, `content`, `source_url`, `board`, `class_level`, `subject`, `chapter`, `difficulty`, `language`, `slug`, `chunk_index`, `tier_access`
 
+## Document upload — CONTENT_REQUIRED
+The datastore has `CONTENT_REQUIRED` config, so every `discoveryengine_v1.Document` upserted via `UpdateDocumentRequest` **must** include `content=Document.Content(raw_bytes=..., mime_type="text/plain")` in addition to `struct_data`. Omitting it causes `400 To create document without content, content config of data store must be NO_CONTENT`.
+
+**How to apply:**
+```python
+doc = discoveryengine_v1.Document(
+    id=doc_id,
+    struct_data=struct_data,
+    content=discoveryengine_v1.Document.Content(
+        raw_bytes=chunk.encode("utf-8"),
+        mime_type="text/plain",
+    ),
+)
+```
+Both chapter chunk docs and topic micro-docs need this. The `struct_data["content"]` field is still needed for RAG retrieval (`search_context` reads it back), so set both.
+
 ## Verification
 After fix: `"Vertex Search warm-up successful"` appears in backend startup logs (was 400 error before).
+Upload verification: `vertex_search: uploaded chunks=N topic_docs=M` in pipeline result.
