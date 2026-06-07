@@ -238,7 +238,6 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
           PROJECT=blissful-acumen-495019-t6
-          WORKER=syrabitworker-prod
 
           sync_secret() {
             local GCP_NAME="$1"
@@ -249,22 +248,9 @@ jobs:
               echo "⚠  GCP secret '$GCP_NAME' not found — skipping $CF_VAR"
               return 0
             }
-            BODY=$(python3 -c "
-import json, sys
-print(json.dumps({'name': sys.argv[1], 'text': sys.argv[2], 'type': 'secret_text'}))
-" "$CF_VAR" "$VAL")
-            HTTP=$(curl -sf -w "%{http_code}" -o /tmp/cf_sync.json \
-              -X PUT \
-              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER}/secrets" \
-              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-              -H "Content-Type: application/json" \
-              -d "$BODY")
-            if [[ "$HTTP" == "200" ]]; then
-              echo "✅ $CF_VAR synced to CF Worker"
-            else
-              echo "❌ $CF_VAR sync failed (HTTP $HTTP): $(cat /tmp/cf_sync.json)"
-              exit 1
-            fi
+            printf '%s' "$VAL" | \
+              pnpm --filter syrabit-edge exec wrangler secret put "$CF_VAR" --env production
+            echo "✅ $CF_VAR synced to CF Worker"
           }
 
           sync_secret "jwt-secret"         "JWT_SECRET"
