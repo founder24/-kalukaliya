@@ -1022,6 +1022,68 @@ async def save_cms_document_revision(request: Request, doc_id: str):
 
 
 # ============================
+# LAYER 4b: Translation Progress
+# ============================
+
+
+@router.get("/content/translation-progress")
+async def get_translation_progress(request: Request):
+    """Per-subject breakdown of chapters missing Assamese (content_as) translation."""
+    await _validate_admin_session(request)
+
+    import asyncio
+    from collections import defaultdict
+
+    chapters, subjects = await asyncio.gather(
+        Chapter.find_all().to_list(),
+        Subject.find_all().to_list(),
+    )
+
+    subject_name_map = {str(s.id): s.name for s in subjects}
+
+    by_subject: dict[str, list] = defaultdict(list)
+    for ch in chapters:
+        by_subject[str(ch.subject_id)].append(ch)
+
+    total = len(chapters)
+    translated = sum(1 for ch in chapters if ch.content_as and ch.content_as.strip())
+    missing = total - translated
+
+    subject_groups = []
+    for subj_id, chs in by_subject.items():
+        subj_name = subject_name_map.get(subj_id, subj_id)
+        subj_translated = sum(1 for ch in chs if ch.content_as and ch.content_as.strip())
+        missing_chs = [ch for ch in chs if not (ch.content_as and ch.content_as.strip())]
+        if not missing_chs:
+            continue
+        subject_groups.append({
+            "subject_id": subj_id,
+            "subject_name": subj_name,
+            "total": len(chs),
+            "translated": subj_translated,
+            "missing": len(missing_chs),
+            "chapters": [
+                {
+                    "id": str(ch.id),
+                    "title": ch.title,
+                    "chapter_number": ch.chapter_number,
+                    "status": ch.status,
+                }
+                for ch in sorted(missing_chs, key=lambda c: (c.chapter_number or 0))
+            ],
+        })
+
+    subject_groups.sort(key=lambda s: -s["missing"])
+
+    return {
+        "total": total,
+        "translated": translated,
+        "missing": missing,
+        "subjects": subject_groups,
+    }
+
+
+# ============================
 # LAYER 5: GCS Sync
 # ============================
 

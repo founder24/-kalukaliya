@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import {
   PenTool, FileText, ArrowRight,
-  Loader2, Globe, Languages,
+  Loader2, Globe, Languages, BarChart2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
@@ -13,6 +13,7 @@ const AdminContentEditor = lazy(() => import('./AdminContentEditor'));
 const AdminCmsDocEditor  = lazy(() => import('./AdminCmsDocEditor'));
 const BlogPublishWizard  = lazy(() => import('./BlogPublishWizard'));
 const AssameseBackfillPanel = lazy(() => import('./AssameseBackfillPanel'));
+const AdminTranslationProgress = lazy(() => import('./AdminTranslationProgress'));
 
 
 const API = API_BASE;
@@ -21,14 +22,16 @@ const TABS = [
   { id: 'editor',      label: 'Content Editor',  icon: PenTool,     color: 'violet',  desc: 'Write & edit chapter-level markdown content' },
   { id: 'cms',         label: 'CMS / Docs',      icon: FileText,    color: 'emerald', desc: 'Manage published pages, SEO docs & blog posts' },
   { id: 'blog',        label: 'Blog Publisher',  icon: Globe,       color: 'sky',     desc: 'SEO & GEO-rich 5-step blog publish wizard' },
-  { id: 'translation', label: 'Assamese',        icon: Languages,   color: 'amber',   desc: 'Bulk translate English chapters to Assamese via Sarvam AI' },
+  { id: 'translation', label: 'Assamese',            icon: Languages,  color: 'amber',   desc: 'Bulk translate English chapters to Assamese via Sarvam AI' },
+  { id: 'progress',    label: 'Translation Progress', icon: BarChart2,  color: 'rose',    desc: 'Track which chapters still lack Assamese translation' },
 ];
 
 const FLOW = [
   { label: 'Editor',        sub: 'Write content',      tab: 'editor',      arrow: true  },
   { label: 'CMS / Docs',   sub: 'Manage docs',        tab: 'cms',         arrow: true  },
   { label: 'Blog Publisher', sub: 'SEO & publish',    tab: 'blog',        arrow: true  },
-  { label: 'Assamese',     sub: 'Bulk translate',     tab: 'translation', arrow: false },
+  { label: 'Assamese',     sub: 'Bulk translate',     tab: 'translation', arrow: true  },
+  { label: 'Progress',     sub: 'Track missing',      tab: 'progress',    arrow: false },
 ];
 
 const COLOR_MAP = {
@@ -63,7 +66,7 @@ function loadPersistedCtx() {
   } catch { return EMPTY_CTX; }
 }
 
-const INTERNAL_TABS = new Set(['editor', 'cms', 'blog', 'translation']);
+const INTERNAL_TABS = new Set(['editor', 'cms', 'blog', 'translation', 'progress']);
 
 export default function AdminContentHub({ adminToken, onNavigate: topNavigate, navContext }) {
   const [activeTab, setActiveTab] = useState(navContext?.initialTab || 'editor');
@@ -241,6 +244,12 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
             {activeTab === 'translation' && (
               <div className="h-full overflow-y-auto p-4 sm:p-6">
                 <AssameseBackfillPanel adminToken={adminToken} />
+              </div>
+            )}
+
+            {activeTab === 'progress' && (
+              <div className="h-full overflow-hidden">
+                <AdminTranslationProgress adminToken={adminToken} />
               </div>
             )}
           </Suspense>
