@@ -337,6 +337,16 @@ async def migrate_chapters(src_db, prod_db, id_map: dict, dry_run: bool, db_name
                 })
 
         word_count = chapter.get("word_count") or len(content_en.split())
+
+        # Detect fields that would be dropped so dry-run can report them
+        src_images = chapter.get("images") or []
+        src_qpapers = chapter.get("question_papers") or []
+        if dry_run and (src_images or src_qpapers):
+            logger.info(
+                f"  [DRY] {slug!r}: would carry images={len(src_images)} "
+                f"question_papers={len(src_qpapers)}"
+            )
+
         new_doc = {
             "_id": ObjectId(),
             "title": chapter.get("title", ""),
@@ -347,6 +357,8 @@ async def migrate_chapters(src_db, prod_db, id_map: dict, dry_run: bool, db_name
             "status": "draft",
             "content_en": content_en,
             "content_as": chapter.get("content_as") or None,
+            "images": src_images,
+            "question_papers": src_qpapers,
             "meta_description": chapter.get("meta_description") or chapter.get("description") or None,
             "keywords": chapter.get("keywords") or chapter.get("bing_keywords") or None,
             "word_count": word_count,

@@ -335,6 +335,10 @@ for ch in published_chapters:
     word_count = ch.get("word_count") or len(body_md.split())
     read_time  = max(1, round(word_count / 200))
 
+    # Preserve content_as and any existing content_blocks from the source chapter
+    content_as = ch.get("content_as") or None
+    existing_blocks = ch.get("content_blocks") or []
+
     ko_doc = {
         "slug":        ko_slug,
         "title":       ch.get("title", ""),
@@ -342,7 +346,8 @@ for ch in published_chapters:
                         or f"{ch.get('title','')} – notes for "
                            f"{meta['subject'].replace('-',' ').title()}."),
         "body_markdown": body_md,
-        "content_blocks": [],
+        "content_as":    content_as,
+        "content_blocks": existing_blocks,
         "metadata": {
             "board":       meta["board"],
             "class_level": meta["class_level"],

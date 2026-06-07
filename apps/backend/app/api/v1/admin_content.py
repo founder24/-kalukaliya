@@ -93,7 +93,7 @@ class ContentUpdate(BaseModel):
 
 
 class GenerateNotesRequest(BaseModel):
-    pass
+    force: bool = False
 
 
 class PublishRequest(BaseModel):
@@ -602,15 +602,25 @@ async def get_topic_index(request: Request, subject_id: str):
 
 
 @router.post("/content/chapters/{chapter_id}/generate-notes")
-async def generate_notes(request: Request, chapter_id: str):
-    """Generate English notes and Assamese translation for a chapter using AI."""
+async def generate_notes(request: Request, chapter_id: str, body: GenerateNotesRequest = None):
+    """Generate English notes and Assamese translation for a chapter using AI.
+
+    Pass {"force": true} in the request body to overwrite existing content.
+    By default (force=false) the endpoint is a no-op when content_en is already present.
+    """
     await _validate_admin_session(request)
     await _csrf_check(request)
 
+    force = body.force if body else False
     try:
-        chapter = await content_generation_service.generate_notes(chapter_id)
+        # Check for existing content BEFORE calling service so we can report correctly
+        _ch_before = await Chapter.get(PydanticObjectId(chapter_id))
+        had_content = bool(_ch_before and _ch_before.content_en and _ch_before.content_en.strip())
+
+        chapter = await content_generation_service.generate_notes(chapter_id, force=force)
+        was_skipped = not force and had_content
         return {
-            "status": "generated",
+            "status": "skipped_existing" if was_skipped else "generated",
             "chapter_id": chapter_id,
             "word_count": chapter.word_count,
             "meta_description": chapter.meta_description,
@@ -623,14 +633,26 @@ async def generate_notes(request: Request, chapter_id: str):
 
 
 @router.post("/content/chapters/{chapter_id}/generate-notes/as")
-async def generate_notes_assamese(request: Request, chapter_id: str):
-    """Generate Assamese translation only for a chapter."""
+async def generate_notes_assamese(request: Request, chapter_id: str, body: GenerateNotesRequest = None):
+    """Generate Assamese translation only for a chapter.
+
+    Pass {"force": true} in the request body to overwrite existing content_as.
+    By default (force=false) the endpoint is a no-op when content_as is already present.
+    """
     await _validate_admin_session(request)
     await _csrf_check(request)
 
+    force = body.force if body else False
     try:
-        await content_generation_service.generate_assamese_only(chapter_id)
-        return {"status": "translated", "chapter_id": chapter_id}
+        _ch_before = await Chapter.get(PydanticObjectId(chapter_id))
+        had_content = bool(_ch_before and _ch_before.content_as and _ch_before.content_as.strip())
+
+        await content_generation_service.generate_assamese_only(chapter_id, force=force)
+        was_skipped = not force and had_content
+        return {
+            "status": "skipped_existing" if was_skipped else "translated",
+            "chapter_id": chapter_id,
+        }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

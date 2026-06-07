@@ -17,11 +17,26 @@ logger = logging.getLogger(__name__)
 class ContentGenerationService:
     """Service for generating chapter notes in English and Assamese."""
 
-    async def generate_notes(self, chapter_id: str) -> Chapter:
-        """Generate English notes and Assamese translation for a chapter."""
+    async def generate_notes(self, chapter_id: str, force: bool = False) -> Chapter:
+        """Generate English notes and Assamese translation for a chapter.
+
+        Args:
+            chapter_id: The chapter to generate notes for.
+            force: When False (default), skip generation if content_en already
+                   has text — prevents accidental overwrite of existing notes.
+                   Set to True to regenerate even if content is present.
+        """
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
         if not chapter:
             raise ValueError(f"Chapter {chapter_id} not found")
+
+        if not force and chapter.content_en and chapter.content_en.strip():
+            logger.info(
+                f"Skipping generation for chapter {chapter_id} "
+                f"({chapter.title!r}) — content_en already present. "
+                "Pass force=True to overwrite."
+            )
+            return chapter
 
         # Build prompt from chapter topics
         topics_text = "\n".join(
@@ -113,8 +128,14 @@ class ContentGenerationService:
 
         return chapter
 
-    async def generate_assamese_only(self, chapter_id: str) -> Chapter:
-        """Translate existing English content to Assamese using Sarvam AI."""
+    async def generate_assamese_only(self, chapter_id: str, force: bool = False) -> Chapter:
+        """Translate existing English content to Assamese using Sarvam AI.
+
+        Args:
+            chapter_id: The chapter to translate.
+            force: When False (default), skip translation if content_as already
+                   has text. Set to True to re-translate.
+        """
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
         if not chapter:
             raise ValueError(f"Chapter {chapter_id} not found")
@@ -123,6 +144,14 @@ class ContentGenerationService:
             raise ValueError(
                 f"Chapter {chapter_id} has no English content to translate"
             )
+
+        if not force and chapter.content_as and chapter.content_as.strip():
+            logger.info(
+                f"Skipping Assamese translation for chapter {chapter_id} "
+                f"({chapter.title!r}) — content_as already present. "
+                "Pass force=True to overwrite."
+            )
+            return chapter
 
         translate_prompt = (
             "You are a professional translator. "

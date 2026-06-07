@@ -1279,9 +1279,11 @@ export default function ChapterPage() {
               </div>
             )}
           </div>
-          {!isQuestionPaper && contentLang === 'as' && !hasAssamese && (
-            <p className="mt-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
-              {contentLang === 'as' ? 'এই অধ্যায়ৰ বাবে অসমীয়া অনুবাদ এতিয়াও উপলব্ধ নহয়। ইংৰাজী বিষয়বস্তু দেখুৱাই আছে।' : 'Assamese translation is not yet available for this chapter. Showing English content.'}
+          {!isQuestionPaper && contentLang === 'as' && !data.content_as && (
+            <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-1.5">
+              <span aria-hidden="true">⚠️</span>
+              {'এই অধ্যায়ৰ বাবে অসমীয়া সংস্কৰণ এতিয়াও উপলব্ধ নহয় — ইংৰাজী বিষয়বস্তু দেখুৱাই আছে।'}
+              <span className="ml-1 text-amber-600 font-normal">(Assamese version not yet available — showing English)</span>
             </p>
           )}
         </div>
