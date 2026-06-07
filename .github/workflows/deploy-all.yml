@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -73,16 +72,16 @@ jobs:
           FAILED=$(grep -oP '\d+ failed' /tmp/pytest-output.txt | grep -oP '\d+' || echo "0")
           PASSED=$(grep -oP '\d+ passed' /tmp/pytest-output.txt | grep -oP '\d+' || echo "0")
           echo "Results: $PASSED passed, $FAILED failed (exit code: $PYTEST_EXIT)"
-          # Allow up to 5 known failures (Redis/Upstash unavailable in CI)
-          if [ "$FAILED" -gt 5 ]; then
-            echo "Test failures detected ($FAILED > 5). Failing CI."
+          # Allow up to 2 known failures (Redis/Upstash unavailable in CI)
+          if [ "$FAILED" -gt 2 ]; then
+            echo "Test failures detected ($FAILED > 2). Failing CI."
             exit 1
           fi
           if [ "$PASSED" -eq 0 ] && [ "$PYTEST_EXIT" -ne 0 ]; then
             echo "No tests passed and pytest exited with error. Failing CI."
             exit 1
           fi
-          echo "Tests passed ($FAILED failures within threshold of 5)."
+          echo "Tests passed ($FAILED failures within threshold of 2)."
         env:
           APP_ENV: test
           JWT_SECRET: test-secret-at-least-32-characters-long-for-ci
@@ -99,16 +98,14 @@ jobs:
     needs: [ci-checks]
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to GCP
+      - name: Authenticate to GCP (Service Account Key)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -334,14 +331,12 @@ jobs:
     needs: [deploy-backend, deploy-edge, deploy-frontend, smoke-test]
     if: always() && (needs.smoke-test.result == 'failure' || needs.deploy-backend.result == 'failure' || needs.deploy-edge.result == 'failure' || needs.deploy-frontend.result == 'failure')
     permissions:
-      id-token: write
       contents: read
     steps:
-      - name: Authenticate to GCP
+      - name: Authenticate to GCP (Service Account Key)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
