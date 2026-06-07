@@ -29,4 +29,9 @@ description: How this monorepo is configured to run in the Replit environment
 - Backend "degraded" health is normal in dev — Redis disabled, Vertex AI not configured
 - 401/403/404 console errors for auth-gated resources are expected for unauthenticated users
 
+## Production GCP resources
+- Cloud Run service: `syrabit-backend` (region `asia-south1`, project `blissful-acumen-495019-t6`)
+- URL: `https://syrabit-backend-851687450401.asia-south1.run.app`
+- Update secrets: `gcloud run services update syrabit-backend --region=asia-south1 --update-secrets=...`
+
 **Why:** Backend is designed to start gracefully without Redis/AI — all Optional fields, warnings only in dev mode.
