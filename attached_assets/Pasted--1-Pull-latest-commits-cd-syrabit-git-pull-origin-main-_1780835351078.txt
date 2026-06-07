@@ -1,0 +1,306 @@
+# 1. Pull latest commits
+cd ~/syrabit && git pull origin main
+
+# 2. Run the audit script
+bash scripts/audit-chat-pipeline-cloud-shell.sh
+
+# 3. Run the frontend feature test
+bash scripts/test-frontend-features.sh
+remote: Enumerating objects: 86, done.
+remote: Counting objects: 100% (76/76), done.
+remote: Compressing objects: 100% (19/19), done.
+remote: Total 86 (delta 59), reused 74 (delta 57), pack-reused 10 (from 1)
+Unpacking objects: 100% (86/86), 248.58 KiB | 558.00 KiB/s, done.
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+   f26fcd6d..d0fcf46f  main       -> origin/main
+Updating f26fcd6d..d0fcf46f
+Fast-forward
+ .github/workflows/cleanup-branches.yml             |  104 ++
+ README.md                                          |   26 +-
+ apps/backend/app/api/v1/admin.py                   |    1 +
+ apps/backend/app/api/v1/auth.py                    |   41 +-
+ apps/frontend/public/ai.txt                        |    8 +-
+ apps/frontend/public/llms.txt                      |  121 ++-
+ apps/frontend/public/sitemap-static.xml            |   26 +-
+ apps/frontend/src/pages/AboutPage.jsx              |    4 +-
+ apps/frontend/src/pages/LibraryPage.jsx            |    4 +-
+ apps/frontend/src/pages/TechnologyPage.jsx         |   18 +-
+ ...sful-acumen-495019-t6-cd-syra_1780833385671.txt |   75 ++
+ ...bit-blissful-acumen-495019-t6_1780833560330.txt |  208 ++++
+ ...bit-blissful-acumen-495019-t6_1780833689472.txt |  129 +++
+ ...b6-name-English-slug-engl-178_1780832517005.txt | 1031 ++++++++++++++++++++
+ ...ell-test-scripts-ready-to-cop_1780833114134.txt |   89 ++
+ ...ect-PROJECT-ID-to-change-to-a_1780831030085.txt |   80 ++
+ ...nder-syrabit-ai-export-TEST-U_1780833599849.txt |   93 ++
+ .../Screenshot_20260607-164917_1780831170274.png   |  Bin 0 -> 87048 bytes
+ .../Screenshot_20260607-165323_1780831410286.png   |  Bin 0 -> 137347 bytes
+ infra/scripts/delete-stale-branches.sh             |  101 ++
+ infra/scripts/gcp-full-setup.sh                    |   31 +-
+ scripts/audit-chat-pipeline-cloud-shell.sh         |    2 +-
+ scripts/test-frontend-features.sh                  |  394 ++++++++
+ 23 files changed, 2512 insertions(+), 74 deletions(-)
+ create mode 100644 .github/workflows/cleanup-branches.yml
+ create mode 100644 attached_assets/Pasted--C-founder-cloudshell-blissful-acumen-495019-t6-cd-syra_1780833385671.txt
+ create mode 100644 attached_assets/Pasted--C-founder-cloudshell-syrabit-blissful-acumen-495019-t6_1780833560330.txt
+ create mode 100644 attached_assets/Pasted--C-founder-cloudshell-syrabit-blissful-acumen-495019-t6_1780833689472.txt
+ create mode 100644 attached_assets/Pasted--id-6a19e1084d8e6ddb2deb7db6-name-English-slug-engl-178_1780832517005.txt
+ create mode 100644 attached_assets/Pasted-Here-are-all-your-Cloud-Shell-test-scripts-ready-to-cop_1780833114134.txt
+ create mode 100644 attached_assets/Pasted-Use-gcloud-config-set-project-PROJECT-ID-to-change-to-a_1780831030085.txt
+ create mode 100644 attached_assets/Pasted-export-TEST-USER-EMAIL-founder-syrabit-ai-export-TEST-U_1780833599849.txt
+ create mode 100644 attached_assets/Screenshot_20260607-164917_1780831170274.png
+ create mode 100644 attached_assets/Screenshot_20260607-165323_1780831410286.png
+ create mode 100755 infra/scripts/delete-stale-branches.sh
+ create mode 100755 scripts/test-frontend-features.sh
+
+[INFO] ════════════════════════════════════════════════════════════════
+[INFO] Chat Pipeline Audit — Google Cloud Shell
+[INFO] ════════════════════════════════════════════════════════════════
+
+[INFO] Step 1: Checking Python environment...
+[✓] Using system python3: 3.12.3
+[INFO] Python version: 3.12
+
+[INFO] Step 2: Installing backend dependencies...
+[INFO] Creating virtual environment...
+[✓] Virtual environment activated
+[INFO] Upgrading pip and setuptools...
+[INFO] Installing requirements.txt...
+[✓] requirements.txt installed
+[INFO] Installing test dependencies...
+[✓] Test dependencies installed
+
+[INFO] Step 3: Locating chat pipeline audit tests...
+[✓] Found: test_pr358_chat_audit.py
+
+[INFO] Step 4: Running chat pipeline audit tests...
+
+[INFO] Running all chat pipeline audit tests
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /home/founder/syrabit/apps/backend/venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/founder/syrabit/apps/backend
+configfile: pytest.ini
+plugins: env-1.6.0, cov-7.1.0, anyio-4.13.0, asyncio-1.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 17 items
+
+tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_stream_returns_correct_sse_format PASSED [  5%]
+tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_stream_routes_to_vertex PASSED [ 11%]
+tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_system_prompt_enforces_english PASSED [ 17%]
+tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_stream_routes_to_sarvam PASSED [ 23%]
+tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_fallback_to_vertex_on_sarvam_failure PASSED [ 29%]
+tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_system_prompt_uses_assamese_script PASSED [ 35%]
+tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_service_unavailable PASSED [ 41%]
+tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_returns_empty PASSED [ 47%]
+tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_raises_exception PASSED [ 52%]
+tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_system_prompt_without_rag_context PASSED [ 58%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_first_chunk_latency PASSED [ 64%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_total_completion_time PASSED [ 70%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_non_streaming_response_latency PASSED [ 76%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_en_overrides_assamese_text PASSED [ 82%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_as_overrides_english_text PASSED [ 88%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_null_falls_back_to_detection PASSED [ 94%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_invalid_lang_rejected PASSED [100%]
+
+============================== 17 passed in 1.88s ==============================
+
+════════════════════════════════════════════════════════════════
+[INFO] Audit Results Summary
+════════════════════════════════════════════════════════════════
+
+Test Results:
+  ✓ Passed:  17
+  ✗ Failed:  0
+0
+  ⊘ Skipped: 0
+0
+  ⚠ Errors:  0
+0
+
+Audit Categories:
+
+  📝 English Mode Routing:
+[✓] English mode (SSE format, Vertex routing, prompt enforcement)
+  🌐 Assamese Mode & Fallback:
+[✓] Assamese routing, Sarvam-to-Vertex fallback, script prompt
+  🔄 RAG Graceful Degradation:
+[✓] Fallback when search unavailable/empty/exception
+  ⚡ Response Latency:
+[✓] First chunk <200ms, total completion <500ms
+
+scripts/audit-chat-pipeline-cloud-shell.sh: line 240: [: 0
+0: integer expression expected
+scripts/audit-chat-pipeline-cloud-shell.sh: line 240: [: 0
+0: integer expression expected
+════════════════════════════════════════════════════════════════
+[INFO] Audit Artifacts
+════════════════════════════════════════════════════════════════
+
+Full audit report:
+  📄 /tmp/chat-pipeline-audit-1780835231.log
+
+To review failures in detail:
+  cat /tmp/chat-pipeline-audit-1780835231.log | grep -A 10 'FAILED\|ERROR'
+
+════════════════════════════════════════════════════════════════
+[WARN] Known Pipeline Issues (from audit docs)
+════════════════════════════════════════════════════════════════
+
+✓ PR 358 Fixed:
+  - conversation_id vs session_id field mapping
+  - LogoutRequest.refresh_token null crash
+  - Missing analytics endpoints
+  - Missing config/trustpilot endpoints
+
+⚠ Still Open:
+  - Latency: No asyncio.gather for parallel embedding+history
+  - Streaming: No heartbeat during RAG retrieval phase (30s+ timeout risk)
+  - Error handling: Raw errors leak to client (info disclosure)
+  - No timeout wrapper on entire chat pipeline (potential 180s hangs)
+  - Language detection: May misclassify mixed-content queries
+
+Recommendations:
+  1. Add asyncio.gather() for parallel RAG retrieval
+  2. Implement SSE keepalive comments during retrieval
+  3. Sanitize error messages before sending to client
+  4. Wrap entire pipeline in asyncio.wait_for(timeout=30s)
+  5. Improve language detection for code and mixed-content
+
+════════════════════════════════════════════════════════════════
+[✓] Chat pipeline audit PASSED
+
+  Syrabit.ai Frontend Feature Test
+  Target : https://syrabit.ai
+  Time   : 2026-06-07 12:28:22 UTC
+
+══ 1. Page Availability ══
+  ✔  GET / → 200
+  ✔  GET /library → 200
+  ✔  GET /chat → 200
+  ✔  GET /about → 200
+  ✔  GET /technology → 200
+  ✔  GET /pricing → 200
+
+══ 2. Page Titles (prerendered HTML) ══
+  ✔  /library title: 'Assamboard Subject Library — Notes, MCQs, Definitions &amp; Exam Prep'
+  ✔  /technology title: 'Technology Behind Syrabit.ai — RAG, AI Tutors &amp; Speed'
+  ✔  /pricing title: 'Pricing &amp; Plans — Free, Starter &amp; Pro | Syrabit.ai'
+  ✔  /chat title: 'Syrabit AI Chat — Ask Anything About Your Syllabus'
+  ✔  /about title: 'About Syrabit.ai — The Educational Browser For Assam'
+
+══ 3. Static SEO Files — Availability ══
+  ✔  GET /robots.txt → 200
+  ✔  GET /llms.txt → 200
+  ✔  GET /ai.txt → 200
+  ✔  GET /sitemap-static.xml → 200
+  ✔  GET /sitemap-index.xml → 200
+  ✔  GET /manifest.json → 200
+
+══ 4. robots.txt — Bot Policy [DEPLOY] ══
+  ✔  robots.txt lists sitemap(s)
+  ✔  robots.txt mentions GPTBot (disallowed)
+  ✔  robots.txt has User-agent directives
+  –  robots.txt allows PerplexityBot [DEPLOY: not yet in production — push to CF Pages]
+  –  robots.txt allows ChatGPT-User [DEPLOY: not yet in production — push to CF Pages]
+  –  robots.txt allows YouBot [DEPLOY: not yet in production — push to CF Pages]
+  ✔   /admin:robots.txt blocks /admin [DEPLOY: deployed]
+  ✔   /api/:robots.txt blocks /api/ indexing [DEPLOY: deployed]
+
+══ 5. ai.txt — AI Bot Manifest ══
+  ✔  ai.txt has [allow] block
+  ✔  ai.txt allows PerplexityBot
+  ✔  ai.txt allows ChatGPT-User
+  ✔  ai.txt allows YouBot
+  ✔  ai.txt has [disallow] block
+  ✔  ai.txt disallows GPTBot
+  ✔  ai.txt disallows ClaudeBot
+  ✔  ai.txt links sitemap
+  ✔  ai.txt links llms.txt
+
+══ 6. llms.txt — LLM Crawler Manifest ══
+  ✔  llms.txt references syrabit.ai
+  ✔  llms.txt covers AHSEC
+  ✔  llms.txt covers SEBA
+  ✔  llms.txt covers Degree/NEP
+  ✔  llms.txt has current tech stack (not Railway)
+  ✔  llms.txt doesn't mention stale Railway backend
+  ✔  llms.txt doesn't mention stale IndicTrans2
+  ✔  llms.txt links /library page
+  ✔  llms.txt links /technology page
+  ✔  llms.txt links /about page
+  ✔  llms.txt has contact email
+
+══ 7. Sitemap — URL Coverage [DEPLOY] ══
+  ✔  sitemap has homepage URL
+  ✔  sitemap has /library
+  ✔  sitemap has /about
+  ✔  sitemap has /pricing
+  ✔  sitemap has /chat
+  ✔  sitemap has lastmod dates
+  ✔  sitemap has changefreq
+  –  sitemap has /technology [DEPLOY: not yet in production — push to CF Pages]
+  –  sitemap lastmod dates are stale (2025-01-15) [DEPLOY: not yet updated in production]
+  ✔  sitemap-index.xml → 200
+  ✔  sitemap-index links child sitemaps
+
+══ 8. PWA Manifest ══
+  ✔  GET /manifest.json → 200
+  ✔  manifest.json has 'name' field
+  ✔  manifest.json has 'icons' field
+  ✔  manifest.json has 'display' field
+  ✔  manifest.json name contains Syrabit
+
+══ 9. Security Headers ══
+  ✔  HSTS header present
+  ✔  x-content-type-options header present
+  ✔  x-frame-options header present
+  ✔  cf-ray header present (served via Cloudflare edge)
+
+══ 10. CORS — Frontend ══
+  ✔  Frontend loads with Origin header (no CORS block)
+
+══ 11. Page Content — Error-Free HTML ══
+  ✔  /library serves clean HTML (no server error signatures)
+  ✔  /chat serves clean HTML (no server error signatures)
+  ✔  /about serves clean HTML (no server error signatures)
+  ✔  /technology serves clean HTML (no server error signatures)
+  ✔  /pricing serves clean HTML (no server error signatures)
+  ✔  Library page has SPA root element
+
+══ 12. Performance SLOs ══
+  ✔  / → 438ms (< 800ms — Cloudflare edge cache hit)
+  ✔  /library → 196ms (< 800ms — Cloudflare edge cache hit)
+  ✔  /about → 187ms (< 800ms — Cloudflare edge cache hit)
+
+══ 13. Static Assets ══
+scripts/test-frontend-features.sh: line 52: warning: command substitution: ignored null byte in input
+  ✔  GET /opengraph.jpg → 200 (OG image)
+scripts/test-frontend-features.sh: line 52: warning: command substitution: ignored null byte in input
+  ✔  GET /favicon.ico → 200
+scripts/test-frontend-features.sh: line 52: warning: command substitution: ignored null byte in input
+  ✔  GET /icons/icon-192x192.png → 200 (PWA icon)
+
+══ 14. 404 / SPA Routing ══
+  ✔  Unknown route → 200 (SPA router or 404 page — not a 5xx)
+
+════════════════════════════════════════
+  Results : 79 checks
+  ✔ Passed : 74
+  ✖ Failed : 0
+  – Skipped: 5  (awaiting CF Pages deploy)
+════════════════════════════════════════
+
+  ALL CHECKS PASSED
+
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ 
+
+
+
+
+
+
+
+
+
+

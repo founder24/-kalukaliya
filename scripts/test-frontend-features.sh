@@ -49,7 +49,7 @@ fetch() {
     local tmpfile; tmpfile=$(mktemp)
     HTTP_STATUS=$(curl -s -L --compressed --max-time "$TIMEOUT" \
         -o "$tmpfile" -w "%{http_code}" "$@" "$url")
-    HTTP_BODY=$(cat "$tmpfile")
+    HTTP_BODY=$(tr -d '\000' < "$tmpfile")
     rm -f "$tmpfile"
 }
 

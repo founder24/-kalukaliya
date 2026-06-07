@@ -179,10 +179,10 @@ echo "════════════════════════�
 echo ""
 
 # Extract test results
-PASSED=$(grep -c " PASSED" "$AUDIT_REPORT" || echo "0")
-FAILED=$(grep -c " FAILED" "$AUDIT_REPORT" || echo "0")
-SKIPPED=$(grep -c " SKIPPED" "$AUDIT_REPORT" || echo "0")
-ERRORS=$(grep -c " ERROR" "$AUDIT_REPORT" || echo "0")
+PASSED=$(grep -c " PASSED" "$AUDIT_REPORT" || true)
+FAILED=$(grep -c " FAILED" "$AUDIT_REPORT" || true)
+SKIPPED=$(grep -c " SKIPPED" "$AUDIT_REPORT" || true)
+ERRORS=$(grep -c " ERROR" "$AUDIT_REPORT" || true)
 
 echo "Test Results:"
 echo "  ✓ Passed:  $PASSED"
