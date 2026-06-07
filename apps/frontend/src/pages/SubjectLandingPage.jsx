@@ -9,7 +9,6 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useResolveSubject, useChapters } from '@/hooks/useContent';
 import ContinueLearning from '@/components/content/ContinueLearning';
-import TrustpilotReviewsSection from '@/components/content/TrustpilotReviewsSection';
 import SubjectTopicIndex from '@/components/subject/SubjectTopicIndex';
 import { apiClient } from '@/utils/api';
 import { MobileNavSwitch } from '@/components/layout/MobileNavSwitch';
@@ -400,12 +399,6 @@ export default function SubjectLandingPage() {
           </div>
         )}
 
-        <TrustpilotReviewsSection
-          subheading={`Finding Syrabit.ai useful for ${boardName} ${className} ${subjectName}? Share your experience and help other students.`}
-          subjectName={subjectName}
-          boardName={boardName}
-          className={className}
-        />
 
         <nav className="mt-10 pt-6 border-t border-border/30" aria-label="Site navigation">
           <div className="flex flex-wrap gap-4 justify-center text-xs text-muted-foreground">

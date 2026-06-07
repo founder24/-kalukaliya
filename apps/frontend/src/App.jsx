@@ -13,17 +13,11 @@ import { HelmetProvider } from "react-helmet-async";
 import Analytics from "@/utils/analytics";
 const PWAInstallPrompt = lazy(() => import("@/components/PWAInstallPrompt"));
 const CookieConsent = lazy(() => import("@/components/CookieConsent"));
-const ReviewPrompt = lazy(() => import("@/components/ReviewPrompt"));
 const LazyToaster = lazy(() => import("sonner").then(m => ({ default: m.Toaster })));
 // Only GlobalSeo is lazy — HelmetProvider must wrap the entire app so that
 // per-page <PageMeta>/Helmet usage on Library, Chapter, Pricing, etc. still
 // works. (Task #381 fix after architect review.)
 const LazyGlobalSeo = lazy(() => import("@/components/seo/GlobalSeo"));
-// Task #727 — emit the Trustpilot aggregate-rating JSON-LD on every
-// route so FAQ/About/Pricing/Learn/blog and any other indexable page
-// becomes eligible for the Google review-stars rich snippet, not just
-// the 5 content pages that render <TrustpilotReviewsSection />.
-const LazyGlobalTrustpilotJsonLd = lazy(() => import("@/components/seo/GlobalTrustpilotJsonLd"));
 import { apiClient } from "@/utils/api";
 import { probeImageResizer } from "@/utils/imageCdn";
 
@@ -403,7 +397,6 @@ export function AppShell({ children, ssr = false, helmetContext }) {
   return (
     <HelmetProvider context={helmetContext}>
       {showDeferred ? <Suspense fallback={null}><LazyGlobalSeo /></Suspense> : null}
-      {showDeferred ? <Suspense fallback={null}><LazyGlobalTrustpilotJsonLd /></Suspense> : null}
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
@@ -414,7 +407,6 @@ export function AppShell({ children, ssr = false, helmetContext }) {
           </AuthProvider>
           {showDeferred ? <Suspense fallback={null}><PWAInstallPrompt /></Suspense> : null}
           {showDeferred ? <Suspense fallback={null}><CookieConsent /></Suspense> : null}
-          {showDeferred ? <Suspense fallback={null}><ReviewPrompt /></Suspense> : null}
         </QueryClientProvider>
       </ErrorBoundary>
     </HelmetProvider>

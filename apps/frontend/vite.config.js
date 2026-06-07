@@ -657,7 +657,6 @@ export default defineConfig(({ mode }) => ({
 
   define: {
     'process.env.NODE_ENV': JSON.stringify(mode),
-    '__TRUSTPILOT_BU_ID__': JSON.stringify(process.env.TRUSTPILOT_BUSINESS_UNIT_ID || ''),
   },
 
   esbuild: {

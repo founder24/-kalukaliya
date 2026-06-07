@@ -7,7 +7,6 @@ import { useContentLang } from '@/context/LanguageContext';
 import LangToggle from '@/components/ui/LangToggle';
 import HeroSection from './landing/HeroSection';
 import PopularSubjects from './landing/PopularSubjects';
-import TrustpilotReviewsSection from '@/components/content/TrustpilotReviewsSection';
 import { RecentMemoriesSection } from './chat/RecentMemoriesSection';
 const FeaturesGrid = lazy(() => import('./landing/FeaturesGrid'));
 const PricingSection = lazy(() => import('./landing/PricingSection'));
@@ -132,9 +131,6 @@ export default function LandingPage() {
           <PricingSection contentLang={contentLang} />
         </div>
       </Suspense>
-      <TrustpilotReviewsSection
-        subheading="Enjoying Syrabit.ai? Help other students across Assam discover it — leave us a quick review."
-      />
       <Suspense fallback={<div style={{ minHeight: '480px' }} aria-hidden />}>
         <div style={{ minHeight: '480px', contentVisibility: 'auto', containIntrinsicSize: '0 480px' }}>
           <TestimonialsFooter year={year} contentLang={contentLang} />

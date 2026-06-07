@@ -5,7 +5,6 @@ import { WORKER_API } from '../utils/api';
 import { useShare } from '../hooks/useShare';
 import PageMeta from '@/components/seo/PageMeta';
 import ContinueLearning from '@/components/content/ContinueLearning';
-import TrustpilotReviewsSection from '@/components/content/TrustpilotReviewsSection';
 import AdSlot from '@/components/ads/AdSlot';
 // Quge5 multitag removed in Task #347 — AdSense is the sole monetised network.
 import useAdsenseAutoAds from '@/components/ads/useAdsenseAutoAds';
@@ -278,12 +277,6 @@ export default function PYQReplicaPage() {
         <AdSlot placement="pyq.endOfContent" />
       </div>
 
-      <TrustpilotReviewsSection
-        subheading={`Finding Syrabit.ai useful${pyqMeta.subject ? ' for ' + pyqMeta.subject : ''}? Share your experience and help other students.`}
-        subjectName={pyqMeta.subject || ''}
-        boardName={pyqMeta.board || ''}
-        className={pyqMeta.class_name || ''}
-      />
 
       <div
         aria-hidden="true"

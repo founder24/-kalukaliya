@@ -9,8 +9,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { X, Check, AlertCircle, Loader2, Trophy } from 'lucide-react';
 import { studyApi } from '@/utils/studyApi';
 import { toast } from 'sonner';
-import { requestReviewPrompt } from '@/components/ReviewPrompt';
-
 export function QuizModal({
   open, onClose,
   context = '', topic = '', chapter_ref = '', subject_name = '',
@@ -69,7 +67,7 @@ export function QuizModal({
       const finalScore = answers.filter(a => a.correct).length;
       const total = questions.length || 1;
       if (finalScore / total >= 0.7) {
-        try { requestReviewPrompt('quiz_high_score'); } catch {}
+        // review prompt removed
       }
       return;
     }

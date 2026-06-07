@@ -19,8 +19,6 @@ import LibrarySkeleton from './library/LibrarySkeleton';
 import FilterChip from './library/FilterChip';
 import ScrollableFilterRow from './library/ScrollableFilterRow';
 
-import TrustpilotReviewsSection from '@/components/content/TrustpilotReviewsSection';
-
 const LazyCmsDocsSection = lazy(() => import('./library/CmsDocsSection'));
 const LazyCmsPostsGrid = lazy(() => import('./library/CmsPostsGrid'));
 const LazyQuestionPapersSection = lazy(() => import('./library/QuestionPapersSection'));
@@ -751,9 +749,6 @@ export default function LibraryPage() {
               <LazyCmsPostsGrid />
             </Suspense>
           </LazyOnVisible>
-          <TrustpilotReviewsSection
-            subheading="Enjoying Syrabit.ai? Help other students across Assam discover it — leave us a quick review."
-          />
         </div>
 
       </div>

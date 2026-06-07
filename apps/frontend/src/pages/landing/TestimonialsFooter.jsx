@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Sparkles, ChevronRight, Mail, Globe } from 'lucide-react';
 import { LogoMark, LogoFull } from '@/components/Logo';
@@ -22,14 +21,10 @@ function Github({ className, size = 24, ...props }) {
   );
 }
 
-const TRUSTPILOT_BU_ID = __TRUSTPILOT_BU_ID__;
-
 const _t = {
   en: {
     testimonialsHeading: 'Students love Syrabit.ai',
     testimonialsSub: 'Real feedback from students across Assam',
-    trustpilotLink: 'See our reviews on Trustpilot',
-    trustpilotMini: 'Rated on Trustpilot',
     ctaHeading: 'Ready to ace your boards?',
     ctaSub: 'Join hundreds of AssamBoard students (AHSEC, DEGREE & SEBA) who study smarter with Syrabit.ai. Free forever — no credit card required.',
     ctaPrimary: 'Create Free Account',
@@ -61,8 +56,6 @@ const _t = {
   as: {
     testimonialsHeading: 'ছাত্ৰ-ছাত্ৰীয়ে Syrabit.ai ভাল পায়',
     testimonialsSub: 'অসমৰ ছাত্ৰ-ছাত্ৰীৰ প্ৰকৃত মতামত',
-    trustpilotLink: 'Trustpilot-ত আমাৰ পৰ্যালোচনা চাওক',
-    trustpilotMini: 'Trustpilot-ত ৰেটিং',
     ctaHeading: 'আপোনাৰ বোৰ্ড পৰীক্ষাত উত্তীৰ্ণ হ\'বলৈ সাজু?',
     ctaSub: 'শত শত অসম বোৰ্ডৰ ছাত্ৰ-ছাত্ৰী (AHSEC, DEGREE আৰু SEBA)ৰ সৈতে যোগদান কৰক যিয়ে Syrabit.ai-ৰ সৈতে স্মাৰ্টকৈ অধ্যয়ন কৰে। চিৰদিনৰ বাবে বিনামূলীয়া — ক্ৰেডিট কাৰ্ডৰ প্ৰয়োজন নাই।',
     ctaPrimary: 'বিনামূলীয়া একাউণ্ট তৈয়াৰ কৰক',
@@ -93,109 +86,11 @@ const _t = {
   },
 };
 
-function TrustpilotCarousel({ label }) {
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.Trustpilot && ref.current) {
-      window.Trustpilot.loadFromElement(ref.current, true);
-    }
-  }, []);
-
-  return (
-    <div
-      ref={ref}
-      className="trustpilot-widget"
-      data-locale="en-US"
-      data-template-id="53aa8912dec7e10d38f59f36"
-      data-businessunit-id={TRUSTPILOT_BU_ID}
-      data-style-height="140px"
-      data-style-width="100%"
-      data-theme="light"
-      data-stars="4,5"
-      data-review-languages="en"
-    >
-      <a
-        href="https://www.trustpilot.com/review/syrabit.ai"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground"
-      >
-        {label}
-      </a>
-    </div>
-  );
-}
-
-function TrustpilotMini({ label }) {
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.Trustpilot && ref.current) {
-      window.Trustpilot.loadFromElement(ref.current, true);
-    }
-  }, []);
-
-  return (
-    <div className="mt-8 flex justify-center">
-      <div
-        ref={ref}
-        className="trustpilot-widget"
-        data-locale="en-US"
-        data-template-id="56278e9abfbd13b10015e694"
-        data-businessunit-id={TRUSTPILOT_BU_ID}
-        data-style-height="52px"
-        data-style-width="100%"
-      >
-        <a
-          href="https://www.trustpilot.com/review/syrabit.ai"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground"
-        >
-          {label}
-        </a>
-      </div>
-    </div>
-  );
-}
-
 export default function TestimonialsFooter({ year, contentLang = 'en' }) {
   const t = _t[contentLang] || _t.en;
 
-  useEffect(() => {
-    if (document.getElementById('trustpilot-widget-script')) return;
-    const script = document.createElement('script');
-    script.id = 'trustpilot-widget-script';
-    script.src = 'https://widget.trustpilot.com/bootstrap/v5/tp.widget.bootstrap.min.js';
-    script.async = true;
-    script.onload = () => {
-      const els = document.querySelectorAll('.trustpilot-widget');
-      els.forEach((el) => {
-        if (window.Trustpilot) window.Trustpilot.loadFromElement(el, true);
-      });
-    };
-    document.head.appendChild(script);
-  }, []);
-
   return (
     <>
-      <section className="py-28 max-w-5xl mx-auto px-5">
-        <Reveal className="text-center mb-14">
-          <h2 className="text-foreground mb-3" style={{ fontSize: 'clamp(1.8rem,4vw,2.8rem)', fontWeight: 800, letterSpacing: '-0.02em' }}>
-            {t.testimonialsHeading}
-          </h2>
-          <p className="text-muted-foreground">
-            {t.testimonialsSub}
-          </p>
-        </Reveal>
-
-        <Reveal>
-          <TrustpilotCarousel label={t.trustpilotLink} />
-        </Reveal>
-
-        <TrustpilotMini label={t.trustpilotMini} />
-      </section>
 
       <section className="py-28 relative overflow-hidden">
         <div className="absolute inset-0 pointer-events-none">

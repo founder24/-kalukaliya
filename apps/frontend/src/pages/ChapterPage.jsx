@@ -19,7 +19,6 @@ import Analytics from '@/utils/analytics';
 import { useContentLang } from '@/context/LanguageContext';
 import StickyToc from '@/components/ui/StickyToc';
 import ContinueLearning from '@/components/content/ContinueLearning';
-import TrustpilotReviewsSection from '@/components/content/TrustpilotReviewsSection';
 import { MobileNavSwitch } from '@/components/layout/MobileNavSwitch';
 import { useLibraryBundle, useLibraryBundleSlim } from '@/hooks/useContent';
 import { findSiblingChapters, siblingsAsRelated } from '@/utils/siblingChapter';
@@ -28,8 +27,6 @@ import { pushRecentChapter } from '@/utils/recentChapters';
 import { HighlightSavePopover } from '@/components/study/HighlightSavePopover';
 import { ReadAloudButton } from '@/components/study/ReadAloudButton';
 import { QuizModal } from '@/components/study/QuizModal';
-import { requestReviewPrompt } from '@/components/ReviewPrompt';
-
 // ─────────────────────────────────────────────────────────────────────────────
 // AD POLICY: Chapter routes (/{board}/...) are intentionally AD-FREE in the
 // Task #526 rollout. Do NOT import <AdSlot /> or any ad-network script here.
@@ -535,25 +532,6 @@ export default function ChapterPage() {
       board,
       data.word_count || 0
     );
-    // Task #652: track unique chapter views in a rolling 7-day window;
-    // on the 3rd one, surface a friendly Google-review nudge. The
-    // ReviewPrompt enforces 30-day throttling and dismissal so we
-    // don't double-gate here.
-    try {
-      const KEY = 'syrabit_chapter_views_week';
-      const WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-      const now = Date.now();
-      let entries = [];
-      try { entries = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch {}
-      if (!Array.isArray(entries)) entries = [];
-      entries = entries.filter(e => e && (now - Number(e.t || 0)) < WINDOW_MS);
-      const id = String(data.chapter_id || chapterSlug);
-      if (!entries.some(e => e.id === id)) entries.push({ id, t: now });
-      localStorage.setItem(KEY, JSON.stringify(entries));
-      if (entries.length >= 3) {
-        requestReviewPrompt('chapter_engagement');
-      }
-    } catch {}
   }, [data?.chapter_id]);
 
   const scrollMilestonesRef = useRef(new Set());
@@ -1408,12 +1386,6 @@ export default function ChapterPage() {
           </aside>
         </div>
 
-        <TrustpilotReviewsSection
-          subheading={`Finding Syrabit.ai helpful for ${subjectName} ${className}? Share your experience and help other students.`}
-          subjectName={subjectName}
-          boardName={boardName}
-          className={className}
-        />
 
         <nav className="mt-10 pt-6 border-t border-border/30" aria-label="Site navigation">
           <div className="flex flex-wrap gap-4 justify-center text-xs text-muted-foreground">
