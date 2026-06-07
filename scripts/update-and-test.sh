@@ -3,10 +3,13 @@
 # Syrabit — Update & Full-Stack Test Runner
 #
 # Pulls latest commits, loads GCP secrets, waits for healthy backend,
-# then runs the 1000+ assertion layer test.
+# then runs the test suite.
 #
 # Usage (from repo root):
-#   bash scripts/update-and-test.sh
+#   bash scripts/update-and-test.sh --master          # ← recommended: all 8 suites
+#   bash scripts/update-and-test.sh                   # deep layer test (1000+ assertions)
+#   bash scripts/update-and-test.sh --master --quick  # unauthenticated suites only
+#   bash scripts/update-and-test.sh --master --only smoke
 #   bash scripts/update-and-test.sh --quick           # skip stress + slow layers
 #   bash scripts/update-and-test.sh --layer 3         # single layer only
 #   bash scripts/update-and-test.sh --no-pull         # skip git pull
@@ -18,6 +21,10 @@
 #   BASE_URL       backend URL     (default: https://api.syrabit.ai)
 #   FRONTEND_URL   frontend URL    (default: https://syrabit.ai)
 #   BRANCH         git branch to pull (default: current branch)
+#
+#   For --master authenticated suites, also set:
+#   TEST_USER_EMAIL / TEST_USER_PASSWORD   (loaded from GCP Secret Manager automatically)
+#   TEST_ADMIN_EMAIL / TEST_ADMIN_PASSWORD (loaded from GCP Secret Manager automatically)
 # =============================================================================
 set -uo pipefail
 
@@ -31,6 +38,8 @@ QUICK_MODE=0
 EXPORT_JSON=0
 LAYER_ARG=""
 LOCAL_MODE=0
+MASTER_MODE=0
+ONLY_SUITE=""
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
@@ -50,6 +59,8 @@ hr()    { echo -e "${D}───────────────────
 # ── Arg parse ─────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --master)      MASTER_MODE=1;        shift ;;
+    --only)        ONLY_SUITE="$2";      shift 2 ;;
     --no-pull)     SKIP_PULL=1;          shift ;;
     --quick)       QUICK_MODE=1;         shift ;;
     --local)       LOCAL_MODE=1;         shift ;;
@@ -60,7 +71,7 @@ while [[ $# -gt 0 ]]; do
     --branch)      BRANCH="$2";         shift 2 ;;
     --project)     GCP_PROJECT="$2";     shift 2 ;;
     --help|-h)
-      sed -n '2,20p' "$0" | grep '^#' | sed 's/^# \?//'
+      sed -n '2,30p' "$0" | grep '^#' | sed 's/^# \?//'
       exit 0 ;;
     *) echo "Unknown option: $1 (use --help)"; exit 1 ;;
   esac
@@ -154,6 +165,10 @@ declare -A SECRET_MAP=(
   ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]="GOOGLE_APPLICATION_CREDENTIALS_JSON"
   ["INDEXNOW_API_KEY"]="INDEXNOW_API_KEY"
   ["INDEXNOW_INTERNAL_SECRET"]="INDEXNOW_INTERNAL_SECRET"
+  ["TEST_USER_EMAIL"]="TEST_USER_EMAIL"
+  ["TEST_USER_PASSWORD"]="TEST_USER_PASSWORD"
+  ["TEST_ADMIN_EMAIL"]="TEST_ADMIN_EMAIL"
+  ["TEST_ADMIN_PASSWORD"]="TEST_ADMIN_PASSWORD"
 )
 
 SECRETS_LOADED=0
@@ -265,38 +280,59 @@ fi
 
 
 # =============================================================================
-# STEP 5 — BUILD LAYER TEST COMMAND
+# STEP 5 — RUN TESTS
 # =============================================================================
-step "5. Running Full-Stack Layer Test (1000+ assertions)"
-hr
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LAYER_TEST="$SCRIPT_DIR/fullstack-layer-test.sh"
 
-if [[ ! -f "$LAYER_TEST" ]]; then
-  die "Layer test script not found at $LAYER_TEST"
-fi
-
-# Build args
-LAYER_TEST_ARGS=()
-[[ $QUICK_MODE  -eq 1 ]]   && LAYER_TEST_ARGS+=("--quick")
-[[ $EXPORT_JSON -eq 1 ]]   && LAYER_TEST_ARGS+=("--cloudshell")
-[[ -n "$LAYER_ARG" ]]      && LAYER_TEST_ARGS+=("--layer" "$LAYER_ARG")
-
-# Export all env vars the layer test needs
+# Export env vars all test scripts need
 export BASE_URL FRONTEND_URL
 export ADMIN_EMAIL ADMIN_PASSWORD
 export TEST_JWT_TOKEN
+export TEST_USER_EMAIL TEST_USER_PASSWORD
+export TEST_ADMIN_EMAIL TEST_ADMIN_PASSWORD
 export RAZORPAY_WEBHOOK_SECRET
 export CRON_SECRET
 export STRESS_TEST="${STRESS_TEST:-0}"
 export VERBOSE="${VERBOSE:-0}"
 export EXPORT_JSON
 
-# Run
-echo ""
-bash "$LAYER_TEST" "${LAYER_TEST_ARGS[@]+"${LAYER_TEST_ARGS[@]}"}"
-TEST_EXIT=$?
+if [[ $MASTER_MODE -eq 1 ]]; then
+  # ── Master runner: all 8 suites in order ────────────────────────────────
+  step "5. Running Master Live Test Suite (all 8 suites)"
+  hr
+
+  MASTER_SCRIPT="$SCRIPT_DIR/run-all-live-tests.sh"
+  if [[ ! -f "$MASTER_SCRIPT" ]]; then
+    die "Master runner not found at $MASTER_SCRIPT"
+  fi
+
+  MASTER_ARGS=()
+  [[ $QUICK_MODE -eq 1 ]] && MASTER_ARGS+=("--quick")
+  [[ -n "$ONLY_SUITE" ]]  && MASTER_ARGS+=("--only" "$ONLY_SUITE")
+
+  echo ""
+  bash "$MASTER_SCRIPT" "${MASTER_ARGS[@]+"${MASTER_ARGS[@]}"}"
+  TEST_EXIT=$?
+
+else
+  # ── Deep layer test: 1000+ assertions, 22 layers ────────────────────────
+  step "5. Running Full-Stack Layer Test (1000+ assertions)"
+  hr
+
+  LAYER_TEST="$SCRIPT_DIR/fullstack-layer-test.sh"
+  if [[ ! -f "$LAYER_TEST" ]]; then
+    die "Layer test script not found at $LAYER_TEST"
+  fi
+
+  LAYER_TEST_ARGS=()
+  [[ $QUICK_MODE  -eq 1 ]] && LAYER_TEST_ARGS+=("--quick")
+  [[ $EXPORT_JSON -eq 1 ]] && LAYER_TEST_ARGS+=("--cloudshell")
+  [[ -n "$LAYER_ARG" ]]    && LAYER_TEST_ARGS+=("--layer" "$LAYER_ARG")
+
+  echo ""
+  bash "$LAYER_TEST" "${LAYER_TEST_ARGS[@]+"${LAYER_TEST_ARGS[@]}"}"
+  TEST_EXIT=$?
+fi
 
 # =============================================================================
 # STEP 6 — SUMMARY
@@ -307,11 +343,10 @@ hr
 echo ""
 echo -e "${B}Total time: ${ELAPSED}s${N}"
 if [[ $TEST_EXIT -eq 0 ]]; then
-  echo -e "${G}${B}✓ All layer tests passed${N}\n"
+  echo -e "${G}${B}✓ All tests passed${N}\n"
 else
-  echo -e "${R}${B}✗ Layer tests reported failures (exit $TEST_EXIT)${N}"
+  echo -e "${R}${B}✗ Tests reported failures (exit $TEST_EXIT)${N}"
   echo    "  Review the output above for details."
-  [[ $EXPORT_JSON -eq 1 ]] && echo    "  Results saved to: fullstack-test-results.json"
   echo ""
 fi
 
