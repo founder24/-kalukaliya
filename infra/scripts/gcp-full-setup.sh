@@ -3,7 +3,14 @@
 # gcp-full-setup.sh — Run once in Cloud Shell to wire ALL GCP permissions
 # for syrabit-backend-sa and create any missing Secret Manager secrets.
 #
-# Usage:
+# Repo: https://github.com/founder24/-kalukaliya
+#
+# QUICKSTART — paste into Cloud Shell (clones repo + runs everything):
+#   bash <(curl -fsSL https://raw.githubusercontent.com/founder24/-kalukaliya/main/infra/scripts/cloudshell-bootstrap.sh)
+#
+# Or step-by-step:
+#   git clone https://github.com/founder24/-kalukaliya syrabit
+#   cd syrabit
 #   bash infra/scripts/gcp-full-setup.sh
 #
 # What this does:

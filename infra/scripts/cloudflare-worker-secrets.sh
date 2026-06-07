@@ -3,7 +3,14 @@
 # cloudflare-worker-secrets.sh — Set all required Cloudflare Worker secrets
 # for the syrabitworker-prod Edge Worker.
 #
-# Usage (run from repo root, requires wrangler logged in):
+# Repo: https://github.com/founder24/-kalukaliya
+#
+# QUICKSTART — paste into Cloud Shell (clones repo + runs GCP + CF setup):
+#   bash <(curl -fsSL https://raw.githubusercontent.com/founder24/-kalukaliya/main/infra/scripts/cloudshell-bootstrap.sh)
+#
+# Or step-by-step (from repo root, after GCP setup):
+#   git clone https://github.com/founder24/-kalukaliya syrabit
+#   cd syrabit
 #   bash infra/scripts/cloudflare-worker-secrets.sh
 #
 # Prerequisites:
