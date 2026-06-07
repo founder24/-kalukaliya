@@ -11,6 +11,7 @@ import {
   FlipHorizontal, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { cdnImage, cdnSrcSet } from '@/utils/imageCdn';
 import { apiClient, API_BASE, seoRelatedByChapter } from '@/utils/api';
 import { useLibraryBundle, useLibraryBundleSlim } from '@/hooks/useContent';
 import { findSiblingChapters, siblingsAsRelated } from '@/utils/siblingChapter';
@@ -310,7 +311,9 @@ export default function LearnPage() {
               {doc?.thumbnail_url && (
                 <div className="w-full aspect-video overflow-hidden">
                   <img
-                    src={doc.thumbnail_url}
+                    src={cdnImage(doc.thumbnail_url, { width: 800 })}
+                    srcSet={cdnSrcSet(doc.thumbnail_url, [400, 800, 1200])}
+                    sizes="(max-width: 640px) 400px, (max-width: 1024px) 800px, 1200px"
                     alt={doc.alt_text || doc.title}
                     className="w-full h-full object-cover"
                     loading="lazy"
