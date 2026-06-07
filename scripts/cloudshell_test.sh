@@ -171,7 +171,7 @@ else
     _ok "Latest revision: ${_rev}  traffic=${_traf}%"
     _info "Image: ${_img}"
   else
-    _fail "Could not read Cloud Run revision (run: gcloud auth login)"
+    _warn "Could not read Cloud Run revision — run: gcloud auth login --project ${GCP_PROJECT}"
   fi
 
   if [[ -n "$_url" ]]; then
@@ -550,26 +550,28 @@ _head "11. GitHub Actions — Latest Deploy Status"
 if [[ -z "$GITHUB_TOKEN" ]]; then
   _skip "GITHUB_TOKEN not set — set it to enable GitHub Actions status check"
 else
-  _gh_runs=$(curl -sf --max-time 10 \
+  _gh_tmp=$(mktemp /tmp/gh_runs_XXXXXX.json)
+  curl -sf --max-time 10 \
     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
-    "https://api.github.com/repos/${GITHUB_REPO}/actions/runs?per_page=10" 2>/dev/null || echo "")
+    "https://api.github.com/repos/${GITHUB_REPO}/actions/runs?per_page=10" \
+    -o "$_gh_tmp" 2>/dev/null || true
 
-  if [[ -z "$_gh_runs" ]]; then
+  if [[ ! -s "$_gh_tmp" ]]; then
     _fail "GitHub API unreachable or token invalid"
   else
-    python3 - <<GHEOF
+    python3 - "$_gh_tmp" <<'GHEOF'
 import json, sys
 
 R="\033[91m"; G="\033[92m"; Y="\033[93m"; B="\033[94m"; X="\033[0m"
 
-raw = """${_gh_runs}"""
-try:
-    data = json.loads(raw)
-except Exception as e:
-    print(f"  {R}✗{X} GitHub API response parse error: {e}")
-    sys.exit(1)
+with open(sys.argv[1], encoding="utf-8") as fh:
+    try:
+        data = json.load(fh)
+    except Exception as e:
+        print(f"  {R}✗{X} GitHub API parse error: {e}")
+        sys.exit(1)
 
 runs  = data.get("workflow_runs", [])
 total = data.get("total_count", 0)
@@ -577,35 +579,27 @@ print(f"  {B}·{X} Total workflow runs: {total}")
 
 seen = {}
 for run in runs[:10]:
-    name   = run.get("name","?")
-    concl  = run.get("conclusion","in_progress") or "in_progress"
-    created= run.get("created_at","?")[:16]
-    branch = run.get("head_branch","?")
-    run_id = run.get("id")
+    name    = run.get("name","?")
+    concl   = run.get("conclusion","in_progress") or "in_progress"
+    created = run.get("created_at","?")[:16]
+    branch  = run.get("head_branch","?")
+    run_id  = run.get("id")
     is_latest = name not in seen
-    seen[name] = run_id
+    seen[name]= run_id
 
     icon = G+"✓"+X if concl=="success" else (Y+"·"+X if concl in ("skipped","cancelled","in_progress") else R+"✗"+X)
     tag  = "" if is_latest else f"  {B}(historical){X}"
     print(f"    {icon} {name}: {concl} @ {created} [{branch}]{tag}")
 
-# Report exit code based on latest deploy status
 deploy_name = "Deploy — Backend + Edge + Frontend"
-if deploy_name in seen:
-    # find that run's conclusion
-    for run in runs[:10]:
-        if run.get("name") == deploy_name:
-            c = run.get("conclusion","?")
-            if c == "success":
-                sys.exit(0)
-            elif c in ("cancelled","in_progress"):
-                sys.exit(0)  # not a failure
-            else:
-                sys.exit(1)
-            break
+for run in runs[:10]:
+    if run.get("name") == deploy_name:
+        c = run.get("conclusion") or "in_progress"
+        sys.exit(0 if c in ("success","cancelled","in_progress") else 1)
 sys.exit(0)
 GHEOF
     _gh_exit=$?
+    rm -f "$_gh_tmp"
     if [[ $_gh_exit -eq 0 ]]; then
       _ok "Latest deploy workflow: success"
     else
