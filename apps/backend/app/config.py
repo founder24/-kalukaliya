@@ -79,10 +79,10 @@ class Settings(BaseSettings):
     # --- P7: Sarvam AI (Indic) ---
     SARVAM_API_KEY: Optional[str] = None
     SARVAM_BASE_URL: str = "https://api.sarvam.ai/v1"
-    # "sarvam-m" was deprecated — confirmed valid models from /v1/models:
-    # sarvam-m1 (multilingual flagship), sarvam-105b, sarvam-30b
+    # Valid Sarvam chat-completion models (as of 2025-06): sarvam-30b, sarvam-105b
+    # sarvam-m1 was renamed; use sarvam-30b (fast) or sarvam-105b (quality).
     # Override via SARVAM_MODEL env var if this needs to change without a deploy.
-    SARVAM_MODEL: str = "sarvam-m1"
+    SARVAM_MODEL: str = "sarvam-30b"
 
     # --- P8: Razorpay (Payments) ---
     RAZORPAY_KEY_ID: Optional[str] = None

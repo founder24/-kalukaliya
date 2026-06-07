@@ -60,14 +60,20 @@ class ContentGenerationService:
         content_en = await vertex_client.generate(system_prompt, user_message)
         chapter.content_en = content_en
 
-        # Generate Assamese translation via Sarvam AI
+        # Generate Assamese translation via Sarvam AI (soft failure — no key yet is ok)
         translate_prompt = (
             "You are a professional translator. "
             "Translate the following educational content from English to Assamese. "
             "Maintain the structure and formatting."
         )
-        content_as = await sarvam_client.generate(translate_prompt, content_en)
-        chapter.content_as = content_as
+        try:
+            content_as = await sarvam_client.generate(translate_prompt, content_en)
+            chapter.content_as = content_as
+        except Exception as e:
+            logger.warning(
+                f"Assamese translation skipped for {chapter.title!r}: {e}. "
+                "Run generate-notes/as once SARVAM_API_KEY is configured."
+            )
 
         # Extract metadata
         meta_prompt = (
