@@ -1084,6 +1084,111 @@ async def get_translation_progress(request: Request):
 
 
 # ============================
+# LAYER 6: Agent Ingest (Replit Chat → MongoDB)
+# ============================
+
+
+class _AgentTopicIn(BaseModel):
+    title: str
+    definition: Optional[str] = None
+
+
+class _AgentChapterIn(BaseModel):
+    title: str
+    chapter_number: int
+    topics: list[_AgentTopicIn] = []
+
+
+class AgentIngestRequest(BaseModel):
+    subject_id: str
+    chapters: list[_AgentChapterIn]
+    trigger_generation: bool = False
+
+
+@router.post("/ingest-from-agent")
+async def ingest_from_agent(request: Request, body: AgentIngestRequest):
+    """Bulk-create chapters + topics from a structured syllabus extracted by the Replit agent.
+
+    Auth: admin session cookie OR Bearer token (type=admin, role=admin).
+    CSRF check is intentionally skipped — this is a programmatic endpoint, not a browser form.
+
+    Set trigger_generation=true to queue background note generation for every
+    newly created chapter immediately after seeding.
+    """
+    await _validate_admin_session(request)
+
+    subject = await Subject.get(PydanticObjectId(body.subject_id))
+    if not subject:
+        raise HTTPException(status_code=404, detail=f"Subject {body.subject_id} not found")
+
+    created = []
+    skipped = []
+
+    for ch_input in body.chapters:
+        slug = _slugify(ch_input.title)
+        existing = await Chapter.find_one(
+            Chapter.subject_id == body.subject_id,
+            Chapter.slug == slug,
+        )
+        if existing:
+            skipped.append({
+                "id": str(existing.id),
+                "title": existing.title,
+                "reason": "already_exists",
+            })
+            continue
+
+        topics = [
+            Topic(
+                title=t.title,
+                definition=t.definition or "",
+                topic_slug=_slugify(t.title),
+            )
+            for t in ch_input.topics
+        ]
+
+        chapter = Chapter(
+            title=ch_input.title,
+            slug=slug,
+            subject_id=body.subject_id,
+            chapter_number=ch_input.chapter_number,
+            published_topics=topics,
+            status="draft",
+        )
+        await chapter.insert()
+        created.append({
+            "id": str(chapter.id),
+            "title": chapter.title,
+            "slug": slug,
+            "topics": len(topics),
+        })
+
+    generation_queued = False
+    if body.trigger_generation and created:
+        import asyncio
+        for ch_info in created:
+            asyncio.create_task(
+                content_generation_service.generate_notes(ch_info["id"], force=False)
+            )
+        generation_queued = True
+
+    logger.info(
+        f"[ingest-from-agent] subject={body.subject_id} "
+        f"created={len(created)} skipped={len(skipped)} gen_queued={generation_queued}"
+    )
+
+    return {
+        "subject_id": body.subject_id,
+        "subject_name": subject.name,
+        "created": len(created),
+        "skipped": len(skipped),
+        "chapters": created,
+        "skipped_details": skipped,
+        "generation_queued": generation_queued,
+    }
+
+
+# ============================
 # LAYER 5: GCS Sync
 # ============================
 
