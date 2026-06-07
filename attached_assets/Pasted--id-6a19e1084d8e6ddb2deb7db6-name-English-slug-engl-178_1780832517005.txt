@@ -1,0 +1,1031 @@
+ },
+    {
+        "id": "6a19e1084d8e6ddb2deb7db6",
+        "name": "English",
+        "slug": "english",
+        "stream_id": "6a19e1084d8e6ddb2deb7db5",
+        "status": "active",
+        "description": "Improve reading comprehension, grammar, writing skills, and literature for AHSEC board exams.",
+        "icon": "\ud83d\udcd6",
+        "thumbnail_url": "/assets/og/ahsec-class-12.png",
+        "tags": []
+    },
+    {
+        "id": "6a19e1084d8e6ddb2deb7db7",
+        "name": "MIL (Assamese)",
+        "slug": "mil-assamese",
+        "stream_id": "6a19e1084d8e6ddb2deb7db5",
+        "status": "active",
+        "description": "\u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be \u09ad\u09be\u09b7\u09be \u0986\u09f0\u09c1 \u09b8\u09be\u09b9\u09bf\u09a4\u09cd\u09af\u09f0 \u0997\u09a6\u09cd\u09af, \u09aa\u09a6\u09cd\u09af, \u0986\u09f0\u09c1 \u09ac\u09cd\u09af\u09be\u0995\u09f0\u09a3\u09f0 \u09b8\u09ae\u09cd\u09aa\u09c2\u09f0\u09cd\u09a3 \u0985\u09a7\u09cd\u09af\u09af\u09bc\u09a8\u0964",
+        "icon": "\u0985",
+        "thumbnail_url": "/assets/og/assamese-honours.png",
+        "tags": []
+    },
+    {
+        "id": "6a19e1084d8e6ddb2deb7db8",
+        "name": "Political Science",
+        "slug": "political-science",
+        "stream_id": "6a19e1084d8e6ddb2deb7db5",
+        "status": "active",
+        "description": "Study Indian constitution, political theory, government, and international relations for AHSEC.",
+        "icon": "\u2696\ufe0f",
+        "thumbnail_url": "/assets/og/ahsec-class-12.png",
+        "tags": []
+    },
+    {
+        "id": "6a19e1094d8e6ddb2deb7db9",
+        "name": "History",
+        "slug": "history",
+        "stream_id": "6a19e1084d8e6ddb2deb7db5",
+        "status": "active",
+        "description": "Explore ancient civilizations, medieval India, colonial period, and world history for AHSEC.",
+        "icon": "\ud83c\udfdb\ufe0f",
+        "thumbnail_url": "/assets/og/ahsec-class-12.png",
+        "tags": []
+    },
+    {
+        "id": "6a19e1094d8e6ddb2deb7dba",
+        "name": "Economics",
+        "slug": "economics",
+        "stream_id": "6a19e1084d8e6ddb2deb7db5",
+        "status": "active",
+        "description": "Study microeconomics, macroeconomics, Indian economy, and statistics for AHSEC board.",
+        "icon": "\ud83d\udcca",
+        "thumbnail_url": "/assets/og/economics-honours.png",
+        "tags": []
+    },
+    {
+        "id": "6a19e1094d8e6ddb2deb7dbb",
+        "name": "Education",
+        "slug": "education",
+        "stream_id": "6a19e1084d8e6ddb2deb7db5",
+        "status": "active",
+        "description": "Study philosophy of education, psychology, teaching methods, and educational theory for AHSEC.",
+        "icon": "\ud83c\udf93",
+        "thumbnail_url": "/assets/og/education-honours.png",
+        "tags": []
+    },
+    {
+        "id": "6a19e1094d8e6ddb2deb7dbc",
+        "name": "Logic & Philosophy",
+        "slug": "logic-philosophy",
+        "stream_id": "6a19e1084d8e6ddb2deb7db5",
+        "status": "active",
+        "description": "Explore Indian and Western philosophy, logic, ethics, and epistemology for AHSEC Arts.",
+        "icon": "\ud83d\udd0d",
+        "thumbnail_url": "/assets/og/ahsec-class-12.png",
+        "tags": []
+    },
+    {
+        "id": "6a19e10a4d8e6ddb2deb7dbe",
+        "name": "English",
+        "slug": "english",
+        "stream_id": "6a19e10a4d8e6ddb2deb7dbd",
+        "status": "active",
+        "description": "Improve reading comprehension, grammar, writing skills, and literature for AHSEC board exams.",
+        "icon": "\ud83d\udcd6",
+        "thumbnail_url": "/assets/og/ahsec-class-12.png",
+        "tags": []
+    },
+    {
+        "id": "6a19e10a4d8e6ddb2deb7dbf",
+        "name": "MIL (Assamese)",
+        "slug": "mil-assamese",
+        "stream_id": "6a19e10a4d8e6ddb2deb7dbd",
+        "status": "active",
+        "description": "\u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be \u09ad\u09be\u09b7\u09be \u0986\u09f0\u09c1 \u09b8\u09be\u09b9\u09bf\u09a4\u09cd\u09af\u09f0 \u0997\u09a6\u09cd\u09af, \u09aa\u09a6\u09cd\u09af, \u0986\u09f0\u09c1 \u09ac\u09cd\u09af\u09be\u0995\u09f0\u09a3\u09f0 \u09b8\u09ae\u09cd\u09aa\u09c2\u09f0\u09cd\u09a3 \u0985\u09a7\u09cd\u09af\u09af\u09bc\u09a8\u0964",
+        "icon": "\u0985",
+        "thumbnail_url": "/assets/og/assamese-honours.png",
+        "tags": []
+    },
+    {
+        "id": "6a19e10a4d8e6ddb2deb7dc0",
+        "name": "Accountancy",
+        "slug": "accountancy",
+        "stream_id": "6a19e10a4d8e6ddb2deb7dbd",
+        "status": "active",
+        "description": "Learn journal entries, ledger, balance sheet, financial statements, and partnership accounts.",
+        "icon": "\ud83d\udcd2",
+        "thumbnail_url": "/assets/og/accountancy-honours.png",
+        "tags": []
+    },
+    {
+        "id": "6a19e10b4d8e6ddb2deb7dc1",
+        "name": "Business Studies",
+        "slug": "business-studies",
+        "stream_id": "6a19e10a4d8e6ddb2deb7dbd",
+        "status": "active",
+        "description": "Study business organisation, management functions, marketing, and finance for AHSEC Commerce.",
+        "icon": "\ud83d\udcbc",
+        "thumbnail_url": "/assets/og/business-studies.png",
+        "tags": []
+    },
+    {
+        "id": "6a19e10b4d8e6ddb2deb7dc2",
+        "name": "Economics",
+        "slug": "economics",
+        "stream_id": "6a19e10a4d8e6ddb2deb7dbd",
+        "status": "active",
+        "description": "Study microeconomics, macroeconomics, Indian economy, and statistics for AHSEC board.",
+        "icon": "\ud83d\udcca",
+        "thumbnail_url": "/assets/og/economics-honours.png",
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab0731945021",
+        "name": "AEC Question Paper (NEP-2nd Semester)",
+        "slug": "aec-question-paper-nep-2nd-semester",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "AEC Question Paper (NEP-2nd Semester) \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab0731945022",
+        "name": "Assamese 2nd Sem NEP",
+        "slug": "assamese-2nd-sem-nep",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "Assamese 2nd Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab0731945023",
+        "name": "Botany 2nd Sem 2025 NEP",
+        "slug": "botany-2nd-sem-2025-nep",
+        "stream_id": "6a19e10f4d8e6ddb2deb7dd0",
+        "status": "active",
+        "description": "Botany 2nd Sem 2025 NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab0731945024",
+        "name": "Chemistry 2nd Sem NEP",
+        "slug": "chemistry-2nd-sem-nep",
+        "stream_id": "6a19e10f4d8e6ddb2deb7dd0",
+        "status": "active",
+        "description": "Chemistry 2nd Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab0731945025",
+        "name": "Commerce  4th Sem NEP",
+        "slug": "commerce-4th-sem-nep",
+        "stream_id": "6a19e1114d8e6ddb2deb7dd7",
+        "status": "active",
+        "description": "Commerce  4th Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab0731945026",
+        "name": "Commerce 2nd Sem NEP",
+        "slug": "commerce-2nd-sem-nep",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dcf",
+        "status": "active",
+        "description": "Commerce 2nd Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab0731945027",
+        "name": "Computer Science 2nd Sem  NEP",
+        "slug": "computer-science-2nd-sem-nep",
+        "stream_id": "6a19e10f4d8e6ddb2deb7dd0",
+        "status": "active",
+        "description": "Computer Science 2nd Sem  NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab0731945028",
+        "name": "ENGLISH COMMUNICATION-I",
+        "slug": "english-communication-i",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "ENGLISH COMMUNICATION-I \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab0731945029",
+        "name": "ENGLISH COMMUNICATION-II",
+        "slug": "english-communication-ii",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "ENGLISH COMMUNICATION-II \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab073194502a",
+        "name": "Economics 2nd Sem NEP",
+        "slug": "economics-2nd-sem-nep",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "Economics 2nd Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab073194502b",
+        "name": "Education 2nd Sem NEP",
+        "slug": "education-2nd-sem-nep",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "Education 2nd Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8282700cab073194502c",
+        "name": "English 2nd Sem NEP",
+        "slug": "english-2nd-sem-nep",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "English 2nd Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab073194502d",
+        "name": "Essence of Democracy and Indian Constitution",
+        "slug": "essence-of-democracy-and-indian-constitution",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "Essence of Democracy and Indian Constitution \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab073194502e",
+        "name": "Fundamentals of Financial Management (Major 4)",
+        "slug": "fundamentals-of-financial-management-major-4",
+        "stream_id": "6a19e1114d8e6ddb2deb7dd7",
+        "status": "active",
+        "description": "Fundamentals of Financial Management (Major 4) \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab073194502f",
+        "name": "Geography of India",
+        "slug": "geography-of-india",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "Geography of India \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945030",
+        "name": "History 2nd Sem  NEP",
+        "slug": "history-2nd-sem-nep",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "History 2nd Sem  NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945031",
+        "name": "INDIAN FINANCIAL SYSTEM",
+        "slug": "indian-financial-system",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dcf",
+        "status": "active",
+        "description": "INDIAN FINANCIAL SYSTEM \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945032",
+        "name": "INDIAN KNOWLEDGE SYSTEM",
+        "slug": "indian-knowledge-system",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "INDIAN KNOWLEDGE SYSTEM \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945033",
+        "name": "MACROECONOMICS",
+        "slug": "macroeconomics",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "MACROECONOMICS \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945034",
+        "name": "Mathematics 2nd Sem  NEP",
+        "slug": "mathematics-2nd-sem-nep",
+        "stream_id": "6a19e10f4d8e6ddb2deb7dd0",
+        "status": "active",
+        "description": "Mathematics 2nd Sem  NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945035",
+        "name": "OFFICE MANAGEMENT",
+        "slug": "office-management",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dcf",
+        "status": "active",
+        "description": "OFFICE MANAGEMENT \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945036",
+        "name": "Philosophy 2nd Sem NEP",
+        "slug": "philosophy-2nd-sem-nep",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "Philosophy 2nd Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945037",
+        "name": "Physics 2nd Sem NEP",
+        "slug": "physics-2nd-sem-nep",
+        "stream_id": "6a19e10f4d8e6ddb2deb7dd0",
+        "status": "active",
+        "description": "Physics 2nd Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945038",
+        "name": "Political Science 2nd Sem  NEP",
+        "slug": "political-science-2nd-sem-nep",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "Political Science 2nd Sem  NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945039",
+        "name": "Political Science 4th Sem NEP",
+        "slug": "political-science-4th-sem-nep",
+        "stream_id": "6a19e1104d8e6ddb2deb7dd6",
+        "status": "active",
+        "description": "Political Science 4th Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab073194503a",
+        "name": "Principles and Practices Of Management",
+        "slug": "principles-and-practices-of-management",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dcf",
+        "status": "active",
+        "description": "Principles and Practices Of Management \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab073194503b",
+        "name": "Sociology 2nd Sem NEP",
+        "slug": "sociology-2nd-sem-nep",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "Sociology 2nd Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab073194503c",
+        "name": "Sociology 4th Sem NEP",
+        "slug": "sociology-4th-sem-nep",
+        "stream_id": "6a19e1104d8e6ddb2deb7dd6",
+        "status": "active",
+        "description": "Sociology 4th Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab073194503d",
+        "name": "Statistics 2nd Sem  NEP",
+        "slug": "statistics-2nd-sem-nep",
+        "stream_id": "6a19e10f4d8e6ddb2deb7dd0",
+        "status": "active",
+        "description": "Statistics 2nd Sem  NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab073194503e",
+        "name": "TOURISM MANAGEMENT",
+        "slug": "tourism-management",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dcf",
+        "status": "active",
+        "description": "TOURISM MANAGEMENT \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab073194503f",
+        "name": "TOURISM MANAGEMENT | VAC-02022",
+        "slug": "tourism-management-vac-02022",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dcf",
+        "status": "active",
+        "description": "TOURISM MANAGEMENT | VAC-02022 \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945040",
+        "name": "VAC 2nd Sem NEP",
+        "slug": "vac-2nd-sem-nep",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "VAC 2nd Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945041",
+        "name": "YOGA AND WELLNESS",
+        "slug": "yoga-and-wellness",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "YOGA AND WELLNESS \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945042",
+        "name": "YOGA AND WELLNESS | VAC-02012",
+        "slug": "yoga-and-wellness-vac-02012",
+        "stream_id": "6a19e10e4d8e6ddb2deb7dce",
+        "status": "active",
+        "description": "YOGA AND WELLNESS | VAC-02012 \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f8283700cab0731945043",
+        "name": "Zoology 2nd Sem NEP",
+        "slug": "zoology-2nd-sem-nep",
+        "stream_id": "6a19e10f4d8e6ddb2deb7dd0",
+        "status": "active",
+        "description": "Zoology 2nd Sem NEP \u2014 DEGREE NEP curriculum",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de32d",
+        "name": "Mathematics 2nd Sem  NEP",
+        "slug": "mathematics-2nd-sem--mat0200104-nep",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de32e",
+        "name": "English Communication",
+        "slug": "english-communication",
+        "stream_id": null,
+        "status": "published",
+        "description": "Advanced Writing, Comprehension, Communication for BA Final Year",
+        "icon": "\ud83d\udcdd",
+        "thumbnail_url": null,
+        "tags": [
+            "Writing",
+            "Communication",
+            "Grammar"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de32f",
+        "name": "Computer Science 2nd Sem  NEP",
+        "slug": "computer-science-2nd-sem--com0200104--nep",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de330",
+        "name": "Financial Accounting",
+        "slug": "financial-accounting",
+        "stream_id": null,
+        "status": "published",
+        "description": "Journal Entries, Ledger, Trial Balance, Final Accounts, Bank Reconciliation",
+        "icon": "\ud83d\udcb0",
+        "thumbnail_url": null,
+        "tags": [
+            "Accounts",
+            "Journal",
+            "Balance Sheet"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de331",
+        "name": "Modern Indian History",
+        "slug": "modern-history",
+        "stream_id": null,
+        "status": "published",
+        "description": "Freedom Struggle, Partition, Post-Independence India, Economic Development",
+        "icon": "\ud83c\udffa",
+        "thumbnail_url": null,
+        "tags": [
+            "Freedom Struggle",
+            "Partition",
+            "Modern"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de333",
+        "name": "Commerce 2nd Sem NEP",
+        "slug": "bcom--2nd-sem---bcm--03-(2025)--(bcm0200304)",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de334",
+        "name": "Chemistry 2nd Sem NEP",
+        "slug": "bsc-2nd-sem--che-(fyugp)-2025---che0200104",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de335",
+        "name": "Income Tax",
+        "slug": "income-tax",
+        "stream_id": null,
+        "status": "published",
+        "description": "Income Tax Act, Heads of Income, Deductions, Assessment, Tax Computation",
+        "icon": "\ud83d\udccb",
+        "thumbnail_url": null,
+        "tags": [
+            "Tax",
+            "Income",
+            "Deductions"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de336",
+        "name": "Computer Science",
+        "slug": "computer-science",
+        "stream_id": null,
+        "status": "published",
+        "description": "Java Programming, Web Technology, Computer Networks, Software Engineering",
+        "icon": "\ud83d\udcbb",
+        "thumbnail_url": null,
+        "tags": [
+            "Java",
+            "Networking",
+            "Web"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de338",
+        "name": "BUSINESS STATISTICS",
+        "slug": "business-statistics",
+        "stream_id": null,
+        "status": "published",
+        "description": "Course Code: COM-MN-04014 | Credits: 4 | Contact Hours: 60 | Marks: 60 + 40 = 100",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de339",
+        "name": "Business Economics",
+        "slug": "business-economics",
+        "stream_id": null,
+        "status": "published",
+        "description": "Micro & Macro Economics for Commerce, Demand, Supply, Market Structures",
+        "icon": "\ud83d\udcc8",
+        "thumbnail_url": null,
+        "tags": [
+            "Micro",
+            "Macro",
+            "Market"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de33a",
+        "name": "Digital Literacy and ICT Skills",
+        "slug": "digital-literacy-and-ict-skills",
+        "stream_id": null,
+        "status": "published",
+        "description": "Digital Literacy and ICT Skills \u2014 FYUGP VAC",
+        "icon": "\ud83d\udcbb",
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de33b",
+        "name": "TOURISM MANAGEMENT | VAC-02022",
+        "slug": "tourism-management-|-vac-02022",
+        "stream_id": null,
+        "status": "published",
+        "description": "Semester: 2nd (B.Com) | Credits: 2 | Contact Hours: 30 | Marks: 30 + 20 = 50",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de33d",
+        "name": "Political Science 2nd Sem  NEP",
+        "slug": "political-science-2nd-sem--nep",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de33e",
+        "name": "Business Mathematics",
+        "slug": "business-mathematics",
+        "stream_id": null,
+        "status": "published",
+        "description": "Arithmetic, Algebra, Matrices, Statistics for Commerce",
+        "icon": "\ud83d\udcd0",
+        "thumbnail_url": null,
+        "tags": [
+            "Algebra",
+            "Statistics",
+            "Matrices"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de33f",
+        "name": "English Literature",
+        "slug": "english-literature",
+        "stream_id": null,
+        "status": "published",
+        "description": "Prose, Poetry, Drama \u2014 British and Indian Literature",
+        "icon": "\ud83d\udcda",
+        "thumbnail_url": null,
+        "tags": [
+            "Prose",
+            "Poetry",
+            "Drama"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de340",
+        "name": "Indian Economy",
+        "slug": "indian-economy",
+        "stream_id": null,
+        "status": "published",
+        "description": "Five-Year Plans, Economic Reforms 1991, Poverty, Agriculture, Industry",
+        "icon": "\ud83c\uddee\ud83c\uddf3",
+        "thumbnail_url": null,
+        "tags": [
+            "Economy",
+            "Reforms",
+            "Development"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de341",
+        "name": "MDC 2nd Sem NEP",
+        "slug": "mdc-2nd-sem-nep",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": "\ud83d\udcc4",
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de343",
+        "name": "Statistics 2nd Sem  NEP",
+        "slug": "statistics-2nd-sem-sta0200104-nep",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de344",
+        "name": "Assamese 4th Sem NEP",
+        "slug": "assamese-4th-sem-nep",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": "\ud83d\udcc4",
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de345",
+        "name": "Business Communication",
+        "slug": "business-communication",
+        "stream_id": null,
+        "status": "published",
+        "description": "Communication Skills, Business Letters, Reports, Presentations",
+        "icon": "\ud83d\udcdd",
+        "thumbnail_url": null,
+        "tags": [
+            "Communication",
+            "Writing",
+            "Soft Skills"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de347",
+        "name": "Business Law",
+        "slug": "business-law",
+        "stream_id": null,
+        "status": "published",
+        "description": "Indian Contract Act, Sale of Goods Act, Company Law, Consumer Protection",
+        "icon": "\u2696\ufe0f",
+        "thumbnail_url": null,
+        "tags": [
+            "Contract Law",
+            "Company Law",
+            "Legal"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de348",
+        "name": "Commerce  4th Sem NEP",
+        "slug": "commerce--4th-sem-nep",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de349",
+        "name": "Fundamentals of Financial Management (Major 4)",
+        "slug": "management",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": "\ud83c\udfe2",
+        "thumbnail_url": null,
+        "tags": [
+            "Planning",
+            "Organising",
+            "Leadership"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de34c",
+        "name": "YOGA AND WELLNESS | VAC-02012",
+        "slug": "yoga-and-wellness-|-vac-02012",
+        "stream_id": null,
+        "status": "published",
+        "description": "Semester: 2nd (Arts & Science) | Credits: 2 (Theory) | Contact Hours: 30 | Marks: 30 + 20 = 50",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de34d",
+        "name": "Physics 2nd Sem NEP",
+        "slug": "bsc-2nd-sem--phy-(fyugp)-2025---phy0200104_0001",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de34e",
+        "name": "Economics 4th Sem NEP",
+        "slug": "economics-4th-sem-nep",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": "\ud83d\udcc4",
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de34f",
+        "name": "Cost Accounting",
+        "slug": "cost-accounting",
+        "stream_id": null,
+        "status": "published",
+        "description": "Cost Concepts, Job Costing, Process Costing, Standard Costing, Marginal Costing",
+        "icon": "\ud83d\udcb0",
+        "thumbnail_url": null,
+        "tags": [
+            "Costing",
+            "Marginal",
+            "Standard"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de350",
+        "name": "Indian Government & Politics",
+        "slug": "indian-politics",
+        "stream_id": null,
+        "status": "published",
+        "description": "Federal System, Parliament, Judiciary, Election Commission, Local Governance",
+        "icon": "\ud83d\uddf3\ufe0f",
+        "thumbnail_url": null,
+        "tags": [
+            "Parliament",
+            "Judiciary",
+            "Federalism"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de351",
+        "name": "Botany 2nd Sem 2025 NEP",
+        "slug": "bsc-2nd-sem-bot-(fyugp)-2025---bot0200104_0001",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de352",
+        "name": "Zoology 2nd Sem NEP",
+        "slug": "bsc-2nd-sem--zlg-(fyugp)-2025---zlg0200104",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de353",
+        "name": "History 2nd Sem  NEP",
+        "slug": "history-2nd-sem--nep",
+        "stream_id": null,
+        "status": "published",
+        "description": "",
+        "icon": null,
+        "thumbnail_url": null,
+        "tags": []
+    },
+    {
+        "id": "6a1f87802c1a19d2142de354",
+        "name": "English (Core)",
+        "slug": "english-core",
+        "stream_id": null,
+        "status": "active",
+        "description": "AHSEC Class 11 English Core \u2014 Hornbill (prose & poetry) and Snapshots (supplementary).",
+        "icon": "\ud83d\udcd7",
+        "thumbnail_url": null,
+        "tags": [
+            "hs-1st-year",
+            "common",
+            "english-core",
+            "ahsec"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de355",
+        "name": "MIL \u2014 Assamese",
+        "slug": "modern-indian-language-assamese",
+        "stream_id": null,
+        "status": "active",
+        "description": "AHSEC Class 11 Modern Indian Language (Assamese) \u2014 \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be \u09b8\u09be\u09b9\u09bf\u09a4\u09cd\u09af.",
+        "icon": "\ud83d\udcd5",
+        "thumbnail_url": null,
+        "tags": [
+            "hs-1st-year",
+            "common",
+            "modern-indian-language-assamese",
+            "ahsec"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de356",
+        "name": "Environmental Education",
+        "slug": "environmental-education",
+        "stream_id": null,
+        "status": "active",
+        "description": "AHSEC compulsory Environmental Education for Class 11 \u2014 concepts, ecosystems, and conservation.",
+        "icon": "\ud83c\udf3f",
+        "thumbnail_url": null,
+        "tags": [
+            "hs-1st-year",
+            "common",
+            "environmental-education",
+            "ahsec"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de357",
+        "name": "Geography",
+        "slug": "geography",
+        "stream_id": null,
+        "status": "active",
+        "description": "AHSEC Class 11 Geography \u2014 fundamentals of physical geography and India physical environment.",
+        "icon": "\ud83c\udf0d",
+        "thumbnail_url": null,
+        "tags": [
+            "hs-1st-year",
+            "arts",
+            "geography",
+            "ahsec"
+        ]
+    },
+    {
+        "id": "6a1f87802c1a19d2142de358",
+        "name": "Sociology",
+        "slug": "sociology",
+        "stream_id": null,
+        "status": "active",
+        "description": "AHSEC Class 11 Sociology \u2014 Introducing Sociology and Understanding Society.",
+        "icon": "\ud83d\udc65",
+        "thumbnail_url": null,
+        "tags": [
+            "hs-1st-year",
+            "arts",
+            "sociology",
+            "ahsec"
+        ]
+    },
+    {
+        "id": "6a1f87822c1a19d2142de3b1",
+        "name": "Assamese (MIL)",
+        "slug": "assamese-mil",
+        "stream_id": null,
+        "status": "published",
+        "description": "\u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be (MIL) \u2014 AHSEC HS 1st Year Assamese language and literature.\n\n<!-- syrabit:related:4379e1b3-a6b1-45a1-9a45-571dfedfa905 -->\n> **Related:** [\u09f0\u099a\u09a8\u09be \u0986\u09f0\u09c1 \u09aa\u09a4\u09cd\u09f0 \u09b2\u09bf\u0996\u09a8 (Composition and Letter Writing)](/ahsec/hs-1st-year/assamese-mil/\u09f0\u099a\u09a8-\u0986\u09f0-\u09aa\u09a4\u09f0-\u09b2\u0996\u09a8-composition-and-letter-writing)\n",
+        "icon": "\ud83d\udcc4",
+        "thumbnail_url": null,
+        "tags": []
+    }
+]
+{
+    "query": "algebra",
+    "results": [],
+    "total": 0,
+    "available": true
+}
+{
+    "detail": "Email already registered"
+}
+{
+    "detail": "Invalid credentials"
+}
+founder@cloudshell:~ (blissful-acumen-495019-t6)$ 
