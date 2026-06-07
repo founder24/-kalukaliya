@@ -54,6 +54,7 @@ export default {
         headers: { 'Content-Type': 'application/json' },
       });
       errResponse.headers.set('X-Request-ID', requestId);
+      applyCorsHeaders(errResponse.headers, request.headers.get('Origin') || '');
       return errResponse;
     }
 
@@ -65,6 +66,7 @@ export default {
         // Token was provided but is invalid/expired — reject
         const errResp = jsonResponse(401, { error: jwtResult.error || 'Unauthorized' });
         errResp.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(errResp.headers, request.headers.get('Origin') || '');
         return errResp;
       }
 
@@ -125,6 +127,7 @@ export default {
           }
         );
         rlResponse.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(rlResponse.headers, request.headers.get('Origin') || '');
         return rlResponse;
       }
 
