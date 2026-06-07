@@ -1,7 +1,7 @@
 import base64
 import httpx
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from app.config import settings
 
@@ -12,14 +12,23 @@ class CloudflareAIClient:
     """Cloudflare Workers AI Client for English chat, OCR, and TTS"""
 
     def __init__(self):
-        self.account_id = settings.CF_ACCOUNT_ID
-        self.api_token = settings.CF_API_TOKEN
-        self.base_url = (
-            f"https://api.cloudflare.com/client/v4/accounts/{self.account_id}/ai/run"
-        )
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, connect=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+
+    @property
+    def account_id(self) -> Optional[str]:
+        return settings.CF_ACCOUNT_ID
+
+    @property
+    def api_token(self) -> Optional[str]:
+        return settings.CF_API_TOKEN
+
+    @property
+    def base_url(self) -> str:
+        return (
+            f"https://api.cloudflare.com/client/v4/accounts/{self.account_id}/ai/run"
         )
 
     async def generate(

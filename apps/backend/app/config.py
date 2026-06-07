@@ -101,13 +101,16 @@ class Settings(BaseSettings):
     INDEXNOW_INTERNAL_SECRET: Optional[str] = None
 
     # --- Cloudflare KV (Content Edge Cache) ---
-    CLOUDFLARE_KV_API_TOKEN: str = ""
-    CLOUDFLARE_ACCOUNT_ID: str = ""
-    CLOUDFLARE_KV_NAMESPACE_ID: str = ""
-    INDEXNOW_KEY: str = ""
+    # SM secrets: CF_KV_API_TOKEN → CLOUDFLARE_KV_API_TOKEN
+    #             CF_ACCOUNT_ID   → CLOUDFLARE_ACCOUNT_ID (also CF_ACCOUNT_ID for Workers AI)
+    #             CF_KV_NAMESPACE_ID → CLOUDFLARE_KV_NAMESPACE_ID
+    CLOUDFLARE_KV_API_TOKEN: Optional[str] = None
+    CLOUDFLARE_ACCOUNT_ID: Optional[str] = None
+    CLOUDFLARE_KV_NAMESPACE_ID: Optional[str] = None
+    INDEXNOW_KEY: Optional[str] = None
 
     # --- Cron/CI Translation ---
-    TRANSLATE_CRON_SECRET: str = ""
+    TRANSLATE_CRON_SECRET: Optional[str] = None
 
     # --- Observability ---
     SENTRY_DSN: Optional[str] = None

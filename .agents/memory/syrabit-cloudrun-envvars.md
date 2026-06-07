@@ -36,8 +36,19 @@ gcloud run services update syrabit-backend --region=asia-south1 \
 
 The deployed Worker is `syrabitworker-prod` (not `syrabit-edge`). `BACKEND_URL` is already a binding via `wrangler.toml [env.production.vars]` — cannot override with a secret (error 10053: binding name already in use).
 
-## Remaining open items (require user credentials)
+## Optional content-pipeline secrets (conditional step in deploy)
 
-- Redis: needs `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` in Cloud Run → `/health/deep` unhealthy on redis
-- Webhook: needs `RAZORPAY_WEBHOOK_SECRET` in Cloud Run → currently returns 501 gracefully
-- Assamese AI: needs `SARVAM_API_KEY` for Sarvam model
+These 4 secrets are attached by a separate post-deploy step in both `deploy.yml` and `cloudbuild.yaml` that probes with `gcloud secrets describe` first. If not found, the deploy continues cleanly and logs a `gcloud secrets create` command. Once created, they are picked up automatically on the next deploy.
+
+| SM secret name | Cloud Run env var(s) | Used by |
+|---|---|---|
+| `CF_ACCOUNT_ID` | `CF_ACCOUNT_ID` + `CLOUDFLARE_ACCOUNT_ID` | `cloudflare_client.py` (Workers AI) + `pipeline.py` (KV) — same value, two consumers |
+| `CF_KV_API_TOKEN` | `CLOUDFLARE_KV_API_TOKEN` | `pipeline._push_cloudflare_kv()` — bulk write HTML to KV |
+| `CF_KV_NAMESPACE_ID` | `CLOUDFLARE_KV_NAMESPACE_ID` | same |
+| `GCS_CONTENT_BUCKET` | `GCS_CONTENT_BUCKET` | `gcs_store.py` — GCS chapter content bucket |
+
+**Why conditional:** `--update-secrets` hard-fails the entire deploy if the referenced SM secret doesn't exist. Using a separate `gcloud run services update` step inside a bash loop keeps the core deploy safe.
+
+**config.py type note:** `CLOUDFLARE_KV_*`, `INDEXNOW_KEY`, `TRANSLATE_CRON_SECRET` are `Optional[str] = None` (not `str = ""`). The `empty_strings_to_none` validator only applies to those Optional fields correctly.
+
+**cloudflare_client.py note:** `account_id`, `api_token`, `base_url` are `@property` (lazy, read from `settings` at call time). Were eager `__init__` attributes that baked in `None` before SM env vars were injected at startup.
