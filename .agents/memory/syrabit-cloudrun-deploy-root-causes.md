@@ -48,3 +48,18 @@ This caused ALL `/api/` calls through `api.syrabit.ai` to return 503.
 ## MongoDB serverSelectionTimeoutMS
 
 5000ms is too tight for Cloud Run cold-start → Atlas SRV lookup + TLS from asia-south1. Increased to 30000ms in `apps/backend/app/db/mongo.py`.
+
+## Architecture gap: library-bundle has no edge cache
+
+`/api/v1/content/library-bundle` (79 KB curriculum metadata) was a pure backend proxy — no KV fallback — so any MongoDB issue caused "Failed to load library" in the browser.
+
+**Fix:** Added stale-while-revalidate KV cache in `apps/edge/src/index.ts` before the generic `/api/` proxy block:
+- Key: `api:library-bundle:{querystring}` in `ISR_CACHE_KV`
+- FRESH_TTL: 5 min (serve from KV, no backend call)
+- HARD_TTL: 2 hr (KV hard expiry)
+- On STALE: serve cached immediately, revalidate backend in `ctx.waitUntil()`
+- On MISS + backend 200: populate KV, serve fresh response
+- On MISS + backend error: pass error through (first visit only)
+- Headers: `X-Cache: HIT|STALE|MISS`, `X-Cache-Age: {seconds}`
+
+**What NOT to cache this way:** user-specific endpoints (chat, profile, conversations), streaming endpoints, anything with auth context.
