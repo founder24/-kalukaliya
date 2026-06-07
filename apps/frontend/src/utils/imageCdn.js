@@ -67,7 +67,13 @@ export function isImageResizerAvailable() {
 
 /**
  * Probe whether Cloudflare Image Resizing is active by fetching a small
- * /cdn-cgi/image/ URL and checking the Cf-Bgj: imgconvert response header.
+ * /cdn-cgi/image/ URL and checking for transformation response headers.
+ *
+ * Cloudflare has used two different headers across versions:
+ *   - Legacy:  Cf-Bgj: imgconvert
+ *   - Current: cf-resized: internal=ok/...
+ * Both are checked so the probe works regardless of which CF edge version
+ * is serving the response.
  *
  * Call once at app startup (e.g. in App.jsx useEffect) to auto-detect plan
  * availability.  If Image Resizing is not active, falls back to original URLs
@@ -86,8 +92,11 @@ export async function probeImageResizer(testImageUrl) {
     const cdnUrl = cdnImage(testImageUrl, { width: 1, quality: 1, format: 'webp' });
     if (cdnUrl === testImageUrl) return;
     const res = await fetch(cdnUrl, { method: 'HEAD', cache: 'no-store' });
-    const transformed = res.headers.get('Cf-Bgj') === 'imgconvert';
-    if (!transformed) {
+    // CF legacy header (pre-2024 edge versions): Cf-Bgj: imgconvert
+    const legacyHeader = res.headers.get('Cf-Bgj') === 'imgconvert';
+    // CF current header (2024+ edge versions): cf-resized: internal=ok/...
+    const currentHeader = (res.headers.get('cf-resized') || '').startsWith('internal=ok');
+    if (!legacyHeader && !currentHeader) {
       markImageResizerUnavailable();
     }
   } catch {

@@ -130,8 +130,11 @@ async function stepImageResizing() {
   console.log('  Target: zone setting image_resizing = "on"');
 
   const current = await cfGet(`/zones/${ZONE_ID}/settings/image_resizing`);
-  if (current.success && current.result?.value === 'on') {
-    ok('image_resizing is already on');
+  // Both "on" and "open" mean Image Resizing is active.
+  // "on"   — resizes images served from this zone only
+  // "open" — resizes any image URL (more permissive; current production setting)
+  if (current.success && (current.result?.value === 'on' || current.result?.value === 'open')) {
+    ok(`image_resizing is already enabled (value: "${current.result.value}")`);
     return;
   }
 
