@@ -48,8 +48,8 @@ async def init_mongo() -> None:
                 settings.MONGODB_URI,
                 maxPoolSize=settings.MONGODB_MAX_POOL_SIZE,
                 minPoolSize=settings.MONGODB_MIN_POOL_SIZE,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=10000,
+                serverSelectionTimeoutMS=30000,
+                connectTimeoutMS=30000,
                 socketTimeoutMS=45000,
                 heartbeatFrequencyMS=10000,
             )
