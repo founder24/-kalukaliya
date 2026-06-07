@@ -289,7 +289,8 @@ jobs:
         if: ${{ github.event.inputs.backend_only != 'true' }}
         run: |
           for attempt in 1 2 3; do
-            HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+            # Follow redirects (-L): syrabit.ai → 301 → /library/ → 200
+            HTTP=$(curl -sfL -o /dev/null -w "%{http_code}" \
               "https://syrabit.ai" --max-time 15 2>/dev/null || echo "000")
             if [[ "$HTTP" == "200" ]]; then
               echo "✔ Frontend live (attempt ${attempt})"
