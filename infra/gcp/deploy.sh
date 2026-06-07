@@ -47,7 +47,7 @@ ENV_VARS=(
 
 # Required secrets — deploy will warn loudly if any are missing from Secret Manager
 REQUIRED_SECRETS=(
-  "MONGODB_URI=MONGODB_URI"
+  "MONGODB_URI=mongodb-uri"
   "JWT_SECRET=jwt-secret"
   "EDGE_SHARED_SECRET=edge-shared-secret"
   "ADMIN_JWT_SECRET=ADMIN_JWT_SECRET"
