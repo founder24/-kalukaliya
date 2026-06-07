@@ -1,0 +1,144 @@
+ SYRABIT LIVE DEPLOYMENT TEST  —  Cloud Shell Edition    ║
+║      2026-06-07 09:34 UTC                                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+  API : https://api.syrabit.ai
+  FE  : https://syrabit.ai
+  GCP : blissful-acumen-495019-t6 / us-central1
+  Auth: founder@syrabit.ai  (rate-limit bypass enabled)
+  GH  : token set  (GitHub Actions status enabled)
+
+
+──────────────────────────────────────────────────────────
+  0. Pre-flight
+──────────────────────────────────────────────────────────
+  ✓ Backend reachable: https://api.syrabit.ai/health
+
+──────────────────────────────────────────────────────────
+  1. Cloud Run Status
+──────────────────────────────────────────────────────────
+  ⚠ Could not read Cloud Run revision — run: gcloud auth login --project blissful-acumen-495019-t6
+
+──────────────────────────────────────────────────────────
+  2. Backend Health
+──────────────────────────────────────────────────────────
+  ✓ GET /health → HTTP 200
+  ✓ GET /health/deep → HTTP 200
+  ✓ health body: status → HTTP 200 ✓ body
+  ✓ health body: healthy → HTTP 200 ✓ body
+  · Health response time: 469ms
+
+──────────────────────────────────────────────────────────
+  3. Frontend & Cloudflare Edge
+──────────────────────────────────────────────────────────
+  ✓ GET https://syrabit.ai/ → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/chat/ → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/library/ → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/robots.txt → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/sitemap.xml → 200 → HTTP 200
+  ✓ Security header: strict-transport-security
+  ✓ Security header: x-frame-options
+  ✓ Security header: x-content-type-options
+  · Cloudflare: cf-ray: a07ea9d1ff2beabe-ORD
+
+──────────────────────────────────────────────────────────
+  4. Anon Endpoints (no auth required)
+──────────────────────────────────────────────────────────
+  ✓ GET /user/credits (anon) → 200 → HTTP 200 ✓ body
+  ✓ /user/credits — tier: anonymous → HTTP 200 ✓ body
+  ✓ GET /conversations/anon → 200 → HTTP 200 ✓ body
+  ✓ GET /chat/history (anon) → 200 → HTTP 200 ✓ body
+  ✓ GET /content/library-bundle → subjects → HTTP 200 ✓ body
+  ✓ GET /subscription/plans → free+pro → HTTP 200 ✓ body
+  ✓ GET /config/trustpilot → 200 → HTTP 200 ✓ body
+  ✓ GET /sitemap-subjects.xml → 200 → HTTP 200
+
+──────────────────────────────────────────────────────────
+  5. Auth Guards (protected endpoints must reject)
+──────────────────────────────────────────────────────────
+  ✓ GET /users/me (no token) → 401 → HTTP 401
+  ✓ GET /conversations (no token) → 401 → HTTP 401
+  ✓ GET /users/me (bad token) → 401 → HTTP 401
+  ✓ POST /auth/login (bad creds) → 401 → HTTP 401
+  ✓ POST /auth/signup (empty) → 422 → HTTP 422
+
+──────────────────────────────────────────────────────────
+  6. Input Validation
+──────────────────────────────────────────────────────────
+  ✓ POST /chat/stream (empty message) → 422 → HTTP 422
+  ✓ POST /chat/stream (no body) → 422 → HTTP 422
+  ✓ POST /auth/login (empty body) → 422 → HTTP 422
+  ✓ Error responses do not leak stack traces
+
+──────────────────────────────────────────────────────────
+  7. CORS Preflight
+──────────────────────────────────────────────────────────
+  ✓ OPTIONS /chat/stream → 200 → HTTP 200
+  ✓ OPTIONS /user/credits → 200 → HTTP 200
+  ✓ CORS: access-control-allow-origin present
+  ✓ POST /chat/stream → Content-Type: text/event-stream
+
+──────────────────────────────────────────────────────────
+  8. Security Probes
+──────────────────────────────────────────────────────────
+  ✓ /.env blocked → HTTP 404
+  ✓ /.git/config blocked → HTTP 404
+  ✓ /.htaccess blocked → HTTP 404
+  ✓ /wp-login.php blocked → HTTP 404
+  ✓ /phpinfo.php blocked → HTTP 404
+  ✓ /xmlrpc.php blocked → HTTP 404
+  ✓ POST /webhooks/razorpay unsigned → 401/403 → HTTP 400
+  ⚠ GET /docs → HTTP 302 (OpenAPI docs visible — ensure APP_ENV=production)
+
+──────────────────────────────────────────────────────────
+  9. Chat TTFB Test  (target: first token < 3000 ms)
+──────────────────────────────────────────────────────────
+  · Authenticated as founder@syrabit.ai — rate limit bypassed
+  ✗ EN short (osmosis): HTTP 403: error code: 1010
+  ✗ EN medium (Newton): HTTP 403: error code: 1010
+  ✗ EN brief: HTTP 403: error code: 1010
+  ✗ AS Assamese: HTTP 403: error code: 1010
+  ⚠ Chat TTFB: some queries exceeded 3000 ms or were rate-limited (see above)
+
+──────────────────────────────────────────────────────────
+  10. Performance Spot Check
+──────────────────────────────────────────────────────────
+  ✓ /api/v1/subscription/plans → 372ms  (< 1000ms threshold)
+  ✓ /api/v1/seo/sitemap-subjects.xml → 371ms  (< 2000ms threshold)
+  ✓ /api/v1/content/library-bundle?slim=1 → 1038ms  (< 3000ms threshold)
+  ✓ /health → 381ms  (< 500ms threshold)
+
+──────────────────────────────────────────────────────────
+  11. GitHub Actions — Latest Deploy Status
+──────────────────────────────────────────────────────────
+  · Total workflow runs: 4280
+    ✓ Smoke Tests: success @ 2026-06-07T09:34 [main]
+    · Deploy — Backend + Edge + Frontend: in_progress @ 2026-06-07T09:34 [main]
+    · Deploy — Backend + Edge + Frontend: in_progress @ 2026-06-07T09:31 [main]  (historical)
+    ✗ Smoke Tests: failure @ 2026-06-07T09:31 [main]  (historical)
+    ✓ Smoke Tests: success @ 2026-06-07T09:28 [main]  (historical)
+    ✓ Deploy — Backend + Edge + Frontend: success @ 2026-06-07T09:28 [main]  (historical)
+    ✓ Deploy — Backend + Edge + Frontend: success @ 2026-06-07T09:25 [main]  (historical)
+    ✓ Smoke Tests: success @ 2026-06-07T09:25 [main]  (historical)
+    ✓ Agent: Environment Sync: success @ 2026-06-07T09:23 [main]
+    ✓ Smoke Tests: success @ 2026-06-07T09:23 [main]  (historical)
+  ✓ Latest deploy workflow: success
+
+╔══════════════════════════════════════════════════════════════╗
+║                        SUMMARY                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+  ✓ PASS:   46
+  ✗ FAIL:   0
+  ⚠ WARN:   3
+  · SKIP:   0
+  ⏱ Time:   42s
+
+  WARNINGS:
+    • Could not read Cloud Run revision — run: gcloud auth login --project blissful-acumen-495019-t6
+    • GET /docs → HTTP 302 (OpenAPI docs visible — ensure APP_ENV=production)
+    • Chat TTFB: some queries exceeded 3000 ms or were rate-limited (see above)
+
+  ✓  Stack is healthy
+
+founder@instance-20260603-085552:~/syrabit$ 
