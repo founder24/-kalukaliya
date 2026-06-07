@@ -25,8 +25,10 @@ echo ""
 
 # ── Step 1: Clone or update the repo ─────────────────────────────────────────
 if [ -d "$REPO_DIR/.git" ]; then
-  echo -e "${G}✓${X} Repo already cloned at ./$REPO_DIR — pulling latest..."
-  git -C "$REPO_DIR" pull --ff-only
+  echo -e "${G}✓${X} Repo already cloned at ./$REPO_DIR — syncing to latest main..."
+  git -C "$REPO_DIR" fetch origin
+  git -C "$REPO_DIR" reset --hard origin/main
+  echo -e "  ${G}✓${X} Reset to origin/main"
 elif [ -f "infra/scripts/gcp-full-setup.sh" ]; then
   echo -e "${G}✓${X} Running from inside the repo already — no clone needed."
   REPO_DIR="."
