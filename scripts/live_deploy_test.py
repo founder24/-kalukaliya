@@ -68,6 +68,35 @@ GCP_CREDS_JSON  = env("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 VERTEX_PROJECT  = env("VERTEX_PROJECT_ID", "blissful-acumen-495019-t6")
 VERTEX_LOCATION = env("VERTEX_LOCATION", "us-central1")
 VERTEX_MODEL    = env("VERTEX_GEMINI_MODEL", "gemini-2.5-flash")
+ADMIN_EMAIL     = env("ADMIN_EMAIL")
+ADMIN_PASSWORD  = env("ADMIN_PASSWORD")
+
+# Cached auth JWT — populated by _get_jwt() before chat section runs
+_JWT_TOKEN: Optional[str] = None
+
+async def _get_jwt() -> Optional[str]:
+    """Try to obtain a JWT via admin login. Returns None if creds not set or login fails."""
+    global _JWT_TOKEN
+    if _JWT_TOKEN:
+        return _JWT_TOKEN
+    if not (ADMIN_EMAIL and ADMIN_PASSWORD):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as c:
+            r = await c.post(
+                f"{PROD_API}/api/v1/auth/login",
+                json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+                headers={"Content-Type": "application/json"},
+            )
+        if r.status_code == 200:
+            data = r.json()
+            token = data.get("access_token") or data.get("token")
+            if token:
+                _JWT_TOKEN = token
+                return token
+    except Exception:
+        pass
+    return None
 
 # Summary accumulator
 results: list[dict] = []
@@ -298,14 +327,18 @@ async def section_mongodb():
 # ═════════════════════════════════════════════════════════════════════════════
 # 5. CHAT SPEED TEST (the critical one)
 # ═════════════════════════════════════════════════════════════════════════════
-async def _stream_chat(payload: dict, label: str, section: str):
+async def _stream_chat(payload: dict, label: str, section: str, jwt: Optional[str] = None):
     url = f"{PROD_CHAT}?_t={BUST()}"
     headers = {
         **NO_CACHE_HEADERS,
         "Content-Type": "application/json",
-        "x-anon-id": f"speedtest-{int(time.time())}",
         "Origin": "https://syrabit.ai",
     }
+    if jwt:
+        headers["Authorization"] = f"Bearer {jwt}"
+    else:
+        safe_label = label.encode('ascii', 'ignore').decode().replace(' ', '_').replace('-', '')[:16]
+        headers["x-anon-id"] = f"speedtest-{safe_label}-{int(time.time())}"
     t_start = time.time()
     t_first_chunk = None
     full_text = ""
@@ -313,6 +346,7 @@ async def _stream_chat(payload: dict, label: str, section: str):
     route_trace = {}
     chunks_received = 0
     error_msg = None
+    server_latency_ms = None
 
     try:
         async with httpx.AsyncClient(
@@ -323,9 +357,15 @@ async def _stream_chat(payload: dict, label: str, section: str):
             async with c.stream("POST", url, json=payload) as resp:
                 if resp.status_code != 200:
                     body = await resp.aread()
-                    fail(f"{label}: HTTP {resp.status_code}: {body[:200]}")
-                    record(section, label, "fail", (time.time()-t_start)*1000,
-                           f"HTTP {resp.status_code}")
+                    ms = (time.time() - t_start) * 1000
+                    if resp.status_code == 429:
+                        # Rate limiter is working correctly — WARN not FAIL
+                        warn(f"{label}: rate limited (429) — anon IP quota hit; "
+                             f"set ADMIN_EMAIL+ADMIN_PASSWORD for auth bypass  ({ms:.0f}ms)")
+                        record(section, label, "warn", ms, "HTTP 429 — rate limit active")
+                    else:
+                        fail(f"{label}: HTTP {resp.status_code}: {body[:200]}")
+                        record(section, label, "fail", ms, f"HTTP {resp.status_code}")
                     return
 
                 async for line in resp.aiter_lines():
@@ -352,8 +392,9 @@ async def _stream_chat(payload: dict, label: str, section: str):
                         chunks_received += 1
 
                     if evt.get("done"):
-                        model = evt.get("model", "?")
+                        model       = evt.get("model", "?")
                         route_trace = evt.get("route_trace", {})
+                        server_latency_ms = evt.get("latency_ms")
                         break
 
     except Exception as e:
@@ -363,23 +404,30 @@ async def _stream_chat(payload: dict, label: str, section: str):
         return
 
     t_end = time.time()
-    ttfb_ms  = (t_first_chunk - t_start) * 1000 if t_first_chunk else -1
-    total_ms = (t_end - t_start) * 1000
-    words    = len(full_text.split()) if full_text else 0
-    chars    = len(full_text)
+    ttfb_ms   = (t_first_chunk - t_start) * 1000 if t_first_chunk else -1
+    total_ms  = (t_end - t_start) * 1000
+    words     = len(full_text.split()) if full_text else 0
+    chars     = len(full_text)
 
-    fallback = route_trace.get("fallback", False)
-    decision = route_trace.get("decision", "?")
+    fallback  = route_trace.get("fallback", False)
+    decision  = route_trace.get("decision", "?")
 
     if error_msg:
         fail(f"{label}: AI error — {error_msg}  ({total_ms:.0f}ms total)")
         record(section, label, "fail", total_ms, error_msg)
         return
 
-    ttfb_str = f"{ttfb_ms:.0f}ms" if ttfb_ms >= 0 else "no-content"
+    ttfb_str    = f"{ttfb_ms:.0f}ms" if ttfb_ms >= 0 else "no-content"
+    srv_lat_str = f"  server_latency={server_latency_ms}ms" if server_latency_ms else ""
     fallback_str = f" {Y}⚡fallback={fallback}{X}" if fallback else ""
+
+    # Target: <3 s TTFB now that thinkingBudget:0 is active
+    TTFB_TARGET = 3000
+    ttfb_ok  = ttfb_ms >= 0 and ttfb_ms < TTFB_TARGET
+    ttfb_col = G if ttfb_ok else Y
+
     print(f"  {G}✓{X} {label}")
-    print(f"      TTFB:   {BOLD}{ttfb_str}{X}")
+    print(f"      TTFB:   {BOLD}{ttfb_col}{ttfb_str}{X}{srv_lat_str}")
     print(f"      Total:  {BOLD}{total_ms:.0f}ms{X}")
     print(f"      Model:  {model}  route={decision}{fallback_str}")
     print(f"      Answer: {words} words / {chars} chars / {chunks_received} chunks")
@@ -387,7 +435,7 @@ async def _stream_chat(payload: dict, label: str, section: str):
         preview = full_text[:120].replace("\n", " ")
         print(f"      Preview: {C}{preview}…{X}")
 
-    status = "ok" if ttfb_ms < 5000 else "warn"
+    status = "ok" if ttfb_ok else "warn"
     record(section, label, status, total_ms,
            f"TTFB={ttfb_str} model={model} fallback={fallback} words={words}")
 
@@ -409,9 +457,14 @@ async def section_chat():
         "EN — brief instruction",
         "AS — Assamese (অসমোছিছ)",
     ]
+    jwt = await _get_jwt()
+    if jwt:
+        info(f"Authenticated as {ADMIN_EMAIL} — rate limits bypassed")
+    else:
+        warn("No ADMIN_EMAIL/ADMIN_PASSWORD set — chat runs as anon (may hit rate limits)")
     for payload, label in zip(tests, labels):
-        await _stream_chat(payload, label, "chat")
-        await asyncio.sleep(0.5)   # small gap between requests
+        await _stream_chat(payload, label, "chat", jwt=jwt)
+        await asyncio.sleep(1.0)   # 1s gap between requests to ease rate limiting
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 6. VERTEX AI DIRECT
@@ -576,33 +629,43 @@ async def section_github():
             record("github", "repo_access", "fail", ms, repo.get("message","?"))
             return
 
-        # Latest workflow runs — flag failures
+        # Latest workflow runs — only flag the MOST RECENT run per workflow name
         t1 = time.time()
         async with make_client(10) as c:
-            r2 = await c.get(f"{base}/repos/{REPO}/actions/runs?per_page=8", headers=headers)
+            r2 = await c.get(f"{base}/repos/{REPO}/actions/runs?per_page=10", headers=headers)
         runs_ms = (time.time() - t1) * 1000
         runs = r2.json().get("workflow_runs", [])
         total_runs = r2.json().get("total_count", 0)
         info(f"Total workflow runs: {total_runs}")
-        for run in runs[:6]:
+
+        # Deduplicate: keep only the first (most recent) occurrence of each workflow name
+        seen_workflows: set = set()
+        for run in runs[:10]:
             name    = run.get("name", "?")
             concl   = run.get("conclusion", "in_progress")
             created = run.get("created_at", "?")[:16]
             branch  = run.get("head_branch", "?")
             run_id  = run.get("id")
-            icon = G+"✓"+X if concl=="success" else (Y+"·"+X if concl in ("skipped","cancelled") else R+"✗"+X)
-            print(f"    {icon} {name}: {concl} @ {created} [{branch}]")
-            record("github", f"workflow_{name}", "ok" if concl=="success" else ("warn" if concl in ("skipped","cancelled","in_progress") else "fail"),
-                   runs_ms, f"{concl} @ {created}")
+            is_latest = name not in seen_workflows
+            seen_workflows.add(name)
 
-            # Drill into failed run jobs
-            if concl == "failure":
+            icon = G+"✓"+X if concl=="success" else (Y+"·"+X if concl in ("skipped","cancelled","in_progress") else R+"✗"+X)
+            tag  = "" if is_latest else f"  {B}(historical){X}"
+            print(f"    {icon} {name}: {concl} @ {created} [{branch}]{tag}")
+
+            if is_latest:
+                # Only record pass/fail/warn for the most recent run of each workflow
+                status = "ok" if concl == "success" else ("warn" if concl in ("skipped", "cancelled", "in_progress") else "fail")
+                record("github", f"workflow_{name}", status, runs_ms, f"{concl} @ {created}")
+
+            # Drill into failed run jobs (only for most recent, or first failure in list)
+            if concl == "failure" and is_latest:
                 async with make_client(10) as c:
                     r3 = await c.get(f"{base}/repos/{REPO}/actions/runs/{run_id}/jobs", headers=headers)
                 jobs = r3.json().get("jobs", [])
                 for j in jobs:
                     j_concl = j.get("conclusion","?")
-                    j_icon  = G+"✓"+X if j_concl=="success" else R+"✗"+X
+                    j_icon  = G+"✓"+X if j_concl=="success" else (Y+"·"+X if j_concl in ("skipped","cancelled") else R+"✗"+X)
                     print(f"        {j_icon} Job: {j['name']} — {j_concl}")
                     if j_concl == "failure":
                         for step in j.get("steps", []):
@@ -680,7 +743,7 @@ def print_summary():
     if chat:
         print(f"\n  {BOLD}{C}CHAT LATENCY:{X}")
         for r in chat:
-            icon = G+"✓"+X if r["status"]=="ok" else R+"✗"+X
+            icon = G+"✓"+X if r["status"]=="ok" else (Y+"⚠"+X if r["status"]=="warn" else R+"✗"+X)
             print(f"    {icon} {r['name']}: {r['ms']}ms total — {r['detail']}")
 
     print()
