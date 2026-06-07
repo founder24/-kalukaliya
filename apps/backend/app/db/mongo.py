@@ -134,7 +134,7 @@ async def create_indexes() -> None:
             logger.warning(f"Email unique index creation failed (non-prod): {e}")
     # Not sparse — matches the existing Atlas index (non-sparse).
     await db.users.create_index([("razorpay_subscription_id", ASCENDING)])
-    await db.users.create_index([("profile.preferences.language", ASCENDING)])
+    await db.users.create_index([("preferred_language", ASCENDING)])
     await db.users.create_index([("created_at", DESCENDING)])
 
     # Chats collection indexes
@@ -160,6 +160,11 @@ async def create_indexes() -> None:
     # Chat feedback TTL index (HF-038)
     await db.chat_feedback.create_index(
         [("timestamp", 1)], expireAfterSeconds=30 * 24 * 60 * 60
+    )
+
+    # Audit logs — TTL to prevent unbounded collection growth (keep 180 days)
+    await db.audit_logs.create_index(
+        [("timestamp", ASCENDING)], expireAfterSeconds=180 * 24 * 60 * 60
     )
 
     # Content hierarchy indexes
