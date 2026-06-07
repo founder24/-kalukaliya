@@ -23,7 +23,8 @@ fail() { echo -e "  ${RED}✗${RESET}  $1"; FAIL=$((FAIL+1)); }
 skip() { echo -e "  ${YELLOW}–${RESET}  $1 (skipped)"; SKIP=$((SKIP+1)); }
 header() { echo -e "\n${CYAN}${BOLD}── $1 ──${RESET}"; }
 
-http_status() { curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$@"; }
+http_status()        { curl -s  -o /dev/null -w "%{http_code}" --max-time 10 "$@"; }
+http_status_follow() { curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "$@"; }
 http_body()   { curl -s --max-time 10 "$@"; }
 http_headers(){ curl -sI --max-time 10 "$@"; }
 
@@ -168,13 +169,13 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════
 header "7. Auth Endpoints"
 
-# Anonymous session ping (POST — expect 200 or 401)
-ANON_STATUS=$(http_status -X POST "$BASE_URL/api/v1/auth/session-ping" \
+# Anonymous session ping (POST — analytics endpoint, expect 200/401/422)
+ANON_STATUS=$(http_status -X POST "$BASE_URL/api/v1/analytics/session-ping" \
   -H "Content-Type: application/json" || echo "000")
 if [ "$ANON_STATUS" = "200" ] || [ "$ANON_STATUS" = "401" ] || [ "$ANON_STATUS" = "422" ]; then
-  pass "POST /auth/session-ping reachable ($ANON_STATUS)"
+  pass "POST /analytics/session-ping reachable ($ANON_STATUS)"
 else
-  fail "POST /auth/session-ping unexpected status ($ANON_STATUS)"
+  fail "POST /analytics/session-ping unexpected status ($ANON_STATUS)"
 fi
 
 # Login with bad creds → 401 or 422 (not 500)
@@ -216,16 +217,18 @@ assert_contains "$CORS_HEADERS" "syrabit.ai"                  "CORS allows syrab
 # ═══════════════════════════════════════════════════════════════════════════
 header "10. Frontend (${FRONTEND_URL})"
 
-FRONT_STATUS=$(http_status "$FRONTEND_URL")
+# Follow redirects: syrabit.ai → 301 → /library/ → 200
+FRONT_STATUS=$(http_status_follow "$FRONTEND_URL")
 if [ "$FRONT_STATUS" = "200" ] || [ "$FRONT_STATUS" = "304" ]; then
-  pass "syrabit.ai → $FRONT_STATUS"
+  pass "syrabit.ai → $FRONT_STATUS (after redirect)"
 else
   fail "syrabit.ai → $FRONT_STATUS"
 fi
 
-FRONT_LIB=$(http_status "$FRONTEND_URL/library")
+# Follow redirects: /library → 308 → /library/ → 200
+FRONT_LIB=$(http_status_follow "$FRONTEND_URL/library")
 if [ "$FRONT_LIB" = "200" ] || [ "$FRONT_LIB" = "304" ]; then
-  pass "syrabit.ai/library → $FRONT_LIB"
+  pass "syrabit.ai/library → $FRONT_LIB (after redirect)"
 else
   fail "syrabit.ai/library → $FRONT_LIB"
 fi
