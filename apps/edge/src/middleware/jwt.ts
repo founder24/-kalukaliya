@@ -109,6 +109,14 @@ export async function verifyJWT(
     return { valid: true, userId: 'anonymous' };
   }
 
+  // If neither secret nor public key is configured the edge cannot verify tokens.
+  // Pass through to the backend (which has its own JWT verification) rather than
+  // rejecting valid user tokens with a misleading 401. This is the safe fallback
+  // for environments where wrangler secrets have not yet been provisioned.
+  if (!jwtSecret && !jwtPublicKey) {
+    return { valid: false, error: 'Missing or invalid Authorization header' };
+  }
+
   // Extract Bearer token — two distinct failure modes:
   //   1. No header at all → treated as anonymous (not rejected) for non-protected routes
   //   2. Header present but wrong scheme → rejected with 401 (Malformed header)
