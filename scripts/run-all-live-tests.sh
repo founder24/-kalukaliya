@@ -225,8 +225,18 @@ fi
 
 # =============================================================================
 # Suite 8 — Chat Live (full chat pipeline)
+# NOTE: Suite 7 (auth) deliberately hammers the login rate limiter with
+# ~11 bad-password attempts. The rate-limit window is 60 seconds. Wait 70s
+# before starting the chat suite so the window resets and the chat login
+# attempt doesn't land in the same bucket.
 # =============================================================================
 if [[ $HAS_USER_CREDS -eq 1 ]]; then
+  if [[ -n "$ONLY" && "$ONLY" != "chat" ]]; then
+    : # --only filter handled inside run_suite — no sleep needed
+  elif [[ "${SUITE_STATUS[auth]:-skip}" != "skip" ]]; then
+    printf "\n  ${Y}…${N}  Waiting 70s for auth rate-limit window to reset before chat suite…\n"
+    sleep 70
+  fi
   run_suite "chat" \
     "Chat Pipeline Live Test (EN, AS, stream, history, TTS, multi-turn)" \
     "test-chat-live.sh"

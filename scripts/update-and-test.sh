@@ -271,7 +271,7 @@ except Exception:
 # =============================================================================
 step "4. Frontend Reachability Check"
 
-FRONT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$FRONTEND_URL" 2>/dev/null || echo "000")
+FRONT_STATUS=$(curl -s -L -o /dev/null -w "%{http_code}" --max-time 10 "$FRONTEND_URL" 2>/dev/null || echo "000")
 if [[ "$FRONT_STATUS" == "200" || "$FRONT_STATUS" == "304" ]]; then
   ok "Frontend $FRONTEND_URL → $FRONT_STATUS"
 else
