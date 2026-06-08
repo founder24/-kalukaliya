@@ -1,0 +1,48 @@
+Here's the full list — 100 issues (14-day window), all unresolved. Grouped for clarity:
+
+📋 All Sentry Issues — syrabit/javascript-react (Last 14 days)
+🔴 Chat Pipeline Failures (actively firing, high volume)
+#	Issue	Events	Last Seen
+004	Failed to save chat (attempt 2): validation error for Chat	548	Jun 8
+002	PostHog API key invalid (401)	354	Jun 8
+017	Sarvam stream HTTP 400 — model=sarvam-m1	147	Jun 8
+003	chat_message_lost /chat/stream	274	Jun 8
+012	Embedding API error: 429 rate limit	100	Jun 8
+009	chat_upstream_failure	70	Jun 8
+🔴 Wrong Sarvam Model (sarvam-m1 — deprecated)
+Issues #015, #017, #023–025, #028, #062, #080 — same root cause, 195+ combined events. Cloud Run still has sarvam-m1 in its env var despite local fix.
+
+🟠 Gemini / Vertex AI Errors
+#	Issue	Events
+005–006	Gemini stream HTTP 404	20
+010–011	Vertex AI 404 gemini-2.0-flash endpoint	10
+022	Vertex AI 503 Service Unavailable	16
+029	Gemini 503 retries exhausted	12
+034–037	Vertex stream 404 + circuit open	20
+063–064	Generate-notes: Gemini 503	37
+🟠 MongoDB Issues
+#	Issue	Events
+001	AutoReconnect: connection already closed	31
+019	MongoDB not initialized (/health/deep)	19
+032	NetworkTimeout shard-00-01	2
+040	Failed to store dead letter: MongoDB not initialized	10
+🟠 Auth / Infrastructure
+#	Issue	Events
+008	Redis not initialized (/health/deep)	38
+016	Resend email 401 Unauthorized (signup broken)	16
+026–027	Google TTS 403 Forbidden	11
+030–031	InvalidAlgorithmError: alg not allowed (logout)	5
+007	VERTEX_PROJECT_ID not configured (/content/search)	2
+018	Vertex Search 400: tier_access field unsupported	8
+020–021	Admin dashboard: coroutine has no attribute to_list	51
+013	chat_upstream_http_error	16
+014	chat_timeout	4
+⚪ Vertex Embedding 429s (bulk publish run — Jun 7, one-time)
+Issues #041–100 — all Vertex AI embedding API failed with status 429 during a mass chapter publish. Not currently active.
+
+Top 5 things to fix right now
+sarvam-m1 in Cloud Run — update SARVAM_MODEL=sarvam-30b in the Cloud Run service env (or redeploy with the correct secret)
+Resend API key — invalid/expired, all signup emails failing
+PostHog key — needs a project API key, not a personal one
+gemini-2.0-flash 404 — a fallback path is still pointing to the old model name
+MongoDB connection pool — add keep-alive / connection pool settings to stop AutoReconnect drops

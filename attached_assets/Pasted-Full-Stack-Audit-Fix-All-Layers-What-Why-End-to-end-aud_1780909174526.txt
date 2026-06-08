@@ -1,0 +1,1460 @@
+Full-Stack Audit & Fix — All Layers
+What & Why
+End-to-end audit and remediation across every layer of the Syrabit stack simultaneously. The goal is to uncover and fix every misconfiguration before it causes a production outage — wrong SM secret casing, stale env vars, broken CI/CD deploy scripts, missing GitHub secrets, incorrect encryption algorithms, wrong search paths, and missing deploy hooks. Based on the confirmed finding that revision 00453 was broken by a single casing mismatch (MONGODB_URI vs mongodb-uri), the same class of error exists across 14+ other secrets in both cloudbuild.yaml and deploy.yml. Everything is audited and fixed before the next deploy trigger.
+
+Already confirmed fixed (do not redo)
+Cloud Run revision 00454+ healthy — mongodb_initialized:true ✅
+Assamese chat streaming via sarvam-30b ✅
+CF Pages VITE_BACKEND_URL=https://api.syrabit.ai set ✅
+Cloud Run REST PATCH applied — secret refs normalized ✅
+health.py deep check runs exactly 4 services: mongodb, redis, mongo_vector_search, sarvam_ai (vertex_ping removed from gather)
+Done looks like
+bash infra/scripts/fullstack-audit.sh exits 0 — all 35+ checks print ✅
+curl -sf https://api.syrabit.ai/api/v1/health/deep | jq . returns:
+{
+  "status": "healthy",
+  "mongodb": {"status": "healthy", "latency_ms": <N>},
+  "redis": {"status": "healthy", "latency_ms": <N>},
+  "mongo_vector_search": {"status": "healthy", "topic_count": 197},
+  "sarvam_ai": {"status": "healthy", "latency_ms": <N>, "http": 200}
+}
+
+curl -sf "https://api.syrabit.ai/api/v1/content/search?q=photosynthesis" | jq '.total' returns > 0
+Cloud Build trigger completes — new revision increments to 00459+ — no secret-not-found errors
+GitHub Actions deploy.yml run completes without Invalid secret path errors
+bash scripts/fullstack-smoke-test.sh (referenced in .github/workflows/smoke-test.yml) exits 0
+Out of scope
+MongoDB Atlas vector search (separate task)
+Content indexing gaps (0 results for un-indexed topics is a data gap, not a config issue)
+New feature development, frontend UI changes
+Phase 1 — Simultaneous layer snapshot (6 parallel actions)
+Run all of these at the same time before touching anything. Capture the baseline so you know what is broken versus what is already correct.
+
+Action 1.1 — Cloud Run service spec dump
+
+curl -sf \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://run.googleapis.com/v2/projects/blissful-acumen-495019-t6/locations/asia-south1/services/syrabit-backend" \
+  | python3 -c "
+import json, sys
+svc = json.load(sys.stdin)
+rev = svc['latestReadyRevision'].split('/')[-1]
+traffic = svc.get('traffic', [])
+print(f'Serving revision: {rev}')
+containers = svc['template']['containers']
+for c in containers:
+    print('=== Env Vars ===')
+    for e in c.get('env', []):
+        if 'value' in e:
+            print(f'  {e[\"name\"]}={e[\"value\"]}')
+        elif 'valueSource' in e:
+            secret = e['valueSource']['secretKeyRef']
+            print(f'  {e[\"name\"]} -> SM:{secret[\"secret\"]}:{secret[\"version\"]}')
+"
+
+Expected: serving revision is 00454+. Look for any env var where SM:UPPER_CASE_NAME appears — that is a broken secret ref casing. Print and save the full output.
+
+Action 1.2 — GCP Secret Manager full inventory
+
+gcloud secrets list \
+  --project=blissful-acumen-495019-t6 \
+  --format="table(name,createTime,replication)" \
+  | sort
+
+Count the output. Expected: 25–30 secrets. Cross-check against the required set below. Note every name that is UPPERCASE vs lowercase — this is the source of all Cloud Run secret ref failures.
+
+Required SM secret names (exact, case-sensitive):
+
+mongodb-uri
+jwt-secret
+edge-shared-secret
+jwt-private-key
+jwt-public-key
+GOOGLE_APPLICATION_CREDENTIALS_JSON
+sarvam-api-key
+gemini-api-key
+admin-jwt-secret
+reset-token-secret
+translate-cron-secret
+indexnow-api-key
+indexnow-internal-secret
+posthog-api-key
+resend-api-key
+razorpay-key-id
+razorpay-key-secret
+razorpay-webhook-secret
+SENTRY_DSN
+VERTEX_SEARCH_DATASTORE_ID
+cf-pages-deploy-hook  (may be missing — see Phase 4)
+upstash-redis-rest-url
+upstash-redis-rest-token
+CF_ACCOUNT_ID
+CF_KV_API_TOKEN
+CF_KV_NAMESPACE_ID
+GCS_CONTENT_BUCKET
+
+Any secret that exists only in UPPERCASE and not in lowercase is an orphan (or the source of a Cloud Run casing bug). Flag them. Do NOT delete.
+
+Action 1.3 — CF Worker binding dump
+
+curl -sf \
+  -H "Authorization: Bearer $CLOUDFLARE_KV_API_TOKEN" \
+  "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/scripts/syrabitworker-prod/bindings" \
+  | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for b in data.get('result', []):
+    print(f'{b[\"type\"]:15} {b[\"name\"]:35} {b.get(\"text\",b.get(\"namespace_id\",\"<secret>\"))}')
+"
+
+Expected output (confirmed correct state):
+
+plain_text      BACKEND_URL                         https://syrabit-backend-bl6wu3psza-el.a.run.app
+plain_text      ALLOWED_ORIGIN                      https://syrabit.ai
+secret_text     JWT_SECRET                          <secret>
+secret_text     EDGE_SHARED_SECRET                  <secret>
+secret_text     GOOGLE_SA_KEY                       <secret>
+kv_namespace    RATE_LIMIT_KV                       <namespace_id>
+kv_namespace    ISR_CACHE_KV                        <namespace_id>
+kv_namespace    CONTENT_KV                          981e939bcca445c481d4be818ebefee7
+
+⚠️ Gotcha: CF API returns secret bindings by name only — it never returns secret values. A binding named JWT_SECRET appearing in the list does NOT confirm its value matches GCP SM. To verify value match, pull from SM and re-push (see Phase 3, Action 3.3).
+
+Action 1.4 — CF Pages env var dump
+
+curl -sf \
+  -H "Authorization: Bearer $CLOUDFLARE_KV_API_TOKEN" \
+  "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/pages/projects/syrabitfrontend" \
+  | python3 -c "
+import json, sys
+p = json.load(sys.stdin)['result']
+env = p.get('deployment_configs', {}).get('production', {}).get('env_vars', {})
+for k, v in env.items():
+    val = v.get('value', '<encrypted>') if v.get('type') == 'plain_text' else '<secret>'
+    print(f'{k}={val}')
+"
+
+Expected: VITE_BACKEND_URL=https://api.syrabit.ai present. Also check BACKEND_BOT_URL — must be https://syrabit-backend-bl6wu3psza-el.a.run.app (direct Cloud Run URL, NOT api.syrabit.ai). The _worker.js line 118: const backend = (env && env.BACKEND_BOT_URL) || DEFAULT_BACKEND — if BACKEND_BOT_URL is missing, bot rendering falls back to the Pages origin (double-proxy loop risk).
+
+Action 1.5 — GitHub secrets inventory
+
+gh secret list --repo founder24/-kalukaliya | sort
+
+Expected: VITE_BACKEND_URL, CF_PAGES_DEPLOY_HOOK, GCP_SA_KEY, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID all listed. gh secret list only shows names (never values). Note which are missing.
+
+Action 1.6 — Live health baseline
+
+# Run all simultaneously — do not chain with &&
+curl -sf https://api.syrabit.ai/api/v1/health | jq '{status,mongodb_initialized,startup_errors}'
+curl -sf https://api.syrabit.ai/api/v1/health/deep | jq '{mongodb:.mongodb.status,redis:.redis.status,mongo_vector_search:.mongo_vector_search,sarvam_ai:.sarvam_ai}'
+curl -sf "https://api.syrabit.ai/api/v1/content/search?q=force" | jq '{total:.total,first_title:.results[0].title}' 2>/dev/null
+curl -sf -H "Origin: https://syrabit.ai" -I https://api.syrabit.ai/api/v1/health 2>&1 | grep -i "access-control\|http/"
+curl -sf -H "Origin: https://syrabitfrontend.pages.dev" -I https://api.syrabit.ai/api/v1/health 2>&1 | grep -i "access-control\|http/"
+
+⚠️ False-positive trap: Do NOT chain these with && and pipe into a single stream — the HTTP status codes appear at the end of the body line and get mixed into the jq output. Run each separately and read the exit code with echo $?. A 0 exit from curl means HTTP 2xx. A non-zero means network failure or 4xx/5xx.
+
+Phase 2 — Fix cloudbuild.yaml (breaks next Cloud Build trigger)
+Action 2.1 — Identify every broken line in cloudbuild.yaml
+
+Read cloudbuild.yaml line 102 and line 104. Confirmed broken state as of audit:
+
+Line 102 (broken --update-env-vars):
+
+APP_ENV=production,JWT_ALGORITHM=HS256,
+VERTEX_PROJECT_ID=blissful-acumen-495019-t6,   ← should stay as env var (needed by embedder)
+VERTEX_LOCATION=us-central1,                   ← wrong region; Cloud Run is asia-south1
+VERTEX_SEARCH_DATASTORE_ID=syrabit-edu-datastore, ← should come from SM mount, not plain var
+VERTEX_SEARCH_LOCATION=global,                 ← stale — comes from config.py default
+VERTEX_SEARCH_SERVING_CONFIG=default_search,   ← stale — comes from config.py default
+SARVAM_MODEL=sarvam-m1                         ← INVALID model name → 422 from Sarvam API
+
+Line 104 (broken --update-secrets, wrong SM casing):
+
+MONGODB_URI=MONGODB_URI:latest      ← SM secret is mongodb-uri (lowercase)
+ADMIN_JWT_SECRET=ADMIN_JWT_SECRET   ← verify SM name with gcloud secrets list
+SARVAM_API_KEY=SARVAM_API_KEY       ← SM secret is sarvam-api-key (lowercase)
+UPSTASH_REDIS_REST_URL=UPSTASH_REDIS_REST_URL   ← verify SM name
+UPSTASH_REDIS_REST_TOKEN=UPSTASH_REDIS_REST_TOKEN ← verify SM name
+RAZORPAY_KEY_ID=RAZORPAY_KEY_ID     ← SM secret is razorpay-key-id (lowercase)
+RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET ← SM secret is razorpay-key-secret (lowercase)
+RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET ← verify SM name
+RESEND_API_KEY=RESEND_API_KEY       ← SM secret is resend-api-key (lowercase)
+RESET_TOKEN_SECRET=RESET_TOKEN_SECRET ← verify SM name
+TRANSLATE_CRON_SECRET=TRANSLATE_CRON_SECRET ← verify SM name
+INDEXNOW_API_KEY=INDEXNOW_API_KEY   ← verify SM name
+INDEXNOW_INTERNAL_SECRET=INDEXNOW_INTERNAL_SECRET ← verify SM name
+POSTHOG_API_KEY=POSTHOG_API_KEY     ← verify SM name
+SENTRY_DSN=SENTRY_DSN               ← verify SM name (may be uppercase in SM)
+
+Action 2.2 — Verify SM secret names before editing (critical)
+
+For every "verify SM name" entry above, run:
+
+# List all secrets, pipe to grep for approximate name match
+gcloud secrets list --project=blissful-acumen-495019-t6 --format="value(name)" \
+  | grep -iE "admin.jwt|sarvam|upstash|razorpay|resend|reset.token|translate|indexnow|posthog|sentry"
+
+The output MUST be used — do not assume the kebab-case version exists without checking. If SM has ADMIN_JWT_SECRET (uppercase) and NOT admin-jwt-secret, the --update-secrets entry must reference the uppercase name.
+
+If a lowercase version is missing but an uppercase one exists with the same value, create the lowercase alias:
+
+SECRET_VAL=$(gcloud secrets versions access latest \
+  --secret=ADMIN_JWT_SECRET \
+  --project=blissful-acumen-495019-t6)
+echo -n "$SECRET_VAL" | gcloud secrets create admin-jwt-secret \
+  --data-file=- \
+  --project=blissful-acumen-495019-t6
+
+Action 2.3 — Write the corrected cloudbuild.yaml line 102
+
+Replace line 102 with:
+
+        --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=asia-south1,SARVAM_MODEL=sarvam-30b \
+        --remove-env-vars=VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG \
+
+⚠️ Critical gotcha — do NOT remove VERTEX_PROJECT_ID: config.py:74 declares it Optional[str] and config.py:253 logs a startup warning if absent. More critically, mongo_vector_search.py calls search_context() which calls the Vertex AI text-embedding-005 model via the aiplatform SDK — this call uses VERTEX_PROJECT_ID to initialize the project. Without it, all vector search returns empty and mongo_vector_search_ping() in the deep health check degrades. The mistake in the attached audit (revision 00456→00457) was removing VERTEX_PROJECT_ID completely — required an emergency re-patch.
+
+⚠️ Fix region: VERTEX_LOCATION=us-central1 → asia-south1. The Vertex AI embedding endpoint (us-central1-aiplatform.googleapis.com) still works cross-region but adds ~200ms. The backend SA is in asia-south1 — all API traffic should stay in the same region.
+
+⚠️ Only remove the 3 VERTEX_SEARCH_ vars* (DATASTORE_ID, LOCATION, SERVING_CONFIG). These now come from SM mounts. config.py:49-51 shows their defaults — they will be overridden by SM values at runtime.
+
+Action 2.4 — Write the corrected cloudbuild.yaml line 104
+
+Using the SM names confirmed in Action 2.2, replace the --update-secrets line. Canonical form (fill in verified SM names for uncertain entries):
+
+        --update-secrets=\
+MONGODB_URI=mongodb-uri:latest,\
+JWT_SECRET=jwt-secret:latest,\
+EDGE_SHARED_SECRET=edge-shared-secret:latest,\
+ADMIN_JWT_SECRET=admin-jwt-secret:latest,\
+GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,\
+SARVAM_API_KEY=sarvam-api-key:latest,\
+UPSTASH_REDIS_REST_URL=upstash-redis-rest-url:latest,\
+UPSTASH_REDIS_REST_TOKEN=upstash-redis-rest-token:latest,\
+GEMINI_API_KEY=gemini-api-key:latest,\
+RAZORPAY_KEY_ID=razorpay-key-id:latest,\
+RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,\
+RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,\
+RESEND_API_KEY=resend-api-key:latest,\
+RESET_TOKEN_SECRET=reset-token-secret:latest,\
+JWT_PRIVATE_KEY=jwt-private-key:latest,\
+JWT_PUBLIC_KEY=jwt-public-key:latest,\
+TRANSLATE_CRON_SECRET=translate-cron-secret:latest,\
+INDEXNOW_API_KEY=indexnow-api-key:latest,\
+INDEXNOW_INTERNAL_SECRET=indexnow-internal-secret:latest,\
+POSTHOG_API_KEY=posthog-api-key:latest,\
+SENTRY_DSN=SENTRY_DSN:latest,\
+VERTEX_SEARCH_DATASTORE_ID=VERTEX_SEARCH_DATASTORE_ID:latest
+
+Every SM_SECRET_NAME on the right side of = MUST match a name from gcloud secrets list exactly. One wrong letter = deploy failure on Creating Revision.
+
+Action 2.5 — Verify the optional-secrets _check() block is intact
+
+Read the bash step in cloudbuild.yaml that handles optional secrets (around line 175-190). Confirm:
+
+cf-pages-deploy-hook → CF_PAGES_DEPLOY_HOOK is inside _check(), NOT in the main --update-secrets line
+CF_ACCOUNT_ID, CF_KV_API_TOKEN, CF_KV_NAMESPACE_ID, GCS_CONTENT_BUCKET are all inside _check()
+Each _check() call follows the pattern: if SM secret exists → add to $UPDATES; if missing → add env var name to $REMOVALS and call --remove-secrets || true
+Any optional secret accidentally moved into the main --update-secrets line will cause hard build failure if the SM secret doesn't exist yet.
+
+Phase 3 — Fix deploy.yml remaining uppercase SM secret refs (5 parallel actions)
+Action 3.1 — Read and diff deploy.yml line 106
+
+deploy.yml line 106 has the same --update-secrets block as cloudbuild.yaml. It was partially fixed (MONGODB_URI → mongodb-uri, GEMINI_API_KEY → gemini-api-key, SARVAM_MODEL fixed). Still broken: the same 14 entries listed in Phase 2 Action 2.1. Apply the same SM name verification and correction.
+
+Action 3.2 — Verify deploy.yml line 104 VERTEX_LOCATION is correct
+
+deploy.yml line 104 currently: --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,SARVAM_MODEL=sarvam-30b. This is correct — SARVAM_MODEL is already fixed ✅. Confirm VERTEX_PROJECT_ID and VERTEX_LOCATION=asia-south1 are present (not missing). The --remove-env-vars line 105 correctly lists the 3 VERTEX_SEARCH_* vars.
+
+⚠️ Gotcha — do NOT let deploy.yml remove VERTEX_PROJECT_ID: The --remove-env-vars on line 105 removes VERTEX_PROJECT_ID,VERTEX_LOCATION,VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG. This is WRONG for VERTEX_PROJECT_ID and VERTEX_LOCATION — both are still needed. Remove them from the --remove-env-vars list. Only these 3 should be removed: VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG. Add VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=asia-south1 back to the --update-env-vars line.
+
+Action 3.3 — Verify JWT_SECRET and EDGE_SHARED_SECRET value match between SM and CF Worker
+
+The CF Worker caching JWT_SECRET that doesn't match GCP SM causes all authenticated requests to return 401. To verify without exposing values, compare character length and first/last 4 chars:
+
+SM_JWT=$(gcloud secrets versions access latest --secret=jwt-secret --project=blissful-acumen-495019-t6)
+echo "SM jwt-secret: len=${#SM_JWT}, first4=${SM_JWT:0:4}, last4=${SM_JWT: -4}"
+# CF Worker secret value is not accessible via API — must re-push from SM to confirm sync
+echo -n "$SM_JWT" | npx wrangler secret put JWT_SECRET --env production
+SM_EDGE=$(gcloud secrets versions access latest --secret=edge-shared-secret --project=blissful-acumen-495019-t6)
+echo -n "$SM_EDGE" | npx wrangler secret put EDGE_SHARED_SECRET --env production
+
+Re-pushing is idempotent — if the value matches, no change occurs; if it was stale, it's now corrected.
+
+Action 3.4 — Verify VITE_BACKEND_URL GitHub secret is present and correct
+
+# gh secret list shows names only, not values
+gh secret list --repo founder24/-kalukaliya | grep VITE_BACKEND_URL
+# Expected: "VITE_BACKEND_URL   Actions   Updated <date>"
+# If missing, set it:
+gh secret set VITE_BACKEND_URL --body "https://api.syrabit.ai" --repo founder24/-kalukaliya
+
+deploy.yml line 283: VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }} — this is injected into the frontend build. If absent, the build uses the .env.production value (https://api.syrabit.ai) which is the same, so this only matters for overrides.
+
+Action 3.5 — Fix GitHub secret encryption method (libsodium, not RSA)
+
+GitHub's Secrets REST API (PUT /repos/{owner}/{repo}/actions/secrets/{name}) requires the secret value to be encrypted with the repo's libsodium public key using crypto_box_seal (NaCl sealed box). This is NOT RSA encryption.
+
+Any infra script that uses RSA to encrypt before PUT will produce an unusable encrypted value — GitHub silently stores it, but the Actions runner fails to decrypt and injects an empty string.
+
+Correct implementation:
+
+// infra/scripts/set-github-secret.js
+const sodium = require('libsodium-wrappers');
+const fetch = require('node-fetch');
+async function setGitHubSecret(repo, token, secretName, secretValue) {
+  await sodium.ready;
+  
+  // Step 1: Get repo public key
+  const keyRes = await fetch(
+    `https://api.github.com/repos/${repo}/actions/secrets/public-key`,
+    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
+  );
+  const { key, key_id } = await keyRes.json();
+  // Step 2: Encrypt with libsodium sealed box (NOT RSA)
+  const publicKey = sodium.from_base64(key, sodium.base64_variants.ORIGINAL);
+  const messageBytes = sodium.from_string(secretValue);
+  const encryptedBytes = sodium.crypto_box_seal(messageBytes, publicKey);
+  const encryptedValue = sodium.to_base64(encryptedBytes, sodium.base64_variants.ORIGINAL);
+  // Step 3: PUT to GitHub API
+  const putRes = await fetch(
+    `https://api.github.com/repos/${repo}/actions/secrets/${secretName}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ encrypted_value: encryptedValue, key_id }),
+    }
+  );
+  // HTTP 201 = created, 204 = updated. Both are success.
+  return putRes.status; // should be 201 or 204
+}
+
+Install dependency: npm install libsodium-wrappers node-fetch in infra/scripts/.
+
+⚠️ False positive: GitHub PUT returns HTTP 204 (No Content) on success for updates. An empty response body does NOT mean failure. echo $? after curl returning 204 will be exit code 0.
+
+Phase 4 — CF Pages deploy hook (3 actions)
+Action 4.1 — Create the CF Pages deploy hook in the dashboard
+
+This must be done manually — there is no API to create a new deploy hook:
+
+CF Dashboard → Workers & Pages → syrabitfrontend → Settings → Builds → Deploy hooks
+Click Add deploy hook → Name: content-publish → Save → Copy the full webhook URL
+Expected URL format: https://api.cloudflare.com/client/v4/pages/webhooks/deploy_hooks/<UUID>
+
+Action 4.2 — Store the hook in GCP SM
+
+⚠️ Critical constraint: The backend SA (syrabit-backend-sa) has roles/secretmanager.secretAccessor (read-only) — it cannot create new secrets. Use the Cloud Build SA or a Replit SA with secretCreator role. If neither is available from Replit, store it as a GitHub Actions secret instead and mount it on the next deploy:
+
+# Option A — Cloud Shell (has owner-level access)
+HOOK_URL="https://api.cloudflare.com/client/v4/pages/webhooks/deploy_hooks/YOUR_UUID"
+echo -n "$HOOK_URL" | gcloud secrets create cf-pages-deploy-hook \
+  --data-file=- \
+  --project=blissful-acumen-495019-t6 \
+  --replication-policy=automatic
+# Grant the backend SA read access
+gcloud secrets add-iam-policy-binding cf-pages-deploy-hook \
+  --member="serviceAccount:syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor" \
+  --project=blissful-acumen-495019-t6 \
+  --condition=None
+# Option B — GitHub secret (fallback if Cloud Shell unavailable)
+gh secret set CF_PAGES_DEPLOY_HOOK --body "$HOOK_URL" --repo founder24/-kalukaliya
+
+The _check() block in deploy.yml line 135 already handles cf-pages-deploy-hook conditionally — once the SM secret exists, the next deploy mounts it as CF_PAGES_DEPLOY_HOOK on Cloud Run automatically. content_publisher.py:295 then calls it after every content publish to trigger a CF Pages rebuild.
+
+Action 4.3 — Verify hook fires correctly
+
+# Test the webhook by triggering a Pages deploy manually
+curl -sf -X POST "$HOOK_URL" | jq .
+# Expected: {"result":{"id":"...","short_id":"...","url":"..."},"success":true}
+
+If this returns 200 with a deployment object, the hook is live. Check CF Pages dashboard → Deployments to confirm a new build was queued.
+
+Phase 5 — CF Edge Worker full verification (5 parallel actions)
+Action 5.1 — Verify BACKEND_URL is the Cloud Run URL (not localhost)
+
+curl -sf \
+  -H "Authorization: Bearer $CLOUDFLARE_KV_API_TOKEN" \
+  "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/scripts/syrabitworker-prod/bindings" \
+  | python3 -c "
+import json, sys
+for b in json.load(sys.stdin)['result']:
+    if b['name'] == 'BACKEND_URL':
+        print(b.get('text','MISSING'))
+"
+
+Must print: https://syrabit-backend-bl6wu3psza-el.a.run.app
+
+If it prints http://localhost:8000 or is missing — the production-safety 503 guard in apps/edge/src/index.ts fires on every request. Fix:
+
+curl -sf -X PATCH \
+  "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/scripts/syrabitworker-prod/settings" \
+  -H "Authorization: Bearer $CLOUDFLARE_KV_API_TOKEN" \
+  --form 'settings={"bindings":[{"type":"plain_text","name":"BACKEND_URL","text":"https://syrabit-backend-bl6wu3psza-el.a.run.app"}]};type=application/json'
+
+⚠️ HTTP 415 trap: This endpoint MUST use --form with multipart/form-data. Sending -H "Content-Type: application/json" -d '{...}' returns HTTP 415 Unsupported Media Type.
+
+Action 5.2 — Verify wrangler.toml production override is committed
+
+Read apps/edge/wrangler.toml lines 86-90. Must contain:
+
+[env.production.vars]
+ALLOWED_ORIGIN = "https://syrabit.ai"
+BACKEND_URL = "https://syrabit-backend-bl6wu3psza-el.a.run.app"
+
+⚠️ wrangler inheritance gotcha: Top-level [vars] entries (BACKEND_URL = "http://localhost:8000") ARE inherited by [env.production] unless explicitly overridden. The confirmed-correct state in the codebase shows production override is present (grep confirmed BACKEND_URL = "https://syrabit-backend-bl6wu3psza-el.a.run.app" at line 88). Verify it's still there after any wrangler.toml edits.
+
+Action 5.3 — Verify CORS allowed-origins list
+
+Read apps/edge/src/middleware/cors.ts line 6. Current confirmed state:
+
+const ALLOWED_ORIGINS = [
+  'https://syrabit.ai',
+  'https://www.syrabit.ai',
+  'https://app.syrabit.ai',
+  'https://syrabitfrontend.pages.dev'
+];
+
+This is already correct ✅. If any domain is missing, add it to the literal array — do NOT rely on PAGES_PREVIEW_REGEX alone, which only matches *.syrabitfrontend.pages.dev subdomains, not the bare production Pages domain.
+
+Action 5.4 — CORS early-exit audit in index.ts
+
+Scan apps/edge/src/index.ts for every return new Response(...) or return response that appears before the final applyCorsHeaders(response.headers, request.headers.get('Origin') || '') at the end of the fetch handler. Each early-exit must call:
+
+applyCorsHeaders(response.headers, request.headers.get('Origin') || '');
+return response;
+
+Confirmed three paths that had this bug (fixed in bf2999c): production-safety 503, JWT 401, rate-limit 429. Check if any new early-exits have been added since. Test each with:
+
+# Test 429 CORS (must have ACAO header even on rate-limit response)
+for i in $(seq 1 32); do
+  STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
+    -H "Origin: https://syrabit.ai" \
+    https://api.syrabit.ai/api/v1/health)
+  echo "Request $i: $STATUS"
+done
+# Last few should be 429 — verify ACAO header on one of them:
+curl -sf -D - -H "Origin: https://syrabit.ai" https://api.syrabit.ai/api/v1/health \
+  | grep -i "access-control-allow-origin"
+
+Action 5.5 — Verify zone routes cover both domains
+
+# List zone routes for syrabit.ai zone
+CF_ZONE_ID="your_zone_id"
+curl -sf \
+  -H "Authorization: Bearer $CLOUDFLARE_KV_API_TOKEN" \
+  "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/workers/routes" \
+  | python3 -c "
+import json, sys
+for r in json.load(sys.stdin)['result']:
+    print(f'{r[\"pattern\"]:50} → {r.get(\"script\",\"(disabled)\")}')
+"
+
+Expected routes:
+
+syrabit.ai/api/*                                   → syrabitworker-prod
+api.syrabit.ai/*                                   → syrabitworker-prod
+syrabit.ai/*                                       → syrabitworker-prod (or Pages)
+
+If api.syrabit.ai/* is missing, all direct API calls bypass the edge worker and hit Cloud Run without HMAC verification or rate limiting.
+
+Phase 6 — Backend runtime deep verification (7 parallel actions)
+Action 6.1 — Deep health check with expected values
+
+curl -sf https://api.syrabit.ai/api/v1/health/deep | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(f'Overall: {d[\"status\"]}')
+for svc in ['mongodb', 'redis', 'mongo_vector_search', 'sarvam_ai']:
+    info = d.get(svc, {})
+    st = info.get('status', 'MISSING')
+    extra = info.get('topic_count', info.get('latency_ms', info.get('error', '')))
+    print(f'  {svc}: {st}  ({extra})')
+"
+
+Expected:
+
+Overall: healthy
+  mongodb: healthy  (latency_ms: <50)
+  redis: healthy  (latency_ms: <10)
+  mongo_vector_search: healthy  (topic_count: 197)
+  sarvam_ai: healthy  (latency_ms: <500)
+
+If mongo_vector_search shows topic_count: 0 instead of 197 — VERTEX_PROJECT_ID is missing or VERTEX_LOCATION is wrong. The embedder cannot initialize without a project. If sarvam_ai is unhealthy — SARVAM_API_KEY is expired or SARVAM_MODEL=sarvam-m1 snuck back in.
+
+⚠️ vertex_ping removed from deep health: health.py line 214-218 shows the gather list: [mongo_ping(), redis_ping(), mongo_vector_search_ping(), sarvam_ping()]. vertex_ping() at line 88-112 is defined but deliberately NOT included — it was degraded because VERTEX_PROJECT_ID was absent in one revision. Do not re-add it without fixing the underlying VERTEX_PROJECT_ID mount first.
+
+Action 6.2 — Direct Sarvam API key test
+
+SARVAM_KEY=$(gcloud secrets versions access latest --secret=sarvam-api-key --project=blissful-acumen-495019-t6)
+curl -sf -X POST https://api.sarvam.ai/v1/chat/completions \
+  -H "Authorization: Bearer $SARVAM_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "sarvam-30b",
+    "messages": [{"role": "user", "content": "What is photosynthesis?"}],
+    "max_tokens": 50
+  }' | jq '{model:.model, finish_reason:.choices[0].finish_reason}'
+
+Expected: {"model": "sarvam-30b", "finish_reason": "stop"}. If response is 422 — model name is wrong. If 402 — billing exhausted on Sarvam account. If 401 — API key is expired/revoked. Valid models: sarvam-30b (fast), sarvam-105b (quality). sarvam-m1 is INVALID since the rename.
+
+Action 6.3 — Content search endpoint path verification
+
+# Correct path: /api/v1/content/search (NOT /api/v1/public/search)
+curl -sf "https://api.syrabit.ai/api/v1/content/search?q=force" | jq '{total,count:(.results|length)}'
+curl -sf "https://api.syrabit.ai/api/v1/public/search?q=force" -o /dev/null -w "%{http_code}\n"
+# Expected: first returns JSON with results, second returns 404
+
+The actual route: public_content.py:984 @router.get("/search") mounted at /api/v1/content/. Any test script, frontend hook, or smoke test using /public/search must be updated. Search the codebase:
+
+grep -rn "public/search\|/public/search" apps/ infra/ .github/ \
+  --include="*.ts" --include="*.js" --include="*.py" --include="*.yml" --include="*.sh"
+
+Replace all hits with /api/v1/content/search.
+
+⚠️ 0-results is a data gap, not a config error: Topics must be indexed in Vertex Search to appear in results. q=force returns results because "Force" chapters are indexed. q=photosynthesis may return 0 if no photosynthesis chapter has been indexed yet. Verify by checking:
+
+curl -sf "https://api.syrabit.ai/api/v1/content/search?q=photosynthesis" | jq '.total'
+# 0 = topic not indexed (data gap) vs HTTP 5xx = config error
+
+Action 6.4 — Verify Vertex Search warm-up in Cloud Run logs
+
+gcloud logging read \
+  'resource.type="cloud_run_revision" resource.labels.service_name="syrabit-backend" jsonPayload.message=~"Vertex Search"' \
+  --project=blissful-acumen-495019-t6 \
+  --freshness=1h \
+  --format="table(timestamp,jsonPayload.message)" \
+  --limit=10
+
+Expected: "Vertex Search warm-up successful" in the logs of the current revision. If instead you see "Vertex Search warm-up failed: 400" — ExtractiveContentSpec crept back into the search request. The Standard tier only supports SnippetSpec(return_snippet=True, max_snippet_count=1) — never ExtractiveContentSpec or ExtractiveSegmentSpec.
+
+Action 6.5 — Startup error check
+
+gcloud logging read \
+  'resource.type="cloud_run_revision" resource.labels.service_name="syrabit-backend" severity>=ERROR' \
+  --project=blissful-acumen-495019-t6 \
+  --freshness=30m \
+  --format="table(timestamp,jsonPayload.message)" \
+  --limit=20
+
+Any startup_errors logged here map directly to missing/wrong secrets at startup. Common patterns:
+
+JWT_SECRET is not set → jwt-secret SM mount missing or wrong casing
+VERTEX_SEARCH_DATASTORE_ID is not set in production → SM mount missing
+motor not initialized → mongodb-uri SM mount wrong casing (root cause of revision 00453 failure)
+Action 6.6 — notes_generated backfill check
+
+# Via Atlas Data API or mongosh
+db.chapters.aggregate([
+  { $group: { _id: "$notes_generated", count: { $sum: 1 } } }
+])
+# Expected: [{ _id: true, count: N }] with no false/null bucket (or a very small number)
+
+Any chapter with notes_generated != true is excluded from sitemaps, search indexing, and content APIs. If count > 50, run the backfill:
+
+db.chapters.updateMany(
+  { content: { $exists: true, $ne: "" }, notes_generated: { $ne: true } },
+  { $set: { notes_generated: true } }
+)
+
+After backfill, the sitemap count self-corrects within 10 minutes (in-process cache TTL). If urgent, deploy a new revision to flush the cache immediately.
+
+Action 6.7 — Assamese chat end-to-end stream test
+
+curl -sf -N \
+  -X POST https://api.syrabit.ai/api/v1/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "Origin: https://syrabit.ai" \
+  -H "X-Edge-Signature: $(echo -n 'POST/api/v1/chat/stream' | openssl dgst -sha256 -hmac "$EDGE_SHARED_SECRET" | awk '{print $2}')" \
+  -d '{"message":"সালোকসংশ্লেষণ কী?","language":"as","chapter_id":null}' \
+  --max-time 30 \
+  | head -c 500
+
+Expected: Server-sent event stream starting with data: followed by Assamese Unicode characters (অ, ক, স, etc.). If you get English characters — language="as" routing to Sarvam is broken. If you get {"error":"sarvam unavailable"} — SARVAM_API_KEY or model name is wrong.
+
+Phase 7 — Cloud Build trigger validation (4 actions)
+Action 7.1 — Commit and push the cloudbuild.yaml fix
+
+git add cloudbuild.yaml
+git commit -m "fix: remove stale VERTEX_SEARCH env vars, fix SM secret casing, SARVAM_MODEL sarvam-30b, VERTEX_LOCATION asia-south1"
+git push origin main
+
+Action 7.2 — Watch the build in real time
+
+# Get the latest build ID (wait ~10s after push for trigger to fire)
+BUILD_ID=$(gcloud builds list \
+  --project=blissful-acumen-495019-t6 \
+  --limit=1 \
+  --format="value(id)")
+echo "Watching build: $BUILD_ID"
+gcloud builds log "$BUILD_ID" --stream
+
+Watch specifically for:
+
+Step 4 gcloud run deploy — must complete without Secret .../versions/latest was not found
+Step 5 optional-secrets _check() — must complete with Attaching secrets: ... or Skipping optional secret ...
+Creating Revision — must succeed and assign a new revision number (00459+)
+Action 7.3 — Verify new revision is serving and healthy
+
+# Wait 60s for revision to become SERVING
+sleep 60
+NEW_REV=$(gcloud run services describe syrabit-backend \
+  --region=asia-south1 \
+  --project=blissful-acumen-495019-t6 \
+  --format="value(status.latestReadyRevisionName)")
+echo "Now serving: $NEW_REV"
+# Confirm health
+curl -sf https://api.syrabit.ai/api/v1/health | jq '{status,mongodb_initialized,startup_errors}'
+
+Expected: new revision number (format syrabit-backend-00459 or higher), status: healthy, mongodb_initialized: true, startup_errors: [].
+
+Action 7.4 — Check full env var inventory on new revision
+
+gcloud run services describe syrabit-backend \
+  --region=asia-south1 \
+  --project=blissful-acumen-495019-t6 \
+  --format=json \
+  | python3 -c "
+import json, sys
+svc = json.load(sys.stdin)
+containers = svc['spec']['template']['spec']['containers']
+for c in containers:
+    envs = c.get('env', [])
+    print(f'Total env vars: {len(envs)}')
+    plain = [(e['name'],e['value']) for e in envs if 'value' in e]
+    secrets = [(e['name'],e['valueFrom']['secretKeyRef']['name']) for e in envs if 'valueFrom' in e]
+    print('Plain env vars:')
+    for k,v in sorted(plain): print(f'  {k}={v}')
+    print('Secret mounts:')
+    for k,v in sorted(secrets): print(f'  {k} -> SM:{v}')
+    # Check for bad patterns
+    bad = [v for _,v in secrets if v.upper() == v and v not in ('GOOGLE_APPLICATION_CREDENTIALS_JSON','SENTRY_DSN','VERTEX_SEARCH_DATASTORE_ID')]
+    if bad: print(f'WARNING: uppercase SM refs: {bad}')
+"
+
+Expected: 28 total env vars. No uppercase SM refs (except GOOGLE_APPLICATION_CREDENTIALS_JSON, SENTRY_DSN, and any others confirmed uppercase in SM). SARVAM_MODEL=sarvam-30b in plain vars. No VERTEX_SEARCH_DATASTORE_ID in plain vars (comes from SM). VERTEX_PROJECT_ID=blissful-acumen-495019-t6 in plain vars.
+
+Phase 8 — Write infra/scripts/fullstack-audit.sh (the persistent check)
+The audit script must be runnable from Cloud Shell and produce actionable output. Structure:
+
+#!/bin/bash
+# fullstack-audit.sh — Run from Cloud Shell: bash infra/scripts/fullstack-audit.sh
+# Exit code 0 = all checks pass. Exit code 1 = at least one failure.
+PROJECT="blissful-acumen-495019-t6"
+REGION="asia-south1"
+SERVICE="syrabit-backend"
+CF_ACCT="d66e40eac539fff1db270fddf384a5ec"
+WORKER="syrabitworker-prod"
+PAGES_PROJECT="syrabitfrontend"
+BASE_URL="https://api.syrabit.ai"
+PASS=0; FAIL=0
+check() {
+  local id="$1" desc="$2" result="$3" fix="$4"
+  if [[ "$result" == "pass" ]]; then
+    echo "  ✅ [$id] $desc"
+    ((PASS++))
+  else
+    echo "  ❌ [$id] $desc"
+    echo "     Result: $result"
+    [[ -n "$fix" ]] && echo "     Fix: $fix"
+    ((FAIL++))
+  fi
+}
+echo ""
+echo "═══════════════════════════════════════════════════"
+echo " LAYER 1: GCP Secret Manager"
+echo "═══════════════════════════════════════════════════"
+REQUIRED_SECRETS=(mongodb-uri jwt-secret edge-shared-secret sarvam-api-key gemini-api-key
+  admin-jwt-secret reset-token-secret translate-cron-secret indexnow-api-key
+  indexnow-internal-secret posthog-api-key resend-api-key razorpay-key-id
+  razorpay-key-secret razorpay-webhook-secret jwt-private-key jwt-public-key
+  GOOGLE_APPLICATION_CREDENTIALS_JSON SENTRY_DSN VERTEX_SEARCH_DATASTORE_ID
+  cf-pages-deploy-hook CF_ACCOUNT_ID CF_KV_API_TOKEN CF_KV_NAMESPACE_ID GCS_CONTENT_BUCKET)
+for secret in "${REQUIRED_SECRETS[@]}"; do
+  result=$(gcloud secrets versions access latest --secret="$secret" \
+    --project="$PROJECT" 2>/dev/null && echo "pass" || echo "secret not found or inaccessible")
+  fix="gcloud secrets create $secret --project=$PROJECT --replication-policy=automatic"
+  check "SM-$(echo $secret | tr '[:lower:]' '[:upper:]' | tr '-' '_' | cut -c1-15)" \
+    "Secret '$secret' readable" "$result" "$fix"
+done
+# JWT_SECRET length check
+JWT_VAL=$(gcloud secrets versions access latest --secret=jwt-secret --project="$PROJECT" 2>/dev/null)
+JWT_LEN=${#JWT_VAL}
+[[ $JWT_LEN -ge 32 ]] && JWT_LEN_OK="pass" || JWT_LEN_OK="length=$JWT_LEN (need >=32)"
+check "SM-JWT-LEN" "jwt-secret length >= 32 chars" "$JWT_LEN_OK" \
+  "python3 -c \"import secrets; print(secrets.token_hex(32))\" | gcloud secrets versions add jwt-secret --data-file=-"
+# Orphan uppercase check
+for UPPER in JWT_SECRET EDGE_SHARED_SECRET MONGODB_URI; do
+  LOWER=$(echo $UPPER | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+  UPPER_EXISTS=$(gcloud secrets describe "$UPPER" --project="$PROJECT" 2>/dev/null && echo yes || echo no)
+  LOWER_EXISTS=$(gcloud secrets describe "$LOWER" --project="$PROJECT" 2>/dev/null && echo yes || echo no)
+  if [[ "$UPPER_EXISTS" == "yes" && "$LOWER_EXISTS" == "yes" ]]; then
+    echo "  ⚠️  [SM-ORPHAN] Both '$UPPER' and '$LOWER' exist — verify values match, then delete '$UPPER'"
+  fi
+done
+echo ""
+echo "═══════════════════════════════════════════════════"
+echo " LAYER 2: Cloud Run Service Spec"
+echo "═══════════════════════════════════════════════════"
+CR_JSON=$(curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/services/$SERVICE")
+# Check for full-path secret refs
+FULL_PATH_COUNT=$(echo "$CR_JSON" | python3 -c \
+  "import json,sys,re; d=json.load(sys.stdin); print(str(d).count('projects/$PROJECT/secrets/'))")
+[[ "$FULL_PATH_COUNT" == "0" ]] && FP_RESULT="pass" || FP_RESULT="$FULL_PATH_COUNT full-path refs found"
+check "CR-FULLPATH" "No full-path secret refs in service spec" "$FP_RESULT" \
+  "Use Cloud Run v2 REST PATCH to normalize — see memory/syrabit-cloudrun-deploy-root-causes.md"
+# Check SARVAM_MODEL
+SARVAM_MODEL_VAL=$(echo "$CR_JSON" | python3 -c \
+  "import json,sys; d=json.load(sys.stdin); envs=d['template']['containers'][0].get('env',[]); print(next((e['value'] for e in envs if e['name']=='SARVAM_MODEL'),'MISSING'))")
+[[ "$SARVAM_MODEL_VAL" == "sarvam-30b" ]] && SM_RESULT="pass" || SM_RESULT="SARVAM_MODEL=$SARVAM_MODEL_VAL (want sarvam-30b)"
+check "CR-SARVAM" "SARVAM_MODEL=sarvam-30b" "$SM_RESULT" \
+  "gcloud run services update $SERVICE --region=$REGION --update-env-vars=SARVAM_MODEL=sarvam-30b"
+# Check stale VERTEX_SEARCH_* plain env vars
+for VAR in VERTEX_SEARCH_DATASTORE_ID VERTEX_SEARCH_LOCATION VERTEX_SEARCH_SERVING_CONFIG; do
+  STALE=$(echo "$CR_JSON" | python3 -c \
+    "import json,sys; d=json.load(sys.stdin); envs=d['template']['containers'][0].get('env',[]); \
+     plain=[e for e in envs if e['name']=='$VAR' and 'value' in e]; print('stale' if plain else 'pass')")
+  check "CR-$VAR" "No plain '$VAR' env var (should come from SM)" "$STALE" \
+    "gcloud run services update $SERVICE --region=$REGION --remove-env-vars=$VAR"
+done
+# Check VERTEX_PROJECT_ID is present (needed by embedder)
+VPROJ=$(echo "$CR_JSON" | python3 -c \
+  "import json,sys; d=json.load(sys.stdin); envs=d['template']['containers'][0].get('env',[]); \
+   print(next((e['value'] for e in envs if e['name']=='VERTEX_PROJECT_ID'),'MISSING'))")
+[[ "$VPROJ" != "MISSING" ]] && VP_RESULT="pass" || VP_RESULT="MISSING — mongo_vector_search embedding will fail"
+check "CR-VERTEX-PROJ" "VERTEX_PROJECT_ID present (needed by text-embedding-005)" "$VP_RESULT" \
+  "gcloud run services update $SERVICE --region=$REGION --update-env-vars=VERTEX_PROJECT_ID=$PROJECT"
+echo ""
+echo "═══════════════════════════════════════════════════"
+echo " LAYER 3: cloudbuild.yaml"
+echo "═══════════════════════════════════════════════════"
+# Check for uppercase SM refs
+UPPER_COUNT=$(grep -c "=UPPER_CASE_PATTERN:latest" cloudbuild.yaml 2>/dev/null || \
+  grep -oP '=\K[A-Z_]+(?=:latest)' cloudbuild.yaml | grep -v "GOOGLE_APPLICATION_CREDENTIALS_JSON\|SENTRY_DSN\|VERTEX_SEARCH_DATASTORE_ID" | wc -l)
+[[ "$UPPER_COUNT" == "0" ]] && CB_RESULT="pass" || CB_RESULT="$UPPER_COUNT potential uppercase SM refs"
+check "CB-CASING" "No unexpected uppercase SM secret refs in cloudbuild.yaml" "$CB_RESULT" \
+  "Replace uppercase SM refs with lowercase equivalents — see Phase 2 of this plan"
+SARVAM_CB=$(grep -o "SARVAM_MODEL=sarvam-[^ ,\\\\]*" cloudbuild.yaml | head -1)
+[[ "$SARVAM_CB" == "SARVAM_MODEL=sarvam-30b" ]] && CB_SARVAM="pass" || CB_SARVAM="found: '$SARVAM_CB'"
+check "CB-SARVAM" "cloudbuild.yaml SARVAM_MODEL=sarvam-30b" "$CB_SARVAM" \
+  "Edit cloudbuild.yaml line 102: change sarvam-m1 to sarvam-30b"
+for VAR in VERTEX_SEARCH_DATASTORE_ID VERTEX_SEARCH_LOCATION VERTEX_SEARCH_SERVING_CONFIG; do
+  IN_UPDATE_ENV=$(grep "update-env-vars" cloudbuild.yaml | grep -c "$VAR" || echo "0")
+  [[ "$IN_UPDATE_ENV" == "0" ]] && CB_V="pass" || CB_V="$VAR still in --update-env-vars"
+  check "CB-$VAR" "cloudbuild.yaml: '$VAR' NOT in --update-env-vars" "$CB_V" \
+    "Remove $VAR from --update-env-vars; add --remove-env-vars=$VAR"
+done
+echo ""
+echo "═══════════════════════════════════════════════════"
+echo " LAYER 4: deploy.yml"
+echo "═══════════════════════════════════════════════════"
+GH_UPPER=$(grep -oP '=\K[A-Z_]+(?=:latest)' .github/workflows/deploy.yml \
+  | grep -v "GOOGLE_APPLICATION_CREDENTIALS_JSON\|SENTRY_DSN\|VERTEX_SEARCH_DATASTORE_ID" | tr '\n' ' ')
+[[ -z "$GH_UPPER" ]] && GH_RESULT="pass" || GH_RESULT="uppercase SM refs: $GH_UPPER"
+check "GH-CASING" "No unexpected uppercase SM refs in deploy.yml" "$GH_RESULT" \
+  "Replace uppercase SM refs with verified lowercase SM names"
+HOOK_IN_CHECK=$(grep -c "_check.*cf-pages-deploy-hook" .github/workflows/deploy.yml 2>/dev/null || echo 0)
+[[ "$HOOK_IN_CHECK" -gt 0 ]] && HOOK_RESULT="pass" || HOOK_RESULT="cf-pages-deploy-hook not in _check() block"
+check "GH-HOOK" "cf-pages-deploy-hook inside _check() (not main --update-secrets)" "$HOOK_RESULT" \
+  "Move cf-pages-deploy-hook into the conditional _check() block"
+echo ""
+echo "═══════════════════════════════════════════════════"
+echo " LAYER 5: CF Edge Worker"
+echo "═══════════════════════════════════════════════════"
+BACKEND_URL_VAL=$(curl -sf \
+  -H "Authorization: Bearer $CLOUDFLARE_KV_API_TOKEN" \
+  "https://api.cloudflare.com/client/v4/accounts/$CF_ACCT/workers/scripts/$WORKER/bindings" \
+  | python3 -c "import json,sys; \
+    bs=json.load(sys.stdin).get('result',[]); \
+    print(next((b.get('text','') for b in bs if b['name']=='BACKEND_URL'),'MISSING'))")
+[[ "$BACKEND_URL_VAL" == "https://syrabit-backend-bl6wu3psza-el.a.run.app" ]] && BU_RESULT="pass" \
+  || BU_RESULT="BACKEND_URL='$BACKEND_URL_VAL'"
+check "EW-BACKEND" "CF Worker BACKEND_URL points to Cloud Run" "$BU_RESULT" \
+  "curl -X PATCH accounts/$CF_ACCT/workers/scripts/$WORKER/settings --form 'settings={...};type=application/json'"
+for SECRET in JWT_SECRET EDGE_SHARED_SECRET GOOGLE_SA_KEY; do
+  EXISTS=$(curl -sf -H "Authorization: Bearer $CLOUDFLARE_KV_API_TOKEN" \
+    "https://api.cloudflare.com/client/v4/accounts/$CF_ACCT/workers/scripts/$WORKER/bindings" \
+    | python3 -c "import json,sys; bs=json.load(sys.stdin).get('result',[]); \
+      print('pass' if any(b['name']=='$SECRET' for b in bs) else 'MISSING')")
+  check "EW-$SECRET" "CF Worker secret '$SECRET' binding exists" "$EXISTS" \
+    "echo -n \"\$(gcloud secrets versions access latest --secret=...)\" | npx wrangler secret put $SECRET --env production"
+done
+echo ""
+echo "═══════════════════════════════════════════════════"
+echo " LAYER 6: CF Pages"
+echo "═══════════════════════════════════════════════════"
+PAGES_ENV=$(curl -sf -H "Authorization: Bearer $CLOUDFLARE_KV_API_TOKEN" \
+  "https://api.cloudflare.com/client/v4/accounts/$CF_ACCT/pages/projects/$PAGES_PROJECT" \
+  | python3 -c "import json,sys; \
+    p=json.load(sys.stdin).get('result',{}); \
+    env=p.get('deployment_configs',{}).get('production',{}).get('env_vars',{}); \
+    print(env.get('VITE_BACKEND_URL',{}).get('value','MISSING'))")
+[[ "$PAGES_ENV" == "https://api.syrabit.ai" ]] && VITE_RESULT="pass" \
+  || VITE_RESULT="VITE_BACKEND_URL='$PAGES_ENV'"
+check "PA-VITE" "CF Pages VITE_BACKEND_URL=https://api.syrabit.ai" "$VITE_RESULT" \
+  "CF Dashboard → syrabitfrontend → Settings → Environment variables → Add VITE_BACKEND_URL"
+echo ""
+echo "═══════════════════════════════════════════════════"
+echo " LAYER 7: Live Health"
+echo "═══════════════════════════════════════════════════"
+HEALTH=$(curl -sf -w "\n%{http_code}" "$BASE_URL/api/v1/health" 2>/dev/null)
+HTTP_CODE=$(echo "$HEALTH" | tail -1)
+BODY=$(echo "$HEALTH" | head -1)
+[[ "$HTTP_CODE" == "200" ]] && H_RESULT="pass" || H_RESULT="HTTP $HTTP_CODE"
+check "LH-BASIC" "GET /api/v1/health returns 200" "$H_RESULT" \
+  "Check startup_errors field and Cloud Run logs"
+MONGO_OK=$(echo "$BODY" | python3 -c "import json,sys; d=json.load(sys.stdin); print('pass' if d.get('mongodb_initialized') else 'false')" 2>/dev/null)
+check "LH-MONGO" "mongodb_initialized=true in basic health" "${MONGO_OK:-parse-error}" \
+  "Check MONGODB_URI SM mount — secret ref must be mongodb-uri (lowercase)"
+DEEP=$(curl -sf "$BASE_URL/api/v1/health/deep" 2>/dev/null)
+for SVC in mongodb redis mongo_vector_search sarvam_ai; do
+  SVC_STATUS=$(echo "$DEEP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('$SVC',{}).get('status','MISSING'))" 2>/dev/null)
+  [[ "$SVC_STATUS" == "healthy" ]] && SVC_RESULT="pass" || SVC_RESULT="$SVC_STATUS"
+  check "LH-$SVC" "deep health: $SVC=healthy" "$SVC_RESULT" \
+    "Check Cloud Run env vars for missing/wrong secret for $SVC"
+done
+TOPIC_COUNT=$(echo "$DEEP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('mongo_vector_search',{}).get('topic_count',0))" 2>/dev/null)
+[[ "$TOPIC_COUNT" -gt 0 ]] && TC_RESULT="pass" || TC_RESULT="topic_count=$TOPIC_COUNT (expect 197)"
+check "LH-TOPICS" "mongo_vector_search topic_count > 0" "$TC_RESULT" \
+  "VERTEX_PROJECT_ID missing — embedder cannot initialize topic index"
+CORS_H=$(curl -sf -H "Origin: https://syrabit.ai" -I "$BASE_URL/api/v1/health" 2>&1 | grep -i "access-control-allow-origin")
+[[ "$CORS_H" == *"syrabit.ai"* ]] && CORS_RESULT="pass" || CORS_RESULT="ACAO header missing"
+check "LH-CORS" "CORS: Origin syrabit.ai → ACAO header present" "$CORS_RESULT" \
+  "Check applyCorsHeaders() called on all early-exit paths in apps/edge/src/index.ts"
+SEARCH=$(curl -sf "$BASE_URL/api/v1/content/search?q=force" -o /dev/null -w "%{http_code}" 2>/dev/null)
+[[ "$SEARCH" == "200" ]] && SRCH_RESULT="pass" || SRCH_RESULT="HTTP $SEARCH"
+check "LH-SEARCH" "GET /api/v1/content/search?q=force returns 200" "$SRCH_RESULT" \
+  "Verify public_content.py router is mounted at /api/v1/content — not /api/v1/public"
+echo ""
+echo "═══════════════════════════════════════════════════"
+echo " SUMMARY"
+echo "═══════════════════════════════════════════════════"
+echo "  PASSED: $PASS"
+echo "  FAILED: $FAIL"
+[[ $FAIL -eq 0 ]] && echo "  ✅ All checks passed" && exit 0 || echo "  ❌ $FAIL check(s) failed" && exit 1
+
+Phase 9 — Final smoke test and sign-off (3 actions)
+Action 9.1 — Run the existing smoke test
+
+BASE_URL=https://api.syrabit.ai bash scripts/fullstack-smoke-test.sh
+
+(Referenced in .github/workflows/smoke-test.yml. Checks /api/v1/health and /api/v1/content/library-bundle.)
+
+Action 9.2 — Run fullstack-audit.sh and confirm 0 failures
+
+bash infra/scripts/fullstack-audit.sh
+echo "Exit code: $?"
+
+All 35+ checks must print ✅. Exit code must be 0. If any ❌ appear, fix the specific issue using the printed fix command and re-run.
+
+Action 9.3 — Trigger Pages redeploy and confirm live
+
+# Rebuild with current env vars
+cd apps/frontend && npm run build
+CLOUDFLARE_ACCOUNT_ID=d66e40eac539fff1db270fddf384a5ec \
+  npx wrangler pages deploy dist \
+  --project-name syrabitfrontend \
+  --branch main \
+  --commit-dirty=true
+# Check the deploy URL returned and confirm it loads the React app
+
+Then test on both domains:
+
+curl -sf -o /dev/null -w "%{http_code}\n" https://syrabit.ai
+curl -sf -o /dev/null -w "%{http_code}\n" https://syrabitfrontend.pages.dev
+# Both should be 200 or 301
+
+⚠️ False positive: A 301 redirect is not a failure — it means the bare domain is redirecting to www. or vice versa, which is correct DNS behaviour. Only 4xx/5xx are failures.
+
+Phase 10 — Sentry Issue Audit & Fix (100 issues, 14-day window)
+All 100 Sentry issues fall into 8 root-cause groups. Fix each group, then verify zero new events appear in the Sentry dashboard within 30 minutes.
+
+Group A — sarvam-m1 deprecated model (195+ events, actively firing)
+Sentry issues: #015, #017, #023–025, #028, #062, #080 + cascades #003, #009, #013, #014
+
+Root cause: Cloud Run env var SARVAM_MODEL=sarvam-m1 overrides config.py:85 default (sarvam-30b). Every Sarvam API call returns HTTP 400 with "model sarvam-m1 not found". This is the single highest-impact fix — resolving it will also close the cascade issues (#003 chat_message_lost, #009 chat_upstream_failure, #013 chat_upstream_http_error, #014 chat_timeout) which are all downstream of Sarvam 400s.
+
+Audit check:
+
+gcloud run services describe syrabit-backend \
+  --region=asia-south1 --project=blissful-acumen-495019-t6 \
+  --format=json \
+  | python3 -c "
+import json, sys
+envs = json.load(sys.stdin)['spec']['template']['spec']['containers'][0]['env']
+val = next((e['value'] for e in envs if e.get('name') == 'SARVAM_MODEL'), 'MISSING')
+print(f'SARVAM_MODEL={val}')
+print('✅ correct' if val == 'sarvam-30b' else '❌ WRONG — still firing 400s')
+"
+
+Live patch (zero-downtime, no redeploy needed):
+
+gcloud run services update syrabit-backend \
+  --region=asia-south1 \
+  --project=blissful-acumen-495019-t6 \
+  --update-env-vars=SARVAM_MODEL=sarvam-30b
+
+New revision deploys in ~60s. Watch for SARVAM_MODEL=sarvam-30b in the new revision spec.
+
+Verify fix in Sentry: After patch, trigger a test chat and confirm no new sarvam-m1 events appear. The Sentry issue count for #017 should stop incrementing within 2 minutes.
+
+Also fix in both deploy scripts so it survives the next deploy:
+
+cloudbuild.yaml:102: SARVAM_MODEL=sarvam-m1 → sarvam-30b ✓ (covered in Phase 2)
+.github/workflows/deploy.yml:104: already sarvam-30b ✓
+Group B — Gemini / Vertex AI 404 model endpoint (50+ events)
+Sentry issues: #005, #006, #010, #011, #022, #029, #034–037, #063, #064
+
+Root cause: config.py:76 VERTEX_GEMINI_MODEL: str = "gemini-2.0-flash". The Vertex AI endpoint for gemini-2.0-flash (without a version suffix) returns 404 intermittently — Google deprecated the unversioned alias and requires gemini-2.0-flash-001 or the newer gemini-2.5-flash-preview-05-20. vertex_client.py:49 sets self.model = settings.VERTEX_GEMINI_MODEL at init time.
+
+Audit check:
+
+# Direct Vertex AI test — confirm which model name returns 200
+VERTEX_PROJECT="blissful-acumen-495019-t6"
+VERTEX_LOCATION="us-central1"
+ACCESS_TOKEN=$(gcloud auth print-access-token)
+for MODEL in "gemini-2.0-flash" "gemini-2.0-flash-001" "gemini-2.5-flash-preview-05-20" "gemini-1.5-flash-002"; do
+  STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
+    -X POST \
+    "https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${VERTEX_PROJECT}/locations/${VERTEX_LOCATION}/publishers/google/models/${MODEL}:generateContent" \
+    -H "Authorization: Bearer $ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"contents":[{"role":"user","parts":[{"text":"Say hi"}]}]}')
+  echo "$MODEL → HTTP $STATUS"
+done
+
+Use the first model that returns 200. Set it as the new VERTEX_GEMINI_MODEL value.
+
+Fix — update config.py:76:
+
+# Change from:
+VERTEX_GEMINI_MODEL: str = "gemini-2.0-flash"
+# Change to (use whichever passed above):
+VERTEX_GEMINI_MODEL: str = "gemini-2.0-flash-001"
+
+This requires a code deploy. Also add VERTEX_GEMINI_MODEL as an overridable env var (it already reads from settings so adding it as an SM-mounted env var allows hot-fixing without code changes):
+
+gcloud run services update syrabit-backend \
+  --region=asia-south1 --project=blissful-acumen-495019-t6 \
+  --update-env-vars=VERTEX_GEMINI_MODEL=gemini-2.0-flash-001
+
+Audit that VERTEX_LOCATION matches the model region: config.py:75 VERTEX_LOCATION: str = "us-central1". Vertex AI generative models are available in us-central1 but not always in asia-south1. The Cloud Run backend is in asia-south1 but the Vertex AI API call itself goes to the Vertex endpoint specified by VERTEX_LOCATION. Confirm: if VERTEX_LOCATION=asia-south1 is set on Cloud Run (as planned in Phase 2 fix), verify the Gemini model is available there:
+
+# Test asia-south1 endpoint
+curl -sf -o /dev/null -w "%{http_code}" \
+  "https://asia-south1-aiplatform.googleapis.com/v1/projects/blissful-acumen-495019-t6/locations/asia-south1/publishers/google/models/gemini-2.0-flash-001:generateContent" \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"contents":[{"role":"user","parts":[{"text":"Hi"}]}]}'
+
+If asia-south1 returns 404, keep VERTEX_LOCATION=us-central1 for Gemini — only change it for embedding if needed.
+
+Verify Sentry fix: Issue #005/006 gemini-2.0-flash endpoint 404 should show zero new events after the env var update.
+
+Group C — Chat save validation error (548 events — #004, highest count)
+Sentry issue: #004 Failed to save chat (attempt 2): validation error for Chat
+
+Root cause: chat.py:34 messages: List[dict] = []. The Chat document's messages field stores raw dicts. On the retry path (chat_service.py:451–468), if rag_sources contains non-JSON-serializable objects (e.g. ObjectId, datetime without isoformat, Pydantic models not serialized), Pydantic's validation on Chat(messages=[...]) fails with validation error. The attempt 2 label confirms the first save succeeded or was skipped and the retry failed.
+
+Audit check — read the exact error from Sentry/logs:
+
+gcloud logging read \
+  'resource.type="cloud_run_revision" resource.labels.service_name="syrabit-backend" jsonPayload.message=~"validation error for Chat"' \
+  --project=blissful-acumen-495019-t6 \
+  --freshness=24h \
+  --format="value(jsonPayload)" \
+  --limit=5
+
+The log output will show the exact field that fails validation. Common suspects:
+
+rag_sources containing MongoDB ObjectId objects (not JSON-serializable without str() cast)
+timestamp as a naive datetime (without timezone.utc) when the model field expects timezone-aware
+chapter_id as a PydanticObjectId when the message dict stores it as a string
+Fix — enforce serialization before Chat construction in chat_service.py:
+
+In chat_service.py:426 and 453, before constructing Chat(messages=[...]), serialize all message dicts:
+
+import json
+def _serialize_messages(messages: list) -> list:
+    """Ensure all message dict values are JSON-serializable before Chat save."""
+    try:
+        # Round-trip through JSON to flush out non-serializable types
+        return json.loads(json.dumps(messages, default=str))
+    except Exception:
+        return messages
+# Usage:
+chat_doc = Chat(
+    user_id=user_id,
+    messages=_serialize_messages(messages),
+    ...
+)
+
+The default=str fallback converts ObjectId/datetime/Pydantic models to their string representation. This is safe — all downstream consumers of the messages field already treat them as dicts.
+
+Also check Chat model index conflict: chat.py:41–44 defines compound indexes in Settings.indexes. Verify these don't conflict with any indexes created by create_indexes() in mongo.py (the dual-ownership TTL conflict pattern from syrabit-cloudrun-fixes.md — any plain index in Settings.indexes on the same field as a TTL index in create_indexes() causes IndexKeySpecsConflict code 85 on the second deploy).
+
+Verify fix: After deploy, confirm chat_message_lost counter in Sentry drops to zero for new sessions.
+
+Group D — PostHog 401 (354 events — #002)
+Sentry issue: #002 PostHog API key invalid (401)
+
+Root cause: config.py:121 POSTHOG_API_KEY: Optional[str] = None. PostHog has two types of API keys:
+
+Project API key (starts with phc_) — used for capturing events from backend SDKs. This is what the backend needs.
+Personal API key (starts with phx_) — used for the PostHog dashboard/REST API. This causes 401 when used as a capture key.
+If the SM secret posthog-api-key contains a personal key (phx_...), every analytics capture call returns 401.
+
+Audit check:
+
+POSTHOG_KEY=$(gcloud secrets versions access latest \
+  --secret=posthog-api-key \
+  --project=blissful-acumen-495019-t6 2>/dev/null)
+echo "Key prefix: ${POSTHOG_KEY:0:4}"
+# phc_ = project key (correct)
+# phx_ = personal key (wrong — will 401)
+# ph_  = old format
+
+Fix — get the correct project API key:
+
+PostHog Dashboard → Project Settings → Project API Key → copy the phc_... key
+Update SM secret:
+echo -n "phc_YOUR_PROJECT_KEY" | gcloud secrets versions add posthog-api-key \
+  --data-file=- \
+  --project=blissful-acumen-495019-t6
+# New SM version takes effect on next Cloud Run startup or after:
+gcloud run services update syrabit-backend \
+  --region=asia-south1 --project=blissful-acumen-495019-t6 \
+  --update-secrets=POSTHOG_API_KEY=posthog-api-key:latest
+
+Verify:
+
+POSTHOG_KEY=$(gcloud secrets versions access latest --secret=posthog-api-key --project=blissful-acumen-495019-t6)
+curl -sf -X POST "https://app.posthog.com/capture/" \
+  -H "Content-Type: application/json" \
+  -d "{\"api_key\":\"$POSTHOG_KEY\",\"event\":\"test\",\"distinct_id\":\"audit-test\"}" \
+  -o /dev/null -w "%{http_code}\n"
+# Expected: 200. If 401 → still wrong key type. If 200 → fixed.
+
+Group E — MongoDB AutoReconnect / connection drops (#001, #019, #032, #040)
+Sentry issues: #001 AutoReconnect: connection already closed, #019 MongoDB not initialized (/health/deep), #032 NetworkTimeout shard-00-01, #040 Failed to store dead letter: MongoDB not initialized
+
+Root cause: Cloud Run containers are ephemeral — they can be stopped and cold-started without notice. MongoDB connections in the pool become stale during idle periods. mongo.py:49–54 has serverSelectionTimeoutMS=30000, heartbeatFrequencyMS=10000, but is missing maxIdleTimeMS (connections sitting idle longer than Atlas's 30s idle timeout get closed by Atlas). When a request arrives after an idle period, the connection is already closed → AutoReconnect.
+
+Current pool config (config.py:57–59, mongo.py:49–54):
+
+maxPoolSize=50       # max connections
+minPoolSize=10       # keep 10 open always
+serverSelectionTimeoutMS=30000
+connectTimeoutMS=30000
+socketTimeoutMS=45000
+heartbeatFrequencyMS=10000  # ping Atlas every 10s
+
+Missing: maxIdleTimeMS, retryWrites, retryReads, waitQueueTimeoutMS.
+
+Fix — add resilience parameters to mongo.py:init_mongo() connection call:
+
+_client = AsyncIOMotorClient(
+    settings.MONGODB_URI,
+    maxPoolSize=settings.MONGODB_MAX_POOL_SIZE,
+    minPoolSize=settings.MONGODB_MIN_POOL_SIZE,
+    serverSelectionTimeoutMS=30000,
+    connectTimeoutMS=30000,
+    socketTimeoutMS=45000,
+    heartbeatFrequencyMS=10000,
+    maxIdleTimeMS=25000,    # close idle connections after 25s (Atlas kills at 30s)
+    retryWrites=True,       # auto-retry write operations on network errors
+    retryReads=True,        # auto-retry read operations on network errors
+    waitQueueTimeoutMS=5000, # fail fast if no connection available after 5s
+    appName="syrabit-backend",  # visible in Atlas → Cluster → Connections
+)
+
+Atlas IP allowlist verification (root cause of #019 MongoDB not initialized): Cloud Run uses dynamic Google IPs from 34.0.0.0/8, 35.0.0.0/8, 104.196.0.0/14. Atlas must allow 0.0.0.0/0 (all IPs) OR the full Google Cloud IP range for asia-south1. Verify:
+
+# Check current Atlas IP allowlist via Atlas API (requires Atlas API key)
+curl -sf -u "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+  "https://cloud.mongodb.com/api/atlas/v1.0/groups/$ATLAS_GROUP_ID/accessList" \
+  | python3 -c "import json,sys; [print(e['cidrBlock']) for e in json.load(sys.stdin)['results']]"
+# Must include 0.0.0.0/0 or GCP CIDR ranges
+
+If 0.0.0.0/0 is NOT present, add it:
+
+curl -sf -X POST -u "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+  -H "Content-Type: application/json" \
+  "https://cloud.mongodb.com/api/atlas/v1.0/groups/$ATLAS_GROUP_ID/accessList" \
+  -d '[{"cidrBlock":"0.0.0.0/0","comment":"Cloud Run dynamic IPs"}]'
+
+Verify fix:
+
+# Should return healthy with no AutoReconnect in logs after fix
+curl -sf https://api.syrabit.ai/api/v1/health/deep | jq '.mongodb'
+# Expected: {"status":"healthy","latency_ms":<N>}
+# Then check logs for AutoReconnect
+gcloud logging read \
+  'resource.type="cloud_run_revision" jsonPayload.message=~"AutoReconnect"' \
+  --project=blissful-acumen-495019-t6 --freshness=30m --limit=5
+
+Group F — Redis not initialized (#008 — 38 events)
+Sentry issue: #008 Redis not initialized (/health/deep)
+
+Root cause: redis.py:19–20: if not settings.UPSTASH_REDIS_REST_URL or not settings.UPSTASH_REDIS_REST_TOKEN: → disabled. The SM secrets for Upstash are uppercase (UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN) — the same uppercase/lowercase casing problem that broke MONGODB_URI. In deploy.yml and cloudbuild.yaml line 104, the entries UPSTASH_REDIS_REST_URL=UPSTASH_REDIS_REST_URL:latest and UPSTASH_REDIS_REST_TOKEN=UPSTASH_REDIS_REST_TOKEN:latest reference the uppercase SM secret names. If those uppercase secrets don't exist in SM (only lowercase do), the env vars are never mounted → Redis stays disabled → runtime_error("Redis not initialized") on every cache operation.
+
+Audit check — run both simultaneously:
+
+# Check SM secret exists
+gcloud secrets describe UPSTASH_REDIS_REST_URL --project=blissful-acumen-495019-t6 2>&1 | grep -E "name|NOT_FOUND"
+gcloud secrets describe UPSTASH_REDIS_REST_TOKEN --project=blissful-acumen-495019-t6 2>&1 | grep -E "name|NOT_FOUND"
+# Check Cloud Run mount
+gcloud run services describe syrabit-backend --region=asia-south1 --project=blissful-acumen-495019-t6 --format=json \
+  | python3 -c "
+import json, sys
+envs = json.load(sys.stdin)['spec']['template']['spec']['containers'][0]['env']
+for e in envs:
+    if 'UPSTASH' in e.get('name',''):
+        src = e.get('value','') or e.get('valueFrom',{}).get('secretKeyRef',{}).get('secret','MISSING')
+        print(f'{e[\"name\"]} -> {src}')
+"
+
+Expected: both env vars mapped to their SM secrets.
+
+Fix if SM secret names are confirmed uppercase (no rename needed — just mount correctly):
+
+gcloud run services update syrabit-backend \
+  --region=asia-south1 --project=blissful-acumen-495019-t6 \
+  --update-secrets=UPSTASH_REDIS_REST_URL=UPSTASH_REDIS_REST_URL:latest,UPSTASH_REDIS_REST_TOKEN=UPSTASH_REDIS_REST_TOKEN:latest
+
+Fix if SM only has lowercase versions:
+
+gcloud run services update syrabit-backend \
+  --region=asia-south1 --project=blissful-acumen-495019-t6 \
+  --update-secrets=UPSTASH_REDIS_REST_URL=upstash-redis-rest-url:latest,UPSTASH_REDIS_REST_TOKEN=upstash-redis-rest-token:latest
+
+Update cloudbuild.yaml and deploy.yml with the confirmed SM names (same fix as Group A in Phase 2/3).
+
+Verify:
+
+curl -sf https://api.syrabit.ai/api/v1/health/deep | jq '.redis'
+# Expected: {"status":"healthy","latency_ms":<N>}
+
+Group G — Resend API key invalid (#016 — 16 events, signup broken)
+Sentry issue: #016 Resend email 401 Unauthorized
+
+Root cause: The Resend API key stored in SM is expired, revoked, or from the wrong Resend account. Every signup email attempt fails silently until Sentry catches it.
+
+Audit check:
+
+RESEND_KEY=$(gcloud secrets versions access latest \
+  --secret=resend-api-key \
+  --project=blissful-acumen-495019-t6 2>/dev/null \
+  || gcloud secrets versions access latest --secret=RESEND_API_KEY --project=blissful-acumen-495019-t6 2>/dev/null)
+echo "Key prefix: ${RESEND_KEY:0:3} (should be 're_')"
+# Live test against Resend API
+curl -sf -X POST "https://api.resend.com/emails" \
+  -H "Authorization: Bearer $RESEND_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"from":"noreply@syrabit.ai","to":["test@example.com"],"subject":"API key test","html":"<p>test</p>"}' \
+  | jq '{id,error}'
+
+A 401 response confirms the key is invalid. A 422 with "The from address must be a verified domain" actually confirms the key IS valid (422 = domain not verified, not auth failure).
+
+Fix — regenerate from Resend dashboard:
+
+Resend Dashboard → API Keys → Create new key → name: syrabit-production → copy
+Update SM:
+echo -n "re_YOUR_NEW_KEY" | gcloud secrets versions add resend-api-key \
+  --data-file=- --project=blissful-acumen-495019-t6
+# Restart Cloud Run to pick up new version (or wait for next deploy)
+gcloud run services update syrabit-backend \
+  --region=asia-south1 --project=blissful-acumen-495019-t6 \
+  --update-secrets=RESEND_API_KEY=resend-api-key:latest
+
+Group H — Google TTS 403 Forbidden (#026, #027 — 11 events)
+Sentry issues: #026, #027 Google TTS 403 Forbidden
+
+Root cause: vertex_client.py:314–373 — TTS uses texttospeech.googleapis.com/v1/text:synthesize with an OAuth2 access token from _get_access_token() (the SA JSON key). The backend SA syrabit-backend-sa may be missing roles/cloudtts.serviceAgent or the Cloud Text-to-Speech API may not be enabled in the project.
+
+Audit check — run simultaneously:
+
+# 1. Check if Cloud TTS API is enabled
+gcloud services list --project=blissful-acumen-495019-t6 --enabled \
+  | grep -i "texttospeech"
+# Expected: "texttospeech.googleapis.com  Cloud Text-to-Speech API"
+# If missing → API not enabled
+# 2. Check SA IAM roles
+gcloud projects get-iam-policy blissful-acumen-495019-t6 \
+  --flatten="bindings[].members" \
+  --format="table(bindings.role)" \
+  --filter="bindings.members:syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com" \
+  | grep -i "tts\|speech\|texttospeech"
+
+Fix A — enable Cloud TTS API if missing:
+
+gcloud services enable texttospeech.googleapis.com \
+  --project=blissful-acumen-495019-t6
+
+Fix B — add SA role if missing:
+
+gcloud projects add-iam-policy-binding blissful-acumen-495019-t6 \
+  --member="serviceAccount:syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com" \
+  --role="roles/cloudtts.serviceAgent" \
+  --condition=None
+# Note: --condition=None is required — without it gcloud prompts interactively and hangs in scripts
+
+Verify:
+
+ACCESS_TOKEN=$(gcloud auth print-access-token --impersonate-service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com)
+curl -sf -X POST "https://texttospeech.googleapis.com/v1/text:synthesize" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"input":{"text":"Hello"},"voice":{"languageCode":"en-US","ssmlGender":"NEUTRAL"},"audioConfig":{"audioEncoding":"MP3"}}' \
+  | jq 'if .audioContent then "✅ TTS works" else . end'
+
+Group I — JWT InvalidAlgorithmError on logout (#030, #031 — 5 events)
+Sentry issues: #030, #031 InvalidAlgorithmError: alg not allowed
+
+Root cause: JWT tokens issued while JWT_ALGORITHM=RS256 was set in Cloud Run (before the HS256 fix) are still circulating. When those tokens hit the logout endpoint, the decode call tries to verify them with the current algorithms=["HS256"] list — they were signed with RS256, so alg not allowed is raised. This is a temporary issue that will self-resolve as old RS256 tokens expire (JWT TTL). However, if the decode call doesn't explicitly pass algorithms=[settings.JWT_ALGORITHM], newer versions of PyJWT raise InvalidAlgorithmError even for HS256 tokens if the alg header doesn't match.
+
+Audit check:
+
+# Check current JWT_ALGORITHM in Cloud Run
+gcloud run services describe syrabit-backend \
+  --region=asia-south1 --project=blissful-acumen-495019-t6 --format=json \
+  | python3 -c "
+import json, sys
+envs = json.load(sys.stdin)['spec']['template']['spec']['containers'][0]['env']
+alg = next((e['value'] for e in envs if e.get('name')=='JWT_ALGORITHM'), 'MISSING')
+print(f'JWT_ALGORITHM={alg}')
+"
+# Should print: JWT_ALGORITHM=HS256
+
+Fix — add graceful multi-algorithm fallback in auth.py:
+
+In auth.py, find the jwt.decode() call (likely jose.jwt.decode() or PyJWT.decode()). Change it to try HS256 first, then RS256 as a fallback for legacy tokens, then fail cleanly:
+
+def decode_token(token: str) -> dict:
+    """Decode a JWT token — tries HS256 first, falls back to RS256 for legacy tokens."""
+    errors = []
+    for alg in ["HS256", "RS256"]:
+        try:
+            if alg == "HS256":
+                return jwt.decode(
+                    token,
+                    settings.JWT_SECRET,
+                    algorithms=["HS256"],
+                    options={"verify_exp": True}
+                )
+            else:
+                # Legacy RS256 tokens — only if RS256 keys are available
+                if not settings.JWT_PUBLIC_KEY:
+                    continue
+                return jwt.decode(
+                    token,
+                    settings.JWT_PUBLIC_KEY,
+                    algorithms=["RS256"],
+                    options={"verify_exp": True}
+                )
+        except Exception as e:
+            errors.append(f"{alg}: {e}")
+    raise ValueError(f"Token decode failed: {errors}")
+
+Once all RS256 tokens have expired (after the token TTL), remove the RS256 fallback.
+
+Verify: Check Sentry — new events should stop once the fallback is in place. Old events will self-resolve as tokens expire.
+
+Group J — Admin dashboard coroutine has no attribute to_list (#020, #021 — 51 events)
+Sentry issues: #020, #021 admin dashboard: coroutine has no attribute to_list
+
+Root cause: admin_content.py lines 130, 191, 227, 267, 323, 443, 469, 545, 879, 1002, 1003 — ALL call .to_list() without a length= argument. In newer Beanie/Motor, .find(...).to_list() (no argument) is deprecated and returns a coroutine object instead of awaiting a list. The calling code then tries to iterate the coroutine → AttributeError: 'coroutine' object has no attribute 'to_list' (or the outer to_list() call itself is the coroutine, and accessing attributes on it fails).
+
+Confirmed affected lines in admin_content.py:
+
+130:  boards = await Board.find_all().skip(skip).limit(limit).to_list()
+191:  classes = await Class.find(query).skip(skip).limit(limit).to_list()
+227:  streams = await Stream.find(query).skip(skip).limit(limit).to_list()
+267:  subjects = await Subject.find(query).skip(skip).limit(limit).to_list()
+323:  chapters = await Chapter.find(query).skip(skip).limit(limit).to_list()
+443:  chapters = await Chapter.find({"published_topics.id": topic_id}).to_list()
+469:  chapters = await Chapter.find({"published_topics.id": topic_id}).to_list()
+545:  ).to_list()
+879:  docs = await CmsDocument.find().sort([("updated_at", -1)]).to_list()
+1002: Chapter.find_all().to_list(),     ← inside asyncio.gather — also broken
+1003: Subject.find_all().to_list(),     ← inside asyncio.gather — also broken
+
+Fix — add length=None to every .to_list() call in admin_content.py: length=None is the Motor/Beanie API for "return all results" while still being an awaitable coroutine with a concrete return type. For paginated endpoints, use length=limit instead.
+
+# Before:
+boards = await Board.find_all().skip(skip).limit(limit).to_list()
+# After:
+boards = await Board.find_all().skip(skip).limit(limit).to_list(length=limit)
+# Before (unbounded):
+chapters = await Chapter.find({"published_topics.id": topic_id}).to_list()
+# After:
+chapters = await Chapter.find({"published_topics.id": topic_id}).to_list(length=None)
+# Before (inside asyncio.gather):
+Chapter.find_all().to_list(),
+# After:
+Chapter.find_all().to_list(length=None),
+
+All 11 occurrences must be fixed. Run a grep to confirm no .to_list() calls remain without a length argument:
+
+grep -n "\.to_list()" apps/backend/app/api/v1/admin_content.py
+# Expected: zero output after fix
+
+Group K — Vertex Search 400 tier_access filter (#018 — 8 events)
+Sentry issue: #018 Vertex Search 400: tier_access field unsupported
+
+Root cause: vertex_search.py — a tier_access = "free" filter was reintroduced. The SEARCH_TIER_STANDARD engine does not support tier_access as a filterable field (it was never registered in the datastore schema). Any non-None filter_expr that references tier_access causes a 400 on every search call → circuit breaker trips → zero RAG results for all users.
+
+Audit check:
+
+grep -n "filter_expr\|tier_access\|filter=" apps/backend/app/services/vertex_search.py
+# Must return: filter_expr is hardcoded to None (or not present at all)
+# If it returns any line with tier_access in a filter_expr — that's the bug
+
+Fix — confirm filter_expr = None in search_context():
+
+# In vertex_search.py search_context() call:
+request = discoveryengine.SearchRequest(
+    serving_config=serving_config,
+    query=query,
+    page_size=page_size,
+    content_search_spec=discoveryengine.SearchRequest.ContentSearchSpec(
+        snippet_spec=discoveryengine.SearchRequest.ContentSearchSpec.SnippetSpec(
+            return_snippet=True,
+            max_snippet_count=1,
+        )
+        # NO ExtractiveContentSpec — Standard tier only supports SnippetSpec
+    ),
+    filter=None,  # DO NOT add tier_access here — field not in datastore schema
+)
+
+The filter=None line must be explicit (not just absent) to prevent accidental re-introduction.
+
+Verify:
+
+# Search must return results and NOT log a 400 error
+curl -sf "https://api.syrabit.ai/api/v1/content/search?q=force" | jq '.total'
+# AND
+gcloud logging read \
+  'resource.type="cloud_run_revision" jsonPayload.message=~"Vertex Search 400"' \
+  --project=blissful-acumen-495019-t6 --freshness=30m --limit=3
+# Expected: zero log entries
+
+Group L — Embedding API 429 rate limits (#012, #041–#100 — 160+ events)
+Sentry issues: #012 Embedding API error: 429 rate limit (ongoing), #041–#100 (bulk publish run Jun 7)
+
+Root cause: Vertex AI text-embedding-005 has a quota of 1500 requests/minute for the us-central1 embedding endpoint. During bulk chapter publish, mongo_vector_search.py calls the embedding API once per topic without any rate limiting or exponential backoff → 429 bursts. Issue #012 fires even outside bulk runs (chat-time embedding for vector search) because Cold Run instances all warm up simultaneously → concurrent embedding requests spike.
+
+Audit — check current retry logic:
+
+grep -n "retry\|backoff\|sleep\|429\|ResourceExhausted\|RESOURCE_EXHAUSTED\|quota" \
+  apps/backend/app/services/mongo_vector_search.py \
+  apps/backend/app/services/content_generation.py
+# If zero output: no retry logic exists → must add
+
+Fix A — add exponential backoff to embedding calls in mongo_vector_search.py:
+
+import asyncio
+from google.api_core.exceptions import ResourceExhausted
+async def _get_embedding_with_retry(text: str, max_retries: int = 3) -> list[float]:
+    """Get text embedding with exponential backoff on 429."""
+    for attempt in range(max_retries):
+        try:
+            return await _get_embedding(text)
+        except ResourceExhausted as e:
+            if attempt == max_retries - 1:
+                raise
+            wait = 2 ** attempt  # 1s, 2s, 4s
+            logger.warning(f"Embedding rate limited (attempt {attempt+1}), retrying in {wait}s")
+            await asyncio.sleep(wait)
+        except Exception:
+            raise
+
+Fix B — add batch throttling in content_generation.py for bulk publish:
+
+# When embedding multiple topics in bulk, add delay between batches:
+EMBEDDING_BATCH_SIZE = 10   # process 10 topics at a time
+EMBEDDING_BATCH_DELAY = 2.0  # seconds between batches
+for i in range(0, len(topics), EMBEDDING_BATCH_SIZE):
+    batch = topics[i:i + EMBEDDING_BATCH_SIZE]
+    await asyncio.gather(*[embed_topic(t) for t in batch])
+    if i + EMBEDDING_BATCH_SIZE < len(topics):
+        await asyncio.sleep(EMBEDDING_BATCH_DELAY)
+
+Fix C — request quota increase from GCP Console: GCP Console → IAM & Admin → Quotas → search textembedding → Embedding requests per minute → Request increase to 5000/min for us-central1.
+
+Verify (after fix):
+
+# Trigger a chat and watch for no 429 embedding errors
+curl -sf -X POST https://api.syrabit.ai/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"What is Newton second law?","language":"en"}' | jq '.sources | length'
+# Expected: > 0 sources (embedding succeeded)
+gcloud logging read \
+  'resource.type="cloud_run_revision" jsonPayload.message=~"429"' \
+  --project=blissful-acumen-495019-t6 --freshness=15m --limit=3
+# Expected: zero
+
+Sentry Audit Verification — final check across all groups
+After all fixes are deployed, run this sweep to confirm zero new events across all Sentry issue groups:
+
+# 1. Sarvam model (Group A)
+curl -sf -X POST https://api.syrabit.ai/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"সালোকসংশ্লেষণ কী?","language":"as"}' \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print('✅ Sarvam OK' if d.get('model','').startswith('sarvam') else f'❌ model={d.get(\"model\")}')"
+# 2. Gemini model (Group B)
+gcloud logging read \
+  'resource.type="cloud_run_revision" jsonPayload.message=~"gemini.*404|404.*gemini"' \
+  --project=blissful-acumen-495019-t6 --freshness=1h --limit=3
+# 3. Chat save (Group C)
+gcloud logging read \
+  'resource.type="cloud_run_revision" jsonPayload.message=~"validation error for Chat"' \
+  --project=blissful-acumen-495019-t6 --freshness=1h --limit=3
+# 4. PostHog (Group D)
+gcloud logging read \
+  'resource.type="cloud_run_revision" jsonPayload.message=~"PostHog.*401|401.*PostHog"' \
+  --project=blissful-acumen-495019-t6 --freshness=1h --limit=3
+# 5. MongoDB connections (Group E)
+curl -sf https://api.syrabit.ai/api/v1/health/deep | jq '{mongodb,redis}'
+# 6. Admin dashboard (Group J)
+curl -sf -H "Cookie: admin_session=<valid_session>" \
+  https://api.syrabit.ai/api/v1/admin/content/boards | jq 'length'
+# Must be a number, not an error
+# 7. Vertex Search filter (Group K)
+curl -sf "https://api.syrabit.ai/api/v1/content/search?q=force" | jq '.total'
+# Must be > 0
+# 8. All 100 issues summary — check Sentry for zero new events in last 30 min
+echo "Check Sentry dashboard: syrabit/javascript-react → Issues → Last 30 min"
+echo "All resolved issue groups should show 0 new events"
+
+Relevant files
+cloudbuild.yaml:102-110
+.github/workflows/deploy.yml:104-147
+apps/edge/wrangler.toml:86-90
+apps/edge/src/index.ts
+apps/edge/src/middleware/cors.ts:6
+apps/backend/app/api/v1/health.py:201-232
+apps/backend/app/api/v1/public_content.py:984
+apps/backend/app/api/v1/admin_content.py:130-1003
+apps/backend/app/config.py:49-51,57-59,74-85,121-122,253
+apps/backend/app/db/mongo.py:30-55
+apps/backend/app/db/redis.py:19-37
+apps/backend/app/core/auth.py
+apps/backend/app/models/chat.py
+apps/backend/app/services/chat_service.py:412-490
+apps/backend/app/services/vertex_search.py
+apps/backend/app/services/mongo_vector_search.py
+apps/backend/app/services/content_generation.py
+apps/backend/app/services/ai/vertex_client.py:201-373
+apps/backend/app/services/content_publisher.py:295
+apps/frontend/public/_routes.json
+apps/frontend/public/_worker.js:118
+infra/scripts/cloudflare-worker-secrets.sh
+infra/scripts/gcp-full-setup.sh
+scripts/fullstack-smoke-test.sh
