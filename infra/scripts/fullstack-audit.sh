@@ -132,7 +132,7 @@ echo "════════════════════════�
 
 # Intentionally uppercase in Secret Manager (GCP secret names created with these exact names).
 # Any uppercase SM ref NOT in this list is likely a mis-cased name that will fail at deploy time.
-_ALLOWED_UPPER="GOOGLE_APPLICATION_CREDENTIALS_JSON|SENTRY_DSN|VERTEX_SEARCH_DATASTORE_ID|CF_ACCOUNT_ID|CF_KV_API_TOKEN|CF_KV_NAMESPACE_ID|GCS_CONTENT_BUCKET|CF_PAGES_DEPLOY_HOOK|CF_KV_NAMESPACE"
+_ALLOWED_UPPER="GOOGLE_APPLICATION_CREDENTIALS_JSON|SENTRY_DSN|VERTEX_SEARCH_DATASTORE_ID|CF_ACCOUNT_ID|CF_KV_API_TOKEN|CF_KV_NAMESPACE_ID|GCS_CONTENT_BUCKET|CF_PAGES_DEPLOY_HOOK|CF_KV_NAMESPACE|ADMIN_EMAIL|ADMIN_PASSWORD"
 
 UPPER_CB=$(grep -oP '=\K[A-Z_]+(?=:latest)' cloudbuild.yaml 2>/dev/null \
   | grep -v -E "^(${_ALLOWED_UPPER})$" \
@@ -147,7 +147,7 @@ check "CB-SARVAM" "cloudbuild.yaml SARVAM_MODEL=sarvam-30b" "$CB_SARVAM" \
   "Edit cloudbuild.yaml: change SARVAM_MODEL value to sarvam-30b"
 
 for VAR in VERTEX_SEARCH_DATASTORE_ID VERTEX_SEARCH_LOCATION VERTEX_SEARCH_SERVING_CONFIG; do
-  IN_UPDATE=$(grep "update-env-vars" cloudbuild.yaml 2>/dev/null | grep -c "$VAR" || echo "0")
+  IN_UPDATE=$(grep "update-env-vars" cloudbuild.yaml 2>/dev/null | grep "$VAR" | wc -l)
   [[ "$IN_UPDATE" == "0" ]] && CB_V="pass" || CB_V="$VAR still in --update-env-vars"
   check "CB-NOSTALE-$VAR" "cloudbuild.yaml: '$VAR' NOT in --update-env-vars" "$CB_V" \
     "Remove $VAR from --update-env-vars; add --remove-env-vars=$VAR"
@@ -176,9 +176,9 @@ GH_LOC=$(grep "VERTEX_LOCATION" .github/workflows/deploy.yml 2>/dev/null | grep 
 check "GH-VLOC" "deploy.yml VERTEX_LOCATION=asia-south1" "$GH_LOC_R" \
   "Edit deploy.yml: change VERTEX_LOCATION=us-central1 to VERTEX_LOCATION=asia-south1"
 
-HOOK_GH=$(grep -c "cf-pages-deploy-hook" .github/workflows/deploy.yml 2>/dev/null || echo "0")
+HOOK_GH=$(grep "cf-pages-deploy-hook" .github/workflows/deploy.yml 2>/dev/null | wc -l)
 HOOK_MAIN=$(grep -v "_check\|describe\|#" .github/workflows/deploy.yml 2>/dev/null \
-  | grep -c "cf-pages-deploy-hook" || echo "0")
+  | grep "cf-pages-deploy-hook" | wc -l)
 [[ "$HOOK_MAIN" == "0" ]] && HOOK_GH_R="pass" || HOOK_GH_R="cf-pages-deploy-hook in main --update-secrets (should be in _check block)"
 check "GH-HOOK" "cf-pages-deploy-hook NOT in main --update-secrets" "$HOOK_GH_R" \
   "Move cf-pages-deploy-hook into the conditional _check() block"
@@ -263,7 +263,7 @@ check "LH-MONGO" "mongodb_initialized=true" "$MONGO_OK" \
 DEEP=$(curl -sf "$BASE_URL/api/v1/health/deep" 2>/dev/null || echo "{}")
 for SVC in mongodb redis mongo_vector_search sarvam_ai; do
   SVC_STATUS=$(echo "$DEEP" | python3 -c \
-    "import json,sys; d=json.load(sys.stdin); print(d.get('$SVC',{}).get('status','MISSING'))" 2>/dev/null || echo "MISSING")
+    "import json,sys; d=json.load(sys.stdin); checks=d.get('checks',d); print(checks.get('$SVC',{}).get('status','MISSING'))" 2>/dev/null || echo "MISSING")
   [[ "$SVC_STATUS" == "healthy" ]] && SVC_R="pass" || SVC_R="$SVC_STATUS"
   check "LH-$SVC" "$SVC: healthy" "$SVC_R" \
     "Check Cloud Run logs for startup errors related to $SVC"
@@ -291,12 +291,12 @@ TOLIST=$(grep -rn "\.to_list()" apps/backend/app/api/v1/admin_content.py 2>/dev/
 check "CODE-TOLIST" "No bare .to_list() in admin_content.py" "$TL_R" \
   "Add length=limit or length=None to each .to_list() call"
 
-TIER_FILTER=$(grep -c "tier_access" apps/backend/app/services/search/vertex_search.py 2>/dev/null || echo "0")
+TIER_FILTER=$(grep -v '^\s*#' apps/backend/app/services/search/vertex_search.py 2>/dev/null | grep "tier_access" | wc -l)
 [[ "$TIER_FILTER" == "0" ]] && TF_R="pass" || TF_R="tier_access filter found in vertex_search.py (causes 400)"
 check "CODE-TIERFILTER" "No tier_access filter in vertex_search.py" "$TF_R" \
   "Set filter_expr = None in search_context() — tier_access field not in datastore schema"
 
-SARVAM_CODE=$(grep -o "sarvam-m1\|sarvam_m1" apps/backend/app/config.py 2>/dev/null || echo "")
+SARVAM_CODE=$(grep -v '^\s*#' apps/backend/app/config.py 2>/dev/null | grep -o "sarvam-m1\|sarvam_m1" || echo "")
 [[ -z "$SARVAM_CODE" ]] && SC_R="pass" || SC_R="sarvam-m1 (invalid model) found in config.py"
 check "CODE-SARVAM-MODEL" "No sarvam-m1 (invalid) in config.py" "$SC_R" \
   "Update SARVAM_MODEL default to sarvam-30b in config.py"
