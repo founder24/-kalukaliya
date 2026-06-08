@@ -60,7 +60,7 @@ class TopicMatcher:
     async def _load_embeddings(self) -> None:
         """Load all TopicEmbedding documents from MongoDB into memory."""
         try:
-            docs = await TopicEmbedding.find_all().to_list()
+            docs = await TopicEmbedding.find_all().to_list(length=None)
         except Exception as e:
             logger.error(f"Failed to load topic embeddings from MongoDB: {e}")
             # Issue #6: Use short TTL on error so we retry quickly

@@ -70,7 +70,7 @@ async def seo_pipeline_status(request: Request):
     """Generation/publish status per subject."""
 
     try:
-        subjects = await Subject.find_all().to_list()
+        subjects = await Subject.find_all().to_list(length=None)
     except Exception:
         return {"pipelines": [], "total_subjects": 0}
 
@@ -94,7 +94,7 @@ async def seo_pipeline_status(request: Request):
                     }
                 }
             ]
-        ).to_list()
+        ).to_list(length=None)
     except Exception:
         chapter_stats = []
 
@@ -139,7 +139,7 @@ async def seo_bulk_generate(request: Request, body: BulkGenerateRequest):
     except Exception:
         raise HTTPException(status_code=422, detail="One or more topic_ids are invalid ObjectIds")
     requested_ids = set(body.topic_ids)
-    chapters = await Chapter.find({"published_topics.id": {"$in": oid_list}}).to_list()
+    chapters = await Chapter.find({"published_topics.id": {"$in": oid_list}}).to_list(length=None)
     topics_to_generate = []
     for ch in chapters:
         for t in ch.published_topics:
@@ -175,7 +175,7 @@ async def seo_coverage(request: Request, subject_id: Optional[str] = Query(None)
         query = {}
         if subject_id:
             query["subject_id"] = PydanticObjectId(subject_id)
-        chapters = await Chapter.find(query).to_list()
+        chapters = await Chapter.find(query).to_list(length=None)
     except Exception:
         chapters = []
 

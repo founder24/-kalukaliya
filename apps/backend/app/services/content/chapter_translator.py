@@ -125,7 +125,7 @@ class ChapterTranslator:
                 {"content_as": {"$exists": False}},
             ]
 
-        chapters = await Chapter.find(query).limit(max_docs).to_list()
+        chapters = await Chapter.find(query).limit(max_docs).to_list(length=max_docs)
         total = len(chapters)
 
         total_with_en = await Chapter.find(

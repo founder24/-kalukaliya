@@ -127,7 +127,7 @@ async def get_feedback_stats(
         {"$sort": {"_id.lang": 1, "accuracy": -1}},
     ]
 
-    results = await ChatFeedback.aggregate(pipeline).to_list()
+    results = await ChatFeedback.aggregate(pipeline).to_list(length=None)
 
     stats = [
         AccuracyStat(

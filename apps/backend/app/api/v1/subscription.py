@@ -165,7 +165,7 @@ async def downgrade_expired_subscriptions(request: Request):
 
     expired_users = await User.find(
         {"cancel_at_period_end": True, "current_period_end": {"$lt": now}}
-    ).to_list()
+    ).to_list(length=None)
 
     downgraded = 0
     for u in expired_users:

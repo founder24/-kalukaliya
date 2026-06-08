@@ -58,11 +58,11 @@ async def _build_chapter_url_map() -> dict:
     Only chapters where notes_generated=True are included.
     """
     boards, classes, streams, subjects, chapters = await asyncio.gather(
-        Board.find().to_list(),
-        Class.find().to_list(),
-        Stream.find().to_list(),
-        Subject.find().to_list(),
-        ContentChapter.find({"notes_generated": True}).to_list(),
+        Board.find().to_list(length=None),
+        Class.find().to_list(length=None),
+        Stream.find().to_list(length=None),
+        Subject.find().to_list(length=None),
+        ContentChapter.find({"notes_generated": True}).to_list(length=None),
     )
     board_map = {str(b.id): b for b in boards}
     class_map = {str(c.id): c for c in classes}
@@ -336,10 +336,10 @@ async def sitemap_subjects():
 
     try:
         boards, classes, streams, subjects = await asyncio.gather(
-            Board.find().to_list(),
-            Class.find().to_list(),
-            Stream.find().to_list(),
-            Subject.find({"status": "active"}).to_list(),
+            Board.find().to_list(length=None),
+            Class.find().to_list(length=None),
+            Stream.find().to_list(length=None),
+            Subject.find({"status": "active"}).to_list(length=None),
         )
         board_map = {str(b.id): b for b in boards}
         class_map = {str(c.id): c for c in classes}
@@ -566,7 +566,7 @@ async def feed_subject_xml(subject_slug: str):
                     "published_at": 1,
                 }
             )
-            .to_list()
+            .to_list(length=None)
         )
         items_xml = []
         for obj in objects:

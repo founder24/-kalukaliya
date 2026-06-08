@@ -35,7 +35,7 @@ async def get_boards(response: Response):
     """Return all active/published boards."""
     response.headers["Cache-Control"] = "public, max-age=300, s-maxage=600"
     try:
-        boards = await Board.find({"status": {"$in": ["active", "published"]}}).to_list()
+        boards = await Board.find({"status": {"$in": ["active", "published"]}}).to_list(length=None)
         return [
             {"id": str(b.id), "name": b.name, "slug": b.slug, "status": b.status}
             for b in boards
@@ -53,7 +53,7 @@ async def get_classes(response: Response, board_id: Optional[str] = Query(None))
         query: dict = {"status": {"$in": ["active", "published"]}}
         if board_id:
             query["board_id"] = board_id
-        classes = await Class.find(query).to_list()
+        classes = await Class.find(query).to_list(length=None)
         return [
             {"id": str(c.id), "name": c.name, "board_id": str(c.board_id), "status": c.status}
             for c in classes
@@ -71,7 +71,7 @@ async def get_streams(response: Response, class_id: Optional[str] = Query(None))
         query: dict = {"status": {"$in": ["active", "published"]}}
         if class_id:
             query["class_id"] = class_id
-        streams = await Stream.find(query).to_list()
+        streams = await Stream.find(query).to_list(length=None)
         return [
             {"id": str(s.id), "name": s.name, "class_id": str(s.class_id), "status": s.status}
             for s in streams
@@ -93,7 +93,7 @@ async def get_subjects(
         query: dict = {"status": {"$in": ["active", "published"]}}
         if stream_id:
             query["stream_id"] = stream_id
-        subjects = await Subject.find(query).to_list()
+        subjects = await Subject.find(query).to_list(length=None)
         return [
             {
                 "id": str(s.id),
@@ -136,10 +136,10 @@ async def get_library_bundle(
 
     try:
         _status_q = {"status": {"$in": ["active", "published"]}}
-        boards = await Board.find(_status_q).to_list()
-        classes = await Class.find(_status_q).to_list()
-        streams = await Stream.find(_status_q).to_list()
-        chapters = await Chapter.find().to_list()
+        boards = await Board.find(_status_q).to_list(length=None)
+        classes = await Class.find(_status_q).to_list(length=None)
+        streams = await Stream.find(_status_q).to_list(length=None)
+        chapters = await Chapter.find().to_list(length=None)
     except Exception as e:
         logger.warning(f"Library bundle DB query failed (DB may not be ready): {e}")
         return {"boards": []}
@@ -147,7 +147,7 @@ async def get_library_bundle(
     # Load subjects separately so a validation error on one bad document
     # does not wipe out the entire library response.
     try:
-        subjects = await Subject.find(_status_q).to_list()
+        subjects = await Subject.find(_status_q).to_list(length=None)
     except Exception as subj_err:
         logger.error(
             f"Subject bulk load failed — attempting per-document fallback: {subj_err}"
@@ -418,7 +418,7 @@ async def resolve_subject(
     board_doc = await Board.find_one({"slug": board, "status": "active"})
     if not board_doc:
         # Fallback: try case-insensitive slugify match on name
-        all_boards = await Board.find({"status": "active"}).to_list()
+        all_boards = await Board.find({"status": "active"}).to_list(length=None)
         board_doc = next(
             (b for b in all_boards if _slugify(b.name) == board or b.slug == board),
             None,
@@ -427,7 +427,7 @@ async def resolve_subject(
         raise HTTPException(status_code=404, detail=f"Board '{board}' not found")
 
     # 2. Resolve class — Class has no stored slug, compute from name
-    classes = await Class.find({"board_id": board_doc.id, "status": "active"}).to_list()
+    classes = await Class.find({"board_id": board_doc.id, "status": "active"}).to_list(length=None)
     matching_class = next(
         (c for c in classes if _slugify(c.name) == class_slug),
         None,
@@ -441,7 +441,7 @@ async def resolve_subject(
     # 3. Load all streams for this class
     streams = await Stream.find(
         {"class_id": matching_class.id, "status": "active"}
-    ).to_list()
+    ).to_list(length=None)
     if not streams:
         raise HTTPException(
             status_code=404,
@@ -453,7 +453,7 @@ async def resolve_subject(
     stream_id_list = [s.id for s in streams]
     candidates = await Subject.find(
         {"stream_id": {"$in": stream_id_list}, "status": "active"}
-    ).to_list()
+    ).to_list(length=None)
 
     subject_doc = next(
         (s for s in candidates if (s.slug or _slugify(s.name)) == subject_slug),
@@ -514,7 +514,7 @@ async def get_chapters_by_subject(
     chapters = (
         await Chapter.find({"subject_id": subject_oid})
         .sort([("chapter_number", 1)])
-        .to_list()
+        .to_list(length=None)
     )
     return [
         {
@@ -652,7 +652,7 @@ async def _resolve_chapter_by_slug(
     # 1. Resolve board
     board_doc = await Board.find_one({"slug": board, "status": "active"})
     if not board_doc:
-        all_boards = await Board.find({"status": "active"}).to_list()
+        all_boards = await Board.find({"status": "active"}).to_list(length=None)
         board_doc = next(
             (b for b in all_boards if _slugify(b.name) == board or b.slug == board),
             None,
@@ -661,7 +661,7 @@ async def _resolve_chapter_by_slug(
         raise HTTPException(status_code=404, detail=f"Board '{board}' not found")
 
     # 2. Resolve class
-    classes = await Class.find({"board_id": board_doc.id, "status": "active"}).to_list()
+    classes = await Class.find({"board_id": board_doc.id, "status": "active"}).to_list(length=None)
     matching_class = next(
         (c for c in classes if _slugify(c.name) == class_slug),
         None,
@@ -675,7 +675,7 @@ async def _resolve_chapter_by_slug(
     # 3. Resolve streams
     streams = await Stream.find(
         {"class_id": matching_class.id, "status": "active"}
-    ).to_list()
+    ).to_list(length=None)
     if not streams:
         raise HTTPException(
             status_code=404,
@@ -696,7 +696,7 @@ async def _resolve_chapter_by_slug(
     stream_id_list = [s.id for s in target_streams]
     candidates = await Subject.find(
         {"stream_id": {"$in": stream_id_list}, "status": "active"}
-    ).to_list()
+    ).to_list(length=None)
 
     subject_doc = next(
         (s for s in candidates if (s.slug or _slugify(s.name)) == subject_slug),
@@ -712,7 +712,7 @@ async def _resolve_chapter_by_slug(
     chapters = (
         await Chapter.find({"subject_id": subject_doc.id})
         .sort("+chapter_number")
-        .to_list()
+        .to_list(length=None)
     )
 
     chapter_doc = None
@@ -911,7 +911,7 @@ async def get_question_papers(
             .sort("-year")
             .skip(skip)
             .limit(limit)
-            .to_list()
+            .to_list(length=limit)
         )
     except Exception as e:
         logger.warning(f"Question papers DB query failed: {e}")
@@ -959,7 +959,7 @@ async def get_cms_posts(
             .sort([("updated_at", -1)])
             .skip(skip)
             .limit(limit)
-            .to_list()
+            .to_list(length=limit)
         )
         items = [
             {

@@ -409,6 +409,20 @@ class ChatService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _serialize_messages(messages: list) -> list:
+        """Ensure all message dict values are JSON-serializable before Chat save.
+
+        Round-trips through JSON to flush out non-serializable types such as
+        ObjectId, datetime without isoformat, or Pydantic models.  The
+        default=str fallback converts them to their string representation,
+        which is safe since all downstream consumers treat messages as plain dicts.
+        """
+        try:
+            return json.loads(json.dumps(messages, default=str))
+        except Exception:
+            return messages
+
+    @staticmethod
     async def save_chat(
         user_id: str,
         session_id: Optional[str],
@@ -420,6 +434,10 @@ class ChatService:
         detected_lang: str = "unknown",
     ) -> None:
         """Persist chat to MongoDB. Designed to be called via asyncio.create_task."""
+        rag_sources = ChatService._serialize_messages([
+            {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
+            for c in context_chunks
+        ])
         try:
             from app.models.chat import Chat
 
@@ -433,10 +451,7 @@ class ChatService:
                 content=assistant_response,
                 model_used=target_model,
                 latency_ms=latency_ms,
-                rag_sources=[
-                    {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
-                    for c in context_chunks
-                ],
+                rag_sources=rag_sources,
             )
             await chat_doc.save()
 
@@ -460,10 +475,7 @@ class ChatService:
                     content=assistant_response,
                     model_used=target_model,
                     latency_ms=latency_ms,
-                    rag_sources=[
-                        {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
-                        for c in context_chunks
-                    ],
+                    rag_sources=rag_sources,
                 )
                 await chat_doc.save()
 
@@ -520,7 +532,7 @@ class ChatService:
                 await Chat.find({"session_id": session_id})
                 .sort("-created_at")
                 .limit(5)
-                .to_list()
+                .to_list(length=5)
             )
             # Reverse to chronological order for prompt building
             chats.reverse()

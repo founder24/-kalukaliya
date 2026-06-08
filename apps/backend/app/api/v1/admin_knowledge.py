@@ -152,7 +152,7 @@ async def list_knowledge(
         .sort("-updated_at")
         .skip(skip)
         .limit(limit)
-        .to_list()
+        .to_list(length=limit)
     )
 
     total = await KnowledgeObject.find(query).count()

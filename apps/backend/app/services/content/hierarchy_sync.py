@@ -29,35 +29,35 @@ async def sync_hierarchy_to_gcs():
 
     try:
         # Boards
-        boards = await Board.find({"status": "active"}).to_list()
+        boards = await Board.find({"status": "active"}).to_list(length=None)
         await gcs_content_store.write_hierarchy(
             "boards", [b.model_dump(mode="json") for b in boards]
         )
         logger.info(f"Synced {len(boards)} boards to GCS")
 
         # Classes
-        classes = await Class.find({"status": "active"}).to_list()
+        classes = await Class.find({"status": "active"}).to_list(length=None)
         await gcs_content_store.write_hierarchy(
             "classes", [c.model_dump(mode="json") for c in classes]
         )
         logger.info(f"Synced {len(classes)} classes to GCS")
 
         # Streams
-        streams = await Stream.find({"status": "active"}).to_list()
+        streams = await Stream.find({"status": "active"}).to_list(length=None)
         await gcs_content_store.write_hierarchy(
             "streams", [s.model_dump(mode="json") for s in streams]
         )
         logger.info(f"Synced {len(streams)} streams to GCS")
 
         # Subjects
-        subjects = await Subject.find({"status": "active"}).to_list()
+        subjects = await Subject.find({"status": "active"}).to_list(length=None)
         await gcs_content_store.write_hierarchy(
             "subjects", [s.model_dump(mode="json") for s in subjects]
         )
         logger.info(f"Synced {len(subjects)} subjects to GCS")
 
         # Chapters (published only)
-        chapters = await Chapter.find({"status": "published"}).to_list()
+        chapters = await Chapter.find({"status": "published"}).to_list(length=None)
         await gcs_content_store.write_hierarchy(
             "chapters", [ch.model_dump(mode="json") for ch in chapters]
         )

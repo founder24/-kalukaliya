@@ -202,7 +202,7 @@ async def list_chapters(
             )
             .skip(skip)
             .limit(limit)
-            .to_list()
+            .to_list(length=limit)
         )
 
         chapters = []

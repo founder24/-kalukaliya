@@ -438,7 +438,7 @@ class ContentPublisherService:
 
     async def regenerate_sitemap(self) -> str:
         """Generate sitemap XML from all published chapters."""
-        chapters = await Chapter.find({"status": "published"}).to_list()
+        chapters = await Chapter.find({"status": "published"}).to_list(length=None)
 
         urlset = ET.Element(
             "urlset", xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"

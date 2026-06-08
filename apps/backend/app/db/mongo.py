@@ -52,6 +52,11 @@ async def init_mongo() -> None:
                 connectTimeoutMS=30000,
                 socketTimeoutMS=45000,
                 heartbeatFrequencyMS=10000,
+                maxIdleTimeMS=25000,
+                retryWrites=True,
+                retryReads=True,
+                waitQueueTimeoutMS=5000,
+                appName="syrabit-backend",
             )
 
             # Initialize Beanie with document models

@@ -127,7 +127,7 @@ async def create_board(request: Request, body: BoardCreate):
 async def list_boards(request: Request, skip: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000)):
     """List all boards."""
 
-    boards = await Board.find_all().skip(skip).limit(limit).to_list()
+    boards = await Board.find_all().skip(skip).limit(limit).to_list(length=limit)
     return {
         "boards": [
             {
@@ -188,7 +188,7 @@ async def list_classes(request: Request, board_id: Optional[str] = Query(None), 
     query = {}
     if board_id:
         query["board_id"] = PydanticObjectId(board_id)
-    classes = await Class.find(query).skip(skip).limit(limit).to_list()
+    classes = await Class.find(query).skip(skip).limit(limit).to_list(length=limit)
     return {
         "classes": [
             {
@@ -224,7 +224,7 @@ async def list_streams(request: Request, class_id: Optional[str] = Query(None), 
     query = {}
     if class_id:
         query["class_id"] = PydanticObjectId(class_id)
-    streams = await Stream.find(query).skip(skip).limit(limit).to_list()
+    streams = await Stream.find(query).skip(skip).limit(limit).to_list(length=limit)
     return {
         "streams": [
             {
@@ -264,7 +264,7 @@ async def list_subjects(request: Request, stream_id: Optional[str] = Query(None)
     query = {}
     if stream_id:
         query["stream_id"] = PydanticObjectId(stream_id)
-    subjects = await Subject.find(query).skip(skip).limit(limit).to_list()
+    subjects = await Subject.find(query).skip(skip).limit(limit).to_list(length=limit)
     return {
         "subjects": [
             {
@@ -320,7 +320,7 @@ async def list_chapters(
         query["subject_id"] = PydanticObjectId(subject_id)
     if status:
         query["status"] = status
-    chapters = await Chapter.find(query).skip(skip).limit(limit).to_list()
+    chapters = await Chapter.find(query).skip(skip).limit(limit).to_list(length=limit)
     return {
         "chapters": [
             {
@@ -440,7 +440,7 @@ async def update_topic(request: Request, topic_id: str, body: TopicUpdate):
     """Update a topic by ID (searches across all chapters)."""
 
     # Find the chapter containing this topic
-    chapters = await Chapter.find({"published_topics.id": topic_id}).to_list()
+    chapters = await Chapter.find({"published_topics.id": topic_id}).to_list(length=None)
     if not chapters:
         raise HTTPException(status_code=404, detail="Topic not found")
 
@@ -466,7 +466,7 @@ async def update_topic(request: Request, topic_id: str, body: TopicUpdate):
 async def delete_topic(request: Request, topic_id: str):
     """Delete a topic by ID."""
 
-    chapters = await Chapter.find({"published_topics.id": topic_id}).to_list()
+    chapters = await Chapter.find({"published_topics.id": topic_id}).to_list(length=None)
     if not chapters:
         raise HTTPException(status_code=404, detail="Topic not found")
 
@@ -542,7 +542,7 @@ async def get_topic_index(request: Request, subject_id: str):
 
     chapters = await Chapter.find(
         {"subject_id": PydanticObjectId(subject_id)}
-    ).to_list()
+    ).to_list(length=None)
 
     index = []
     for ch in chapters:
@@ -876,7 +876,7 @@ async def list_cms_documents(request: Request):
     """List all CMS documents (admin)."""
     try:
         from app.models.cms import CmsDocument
-        docs = await CmsDocument.find().sort([("updated_at", -1)]).to_list()
+        docs = await CmsDocument.find().sort([("updated_at", -1)]).to_list(length=None)
         return [_cms_doc_to_dict(d) for d in docs]
     except Exception as e:
         logger.error(f"CMS list error: {e}")
@@ -999,8 +999,8 @@ async def get_translation_progress(request: Request):
     from collections import defaultdict
 
     chapters, subjects = await asyncio.gather(
-        Chapter.find_all().to_list(),
-        Subject.find_all().to_list(),
+        Chapter.find_all().to_list(length=None),
+        Subject.find_all().to_list(length=None),
     )
 
     subject_name_map = {str(s.id): s.name for s in subjects}

@@ -263,7 +263,7 @@ class ContentTranslator:
             if subject:
                 query["metadata.subject"] = subject
 
-            objects = await KnowledgeObject.find(query).limit(limit).to_list()
+            objects = await KnowledgeObject.find(query).limit(limit).to_list(length=limit)
             app_state.translation_status["total"] = len(objects)
 
             for i, ko in enumerate(objects):

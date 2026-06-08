@@ -57,7 +57,7 @@ async def list_conversations(
         .sort("-updated_at")
         .skip(skip)
         .limit(limit)
-        .to_list()
+        .to_list(length=limit)
     )
 
     total = await Chat.find({"user_id": str(user.id)}).count()
@@ -100,7 +100,7 @@ async def list_anon_conversations(
             .sort("-updated_at")
             .skip(skip)
             .limit(limit)
-            .to_list()
+            .to_list(length=limit)
         )
 
         total = await Chat.find({"user_id": anon_id}).count()

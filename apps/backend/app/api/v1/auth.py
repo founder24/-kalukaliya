@@ -169,6 +169,33 @@ def _get_verification_key() -> tuple[str, str]:
     return jwt_secret, "HS256"
 
 
+def _decode_token_with_fallback(token: str) -> dict:
+    """Decode a JWT trying HS256 first, then RS256 for legacy tokens.
+
+    Tokens issued while JWT_ALGORITHM=RS256 was set in Cloud Run are still
+    circulating during the HS256 migration window.  Trying RS256 as a fallback
+    prevents InvalidAlgorithmError on logout for those tokens.
+    Once all RS256 tokens have expired (after token TTL), remove the RS256 branch.
+    """
+    key, algorithm = _get_verification_key()
+    try:
+        return jwt.decode(token, key, algorithms=[algorithm])
+    except Exception as primary_err:
+        if algorithm == "HS256" and settings.JWT_PUBLIC_KEY:
+            try:
+                payload = jwt.decode(
+                    token,
+                    settings.JWT_PUBLIC_KEY,
+                    algorithms=["RS256"],
+                    options={"verify_exp": True},
+                )
+                logger.info("Decoded legacy RS256 token via fallback path (expected during migration)")
+                return payload
+            except Exception:
+                pass
+        raise primary_err
+
+
 def create_access_token(user_id: str, expires_delta: timedelta = None) -> str:
     """Create JWT access token"""
     expire = datetime.now(timezone.utc) + (
@@ -817,8 +844,7 @@ async def logout(
     try:
         from app.db.redis import get_redis
 
-        key, algorithm = _get_verification_key()
-        payload = jwt.decode(token, key, algorithms=[algorithm])
+        payload = _decode_token_with_fallback(token)
     except HTTPException:
         raise
     except Exception as e:
