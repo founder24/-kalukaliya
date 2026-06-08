@@ -29,10 +29,15 @@ import time
 from typing import Optional
 
 import numpy as np
+import sentry_sdk
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for transient Vertex AI embedding errors
+_EMBED_MAX_ATTEMPTS = 3
+_EMBED_BACKOFF_DELAYS = [1.0, 2.0, 4.0]  # seconds between attempts
 
 # Similarity threshold — same as topic_matcher.MATCH_THRESHOLD
 MATCH_THRESHOLD = 0.65
@@ -79,17 +84,57 @@ class MongoVectorSearchService:
         """
         t0 = time.time()
 
-        try:
-            from app.services.ai.embedder import generate_embedding_vector
+        from app.services.ai.embedder import generate_embedding_vector
 
-            query_embedding = await asyncio.wait_for(
-                generate_embedding_vector(query), timeout=3.0
+        query_embedding: list[float] | None = None
+        last_exc: Exception | None = None
+
+        for attempt in range(1, _EMBED_MAX_ATTEMPTS + 1):
+            try:
+                query_embedding = await asyncio.wait_for(
+                    generate_embedding_vector(query), timeout=5.0
+                )
+                break
+            except (ValueError, RuntimeError) as exc:
+                # ValueError = empty text; config RuntimeError = not transient
+                if isinstance(exc, ValueError) or "not configured" in str(exc):
+                    logger.error(f"MongoVectorSearch: embedding non-retryable error: {exc}")
+                    return [], 0.0
+                last_exc = exc
+            except Exception as exc:
+                last_exc = exc
+
+            if attempt < _EMBED_MAX_ATTEMPTS:
+                delay = _EMBED_BACKOFF_DELAYS[attempt - 1]
+                sentry_sdk.add_breadcrumb(
+                    category="search",
+                    message=(
+                        f"MongoVectorSearch embedding attempt {attempt} failed "
+                        f"({last_exc!r}); retrying in {delay}s"
+                    ),
+                    level="warning",
+                )
+                logger.warning(
+                    "MongoVectorSearch: embedding attempt %d/%d failed (%s); "
+                    "retrying in %.0fs",
+                    attempt, _EMBED_MAX_ATTEMPTS, last_exc, delay,
+                )
+                await asyncio.sleep(delay)
+
+        if query_embedding is None:
+            sentry_sdk.add_breadcrumb(
+                category="search",
+                message=(
+                    f"MongoVectorSearch embedding failed after "
+                    f"{_EMBED_MAX_ATTEMPTS} attempts: {last_exc!r}"
+                ),
+                level="error",
             )
-        except asyncio.TimeoutError:
-            logger.warning("MongoVectorSearch: embedding timed out")
-            return [], 0.0
-        except Exception as e:
-            logger.error(f"MongoVectorSearch: embedding failed: {e}")
+            logger.error(
+                "MongoVectorSearch: embedding failed after %d attempts, "
+                "returning 503-equivalent empty result. Last error: %s",
+                _EMBED_MAX_ATTEMPTS, last_exc,
+            )
             return [], 0.0
 
         chunks = await self.search_with_embedding(query_embedding, lang=lang, limit=limit)
