@@ -48,7 +48,6 @@ class ContentGenerationService:
             logger.info(
                 f"Auto-publish complete for {chapter_title!r}: "
                 f"gcs={result.get('gcs', {}).get('status')} "
-                f"vtx={result.get('vertex_search', {}).get('status')} "
                 f"emb={result.get('topic_embeddings', {}).get('count', 0)}"
             )
             return result
@@ -64,15 +63,14 @@ class ContentGenerationService:
         try:
             from app.services.content_publisher import content_publisher_service
             gcs_result = await content_publisher_service.publish_to_gcs(chapter)
-            vtx_result = await content_publisher_service.publish_to_vertex_search(chapter)
             logger.info(
-                f"GCS/Vertex re-sync after Assamese update for {chapter.title!r}: "
-                f"gcs={gcs_result.get('status')} vtx={vtx_result.get('status')}"
+                f"GCS re-sync after Assamese update for {chapter.title!r}: "
+                f"gcs={gcs_result.get('status')}"
             )
-            return {"gcs": gcs_result, "vertex_search": vtx_result}
+            return {"gcs": gcs_result}
         except Exception as e:
             logger.warning(
-                f"GCS/Vertex re-sync failed after Assamese update for "
+                f"GCS re-sync failed after Assamese update for "
                 f"{chapter.title!r}: {e}"
             )
             return {"status": "error", "detail": str(e)}

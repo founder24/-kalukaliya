@@ -73,13 +73,22 @@ class ContentPublisherService:
         return chunks
 
     async def publish_to_vertex_search(self, chapter: Chapter) -> dict:
-        """Upload chapter content chunks to Vertex AI Search (Discovery Engine)."""
+        """Vertex AI Search removed — MongoDB vector search is now the sole RAG backend.
+        This stub is kept so existing callers (admin APIs, content_publisher) don't break.
+        """
+        logger.debug(
+            f"publish_to_vertex_search: skipped for '{chapter.title}' "
+            "(Vertex Search removed; topic embeddings handle RAG)"
+        )
+        return {"status": "skipped", "reason": "vertex_search_removed"}
+
+    async def _publish_to_vertex_search_legacy(self, chapter: Chapter) -> dict:
+        """Legacy Vertex AI Search indexing — disabled. Kept for reference only."""
         if (
             not settings.VERTEX_PROJECT_ID
             or not settings.GOOGLE_APPLICATION_CREDENTIALS_JSON
             or not settings.VERTEX_SEARCH_DATASTORE_ID
         ):
-            logger.warning("Vertex AI Search not configured, skipping")
             return {"status": "skipped", "reason": "not_configured"}
 
         try:
@@ -303,8 +312,8 @@ class ContentPublisherService:
         # 1. Write to GCS (source of truth for educational content)
         gcs_result = await self.publish_to_gcs(chapter)
 
-        # 2. Index in Vertex AI Search (for RAG)
-        search_result = await self.publish_to_vertex_search(chapter)
+        # 2. Topic embeddings are generated in step 8; Vertex Search removed.
+        search_result = {"status": "skipped", "reason": "vertex_search_removed"}
 
         # 3. Trigger Cloudflare prerender for the chapter page
         cf_result = await self.publish_to_cloudflare(chapter)

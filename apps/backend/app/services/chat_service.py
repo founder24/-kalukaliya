@@ -21,7 +21,7 @@ from app.config import settings
 from app.core.token_budget import truncate_chunks_to_budget
 from app.db.redis import get_redis
 from app.services.ai.router import detect_language_and_route
-from app.services.search.vertex_search import search_service
+from app.services.search.mongo_vector_search import mongo_vector_search
 
 logger = logging.getLogger(__name__)
 
@@ -119,17 +119,8 @@ class ChatService:
         Generate an embedding for the user query and check against TopicMatcher.
 
         Returns match info dict (with score, topic metadata) if a topic matches
-        above the 0.70 threshold, otherwise None.
-
-        Short-circuits immediately when the search service is not configured so
-        no embedding API call is made and zero latency is added to the chat path.
+        above the 0.65 threshold, otherwise None.
         """
-        # Skip embedding entirely when RAG search is unavailable — avoids the
-        # 0.5s timeout wait that was being added to every chat request when
-        # VERTEX_SEARCH_DATASTORE_ID is not set.
-        if not search_service.is_available():
-            return None
-
         try:
             from app.services.ai.embedder import generate_embedding_vector
             from app.services.ai.topic_matcher import topic_matcher
@@ -154,38 +145,104 @@ class ChatService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def retrieve_context(sanitized_message: str, user_tier: str) -> list[dict]:
-        """Generate embedding and perform hybrid search for RAG context."""
-        if not search_service.is_available():
+    async def retrieve_context_from_chapter(
+        chapter_id: Optional[str],
+        chapter_title: str,
+        detected_lang: str,
+    ) -> list[dict]:
+        """
+        MongoDB fast path: fetch chapter content directly using chapter_id
+        from topic_match.  Bypasses Vertex AI Search entirely.
+
+        Latency comparison:
+          MongoDB path  ~20-60 ms  (Motor async, same connection pool)
+          Vertex Search ~800-3000 ms (sync gRPC in thread pool)
+
+        Falls back gracefully (returns []) on any error so the caller
+        can fall through to the full MongoDB vector search path.
+        """
+        if not chapter_id:
             return []
 
+        import time as _time
+        t0 = _time.time()
         try:
+            from app.models.content import Chapter
+            from beanie import PydanticObjectId
 
+            chapter = None
+            try:
+                chapter = await Chapter.get(PydanticObjectId(chapter_id))
+            except Exception:
+                chapter = await Chapter.find_one({"_id": chapter_id})
+
+            if not chapter:
+                logger.debug(f"mongo_fast_path: chapter {chapter_id!r} not found")
+                return []
+
+            content = (
+                chapter.content_as
+                if detected_lang == "as" and chapter.content_as
+                else chapter.content_en
+            )
+            if not content:
+                logger.debug(
+                    f"mongo_fast_path: chapter '{chapter.title}' has no content"
+                )
+                return []
+
+            from app.services.content.search_indexer import search_indexer
+            chunks = search_indexer.chunk_text(content, chunk_size=500)
+
+            latency_ms = int((_time.time() - t0) * 1000)
+            logger.info(
+                f"mongo_fast_path_hit: chapter='{chapter.title}', "
+                f"lang={detected_lang}, chunks={len(chunks)}, "
+                f"latency_ms={latency_ms}"
+            )
+
+            return [
+                {
+                    "id": f"{chapter.slug}_chunk_{i}",
+                    "title": chapter.title,
+                    "content": chunk,
+                    "score": 0.85,
+                    "reranker_score": 0.85,
+                    "url": f"/{chapter.slug}",
+                    "hierarchy": "",
+                    "source": "mongodb",
+                }
+                for i, chunk in enumerate(chunks[:5])
+            ]
+        except Exception as e:
+            logger.warning(f"mongo_fast_path error: {e}")
+            return []
+
+    @staticmethod
+    async def retrieve_context(sanitized_message: str, user_tier: str) -> list[dict]:
+        """
+        Full MongoDB vector search RAG: embed query → cosine match topics →
+        fetch chapter content.  Replaces Vertex AI Search entirely.
+        """
+        try:
             async def _do_retrieval():
-                # HF-011: Pass raw text - Azure Search handles vectorization
-                # via VectorizableTextQuery internally
-                context_chunks = await search_service.search_context(
+                chunks, _ = await mongo_vector_search.search_context(
                     query=sanitized_message,
-                    text=sanitized_message,
-                    user_tier=user_tier,
+                    lang="en",
                     limit=settings.MAX_CONTEXT_DOCS,
                 )
-                # Filter chunks below similarity threshold
-                context_chunks = [
-                    c
-                    for c in context_chunks
+                chunks = [
+                    c for c in chunks
                     if c.get("score", 0) >= SIMILARITY_THRESHOLD
                 ]
-                return truncate_chunks_to_budget(context_chunks, max_tokens=3000)
+                return truncate_chunks_to_budget(chunks, max_tokens=3000)
 
-            return await asyncio.wait_for(_do_retrieval(), timeout=3.0)
+            return await asyncio.wait_for(_do_retrieval(), timeout=5.0)
         except asyncio.TimeoutError:
-            logger.warning(
-                "RAG retrieval timed out after 3.0s, returning empty context"
-            )
+            logger.warning("MongoDB vector RAG timed out after 5s")
             return []
         except Exception as e:
-            logger.error(f"RAG retrieval failed: {e}")
+            logger.error(f"MongoDB vector RAG failed: {e}")
             return []
 
     # ------------------------------------------------------------------
@@ -201,12 +258,17 @@ class ChatService:
             "Use the following numbered context to answer. If the answer is not in the context, say so clearly.\n"
             "Cite sources using [#] format (e.g., [1], [2]). Respond in English."
             if detected_lang == "en"
-            else "You are Syrabit, an educational assistant for Assamese students. "
-            "You can understand questions in any language (English, Hindi, Assamese, etc.) "
-            "but you MUST always respond in Assamese (\u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be) script only. "
-            "Never respond in English or any other language.\n"
-            "\u09a8\u09bf\u09ae\u09cd\u09a8\u09b2\u09bf\u0996\u09bf\u09a4 \u09a8\u09ae\u09cd\u09ac\u09f0\u09af\u09c1\u0995\u09cd\u09a4 \u09aa\u09cd\u09f0\u09b8\u0982\u0997 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u09bf \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964 \u09aa\u09cd\u09f0\u09b8\u0982\u0997\u09a4 \u09a8\u09be\u09a5\u09be\u0995\u09bf\u09b2\u09c7 \u09b8\u09cd\u09aa\u09b7\u09cd\u099f\u0995\u09c8 \u0995\u0993\u0995\u0964\n"
-            "\u0989\u09a6\u09cd\u09a7\u09c3\u09a4\u09bf\u09f0 \u09ac\u09be\u09ac\u09c7 [#] \u09ac\u09bf\u09a8\u09cd\u09af\u09be\u09b8 \u09ac\u09cd\u09af\u09f1\u09b9\u09be\u09f0 \u0995\u09f0\u0995 (\u09af\u09c7\u09a8\u09c7 [1], [2])\u0964 \u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be\u09a4 \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964"
+            # Assamese prompt: instruct Sarvam to think AND answer natively in
+            # Assamese.  Keeping the prompt in Assamese script encourages the
+            # model to reason in Assamese rather than in English, reducing the
+            # English <think> overhead and improving fluency.
+            else (
+                "তুমি Syrabit, অসমৰ AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
+                "যিকোনো ভাষাত প্ৰশ্ন বুজিব পাৰা, কিন্তু উত্তৰ সদায় অসমীয়া (অসমীয়া লিপি) ত দিব লাগিব।\n"
+                "ইংৰাজী বা অন্য ভাষাত উত্তৰ নিদিবা।\n"
+                "তলত দিয়া নম্বৰযুক্ত প্ৰসংগ ব্যৱহাৰ কৰি উত্তৰ দিয়া। প্ৰসংগত নাথাকিলে স্পষ্টকৈ কোৱা।\n"
+                "উদ্ধৃতিৰ বাবে [#] বিন্যাস ব্যৱহাৰ কৰক (যেনে [1], [2])।"
+            )
         )
 
         if not context_chunks:
@@ -219,12 +281,10 @@ class ChatService:
                 )
             else:
                 return (
-                    "You are Syrabit, an educational assistant for Assamese students covering AHSEC, SEBA, and CBSE curricula. "
-                    "You can understand questions in any language (English, Hindi, Assamese, etc.) "
-                    "but you MUST always respond in Assamese (\u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be) script only. "
-                    "Never respond in English or any other language. "
-                    "\u099b\u09be\u09a4\u09cd\u09f0\u09f0 \u09aa\u09cd\u09f0\u09b6\u09cd\u09a8\u09f0 \u09b8\u09a0\u09bf\u0995 \u0986\u09f0\u09c1 \u09b8\u09b9\u09be\u09af\u09bc\u0995\u09be\u09f0\u09c0 \u0989\u09a4\u09cd\u09a4\u09f0 \u09a6\u09bf\u09af\u09bc\u0995\u0964 "
-                    "\u09b8\u09cd\u09aa\u09b7\u09cd\u099f, \u09a4\u09a5\u09cd\u09af\u09aa\u09c2\u09f0\u09cd\u09a3 \u0986\u09f0\u09c1 \u09b6\u09bf\u0995\u09cd\u09b7\u09be\u09ae\u09c2\u09b2\u0995 \u09ac\u09cd\u09af\u09be\u0996\u09cd\u09af\u09be \u09a6\u09bf\u09af\u09bc\u0995\u0964"
+                    "তুমি Syrabit, অসমৰ AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
+                    "যিকোনো ভাষাত প্ৰশ্ন বুজিব পাৰা, কিন্তু উত্তৰ সদায় অসমীয়া (অসমীয়া লিপি) ত দিব লাগিব।\n"
+                    "ইংৰাজী বা অন্য ভাষাত উত্তৰ নিদিবা।\n"
+                    "ছাত্ৰৰ প্ৰশ্নৰ সঠিক আৰু সহায়কাৰী উত্তৰ দিয়া। স্পষ্ট, তথ্যপূৰ্ণ আৰু শিক্ষামূলক ব্যাখ্যা দিয়া।"
                 )
 
         context_text = "\n".join(

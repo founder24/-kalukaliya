@@ -32,6 +32,10 @@ export async function proxyRequest(
   // Remove hop-by-hop headers that shouldn't be forwarded
   headers.delete('Host');
   headers.delete('Connection');
+  // Strip Origin before proxying — the edge worker is the CORS authority.
+  // Backend CSRF guard skips when Origin is absent; the edge has already
+  // validated the origin and will set correct ACAO on the response.
+  headers.delete('Origin');
 
   // Per-request HMAC signature (SEC-002 fix)
   if (env.EDGE_SHARED_SECRET) {

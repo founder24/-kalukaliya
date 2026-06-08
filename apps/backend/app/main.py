@@ -51,6 +51,7 @@ from app.api.v1 import (
     payments,
 )
 from app.api.webhooks import razorpay
+from app.api.v1 import search_compare
 
 logger = logging.getLogger(__name__)
 
@@ -85,14 +86,44 @@ async def lifespan(app: FastAPI):
             "service is DEGRADED. Set UPSTASH_REDIS_REST_URL/TOKEN env vars to restore."
         )
 
-    # Warm up Vertex AI Search connection
+    # ── Load SARVAM_API_KEY from GCP Secret Manager ───────────────────────────
+    # The service account JSON in GOOGLE_APPLICATION_CREDENTIALS_JSON is used
+    # to authenticate.  This replaces the Replit environment-variable approach
+    # with a secure, auditable GCP Secret Manager fetch at every startup.
     try:
-        from app.services.search.vertex_search import search_service
+        from app.core.secret_manager import load_secrets_into_settings
 
-        await search_service.warm_up()
-        logger.info("Vertex AI Search warmed up successfully")
+        sm_results = await load_secrets_into_settings()
+        logger.info(f"Secret Manager fetch results: {sm_results}")
+        if settings.SARVAM_API_KEY:
+            # Patch the already-created singleton — it cached api_key=None at
+            # import time before the lifespan ran. SM is authoritative, so we
+            # push the live key into the singleton now.
+            from app.services.ai.sarvam_client import sarvam_client
+            sarvam_client.api_key = settings.SARVAM_API_KEY
+            source = 'secret_manager' if sm_results.get('SARVAM_API_KEY') == 'loaded' else 'env_var'
+            logger.info(
+                f"Sarvam AI key ready (source={source}, "
+                f"prefix={settings.SARVAM_API_KEY[:8]}...)"
+            )
+        else:
+            logger.warning(
+                "SARVAM_API_KEY is still empty after Secret Manager fetch — "
+                "Assamese AI responses will fail"
+            )
     except Exception as e:
-        logger.warning(f"Vertex AI Search warm-up failed: {e}")
+        logger.error(f"Secret Manager startup failed (non-fatal): {e}")
+
+    # Warm up MongoDB topic embeddings cache (loads all TopicEmbedding docs
+    # from Atlas into memory so the first chat request is not cold)
+    try:
+        from app.services.ai.topic_matcher import topic_matcher
+        await topic_matcher._load_embeddings()
+        logger.info(
+            f"Topic embeddings warmed up: {len(topic_matcher._embeddings or [])} topics"
+        )
+    except Exception as e:
+        logger.warning(f"Topic embedding warm-up failed (non-fatal): {e}")
 
     # Warm up Vertex AI OAuth token
     try:
@@ -274,6 +305,9 @@ def create_app() -> FastAPI:
         tags=["Conversations"],
     )
     app.include_router(edu.router, prefix="/api/v1", tags=["Education"])
+    app.include_router(
+        search_compare.router, prefix="/api/v1", tags=["Search Benchmark"]
+    )
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
     app.include_router(
         subscription.router, prefix="/api/v1/subscription", tags=["Subscription"]

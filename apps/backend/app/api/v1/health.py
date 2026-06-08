@@ -68,18 +68,20 @@ async def redis_ping() -> Dict[str, Any]:
         return {"status": "unhealthy", "error": str(e)}
 
 
-async def vertex_search_ping() -> Dict[str, Any]:
-    """Ping Vertex AI Search (Discovery Engine) service"""
+async def mongo_vector_search_ping() -> Dict[str, Any]:
+    """Ping MongoDB vector search (topic embeddings cache)."""
     try:
-        from app.services.search.vertex_search import search_service
+        from app.services.ai.topic_matcher import topic_matcher
 
-        if not search_service._initialized:
-            return {"status": "degraded", "error": "Search client not configured"}
+        if not topic_matcher._is_cache_valid():
+            await topic_matcher._load_embeddings()
 
-        await search_service.warm_up()
-        return {"status": "healthy"}
+        count = len(topic_matcher._embeddings or [])
+        if count == 0:
+            return {"status": "degraded", "error": "No topic embeddings loaded"}
+        return {"status": "healthy", "topic_count": count}
     except Exception as e:
-        logger.error(f"Vertex Search ping failed: {str(e)}")
+        logger.error(f"MongoDB vector search ping failed: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
 
 
@@ -211,14 +213,14 @@ async def deep_health_check():
     results = await asyncio.gather(
         _safe_check(mongo_ping()),
         _safe_check(redis_ping()),
-        _safe_check(vertex_search_ping()),
+        _safe_check(mongo_vector_search_ping()),
         _safe_check(vertex_ping()),
         _safe_check(sarvam_ping()),
     )
     checks = {
         "mongodb": results[0],
         "redis": results[1],
-        "vertex_search": results[2],
+        "mongo_vector_search": results[2],
         "vertex_ai": results[3],
         "sarvam_ai": results[4],
     }
@@ -254,11 +256,9 @@ async def circuit_breaker_status():
     from app.core.circuit_breaker import (
         vertex_circuit_breaker,
         sarvam_circuit_breaker,
-        vertex_search_circuit_breaker,
     )
 
     return {
         "vertex_ai": vertex_circuit_breaker.get_status(),
         "sarvam_ai": sarvam_circuit_breaker.get_status(),
-        "vertex_search": vertex_search_circuit_breaker.get_status(),
     }

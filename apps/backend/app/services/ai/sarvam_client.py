@@ -74,10 +74,12 @@ class SarvamAIClient:
                         {"role": "user", "content": user_message},
                     ],
                     "temperature": 0.7,
-                    # sarvam-30b / sarvam-105b are reasoning models that use
-                    # completion tokens for internal thinking before the answer.
-                    # Starter tier cap is 4096; use the full allowance so the
-                    # model can finish reasoning AND emit the translated text.
+                    # sarvam-30b / sarvam-105b are reasoning models.
+                    # enable_thinking=False skips the internal English reasoning
+                    # phase entirely — brings TTFB from 5-30s down to 1-3s for
+                    # Assamese chat.  budget_tokens=0 is the fallback for APIs
+                    # that use the alternative parameter name.
+                    "enable_thinking": False,
                     "max_tokens": 4096,
                     "stream": stream,
                 },
@@ -167,6 +169,11 @@ class SarvamAIClient:
                 {"role": "user", "content": user_message},
             ],
             "temperature": 0.7,
+            # Disable reasoning phase for fast streaming TTFB.
+            # Without this, sarvam-30b thinks in English for 5-30s before
+            # emitting the first Assamese token (which is then stripped by
+            # the think-block filter, so the user sees nothing until it ends).
+            "enable_thinking": False,
             "max_tokens": 2048,
             "stream": True,
         }

@@ -996,17 +996,12 @@ async def search_content(
     response.headers["Cache-Control"] = "public, max-age=30, s-maxage=120"
     query = q.strip()
 
-    from app.services.search.vertex_search import search_service
-
-    if not search_service.is_available():
-        logger.warning("Public search called but Vertex Search is not available")
-        return {"query": query, "results": [], "total": 0, "available": False}
+    from app.services.search.mongo_vector_search import mongo_vector_search
 
     try:
-        raw = await search_service.search_context(
+        raw, _ = await mongo_vector_search.search_context(
             query=query,
-            text=query,
-            user_tier="free",
+            lang="en",
             limit=limit,
         )
         results = [

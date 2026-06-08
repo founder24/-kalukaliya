@@ -605,7 +605,6 @@ async def generate_notes(request: Request, chapter_id: str, body: GenerateNotesR
             "meta_description": chapter.meta_description,
             "pipeline": {
                 "gcs": publish_result.get("gcs", {}).get("status"),
-                "vertex_search": publish_result.get("vertex_search", {}).get("status"),
                 "cloudflare": publish_result.get("cloudflare", {}).get("status"),
                 "topic_embeddings": publish_result.get("topic_embeddings", {}).get("count", 0),
             },

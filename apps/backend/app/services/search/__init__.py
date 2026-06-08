@@ -1,3 +1,3 @@
-from app.services.search.vertex_search import search_service
+from app.services.search.mongo_vector_search import mongo_vector_search
 
-__all__ = ["search_service"]
+__all__ = ["mongo_vector_search"]

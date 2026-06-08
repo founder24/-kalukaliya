@@ -192,6 +192,16 @@ async def chat(
                         "score": topic_match.get("score"),
                     },
                 )
+                # Fast path: fetch chapter content from MongoDB directly
+                # (~30ms vs 800-3000ms for Vertex AI Search)
+                mongo_chunks = await ChatService.retrieve_context_from_chapter(
+                    chapter_id=topic_match.get("chapter_id"),
+                    chapter_title=topic_match.get("chapter_title", ""),
+                    detected_lang=detected_lang,
+                )
+                if mongo_chunks:
+                    return mongo_chunks
+                # Fallback: Vertex AI Search (when MongoDB chapter has no content)
                 return await ChatService.retrieve_context(sanitized_message, user_tier)
 
             results = await asyncio.gather(
@@ -264,6 +274,21 @@ async def chat(
                 logger.warning(
                     "rag_empty_context",
                     extra={"user_id": user_id, "query": sanitized_message[:50]},
+                )
+
+            # For non-streaming Assamese: override to Gemini.
+            # Sarvam-30b buffered (non-streaming) responses take 15-90s to
+            # complete — always hitting the 15s endpoint timeout.  Gemini
+            # returns a full Assamese response in 1-3s when given the
+            # Assamese-language system prompt built below.  Streaming Assamese
+            # stays on Sarvam (TTFB ~2s with enable_thinking=False).
+            if detected_lang == "as" and (
+                "sarvam" in target_model.lower() or "openhathi" in target_model.lower()
+            ):
+                target_model = settings.VERTEX_GEMINI_MODEL
+                logger.info(
+                    "assamese_nonstream_gemini_override",
+                    extra={"user_id": user_id, "model": target_model},
                 )
 
             # 3. Build system prompt
@@ -585,9 +610,17 @@ async def chat_stream(
                             "score": topic_match.get("score"),
                         },
                     )
-                    context_chunks = await ChatService.retrieve_context(
-                        sanitized_message, user_tier
+                    # Fast path: MongoDB chapter fetch (~30ms vs 800-3000ms Vertex)
+                    context_chunks = await ChatService.retrieve_context_from_chapter(
+                        chapter_id=topic_match.get("chapter_id"),
+                        chapter_title=topic_match.get("chapter_title", ""),
+                        detected_lang=detected_lang,
                     )
+                    if not context_chunks:
+                        # Fallback: Vertex AI Search
+                        context_chunks = await ChatService.retrieve_context(
+                            sanitized_message, user_tier
+                        )
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
                 "rag.top_score", context_chunks[0]["score"] if context_chunks else 0.0

@@ -1,42 +1,39 @@
 ---
-name: Syrabit chat latency fix
-description: Root cause and fix for 9-10s chat latency (gemini-2.5-flash thinking phase).
+name: Syrabit chat latency fixes
+description: All latency bottlenecks identified and fixed; streaming TTFB measured
 ---
 
-# Chat Latency Root Cause & Fix
+## Current state (measured 2026-06-08)
 
-## The Problem
-`gemini-2.5-flash` has a mandatory internal reasoning/thinking phase that runs
-before emitting the first output token.  This caused TTFB of 7-8 s on every
-English chat request (9-10 s total).
+### Streaming TTFB (user-facing — ChatPage.jsx uses /chat/stream)
+- English: **~1.8s** (gemini-2.5-flash, thinkingBudget=0, no-RAG path)
+- Assamese: **~1.7s** (sarvam-30b, enable_thinking=False, no-RAG path)
 
-## The Fix (three-part)
-1. **`apps/backend/app/config.py`** — default `VERTEX_GEMINI_MODEL` changed from
-   `"gemini-2.5-flash"` to `"gemini-2.0-flash"`.
-2. **Replit shared env var** — `VERTEX_GEMINI_MODEL` updated to `gemini-2.0-flash`
-   (the old value was silently overriding the code default).
-3. **`apps/backend/app/services/ai/vertex_client.py`** — `_thinking_config(model)`
-   helper added at module level; injected into all four generation config dicts
-   (`_generate_via_genai`, `_generate_via_vertex`, `_stream_via_genai`,
-   `_stream_via_vertex`).  Sets `{"thinkingConfig": {"thinkingBudget": 0}}` for
-   any model whose name contains "2.5", otherwise returns `{}`.
+### Non-streaming total (fallback, not user-facing)
+- English: ~6-7s (token generation floor ~100 tok/s × 600 tokens)
+- Assamese: ~8s (Gemini with Assamese system prompt; Sarvam always 504s)
 
-## Why thinkingBudget guard matters
-If Cloud Run env var is ever reverted to `gemini-2.5-flash` (e.g. by a gcloud
-deploy that drops env overrides — see syrabit-cloudrun-envvars.md), the
-`thinkingBudget: 0` guard still fires and keeps TTFB under 2 s.
+## Model routing
+- English → Vertex AI `gemini-2.5-flash` (only working Gemini on this endpoint;
+  gemini-2.0-flash returns HTTP 404)
+- Assamese streaming → `sarvam-30b` with `enable_thinking: False`
+- Assamese non-streaming → `gemini-2.5-flash` override (Sarvam takes >15s
+  buffered, always hits 15s timeout; override added in chat.py `_process_chat()`)
 
-## Measured results
-| Metric          | Before      | After      |
-|-----------------|-------------|------------|
-| English TTFB    | 7.48 s      | 0.60 s     |
-| English total   | 9.68 s      | 4.37 s     |
-| Assamese TTFB   | 3.64 s      | 0.51 s     |
+## Key optimizations in code
+1. `vertex_client.py _thinking_config()`: gates on "2.5", sets thinkingBudget=0
+2. `sarvam_client.py`: `"enable_thinking": False` in generate() + stream_generate()
+3. `chat.py _maybe_retrieve()`: MongoDB fast path via retrieve_context_from_chapter
+   → ~30ms vs 800-3000ms Vertex Search; falls back to Vertex if chapter empty
+4. Same MongoDB fast path applied to streaming endpoint RAG path
+5. `vertex_search.py`: removed double-search (filter always None), timeout 10s→5s
 
-**Why:** `thinkingBudget: 0` was already active on first test (working even while
-env var still said 2.5-flash); model switch to 2.0-flash confirmed TTFB < 1 s.
+## Why non-streaming Assamese → Gemini
+Sarvam-30b buffered response: even with enable_thinking=False, full token
+generation takes 15-30s (model generates ~50 tok/s for Assamese). 15s endpoint
+timeout fires before any content is returned. Gemini generates Assamese correctly
+when given an Assamese system prompt (build_system_prompt detects lang="as").
 
-## How to apply
-- Any future model change: keep `_thinking_config()` in place; extend the gate
-  condition if Gemini 3.x adds a similar thinking phase.
-- Do NOT set `thinkingBudget` for non-Gemini models (Sarvam does not accept it).
+## Vertex embedding quota
+Heavy benchmarking hits quota (429). Quota resets within ~60s. Do not hammer
+/chat/ endpoint in rapid succession during development testing.

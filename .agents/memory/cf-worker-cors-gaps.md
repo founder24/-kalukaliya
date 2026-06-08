@@ -25,3 +25,13 @@ immediately before the `return`.
 - Cold-start retry added to `apps/edge/src/routes/api-proxy.ts`: non-streaming 502/503 from Cloud Run (HTML body = infra error, not FastAPI) → wait 3s → retry once.
 - Frontend `ChatPage.jsx`: CF Worker 503 uses `{"error":"...", "status":...}` format (no `detail` field). Added handler before the generic `throw` to show toast + auto-retry after 5s.
 - Test script gap: `test-live.sh` curl calls never sent `Origin` header. Added to all 6 chat tests + new `/chat/stream` streaming test with Origin.
+
+## pages.dev bare-domain CORS gap (fixed)
+
+`https://syrabitfrontend.pages.dev` was blocked by both the edge worker and the GCP backend. Two-layer fix:
+1. `cors.ts` `ALLOWED_ORIGINS` list: add `https://syrabitfrontend.pages.dev`. The existing `PAGES_PREVIEW_REGEX` only matched **subdomains** (`*.syrabitfrontend.pages.dev`), not the bare production Pages domain.
+2. `api-proxy.ts` `proxyRequest()`: `headers.delete('Origin')` before forwarding to backend. Edge is the CORS authority; backend CSRF guard skips when Origin is absent, avoiding the duplicate origin check.
+
+**Why:** The GCP backend has its own CSRF middleware that also checks origin. Rather than keeping both lists in sync, strip Origin at the edge proxy — the edge validates it and sets correct ACAO on the response. Backend never needs the client origin.
+
+**How to apply:** When adding a new allowed origin, update `ALLOWED_ORIGINS` in `cors.ts` (and optionally `config.py` for direct-backend callers). Do NOT rely on the regex alone for canonical domain names.

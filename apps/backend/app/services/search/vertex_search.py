@@ -222,19 +222,24 @@ class VertexSearchService:
             # Re-enable once the field is added to the datastore's field config.
             filter_expr = None
 
-            # Execute search in thread pool (client is synchronous)
+            # Execute search in thread pool (client is synchronous).
+            # 5s timeout — Vertex AI Search P95 is ~1-2s; 5s gives headroom
+            # without blocking the chat pipeline for too long on cold starts.
+            import time as _time
+            _t0 = _time.time()
             try:
                 results = await asyncio.wait_for(
                     asyncio.to_thread(self._execute_search, query, filter_expr, limit),
-                    timeout=10.0,
+                    timeout=5.0,
                 )
+                _latency_ms = int((_time.time() - _t0) * 1000)
                 logger.info(
-                    f"Vertex Search returned {len(results)} results "
-                    f"for query '{query[:20]}...'"
+                    f"vertex_search_latency: {_latency_ms}ms, "
+                    f"results={len(results)}, query='{query[:20]}...'"
                 )
             except asyncio.TimeoutError:
                 logger.error(
-                    f"Vertex Search timed out after 10s for query '{query[:20]}...'"
+                    f"Vertex Search timed out after 5s for query '{query[:20]}...'"
                 )
                 return []
 
@@ -265,53 +270,14 @@ class VertexSearchService:
                     "score": round(score, 2),
                     "reranker_score": round(score, 2),
                     "url": struct_data.get("source_url", ""),
+                    "source": "vertex",
                 }
                 context_chunks.append(chunk)
 
-            # Fallback for empty tier-filtered results
-            if not context_chunks and user_tier:
-                logger.warning(
-                    f"No results with tier filter '{user_tier}', retrying without filter"
-                )
-                try:
-                    fallback_results = await asyncio.wait_for(
-                        asyncio.to_thread(self._execute_search, query, None, limit),
-                        timeout=10.0,
-                    )
-                    for i, result in enumerate(fallback_results):
-                        doc_data = result.document
-                        struct_data = {}
-                        if doc_data.struct_data:
-                            struct_data = dict(doc_data.struct_data)
-
-                        content = struct_data.get("content", "")
-                        if not content and hasattr(result.document, "derived_struct_data") and result.document.derived_struct_data:
-                            derived = dict(result.document.derived_struct_data)
-                            snippets = derived.get("snippets", [])
-                            if snippets:
-                                content = snippets[0].get("snippet", "")
-
-                        score = self._extract_score(result, content, i)
-
-                        chunk = {
-                            "id": doc_data.id or f"result_{i}",
-                            "title": struct_data.get("title", ""),
-                            "content": content,
-                            "score": round(score, 2),
-                            "reranker_score": round(score, 2),
-                            "url": struct_data.get("source_url", ""),
-                            "unfiltered": True,
-                        }
-                        context_chunks.append(chunk)
-
-                    if context_chunks:
-                        logger.info(
-                            f"Found {len(context_chunks)} results without tier filter"
-                        )
-                except asyncio.TimeoutError:
-                    logger.error("Vertex Search fallback timed out")
-                except Exception as e:
-                    logger.error(f"Vertex Search fallback failed: {e}")
+            # NOTE: The tier-filter fallback that previously re-ran the same
+            # query without a filter has been removed.  filter_expr is always
+            # None (tier filtering was disabled at schema level), so the
+            # fallback was making an identical duplicate request wasting 1-3s.
 
             logger.info(
                 f"Retrieved {len(context_chunks)} chunks for query '{query[:20]}...'"

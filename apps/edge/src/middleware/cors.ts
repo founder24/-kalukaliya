@@ -3,7 +3,7 @@
  * Supports production domains and Cloudflare Pages preview deployments.
  */
 
-const ALLOWED_ORIGINS = ['https://syrabit.ai', 'https://www.syrabit.ai', 'https://app.syrabit.ai'];
+const ALLOWED_ORIGINS = ['https://syrabit.ai', 'https://www.syrabit.ai', 'https://app.syrabit.ai', 'https://syrabitfrontend.pages.dev'];
 const PAGES_PREVIEW_REGEX = /^https:\/\/[a-z0-9-]+\.syrabitfrontend\.pages\.dev$/;
 
 function isAllowedOrigin(origin: string): boolean {

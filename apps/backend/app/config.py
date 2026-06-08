@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     VERTEX_PROJECT_ID: Optional[str] = None
     VERTEX_LOCATION: str = "us-central1"
-    VERTEX_GEMINI_MODEL: str = "gemini-2.5-flash"
+    VERTEX_GEMINI_MODEL: str = "gemini-2.0-flash"
     VERTEX_VISION_MODEL: str = "gemini-1.5-pro-vision"
 
     # --- P7: Sarvam AI (Indic) ---
@@ -144,10 +144,11 @@ class Settings(BaseSettings):
     TRUST_EDGE_AUTH: bool = True
     ALLOWED_ORIGINS: str = (
         "https://syrabit.ai,https://www.syrabit.ai,https://app.syrabit.ai,"
-        "https://api.syrabit.ai"
+        "https://api.syrabit.ai,https://syrabitfrontend.pages.dev"
     )
     # Note (HF-108): ALLOWED_ORIGINS uses exact match; Cloudflare Pages preview URLs
-    # are handled by is_origin_allowed() regex. Use that method for all origin checks.
+    # (subdomain deployments) are handled by is_origin_allowed() regex. Use that method
+    # for all origin checks. The bare syrabitfrontend.pages.dev is in ALLOWED_ORIGINS above.
     MAX_CONTEXT_DOCS: int = 5
     STREAM_CHUNK_SIZE: int = 128
 
