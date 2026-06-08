@@ -106,60 +106,6 @@ jobs:
             --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=ADMIN_JWT_SECRET:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=SARVAM_API_KEY:latest,UPSTASH_REDIS_REST_URL=UPSTASH_REDIS_REST_URL:latest,UPSTASH_REDIS_REST_TOKEN=UPSTASH_REDIS_REST_TOKEN:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest,RESET_TOKEN_SECRET=RESET_TOKEN_SECRET:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=TRANSLATE_CRON_SECRET:latest,INDEXNOW_API_KEY=INDEXNOW_API_KEY:latest,INDEXNOW_INTERNAL_SECRET=INDEXNOW_INTERNAL_SECRET:latest,POSTHOG_API_KEY=POSTHOG_API_KEY:latest,SENTRY_DSN=SENTRY_DSN:latest \
             --remove-secrets=CF_PAGES_DEPLOY_HOOK,CF_ACCOUNT_ID,CLOUDFLARE_ACCOUNT_ID,CLOUDFLARE_KV_API_TOKEN,CLOUDFLARE_KV_NAMESPACE_ID,GCS_CONTENT_BUCKET
 
-      - name: Attach optional content-pipeline secrets (CF Pages + CF KV + GCS)
-        run: |
-          # These secrets are optional — the deploy must not fail if they don't exist yet.
-          # KEY RULE: if a secret is MISSING from GCP Secret Manager, we --remove-secrets it
-          # from the Cloud Run service so it doesn't block future deploys.
-          UPDATES=""
-          REMOVALS=""
-
-          _check() {
-            local SECRET_NAME="$1"   # GCP secret name
-            local ENV_VARS="$2"      # comma-separated Cloud Run env var names to set/remove
-            if gcloud secrets describe "$SECRET_NAME" --project="$PROJECT" >/dev/null 2>&1; then
-              for EV in ${ENV_VARS//,/ }; do
-                UPDATES="${UPDATES:+$UPDATES,}${EV}=${SECRET_NAME}:latest"
-              done
-              echo "  ✓ $SECRET_NAME found → $ENV_VARS"
-            else
-              for EV in ${ENV_VARS//,/ }; do
-                REMOVALS="${REMOVALS:+$REMOVALS,}${EV}"
-              done
-              echo "  ⚠ $SECRET_NAME missing → removing $ENV_VARS from service spec"
-              echo "    Create: echo -n 'VALUE' | gcloud secrets create $SECRET_NAME --replication-policy=automatic --data-file=- --project=$PROJECT"
-            fi
-          }
-
-          # CF Pages deploy hook — triggers a Pages rebuild when content changes
-          _check "cf-pages-deploy-hook"  "CF_PAGES_DEPLOY_HOOK"
-          # CF Workers AI / KV pipeline secrets
-          _check "CF_ACCOUNT_ID"         "CF_ACCOUNT_ID,CLOUDFLARE_ACCOUNT_ID"
-          _check "CF_KV_API_TOKEN"        "CLOUDFLARE_KV_API_TOKEN"
-          _check "CF_KV_NAMESPACE_ID"     "CLOUDFLARE_KV_NAMESPACE_ID"
-          # GCS content pipeline
-          _check "GCS_CONTENT_BUCKET"    "GCS_CONTENT_BUCKET"
-
-          # Apply updates (secrets that DO exist)
-          if [ -n "$UPDATES" ]; then
-            gcloud run services update syrabit-backend \
-              --region="$REGION" --project="$PROJECT" \
-              --update-secrets="$UPDATES"
-            echo "  Attached: $UPDATES"
-          fi
-
-          # Remove stale references (secrets that DON'T exist but may be in service spec)
-          if [ -n "$REMOVALS" ]; then
-            gcloud run services update syrabit-backend \
-              --region="$REGION" --project="$PROJECT" \
-              --remove-secrets="$REMOVALS" 2>/dev/null || true
-            echo "  Removed stale refs: $REMOVALS"
-          fi
-
-          if [ -z "$UPDATES" ] && [ -z "$REMOVALS" ]; then
-            echo "  No optional secrets to update."
-          fi
-
       - name: Get Cloud Run service URL
         id: get-url
         run: |
@@ -173,10 +119,10 @@ jobs:
       - name: Wait for healthy revision (up to 3 min)
         run: |
           SERVICE_URL="${{ steps.get-url.outputs.service_url }}"
-          echo "Polling ${SERVICE_URL}/health ..."
+          echo "Polling ${SERVICE_URL}/api/v1/health ..."
           for i in $(seq 1 36); do
             HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
-              "${SERVICE_URL}/health" --max-time 8 2>/dev/null || echo "000")
+              "${SERVICE_URL}/api/v1/health" --max-time 8 2>/dev/null || echo "000")
             if [[ "$HTTP" == "200" ]]; then
               echo "✔ Backend healthy after $((i * 5))s (HTTP 200)"
               exit 0
