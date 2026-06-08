@@ -319,8 +319,8 @@ jobs:
             echo "  Likely cause: BACKEND_URL Wrangler secret is stale or missing."
             echo "  Fix:  npx wrangler secret put BACKEND_URL --env production"
             echo "  Value: $(gcloud run services describe syrabit-backend \
-                   --region asia-south1 \
-                   --project blissful-acumen-495019-t6 \
+                   --region ${{ secrets.GCP_REGION }} \
+                   --project ${{ secrets.GCP_PROJECT_ID }} \
                    --format 'value(status.url)' 2>/dev/null || echo '<run gcloud locally>')"
           fi
           exit 1
@@ -418,8 +418,8 @@ jobs:
           echo "Smoke tests failed — rolling back syrabit-backend..."
           REVISIONS=$(gcloud run revisions list \
             --service syrabit-backend \
-            --region "asia-south1" \
-            --project "blissful-acumen-495019-t6" \
+            --region "${{ secrets.GCP_REGION }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
             --sort-by "~creationTimestamp" \
             --format "value(REVISION)" \
             --limit 2)
@@ -428,8 +428,8 @@ jobs:
           if [[ -n "$PREVIOUS" && "$PREVIOUS" != "$CURRENT" ]]; then
             echo "Rolling back: $CURRENT → $PREVIOUS"
             gcloud run services update-traffic syrabit-backend \
-              --region "asia-south1" \
-              --project "blissful-acumen-495019-t6" \
+              --region "${{ secrets.GCP_REGION }}" \
+              --project "${{ secrets.GCP_PROJECT_ID }}" \
               --to-revisions "${PREVIOUS}=100"
             echo "✔ Rollback complete — ${PREVIOUS} now serving 100% of traffic"
           else
