@@ -269,7 +269,7 @@ jobs:
       - name: Build
         run: pnpm --filter @workspace/syrabit run build
         env:
-          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://api.syrabit.ai' }}
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
@@ -279,6 +279,7 @@ jobs:
           command: pages deploy apps/frontend/dist --project-name=syrabitfrontend
 
       - name: Submit URLs to IndexNow
+        if: ${{ secrets.INDEXNOW_SECRET != '' }}
         run: node apps/frontend/scripts/indexnow-submit.mjs
         env:
           INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
