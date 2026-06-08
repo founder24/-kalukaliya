@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     VERTEX_PROJECT_ID: Optional[str] = None
     VERTEX_LOCATION: str = "us-central1"
-    VERTEX_GEMINI_MODEL: str = "gemini-2.0-flash"
+    VERTEX_GEMINI_MODEL: str = "gemini-2.5-flash"
     VERTEX_VISION_MODEL: str = "gemini-1.5-pro-vision"
 
     # --- P7: Sarvam AI (Indic) ---

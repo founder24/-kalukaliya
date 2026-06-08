@@ -412,86 +412,98 @@ async def resolve_subject(
     page can render breadcrumbs and metadata without a separate hierarchy fetch.
     Chapters are NOT included — use GET /content/chapters/{subject_id} for those.
     """
+    try:
+        from beanie.exceptions import CollectionWasNotInitialized as _CWNI
+    except ImportError:
+        _CWNI = None
+
     response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
 
-    # 1. Resolve board by stored slug field
-    board_doc = await Board.find_one({"slug": board, "status": "active"})
-    if not board_doc:
-        # Fallback: try case-insensitive slugify match on name
-        all_boards = await Board.find({"status": "active"}).to_list(length=None)
-        board_doc = next(
-            (b for b in all_boards if _slugify(b.name) == board or b.slug == board),
+    try:
+        # 1. Resolve board by stored slug field
+        board_doc = await Board.find_one({"slug": board, "status": "active"})
+        if not board_doc:
+            # Fallback: try case-insensitive slugify match on name
+            all_boards = await Board.find({"status": "active"}).to_list(length=None)
+            board_doc = next(
+                (b for b in all_boards if _slugify(b.name) == board or b.slug == board),
+                None,
+            )
+        if not board_doc:
+            raise HTTPException(status_code=404, detail=f"Board '{board}' not found")
+
+        # 2. Resolve class — Class has no stored slug, compute from name
+        classes = await Class.find({"board_id": board_doc.id, "status": "active"}).to_list(length=None)
+        matching_class = next(
+            (c for c in classes if _slugify(c.name) == class_slug),
             None,
         )
-    if not board_doc:
-        raise HTTPException(status_code=404, detail=f"Board '{board}' not found")
+        if not matching_class:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Class '{class_slug}' not found under board '{board}'",
+            )
 
-    # 2. Resolve class — Class has no stored slug, compute from name
-    classes = await Class.find({"board_id": board_doc.id, "status": "active"}).to_list(length=None)
-    matching_class = next(
-        (c for c in classes if _slugify(c.name) == class_slug),
-        None,
-    )
-    if not matching_class:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Class '{class_slug}' not found under board '{board}'",
+        # 3. Load all streams for this class
+        streams = await Stream.find(
+            {"class_id": matching_class.id, "status": "active"}
+        ).to_list(length=None)
+        if not streams:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No streams found for class '{class_slug}'",
+            )
+
+        # 4. Find the matching subject across all streams in this class
+        #    Subject.slug may be stored or must be derived from name.
+        stream_id_list = [s.id for s in streams]
+        candidates = await Subject.find(
+            {"stream_id": {"$in": stream_id_list}, "status": "active"}
+        ).to_list(length=None)
+
+        subject_doc = next(
+            (s for s in candidates if (s.slug or _slugify(s.name)) == subject_slug),
+            None,
         )
+        if not subject_doc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Subject '{subject_slug}' not found under '{board}/{class_slug}'",
+            )
 
-    # 3. Load all streams for this class
-    streams = await Stream.find(
-        {"class_id": matching_class.id, "status": "active"}
-    ).to_list(length=None)
-    if not streams:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No streams found for class '{class_slug}'",
-        )
+        # 5. Find the stream that owns this subject (for breadcrumb stream_name)
+        stream_doc = next((s for s in streams if s.id == subject_doc.stream_id), None)
 
-    # 4. Find the matching subject across all streams in this class
-    #    Subject.slug may be stored or must be derived from name.
-    stream_id_list = [s.id for s in streams]
-    candidates = await Subject.find(
-        {"stream_id": {"$in": stream_id_list}, "status": "active"}
-    ).to_list(length=None)
+        # 6. Chapter count — lightweight aggregate, no content payload
+        chapter_count = await Chapter.find({"subject_id": subject_doc.id}).count()
 
-    subject_doc = next(
-        (s for s in candidates if (s.slug or _slugify(s.name)) == subject_slug),
-        None,
-    )
-    if not subject_doc:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Subject '{subject_slug}' not found under '{board}/{class_slug}'",
-        )
-
-    # 5. Find the stream that owns this subject (for breadcrumb stream_name)
-    stream_doc = next((s for s in streams if s.id == subject_doc.stream_id), None)
-
-    # 6. Chapter count — lightweight aggregate, no content payload
-    chapter_count = await Chapter.find({"subject_id": subject_doc.id}).count()
-
-    return {
-        "id": str(subject_doc.id),
-        "name": subject_doc.name,
-        "slug": subject_doc.slug or _slugify(subject_doc.name),
-        "description": subject_doc.description,
-        "tags": subject_doc.tags or [],
-        "icon": subject_doc.icon,
-        "gradient": subject_doc.gradient,
-        "thumbnailUrl": subject_doc.thumbnail_url,
-        "has_document": subject_doc.has_document,
-        "seo_stats": subject_doc.seo_stats,
-        "status": subject_doc.status,
-        # Breadcrumb context — avoids a second round-trip from the page component
-        "board_name": board_doc.name,
-        "board_slug": board_doc.slug,
-        "class_name": matching_class.name,
-        "class_slug": _slugify(matching_class.name),
-        "stream_name": stream_doc.name if stream_doc else "",
-        "stream_slug": _slugify(stream_doc.name) if stream_doc else "",
-        "chapter_count": chapter_count,
-    }
+        return {
+            "id": str(subject_doc.id),
+            "name": subject_doc.name,
+            "slug": subject_doc.slug or _slugify(subject_doc.name),
+            "description": subject_doc.description,
+            "tags": subject_doc.tags or [],
+            "icon": subject_doc.icon,
+            "gradient": subject_doc.gradient,
+            "thumbnailUrl": subject_doc.thumbnail_url,
+            "has_document": subject_doc.has_document,
+            "seo_stats": subject_doc.seo_stats,
+            "status": subject_doc.status,
+            # Breadcrumb context — avoids a second round-trip from the page component
+            "board_name": board_doc.name,
+            "board_slug": board_doc.slug,
+            "class_name": matching_class.name,
+            "class_slug": _slugify(matching_class.name),
+            "stream_name": stream_doc.name if stream_doc else "",
+            "stream_slug": _slugify(stream_doc.name) if stream_doc else "",
+            "chapter_count": chapter_count,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        if _CWNI and isinstance(e, _CWNI):
+            raise HTTPException(status_code=503, detail="Content store not ready, please retry")
+        raise HTTPException(status_code=500, detail=f"Failed to resolve subject: {e}")
 
 
 @router.get("/chapters/{subject_id}")

@@ -42,7 +42,7 @@ async def store_dead_letter(
         await collection.insert_one(document)
         logger.info(f"Dead letter stored for user {user_id}, lang={lang}")
     except Exception as e:
-        logger.error(f"Failed to store dead letter: {e}")
+        logger.warning(f"Failed to store dead letter (non-critical): {e}")
 
 
 async def list_dead_letters(

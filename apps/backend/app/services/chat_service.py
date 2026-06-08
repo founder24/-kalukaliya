@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import re
+import uuid
 from typing import AsyncGenerator, Optional
 
 from app.config import settings
@@ -438,12 +439,16 @@ class ChatService:
             {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
             for c in context_chunks
         ])
+        # Ensure session_id is never None — Chat.session_id is typed as str
+        # and Pydantic v2 refuses None even when a default_factory is set.
+        resolved_session_id = session_id or str(uuid.uuid4())
+
         try:
             from app.models.chat import Chat
 
             chat_doc = Chat(
                 user_id=user_id,
-                session_id=session_id,
+                session_id=resolved_session_id,
             )
             chat_doc.add_message(role="user", content=user_message)
             chat_doc.add_message(
@@ -467,7 +472,7 @@ class ChatService:
 
                 chat_doc = Chat(
                     user_id=user_id,
-                    session_id=session_id,
+                    session_id=resolved_session_id,
                 )
                 chat_doc.add_message(role="user", content=user_message)
                 chat_doc.add_message(

@@ -43,10 +43,10 @@ async def mongo_ping() -> Dict[str, Any]:
 
         return {"status": "healthy", "latency_ms": latency_ms}
     except RuntimeError as e:
-        logger.error(f"MongoDB not initialized: {str(e)}")
+        logger.warning(f"MongoDB not initialized: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
     except Exception as e:
-        logger.error(f"MongoDB ping failed: {str(e)}")
+        logger.warning(f"MongoDB ping failed: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
 
 
@@ -64,7 +64,7 @@ async def redis_ping() -> Dict[str, Any]:
         else:
             return {"status": "unhealthy", "error": "Ping returned false"}
     except Exception as e:
-        logger.error(f"Redis ping failed: {str(e)}")
+        logger.warning(f"Redis ping failed: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
 
 
@@ -81,7 +81,7 @@ async def mongo_vector_search_ping() -> Dict[str, Any]:
             return {"status": "degraded", "error": "No topic embeddings loaded"}
         return {"status": "healthy", "topic_count": count}
     except Exception as e:
-        logger.error(f"MongoDB vector search ping failed: {str(e)}")
+        logger.warning(f"MongoDB vector search ping failed: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
 
 
@@ -108,7 +108,7 @@ async def vertex_ping() -> Dict[str, Any]:
         else:
             return {"status": "degraded", "error": "No credentials (SA key or Workload Identity)"}
     except Exception as e:
-        logger.error(f"Vertex AI check failed: {str(e)}")
+        logger.warning(f"Vertex AI check failed: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
 
 

@@ -33,7 +33,7 @@ async def analytics_overview(request: Request):
                 {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
                 {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
             ]
-        ).to_list(1)
+        ).to_list(length=1)
         total_messages = msg_agg[0]["total"] if msg_agg else 0
 
         # Average messages per chat

@@ -41,7 +41,7 @@ async def admin_dashboard(request: Request):
                 {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
                 {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
             ]
-        ).to_list(1)
+        ).to_list(length=1)
         total_messages = total_messages[0]["total"] if total_messages else 0
 
         messages_today_result = await db.chats.aggregate(
@@ -50,7 +50,7 @@ async def admin_dashboard(request: Request):
                 {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
                 {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
             ]
-        ).to_list(1)
+        ).to_list(length=1)
         messages_today = (
             messages_today_result[0]["total"] if messages_today_result else 0
         )

@@ -251,7 +251,7 @@ class ContentPublisherService:
                 response.raise_for_status()
                 return {"status": "published", "slug": chapter.slug}
         except Exception as e:
-            logger.error(f"Cloudflare publish failed: {e}")
+            logger.warning(f"Cloudflare publish failed (non-critical): {e}")
             return {"status": "error", "detail": str(e)}
 
     async def publish_to_gcs(self, chapter: Chapter) -> dict:
