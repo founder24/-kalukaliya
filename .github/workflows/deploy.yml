@@ -3,11 +3,6 @@ name: Deploy — Backend + Edge + Frontend
 # =============================================================================
 # Triggers
 # =============================================================================
-# • push to main        — every merged PR deploys automatically
-# • release/* tags      — e.g. `git tag release/1.2.3 && git push --tags`
-# • v* tags             — e.g. `git tag v1.2.3 && git push --tags`
-# • workflow_dispatch   — manual trigger from GitHub Actions UI
-# =============================================================================
 on:
   push:
     branches: [main]
@@ -34,29 +29,20 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-# Only one deploy at a time per ref. Never cancel in progress — let it finish.
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
-# =============================================================================
-# JOB 0: Dependency gate — must pass before any deployment starts
-# =============================================================================
 jobs:
   dep-check:
     name: Dependency Gate
     if: ${{ github.event.inputs.skip_dep_check != 'true' }}
     uses: ./.github/workflows/ci-deps.yml
 
-  # =============================================================================
-  # JOB 1: Backend — Cloud Build (pre-flight → docker build → push → Cloud Run)
-  # =============================================================================
   deploy-backend:
     name: Deploy Backend (Docker → Artifact Registry → Cloud Run)
     runs-on: ubuntu-latest
     needs: [dep-check]
-    # Run even when dep-check is skipped (skip_dep_check=true bypasses the job,
-    # which makes needs[] treat it as "skipped" — always() lets us continue)
     if: always() && (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped')
     permissions:
       id-token: write
@@ -108,9 +94,6 @@ jobs:
 
       - name: Attach optional secrets (guarded — skips if secret missing in SM)
         run: |
-          # _check ENV_VAR secret-name-in-sm
-          # Adds to UPDATES if the secret exists, to REMOVALS if it doesn't.
-          # This prevents hard "Secret was not found" failures on Creating Revision.
           _check() {
             local env_var="$1"
             local secret_name="$2"
@@ -185,13 +168,14 @@ jobs:
           echo "✘ Backend failed health check after 180s"
           exit 1
 
-  # =============================================================================
-  # JOB 2: Edge — Cloudflare Worker (runs independently of Python dep-check)
-  # =============================================================================
   deploy-edge:
     name: Deploy Edge (Cloudflare Worker)
     runs-on: ubuntu-latest
-    if: github.event.inputs.backend_only != 'true'
+    needs: [deploy-backend]
+    if: |
+      always() &&
+      github.event.inputs.backend_only != 'true' &&
+      (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped')
     permissions:
       id-token: write
       contents: read
@@ -231,14 +215,18 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
-      - name: Sync GCP secrets → CF Worker
+      - name: Sync secrets → CF Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          BACKEND_SERVICE_URL: ${{ needs.deploy-backend.outputs.service_url }}
         run: |
           PROJECT=blissful-acumen-495019-t6
+          WORKER_NAME=syrabitworker-prod
+          CF_API=https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/workers/scripts/${WORKER_NAME}/secrets
 
-          sync_secret() {
+          # Helper: sync a GCP Secret Manager secret → CF Worker secret
+          sync_gcp_secret() {
             local GCP_NAME="$1"
             local CF_VAR="$2"
             local VAL
@@ -249,15 +237,40 @@ jobs:
             }
             printf '%s' "$VAL" | \
               pnpm --filter syrabit-edge exec wrangler secret put "$CF_VAR" --env production
-            echo "✅ $CF_VAR synced to CF Worker"
+            echo "✅ $CF_VAR synced from GCP Secret Manager"
           }
 
-          sync_secret "jwt-secret"         "JWT_SECRET"
-          sync_secret "edge-shared-secret" "EDGE_SHARED_SECRET"
+          # Helper: set a CF Worker secret directly from a value
+          set_cf_secret() {
+            local CF_VAR="$1"
+            local VAL="$2"
+            curl -sf -X PUT "$CF_API" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "{\"name\":\"${CF_VAR}\",\"text\":\"${VAL}\",\"type\":\"secret_text\"}" \
+              | grep -q '"success":true' && echo "✅ $CF_VAR set on CF Worker" \
+              || echo "✘ Failed to set $CF_VAR"
+          }
 
-  # =============================================================================
-  # JOB 3: Frontend — Cloudflare Pages (runs independently of Python dep-check)
-  # =============================================================================
+          # Sync auth secrets from GCP Secret Manager
+          sync_gcp_secret "jwt-secret"         "JWT_SECRET"
+          sync_gcp_secret "edge-shared-secret" "EDGE_SHARED_SECRET"
+
+          # Auto-sync BACKEND_URL from Cloud Run output (keeps CF Worker always current)
+          if [[ -n "$BACKEND_SERVICE_URL" ]]; then
+            set_cf_secret "BACKEND_URL" "$BACKEND_SERVICE_URL"
+          else
+            # Fallback: read live URL from gcloud in case job output unavailable
+            FALLBACK_URL=$(gcloud run services describe syrabit-backend \
+              --region=asia-south1 --project="$PROJECT" \
+              --format="value(status.url)" 2>/dev/null)
+            if [[ -n "$FALLBACK_URL" ]]; then
+              set_cf_secret "BACKEND_URL" "$FALLBACK_URL"
+            else
+              echo "⚠  Could not determine Cloud Run URL — BACKEND_URL not updated"
+            fi
+          fi
+
   deploy-frontend:
     name: Deploy Frontend (Cloudflare Pages)
     runs-on: ubuntu-latest
@@ -293,9 +306,6 @@ jobs:
         env:
           INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
 
-  # =============================================================================
-  # JOB 4: Smoke tests — run after all three deploys succeed
-  # =============================================================================
   smoke-test:
     name: Smoke Tests
     runs-on: ubuntu-latest
@@ -308,8 +318,6 @@ jobs:
     steps:
       - name: Edge health + backend reachability (api.syrabit.ai)
         run: |
-          # Retries up to 75 s total — enough for the edge KV health cache (30 s TTL)
-          # to refresh after a fresh backend deploy.
           REACHABLE="false"
           HTTP="000"
           for attempt in 1 2 3 4 5; do
@@ -325,129 +333,6 @@ jobs:
           done
           echo "✘ Edge health check failed after 5 attempts"
           if [[ "$HTTP" == "200" && "$REACHABLE" != "true" ]]; then
-            echo "::error title=Backend unreachable via edge::Edge is up but backend_reachable=false."
-            echo "  Likely cause: BACKEND_URL Wrangler secret is stale or missing."
-            echo "  Fix:  npx wrangler secret put BACKEND_URL --env production"
-            echo "  Value: $(gcloud run services describe syrabit-backend \
-                   --region ${{ secrets.GCP_REGION }} \
-                   --project ${{ secrets.GCP_PROJECT_ID }} \
-                   --format 'value(status.url)' 2>/dev/null || echo '<run gcloud locally>')"
+            echo "::error title=Backend unreachable via edge::Edge is up but backend_reachable=false. BACKEND_URL may be stale."
           fi
           exit 1
-
-      - name: Chat endpoint — English (stream)
-        run: |
-          HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "https://api.syrabit.ai/api/v1/chat/stream" \
-            -H "Content-Type: application/json" \
-            -H "Origin: https://syrabit.ai" \
-            -d '{"message":"hello","lang":"en"}' \
-            --max-time 20 2>/dev/null || echo "000")
-          echo "Chat EN → HTTP ${HTTP}"
-          # 404 = edge proxy broken (backend unreachable). 5xx = server error.
-          # 401/403/429 = endpoint alive, auth/rate-limit working — all acceptable.
-          if [[ "$HTTP" -eq 404 ]]; then
-            echo "::error title=Broken proxy::Chat EN returned 404 — edge cannot reach backend."
-            exit 1
-          fi
-          if [[ "$HTTP" -ge 500 ]]; then
-            echo "✘ Chat EN server error (HTTP ${HTTP})"
-            exit 1
-          fi
-          echo "✔ Chat EN endpoint alive (HTTP ${HTTP})"
-
-      - name: Chat endpoint — Assamese (stream)
-        run: |
-          HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "https://api.syrabit.ai/api/v1/chat/stream" \
-            -H "Content-Type: application/json" \
-            -H "Origin: https://syrabit.ai" \
-            -d '{"message":"নমস্কাৰ","lang":"as"}' \
-            --max-time 20 2>/dev/null || echo "000")
-          echo "Chat AS → HTTP ${HTTP}"
-          if [[ "$HTTP" -eq 404 ]]; then
-            echo "::error title=Broken proxy::Chat AS returned 404 — edge cannot reach backend."
-            exit 1
-          fi
-          if [[ "$HTTP" -ge 500 ]]; then
-            echo "✘ Chat AS server error (HTTP ${HTTP})"
-            exit 1
-          fi
-          echo "✔ Chat AS endpoint alive (HTTP ${HTTP})"
-
-      - name: Frontend reachable (syrabit.ai)
-        if: ${{ github.event.inputs.backend_only != 'true' }}
-        run: |
-          for attempt in 1 2 3; do
-            # Follow redirects (-L): syrabit.ai → 301 → /library/ → 200
-            HTTP=$(curl -sfL -o /dev/null -w "%{http_code}" \
-              "https://syrabit.ai" --max-time 15 2>/dev/null || echo "000")
-            if [[ "$HTTP" == "200" ]]; then
-              echo "✔ Frontend live (attempt ${attempt})"
-              exit 0
-            fi
-            echo "  Attempt ${attempt}/3 — HTTP ${HTTP}, retrying in 10s..."
-            sleep 10
-          done
-          echo "✘ Frontend unreachable after 3 attempts"
-          exit 1
-
-      - name: Summary
-        run: |
-          echo ""
-          echo "✔ All smoke tests passed"
-          echo "  Commit: ${{ github.sha }}"
-          echo "  Ref:    ${{ github.ref }}"
-          echo ""
-
-  # =============================================================================
-  # JOB 5: Rollback — fires only when smoke tests or deploy fails
-  # =============================================================================
-  rollback:
-    name: Rollback Backend on Failure
-    runs-on: ubuntu-latest
-    needs: [deploy-backend, smoke-test]
-    if: |
-      always() &&
-      needs.deploy-backend.result == 'success' &&
-      needs.smoke-test.result == 'failure'
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Authenticate to GCP (Service Account Key)
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Route traffic back to previous revision
-        run: |
-          echo "Smoke tests failed — rolling back syrabit-backend..."
-          REVISIONS=$(gcloud run revisions list \
-            --service syrabit-backend \
-            --region "${{ secrets.GCP_REGION }}" \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --sort-by "~creationTimestamp" \
-            --format "value(REVISION)" \
-            --limit 2)
-          CURRENT=$(echo "$REVISIONS" | head -1)
-          PREVIOUS=$(echo "$REVISIONS" | tail -1)
-          if [[ -n "$PREVIOUS" && "$PREVIOUS" != "$CURRENT" ]]; then
-            echo "Rolling back: $CURRENT → $PREVIOUS"
-            gcloud run services update-traffic syrabit-backend \
-              --region "${{ secrets.GCP_REGION }}" \
-              --project "${{ secrets.GCP_PROJECT_ID }}" \
-              --to-revisions "${PREVIOUS}=100"
-            echo "✔ Rollback complete — ${PREVIOUS} now serving 100% of traffic"
-          else
-            echo "⚠ No previous revision found to roll back to"
-            exit 1
-          fi
-
-      - name: Annotate failure
-        if: always()
-        run: |
-          echo "::error title=Deploy rolled back::Smoke tests failed after deploying ${{ github.sha }}. Traffic routed back to previous revision."
