@@ -160,9 +160,17 @@ else
                                 || _warn "Traffic: ${_traffic}% on latest (split traffic active?)"
     _env=$(gcloud run services describe syrabit-backend \
       --project="${GCP_PROJECT}" --region="${GCP_REGION}" \
-      --format="value(spec.template.spec.containers[0].env[APP_ENV])" 2>/dev/null || echo "")
+      --format="json(spec.template.spec.containers[0].env)" 2>/dev/null \
+      | python3 -c "
+import json,sys
+try:
+  d=json.load(sys.stdin)
+  envs=d.get('spec',{}).get('template',{}).get('spec',{}).get('containers',[{}])[0].get('env',[])
+  print(next((e.get('value','') for e in envs if e.get('name')=='APP_ENV'),''))
+except: print('')
+" 2>/dev/null || echo "")
     [[ "$_env" == "production" ]] && _ok "APP_ENV=production ✓" \
-                                   || _warn "APP_ENV='${_env:-not set}'  (run: gcloud run services update syrabit-backend --update-env-vars=APP_ENV=production --region=${GCP_REGION})"
+                                   || _warn "APP_ENV='${_env:-not set}'  →  fix: gcloud run services update syrabit-backend --update-env-vars=APP_ENV=production --region=${GCP_REGION} --project=${GCP_PROJECT}"
   fi
 fi
 
