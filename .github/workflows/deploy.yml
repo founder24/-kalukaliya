@@ -103,7 +103,7 @@ jobs:
             --service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com \
             --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,SARVAM_MODEL=sarvam-30b,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=asia-south1 \
             --remove-env-vars=VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG \
-            --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest,SENTRY_DSN=SENTRY_DSN:latest \
+            --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest\
             --remove-secrets=CF_PAGES_DEPLOY_HOOK,CF_ACCOUNT_ID,CLOUDFLARE_ACCOUNT_ID,CLOUDFLARE_KV_API_TOKEN,CLOUDFLARE_KV_NAMESPACE_ID,GCS_CONTENT_BUCKET
 
       - name: Attach optional secrets (guarded — skips if secret missing in SM)
@@ -133,6 +133,14 @@ jobs:
           _check INDEXNOW_INTERNAL_SECRET    indexnow-internal-secret
           _check VERTEX_SEARCH_DATASTORE_ID  VERTEX_SEARCH_DATASTORE_ID
           _check SENTRY_DSN                 SENTRY_DSN
+          _check CF_ACCOUNT_ID               CF_ACCOUNT_ID
+          _check CLOUDFLARE_ACCOUNT_ID        CF_ACCOUNT_ID
+          _check CLOUDFLARE_KV_API_TOKEN      CF_KV_API_TOKEN
+          _check CLOUDFLARE_KV_NAMESPACE_ID   CF_KV_NAMESPACE_ID
+          _check GCS_CONTENT_BUCKET           GCS_CONTENT_BUCKET
+          _check CF_PAGES_DEPLOY_HOOK         CF_PAGES_DEPLOY_HOOK
+          _check ADMIN_EMAIL                  ADMIN_EMAIL
+          _check ADMIN_PASSWORD               ADMIN_PASSWORD
 
           if [[ -n "$UPDATES" ]]; then
             echo "Attaching optional secrets: $UPDATES"
