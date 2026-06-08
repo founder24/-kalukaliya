@@ -503,7 +503,8 @@ async def resolve_subject(
     except Exception as e:
         if _CWNI and isinstance(e, _CWNI):
             raise HTTPException(status_code=503, detail="Content store not ready, please retry")
-        raise HTTPException(status_code=500, detail=f"Failed to resolve subject: {e}")
+        logger.error(f"resolve_subject({board}/{class_slug}/{subject_slug}) failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to resolve subject")
 
 
 @router.get("/chapters/{subject_id}")
