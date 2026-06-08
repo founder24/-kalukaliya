@@ -1,0 +1,823 @@
+Welcome to Cloud Shell! Type "help" to get started, or type "gemini" to try prompting with Gemini CLI.
+Your Cloud Platform project in this session is set to blissful-acumen-495019-t6.
+Use `gcloud config set project [PROJECT_ID]` to change to a different project.
+founder@cloudshell:~ (blissful-acumen-495019-t6)$ bash <(curl -fsSL https://raw.githubusercontent.com/founder24/-kalukaliya/main/infra/scripts/cloudshell-bootstrap.sh)
+curl: (22) The requested URL returned error: 404
+founder@cloudshell:~ (blissful-acumen-495019-t6)$ cd ~/syrabit && git pull origin main
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+Already up to date.
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ # One-liner (no repo needed):
+curl -fsSL https://raw.githubusercontent.com/founder24/-kalukaliya/main/scripts/cloudshell_test.sh | bash
+
+# With credentials:
+ADMIN_EMAIL=founder@syrabit.ai ADMIN_PASSWORD=secret bash scripts/cloudshell_test.sh
+curl: (22) The requested URL returned error: 404
+
+╔══════════════════════════════════════════════════════════════╗
+║      SYRABIT LIVE DEPLOYMENT TEST  —  Cloud Shell Edition    ║
+║      2026-06-08 12:01 UTC                                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+  API : https://api.syrabit.ai
+  FE  : https://syrabit.ai
+  GCP : blissful-acumen-495019-t6 / us-central1
+  Auth: founder@syrabit.ai  (rate-limit bypass enabled)
+  GH  : token set  (GitHub Actions status enabled)
+
+
+──────────────────────────────────────────────────────────
+  0. Pre-flight
+──────────────────────────────────────────────────────────
+  ✓ Backend reachable: https://api.syrabit.ai/health
+
+──────────────────────────────────────────────────────────
+  1. Cloud Run Status
+──────────────────────────────────────────────────────────
+  ⚠ Could not read Cloud Run revision — run: gcloud auth login --project blissful-acumen-495019-t6
+
+──────────────────────────────────────────────────────────
+  2. Backend Health
+──────────────────────────────────────────────────────────
+  ✓ GET /health → HTTP 200
+  ✓ GET /health/deep → HTTP 200
+  ✓ health body: status → HTTP 200 ✓ body
+  ✓ health body: healthy → HTTP 200 ✓ body
+  · Health response time: 66ms
+
+──────────────────────────────────────────────────────────
+  3. Frontend & Cloudflare Edge
+──────────────────────────────────────────────────────────
+  ✓ GET https://syrabit.ai/ → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/chat/ → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/library/ → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/robots.txt → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/sitemap.xml → 200 → HTTP 200
+  ✓ Security header: strict-transport-security
+  ✓ Security header: x-frame-options
+  ✓ Security header: x-content-type-options
+  · Cloudflare: cf-ray: a087bf6c2c0ba9ad-TPE
+
+──────────────────────────────────────────────────────────
+  4. Anon Endpoints (no auth required)
+──────────────────────────────────────────────────────────
+  ✓ GET /user/credits (anon) → 200 → HTTP 200 ✓ body
+  ✓ /user/credits — tier: anonymous → HTTP 200 ✓ body
+  ✓ GET /conversations/anon → 200 → HTTP 200 ✓ body
+  ✓ GET /chat/history (anon) → 200 → HTTP 200 ✓ body
+  ✓ GET /content/library-bundle → subjects → HTTP 200 ✓ body
+  ✓ GET /subscription/plans → free+pro → HTTP 200 ✓ body
+  ✓ GET /config/trustpilot → 200 → HTTP 200 ✓ body
+  ✓ GET /sitemap-subjects.xml → 200 → HTTP 200
+
+──────────────────────────────────────────────────────────
+  5. Auth Guards (protected endpoints must reject)
+──────────────────────────────────────────────────────────
+  ✓ GET /users/me (no token) → 401 → HTTP 401
+  ✓ GET /conversations (no token) → 401 → HTTP 401
+  ✓ GET /users/me (bad token) → 401 → HTTP 401
+  ✓ POST /auth/login (bad creds) → 401 → HTTP 401
+  ✓ POST /auth/signup (empty) → 422 → HTTP 422
+
+──────────────────────────────────────────────────────────
+  6. Input Validation
+──────────────────────────────────────────────────────────
+  ✓ POST /chat/stream (empty message) → 422 → HTTP 422
+  ✓ POST /chat/stream (no body) → 422 → HTTP 422
+  ✓ POST /auth/login (empty body) → 422 → HTTP 422
+  ✓ Error responses do not leak stack traces
+
+──────────────────────────────────────────────────────────
+  7. CORS Preflight
+──────────────────────────────────────────────────────────
+  ✓ OPTIONS /chat/stream → 200 → HTTP 200
+  ✓ OPTIONS /user/credits → 200 → HTTP 200
+  ✓ CORS: access-control-allow-origin present
+  ✓ POST /chat/stream → Content-Type: text/event-stream
+
+──────────────────────────────────────────────────────────
+  8. Security Probes
+──────────────────────────────────────────────────────────
+  ✓ /.env blocked → HTTP 404
+  ✓ /.git/config blocked → HTTP 404
+  ✓ /.htaccess blocked → HTTP 404
+  ✓ /wp-login.php blocked → HTTP 404
+  ✓ /phpinfo.php blocked → HTTP 404
+  ✓ /xmlrpc.php blocked → HTTP 404
+  ✓ POST /webhooks/razorpay unsigned → 401/403 → HTTP 400
+  ⚠ GET /docs → HTTP 200 (OpenAPI docs may be visible — ensure APP_ENV=production)
+
+──────────────────────────────────────────────────────────
+  9. Chat TTFB Test  (target: first token < 3000 ms)
+──────────────────────────────────────────────────────────
+  ⚠ Login failed — chat will run as anon (may hit 429)
+  ✗ EN short (osmosis): AI error — Service temporarily unavailable. Please try again.  (3557ms)
+  ✗ EN medium (Newton): AI error — Service temporarily unavailable. Please try again.  (4221ms)
+  ✗ EN brief: AI error — Service temporarily unavailable. Please try again.  (1929ms)
+  ⚠ AS Assamese
+      TTFB  : 9786ms  server_lat=11767ms
+      Total : 12627ms   model=sarvam-30b   route=sarvam
+      Reply : 156 words / 476 chunks
+      Text  :  অৱশ্যে! অসমৰ ছাত্ৰ-ছাত্ৰীসকলৰ বাবে অসমীয়া ভাষাত অসমোছিছৰ এক স্পষ্ট আৰু সৰল ব্যাখ্যা আগবঢ়োৱা হ’ল। …
+  ⚠ Chat TTFB: some queries exceeded 3000 ms or were rate-limited (see above)
+
+──────────────────────────────────────────────────────────
+  10. Performance Spot Check
+──────────────────────────────────────────────────────────
+  ✓ /api/v1/subscription/plans → 256ms  (< 1000ms threshold)
+  ✓ /api/v1/seo/sitemap-subjects.xml → 276ms  (< 2000ms threshold)
+  ✓ /api/v1/content/library-bundle?slim=1 → 297ms  (< 3000ms threshold)
+  ⚠ /health → 661ms  (⚠ above 500ms threshold)
+
+──────────────────────────────────────────────────────────
+  11. GitHub Actions — Latest Deploy Status
+──────────────────────────────────────────────────────────
+  · Total workflow runs: 4495
+    ✓ Agent: Uptime Monitor: success @ 2026-06-08T11:55 [main]
+    ✗ Deploy — Backend + Edge + Frontend: failure @ 2026-06-08T10:49 [main]
+    ✓ Smoke Tests: success @ 2026-06-08T10:49 [main]
+    ✓ Agent: Environment Sync: success @ 2026-06-08T10:49 [main]
+    ✗ Deploy — Backend + Edge + Frontend: failure @ 2026-06-08T10:44 [main]  (historical)
+    ✓ Smoke Tests: success @ 2026-06-08T10:44 [main]  (historical)
+    ✗ Deploy — Backend + Edge + Frontend: failure @ 2026-06-08T10:40 [main]  (historical)
+    ✓ Agent: Environment Sync: success @ 2026-06-08T10:40 [main]  (historical)
+    ✓ Smoke Tests: success @ 2026-06-08T10:40 [main]  (historical)
+    ✓ Agent: Drift Detection: success @ 2026-06-08T10:10 [main]
+  ✗ Latest deploy workflow: failure — check GitHub Actions
+
+╔══════════════════════════════════════════════════════════════╗
+║                        SUMMARY                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+  ✓ PASS:   44
+  ✗ FAIL:   1
+  ⚠ WARN:   5
+  · SKIP:   0
+  ⏱ Time:   88s
+
+  FAILURES:
+    • Latest deploy workflow: failure — check GitHub Actions
+
+  WARNINGS:
+    • Could not read Cloud Run revision — run: gcloud auth login --project blissful-acumen-495019-t6
+    • GET /docs → HTTP 200 (OpenAPI docs may be visible — ensure APP_ENV=production)
+    • Login failed — chat will run as anon (may hit 429)
+    • Chat TTFB: some queries exceeded 3000 ms or were rate-limited (see above)
+    • /health → 661ms  (⚠ above 500ms threshold)
+
+  ✗  1 check(s) failed — review output above
+
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ ^C
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ # Full (with credentials):
+TEST_USER_EMAIL="founder@srabit.ai" TEST_USER_PASSWORD="Rimjhimiya@325544" bash scripts/cloud-shell-test.sh
+
+# Specific category:
+bash scripts/cloud-shell-test.sh --category health,auth,security
+
+╔══════════════════════════════════════════════════════════════╗
+║         SYRABIT FULLSTACK TEST  —  2026-06-08 12:06 UTC         ║
+╚══════════════════════════════════════════════════════════════╝
+
+  Backend:   https://api.syrabit.ai
+  Frontend:  https://syrabit.ai
+  Project:   blissful-acumen-495019-t6 / asia-south1
+  Auth user: founder@srabit.ai
+
+
+▶ 1. Cloud Run Deployment Status
+  Checking Cloud Run service: syrabit-backend
+  ✔ Latest revision: syrabit-backend-00479-k8f (traffic: 100%)
+  ✔ Cloud Run direct health check → HTTP 200 (https://syrabit-backend-bl6wu3psza-el.a.run.app/health)
+
+▶ 2. Backend Health
+  ✔ GET /health → HTTP 200
+  ✔ GET /health/deep → HTTP 200 (200=healthy, 503=degraded-but-alive)
+  ✔ GET /health/circuit-breakers → HTTP 200
+  ✔ GET /health body contains 'status' field
+
+▶ 3. Frontend & Edge
+  ✘ GET https://syrabit.ai/ → expected HTTP 200, got HTTP 301
+  ✔ GET https://syrabit.ai/manifest.json → HTTP 200
+  ✔ GET https://syrabit.ai/robots.txt → HTTP 200
+  ✔ GET https://api.syrabit.ai/health via edge → HTTP 200
+  ✔ CORS headers present on API (Access-Control-Allow-Origin)
+  ✔ Security header present: x-content-type-options
+  ✔ Security header present: x-frame-options
+  ✔ Security header present: strict-transport-security
+
+▶ 4. Content & SEO
+  ✔ GET /sitemap.xml (via edge rewrite) → HTTP 200
+  ✔ GET /api/v1/content/library-bundle → HTTP 200
+  ✔ GET /api/v1/config/trustpilot → HTTP 200
+  ✔ Library bundle returns non-empty JSON
+  ✔ Sitemap contains syrabit.ai URLs
+
+▶ 5. Security Probes
+  ✔ POST /auth/login empty body → HTTP 422 (validation working)
+  ✔ POST /webhooks/razorpay unsigned → HTTP 400 (rejected correctly)
+  ✔ Error responses do not leak stack traces
+  ✔ GET /users/me without token → HTTP 401 (auth enforced)
+  ℹ  GET /docs → HTTP 302 (docs visible — expected if APP_ENV≠production)
+
+▶ 6. Auth Pipeline
+  Running auth pipeline tests...
+  !   WARNING: This script tests against PRODUCTION               !
+    [INFO] TEST_ADMIN_EMAIL/TEST_ADMIN_PASSWORD not set - skipping admin tests
+    [FAIL] Login with valid credentials (expected HTTP 200, got HTTP 401)
+    [FAIL] Cannot proceed with auth flow - login failed
+    [PASS] GET /users/me with NO token (HTTP 401)
+    [PASS] GET /users/me with INVALID token (HTTP 401)
+    [PASS] GET /users/me with EXPIRED/garbage JWT (HTTP 401)
+    [PASS] POST /auth/forgot-password with valid email (HTTP 200)
+    [PASS] POST /auth/forgot-password with nonexistent email (no enumeration) (HTTP 200)
+    [PASS] Rate limiting triggered on attempt 11 (HTTP 429)
+    [SKIP] Admin tests skipped (--skip-admin or no admin credentials)
+    [SKIP] Admin rate limit tests skipped (--skip-admin or --skip-destructive)
+    [PASS] POST /auth/login with empty body (HTTP 422)
+    [PASS] POST /auth/login missing password (HTTP 422)
+    [PASS] POST /auth/refresh with invalid refresh token (HTTP 401)
+    [PASS] POST /auth/refresh with garbage refresh token (HTTP 401)
+    [PASS] Header present: x-content-type-options
+    [PASS] Header present: strict-transport-security
+    [PASS] Header present: content-type
+    PASSED:  13
+    FAILED:  2
+    SKIPPED: 2
+  Some tests FAILED. Review output above for details.
+  ✘ Auth pipeline script exited 1 (failures detected — run directly for detail)
+
+▶ 7. Chat Pipeline
+  Running chat pipeline tests (this may take ~30s)...
+  !   WARNING: This script tests against PRODUCTION               !
+    [FAIL] Login failed (expected HTTP 200, got HTTP 429)
+    [SKIP] All authenticated chat tests skipped - no token
+    [FAIL] POST /chat/ anonymous (no auth token) (expected HTTP 200, got HTTP 502)
+    [FAIL] POST /chat/ anonymous with X-Anon-ID header (expected HTTP 200, got HTTP 502)
+    [SKIP] Authenticated streaming tests skipped - no token
+    [PASS] POST /chat/stream anonymous - received response
+    [SKIP] Authenticated history tests skipped - no token
+    [PASS] GET /chat/history without auth returns 200 (optional auth)
+    [SKIP] Chat messages tests skipped - no token
+    [PASS] GET /chat/nonexistent-session/messages (HTTP 404)
+    [SKIP] TTS tests skipped (--skip-tts)
+    [PASS] POST /chat/image without auth (expect 401) (HTTP 401)
+    [SKIP] Image with auth test skipped - no token
+    [SKIP] Performance tests skipped - no token
+    [SKIP] Multi-turn tests skipped - no token
+    [INFO] No latency measurements collected
+    PASSED:  4
+    FAILED:  3
+    SKIPPED: 8
+  Some tests FAILED. Review output above for details.
+  ✘ Chat pipeline script exited 1 (failures detected — run directly for detail)
+
+▶ 8. Performance Spot Check
+  ✔ /health → 347ms  (threshold 500ms)
+  ✔ /api/v1/content/library-bundle → 121ms  (threshold 3000ms)
+  ✔ /sitemap.xml → 190ms  (threshold 2000ms)
+
+╔══════════════════════════════════════════════════════════════╗
+║                        SUMMARY                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+  ✔ Passed:  25
+  ✘ Failed:  3
+  ⊘ Skipped: 0
+  ⏱ Duration: 41s
+
+  Failed checks:
+    • GET https://syrabit.ai/ → expected HTTP 200, got HTTP 301
+    • Auth pipeline script exited 1 (failures detected — run directly for detail)
+    • Chat pipeline script exited 1 (failures detected — run directly for detail)
+
+  ✘  3 check(s) failed — review output above
+
+  Tip: run the failing section directly for full detail:
+    bash scripts/live-deployment-test.sh --verbose
+    bash scripts/test-auth-live.sh
+    bash scripts/test-chat-live.sh
+
+
+╔══════════════════════════════════════════════════════════════╗
+║         SYRABIT FULLSTACK TEST  —  2026-06-08 12:07 UTC         ║
+╚══════════════════════════════════════════════════════════════╝
+
+  Backend:   https://api.syrabit.ai
+  Frontend:  https://syrabit.ai
+  Project:   blissful-acumen-495019-t6 / asia-south1
+  Auth user: not set — auth/chat tests will be skipped
+             set TEST_USER_EMAIL + TEST_USER_PASSWORD to enable
+
+
+▶ 1. Cloud Run Deployment Status
+  Checking Cloud Run service: syrabit-backend
+  ✔ Latest revision: syrabit-backend-00479-k8f (traffic: 100%)
+  ✔ Cloud Run direct health check → HTTP 200 (https://syrabit-backend-bl6wu3psza-el.a.run.app/health)
+
+▶ 2. Backend Health
+  ✔ GET /health → HTTP 200
+  ✔ GET /health/deep → HTTP 200 (200=healthy, 503=degraded-but-alive)
+  ✔ GET /health/circuit-breakers → HTTP 200
+  ✔ GET /health body contains 'status' field
+
+▶ 3. Frontend & Edge
+  ✘ GET https://syrabit.ai/ → expected HTTP 200, got HTTP 301
+  ✔ GET https://syrabit.ai/manifest.json → HTTP 200
+  ✔ GET https://syrabit.ai/robots.txt → HTTP 200
+  ✔ GET https://api.syrabit.ai/health via edge → HTTP 200
+  ✔ CORS headers present on API (Access-Control-Allow-Origin)
+  ✔ Security header present: x-content-type-options
+  ✔ Security header present: x-frame-options
+  ✔ Security header present: strict-transport-security
+
+▶ 4. Content & SEO
+  ✔ GET /sitemap.xml (via edge rewrite) → HTTP 200
+  ✔ GET /api/v1/content/library-bundle → HTTP 200
+  ✔ GET /api/v1/config/trustpilot → HTTP 200
+  ✔ Library bundle returns non-empty JSON
+  ✔ Sitemap contains syrabit.ai URLs
+
+▶ 5. Security Probes
+  ✔ POST /auth/login empty body → HTTP 422 (validation working)
+  ✔ POST /webhooks/razorpay unsigned → HTTP 400 (rejected correctly)
+  ✔ Error responses do not leak stack traces
+  ✔ GET /users/me without token → HTTP 401 (auth enforced)
+  ℹ  GET /docs → HTTP 302 (docs visible — expected if APP_ENV≠production)
+
+▶ 6. Auth Pipeline
+  ⊘ Skipped — set TEST_USER_EMAIL + TEST_USER_PASSWORD to enable
+
+▶ 7. Chat Pipeline
+  ⊘ Skipped — set TEST_USER_EMAIL + TEST_USER_PASSWORD to enable
+
+▶ 8. Performance Spot Check
+  ✔ /health → 63ms  (threshold 500ms)
+  ✔ /api/v1/content/library-bundle → 327ms  (threshold 3000ms)
+  ✔ /sitemap.xml → 202ms  (threshold 2000ms)
+
+╔══════════════════════════════════════════════════════════════╗
+║                        SUMMARY                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+  ✔ Passed:  25
+  ✘ Failed:  1
+  ⊘ Skipped: 2
+  ⏱ Duration: 17s
+
+  Failed checks:
+    • GET https://syrabit.ai/ → expected HTTP 200, got HTTP 301
+
+  ✘  1 check(s) failed — review output above
+
+  Tip: run the failing section directly for full detail:
+    bash scripts/live-deployment-test.sh --verbose
+    bash scripts/test-auth-live.sh
+    bash scripts/test-chat-live.sh
+
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ ^C
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ bash scripts/audit-chat-pipeline-cloud-shell.sh          # all tests
+bash scripts/audit-chat-pipeline-cloud-shell.sh TestChatResponseSpeed  # one class
+
+[INFO] ════════════════════════════════════════════════════════════════
+[INFO] Chat Pipeline Audit — Google Cloud Shell
+[INFO] ════════════════════════════════════════════════════════════════
+
+[INFO] Step 1: Checking Python environment...
+[✓] Using system python3: 3.12.3
+[INFO] Python version: 3.12
+
+[INFO] Step 2: Installing backend dependencies...
+[✓] Virtual environment activated
+[INFO] Upgrading pip and setuptools...
+[INFO] Installing requirements.txt...
+[✓] requirements.txt installed
+[INFO] Installing test dependencies...
+[✓] Test dependencies installed
+
+[INFO] Step 3: Locating chat pipeline audit tests...
+[✓] Found: test_pr358_chat_audit.py
+
+[INFO] Step 4: Running chat pipeline audit tests...
+
+[INFO] Running all chat pipeline audit tests
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /home/founder/syrabit/apps/backend/venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/founder/syrabit/apps/backend
+configfile: pytest.ini
+plugins: env-1.6.0, cov-7.1.0, anyio-4.13.0, asyncio-1.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 17 items
+
+tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_stream_returns_correct_sse_format FAILED [  5%]
+tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_stream_routes_to_vertex FAILED [ 11%]
+tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_system_prompt_enforces_english PASSED [ 17%]
+tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_stream_routes_to_sarvam FAILED [ 23%]
+tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_fallback_to_vertex_on_sarvam_failure FAILED [ 29%]
+tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_system_prompt_uses_assamese_script PASSED [ 35%]
+tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_service_unavailable FAILED [ 41%]
+tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_returns_empty FAILED [ 47%]
+tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_raises_exception FAILED [ 52%]
+tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_system_prompt_without_rag_context PASSED [ 58%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_first_chunk_latency FAILED [ 64%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_total_completion_time FAILED [ 70%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_non_streaming_response_latency FAILED [ 76%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_en_overrides_assamese_text FAILED [ 82%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_as_overrides_english_text FAILED [ 88%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_null_falls_back_to_detection FAILED [ 94%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_invalid_lang_rejected FAILED [100%]
+
+=================================== FAILURES ===================================
+___ TestEnglishModeChatStream.test_english_stream_returns_correct_sse_format ___
+tests/test_pr358_chat_audit.py:173: in test_english_stream_returns_correct_sse_format
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+------------------------------ Captured log setup ------------------------------
+WARNING  app.config:config.py:186 TRUST_EDGE_AUTH is True but EDGE_SHARED_SECRET is not set. Edge auth trust is effectively disabled in this environment.
+----------------------------- Captured stdout call -----------------------------
+{"timestamp": "2026-06-08T12:08:41.467880+00:00", "level": "INFO", "logger": "app.core.telemetry", "message": "OpenTelemetry packages not installed \u2014 tracing disabled. Install with: pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi opentelemetry-instrumentation-httpx opentelemetry-exporter-otlp", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------ Captured log call -------------------------------
+INFO     app.core.telemetry:telemetry.py:59 OpenTelemetry packages not installed — tracing disabled. Install with: pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi opentelemetry-instrumentation-httpx opentelemetry-exporter-otlp
+________ TestEnglishModeChatStream.test_english_stream_routes_to_vertex ________
+tests/test_pr358_chat_audit.py:229: in test_english_stream_routes_to_vertex
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+_______ TestAssameseModeChatStream.test_assamese_stream_routes_to_sarvam _______
+tests/test_pr358_chat_audit.py:286: in test_assamese_stream_routes_to_sarvam
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+_ TestAssameseModeChatStream.test_assamese_fallback_to_vertex_on_sarvam_failure _
+tests/test_pr358_chat_audit.py:341: in test_assamese_fallback_to_vertex_on_sarvam_failure
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+_ TestRAGUnavailableFallback.test_chat_responds_when_search_service_unavailable _
+tests/test_pr358_chat_audit.py:423: in test_chat_responds_when_search_service_unavailable
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+___ TestRAGUnavailableFallback.test_chat_responds_when_search_returns_empty ____
+tests/test_pr358_chat_audit.py:472: in test_chat_responds_when_search_returns_empty
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+__ TestRAGUnavailableFallback.test_chat_responds_when_search_raises_exception __
+tests/test_pr358_chat_audit.py:514: in test_chat_responds_when_search_raises_exception
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+____________ TestChatResponseSpeed.test_stream_first_chunk_latency _____________
+tests/test_pr358_chat_audit.py:581: in test_stream_first_chunk_latency
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+___________ TestChatResponseSpeed.test_stream_total_completion_time ____________
+tests/test_pr358_chat_audit.py:624: in test_stream_total_completion_time
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+__________ TestChatResponseSpeed.test_non_streaming_response_latency ___________
+tests/test_pr358_chat_audit.py:666: in test_non_streaming_response_latency
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+__________ TestLangFieldOverride.test_lang_en_overrides_assamese_text __________
+tests/test_pr358_chat_audit.py:721: in test_lang_en_overrides_assamese_text
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+__________ TestLangFieldOverride.test_lang_as_overrides_english_text ___________
+tests/test_pr358_chat_audit.py:767: in test_lang_as_overrides_english_text
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+_________ TestLangFieldOverride.test_lang_null_falls_back_to_detection _________
+tests/test_pr358_chat_audit.py:816: in test_lang_null_falls_back_to_detection
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+_______________ TestLangFieldOverride.test_invalid_lang_rejected _______________
+tests/test_pr358_chat_audit.py:859: in test_invalid_lang_rejected
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+=========================== short test summary info ============================
+FAILED tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_stream_returns_correct_sse_format
+FAILED tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_stream_routes_to_vertex
+FAILED tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_stream_routes_to_sarvam
+FAILED tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_fallback_to_vertex_on_sarvam_failure
+FAILED tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_service_unavailable
+FAILED tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_returns_empty
+FAILED tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_raises_exception
+FAILED tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_first_chunk_latency
+FAILED tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_total_completion_time
+FAILED tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_non_streaming_response_latency
+FAILED tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_en_overrides_assamese_text
+FAILED tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_as_overrides_english_text
+FAILED tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_null_falls_back_to_detection
+FAILED tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_invalid_lang_rejected
+========================= 14 failed, 3 passed in 4.97s =========================
+
+════════════════════════════════════════════════════════════════
+[INFO] Audit Results Summary
+════════════════════════════════════════════════════════════════
+
+Test Results:
+  ✓ Passed:  3
+  ✗ Failed:  14
+  ⊘ Skipped: 0
+  ⚠ Errors:  0
+
+Audit Categories:
+
+  📝 English Mode Routing:
+[✓] English mode (SSE format, Vertex routing, prompt enforcement)
+  🌐 Assamese Mode & Fallback:
+[✓] Assamese routing, Sarvam-to-Vertex fallback, script prompt
+  🔄 RAG Graceful Degradation:
+[✓] Fallback when search unavailable/empty/exception
+  ⚡ Response Latency:
+[✗] Latency tests failed (may indicate timeout/GC issues)
+
+════════════════════════════════════════════════════════════════
+[✗] FAILURES/ERRORS DETECTED
+════════════════════════════════════════════════════════════════
+
+Failed Tests:
+tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_stream_returns_correct_sse_format FAILED [  5%]
+tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_stream_routes_to_vertex FAILED [ 11%]
+tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_stream_routes_to_sarvam FAILED [ 23%]
+tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_fallback_to_vertex_on_sarvam_failure FAILED [ 29%]
+tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_service_unavailable FAILED [ 41%]
+tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_returns_empty FAILED [ 47%]
+tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_raises_exception FAILED [ 52%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_first_chunk_latency FAILED [ 64%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_total_completion_time FAILED [ 70%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_non_streaming_response_latency FAILED [ 76%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_en_overrides_assamese_text FAILED [ 82%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_as_overrides_english_text FAILED [ 88%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_lang_null_falls_back_to_detection FAILED [ 94%]
+tests/test_pr358_chat_audit.py::TestLangFieldOverride::test_invalid_lang_rejected FAILED [100%]
+FAILED tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_stream_returns_correct_sse_format
+FAILED tests/test_pr358_chat_audit.py::TestEnglishModeChatStream::test_english_stream_routes_to_vertex
+FAILED tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_stream_routes_to_sarvam
+FAILED tests/test_pr358_chat_audit.py::TestAssameseModeChatStream::test_assamese_fallback_to_vertex_on_sarvam_failure
+FAILED tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_service_unavailable
+FAILED tests/test_pr358_chat_audit.py::TestRAGUnavailableFallback::test_chat_responds_when_search_returns_empty
+
+Remediation Steps:
+  1. Check detailed logs: cat /tmp/chat-pipeline-audit-1780920510.log
+  2. Review failing test file: /home/founder/syrabit/apps/backend/tests/test_pr358_chat_audit.py
+  3. For latency failures: increase thresholds (environment-dependent)
+  4. For fallback test: verify patch targets match production code paths
+  5. For analytics/config failures: ensure all endpoints are implemented
+
+════════════════════════════════════════════════════════════════
+[INFO] Audit Artifacts
+════════════════════════════════════════════════════════════════
+
+Full audit report:
+  📄 /tmp/chat-pipeline-audit-1780920510.log
+
+To review failures in detail:
+  cat /tmp/chat-pipeline-audit-1780920510.log | grep -A 10 'FAILED\|ERROR'
+
+════════════════════════════════════════════════════════════════
+[WARN] Known Pipeline Issues (from audit docs)
+════════════════════════════════════════════════════════════════
+
+✓ PR 358 Fixed:
+  - conversation_id vs session_id field mapping
+  - LogoutRequest.refresh_token null crash
+  - Missing analytics endpoints
+  - Missing config/trustpilot endpoints
+
+⚠ Still Open:
+  - Latency: No asyncio.gather for parallel embedding+history
+  - Streaming: No heartbeat during RAG retrieval phase (30s+ timeout risk)
+  - Error handling: Raw errors leak to client (info disclosure)
+  - No timeout wrapper on entire chat pipeline (potential 180s hangs)
+  - Language detection: May misclassify mixed-content queries
+
+Recommendations:
+  1. Add asyncio.gather() for parallel RAG retrieval
+  2. Implement SSE keepalive comments during retrieval
+  3. Sanitize error messages before sending to client
+  4. Wrap entire pipeline in asyncio.wait_for(timeout=30s)
+  5. Improve language detection for code and mixed-content
+
+════════════════════════════════════════════════════════════════
+[✗] Chat pipeline audit FAILED (see details above)
+
+[INFO] ════════════════════════════════════════════════════════════════
+[INFO] Chat Pipeline Audit — Google Cloud Shell
+[INFO] ════════════════════════════════════════════════════════════════
+
+[INFO] Step 1: Checking Python environment...
+[✓] Using system python3: 3.12.3
+[INFO] Python version: 3.12
+
+[INFO] Step 2: Installing backend dependencies...
+[✓] Virtual environment activated
+[INFO] Upgrading pip and setuptools...
+[INFO] Installing requirements.txt...
+[✓] requirements.txt installed
+[INFO] Installing test dependencies...
+[✓] Test dependencies installed
+
+[INFO] Step 3: Locating chat pipeline audit tests...
+[✓] Found: test_pr358_chat_audit.py
+
+[INFO] Step 4: Running chat pipeline audit tests...
+
+[INFO] Running tests matching: TestChatResponseSpeed
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /home/founder/syrabit/apps/backend/venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/founder/syrabit/apps/backend
+configfile: pytest.ini
+plugins: env-1.6.0, cov-7.1.0, anyio-4.13.0, asyncio-1.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 17 items / 14 deselected / 3 selected
+
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_first_chunk_latency FAILED [ 33%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_total_completion_time FAILED [ 66%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_non_streaming_response_latency FAILED [100%]
+
+=================================== FAILURES ===================================
+____________ TestChatResponseSpeed.test_stream_first_chunk_latency _____________
+tests/test_pr358_chat_audit.py:581: in test_stream_first_chunk_latency
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+------------------------------ Captured log setup ------------------------------
+WARNING  app.config:config.py:186 TRUST_EDGE_AUTH is True but EDGE_SHARED_SECRET is not set. Edge auth trust is effectively disabled in this environment.
+----------------------------- Captured stdout call -----------------------------
+{"timestamp": "2026-06-08T12:08:48.600021+00:00", "level": "INFO", "logger": "app.core.telemetry", "message": "OpenTelemetry packages not installed \u2014 tracing disabled. Install with: pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi opentelemetry-instrumentation-httpx opentelemetry-exporter-otlp", "request_id": null, "user_id": null, "lang": null, "provider": null, "latency_ms": null}
+------------------------------ Captured log call -------------------------------
+INFO     app.core.telemetry:telemetry.py:59 OpenTelemetry packages not installed — tracing disabled. Install with: pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi opentelemetry-instrumentation-httpx opentelemetry-exporter-otlp
+___________ TestChatResponseSpeed.test_stream_total_completion_time ____________
+tests/test_pr358_chat_audit.py:624: in test_stream_total_completion_time
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+__________ TestChatResponseSpeed.test_non_streaming_response_latency ___________
+tests/test_pr358_chat_audit.py:666: in test_non_streaming_response_latency
+    with (
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/unittest/mock.py:1431: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'app.services.chat_service' from '/home/founder/syrabit/apps/backend/app/services/chat_service.py'> does not have the attribute 'search_service'
+=========================== short test summary info ============================
+FAILED tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_first_chunk_latency
+FAILED tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_total_completion_time
+FAILED tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_non_streaming_response_latency
+======================= 3 failed, 14 deselected in 1.99s =======================
+
+════════════════════════════════════════════════════════════════
+[INFO] Audit Results Summary
+════════════════════════════════════════════════════════════════
+
+Test Results:
+  ✓ Passed:  0
+  ✗ Failed:  3
+  ⊘ Skipped: 0
+  ⚠ Errors:  0
+
+Audit Categories:
+
+  ⚡ Response Latency:
+[✗] Latency tests failed (may indicate timeout/GC issues)
+
+════════════════════════════════════════════════════════════════
+[✗] FAILURES/ERRORS DETECTED
+════════════════════════════════════════════════════════════════
+
+Failed Tests:
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_first_chunk_latency FAILED [ 33%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_total_completion_time FAILED [ 66%]
+tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_non_streaming_response_latency FAILED [100%]
+FAILED tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_first_chunk_latency
+FAILED tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_stream_total_completion_time
+FAILED tests/test_pr358_chat_audit.py::TestChatResponseSpeed::test_non_streaming_response_latency
+
+Remediation Steps:
+  1. Check detailed logs: cat /tmp/chat-pipeline-audit-1780920523.log
+  2. Review failing test file: /home/founder/syrabit/apps/backend/tests/test_pr358_chat_audit.py
+  3. For latency failures: increase thresholds (environment-dependent)
+  4. For fallback test: verify patch targets match production code paths
+  5. For analytics/config failures: ensure all endpoints are implemented
+
+════════════════════════════════════════════════════════════════
+[INFO] Audit Artifacts
+════════════════════════════════════════════════════════════════
+
+Full audit report:
+  📄 /tmp/chat-pipeline-audit-1780920523.log
+
+To review failures in detail:
+  cat /tmp/chat-pipeline-audit-1780920523.log | grep -A 10 'FAILED\|ERROR'
+
+════════════════════════════════════════════════════════════════
+[WARN] Known Pipeline Issues (from audit docs)
+════════════════════════════════════════════════════════════════
+
+✓ PR 358 Fixed:
+  - conversation_id vs session_id field mapping
+  - LogoutRequest.refresh_token null crash
+  - Missing analytics endpoints
+  - Missing config/trustpilot endpoints
+
+⚠ Still Open:
+  - Latency: No asyncio.gather for parallel embedding+history
+  - Streaming: No heartbeat during RAG retrieval phase (30s+ timeout risk)
+  - Error handling: Raw errors leak to client (info disclosure)
+  - No timeout wrapper on entire chat pipeline (potential 180s hangs)
+  - Language detection: May misclassify mixed-content queries
+
+Recommendations:
+  1. Add asyncio.gather() for parallel RAG retrieval
+  2. Implement SSE keepalive comments during retrieval
+  3. Sanitize error messages before sending to client
+  4. Wrap entire pipeline in asyncio.wait_for(timeout=30s)
+  5. Improve language detection for code and mixed-content
+
+════════════════════════════════════════════════════════════════
+[✗] Chat pipeline audit FAILED (see details above)
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ ^C
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ bash <(curl -fsSL https://raw.githubusercontent.com/founder24/-kalukaliya/main/infra/scripts/cloudshell-update.sh)
+curl: (22) The requested URL returned error: 404
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ ^C
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ bash <(curl -fsSL https://raw.githubusercontent.com/founder24/-kalukaliya/main/infra/scripts/cloudshell-bootstrap.sh)
+curl: (22) The requested URL returned error: 404
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ ^C
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ 

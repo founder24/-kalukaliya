@@ -4,12 +4,12 @@
 #  Self-contained — requires only: bash + curl + python3 (all in Cloud Shell)
 # =============================================================================
 #
-#  One-liner (no repo needed):
-#    curl -fsSL https://raw.githubusercontent.com/founder24/-kalukaliya/main/scripts/cloudshell_test.sh | bash
+#  From inside your ~/syrabit checkout:
+#    bash scripts/cloudshell_test.sh
 #
 #  With credentials (auth bypass + GitHub status):
 #    ADMIN_EMAIL=founder@syrabit.ai \
-#    ADMIN_PASSWORD=secret \
+#    ADMIN_PASSWORD=<your-password> \
 #    GITHUB_TOKEN=ghp_... \
 #    bash scripts/cloudshell_test.sh
 #

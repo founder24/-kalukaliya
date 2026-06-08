@@ -83,7 +83,7 @@ def _parse_sse_events(body: str) -> list[dict]:
 def _common_patches(mock_redis_instance=None, generate_result=None):
     """Return dict of common patches for chat endpoint tests.
 
-    NOTE: Callers must patch ``search_service`` and ``stream_response``
+    NOTE: Callers must patch ``mongo_vector_search`` and ``stream_response``
     (or ``generate_response``) themselves, since every test provides its
     own mock for these.
     """
@@ -168,14 +168,14 @@ class TestEnglishModeChatStream:
         patches = _common_patches()
 
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch("app.services.ai.router.stream_response", side_effect=_stream_gen),
             patches["posthog"],
             patches["token_budget"],
@@ -224,14 +224,14 @@ class TestEnglishModeChatStream:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch(
                 "app.services.ai.router.stream_response", side_effect=_capture_stream
             ),
@@ -281,14 +281,14 @@ class TestAssameseModeChatStream:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch(
                 "app.services.ai.router.stream_response", side_effect=_capture_stream
             ),
@@ -333,7 +333,7 @@ class TestAssameseModeChatStream:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         mock_vertex = MagicMock()
         mock_vertex.stream_generate_with_retry = _vertex_fallback
@@ -343,7 +343,7 @@ class TestAssameseModeChatStream:
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch(
                 "app.services.ai.router.stream_response",
                 side_effect=lambda *a, **kw: _raise_before_yield(
@@ -410,7 +410,7 @@ class TestRAGUnavailableFallback:
 
     @pytest.mark.asyncio
     async def test_chat_responds_when_search_service_unavailable(self):
-        """When search_service.is_available() is False, stream still completes."""
+        """When mongo_vector_search.search_context raises, stream still completes."""
         from app.main import app
 
         async def _stream_gen(system_prompt, user_message, model):
@@ -418,14 +418,14 @@ class TestRAGUnavailableFallback:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(side_effect=RuntimeError("search unavailable"))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch("app.services.ai.router.stream_response", side_effect=_stream_gen),
             patches["posthog"],
             patches["token_budget"],
@@ -466,15 +466,14 @@ class TestRAGUnavailableFallback:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = True
-        mock_search.search_context = AsyncMock(return_value=[])
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch("app.services.ai.router.stream_response", side_effect=_stream_gen),
             patches["posthog"],
             patches["token_budget"],
@@ -508,7 +507,6 @@ class TestRAGUnavailableFallback:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = True
         mock_search.search_context = AsyncMock(side_effect=Exception("Search API down"))
 
         with (
@@ -516,7 +514,7 @@ class TestRAGUnavailableFallback:
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch("app.services.ai.router.stream_response", side_effect=_stream_gen),
             patches["posthog"],
             patches["token_budget"],
@@ -576,14 +574,14 @@ class TestChatResponseSpeed:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch("app.services.ai.router.stream_response", side_effect=_stream_gen),
             patches["posthog"],
             patches["token_budget"],
@@ -619,14 +617,14 @@ class TestChatResponseSpeed:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch("app.services.ai.router.stream_response", side_effect=_stream_gen),
             patches["posthog"],
             patches["token_budget"],
@@ -661,14 +659,14 @@ class TestChatResponseSpeed:
 
         patches = _common_patches(generate_result="A quick test answer.")
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patches["generate_response"],
             patches["posthog"],
             patches["token_budget"],
@@ -716,14 +714,14 @@ class TestLangFieldOverride:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch(
                 "app.services.ai.router.stream_response", side_effect=_capture_stream
             ),
@@ -762,14 +760,14 @@ class TestLangFieldOverride:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch(
                 "app.services.ai.router.stream_response", side_effect=_capture_stream
             ),
@@ -811,14 +809,14 @@ class TestLangFieldOverride:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch(
                 "app.services.ai.router.stream_response", side_effect=_capture_stream
             ),
@@ -854,14 +852,14 @@ class TestLangFieldOverride:
 
         patches = _common_patches()
         mock_search = MagicMock()
-        mock_search.is_available.return_value = False
+        mock_search.search_context = AsyncMock(return_value=([], 0.0))
 
         with (
             patches["rate_limit"],
             patches["redis"],
             patches["auth"],
             patches["topic_match"],
-            patch("app.services.chat_service.search_service", mock_search),
+            patch("app.services.chat_service.mongo_vector_search", mock_search),
             patch("app.services.ai.router.stream_response", side_effect=_stream_gen),
             patches["posthog"],
             patches["token_budget"],

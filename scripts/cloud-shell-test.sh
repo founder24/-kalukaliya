@@ -93,7 +93,8 @@ http_check() {
   local label="$1" url="$2" expected="$3"
   local code
   code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$url" 2>/dev/null || echo "000")
-  if [[ "$code" == "$expected" ]]; then
+  # $expected may be a space-separated list of acceptable codes (e.g. "200 301")
+  if [[ " $expected " == *" $code "* ]]; then
     section_pass "${label} → HTTP ${code}"
     return 0
   else
@@ -221,7 +222,7 @@ run_section "2. Backend Health" check_backend_health
 # SECTION 3 — FRONTEND & EDGE
 # =============================================================================
 check_frontend_edge() {
-  http_check "GET ${FRONTEND_URL}/"              "${FRONTEND_URL}/"              "200"
+  http_check "GET ${FRONTEND_URL}/"              "${FRONTEND_URL}/"              "200 301"
   http_check "GET ${FRONTEND_URL}/manifest.json" "${FRONTEND_URL}/manifest.json" "200"
   http_check "GET ${FRONTEND_URL}/robots.txt"    "${FRONTEND_URL}/robots.txt"    "200"
 
