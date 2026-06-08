@@ -8,7 +8,7 @@
 - [Syrabit content model FlexId](syrabit-flexid.md) — DB uses legacy string IDs (e.g. 's13', UUID) not ObjectIds; all reference fields must use FlexId
 - [Syrabit credential map](syrabit-credentials.md) — Full credential map: GCP secrets, Cloudflare Worker secrets, Pages env vars, GitHub secrets
 - [Syrabit GitHub repo + deploy fix](syrabit-github-deploy.md) — Repo is founder24/-kalukaliya; deploy.yml optional-secrets pattern + --remove-secrets guard
-- [Syrabit git divergence pattern](syrabit-git-divergence.md) — Contents API pushes + Replit checkpoints create diverged histories; fix is force-push from Replit
+- [Syrabit git divergence pattern](syrabit-git-divergence.md) — Use GitHub Git Data API (blob→tree→commit→PATCH ref) to push; CI dep check needs scripts/compile-deps.sh not raw pip-compile
 - [CF Worker CORS gaps](cf-worker-cors-gaps.md) — rate-limit 429/JWT 401/safety 503 returned before applyCorsHeaders; browser got TypeError(Failed to fetch)
 - [Syrabit Vertex Search Standard tier](syrabit-vertex-search-tier.md) — Engine is STANDARD not Enterprise; ExtractiveContentSpec causes 400; use SnippetSpec only + struct_data["content"]
 - [Syrabit GCP SA setup](syrabit-gcp-sa-setup.md) — Full IAM role list + one-shot setup script for syrabit-backend-sa; Cloudflare Worker secrets script pulls from SM automatically
