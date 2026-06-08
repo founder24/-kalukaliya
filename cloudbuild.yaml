@@ -181,6 +181,14 @@ steps:
           echo "  ⚠ ADMIN_PASSWORD not in SM — admin auto-bootstrap disabled"
         fi
 
+        # SENTRY_DSN — error tracking (SM name: SENTRY_DSN)
+        if gcloud secrets describe SENTRY_DSN --project="$$PROJECT" >/dev/null 2>&1; then
+          UPDATES="$${UPDATES:+$$UPDATES,}SENTRY_DSN=SENTRY_DSN:latest"
+          echo "  ✓ SENTRY_DSN"
+        else
+          echo "  ⚠ SENTRY_DSN not in SM — Sentry error tracking disabled"
+        fi
+
         if [ -n "$$UPDATES" ]; then
           gcloud run services update syrabit-backend \
             --region="$$REGION" --project="$$PROJECT" \
