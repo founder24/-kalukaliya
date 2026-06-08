@@ -214,15 +214,13 @@ async def deep_health_check():
         _safe_check(mongo_ping()),
         _safe_check(redis_ping()),
         _safe_check(mongo_vector_search_ping()),
-        _safe_check(vertex_ping()),
         _safe_check(sarvam_ping()),
     )
     checks = {
         "mongodb": results[0],
         "redis": results[1],
         "mongo_vector_search": results[2],
-        "vertex_ai": results[3],
-        "sarvam_ai": results[4],
+        "sarvam_ai": results[3],
     }
 
     # Determine overall status
