@@ -61,15 +61,16 @@ frozenlist==1.8.0
     # via
     #   aiohttp
     #   aiosignal
-google-api-core==2.30.3
+google-api-core[grpc]==2.30.3
     # via
     #   google-cloud-aiplatform
     #   google-cloud-bigquery
     #   google-cloud-core
     #   google-cloud-discoveryengine
     #   google-cloud-resource-manager
+    #   google-cloud-secret-manager
     #   google-cloud-storage
-google-auth==2.53.0
+google-auth[aiohttp,requests]==2.53.0
     # via
     #   -r requirements.in
     #   google-api-core
@@ -78,6 +79,7 @@ google-auth==2.53.0
     #   google-cloud-core
     #   google-cloud-discoveryengine
     #   google-cloud-resource-manager
+    #   google-cloud-secret-manager
     #   google-cloud-storage
     #   google-genai
 google-cloud-aiplatform==1.154.0
@@ -92,6 +94,8 @@ google-cloud-discoveryengine==0.19.0
     # via -r requirements.in
 google-cloud-resource-manager==1.17.0
     # via google-cloud-aiplatform
+google-cloud-secret-manager==2.29.0
+    # via -r requirements.in
 google-cloud-storage==3.10.1
     # via
     #   -r requirements.in
@@ -106,18 +110,21 @@ google-resumable-media==2.9.0
     # via
     #   google-cloud-bigquery
     #   google-cloud-storage
-googleapis-common-protos==1.75.0
+googleapis-common-protos[grpc]==1.75.0
     # via
     #   google-api-core
     #   grpc-google-iam-v1
     #   grpcio-status
 grpc-google-iam-v1==0.14.4
-    # via google-cloud-resource-manager
+    # via
+    #   google-cloud-resource-manager
+    #   google-cloud-secret-manager
 grpcio==1.81.0
     # via
     #   google-api-core
     #   google-cloud-discoveryengine
     #   google-cloud-resource-manager
+    #   google-cloud-secret-manager
     #   googleapis-common-protos
     #   grpc-google-iam-v1
     #   grpcio-status
@@ -176,12 +183,14 @@ proto-plus==1.28.0
     #   google-cloud-aiplatform
     #   google-cloud-discoveryengine
     #   google-cloud-resource-manager
+    #   google-cloud-secret-manager
 protobuf==6.33.6
     # via
     #   google-api-core
     #   google-cloud-aiplatform
     #   google-cloud-discoveryengine
     #   google-cloud-resource-manager
+    #   google-cloud-secret-manager
     #   googleapis-common-protos
     #   grpc-google-iam-v1
     #   grpcio-status
@@ -192,7 +201,7 @@ pyasn1-modules==0.4.2
     # via google-auth
 pycparser==3.0
     # via cffi
-pydantic==2.13.4
+pydantic[email]==2.13.4
     # via
     #   -r requirements.in
     #   beanie
@@ -205,7 +214,7 @@ pydantic-core==2.46.4
     # via pydantic
 pydantic-settings==2.14.1
     # via -r requirements.in
-pyjwt==2.13.0
+pyjwt[crypto]==2.13.0
     # via -r requirements.in
 pymongo==4.17.0
     # via
