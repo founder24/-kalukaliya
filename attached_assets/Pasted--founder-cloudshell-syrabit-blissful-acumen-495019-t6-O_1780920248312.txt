@@ -1,0 +1,162 @@
+
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ # One-liner (no repo needed):
+curl -fsSL https://raw.githubusercontent.com/founder24/-kalukaliya/main/scripts/cloudshell_test.sh | bash
+
+# With credentials:
+ADMIN_EMAIL=founder@syrabit.ai ADMIN_PASSWORD=secret bash scripts/cloudshell_test.sh
+curl: (22) The requested URL returned error: 404
+
+╔══════════════════════════════════════════════════════════════╗
+║      SYRABIT LIVE DEPLOYMENT TEST  —  Cloud Shell Edition    ║
+║      2026-06-08 12:01 UTC                                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+  API : https://api.syrabit.ai
+  FE  : https://syrabit.ai
+  GCP : blissful-acumen-495019-t6 / us-central1
+  Auth: founder@syrabit.ai  (rate-limit bypass enabled)
+  GH  : token set  (GitHub Actions status enabled)
+
+
+──────────────────────────────────────────────────────────
+  0. Pre-flight
+──────────────────────────────────────────────────────────
+  ✓ Backend reachable: https://api.syrabit.ai/health
+
+──────────────────────────────────────────────────────────
+  1. Cloud Run Status
+──────────────────────────────────────────────────────────
+  ⚠ Could not read Cloud Run revision — run: gcloud auth login --project blissful-acumen-495019-t6
+
+──────────────────────────────────────────────────────────
+  2. Backend Health
+──────────────────────────────────────────────────────────
+  ✓ GET /health → HTTP 200
+  ✓ GET /health/deep → HTTP 200
+  ✓ health body: status → HTTP 200 ✓ body
+  ✓ health body: healthy → HTTP 200 ✓ body
+  · Health response time: 66ms
+
+──────────────────────────────────────────────────────────
+  3. Frontend & Cloudflare Edge
+──────────────────────────────────────────────────────────
+  ✓ GET https://syrabit.ai/ → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/chat/ → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/library/ → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/robots.txt → 200 → HTTP 200
+  ✓ GET https://syrabit.ai/sitemap.xml → 200 → HTTP 200
+  ✓ Security header: strict-transport-security
+  ✓ Security header: x-frame-options
+  ✓ Security header: x-content-type-options
+  · Cloudflare: cf-ray: a087bf6c2c0ba9ad-TPE
+
+──────────────────────────────────────────────────────────
+  4. Anon Endpoints (no auth required)
+──────────────────────────────────────────────────────────
+  ✓ GET /user/credits (anon) → 200 → HTTP 200 ✓ body
+  ✓ /user/credits — tier: anonymous → HTTP 200 ✓ body
+  ✓ GET /conversations/anon → 200 → HTTP 200 ✓ body
+  ✓ GET /chat/history (anon) → 200 → HTTP 200 ✓ body
+  ✓ GET /content/library-bundle → subjects → HTTP 200 ✓ body
+  ✓ GET /subscription/plans → free+pro → HTTP 200 ✓ body
+  ✓ GET /config/trustpilot → 200 → HTTP 200 ✓ body
+  ✓ GET /sitemap-subjects.xml → 200 → HTTP 200
+
+──────────────────────────────────────────────────────────
+  5. Auth Guards (protected endpoints must reject)
+──────────────────────────────────────────────────────────
+  ✓ GET /users/me (no token) → 401 → HTTP 401
+  ✓ GET /conversations (no token) → 401 → HTTP 401
+  ✓ GET /users/me (bad token) → 401 → HTTP 401
+  ✓ POST /auth/login (bad creds) → 401 → HTTP 401
+  ✓ POST /auth/signup (empty) → 422 → HTTP 422
+
+──────────────────────────────────────────────────────────
+  6. Input Validation
+──────────────────────────────────────────────────────────
+  ✓ POST /chat/stream (empty message) → 422 → HTTP 422
+  ✓ POST /chat/stream (no body) → 422 → HTTP 422
+  ✓ POST /auth/login (empty body) → 422 → HTTP 422
+  ✓ Error responses do not leak stack traces
+
+──────────────────────────────────────────────────────────
+  7. CORS Preflight
+──────────────────────────────────────────────────────────
+  ✓ OPTIONS /chat/stream → 200 → HTTP 200
+  ✓ OPTIONS /user/credits → 200 → HTTP 200
+  ✓ CORS: access-control-allow-origin present
+  ✓ POST /chat/stream → Content-Type: text/event-stream
+
+──────────────────────────────────────────────────────────
+  8. Security Probes
+──────────────────────────────────────────────────────────
+  ✓ /.env blocked → HTTP 404
+  ✓ /.git/config blocked → HTTP 404
+  ✓ /.htaccess blocked → HTTP 404
+  ✓ /wp-login.php blocked → HTTP 404
+  ✓ /phpinfo.php blocked → HTTP 404
+  ✓ /xmlrpc.php blocked → HTTP 404
+  ✓ POST /webhooks/razorpay unsigned → 401/403 → HTTP 400
+  ⚠ GET /docs → HTTP 200 (OpenAPI docs may be visible — ensure APP_ENV=production)
+
+──────────────────────────────────────────────────────────
+  9. Chat TTFB Test  (target: first token < 3000 ms)
+──────────────────────────────────────────────────────────
+  ⚠ Login failed — chat will run as anon (may hit 429)
+  ✗ EN short (osmosis): AI error — Service temporarily unavailable. Please try again.  (3557ms)
+  ✗ EN medium (Newton): AI error — Service temporarily unavailable. Please try again.  (4221ms)
+  ✗ EN brief: AI error — Service temporarily unavailable. Please try again.  (1929ms)
+  ⚠ AS Assamese
+      TTFB  : 9786ms  server_lat=11767ms
+      Total : 12627ms   model=sarvam-30b   route=sarvam
+      Reply : 156 words / 476 chunks
+      Text  :  অৱশ্যে! অসমৰ ছাত্ৰ-ছাত্ৰীসকলৰ বাবে অসমীয়া ভাষাত অসমোছিছৰ এক স্পষ্ট আৰু সৰল ব্যাখ্যা আগবঢ়োৱা হ’ল। …
+  ⚠ Chat TTFB: some queries exceeded 3000 ms or were rate-limited (see above)
+
+──────────────────────────────────────────────────────────
+  10. Performance Spot Check
+──────────────────────────────────────────────────────────
+  ✓ /api/v1/subscription/plans → 256ms  (< 1000ms threshold)
+  ✓ /api/v1/seo/sitemap-subjects.xml → 276ms  (< 2000ms threshold)
+  ✓ /api/v1/content/library-bundle?slim=1 → 297ms  (< 3000ms threshold)
+  ⚠ /health → 661ms  (⚠ above 500ms threshold)
+
+──────────────────────────────────────────────────────────
+  11. GitHub Actions — Latest Deploy Status
+──────────────────────────────────────────────────────────
+  · Total workflow runs: 4495
+    ✓ Agent: Uptime Monitor: success @ 2026-06-08T11:55 [main]
+    ✗ Deploy — Backend + Edge + Frontend: failure @ 2026-06-08T10:49 [main]
+    ✓ Smoke Tests: success @ 2026-06-08T10:49 [main]
+    ✓ Agent: Environment Sync: success @ 2026-06-08T10:49 [main]
+    ✗ Deploy — Backend + Edge + Frontend: failure @ 2026-06-08T10:44 [main]  (historical)
+    ✓ Smoke Tests: success @ 2026-06-08T10:44 [main]  (historical)
+    ✗ Deploy — Backend + Edge + Frontend: failure @ 2026-06-08T10:40 [main]  (historical)
+    ✓ Agent: Environment Sync: success @ 2026-06-08T10:40 [main]  (historical)
+    ✓ Smoke Tests: success @ 2026-06-08T10:40 [main]  (historical)
+    ✓ Agent: Drift Detection: success @ 2026-06-08T10:10 [main]
+  ✗ Latest deploy workflow: failure — check GitHub Actions
+
+╔══════════════════════════════════════════════════════════════╗
+║                        SUMMARY                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+  ✓ PASS:   44
+  ✗ FAIL:   1
+  ⚠ WARN:   5
+  · SKIP:   0
+  ⏱ Time:   88s
+
+  FAILURES:
+    • Latest deploy workflow: failure — check GitHub Actions
+
+  WARNINGS:
+    • Could not read Cloud Run revision — run: gcloud auth login --project blissful-acumen-495019-t6
+    • GET /docs → HTTP 200 (OpenAPI docs may be visible — ensure APP_ENV=production)
+    • Login failed — chat will run as anon (may hit 429)
+    • Chat TTFB: some queries exceeded 3000 ms or were rate-limited (see above)
+    • /health → 661ms  (⚠ above 500ms threshold)
+
+  ✗  1 check(s) failed — review output above
+
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ 
