@@ -18,7 +18,7 @@ Both cases produce a hard failure on `Creating Revision`.
 - **Optional secrets**: handled by a `_check()` bash function in the "Attach optional content-pipeline secrets" step:
   - If the GCP secret EXISTS → add to `UPDATES`, call `--update-secrets`
   - If the GCP secret MISSING → add env var name to `REMOVALS`, call `--remove-secrets` (with `|| true` so it's safe if the env var wasn't set)
-- Optional secrets managed this way: `cf-pages-deploy-hook` (CF_PAGES_DEPLOY_HOOK), `CF_ACCOUNT_ID` (CF_ACCOUNT_ID + CLOUDFLARE_ACCOUNT_ID), `CF_KV_API_TOKEN` (CLOUDFLARE_KV_API_TOKEN), `CF_KV_NAMESPACE_ID` (CLOUDFLARE_KV_NAMESPACE_ID), `GCS_CONTENT_BUCKET` (GCS_CONTENT_BUCKET)
+- Optional secrets managed this way: `cf-pages-deploy-hook` (CF_PAGES_DEPLOY_HOOK), `CF_ACCOUNT_ID` (CF_ACCOUNT_ID + CLOUDFLARE_ACCOUNT_ID), `CF_KV_API_TOKEN` (CLOUDFLARE_KV_API_TOKEN), `CF_KV_NAMESPACE_ID` (CLOUDFLARE_KV_NAMESPACE_ID), `GCS_CONTENT_BUCKET` (GCS_CONTENT_BUCKET), `upstash-redis-rest-url` (UPSTASH_REDIS_REST_URL), `upstash-redis-rest-token` (UPSTASH_REDIS_REST_TOKEN), `posthog-api-key` (POSTHOG_API_KEY), `indexnow-api-key` (INDEXNOW_API_KEY), `indexnow-internal-secret` (INDEXNOW_INTERNAL_SECRET), `VERTEX_SEARCH_DATASTORE_ID` (VERTEX_SEARCH_DATASTORE_ID)
 
 **Why:** Cloud Run's revision spec is immutable — once a secret ref is embedded it persists across deploys until explicitly removed. The `--remove-secrets` call cleans up stale refs proactively.
 

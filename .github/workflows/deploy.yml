@@ -103,8 +103,51 @@ jobs:
             --service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com \
             --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,SARVAM_MODEL=sarvam-30b,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=asia-south1 \
             --remove-env-vars=VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG \
-            --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,UPSTASH_REDIS_REST_URL=upstash-redis-rest-url:latest,UPSTASH_REDIS_REST_TOKEN=upstash-redis-rest-token:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest,INDEXNOW_API_KEY=indexnow-api-key:latest,INDEXNOW_INTERNAL_SECRET=indexnow-internal-secret:latest,POSTHOG_API_KEY=posthog-api-key:latest,SENTRY_DSN=SENTRY_DSN:latest,VERTEX_SEARCH_DATASTORE_ID=VERTEX_SEARCH_DATASTORE_ID:latest \
+            --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest,SENTRY_DSN=SENTRY_DSN:latest \
             --remove-secrets=CF_PAGES_DEPLOY_HOOK,CF_ACCOUNT_ID,CLOUDFLARE_ACCOUNT_ID,CLOUDFLARE_KV_API_TOKEN,CLOUDFLARE_KV_NAMESPACE_ID,GCS_CONTENT_BUCKET
+
+      - name: Attach optional secrets (guarded — skips if secret missing in SM)
+        run: |
+          # _check ENV_VAR secret-name-in-sm
+          # Adds to UPDATES if the secret exists, to REMOVALS if it doesn't.
+          # This prevents hard "Secret was not found" failures on Creating Revision.
+          _check() {
+            local env_var="$1"
+            local secret_name="$2"
+            if gcloud secrets describe "$secret_name" \
+                --project="$PROJECT" --quiet 2>/dev/null; then
+              UPDATES="${UPDATES:+${UPDATES},}${env_var}=${secret_name}:latest"
+            else
+              echo "  ⚠ $secret_name not found in Secret Manager — will remove ref if present"
+              REMOVALS="${REMOVALS:+${REMOVALS},}${env_var}"
+            fi
+          }
+
+          UPDATES=""
+          REMOVALS=""
+
+          _check UPSTASH_REDIS_REST_URL      upstash-redis-rest-url
+          _check UPSTASH_REDIS_REST_TOKEN    upstash-redis-rest-token
+          _check POSTHOG_API_KEY             posthog-api-key
+          _check INDEXNOW_API_KEY            indexnow-api-key
+          _check INDEXNOW_INTERNAL_SECRET    indexnow-internal-secret
+          _check VERTEX_SEARCH_DATASTORE_ID  VERTEX_SEARCH_DATASTORE_ID
+
+          if [[ -n "$UPDATES" ]]; then
+            echo "Attaching optional secrets: $UPDATES"
+            gcloud run services update syrabit-backend \
+              --region="$REGION" \
+              --project="$PROJECT" \
+              --update-secrets="$UPDATES"
+          fi
+
+          if [[ -n "$REMOVALS" ]]; then
+            echo "Removing stale optional secret refs: $REMOVALS"
+            gcloud run services update syrabit-backend \
+              --region="$REGION" \
+              --project="$PROJECT" \
+              --remove-secrets="$REMOVALS" || true
+          fi
 
       - name: Get Cloud Run service URL
         id: get-url
