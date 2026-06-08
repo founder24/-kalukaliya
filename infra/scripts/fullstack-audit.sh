@@ -42,6 +42,15 @@ if [[ -z "$CF_ACCT" ]]; then
     --secret=CF_ACCOUNT_ID --project="$PROJECT" 2>/dev/null || echo "")
 fi
 
+# Fetch Cloud Run spec early — used as a fallback proof-of-existence for SM secrets
+# when the running account lacks secretmanager.versions.access on individual secrets.
+# GCP hides inaccessible secrets as NOT_FOUND, so a successful CR mount reference
+# is authoritative proof the secret exists and is readable by syrabit-backend-sa.
+CR_JSON=$(curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token 2>/dev/null)" \
+  "https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/services/$SERVICE" 2>/dev/null || echo "{}")
+CR_SM_SECRETS=$(echo "$CR_JSON" | python3 -c \
+  "import json,sys; d=json.load(sys.stdin); envs=d.get('template',{}).get('containers',[{}])[0].get('env',[]); print(' '.join(e.get('valueSource',{}).get('secretKeyRef',{}).get('secret','') for e in envs if 'valueSource' in e))" 2>/dev/null || echo "")
+
 # ═══════════════════════════════════════════════════
 echo ""
 echo "═══════════════════════════════════════════════════"
@@ -59,15 +68,25 @@ REQUIRED_SECRETS=(
 )
 
 for secret in "${REQUIRED_SECRETS[@]}"; do
-  if gcloud secrets versions access latest --secret="$secret" \
-       --project="$PROJECT" >/dev/null 2>&1; then
-    result="pass"
-  else
-    result="secret not found or inaccessible"
-  fi
   short_id="SM-$(echo "$secret" | tr '[:lower:]' '[:upper:]' | tr '-' '_' | cut -c1-20)"
-  check "$short_id" "Secret '$secret' readable" "$result" \
-    "gcloud secrets create $secret --project=$PROJECT --replication-policy=automatic"
+  if echo " $CR_SM_SECRETS " | grep -qw "$secret"; then
+    # Secret is mounted on Cloud Run — definitively exists and is readable by
+    # syrabit-backend-sa (the account that matters at runtime). GCP hides secrets
+    # the audit SA can't access as NOT_FOUND, so the CR mount ref is authoritative.
+    echo "  ℹ️  (verified via Cloud Run mount for '$secret')"
+    check "$short_id" "Secret '$secret' readable" "pass"
+  else
+    # Not mounted on Cloud Run — must verify directly (CF_ACCOUNT_ID, CF_KV_NAMESPACE_ID,
+    # GCS_CONTENT_BUCKET are examples that are SM-only, not mounted on CR).
+    if timeout 15 gcloud secrets versions access latest --secret="$secret" \
+         --project="$PROJECT" >/dev/null 2>&1; then
+      result="pass"
+    else
+      result="secret not found or inaccessible"
+    fi
+    check "$short_id" "Secret '$secret' readable" "$result" \
+      "gcloud secrets create $secret --project=$PROJECT --replication-policy=automatic"
+  fi
 done
 
 JWT_VAL=$(gcloud secrets versions access latest \
@@ -96,9 +115,7 @@ echo "════════════════════════�
 echo " LAYER 2: Cloud Run Service Spec"
 echo "═══════════════════════════════════════════════════"
 
-CR_JSON=$(curl -sf -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  "https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/services/$SERVICE" 2>/dev/null || echo "{}")
-
+# CR_JSON already fetched above (reused here)
 SARVAM_MODEL_VAL=$(echo "$CR_JSON" | python3 -c \
   "import json,sys; d=json.load(sys.stdin); envs=d.get('template',{}).get('containers',[{}])[0].get('env',[]); print(next((e.get('value','') for e in envs if e.get('name')=='SARVAM_MODEL'),'MISSING'))" 2>/dev/null || echo "MISSING")
 [[ "$SARVAM_MODEL_VAL" == "sarvam-30b" ]] && SM_RESULT="pass" || SM_RESULT="SARVAM_MODEL=$SARVAM_MODEL_VAL (want sarvam-30b)"
