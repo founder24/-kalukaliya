@@ -64,7 +64,7 @@ class SarvamAIClient:
             response = await self._client.post(
                 f"{self.base_url}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",
+                    "api-subscription-key": self.api_key,
                     "Content-Type": "application/json",
                 },
                 json={
@@ -159,7 +159,7 @@ class SarvamAIClient:
 
         url = f"{self.base_url}/chat/completions"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "api-subscription-key": self.api_key,
             "Content-Type": "application/json",
         }
         payload = {

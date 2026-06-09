@@ -335,7 +335,18 @@ class ChatService:
                 )
                 return response_text, actual_model
             else:
-                raise
+                # English: Vertex/Gemini failed — fall back to Sarvam AI
+                logger.warning(
+                    f"Vertex/Gemini failed for English ({e}), falling back to Sarvam AI"
+                )
+                from app.services.ai.sarvam_client import sarvam_client
+
+                actual_model = settings.SARVAM_MODEL
+                response_text = await sarvam_client.generate(
+                    system_prompt=system_prompt,
+                    user_message=sanitized_message,
+                )
+                return response_text, actual_model
 
     @staticmethod
     async def stream_llm(
@@ -398,9 +409,39 @@ class ChatService:
                     yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
                     return
             else:
-                logger.error(f"LLM stream failed: {e}")
-                yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
-                return
+                # English: Vertex/Gemini failed — fall back to Sarvam AI
+                logger.warning(
+                    f"Vertex/Gemini stream failed for English ({e}), falling back to Sarvam AI"
+                )
+                logger.info(
+                    "chat_fallback",
+                    extra={
+                        "user_id": user_id,
+                        "error": str(e),
+                        "fallback_provider": "sarvam",
+                        "detected_lang": "en",
+                    },
+                )
+                yield f"data: {json.dumps({'fallback': True, 'provider': 'sarvam', 'reason': str(e)})}\n\n"
+
+                try:
+                    from app.services.ai.sarvam_client import sarvam_client
+
+                    actual_model = settings.SARVAM_MODEL
+                    async for chunk in sarvam_client.stream_generate_with_retry(
+                        system_prompt, sanitized_message
+                    ):
+                        full_response += chunk
+                        yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+                except Exception as fallback_err:
+                    logger.error(f"Sarvam fallback also failed for English: {fallback_err}")
+                    from app.services.dead_letter import store_dead_letter
+
+                    await store_dead_letter(
+                        user_id, request_message, detected_lang, str(fallback_err)
+                    )
+                    yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
+                    return
 
         # Emit the sentinel value so the router knows the model/response
         yield f"data: {json.dumps({'__syrabit_stream_complete_7f3a9b2e__': True, 'full_response': full_response, 'actual_model': actual_model})}\n\n"
