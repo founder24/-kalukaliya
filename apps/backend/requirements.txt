@@ -29,7 +29,7 @@ backoff==2.2.1
     # via posthog
 bcrypt==5.0.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
-beanie==2.2.0
+beanie==2.1.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
 certifi==2026.5.20
     # via
