@@ -406,22 +406,55 @@ async def _tts_live_test() -> Dict[str, Any]:
 async def _search_live_test() -> Dict[str, Any]:
     """Live-test the vector search pipeline with a minimal query.
 
-    Runs the full path: embed → cosine match → chunk retrieval.
-    Returns hit_count so you can spot when the index is empty.
+    First verifies MongoDB connectivity; if the DB is not reachable the check
+    returns status=not_configured rather than degraded so dashboards can
+    distinguish "no DB in this environment" from "index is empty" or
+    "embed pipeline broken".
+
+    When MongoDB is connected the full path is exercised:
+      embed query → cosine match → chunk retrieval
+    and hit_count is returned so you can spot an empty index.
     """
     t0 = time.monotonic()
     try:
+        # Gate on MongoDB availability first — if the DB is not connected the
+        # search will silently return 0 hits, which is indistinguishable from
+        # an empty index.  Detecting no-DB here lets us set a clear status.
+        try:
+            from app.db.mongo import get_mongo_client
+            _client = get_mongo_client()
+            await asyncio.wait_for(_client.admin.command("ping"), timeout=3.0)
+            mongo_ok = True
+        except Exception:
+            mongo_ok = False
+
+        if not mongo_ok:
+            latency_ms = round((time.monotonic() - t0) * 1000, 1)
+            return {
+                "status": "not_configured",
+                "latency_ms": latency_ms,
+                "detail": "MongoDB not connected — MONGODB_URI not set or Atlas unreachable",
+            }
+
         from app.services.search.mongo_vector_search import mongo_vector_search
 
         chunks, _ = await mongo_vector_search.search_context(
             query="photosynthesis", lang="en", limit=3
         )
         latency_ms = round((time.monotonic() - t0) * 1000, 1)
+
+        if chunks:
+            return {
+                "status": "healthy",
+                "latency_ms": latency_ms,
+                "hit_count": len(chunks),
+                "top_score": round(chunks[0].get("score", 0), 3),
+            }
         return {
-            "status": "healthy" if chunks else "degraded",
+            "status": "degraded",
             "latency_ms": latency_ms,
-            "hit_count": len(chunks),
-            "top_score": round(chunks[0].get("score", 0), 3) if chunks else None,
+            "hit_count": 0,
+            "detail": "Search returned no results — index may be empty",
         }
     except Exception as e:
         latency_ms = round((time.monotonic() - t0) * 1000, 1)
@@ -460,14 +493,19 @@ async def providers_health_check():
         "vector_search": results[3],
     }
 
-    # Classify overall: any unhealthy → degraded (TTS is non-critical)
+    # Classify overall status.
+    # "not_configured" = provider intentionally absent in this environment
+    # (e.g. no MONGODB_URI in dev) — treated the same as healthy for rollup.
+    # "degraded" / "unhealthy" on a CRITICAL provider → overall "degraded".
     CRITICAL = {"vertex_gemini", "sarvam_ai"}
-    critical_ok = all(checks[k].get("status") == "healthy" for k in CRITICAL)
-    all_ok = all(v.get("status") == "healthy" for v in checks.values())
+    OK_STATES = {"healthy", "not_configured"}
+
+    critical_ok = all(checks[k].get("status") in OK_STATES for k in CRITICAL)
+    all_ok = all(v.get("status") in OK_STATES for v in checks.values())
 
     if not critical_ok:
         overall = "degraded"
-        http_status = status.HTTP_200_OK  # still 200 — monitoring tools read the body
+        http_status = status.HTTP_200_OK  # always 200 — monitoring tools read the body
     elif not all_ok:
         overall = "partial"
         http_status = status.HTTP_200_OK
