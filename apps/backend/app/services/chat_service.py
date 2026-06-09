@@ -259,14 +259,16 @@ class ChatService:
             "Use the following numbered context to answer. If the answer is not in the context, say so clearly.\n"
             "Cite sources using [#] format (e.g., [1], [2]). Respond in English."
             if detected_lang == "en"
-            # Assamese prompt: instruct Sarvam to think AND answer natively in
-            # Assamese.  Keeping the prompt in Assamese script encourages the
-            # model to reason in Assamese rather than in English, reducing the
-            # English <think> overhead and improving fluency.
+            # Assamese prompt written in Assamese script so the model reasons
+            # in Assamese (reasoning_content tokens start at ~150 ms and are
+            # streamed to the user immediately, giving <3 s TTFB).
+            # The model accepts any input language but MUST think and respond
+            # entirely in Assamese script — English reasoning is forbidden.
             else (
                 "তুমি Syrabit, অসমৰ AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
-                "যিকোনো ভাষাত প্ৰশ্ন বুজিব পাৰা, কিন্তু উত্তৰ সদায় অসমীয়া (অসমীয়া লিপি) ত দিব লাগিব।\n"
-                "ইংৰাজী বা অন্য ভাষাত উত্তৰ নিদিবা।\n"
+                "যিকোনো ভাষাত প্ৰশ্ন গ্ৰহণ কৰিব পাৰা।\n"
+                "তোমাৰ সকলো চিন্তা-ভাৱনা আৰু উত্তৰ সম্পূৰ্ণৰূপে অসমীয়া ভাষা আৰু অসমীয়া লিপিত লিখিব।\n"
+                "ইংৰাজী বা অন্য ভাষা ব্যৱহাৰ কৰা সম্পূৰ্ণ নিষিদ্ধ।\n"
                 "তলত দিয়া নম্বৰযুক্ত প্ৰসংগ ব্যৱহাৰ কৰি উত্তৰ দিয়া। প্ৰসংগত নাথাকিলে স্পষ্টকৈ কোৱা।\n"
                 "উদ্ধৃতিৰ বাবে [#] বিন্যাস ব্যৱহাৰ কৰক (যেনে [1], [2])।"
             )
@@ -283,8 +285,9 @@ class ChatService:
             else:
                 return (
                     "তুমি Syrabit, অসমৰ AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
-                    "যিকোনো ভাষাত প্ৰশ্ন বুজিব পাৰা, কিন্তু উত্তৰ সদায় অসমীয়া (অসমীয়া লিপি) ত দিব লাগিব।\n"
-                    "ইংৰাজী বা অন্য ভাষাত উত্তৰ নিদিবা।\n"
+                    "যিকোনো ভাষাত প্ৰশ্ন গ্ৰহণ কৰিব পাৰা।\n"
+                    "তোমাৰ সকলো চিন্তা-ভাৱনা আৰু উত্তৰ সম্পূৰ্ণৰূপে অসমীয়া ভাষা আৰু অসমীয়া লিপিত লিখিব।\n"
+                    "ইংৰাজী বা অন্য ভাষা ব্যৱহাৰ কৰা সম্পূৰ্ণ নিষিদ্ধ।\n"
                     "ছাত্ৰৰ প্ৰশ্নৰ সঠিক আৰু সহায়কাৰী উত্তৰ দিয়া। স্পষ্ট, তথ্যপূৰ্ণ আৰু শিক্ষামূলক ব্যাখ্যা দিয়া।"
                 )
 
