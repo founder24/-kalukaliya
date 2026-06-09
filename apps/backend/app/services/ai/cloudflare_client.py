@@ -23,7 +23,7 @@ class CloudflareAIClient:
 
     @property
     def api_token(self) -> Optional[str]:
-        return settings.CF_API_TOKEN
+        return settings.CF_API_TOKEN or settings.WORKER_AI
 
     @property
     def base_url(self) -> str:
