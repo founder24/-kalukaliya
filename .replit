@@ -92,6 +92,7 @@ VERTEX_SEARCH_SERVING_CONFIG = "default_search"
 CLOUDFLARE_ACCOUNT_ID = "d66e40eac539fff1db270fddf384a5ec"
 CLOUDFLARE_KV_NAMESPACE_ID = "981e939bcca445c481d4be818ebefee7"
 SARVAM_MODEL = "sarvam-30b"
+CF_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-q"
 
 [postMerge]
 path = "scripts/post-merge.sh"

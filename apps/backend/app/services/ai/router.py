@@ -1,7 +1,6 @@
 """
-Chat routing exclusively uses Vertex AI (English) and Sarvam AI (Assamese).
-Cloudflare Workers AI is NOT used for chat - it is only used for OCR and TTS
-endpoints in chat.py.
+Chat routing uses Cloudflare Workers AI (English) and Sarvam AI (Assamese).
+Vertex AI / Gemini is no longer used for chat routing.
 """
 
 import re
@@ -50,9 +49,14 @@ def detect_language_and_route(text: str) -> tuple[str, str]:
         logger.info("Routing to Sarvam AI for Assamese content")
         return "as", settings.SARVAM_MODEL
     else:
-        # Route to Vertex AI for English
-        logger.info("Routing to Vertex AI for English content")
-        return "en", settings.VERTEX_GEMINI_MODEL
+        # Route to Cloudflare Workers AI for English
+        logger.info(f"Routing to Cloudflare Workers AI for English content (model={settings.CF_AI_MODEL})")
+        return "en", settings.CF_AI_MODEL
+
+
+def _is_cf_model(model: str) -> bool:
+    """True when the model string is a Cloudflare Workers AI model path."""
+    return model.startswith("@cf/")
 
 
 async def generate_response(
@@ -67,10 +71,16 @@ async def generate_response(
         return await generate_with_sarvam(
             system_prompt=system_prompt, user_message=user_message, stream=stream
         )
+    elif _is_cf_model(model):
+        from app.services.ai.cloudflare_client import cloudflare_client
+
+        logger.info(f"Generating via Cloudflare Workers AI (model={model})")
+        return await cloudflare_client.generate(
+            system_prompt=system_prompt, user_message=user_message, stream=stream
+        )
     elif "gemini" in model.lower() or "vertex" in model.lower():
         from app.services.ai.vertex_client import generate_with_vertex
 
-        # Note: vertex_client currently uses settings.VERTEX_GEMINI_MODEL regardless of model param
         return await generate_with_vertex(
             system_prompt=system_prompt,
             user_message=user_message,
@@ -79,8 +89,8 @@ async def generate_response(
         )
     else:
         raise RuntimeError(
-            f"Unknown model '{model}': chat routing only supports Vertex AI (gemini) "
-            f"and Sarvam AI (openhathi/sarvam). Cloudflare Workers AI is not used for chat."
+            f"Unknown model '{model}': supported providers are Cloudflare Workers AI (@cf/...), "
+            f"Sarvam AI (sarvam/openhathi), and Vertex AI (gemini/vertex)."
         )
 
 
@@ -94,7 +104,8 @@ async def stream_response(
 
     Routes to:
     - Sarvam AI (with retry) for Assamese models (sarvam, openhathi, saaras)
-    - Vertex AI for English models
+    - Cloudflare Workers AI for English models (@cf/...)
+    - Vertex AI as fallback for legacy gemini/vertex model names
 
     Yields text chunks as they arrive from the provider.
     Raises RuntimeError on failure (caller handles fallback).
@@ -112,6 +123,15 @@ async def stream_response(
             user_message=user_message,
         ):
             yield chunk
+    elif _is_cf_model(model):
+        from app.services.ai.cloudflare_client import cloudflare_client
+
+        logger.info(f"Streaming from Cloudflare Workers AI (model={model})")
+        async for chunk in cloudflare_client.stream_generate(
+            system_prompt=system_prompt,
+            user_message=user_message,
+        ):
+            yield chunk
     elif "gemini" in model.lower() or "vertex" in model.lower():
         from app.services.ai.vertex_client import vertex_client
 
@@ -123,6 +143,6 @@ async def stream_response(
             yield chunk
     else:
         raise RuntimeError(
-            f"Unknown model '{model}': chat streaming only supports Vertex AI (gemini) "
-            f"and Sarvam AI (openhathi/sarvam/saaras). Cloudflare Workers AI is not used for chat."
+            f"Unknown model '{model}': supported providers are Cloudflare Workers AI (@cf/...), "
+            f"Sarvam AI (openhathi/sarvam/saaras), and Vertex AI (gemini/vertex)."
         )
