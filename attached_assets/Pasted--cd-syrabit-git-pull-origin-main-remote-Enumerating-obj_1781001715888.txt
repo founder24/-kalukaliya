@@ -1,0 +1,93 @@
+ cd ~/syrabit && git pull origin main
+remote: Enumerating objects: 167, done.
+remote: Counting objects: 100% (150/150), done.
+remote: Compressing objects: 100% (37/37), done.
+remote: Total 167 (delta 116), reused 146 (delta 113), pack-reused 17 (from 1)
+Receiving objects: 100% (167/167), 214.16 KiB | 417.00 KiB/s, done.
+Resolving deltas: 100% (117/117), completed with 26 local objects.
+From https://github.com/founder24/-kalukaliya
+ * branch              main       -> FETCH_HEAD
+   c614f538..cc38cf20  main       -> origin/main
+Updating c614f538..cc38cf20
+Fast-forward
+ .agents/memory/MEMORY.md                                                                         |    1 +
+ .agents/memory/sarvam-auth-header.md                                                             |   24 +
+ .agents/memory/sarvam-model-rename.md                                                            |   17 +-
+ .agents/memory/syrabit-chat-latency.md                                                           |   66 +-
+ .github/workflows/deploy.yml                                                                     |  215 +--
+ .replit                                                                                          |    3 +-
+ apps/backend/app/api/v1/health.py                                                                |  278 ++++
+ apps/backend/app/config.py                                                                       |    2 +
+ apps/backend/app/services/ai/cloudflare_client.py                                                |    2 +-
+ apps/backend/app/services/ai/router.py                                                           |   44 +-
+ apps/backend/app/services/ai/sarvam_client.py                                                    |   72 +-
+ apps/backend/app/services/chat_service.py                                                        |   68 +-
+ apps/backend/requirements.in                                                                     |    2 +-
+ apps/backend/requirements.txt                                                                    |    2 +-
+ apps/edge/wrangler.toml                                                                          |   26 +-
+ apps/frontend/package-lock.json                                                                  | 8059 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ attached_assets/Pasted-work-as-a-dev-use-sha-key-github-token-cloudflare-api-t_1780989249236.txt |   30 +
+ attached_assets/Pasted-work-as-a-dev-use-sha-key-github-token-cloudflare-api-t_1780992162856.txt |   30 +
+ attached_assets/Screenshot_20260609-124704_1780989434226.png                                     |  Bin 0 -> 90702 bytes
+ attached_assets/Screenshot_20260609-125128_1780989697261.png                                     |  Bin 0 -> 19849 bytes
+ cloudbuild.yaml                                                                                  |   14 +-
+ main                                                                                             |    0
+ pyproject.toml                                                                                   |    3 +-
+ scripts/install-hooks.sh                                                                         |   28 +
+ scripts/post-merge.sh                                                                            |    3 +
+ scripts/sync-to-github.sh                                                                        |   22 +
+ uv.lock                                                                                          |  507 +------
+ 27 files changed, 8768 insertions(+), 750 deletions(-)
+ create mode 100644 .agents/memory/sarvam-auth-header.md
+ create mode 100644 apps/frontend/package-lock.json
+ create mode 100644 attached_assets/Pasted-work-as-a-dev-use-sha-key-github-token-cloudflare-api-t_1780989249236.txt
+ create mode 100644 attached_assets/Pasted-work-as-a-dev-use-sha-key-github-token-cloudflare-api-t_1780992162856.txt
+ create mode 100644 attached_assets/Screenshot_20260609-124704_1780989434226.png
+ create mode 100644 attached_assets/Screenshot_20260609-125128_1780989697261.png
+ create mode 100644 main
+ create mode 100755 scripts/install-hooks.sh
+ create mode 100755 scripts/sync-to-github.sh
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ # English — Cloudflare Workers AI
+curl -s -o /dev/null \
+  -w "TTFB: %{time_starttransfer}s  Total: %{time_total}s  HTTP: %{http_code}\n" \
+  -X POST https://syrabit-backend-851687450401.asia-south1.run.app/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is photosynthesis?", "lang": "en"}'
+
+# Assamese — Sarvam AI
+curl -s -o /dev/null \
+  -w "TTFB: %{time_starttransfer}s  Total: %{time_total}s  HTTP: %{http_code}\n" \
+  -X POST https://syrabit-backend-851687450401.asia-south1.run.app/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "সালোকসংশ্লেষণ কি?", "lang": "as"}'
+TTFB: 0.655680s  Total: 0.655768s  HTTP: 307
+TTFB: 0.650096s  Total: 0.650169s  HTTP: 307
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ # English
+curl -s \
+  -w "\n--- curl total: %{time_total}s ---\n" \
+  -X POST https://syrabit-backend-851687450401.asia-south1.run.app/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is photosynthesis?", "lang": "en"}' | python3 -m json.tool
+
+# Assamese
+curl -s \
+  -w "\n--- curl total: %{time_total}s ---\n" \
+  -X POST https://syrabit-backend-851687450401.asia-south1.run.app/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "সালোকসংশ্লেষণ কি?", "lang": "as"}' | python3 -m json.tool
+Expecting value: line 2 column 1 (char 1)
+Expecting value: line 2 column 1 (char 1)
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ # English
+curl -s -w "\nTotal: %{time_total}s\n" \
+  -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is photosynthesis?", "lang": "en"}' | python3 -m json.tool
+
+# Assamese
+curl -s -w "\nTotal: %{time_total}s\n" \
+  -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "সালোকসংশ্লেষণ কি?", "lang": "as"}' | python3 -m json.tool
+Expecting value: line 2 column 1 (char 1)
+Expecting value: line 2 column 1 (char 1)
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ 
