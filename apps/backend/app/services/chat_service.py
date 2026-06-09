@@ -68,7 +68,7 @@ class ChatService:
             target_model = (
                 settings.SARVAM_MODEL
                 if lang_override == "as"
-                else settings.VERTEX_GEMINI_MODEL
+                else settings.CF_AI_MODEL
             )
         else:
             detected_lang, target_model = detect_language_and_route(message)
@@ -338,9 +338,9 @@ class ChatService:
                 )
                 return response_text, actual_model
             else:
-                # English: Vertex/Gemini failed — fall back to Sarvam AI
+                # English: CF Workers AI failed — fall back to Sarvam AI
                 logger.warning(
-                    f"Vertex/Gemini failed for English ({e}), falling back to Sarvam AI"
+                    f"CF Workers AI failed for English ({e}), falling back to Sarvam AI"
                 )
                 from app.services.ai.sarvam_client import sarvam_client
 
@@ -412,9 +412,9 @@ class ChatService:
                     yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
                     return
             else:
-                # English: Vertex/Gemini failed — fall back to Sarvam AI
+                # English: CF Workers AI failed — fall back to Sarvam AI
                 logger.warning(
-                    f"Vertex/Gemini stream failed for English ({e}), falling back to Sarvam AI"
+                    f"CF Workers AI stream failed for English ({e}), falling back to Sarvam AI"
                 )
                 logger.info(
                     "chat_fallback",
