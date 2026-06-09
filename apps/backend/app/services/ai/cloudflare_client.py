@@ -40,8 +40,10 @@ class CloudflareAIClient:
                 "Cloudflare Workers AI not configured (CF_ACCOUNT_ID or CF_API_TOKEN missing)"
             )
 
+        url = f"{self.base_url}/{settings.CF_AI_MODEL}"
+        logger.info(f"CF Workers AI request: account_id={self.account_id[:6]}... model={settings.CF_AI_MODEL}")
         response = await self._client.post(
-            f"{self.base_url}/{settings.CF_AI_MODEL}",
+            url,
             headers={
                 "Authorization": f"Bearer {self.api_token}",
                 "Content-Type": "application/json",
@@ -55,7 +57,13 @@ class CloudflareAIClient:
                 "temperature": 0.7,
             },
         )
-        response.raise_for_status()
+        if not response.is_success:
+            error_body = response.text[:500]
+            logger.error(
+                f"CF Workers AI HTTP {response.status_code} — account={self.account_id[:6]}... "
+                f"model={settings.CF_AI_MODEL} body={error_body}"
+            )
+            response.raise_for_status()
         data = response.json()
         result = data.get("result", {})
         return result.get("response", "")

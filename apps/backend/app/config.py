@@ -34,9 +34,9 @@ class Settings(BaseSettings):
     CF_R2_ACCESS_KEY: Optional[str] = None
     CF_R2_SECRET_KEY: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
-    # NOTE: CF_AI_MODEL is used ONLY for OCR (vision_analyze) and TTS (text_to_speech).
-    # English chat routing was moved to Vertex AI (VERTEX_GEMINI_MODEL) for performance.
-    CF_AI_MODEL: str = "@cf/meta/llama-3.1-8b-instruct"
+    # CF_AI_MODEL: used for English chat (primary) + OCR + TTS.
+    # AWQ quantized variant is faster and available on all CF Workers AI regions.
+    CF_AI_MODEL: str = "@cf/meta/llama-3.1-8b-instruct-awq"
     CF_AI_VISION_MODEL: str = "@cf/unum/uform-gen2-qwen-500m"
     CF_AI_TTS_MODEL: str = "@cf/myshell/melotts"
     # Cloudflare Pages deploy hook — triggers a rebuild to regenerate static content
