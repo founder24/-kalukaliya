@@ -14,9 +14,14 @@ AUTHED_URL="https://${GITHUB_TOKEN}@github.com/founder24/-kalukaliya.git"
 
 # Run in background so it never blocks the commit or UI
 (
-  git push "$AUTHED_URL" "$BRANCH" --quiet 2>&1 \
-    && echo "[sync-to-github] ✓ Pushed to GitHub ($BRANCH)" \
-    || echo "[sync-to-github] ✗ Push failed (may need --force if histories diverged)" 
+  if git push "$AUTHED_URL" "$BRANCH" --quiet 2>&1; then
+    echo "[sync-to-github] ✓ Pushed to GitHub ($BRANCH)"
+  else
+    echo "[sync-to-github] Fast-forward failed — retrying with --force-with-lease" >&2
+    git push "$AUTHED_URL" "$BRANCH" --force-with-lease --quiet 2>&1 \
+      && echo "[sync-to-github] ✓ Force-pushed to GitHub ($BRANCH)" \
+      || echo "[sync-to-github] ✗ Push failed (force-with-lease also failed)" >&2
+  fi
 ) &
 
 exit 0
