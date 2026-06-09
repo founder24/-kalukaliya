@@ -56,15 +56,39 @@ async def test_generate_response_routes_sarvam_to_sarvam():
 
 
 @pytest.mark.anyio
-async def test_generate_response_routes_cloudflare_as_default():
-    """Test that unrecognized model raises RuntimeError (Cloudflare removed from chat)"""
+async def test_generate_response_routes_cf_model_to_cloudflare():
+    """Test that @cf/ model routes to Cloudflare Workers AI (llama-3.2-3b-instruct)"""
+    mock_cf_client = MagicMock()
+    mock_cf_client.generate = AsyncMock(return_value="cf response")
+
+    with patch("app.services.ai.cloudflare_client.cloudflare_client", mock_cf_client):
+        from app.services.ai.router import generate_response
+
+        result = await generate_response(
+            system_prompt="You are helpful.",
+            user_message="Hello",
+            model="@cf/meta/llama-3.2-3b-instruct",
+            stream=False,
+        )
+
+    mock_cf_client.generate.assert_called_once_with(
+        system_prompt="You are helpful.",
+        user_message="Hello",
+        stream=False,
+    )
+    assert result == "cf response"
+
+
+@pytest.mark.anyio
+async def test_generate_response_unknown_model_raises():
+    """Test that an unrecognized model name raises RuntimeError"""
     from app.services.ai.router import generate_response
 
     with pytest.raises(RuntimeError, match="Unknown model"):
         await generate_response(
             system_prompt="You are helpful.",
             user_message="Hello",
-            model="@cf/meta/llama-3.1-70b-instruct",
+            model="some-unknown-model-xyz",
             stream=False,
         )
 
@@ -120,14 +144,39 @@ async def test_stream_response_routes_sarvam_to_sarvam():
 
 
 @pytest.mark.anyio
-async def test_stream_response_routes_cloudflare_as_default():
-    """Test that streaming with unrecognized model raises RuntimeError (Cloudflare removed from chat)"""
+async def test_stream_response_routes_cf_model_to_cloudflare():
+    """Test that streaming @cf/ model routes to Cloudflare Workers AI"""
+
+    async def mock_cf_stream(*args, **kwargs):
+        for chunk in ["Hello", " from", " CF"]:
+            yield chunk
+
+    mock_cf_client = MagicMock()
+    mock_cf_client.stream_generate = mock_cf_stream
+
+    with patch("app.services.ai.cloudflare_client.cloudflare_client", mock_cf_client):
+        from app.services.ai.router import stream_response
+
+        chunks = []
+        async for chunk in stream_response(
+            system_prompt="You are helpful.",
+            user_message="Hello",
+            model="@cf/meta/llama-3.2-3b-instruct",
+        ):
+            chunks.append(chunk)
+
+    assert chunks == ["Hello", " from", " CF"]
+
+
+@pytest.mark.anyio
+async def test_stream_response_unknown_model_raises():
+    """Test that streaming with an unrecognized model raises RuntimeError"""
     from app.services.ai.router import stream_response
 
     with pytest.raises(RuntimeError, match="Unknown model"):
         async for _ in stream_response(
             system_prompt="You are helpful.",
             user_message="Hello",
-            model="@cf/meta/llama-3.1-70b-instruct",
+            model="some-unknown-model-xyz",
         ):
             pass
