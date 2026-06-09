@@ -1,39 +1,38 @@
 ---
 name: Syrabit chat latency fixes
-description: All latency bottlenecks identified and fixed; streaming TTFB measured
+description: All latency bottlenecks; actual TTFB measured June 2026; sarvam-30b reasoning-phase root cause confirmed
 ---
 
-## Current state (measured 2026-06-08)
+## Measured TTFB (June 2026, via /api/v1/chat/stream)
 
-### Streaming TTFB (user-facing — ChatPage.jsx uses /chat/stream)
-- English: **~1.8s** (gemini-2.5-flash, thinkingBudget=0, no-RAG path)
-- Assamese: **~1.7s** (sarvam-30b, enable_thinking=False, no-RAG path)
+- English (Vertex/Gemini 2.5 Flash):  **~4.2s TTFB**, ~4.5s total
+- Assamese (Sarvam 30b):              **~7.3s TTFB**, ~7.5s total
 
-### Non-streaming total (fallback, not user-facing)
-- English: ~6-7s (token generation floor ~100 tok/s × 600 tokens)
-- Assamese: ~8s (Gemini with Assamese system prompt; Sarvam always 504s)
+## Root cause of Assamese 7s TTFB
+
+`sarvam-30b` is a reasoning model. Wire-level SSE confirms:
+- `delta.reasoning_content` streams English thinking from ~150ms (server-side)
+- `delta.content` (actual Assamese answer) arrives only AFTER reasoning completes — ~7s later
+- Flags `enable_thinking: False` and `budget_tokens: 0` are **both ignored** — same TTFB regardless
+- No API flag can reduce this; it is the model's architecture
+- Only two Sarvam models exist (sarvam-30b, sarvam-105b); sarvam-30b is already the faster one
+- Only viable improvement: UX typing indicator fired immediately on request start
 
 ## Model routing
-- English → Vertex AI `gemini-2.5-flash` (only working Gemini on this endpoint;
-  gemini-2.0-flash returns HTTP 404)
-- Assamese streaming → `sarvam-30b` with `enable_thinking: False`
-- Assamese non-streaming → `gemini-2.5-flash` override (Sarvam takes >15s
-  buffered, always hits 15s timeout; override added in chat.py `_process_chat()`)
 
-## Key optimizations in code
-1. `vertex_client.py _thinking_config()`: gates on "2.5", sets thinkingBudget=0
-2. `sarvam_client.py`: `"enable_thinking": False` in generate() + stream_generate()
-3. `chat.py _maybe_retrieve()`: MongoDB fast path via retrieve_context_from_chapter
-   → ~30ms vs 800-3000ms Vertex Search; falls back to Vertex if chapter empty
-4. Same MongoDB fast path applied to streaming endpoint RAG path
-5. `vertex_search.py`: removed double-search (filter always None), timeout 10s→5s
+- English → Vertex AI `gemini-2.5-flash` (OAuth2 SA path; GEMINI_API_KEY also works via genai path)
+- Assamese streaming → `sarvam-30b` via `sarvam_client.stream_generate_with_retry()`
+- Assamese non-streaming → `gemini-2.5-flash` override (buffered Sarvam > 15s timeout)
 
-## Why non-streaming Assamese → Gemini
-Sarvam-30b buffered response: even with enable_thinking=False, full token
-generation takes 15-30s (model generates ~50 tok/s for Assamese). 15s endpoint
-timeout fires before any content is returned. Gemini generates Assamese correctly
-when given an Assamese system prompt (build_system_prompt detects lang="as").
+## Key optimisations in code
+
+1. `vertex_client.py _thinking_config()`: gates on "2.5", sets thinkingBudget=0 → cuts Gemini thinking phase
+2. `sarvam_client.py`: `"enable_thinking": False` in generate() + stream_generate() (kept even though ignored, in case Sarvam honours it in future)
+3. `sarvam_client.py auth header`: `api-subscription-key` (not `Authorization: Bearer`)
+4. `chat_service.py`: English fallback to Sarvam when Vertex fails (bug fix)
+5. `chat.py _maybe_retrieve()`: MongoDB fast path → ~30ms vs 800-3000ms Vertex Search
 
 ## Vertex embedding quota
+
 Heavy benchmarking hits quota (429). Quota resets within ~60s. Do not hammer
 /chat/ endpoint in rapid succession during development testing.
