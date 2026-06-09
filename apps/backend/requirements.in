@@ -4,7 +4,7 @@
 
 aiohttp>=3.14.0
 bcrypt
-beanie>=2.2.0
+beanie>=2.1.0
 fastapi
 google-auth[aiohttp]
 google-cloud-aiplatform
