@@ -1,0 +1,185 @@
+cd ~/syrabit
+
+# 1. Build image
+IMAGE="asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:$(git rev-parse --short HEAD)"
+gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+docker build -t "$IMAGE" -f apps/backend/Dockerfile apps/backend
+
+# 2. Push
+docker push "$IMAGE"
+
+# 3. Deploy
+gcloud run deploy syrabit-backend \
+  --image="$IMAGE" \
+  --region=asia-south1 \
+  --project=blissful-acumen-495019-t6 \
+  --port=8000 \
+  --allow-unauthenticated \
+  --min-instances=1 \
+  --service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com \
+  --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,SARVAM_MODEL=sarvam-30b,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=asia-south1,CF_AI_MODEL=@cf/meta/llama-3.1-8b-instruct-q \
+  --remove-env-vars=VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG \
+  --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,CF_API_TOKEN=CF_API_TOKEN:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest,UPSTASH_REDIS_REST_URL=UPSTASH_REDIS_REST_URL:latest,UPSTASH_REDIS_REST_TOKEN=UPSTASH_REDIS_REST_TOKEN:latest,INDEXNOW_API_KEY=INDEXNOW_API_KEY:latest,POSTHOG_API_KEY=POSTHOG_API_KEY:latest
+WARNING: Your config file at [/home/founder/.docker/config.json] contains these credential helper entries:
+
+{
+  "credHelpers": {
+    "africa-south1-docker.pkg.dev": "gcloud",
+    "asia-docker.pkg.dev": "gcloud",
+    "asia-east1-docker.pkg.dev": "gcloud",
+    "asia-east2-docker.pkg.dev": "gcloud",
+    "asia-northeast1-docker.pkg.dev": "gcloud",
+    "asia-northeast2-docker.pkg.dev": "gcloud",
+    "asia-northeast3-docker.pkg.dev": "gcloud",
+    "asia-south1-docker.pkg.dev": "gcloud",
+    "asia-south2-docker.pkg.dev": "gcloud",
+    "asia-southeast1-docker.pkg.dev": "gcloud",
+    "asia-southeast2-docker.pkg.dev": "gcloud",
+    "asia-southeast3-docker.pkg.dev": "gcloud",
+    "asia.gcr.io": "gcloud",
+    "australia-southeast1-docker.pkg.dev": "gcloud",
+    "australia-southeast2-docker.pkg.dev": "gcloud",
+    "docker.africa-south1.rep.pkg.dev": "gcloud",
+    "docker.asia-east1.rep.pkg.dev": "gcloud",
+    "docker.asia-east2.rep.pkg.dev": "gcloud",
+    "docker.asia-northeast1.rep.pkg.dev": "gcloud",
+    "docker.asia-northeast2.rep.pkg.dev": "gcloud",
+    "docker.asia-northeast3.rep.pkg.dev": "gcloud",
+    "docker.asia-south1.rep.pkg.dev": "gcloud",
+    "docker.asia-south2.rep.pkg.dev": "gcloud",
+    "docker.asia-southeast1.rep.pkg.dev": "gcloud",
+    "docker.asia-southeast2.rep.pkg.dev": "gcloud",
+    "docker.australia-southeast1.rep.pkg.dev": "gcloud",
+    "docker.australia-southeast2.rep.pkg.dev": "gcloud",
+    "docker.europe-central2.rep.pkg.dev": "gcloud",
+    "docker.europe-north1.rep.pkg.dev": "gcloud",
+    "docker.europe-southwest1.rep.pkg.dev": "gcloud",
+    "docker.europe-west1.rep.pkg.dev": "gcloud",
+    "docker.europe-west10.rep.pkg.dev": "gcloud",
+    "docker.europe-west12.rep.pkg.dev": "gcloud",
+    "docker.europe-west2.rep.pkg.dev": "gcloud",
+    "docker.europe-west3.rep.pkg.dev": "gcloud",
+    "docker.europe-west4.rep.pkg.dev": "gcloud",
+    "docker.europe-west6.rep.pkg.dev": "gcloud",
+    "docker.europe-west8.rep.pkg.dev": "gcloud",
+    "docker.europe-west9.rep.pkg.dev": "gcloud",
+    "docker.me-central1.rep.pkg.dev": "gcloud",
+    "docker.me-central2.rep.pkg.dev": "gcloud",
+    "docker.me-west1.rep.pkg.dev": "gcloud",
+    "docker.northamerica-northeast1.rep.pkg.dev": "gcloud",
+    "docker.northamerica-northeast2.rep.pkg.dev": "gcloud",
+    "docker.southamerica-east1.rep.pkg.dev": "gcloud",
+    "docker.southamerica-west1.rep.pkg.dev": "gcloud",
+    "docker.us-central1.rep.pkg.dev": "gcloud",
+    "docker.us-central2.rep.pkg.dev": "gcloud",
+    "docker.us-east1.rep.pkg.dev": "gcloud",
+    "docker.us-east4.rep.pkg.dev": "gcloud",
+    "docker.us-east5.rep.pkg.dev": "gcloud",
+    "docker.us-east7.rep.pkg.dev": "gcloud",
+    "docker.us-south1.rep.pkg.dev": "gcloud",
+    "docker.us-west1.rep.pkg.dev": "gcloud",
+    "docker.us-west2.rep.pkg.dev": "gcloud",
+    "docker.us-west3.rep.pkg.dev": "gcloud",
+    "docker.us-west4.rep.pkg.dev": "gcloud",
+    "eu.gcr.io": "gcloud",
+    "europe-central2-docker.pkg.dev": "gcloud",
+    "europe-docker.pkg.dev": "gcloud",
+    "europe-north1-docker.pkg.dev": "gcloud",
+    "europe-north2-docker.pkg.dev": "gcloud",
+    "europe-southwest1-docker.pkg.dev": "gcloud",
+    "europe-west1-docker.pkg.dev": "gcloud",
+    "europe-west10-docker.pkg.dev": "gcloud",
+    "europe-west12-docker.pkg.dev": "gcloud",
+    "europe-west2-docker.pkg.dev": "gcloud",
+    "europe-west3-docker.pkg.dev": "gcloud",
+    "europe-west4-docker.pkg.dev": "gcloud",
+    "europe-west6-docker.pkg.dev": "gcloud",
+    "europe-west8-docker.pkg.dev": "gcloud",
+    "europe-west9-docker.pkg.dev": "gcloud",
+    "gcr.io": "gcloud",
+    "marketplace.gcr.io": "gcloud",
+    "me-central1-docker.pkg.dev": "gcloud",
+    "me-central2-docker.pkg.dev": "gcloud",
+    "me-west1-docker.pkg.dev": "gcloud",
+    "northamerica-northeast1-docker.pkg.dev": "gcloud",
+    "northamerica-northeast2-docker.pkg.dev": "gcloud",
+    "northamerica-south1-docker.pkg.dev": "gcloud",
+    "southamerica-east1-docker.pkg.dev": "gcloud",
+    "southamerica-west1-docker.pkg.dev": "gcloud",
+    "staging-k8s.gcr.io": "gcloud",
+    "us-central1-docker.pkg.dev": "gcloud",
+    "us-central2-docker.pkg.dev": "gcloud",
+    "us-docker.pkg.dev": "gcloud",
+    "us-east1-docker.pkg.dev": "gcloud",
+    "us-east4-docker.pkg.dev": "gcloud",
+    "us-east5-docker.pkg.dev": "gcloud",
+    "us-east7-docker.pkg.dev": "gcloud",
+    "us-south1-docker.pkg.dev": "gcloud",
+    "us-west1-docker.pkg.dev": "gcloud",
+    "us-west2-docker.pkg.dev": "gcloud",
+    "us-west3-docker.pkg.dev": "gcloud",
+    "us-west4-docker.pkg.dev": "gcloud",
+    "us-west8-docker.pkg.dev": "gcloud",
+    "us.gcr.io": "gcloud"
+  }
+}
+Adding credentials for: asia-south1-docker.pkg.dev
+gcloud credential helpers already registered correctly.
+[+] Building 278.6s (14/14) FINISHED                                                                                                                                                               docker:default
+ => [internal] load build definition from Dockerfile                                                                                                                                                         0.0s
+ => => transferring dockerfile: 1.23kB                                                                                                                                                                       0.0s
+ => WARN: FromAsCasing: 'as' and 'FROM' keywords' casing do not match (line 1)                                                                                                                               0.0s
+ => [internal] load metadata for docker.io/library/python:3.12-slim                                                                                                                                          1.4s
+ => [internal] load .dockerignore                                                                                                                                                                            0.0s
+ => => transferring context: 180B                                                                                                                                                                            0.0s
+ => [builder 1/5] FROM docker.io/library/python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203                                                                          168.8s
+ => => resolve docker.io/library/python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203                                                                                    0.0s
+ => => sha256:07342fe545e640a2c4960e97ffe33a301cd8e61e0c4d4307d7ac66b6b8a9eb2d 250B / 250B                                                                                                                   0.2s
+ => => sha256:e113665b194b20ba7e9093ef6a1a38edbaebbfb983c00e379a45a142a95a86ef 12.11MB / 12.11MB                                                                                                             3.2s
+ => => sha256:4a9dde5cdde190bfa0a3ab17863a083e66ea9636b157638c315357dfa476ba76 1.29MB / 1.29MB                                                                                                               0.9s
+ => => sha256:5b4d6ff92fc4e14e911b7753c954fac965d48c40fe1075758d284148ccace970 29.78MB / 29.78MB                                                                                                           166.9s
+ => => extracting sha256:5b4d6ff92fc4e14e911b7753c954fac965d48c40fe1075758d284148ccace970                                                                                                                    1.1s
+ => => extracting sha256:4a9dde5cdde190bfa0a3ab17863a083e66ea9636b157638c315357dfa476ba76                                                                                                                    0.1s
+ => => extracting sha256:e113665b194b20ba7e9093ef6a1a38edbaebbfb983c00e379a45a142a95a86ef                                                                                                                    0.6s
+ => => extracting sha256:07342fe545e640a2c4960e97ffe33a301cd8e61e0c4d4307d7ac66b6b8a9eb2d                                                                                                                    0.0s
+ => [internal] load build context                                                                                                                                                                            0.2s
+ => => transferring context: 1.49MB                                                                                                                                                                          0.1s
+ => [builder 2/5] WORKDIR /app                                                                                                                                                                               0.7s
+ => [stage-1 3/6] RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app                                                                                                                            0.4s
+ => [builder 3/5] RUN apt-get update && apt-get install -y --no-install-recommends     gcc     libffi-dev     && rm -rf /var/lib/apt/lists/*                                                                24.0s
+ => [builder 4/5] COPY requirements.txt .                                                                                                                                                                    0.0s 
+ => [builder 5/5] RUN sed 's/ *\\$//' requirements.txt | grep -v '^\s*--hash' > requirements-nohash.txt     && pip install --no-cache-dir --user -r requirements-nohash.txt     && pip install --no-cache-  53.6s 
+ => [stage-1 4/6] COPY --from=builder /root/.local /home/appuser/.local                                                                                                                                      4.3s 
+ => [stage-1 5/6] COPY app/ ./app/                                                                                                                                                                           0.2s 
+ => [stage-1 6/6] COPY gunicorn_conf.py ./gunicorn_conf.py                                                                                                                                                   0.0s 
+ => exporting to image                                                                                                                                                                                      22.7s 
+ => => exporting layers                                                                                                                                                                                     16.6s 
+ => => exporting manifest sha256:6206c6bce41bc8881233ccf9ce3bdb471fe91a6075d5d993f53cc2b8ea8b3ff0                                                                                                            0.0s 
+ => => exporting config sha256:07f02f73719c29bef44bff4b1cb9cd820ea693142b494693e9e36dc4c5493e27                                                                                                              0.0s
+ => => exporting attestation manifest sha256:3d81c973aa74859b1ac5f4e27dab7ccbfe9f62a70aa6dc6877e2eda85970fdff                                                                                                0.0s
+ => => exporting manifest list sha256:61ec870cf797d42d47483b8796eee0a241ec8d5bba07f060d7113170e6868a22                                                                                                       0.0s
+ => => naming to asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:59c9ab2e                                                                                                               0.0s
+ => => unpacking to asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:59c9ab2e                                                                                                            6.0s
+
+ 1 warning found (use docker --debug to expand):
+ - FromAsCasing: 'as' and 'FROM' keywords' casing do not match (line 1)
+The push refers to repository [asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend]
+67da758208b0: Waiting 
+8cb373988cc6: Waiting 
+8a1a14a1a15f: Waiting 
+07342fe545e6: Waiting 
+3d78800be547: Waiting 
+b69ec1dd4b7d: Waiting 
+14b1b127f236: Waiting 
+5b4d6ff92fc4: Waiting 
+4a9dde5cdde1: Waiting 
+e113665b194b: Waiting 
+failed to do request: Head "https://asia-south1-docker.pkg.dev/v2/blissful-acumen-495019-t6/syrabit/backend/blobs/sha256:5b4d6ff92fc4e14e911b7753c954fac965d48c40fe1075758d284148ccace970": dial tcp 108.177.97.82:443: connect: connection refused
+Deploying container to Cloud Run service [syrabit-backend] in project [blissful-acumen-495019-t6] region [asia-south1]
+Deploying...                                                                                                                                                                                                     
+  Setting IAM Policy...warning                                                                                                                                                                                   
+  Creating Revision...failed                                                                                                                                                                                     
+Deployment failed                                                                                                                                                                                                
+  Setting IAM policy failed, try "gcloud beta run services add-iam-policy-binding --region=asia-south1 --member=allUsers --role=roles/run.invoker syrabit-backend"
+ERROR: (gcloud.run.deploy) Image 'asia-south1-docker.pkg.dev/blissful-acumen-495019-t6/syrabit/backend:59c9ab2e' not found.
+founder@cloudshell:~/syrabit (blissful-acumen-495019-t6)$ 

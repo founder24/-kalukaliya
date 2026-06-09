@@ -36,7 +36,7 @@ concurrency:
 jobs:
   dep-check:
     name: Dependency Gate
-    if: ${{ github.event.inputs.skip_dep_check != 'true' }}
+    if: ${{ inputs.skip_dep_check != 'true' }}
     uses: ./.github/workflows/ci-deps.yml
 
   deploy-backend:
@@ -173,7 +173,7 @@ jobs:
     needs: [deploy-backend]
     if: |
       always() &&
-      github.event.inputs.backend_only != 'true' &&
+      inputs.backend_only != 'true' &&
       (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped')
     permissions:
       id-token: write
@@ -273,7 +273,7 @@ jobs:
   deploy-frontend:
     name: Deploy Frontend (Cloudflare Pages)
     runs-on: ubuntu-latest
-    if: github.event.inputs.backend_only != 'true'
+    if: inputs.backend_only != 'true'
     steps:
       - uses: actions/checkout@v4
 
