@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     CF_ACCOUNT_ID: Optional[str] = None
     CF_API_TOKEN: Optional[str] = None
     WORKER_AI: Optional[str] = None  # alias secret name used in Replit
+    CLOUDFLARE_WORKER_API_TOKEN: Optional[str] = None  # GCP Secret Manager secret name
     CF_R2_BUCKET: str = "syrabit-assets"
     # Note (HF-110): CF_R2_BUCKET default matches wrangler.toml binding name.
     CF_R2_ACCESS_KEY: Optional[str] = None
