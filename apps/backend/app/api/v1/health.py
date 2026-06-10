@@ -51,7 +51,17 @@ async def mongo_ping() -> Dict[str, Any]:
 
 
 async def redis_ping() -> Dict[str, Any]:
-    """Ping Upstash Redis connection"""
+    """Ping Upstash Redis connection.
+
+    Returns "disabled" (not "unhealthy") when UPSTASH credentials are absent —
+    Redis is an optional dependency; missing credentials is an intentional
+    configuration choice, not a service failure.
+    """
+    from app.config import settings
+
+    if not settings.UPSTASH_REDIS_REST_URL or not settings.UPSTASH_REDIS_REST_TOKEN:
+        return {"status": "disabled", "reason": "UPSTASH credentials not configured"}
+
     try:
         from app.db.redis import get_redis
 
@@ -224,9 +234,11 @@ async def deep_health_check():
     }
 
     # Determine overall status
+    # Redis is optional — "disabled" (no credentials) is acceptable, not a failure.
     CORE_SERVICES = {"mongodb", "redis"}
+    ACCEPTABLE = {"healthy", "disabled"}
 
-    core_healthy = all(checks[svc].get("status") == "healthy" for svc in CORE_SERVICES)
+    core_healthy = all(checks[svc].get("status") in ACCEPTABLE for svc in CORE_SERVICES)
     all_healthy = all(check.get("status") == "healthy" for check in checks.values())
 
     if not core_healthy:
