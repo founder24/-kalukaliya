@@ -43,9 +43,13 @@
 #
 # =============================================================================
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── JSON output ───────────────────────────────────────────────────────────────
+JSON_OUTPUT="${JSON_OUTPUT:-0}"
+JSON_FILE="${JSON_FILE:-/tmp/syrabit-test-results-$(date +%Y%m%d-%H%M%S).json}"
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
@@ -60,8 +64,9 @@ QUICK=0
 ONLY=""
 for arg in "$@"; do
   case "$arg" in
-    --quick) QUICK=1 ;;
-    --only)  ;;
+    --quick)       QUICK=1 ;;
+    --json-output) JSON_OUTPUT=1 ;;
+    --only)        ;;
     *) [[ "${PREV_ARG:-}" == "--only" ]] && ONLY="$arg" ;;
   esac
   PREV_ARG="$arg"
@@ -304,6 +309,30 @@ printf "  Suites : %d total\n" $TOTAL_SUITES
 printf "  ${G}Passed${N} : %d\n" $PASSED_SUITES
 printf "  ${R}Failed${N} : %d\n" $FAILED_SUITES
 printf "  ${Y}Skipped${N}: %d\n" $SKIPPED_SUITES
+
+# ── Machine-readable JSON output ─────────────────────────────────────────────
+if [[ "$JSON_OUTPUT" -eq 1 ]]; then
+  {
+    printf '{\n'
+    printf '  "timestamp": "%s",\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf '  "target_frontend": "%s",\n' "${FRONTEND:-https://syrabit.ai}"
+    printf '  "target_backend": "%s",\n' "${BACKEND_URL:-https://api.syrabit.ai}"
+    printf '  "totals": {"passed": %d, "failed": %d, "skipped": %d},\n' \
+      "$PASSED_SUITES" "$FAILED_SUITES" "$SKIPPED_SUITES"
+    printf '  "suites": {\n'
+    first=1
+    for key in uptime smoke frontend bundle deployment live auth providers ttfb chat; do
+      status="${SUITE_STATUS[$key]:-skip}"
+      note="${SUITE_NOTES[$key]:-}"
+      [[ $first -eq 0 ]] && printf ',\n'
+      printf '    "%s": {"status": "%s", "note": "%s"}' "$key" "$status" "$note"
+      first=0
+    done
+    printf '\n  }\n'
+    printf '}\n'
+  } > "$JSON_FILE"
+  printf "\n  ${C}JSON results written to: %s${N}\n" "$JSON_FILE"
+fi
 
 if [[ $FAILED_SUITES -gt 0 ]]; then
   printf "\n  ${R}${B}%d SUITE(S) FAILED${N}\n\n" $FAILED_SUITES

@@ -25,9 +25,27 @@
 
 set -euo pipefail
 
-EXPECTED_CLOUD_RUN_HOST="syrabit-backend-bl6wu3psza-el.a.run.app"
 EXPECTED_WORKER_HOST="api.syrabit.ai"
 BASE="${1:-https://syrabit.ai}"
+
+# Dynamically discover the current Cloud Run service URL; fall back to the
+# last-known host if gcloud is unavailable (e.g. running outside Cloud Shell).
+GCP_PROJECT="${GCP_PROJECT:-blissful-acumen-495019-t6}"
+GCP_REGION="${GCP_REGION:-asia-south1}"
+EXPECTED_CLOUD_RUN_HOST=""
+if command -v gcloud &>/dev/null; then
+  _raw_url=$(gcloud run services describe syrabit-backend \
+    --project="$GCP_PROJECT" --region="$GCP_REGION" \
+    --format="value(status.url)" 2>/dev/null || echo "")
+  if [[ -n "$_raw_url" ]]; then
+    EXPECTED_CLOUD_RUN_HOST=$(echo "$_raw_url" | sed 's|https://||;s|/.*||')
+    echo "  (Cloud Run host discovered via gcloud: ${EXPECTED_CLOUD_RUN_HOST})"
+  fi
+fi
+if [[ -z "$EXPECTED_CLOUD_RUN_HOST" ]]; then
+  EXPECTED_CLOUD_RUN_HOST="syrabit-backend-bl6wu3psza-el.a.run.app"
+  echo "  ⚠  Could not discover Cloud Run URL via gcloud — using cached fallback"
+fi
 
 PASS=0; FAIL=0; WARN=0
 

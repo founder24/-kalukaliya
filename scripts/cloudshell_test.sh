@@ -26,7 +26,7 @@
 #    GCP_REGION                     Cloud Run region (default: us-central1)
 #    CURL_TIMEOUT                   Seconds per request (default: 15)
 # =============================================================================
-set -uo pipefail
+set -euo pipefail
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 API="${CLOUD_API:-https://api.syrabit.ai}"

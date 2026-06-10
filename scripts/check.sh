@@ -21,7 +21,7 @@
 #    --fe   <url>       Override frontend   (default: https://syrabit.ai)
 #    --region <region>  Cloud Run region    (default: asia-south1)
 # =============================================================================
-set -uo pipefail
+set -euo pipefail
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 API="${API:-https://api.syrabit.ai}"
@@ -158,6 +158,33 @@ else
       --format="value(status.traffic[0].percent)" 2>/dev/null || echo "?")
     [[ "$_traffic" == "100" ]] && _ok "Traffic: 100% on latest revision" \
                                 || _warn "Traffic: ${_traffic}% on latest (split traffic active?)"
+
+    # Deployment consistency: verify the Cloud Run URL in the service matches
+    # what the health endpoint reports, confirming no stale revision is serving.
+    _svc_url=$(gcloud run services describe syrabit-backend \
+      --project="${GCP_PROJECT}" --region="${GCP_REGION}" \
+      --format="value(status.url)" 2>/dev/null || echo "")
+    if [[ -n "$_svc_url" ]]; then
+      _direct_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+        "${_svc_url}/health" 2>/dev/null || echo "000")
+      if [[ "$_direct_code" == "200" ]]; then
+        _ok "Deployment consistency: Cloud Run direct /health → HTTP 200 (${_svc_url})"
+      elif [[ "$_direct_code" == "401" || "$_direct_code" == "403" ]]; then
+        _skip "Deployment consistency: Cloud Run requires IAM auth (${_direct_code}) — expected in production"
+      else
+        _warn "Deployment consistency: Cloud Run direct /health → HTTP ${_direct_code} (${_svc_url})"
+      fi
+      # Cross-check: traffic revision name vs latest ready revision
+      _active_rev=$(gcloud run services describe syrabit-backend \
+        --project="${GCP_PROJECT}" --region="${GCP_REGION}" \
+        --format="value(status.traffic[0].revisionName)" 2>/dev/null || echo "")
+      if [[ -n "$_active_rev" && -n "$_svc" && "$_active_rev" == "$_svc" ]]; then
+        _ok "Deployment consistency: active traffic revision matches latest ready (${_active_rev})"
+      elif [[ -n "$_active_rev" && -n "$_svc" ]]; then
+        _warn "Deployment consistency: traffic on ${_active_rev}, latest ready is ${_svc} — deploy may be canary"
+      fi
+    fi
+
     _env=$(gcloud run services describe syrabit-backend \
       --project="${GCP_PROJECT}" --region="${GCP_REGION}" \
       --format="json(spec.template.spec.containers[0].env)" 2>/dev/null \

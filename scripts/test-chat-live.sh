@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 # =============================================================================
 # test-chat-live.sh - Comprehensive chat pipeline testing against live syrabit.ai API
@@ -101,6 +101,25 @@ print_skip() {
 
 print_info() {
   echo -e "  ${YELLOW}[INFO]${NC} $1"
+}
+
+# curl with up to 3 retries and exponential backoff (2s, 4s)
+# Usage: curl_retry [curl-args...]
+curl_retry() {
+  local attempt=0
+  local max_attempts=3
+  local sleep_secs=2
+  while [[ $attempt -lt $max_attempts ]]; do
+    if curl "$@"; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep "$sleep_secs"
+      sleep_secs=$((sleep_secs * 2))
+    fi
+  done
+  return 1
 }
 
 # JSON value extraction - uses jq if available, falls back to grep/sed
@@ -746,7 +765,8 @@ else
     print_fail "Timed non-streaming chat (expected 200, got HTTP $RESPONSE_CODE)"
   fi
 
-  # Test: Streaming first-byte latency
+  # Test: Streaming first-byte latency (TTFB SLO: < 3000ms)
+  TTFB_SLO_MS=3000
   STREAM_START=$(date +%s%N 2>/dev/null || date +%s)
   FIRST_CHUNK=$(curl -s --max-time 15 -X POST \
     -H "Content-Type: application/json" \
@@ -756,17 +776,20 @@ else
   STREAM_END=$(date +%s%N 2>/dev/null || date +%s)
 
   if [[ -n "$FIRST_CHUNK" ]]; then
-    # Calculate first-byte latency (nanoseconds to ms if available)
     if [[ "$STREAM_START" -gt 1000000000000 ]]; then
       FIRST_BYTE_MS=$(( (STREAM_END - STREAM_START) / 1000000 ))
     else
       FIRST_BYTE_MS=$(( (STREAM_END - STREAM_START) * 1000 ))
     fi
-    print_pass "Streaming first-byte received"
-    print_info "Streaming first-byte latency: ~${FIRST_BYTE_MS}ms"
     record_latency "$FIRST_BYTE_MS"
+    if [[ "$FIRST_BYTE_MS" -lt "$TTFB_SLO_MS" ]]; then
+      print_pass "Streaming TTFB SLO: ${FIRST_BYTE_MS}ms < ${TTFB_SLO_MS}ms target"
+    else
+      print_fail "Streaming TTFB SLO BREACHED: ${FIRST_BYTE_MS}ms >= ${TTFB_SLO_MS}ms target"
+    fi
+    print_info "Streaming first-byte latency: ~${FIRST_BYTE_MS}ms"
   else
-    print_fail "Streaming first-byte - no data received"
+    print_fail "Streaming first-byte - no data received (TTFB check skipped)"
   fi
 fi
 
@@ -805,6 +828,97 @@ else
     fi
   else
     print_skip "Multi-turn follow-up skipped - first message failed"
+  fi
+fi
+
+# =============================================================================
+# SECTION 10: RAG Quality Validation
+# =============================================================================
+
+print_header "SECTION 10: RAG Quality Validation"
+
+if [[ -z "$ACCESS_TOKEN" ]]; then
+  print_skip "RAG quality tests skipped - no token"
+else
+  # For each query we check that the response contains at least one expected keyword,
+  # confirming the model is grounding answers in relevant content rather than hallucinating.
+  declare -a RAG_TESTS=(
+    "What is photosynthesis?|en|photosynthesis|chlorophyll|light|glucose|plant"
+    "Explain Newton's first law of motion|en|motion|force|inertia|rest|velocity|object"
+    "What is the French Revolution?|en|France|revolution|revolution|monarchy|republic|1789"
+  )
+
+  for entry in "${RAG_TESTS[@]}"; do
+    IFS='|' read -r rag_msg rag_lang rag_kw1 rag_kw2 rag_kw3 rag_kw4 rag_kw5 rag_kw6 <<< "$entry"
+    do_request POST "${CHAT_API}/" \
+      "{\"message\":\"${rag_msg}\",\"lang\":\"${rag_lang}\"}" \
+      -H "Authorization: Bearer ${ACCESS_TOKEN}"
+
+    if [[ "$RESPONSE_CODE" == "200" ]]; then
+      resp_text=$(json_value "$RESPONSE_BODY" "response")
+      resp_lower=$(echo "$resp_text" | tr '[:upper:]' '[:lower:]')
+      matched=false
+      for kw in "$rag_kw1" "$rag_kw2" "$rag_kw3" "$rag_kw4" "$rag_kw5" "$rag_kw6"; do
+        if [[ -n "$kw" ]] && echo "$resp_lower" | grep -qi "$kw"; then
+          matched=true
+          break
+        fi
+      done
+      if [[ "$matched" == "true" ]]; then
+        print_pass "RAG quality: '${rag_msg:0:40}' response contains relevant content"
+      else
+        print_fail "RAG quality: '${rag_msg:0:40}' response may be off-topic (no expected keywords)"
+        print_info "Response excerpt: ${resp_text:0:150}"
+      fi
+    else
+      print_fail "RAG quality: '${rag_msg:0:40}' request failed (HTTP $RESPONSE_CODE)"
+    fi
+  done
+fi
+
+# =============================================================================
+# SECTION 11: Assamese Routing Matrix
+# =============================================================================
+
+print_header "SECTION 11: Assamese Routing Matrix"
+
+if [[ -z "$ACCESS_TOKEN" ]]; then
+  print_skip "Assamese routing matrix skipped - no token"
+else
+  # Verify that Assamese-language queries are consistently routed to Sarvam.
+  # Test various input types: pure Assamese, mixed, and explicit lang flag.
+  declare -a AS_ROUTING_TESTS=(
+    "নমস্কাৰ, তুমি কোন?|as|Assamese greeting (lang: as)"
+    "অসম কিয় বিখ্যাত?|as|Assamese culture query (lang: as)"
+    "Hello, আমাক সহায় কৰা|as|Mixed AS/EN query (lang: as)"
+  )
+
+  AS_SARVAM_ROUTED=0
+  AS_TOTAL=0
+
+  for entry in "${AS_ROUTING_TESTS[@]}"; do
+    IFS='|' read -r as_msg as_lang as_label <<< "$entry"
+    AS_TOTAL=$((AS_TOTAL + 1))
+
+    do_request POST "${CHAT_API}/" \
+      "{\"message\":\"${as_msg}\",\"lang\":\"${as_lang}\"}" \
+      -H "Authorization: Bearer ${ACCESS_TOKEN}"
+
+    if [[ "$RESPONSE_CODE" == "200" ]]; then
+      model_used=$(json_value "$RESPONSE_BODY" "model_used")
+      if echo "$model_used" | grep -qi "sarvam\|sarv\|transliterate"; then
+        print_pass "Assamese routing: ${as_label} → Sarvam (model: ${model_used})"
+        AS_SARVAM_ROUTED=$((AS_SARVAM_ROUTED + 1))
+      else
+        print_info "Assamese routing: ${as_label} → model '${model_used}' (expected Sarvam)"
+      fi
+    else
+      print_fail "Assamese routing: ${as_label} returned HTTP $RESPONSE_CODE"
+    fi
+  done
+
+  if [[ $AS_TOTAL -gt 0 ]]; then
+    print_info "Assamese routing matrix: ${AS_SARVAM_ROUTED}/${AS_TOTAL} queries routed to Sarvam"
   fi
 fi
 

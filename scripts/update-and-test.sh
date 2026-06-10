@@ -26,7 +26,7 @@
 #   TEST_USER_EMAIL / TEST_USER_PASSWORD   (loaded from GCP Secret Manager automatically)
 #   TEST_ADMIN_EMAIL / TEST_ADMIN_PASSWORD (loaded from GCP Secret Manager automatically)
 # =============================================================================
-set -uo pipefail
+set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
 GCP_PROJECT="${GCP_PROJECT:-blissful-acumen-495019-t6}"

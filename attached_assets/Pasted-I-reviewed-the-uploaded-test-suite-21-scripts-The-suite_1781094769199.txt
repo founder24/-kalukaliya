@@ -1,0 +1,336 @@
+I reviewed the uploaded test suite (21 scripts). The suite is already extensive, but it is **not capable of being "100% accurate" in Cloud Shell** yet. Several design issues can create false positives, false negatives, and deployment drift.
+
+## Highest-priority improvements
+
+### 1. Use strict bash everywhere
+
+Many scripts use:
+
+```bash
+set -uo pipefail
+```
+
+instead of:
+
+```bash
+set -euo pipefail
+```
+
+Affected scripts include:
+
+* `cloud-shell-test.sh`
+* `cloudshell_test.sh`
+* `live-deployment-test.sh`
+* `test-auth-live.sh`
+* `test-chat-live.sh`
+* `update-and-test.sh`
+* `check.sh`
+* `config_audit.sh`
+
+Without `-e`, failed commands can be silently ignored and tests continue.
+
+---
+
+### 2. Add retries to all network requests
+
+Most scripts call `curl` directly.
+
+Cloud Shell occasionally experiences:
+
+* transient DNS failures
+* TLS handshake failures
+* Cloudflare edge routing changes
+* temporary 522/524 errors
+
+Use a standard wrapper:
+
+```bash
+curl_retry() {
+  curl \
+    --retry 5 \
+    --retry-all-errors \
+    --retry-delay 2 \
+    --connect-timeout 10 \
+    --max-time 30 \
+    "$@"
+}
+```
+
+Then replace every raw curl call.
+
+This is probably the biggest source of flaky results.
+
+---
+
+### 3. Stop hardcoding Cloud Run URLs
+
+I found hardcoded values like:
+
+```bash
+syrabit-backend-bl6wu3psza-el.a.run.app
+```
+
+inside:
+
+* `verify-cf-pages-url.sh`
+* `fullstack-smoke-test.sh`
+* other scripts
+
+Cloud Run URLs change after service recreation.
+
+Instead:
+
+```bash
+gcloud run services describe syrabit-backend \
+  --region asia-south1 \
+  --format='value(status.url)'
+```
+
+Use that dynamically.
+
+---
+
+### 4. Verify Cloudflare edge and direct backend separately
+
+Current tests mostly check:
+
+```text
+syrabit.ai
+api.syrabit.ai
+```
+
+You should also test:
+
+```text
+Cloudflare Edge
+↓
+Worker
+↓
+Cloud Run
+↓
+MongoDB
+```
+
+and
+
+```text
+Direct Cloud Run
+```
+
+independently.
+
+Example:
+
+```bash
+EDGE_URL=https://api.syrabit.ai
+DIRECT_URL=$(gcloud run services describe ...)
+```
+
+Run the same health checks against both.
+
+This catches Worker misconfigurations instantly.
+
+---
+
+### 5. Add first-token latency tests
+
+Your architecture goal is:
+
+* <100ms page load
+* <1s chat start
+
+Current scripts mostly validate status codes.
+
+Add:
+
+```bash
+curl -N \
+  -w "\nTTFB=%{time_starttransfer}\n" \
+  ...
+```
+
+Fail if:
+
+```text
+TTFB > 1.0s
+```
+
+for English chat.
+
+Measure:
+
+* p50
+* p95
+* p99
+
+over 20 requests.
+
+---
+
+### 6. Add RAG quality validation
+
+Right now tests appear to check:
+
+```text
+response exists
+status=200
+```
+
+That doesn't validate retrieval.
+
+Create a fixed corpus test:
+
+```json
+{
+  "question": "Known document fact",
+  "expected": "Known answer"
+}
+```
+
+Then calculate:
+
+```text
+exact match
+contains expected phrase
+retrieval source count
+```
+
+Otherwise MongoDB vector search regressions won't be detected.
+
+---
+
+### 7. Add Assamese model validation
+
+Because you're using Sarvam for Assamese and Workers AI for English.
+
+Test matrix:
+
+| Input    | Expected Route   |
+| -------- | ---------------- |
+| English  | Workers AI       |
+| Assamese | Sarvam           |
+| Mixed    | Correct fallback |
+
+Validate:
+
+```json
+{
+  "lang":"as"
+}
+```
+
+or routing metadata.
+
+Without this, language routing bugs may go unnoticed.
+
+---
+
+### 8. Add cache-hit verification
+
+Since Cloudflare KV and edge caching are critical to your architecture.
+
+Verify:
+
+```bash
+cf-cache-status
+```
+
+Expected:
+
+```text
+MISS
+HIT
+```
+
+on second request.
+
+Fail if:
+
+```text
+DYNAMIC
+BYPASS
+```
+
+for prerendered pages.
+
+---
+
+### 9. Add deployment consistency checks
+
+Before tests:
+
+```bash
+git rev-parse HEAD
+```
+
+Compare against:
+
+* deployed frontend commit
+* deployed backend revision
+
+Many production failures come from:
+
+```text
+frontend = newer
+backend = older
+```
+
+---
+
+### 10. Produce machine-readable output
+
+Add:
+
+```bash
+--json
+```
+
+for every script.
+
+Generate:
+
+```json
+{
+  "test":"chat_latency",
+  "status":"pass",
+  "latency_ms":487
+}
+```
+
+Then aggregate in:
+
+```bash
+run-all-live-tests.sh
+```
+
+This makes CI/CD much more reliable.
+
+---
+
+## Missing production-critical tests
+
+Your suite currently lacks explicit verification for:
+
+* Secret Manager access
+* MongoDB Atlas connectivity
+* MongoDB vector index existence
+* Cloudflare KV reads
+* Cloudflare R2 reads
+* Worker AI availability
+* Sarvam API availability
+* SSE streaming integrity
+* Rate-limit behavior
+* JWT refresh flow
+* Cache invalidation after deploy
+
+These should be added if the goal is a production-grade deployment audit.
+
+## Overall score
+
+For breadth: **8.5/10**
+
+For Cloud Shell reliability: **6.5/10**
+
+For detecting real production regressions: **7.5/10**
+
+After implementing the 10 improvements above, especially retries, dynamic Cloud Run discovery, latency SLO checks, cache verification, and RAG correctness tests, the suite would be much closer to a deployment gate that you can trust before every release.

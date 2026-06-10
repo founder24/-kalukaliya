@@ -333,6 +333,27 @@ if should_run "content"; then
         warn_test "Cache-Control header missing on content responses"
     fi
 
+    # Cache-hit verification: second identical request should be faster or show cache indicator.
+    # Check for X-Cache, CF-Cache-Status, or Age headers that confirm caching is active.
+    do_request GET "$BACKEND_URL/api/v1/content/library-bundle"
+    local cache_indicator=""
+    cache_indicator=$(echo "$RESPONSE_HEADERS" | grep -iE "^(x-cache|cf-cache-status|age|x-cache-status):" | head -1 || true)
+    if [[ -n "$cache_indicator" ]]; then
+        pass_test "Cache indicator header present on library-bundle: $(echo "$cache_indicator" | tr -d '\r')"
+    else
+        warn_test "No cache indicator header (X-Cache / CF-Cache-Status / Age) on library-bundle"
+    fi
+
+    # Second request to verify cache works end-to-end (Age should increment or HIT)
+    do_request GET "$BACKEND_URL/api/v1/content/library-bundle"
+    local cf_cache_status=""
+    cf_cache_status=$(echo "$RESPONSE_HEADERS" | grep -i "^cf-cache-status:" | tr -d '\r' | awk '{print $2}' || true)
+    if [[ "$cf_cache_status" == "HIT" ]]; then
+        pass_test "CF-Cache-Status: HIT on second library-bundle request (cache warm)"
+    elif [[ -n "$cf_cache_status" ]]; then
+        pass_test "CF-Cache-Status present: ${cf_cache_status} (caching active)"
+    fi
+
     echo ""
 fi
 

@@ -29,7 +29,7 @@
 #   GCP_REGION            GCP region (default: asia-south1)
 # =============================================================================
 
-set -uo pipefail
+set -euo pipefail
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 BACKEND_URL="${BACKEND_URL:-https://api.syrabit.ai}"
@@ -87,6 +87,25 @@ run_section() {
   echo ""
   echo -e "${BOLD}▶ ${name}${NC}"
   "$@"
+}
+
+# curl with up to 3 retries and exponential backoff (2s, 4s)
+# Usage: curl_retry [curl-args...]
+curl_retry() {
+  local attempt=0
+  local max_attempts=3
+  local sleep_secs=2
+  while [[ $attempt -lt $max_attempts ]]; do
+    if curl "$@"; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep "$sleep_secs"
+      sleep_secs=$((sleep_secs * 2))
+    fi
+  done
+  return 1
 }
 
 http_check() {
