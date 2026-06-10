@@ -1,0 +1,63 @@
+CF Workers AI works directly ✅ but backend still falls back to Sarvam. Let me test the chat endpoint directly against Cloud Run (bypassing the edge) to see the actual error, and verify the env var is set on the running revision.
+
+
+3 actions
+Two issues spotted in Cloud Run:
+
+CF_AI_MODEL is @cf/meta/llama-3.1-8b-instruct-q — wrong/corrupted (should be llama-3.2-3b-instruct)
+CF_WORKER_AI_TOKEN is now correctly set ✅
+The model name is stale from a previous deploy. Let me fix it directly on Cloud Run and also check what caused the corruption.
+
+
+3 actions
+Model fix deployed (revision 00559). Now testing the English chat — both token and model are now correct on Cloud Run.
+
+
+3 actions
+Still falling back. Let me check backend logs for the actual CF error and read the cloudflare client code simultaneously.
+
+
+3 actions
+Found it! The Cloud Run log says exactly: "Cloudflare Workers AI not configured (CF_ACCOUNT_ID or CF_API_TOKEN missing)"
+
+CF_ACCOUNT_ID is NOT set on Cloud Run — it's missing from the env vars. I need to add it now alongside checking config.py.
+
+
+3 actions
+Found it! CF_ACCOUNT_ID is completely missing from Cloud Run's env vars — the cloudflare_client.py line 44 checks not self.account_id or not self.api_token and account_id resolves to settings.CF_ACCOUNT_ID which is None. Adding it now.
+
+
+2 actions
+Revision deployed. Now testing the full pipeline — English (CF llama) and Assamese (Sarvam).
+
+
+5 actions
+The log output shows empty textPayload. Let me get proper JSON logs from the new revision and debug why CF is still failing.
+
+
+2 actions
+The account ID is now correct but getting 401 — the working token might not be reaching pydantic settings. Let me verify the token being used vs what's stored, and test directly.
+
+
+3 actions
+Everything stored correctly on Cloud Run ✅, but still getting 401. The CF token works from Replit but fails from GCP. This strongly suggests the token has an IP restriction — CF API tokens can be scoped to specific IPs and Cloud Run's GCP IPs aren't allowed. Let me verify and create a new unrestricted token.
+
+
+2 actions
+Can't inspect or create CF tokens — no API token management permissions. Let me definitively diagnose whether pydantic is picking up CF_WORKER_AI_TOKEN or falling to the stale CF_API_TOKEN by removing the stale binding, and simultaneously add debug logging to the cloudflare client.
+
+
+3 actions
+Good, the stale CF_API_TOKEN binding is removed. Now let me add a debug log line in the cloudflare client to show which token prefix is being used, then test.
+
+
+2 actions
+Now let me test immediately with CF_API_TOKEN removed — this will definitively show which token path is used.
+
+
+3 actions
+The error is "not configured" — meaning CF_WORKER_AI_TOKEN AND CF_ACCOUNT_ID are both None in pydantic settings despite being in Cloud Run env vars. This is a pydantic-settings issue. Let me verify what revision 00561 actually has, and check pydantic settings behavior.
+
+
+3 actions
+Pydantic reads CF_WORKER_AI_TOKEN correctly locally, but the Cloud Run container shows "not configured" despite having the env var. There may be a .env file in the Docker image conflicting. Let me fix this properly — read from os.environ directly as priority, and also try setting the token under an alternate name.

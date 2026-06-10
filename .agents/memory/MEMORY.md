@@ -18,3 +18,5 @@
 - [Sarvam model rename](sarvam-model-rename.md) — sarvam-m1 invalid; valid chat-completion models are sarvam-30b (fast) and sarvam-105b (quality); 402 = billing exhausted
 - [Motor 3+ to_list() requirement](motor-to-list.md) — Motor 3+ requires explicit length arg on .to_list(); bare .to_list() raises TypeError at runtime; use length=limit (paginated) or length=None (unbounded)
 - [JWT RS256→HS256 migration fallback](jwt-migration-fallback.md) — During RS256→HS256 migration, logout decode must try HS256 then fall back to RS256 for live tokens; use _decode_token_with_fallback()
+- [CF_WORKER_AI_TOKEN vs CF_API_TOKEN](cf-worker-ai-token.md) — Cloud Run env var is CF_WORKER_AI_TOKEN; cloudflare_client.api_token must resolve CF_WORKER_AI_TOKEN ?? CF_API_TOKEN; both fields needed in config.py
+- [Redis disabled health check](redis-disabled-health.md) — When Upstash creds absent, health check returns "disabled" not "unhealthy"; smoke test must accept "disabled" as pass
