@@ -224,6 +224,20 @@ else
 fi
 
 # =============================================================================
+# Suite 9 — Provider Health (vertex, sarvam, redis, CF Workers AI, TTS, RAG)
+# =============================================================================
+run_suite "providers" \
+  "AI Provider Health (/health/providers: all 6 integrations)" \
+  "test-providers.sh"
+
+# =============================================================================
+# Suite 10 — Sarvam TTFB (verify streaming fix: any-language → Assamese < 3s)
+# =============================================================================
+run_suite "ttfb" \
+  "Sarvam TTFB (EN/HI/AS input → Assamese, first token < 3s)" \
+  "test-sarvam-ttfb.sh"
+
+# =============================================================================
 # Suite 8 — Chat Live (full chat pipeline)
 # NOTE: Suite 7 (auth) deliberately hammers the login rate limiter with
 # ~11 bad-password attempts. The rate-limit window is 60 seconds. Wait 70s
@@ -265,10 +279,12 @@ declare -A SUITE_LABELS=(
   [deployment]="Live Deployment (health, SEO, security, perf)"
   [live]="End-to-End Layers (CF · Library · Auth · Chat)"
   [auth]="Auth Live (login, refresh, blacklist, logout)"
+  [providers]="AI Provider Health (vertex, sarvam, redis, CF AI, TTS)"
+  [ttfb]="Sarvam TTFB (EN/HI/AS→Assamese, first token <3s)"
   [chat]="Chat Pipeline (EN, AS, stream, TTS, multi-turn)"
 )
 
-for key in uptime smoke frontend bundle deployment live auth chat; do
+for key in uptime smoke frontend bundle deployment live auth providers ttfb chat; do
   status="${SUITE_STATUS[$key]:-skip}"
   label="${SUITE_LABELS[$key]:-$key}"
   note="${SUITE_NOTES[$key]:-}"

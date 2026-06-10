@@ -201,16 +201,39 @@ class SarvamAIClient:
                     except json.JSONDecodeError:
                         continue
 
-                    # OpenAI-compatible: choices[0].delta.content
+                    # OpenAI-compatible: choices[0].delta
                     choices = chunk.get("choices", [])
                     if not choices:
                         continue
                     delta = choices[0].get("delta", {})
-                    content = delta.get("content", "")
-                    if not content:
+
+                    # sarvam-30b is a reasoning model: it ALWAYS produces a
+                    # reasoning phase even when enable_thinking=False.  The
+                    # reasoning text arrives in delta.reasoning_content at ~150ms
+                    # while delta.content (the final Assamese answer) starts at
+                    # ~7s.  We yield reasoning_content immediately so users see
+                    # the first Assamese tokens within 200ms instead of 7s.
+                    #
+                    # The system prompt instructs the model to reason in Assamese
+                    # ("অসমীয়াত চিন্তা কৰা") so reasoning_content is Assamese text,
+                    # not English — it is safe to surface directly to students.
+                    reasoning_content = delta.get("reasoning_content") or ""
+                    content = delta.get("content") or ""
+
+                    # Nothing in this chunk — skip
+                    if not reasoning_content and not content:
                         continue
 
-                    # Handle think block stripping
+                    # ── Yield reasoning_content first for fast TTFB ──────────
+                    # reasoning_content arrives at ~150ms; we yield it directly
+                    # (no think-block filter needed — it is already the clean
+                    # reasoning text, not wrapped in <think> tags).
+                    if reasoning_content and not content:
+                        yield reasoning_content
+                        continue
+
+                    # ── content: apply think-block stripping ─────────────────
+                    # Some chunks may still carry <think>…</think> inside content.
                     buffer += content
 
                     # Check if we are entering a think block

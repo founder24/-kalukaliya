@@ -257,6 +257,121 @@ async def deep_health_check():
     )
 
 
+async def google_tts_ping() -> Dict[str, Any]:
+    """Check Google TTS / Cloud Text-to-Speech credentials availability."""
+    try:
+        from app.config import settings
+
+        if not settings.GOOGLE_APPLICATION_CREDENTIALS_JSON and not os.environ.get("K_SERVICE"):
+            return {"status": "not_configured", "note": "No SA key and not on Cloud Run (Workload Identity)"}
+
+        import json as _json
+
+        if settings.GOOGLE_APPLICATION_CREDENTIALS_JSON:
+            cred_data = _json.loads(settings.GOOGLE_APPLICATION_CREDENTIALS_JSON)
+            project_id = cred_data.get("project_id", "unknown")
+            return {"status": "healthy", "auth": "service_account", "project_id": project_id}
+
+        return {"status": "healthy", "auth": "workload_identity"}
+    except Exception as e:
+        logger.warning(f"Google TTS check failed: {str(e)}")
+        return {"status": "unhealthy", "error": str(e)[:120]}
+
+
+async def cloudflare_workers_ai_ping() -> Dict[str, Any]:
+    """Verify CF Workers AI token by calling the lightweight /ai/models endpoint."""
+    try:
+        from app.config import settings
+
+        token = getattr(settings, "CF_WORKER_AI_TOKEN", None) or os.environ.get("CF_WORKER_AI_TOKEN")
+        account_id = getattr(settings, "CF_ACCOUNT_ID", None) or os.environ.get("CF_ACCOUNT_ID")
+
+        if not token:
+            return {"status": "not_configured", "note": "CF_WORKER_AI_TOKEN not set"}
+        if not account_id:
+            return {"status": "not_configured", "note": "CF_ACCOUNT_ID not set"}
+
+        import httpx
+
+        t0 = time.monotonic()
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(
+                f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/models/search?per_page=1",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        latency_ms = round((time.monotonic() - t0) * 1000, 1)
+
+        if resp.status_code == 200:
+            return {"status": "healthy", "latency_ms": latency_ms}
+        elif resp.status_code == 401:
+            return {"status": "unhealthy", "error": "CF_WORKER_AI_TOKEN is invalid (401 Unauthorized)"}
+        elif resp.status_code == 403:
+            return {"status": "unhealthy", "error": "CF_WORKER_AI_TOKEN lacks AI permissions (403 Forbidden)"}
+        else:
+            return {"status": "degraded", "error": f"HTTP {resp.status_code}", "latency_ms": latency_ms}
+    except Exception as e:
+        logger.warning(f"CF Workers AI ping failed: {str(e)}")
+        return {"status": "unhealthy", "error": str(e)[:120]}
+
+
+@router.get("/providers")
+async def provider_health_check():
+    """
+    Check all AI provider integrations in parallel.
+
+    Providers checked:
+      - vertex_gemini       : Vertex AI / Gemini (credential config)
+      - sarvam_ai           : Sarvam API endpoint reachability
+      - google_tts          : Cloud Text-to-Speech credentials
+      - vector_search       : MongoDB topic embedding cache
+      - redis               : Upstash Redis session store
+      - cloudflare_workers_ai : CF Workers AI token validity
+
+    Overall status:
+      healthy  — all providers healthy
+      degraded — ≥1 provider degraded/not_configured but none unhealthy
+      unhealthy — ≥1 provider explicitly unhealthy
+    """
+    results = await asyncio.gather(
+        _safe_check(vertex_ping(),           timeout=10.0),
+        _safe_check(sarvam_ping(),           timeout=10.0),
+        _safe_check(google_tts_ping(),       timeout=5.0),
+        _safe_check(mongo_vector_search_ping(), timeout=10.0),
+        _safe_check(redis_ping(),            timeout=5.0),
+        _safe_check(cloudflare_workers_ai_ping(), timeout=10.0),
+    )
+
+    providers = {
+        "vertex_gemini":         results[0],
+        "sarvam_ai":             results[1],
+        "google_tts":            results[2],
+        "vector_search":         results[3],
+        "redis":                 results[4],
+        "cloudflare_workers_ai": results[5],
+    }
+
+    statuses = [p.get("status", "unknown") for p in providers.values()]
+
+    if any(s == "unhealthy" for s in statuses):
+        overall = "unhealthy"
+        http_status = status.HTTP_503_SERVICE_UNAVAILABLE
+    elif any(s == "degraded" for s in statuses):
+        overall = "degraded"
+        http_status = status.HTTP_200_OK
+    else:
+        overall = "healthy"
+        http_status = status.HTTP_200_OK
+
+    return JSONResponse(
+        status_code=http_status,
+        content={
+            "overall": overall,
+            "providers": providers,
+            "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        },
+    )
+
+
 @router.get("/circuit-breakers")
 async def circuit_breaker_status():
     """
