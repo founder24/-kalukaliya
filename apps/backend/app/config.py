@@ -27,16 +27,14 @@ class Settings(BaseSettings):
     # --- P1: Cloudflare (Edge) — not used by backend at runtime ---
     CF_ACCOUNT_ID: Optional[str] = None
     CF_API_TOKEN: Optional[str] = None
-    WORKER_AI: Optional[str] = None  # alias secret name used in Replit
-    CLOUDFLARE_WORKER_API_TOKEN: Optional[str] = None  # GCP Secret Manager secret name
     CF_R2_BUCKET: str = "syrabit-assets"
     # Note (HF-110): CF_R2_BUCKET default matches wrangler.toml binding name.
     CF_R2_ACCESS_KEY: Optional[str] = None
     CF_R2_SECRET_KEY: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
-    # CF_AI_MODEL: used for English chat (primary) + OCR + TTS.
-    # AWQ quantized variant is faster and available on all CF Workers AI regions.
-    CF_AI_MODEL: str = "@cf/meta/llama-3.1-8b-instruct-awq"
+    # NOTE: CF_AI_MODEL is used ONLY for OCR (vision_analyze) and TTS (text_to_speech).
+    # English chat routing was moved to Vertex AI (VERTEX_GEMINI_MODEL) for performance.
+    CF_AI_MODEL: str = "@cf/meta/llama-3.1-8b-instruct"
     CF_AI_VISION_MODEL: str = "@cf/unum/uform-gen2-qwen-500m"
     CF_AI_TTS_MODEL: str = "@cf/myshell/melotts"
     # Cloudflare Pages deploy hook — triggers a rebuild to regenerate static content
@@ -288,9 +286,9 @@ class Settings(BaseSettings):
         # Allow Cloudflare Pages preview URLs
         if re.match(r"^https://[a-z0-9-]+\.syrabitfrontend\.pages\.dev$", origin):
             return True
-        # Allow Replit dev preview URLs (used during development/testing)
-        if self.APP_ENV in ("development", "test") and re.match(
-            r"^https://[a-z0-9-]+\.(sisko\.replit\.dev|repl\.co|replit\.dev)$", origin
+        # Allow Replit dev preview URLs (always allowed for Replit compatibility)
+        if re.match(
+            r"^https://[a-z0-9-]+\.(sisko\.replit\.dev|repl\.co|replit\.dev|replit\.app)$", origin
         ):
             return True
         return False

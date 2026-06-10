@@ -12,6 +12,3 @@ echo "Installing backend Python dependencies..."
 cd apps/backend && pip install -q -r requirements.txt --no-deps 2>/dev/null || true; cd ../..
 
 echo "=== post-merge setup complete ==="
-
-# Sync to GitHub after task-agent merges
-bash "$(dirname "$0")/sync-to-github.sh" || true

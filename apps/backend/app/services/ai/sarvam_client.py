@@ -64,7 +64,7 @@ class SarvamAIClient:
             response = await self._client.post(
                 f"{self.base_url}/chat/completions",
                 headers={
-                    "api-subscription-key": self.api_key,
+                    "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -144,20 +144,12 @@ class SarvamAIClient:
         """
         Stream response using Sarvam AI OpenAI-compatible SSE endpoint.
 
-        sarvam-30b is a hard-reasoning model: it ALWAYS streams its thinking
-        via delta.reasoning_content before emitting the final answer via
-        delta.content.  The enable_thinking flag is silently ignored.
+        Parses chunked SSE lines in the format:
+            data: {"choices": [{"delta": {"content": "..."}}]}
+            data: [DONE]
 
-        Strategy for <3 s TTFB:
-          - Yield delta.reasoning_content tokens immediately (first token
-            arrives at ~150 ms).
-          - When the system prompt is written in Assamese and instructs
-            Assamese-only reasoning, the thinking tokens are in Assamese
-            script, so users see native content from the first token.
-          - delta.content (final answer) is yielded after reasoning completes.
-
-        Input language: accepted in any language — the system prompt is
-        responsible for enforcing Assamese output.
+        Yields text content deltas as they arrive.
+        Strips <think>...</think> reasoning blocks from output.
         """
         if not self.api_key:
             raise RuntimeError("Sarvam AI not configured (SARVAM_API_KEY is empty)")
@@ -167,7 +159,7 @@ class SarvamAIClient:
 
         url = f"{self.base_url}/chat/completions"
         headers = {
-            "api-subscription-key": self.api_key,
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
         payload = {
@@ -177,12 +169,19 @@ class SarvamAIClient:
                 {"role": "user", "content": user_message},
             ],
             "temperature": 0.7,
-            # enable_thinking=False is sent for forward compatibility; the
-            # current sarvam-30b API ignores it and always reasons first.
+            # Disable reasoning phase for fast streaming TTFB.
+            # Without this, sarvam-30b thinks in English for 5-30s before
+            # emitting the first Assamese token (which is then stripped by
+            # the think-block filter, so the user sees nothing until it ends).
             "enable_thinking": False,
             "max_tokens": 2048,
             "stream": True,
         }
+
+        # State for stripping <think>...</think> blocks from streamed output
+        in_think_block = False
+        buffer = ""
+        think_started = False
 
         try:
             async with self._client.stream(
@@ -202,23 +201,42 @@ class SarvamAIClient:
                     except json.JSONDecodeError:
                         continue
 
+                    # OpenAI-compatible: choices[0].delta.content
                     choices = chunk.get("choices", [])
                     if not choices:
                         continue
                     delta = choices[0].get("delta", {})
-
-                    # Yield reasoning_content first — arrives at ~150 ms,
-                    # contains Assamese thinking when the system prompt
-                    # instructs Assamese-only output.
-                    reasoning = delta.get("reasoning_content") or ""
-                    if reasoning:
-                        yield reasoning
+                    content = delta.get("content", "")
+                    if not content:
                         continue
 
-                    # Final answer tokens follow after reasoning completes.
-                    content = delta.get("content") or ""
-                    if content:
-                        yield content
+                    # Handle think block stripping
+                    buffer += content
+
+                    # Check if we are entering a think block
+                    if not think_started and buffer.lstrip().startswith("<think>"):
+                        in_think_block = True
+                        think_started = True
+
+                    if in_think_block:
+                        # Check if think block has ended
+                        if "</think>" in buffer:
+                            # Strip out the think block and yield the rest
+                            after_think = buffer.split("</think>", 1)[1]
+                            buffer = ""
+                            in_think_block = False
+                            if after_think.strip():
+                                yield after_think
+                        # While in think block, don't yield anything
+                        continue
+
+                    # Not in a think block, yield content as it arrives
+                    buffer = ""
+                    yield content
+
+            # If there is remaining buffer content after stream ends (edge case)
+            if buffer and not in_think_block:
+                yield buffer
 
             sarvam_circuit_breaker._on_success()
         except Exception as e:

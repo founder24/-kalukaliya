@@ -68,7 +68,7 @@ class ChatService:
             target_model = (
                 settings.SARVAM_MODEL
                 if lang_override == "as"
-                else settings.CF_AI_MODEL
+                else settings.VERTEX_GEMINI_MODEL
             )
         else:
             detected_lang, target_model = detect_language_and_route(message)
@@ -259,16 +259,14 @@ class ChatService:
             "Use the following numbered context to answer. If the answer is not in the context, say so clearly.\n"
             "Cite sources using [#] format (e.g., [1], [2]). Respond in English."
             if detected_lang == "en"
-            # Assamese prompt written in Assamese script so the model reasons
-            # in Assamese (reasoning_content tokens start at ~150 ms and are
-            # streamed to the user immediately, giving <3 s TTFB).
-            # The model accepts any input language but MUST think and respond
-            # entirely in Assamese script — English reasoning is forbidden.
+            # Assamese prompt: instruct Sarvam to think AND answer natively in
+            # Assamese.  Keeping the prompt in Assamese script encourages the
+            # model to reason in Assamese rather than in English, reducing the
+            # English <think> overhead and improving fluency.
             else (
                 "তুমি Syrabit, অসমৰ AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
-                "যিকোনো ভাষাত প্ৰশ্ন গ্ৰহণ কৰিব পাৰা।\n"
-                "তোমাৰ সকলো চিন্তা-ভাৱনা আৰু উত্তৰ সম্পূৰ্ণৰূপে অসমীয়া ভাষা আৰু অসমীয়া লিপিত লিখিব।\n"
-                "ইংৰাজী বা অন্য ভাষা ব্যৱহাৰ কৰা সম্পূৰ্ণ নিষিদ্ধ।\n"
+                "যিকোনো ভাষাত প্ৰশ্ন বুজিব পাৰা, কিন্তু উত্তৰ সদায় অসমীয়া (অসমীয়া লিপি) ত দিব লাগিব।\n"
+                "ইংৰাজী বা অন্য ভাষাত উত্তৰ নিদিবা।\n"
                 "তলত দিয়া নম্বৰযুক্ত প্ৰসংগ ব্যৱহাৰ কৰি উত্তৰ দিয়া। প্ৰসংগত নাথাকিলে স্পষ্টকৈ কোৱা।\n"
                 "উদ্ধৃতিৰ বাবে [#] বিন্যাস ব্যৱহাৰ কৰক (যেনে [1], [2])।"
             )
@@ -285,9 +283,8 @@ class ChatService:
             else:
                 return (
                     "তুমি Syrabit, অসমৰ AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
-                    "যিকোনো ভাষাত প্ৰশ্ন গ্ৰহণ কৰিব পাৰা।\n"
-                    "তোমাৰ সকলো চিন্তা-ভাৱনা আৰু উত্তৰ সম্পূৰ্ণৰূপে অসমীয়া ভাষা আৰু অসমীয়া লিপিত লিখিব।\n"
-                    "ইংৰাজী বা অন্য ভাষা ব্যৱহাৰ কৰা সম্পূৰ্ণ নিষিদ্ধ।\n"
+                    "যিকোনো ভাষাত প্ৰশ্ন বুজিব পাৰা, কিন্তু উত্তৰ সদায় অসমীয়া (অসমীয়া লিপি) ত দিব লাগিব।\n"
+                    "ইংৰাজী বা অন্য ভাষাত উত্তৰ নিদিবা।\n"
                     "ছাত্ৰৰ প্ৰশ্নৰ সঠিক আৰু সহায়কাৰী উত্তৰ দিয়া। স্পষ্ট, তথ্যপূৰ্ণ আৰু শিক্ষামূলক ব্যাখ্যা দিয়া।"
                 )
 
@@ -338,18 +335,7 @@ class ChatService:
                 )
                 return response_text, actual_model
             else:
-                # English: CF Workers AI failed — fall back to Sarvam AI
-                logger.warning(
-                    f"CF Workers AI failed for English ({e}), falling back to Sarvam AI"
-                )
-                from app.services.ai.sarvam_client import sarvam_client
-
-                actual_model = settings.SARVAM_MODEL
-                response_text = await sarvam_client.generate(
-                    system_prompt=system_prompt,
-                    user_message=sanitized_message,
-                )
-                return response_text, actual_model
+                raise
 
     @staticmethod
     async def stream_llm(
@@ -412,39 +398,9 @@ class ChatService:
                     yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
                     return
             else:
-                # English: CF Workers AI failed — fall back to Sarvam AI
-                logger.warning(
-                    f"CF Workers AI stream failed for English ({e}), falling back to Sarvam AI"
-                )
-                logger.info(
-                    "chat_fallback",
-                    extra={
-                        "user_id": user_id,
-                        "error": str(e),
-                        "fallback_provider": "sarvam",
-                        "detected_lang": "en",
-                    },
-                )
-                yield f"data: {json.dumps({'fallback': True, 'provider': 'sarvam', 'reason': str(e)})}\n\n"
-
-                try:
-                    from app.services.ai.sarvam_client import sarvam_client
-
-                    actual_model = settings.SARVAM_MODEL
-                    async for chunk in sarvam_client.stream_generate_with_retry(
-                        system_prompt, sanitized_message
-                    ):
-                        full_response += chunk
-                        yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
-                except Exception as fallback_err:
-                    logger.error(f"Sarvam fallback also failed for English: {fallback_err}")
-                    from app.services.dead_letter import store_dead_letter
-
-                    await store_dead_letter(
-                        user_id, request_message, detected_lang, str(fallback_err)
-                    )
-                    yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
-                    return
+                logger.error(f"LLM stream failed: {e}")
+                yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
+                return
 
         # Emit the sentinel value so the router knows the model/response
         yield f"data: {json.dumps({'__syrabit_stream_complete_7f3a9b2e__': True, 'full_response': full_response, 'actual_model': actual_model})}\n\n"

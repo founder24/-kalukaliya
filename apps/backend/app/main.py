@@ -400,7 +400,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins_list,
-        allow_origin_regex=r"^https://[a-z0-9-]+\.syrabitfrontend\.pages\.dev$",
+        allow_origin_regex=r"^https://([a-z0-9-]+\.syrabitfrontend\.pages\.dev|[a-z0-9-]+\.replit\.dev|[a-z0-9-]+\.replit\.app|[a-z0-9-]+\.sisko\.replit\.dev)$",
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
         allow_headers=[

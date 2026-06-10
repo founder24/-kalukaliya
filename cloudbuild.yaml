@@ -99,11 +99,13 @@ steps:
       - '--min-instances=1'
       - '--service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com'
       - >-
-        --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=asia-south1,SARVAM_MODEL=sarvam-30b,CF_AI_MODEL=@cf/meta/llama-3.1-8b-instruct-q
+        --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=asia-south1,SARVAM_MODEL=sarvam-30b
       - >-
         --remove-env-vars=VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG
       - >-
-        --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,UPSTASH_REDIS_REST_URL=UPSTASH_REDIS_REST_URL:latest,UPSTASH_REDIS_REST_TOKEN=UPSTASH_REDIS_REST_TOKEN:latest,CF_API_TOKEN=CF_API_TOKEN:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest,INDEXNOW_API_KEY=INDEXNOW_API_KEY:latest,POSTHOG_API_KEY=POSTHOG_API_KEY:latest
+        --remove-secrets=VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN,POSTHOG_API_KEY,INDEXNOW_API_KEY,INDEXNOW_INTERNAL_SECRET
+      - >-
+        --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest
 
   # ── Step 5: Attach optional secrets (CF KV + GCS + CF Pages) ─────────────
   # These secrets may not exist yet in Secret Manager. This step probes for
@@ -187,6 +189,46 @@ steps:
           echo "  ✓ SENTRY_DSN"
         else
           echo "  ⚠ SENTRY_DSN not in SM — Sentry error tracking disabled"
+        fi
+
+        # UPSTASH_REDIS_REST_URL — rate limiting (optional: app degrades gracefully)
+        if gcloud secrets describe upstash-redis-rest-url --project="$$PROJECT" >/dev/null 2>&1; then
+          UPDATES="$${UPDATES:+$$UPDATES,}UPSTASH_REDIS_REST_URL=upstash-redis-rest-url:latest"
+          echo "  ✓ upstash-redis-rest-url"
+        else
+          echo "  ⚠ upstash-redis-rest-url not in SM — Redis rate limiting disabled"
+        fi
+
+        # UPSTASH_REDIS_REST_TOKEN — rate limiting (optional)
+        if gcloud secrets describe upstash-redis-rest-token --project="$$PROJECT" >/dev/null 2>&1; then
+          UPDATES="$${UPDATES:+$$UPDATES,}UPSTASH_REDIS_REST_TOKEN=upstash-redis-rest-token:latest"
+          echo "  ✓ upstash-redis-rest-token"
+        else
+          echo "  ⚠ upstash-redis-rest-token not in SM — Redis rate limiting disabled"
+        fi
+
+        # POSTHOG_API_KEY — product analytics (optional)
+        if gcloud secrets describe posthog-api-key --project="$$PROJECT" >/dev/null 2>&1; then
+          UPDATES="$${UPDATES:+$$UPDATES,}POSTHOG_API_KEY=posthog-api-key:latest"
+          echo "  ✓ posthog-api-key"
+        else
+          echo "  ⚠ posthog-api-key not in SM — PostHog analytics disabled"
+        fi
+
+        # INDEXNOW_API_KEY — IndexNow SEO pinging (optional)
+        if gcloud secrets describe indexnow-api-key --project="$$PROJECT" >/dev/null 2>&1; then
+          UPDATES="$${UPDATES:+$$UPDATES,}INDEXNOW_API_KEY=indexnow-api-key:latest"
+          echo "  ✓ indexnow-api-key"
+        else
+          echo "  ⚠ indexnow-api-key not in SM — IndexNow SEO pinging disabled"
+        fi
+
+        # INDEXNOW_INTERNAL_SECRET — internal cron auth for IndexNow (optional)
+        if gcloud secrets describe indexnow-internal-secret --project="$$PROJECT" >/dev/null 2>&1; then
+          UPDATES="$${UPDATES:+$$UPDATES,}INDEXNOW_INTERNAL_SECRET=indexnow-internal-secret:latest"
+          echo "  ✓ indexnow-internal-secret"
+        else
+          echo "  ⚠ indexnow-internal-secret not in SM — IndexNow cron auth disabled"
         fi
 
         if [ -n "$$UPDATES" ]; then
