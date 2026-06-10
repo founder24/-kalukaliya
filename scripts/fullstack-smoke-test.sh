@@ -141,6 +141,8 @@ fi
 REDIS_STATUS=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('redis',{}).get('status','')")
 if [ "$REDIS_STATUS" = "healthy" ]; then
   pass "Redis healthy"
+elif [ "$REDIS_STATUS" = "disabled" ]; then
+  pass "Redis healthy (disabled — Upstash not configured, using in-process fallback)"
 else
   fail "Redis unhealthy: $(json_field "$DEEP_BODY" "d.get('checks',{}).get('redis',{}).get('error','')")"
 fi
