@@ -1,0 +1,167 @@
+Remaining gaps before I'd call it "production-grade"
+1. Percentile latency instead of single samples
+
+Currently:
+
+FIRST_BYTE_MS < 3000
+
+from one request.
+
+A production SLO should be:
+
+20 requests
+p50
+p95
+p99
+
+Example:
+
+for i in {1..20}; do
+   ...
+done
+
+Then calculate:
+
+{
+  "p50": 420,
+  "p95": 980,
+  "p99": 1450
+}
+
+One lucky request can hide a real latency issue.
+
+2. Vector index verification
+
+You validate RAG outputs.
+
+You still don't validate:
+
+Mongo Atlas reachable
+Vector index exists
+Vector index state = READY
+
+A degraded index can sometimes still return answers while quality collapses.
+
+Add:
+
+mongosh
+db.collection.getIndexes()
+
+or Atlas API verification.
+
+3. Secret Manager verification
+
+Current summary doesn't mention:
+
+GCP Secret Manager
+
+You use Secret Manager in production.
+
+A deployment gate should verify:
+
+secret exists
+service account can access it
+latest version enabled
+
+before promoting a release.
+
+4. Worker AI health
+
+Right now you test chat behavior.
+
+Add a direct Workers AI probe:
+
+English request
+Worker AI endpoint
+Expected model response
+
+This isolates:
+
+Worker routing issue
+vs
+model issue
+vs
+backend issue
+5. Sarvam health
+
+Likewise:
+
+Direct Sarvam API call
+
+before language-routing tests.
+
+Otherwise failures appear as routing failures even when Sarvam itself is down.
+
+6. Cache invalidation test
+
+You validate:
+
+MISS → HIT
+
+Excellent.
+
+Also validate:
+
+Deploy
+↓
+Invalidate
+↓
+Fresh content served
+
+Many production outages happen because stale KV/R2 content survives deploys.
+
+7. Streaming integrity
+
+For AI chat, don't just measure TTFB.
+
+Verify:
+
+SSE stream opens
+multiple chunks arrive
+stream terminates cleanly
+
+Examples:
+
+data:
+data:
+data:
+[DONE]
+
+This catches proxy buffering issues.
+
+8. Canary awareness
+
+You currently warn on:
+
+traffic revision != latest revision
+
+I'd improve that to:
+
+{
+  "mode":"canary",
+  "traffic_split":"90/10"
+}
+
+instead of generic warnings.
+
+Many teams intentionally run canaries.
+
+Revised assessment
+
+Before changes:
+
+Area	Score
+Reliability	6.5/10
+Regression Detection	7.5/10
+Cloud Shell Repeatability	6/10
+
+After your implementation:
+
+Area	Score
+Reliability	9/10
+Regression Detection	9/10
+Cloud Shell Repeatability	9/10
+
+With percentile latency testing, direct Secret Manager checks, vector-index validation, and streaming integrity checks, it would move into the 9.5–10/10 deployment gate category for the architecture you described (Cloudflare Edge + Cloud Run + MongoDB Atlas Vector Search + Sarvam + Workers AI).
+
+The biggest remaining risk isn't the scripts anymore—it's whether the tests are exercising the exact production paths that real users hit. The closer the tests are to actual edge → worker → model → RAG traffic, the more trustworthy the gate becomes.

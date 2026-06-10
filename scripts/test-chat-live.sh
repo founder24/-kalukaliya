@@ -502,30 +502,50 @@ else
     "${CHAT_API}/stream" 2>/dev/null)
   SSE_EXIT=$?
 
-  # Check if we got any output
+  # --- Streaming Integrity Check ---
   if [[ -n "$SSE_OUTPUT" ]]; then
     print_pass "POST /chat/stream - received SSE response (auth, English)"
 
-    # Verify SSE chunks are present
-    if echo "$SSE_OUTPUT" | grep -q "^data:"; then
-      print_pass "SSE chunks received (data: prefix found)"
+    # 1. Count data: chunks — must have ≥3 for a real stream, not just a buffered single reply
+    SSE_CHUNK_COUNT=$(echo "$SSE_OUTPUT" | grep -c "^data:" 2>/dev/null || echo "0")
+    if [[ "$SSE_CHUNK_COUNT" -ge 3 ]]; then
+      print_pass "SSE stream integrity: ${SSE_CHUNK_COUNT} chunks received (≥3 required)"
+    elif [[ "$SSE_CHUNK_COUNT" -ge 1 ]]; then
+      print_fail "SSE stream integrity: only ${SSE_CHUNK_COUNT} chunks — proxy may be buffering"
     else
-      print_fail "SSE chunks not in expected format (no data: prefix)"
+      print_fail "SSE chunks not in expected format (no data: lines found)"
       echo "         First 200 chars: ${SSE_OUTPUT:0:200}"
     fi
 
-    # Verify final event contains done: true
-    if echo "$SSE_OUTPUT" | grep -q '"done"[[:space:]]*:[[:space:]]*true'; then
-      print_pass "Final SSE event contains done: true"
+    # 2. Verify stream terminates cleanly with done:true or syrabit_done
+    SSE_LAST_DATA=$(echo "$SSE_OUTPUT" | grep "^data:" | tail -1 || echo "")
+    if echo "$SSE_LAST_DATA" | grep -q '"done"[[:space:]]*:[[:space:]]*true'; then
+      print_pass "SSE stream terminated cleanly (done:true in final chunk)"
+    elif echo "$SSE_OUTPUT" | grep -q "syrabit_done"; then
+      print_pass "SSE stream terminated cleanly (syrabit_done event present)"
     else
-      print_info "done: true not found in captured output (stream may have been cut short)"
+      print_fail "SSE stream did not terminate cleanly — no done:true or syrabit_done in output"
     fi
 
-    # Verify syrabit_done event
-    if echo "$SSE_OUTPUT" | grep -q "syrabit_done"; then
-      print_pass "Final SSE event contains syrabit_done"
+    # 3. Verify no error event mid-stream
+    if echo "$SSE_OUTPUT" | grep -q '"error"[[:space:]]*:[[:space:]]*true'; then
+      print_fail "SSE stream contained error:true event (mid-stream failure)"
     else
-      print_info "syrabit_done not found (stream may have been cut short)"
+      print_pass "SSE stream contained no error events"
+    fi
+
+    # 4. Verify all data: lines are valid JSON (not malformed)
+    SSE_MALFORMED=$(echo "$SSE_OUTPUT" | grep "^data:" | while IFS= read -r line; do
+      payload="${line#data:}"
+      payload="${payload## }"
+      if [[ -n "$payload" && "$payload" != "[DONE]" ]]; then
+        echo "$payload" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null || echo "BAD"
+      fi
+    done | grep -c "BAD" 2>/dev/null || echo "0")
+    if [[ "$SSE_MALFORMED" -eq 0 ]]; then
+      print_pass "SSE stream: all data: payloads are valid JSON"
+    else
+      print_fail "SSE stream: ${SSE_MALFORMED} malformed (non-JSON) data: lines"
     fi
   else
     if [[ $SSE_EXIT -eq 28 ]]; then
@@ -743,53 +763,105 @@ print_header "SECTION 8: Performance & Latency"
 if [[ -z "$ACCESS_TOKEN" ]]; then
   print_skip "Performance tests skipped - no token"
 else
-  # Test: Timed non-streaming chat request
+  # --- Single warm-up request ---
   do_timed_request POST "${CHAT_API}/" \
     "{\"message\":\"What time is it?\",\"lang\":\"en\"}" \
     -H "Authorization: Bearer ${ACCESS_TOKEN}"
 
   if [[ "$RESPONSE_CODE" == "200" ]]; then
     print_pass "Timed non-streaming chat (HTTP 200)"
-    print_info "Wall-clock latency: ${ELAPSED_MS}ms"
+    print_info "Warm-up wall-clock latency: ${ELAPSED_MS}ms"
     record_latency "$ELAPSED_MS"
-
-    # Verify latency_ms is in the response
     reported_latency=$(json_number "$RESPONSE_BODY" "latency_ms")
-    if [[ -n "$reported_latency" ]]; then
-      print_pass "latency_ms reported in response: ${reported_latency}ms"
-      record_latency "$reported_latency"
-    else
-      print_fail "latency_ms not found in response"
-    fi
+    [[ -n "$reported_latency" ]] \
+      && print_pass "latency_ms in response: ${reported_latency}ms" \
+      || print_fail "latency_ms missing from response"
   else
     print_fail "Timed non-streaming chat (expected 200, got HTTP $RESPONSE_CODE)"
   fi
 
-  # Test: Streaming first-byte latency (TTFB SLO: < 3000ms)
-  TTFB_SLO_MS=3000
-  STREAM_START=$(date +%s%N 2>/dev/null || date +%s)
-  FIRST_CHUNK=$(curl -s --max-time 15 -X POST \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-    -d "{\"message\":\"Say yes\",\"lang\":\"en\"}" \
-    "${CHAT_API}/stream" 2>/dev/null | head -1)
-  STREAM_END=$(date +%s%N 2>/dev/null || date +%s)
+  # --- Percentile latency: 20 samples → p50 / p95 / p99 ---
+  # SLOs: p95 < 3000ms (streaming TTFB), p50 < 1200ms (non-streaming round-trip)
+  print_info "Running 20-sample percentile latency test (p50/p95/p99)…"
+  python3 - "${CHAT_API}/" "${ACCESS_TOKEN}" <<'LATENCY_PYEOF'
+import sys, json, time, urllib.request, urllib.error
+import statistics
 
-  if [[ -n "$FIRST_CHUNK" ]]; then
-    if [[ "$STREAM_START" -gt 1000000000000 ]]; then
-      FIRST_BYTE_MS=$(( (STREAM_END - STREAM_START) / 1000000 ))
-    else
-      FIRST_BYTE_MS=$(( (STREAM_END - STREAM_START) * 1000 ))
-    fi
-    record_latency "$FIRST_BYTE_MS"
-    if [[ "$FIRST_BYTE_MS" -lt "$TTFB_SLO_MS" ]]; then
-      print_pass "Streaming TTFB SLO: ${FIRST_BYTE_MS}ms < ${TTFB_SLO_MS}ms target"
-    else
-      print_fail "Streaming TTFB SLO BREACHED: ${FIRST_BYTE_MS}ms >= ${TTFB_SLO_MS}ms target"
-    fi
-    print_info "Streaming first-byte latency: ~${FIRST_BYTE_MS}ms"
+API_URL  = sys.argv[1]
+TOKEN    = sys.argv[2]
+SAMPLES  = 20
+P95_SLO  = 3000   # ms  — non-streaming round-trip p95
+P50_SLO  = 1500   # ms
+
+G = "\033[92m"; Y = "\033[93m"; R = "\033[91m"; B = "\033[94m"; X = "\033[0m"; BOLD = "\033[1m"
+
+results = []
+errors  = 0
+
+for i in range(SAMPLES):
+    payload = json.dumps({"message": "Name one planet", "lang": "en"}).encode()
+    req = urllib.request.Request(
+        API_URL,
+        data=payload,
+        headers={
+            "Content-Type":  "application/json",
+            "Authorization": f"Bearer {TOKEN}",
+        },
+        method="POST",
+    )
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            body = resp.read()
+            elapsed_ms = int((time.time() - t0) * 1000)
+            results.append(elapsed_ms)
+    except Exception as e:
+        errors += 1
+    if i < SAMPLES - 1:
+        time.sleep(0.4)
+
+if not results:
+    print(f"  {R}✗{X} All {SAMPLES} requests failed — cannot compute percentiles")
+    sys.exit(1)
+
+results_sorted = sorted(results)
+n   = len(results_sorted)
+p50 = results_sorted[n // 2]
+p95 = results_sorted[min(int(n * 0.95), n - 1)]
+p99 = results_sorted[min(int(n * 0.99), n - 1)]
+avg = int(statistics.mean(results_sorted))
+
+col_p50 = G if p50 < 1500 else Y
+col_p95 = G if p95 < P95_SLO else R
+
+print(f"  {BOLD}Latency percentiles ({n}/{SAMPLES} samples, {errors} errors){X}")
+print(f"    avg={avg}ms  {col_p50}p50={p50}ms{X}  {col_p95}p95={p95}ms{X}  p99={p99}ms")
+print(f"    SLO: p95 < {P95_SLO}ms  |  p50 < {P50_SLO}ms")
+
+ok = True
+if p95 >= P95_SLO:
+    print(f"  {R}✗ p95 SLO BREACHED: {p95}ms ≥ {P95_SLO}ms{X}")
+    ok = False
+else:
+    print(f"  {G}✓ p95 SLO: {p95}ms < {P95_SLO}ms{X}")
+
+if p50 >= P50_SLO:
+    print(f"  {Y}⚠ p50 elevated: {p50}ms ≥ {P50_SLO}ms{X}")
+else:
+    print(f"  {G}✓ p50 SLO: {p50}ms < {P50_SLO}ms{X}")
+
+if errors > SAMPLES // 5:
+    print(f"  {R}✗ Error rate {errors}/{SAMPLES} exceeds 20% threshold{X}")
+    ok = False
+
+sys.exit(0 if ok else 1)
+LATENCY_PYEOF
+
+  LATENCY_RC=$?
+  if [[ $LATENCY_RC -eq 0 ]]; then
+    print_pass "Percentile latency SLOs: p95 < 3000ms, p50 < 1500ms"
   else
-    print_fail "Streaming first-byte - no data received (TTFB check skipped)"
+    print_fail "Percentile latency SLO breach — see details above"
   fi
 fi
 

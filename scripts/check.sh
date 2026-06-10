@@ -153,11 +153,46 @@ else
     _warn "Could not read Cloud Run revision — check: gcloud auth login"
   else
     _ok "Latest revision: ${_svc}"
-    _traffic=$(gcloud run services describe syrabit-backend \
+    # Canary-aware traffic split analysis
+    _traffic_json=$(gcloud run services describe syrabit-backend \
       --project="${GCP_PROJECT}" --region="${GCP_REGION}" \
-      --format="value(status.traffic[0].percent)" 2>/dev/null || echo "?")
-    [[ "$_traffic" == "100" ]] && _ok "Traffic: 100% on latest revision" \
-                                || _warn "Traffic: ${_traffic}% on latest (split traffic active?)"
+      --format="json(status.traffic)" 2>/dev/null || echo "{}")
+    python3 - "$_svc" <<CANARY_PYEOF
+import json, sys, os
+R="\033[91m"; G="\033[92m"; Y="\033[93m"; B="\033[94m"; X="\033[0m"; BOLD="\033[1m"
+latest_rev = sys.argv[1]
+try:
+    raw = """${_traffic_json}"""
+    d = json.loads(raw)
+    traffic = d.get("status", {}).get("traffic", [])
+except Exception as e:
+    print(f"  {Y}⚠{X} Could not parse traffic JSON: {e}")
+    sys.exit(0)
+
+if not traffic:
+    print(f"  {Y}·{X} No traffic entries found")
+    sys.exit(0)
+
+if len(traffic) == 1 and traffic[0].get("percent") == 100:
+    rev = traffic[0].get("revisionName", "?")
+    icon = G+"✓"+X if rev == latest_rev else Y+"⚠"+X
+    note = "" if rev == latest_rev else f" (latest ready: {latest_rev})"
+    print(f"  {icon} Traffic: 100% → {BOLD}{rev}{X}{note}")
+else:
+    # Structured canary / split-traffic report
+    total = sum(t.get("percent",0) for t in traffic)
+    split = "  /  ".join(
+        f"{t.get('percent',0)}% → {t.get('revisionName','?')}" for t in traffic
+    )
+    mode = "canary" if len(traffic) == 2 else f"{len(traffic)}-way split"
+    print(f"  {B}ℹ{X} {BOLD}CANARY MODE{X} ({mode}): {split}  [total={total}%]")
+    for t in traffic:
+        rev  = t.get("revisionName","?")
+        pct  = t.get("percent", 0)
+        icon = G+"✓"+X if rev == latest_rev else B+"·"+X
+        note = " ← latest ready" if rev == latest_rev else ""
+        print(f"      {icon} {pct:>3}% → {rev}{note}")
+CANARY_PYEOF
 
     # Deployment consistency: verify the Cloud Run URL in the service matches
     # what the health endpoint reports, confirming no stale revision is serving.
@@ -202,6 +237,63 @@ except: print('')
 fi
 
 # =============================================================================
+#  1b. SECRET MANAGER VERIFICATION
+# =============================================================================
+_head "1b. Secret Manager — Critical Secrets"
+if ! command -v gcloud &>/dev/null; then
+  _skip "gcloud not found — skipping Secret Manager checks"
+else
+  _CRITICAL_SECRETS=(
+    "MONGODB_URI"
+    "jwt-secret"
+    "GEMINI_API_KEY"
+    "SARVAM_API_KEY"
+    "CLOUDFLARE_API_TOKEN"
+  )
+  for _sec in "${_CRITICAL_SECRETS[@]}"; do
+    _sv=$(gcloud secrets versions describe latest \
+      --secret="$_sec" \
+      --project="${GCP_PROJECT}" \
+      --format="value(state)" 2>/dev/null || echo "NOT_FOUND")
+    if [[ "$_sv" == "ENABLED" ]]; then
+      _ok "Secret '${_sec}' — latest version ENABLED"
+    elif [[ "$_sv" == "NOT_FOUND" ]]; then
+      _fail "Secret '${_sec}' — NOT FOUND in project ${GCP_PROJECT}"
+    else
+      _warn "Secret '${_sec}' — state: ${_sv} (expected ENABLED)"
+    fi
+  done
+
+  # Verify service account can access the backend secret (IAM binding check)
+  _sa_email="syrabit-backend-sa@${GCP_PROJECT}.iam.gserviceaccount.com"
+  _iam_check=$(gcloud secrets get-iam-policy MONGODB_URI \
+    --project="${GCP_PROJECT}" \
+    --format="json" 2>/dev/null \
+    | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    bindings = d.get('bindings', [])
+    sa = 'serviceAccount:${_sa_email}'
+    accessor_roles = {'roles/secretmanager.secretAccessor', 'roles/owner', 'roles/editor'}
+    for b in bindings:
+        if b.get('role') in accessor_roles and sa in b.get('members', []):
+            print('OK')
+            break
+    else:
+        print('MISSING')
+except: print('UNKNOWN')
+" 2>/dev/null || echo "UNKNOWN")
+  if [[ "$_iam_check" == "OK" ]]; then
+    _ok "SA '${_sa_email}' has secretAccessor on MONGODB_URI"
+  elif [[ "$_iam_check" == "MISSING" ]]; then
+    _warn "SA '${_sa_email}' missing secretAccessor on MONGODB_URI — backend may fail to read secrets"
+  else
+    _info "IAM binding check for SA inconclusive (check gcloud permissions)"
+  fi
+fi
+
+# =============================================================================
 #  2. BACKEND HEALTH
 # =============================================================================
 _head "2. Backend Health"
@@ -227,6 +319,55 @@ elif [[ "$_vertex_state" == "unknown" ]]; then
 else
   _warn "Vertex AI circuit breaker: ${_vertex_state}  (English chat may be failing — check Gemini API key/quota)"
 fi
+
+# --- Worker AI health probe ---
+# Isolates: CF Worker routing issue vs model issue vs backend issue
+_head "2b. Workers AI / Sarvam Health (Provider Pre-flight)"
+_providers_body=$(curl -sf --max-time 10 "${API}/api/v1/health/deep" 2>/dev/null || echo "{}")
+python3 - <<PROVIDERS_PYEOF
+import sys, json
+R="\033[91m"; G="\033[92m"; Y="\033[93m"; B="\033[94m"; X="\033[0m"
+body = """${_providers_body}"""
+try:
+    d = json.loads(body)
+except Exception:
+    print(f"  {Y}·{X} Could not parse /health/deep — skipping provider probes")
+    sys.exit(0)
+
+checks = d.get("checks", d)
+
+# Workers AI / Vertex AI probe
+for key, label in [
+    ("vertex_ai", "Workers AI / Vertex"),
+    ("vertex",    "Workers AI / Vertex"),
+    ("gemini",    "Gemini (Workers AI)"),
+]:
+    if key in checks:
+        s = checks[key]
+        state = s.get("status", s.get("state", "?"))
+        latency = s.get("latency_ms", "")
+        lat_str = f"  {latency}ms" if latency else ""
+        if state in ("healthy", "ok", "CLOSED", "closed"):
+            print(f"  {G}✓{X} {label}: {state}{lat_str}")
+        else:
+            print(f"  {R}✗{X} {label}: {state}{lat_str}  → English chat may be degraded")
+        break
+
+# Sarvam probe
+for key, label in [("sarvam", "Sarvam AI"), ("sarvam_ai", "Sarvam AI")]:
+    if key in checks:
+        s = checks[key]
+        state = s.get("status", s.get("state", "?"))
+        latency = s.get("latency_ms", "")
+        lat_str = f"  {latency}ms" if latency else ""
+        if state in ("healthy", "ok"):
+            print(f"  {G}✓{X} {label}: {state}{lat_str}")
+        else:
+            print(f"  {Y}⚠{X} {label}: {state}{lat_str}  → Assamese routing will fall back or fail")
+        break
+else:
+    print(f"  {Y}·{X} Sarvam status not exposed in /health/deep — skipping direct probe")
+PROVIDERS_PYEOF
 
 # /docs visibility (follow redirects — 404/403 is correct in production)
 _docs_code=$(curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 "${API}/docs" 2>/dev/null || echo "000")

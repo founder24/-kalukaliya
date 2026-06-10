@@ -159,6 +159,53 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 5b. Vector Index Verification (Atlas Search / Vector Search)
+# ═══════════════════════════════════════════════════════════════════════════
+header "5b. Vector Index Verification"
+
+# Strategy A: check /health/deep for vector_index or search_index status
+VECTOR_STATUS=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('vector_index',{}).get('status','')")
+SEARCH_STATUS=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('atlas_search',{}).get('status','')")
+
+if [ -n "$VECTOR_STATUS" ] && [ "$VECTOR_STATUS" != "None" ]; then
+  if [ "$VECTOR_STATUS" = "healthy" ] || [ "$VECTOR_STATUS" = "READY" ]; then
+    pass "Vector index: status=${VECTOR_STATUS} (READY)"
+  else
+    fail "Vector index: status=${VECTOR_STATUS} — RAG quality may degrade silently"
+    echo ""
+    echo -e "  ${RED}Vector index is not READY. A degraded index can still return results${RESET}"
+    echo    "  while answer quality collapses. Check Atlas Search → Indexes in the console."
+  fi
+elif [ -n "$SEARCH_STATUS" ] && [ "$SEARCH_STATUS" != "None" ]; then
+  if [ "$SEARCH_STATUS" = "healthy" ] || [ "$SEARCH_STATUS" = "READY" ]; then
+    pass "Atlas Search index: status=${SEARCH_STATUS} (READY)"
+  else
+    fail "Atlas Search index: status=${SEARCH_STATUS} (expected READY)"
+  fi
+else
+  # Strategy B: probe a RAG-dependent endpoint and validate response quality
+  # If the vector index is broken, the RAG search returns empty contexts and the
+  # answer will be generic / very short.
+  RAG_BODY=$(http_body "$BASE_URL/api/v1/chat/" \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -d '{"message":"What is photosynthesis? Answer in one sentence.","lang":"en"}' 2>/dev/null || echo "{}")
+
+  RAG_RESPONSE=$(json_field "$RAG_BODY" "str(d.get('response',''))" 2>/dev/null || echo "")
+  RAG_LEN=${#RAG_RESPONSE}
+
+  if [ "$RAG_LEN" -ge 30 ]; then
+    pass "Vector index proxy check: RAG returned ${RAG_LEN}-char response (index likely READY)"
+  elif [ "$RAG_LEN" -gt 0 ]; then
+    warn "Vector index proxy check: very short RAG response (${RAG_LEN} chars) — index may be degraded"
+    echo "  Response: ${RAG_RESPONSE:0:120}"
+  else
+    warn "Vector index status not exposed in /health/deep — add 'vector_index' check to deep health endpoint"
+    echo "  Tip: add db.getCollection('chapters').getSearchIndexes() probe to /health/deep"
+  fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 6. Library Bundle (core content test)
 # ═══════════════════════════════════════════════════════════════════════════
 header "6. Library Bundle"
