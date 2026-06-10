@@ -24,9 +24,13 @@ class Settings(BaseSettings):
         env_ignore_empty=True,
     )
 
-    # --- P1: Cloudflare (Edge) — not used by backend at runtime ---
+    # --- P1: Cloudflare (Edge) ---
     CF_ACCOUNT_ID: Optional[str] = None
+    # CF_API_TOKEN: legacy name kept for backward compat.
+    # CF_WORKER_AI_TOKEN: current name used by Cloud Run env var.
+    # cloudflare_client resolves: CF_WORKER_AI_TOKEN ?? CF_API_TOKEN
     CF_API_TOKEN: Optional[str] = None
+    CF_WORKER_AI_TOKEN: Optional[str] = None
     CF_R2_BUCKET: str = "syrabit-assets"
     # Note (HF-110): CF_R2_BUCKET default matches wrangler.toml binding name.
     CF_R2_ACCESS_KEY: Optional[str] = None
