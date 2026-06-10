@@ -17,10 +17,31 @@ jobs:
     env:
       BASE_URL: https://api.syrabit.ai
       FRONTEND_URL: https://syrabit.ai
-      DIRECT_URL: https://syrabit-backend-bl6wu3psza-el.a.run.app
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve live Cloud Run URL
+        id: resolve-url
+        run: |
+          URL=$(gcloud run services describe syrabit-backend \
+            --region=asia-south1 \
+            --project=blissful-acumen-495019-t6 \
+            --format="value(status.url)" 2>/dev/null || echo "")
+          if [[ -z "$URL" ]]; then
+            URL="https://syrabit-backend-bl6wu3psza-el.a.run.app"
+            echo "⚠  gcloud lookup failed — using fallback URL"
+          fi
+          echo "direct_url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "Cloud Run URL: ${URL}"
 
       - name: Wait for deployment to stabilise
         run: sleep 20
@@ -30,6 +51,8 @@ jobs:
 
       - name: Run full-stack smoke tests
         run: bash scripts/fullstack-smoke-test.sh
+        env:
+          DIRECT_URL: ${{ steps.resolve-url.outputs.direct_url }}
 
       - name: Notify on failure
         if: failure()

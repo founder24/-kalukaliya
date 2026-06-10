@@ -24,13 +24,9 @@ class Settings(BaseSettings):
         env_ignore_empty=True,
     )
 
-    # --- P1: Cloudflare (Edge) ---
+    # --- P1: Cloudflare (Edge) — not used by backend at runtime ---
     CF_ACCOUNT_ID: Optional[str] = None
-    # CF_API_TOKEN: legacy name kept for backward compat.
-    # CF_WORKER_AI_TOKEN: current name used by Cloud Run env var.
-    # cloudflare_client resolves: CF_WORKER_AI_TOKEN ?? CF_API_TOKEN
     CF_API_TOKEN: Optional[str] = None
-    CF_WORKER_AI_TOKEN: Optional[str] = None
     CF_R2_BUCKET: str = "syrabit-assets"
     # Note (HF-110): CF_R2_BUCKET default matches wrangler.toml binding name.
     CF_R2_ACCESS_KEY: Optional[str] = None
@@ -290,7 +286,7 @@ class Settings(BaseSettings):
         # Allow Cloudflare Pages preview URLs
         if re.match(r"^https://[a-z0-9-]+\.syrabitfrontend\.pages\.dev$", origin):
             return True
-        # Allow Replit dev preview URLs (always allowed for Replit compatibility)
+        # Allow Replit dev preview URLs (always allowed for replit.dev/repl.co domains)
         if re.match(
             r"^https://[a-z0-9-]+\.(sisko\.replit\.dev|repl\.co|replit\.dev|replit\.app)$", origin
         ):

@@ -13,6 +13,7 @@ import { getCorsHeaders, applyCorsHeaders } from './middleware/cors';
 import { verifyJWT } from './middleware/jwt';
 import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
 import { proxyRequest } from './routes/api-proxy';
+import { handleContentKV } from './routes/content-kv';
 import { handleISR } from './routes/isr';
 import { handleRobots } from './routes/robots';
 import { getIdentityToken } from './utils/google-auth';
@@ -437,6 +438,14 @@ export default {
       headers.set('X-Request-ID', requestId);
 
       return new Response(object.body, { headers });
+    }
+
+    // CONTENT_KV: serve pre-rendered HTML to bots for chapter pages
+    const kvResponse = await handleContentKV(request, env);
+    if (kvResponse) {
+      const secured = addSecurityHeaders(kvResponse);
+      secured.headers.set('X-Request-ID', requestId);
+      return secured;
     }
 
     // ISR fallback for bot traffic (before 404)

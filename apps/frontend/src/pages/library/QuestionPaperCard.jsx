@@ -1,7 +1,9 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 
 const QuestionPaperCard = memo(function QuestionPaperCard({ paper }) {
+  const [imgFailed, setImgFailed] = useState(false);
+
   return (
     <a
       href={paper.image_url}
@@ -14,6 +16,20 @@ const QuestionPaperCard = memo(function QuestionPaperCard({ paper }) {
         boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
       }}
     >
+      {paper.image_url && !imgFailed && (
+        <div
+          className="overflow-hidden flex-shrink-0"
+          style={{ height: '160px', background: 'rgba(0,0,0,0.18)' }}
+        >
+          <img
+            src={paper.image_url}
+            alt={paper.title}
+            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+            loading="lazy"
+            onError={() => setImgFailed(true)}
+          />
+        </div>
+      )}
       <div className="p-4 flex flex-col flex-1 gap-3">
         <div className="flex flex-wrap gap-1.5">
           <span

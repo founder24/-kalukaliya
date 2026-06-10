@@ -87,7 +87,7 @@ jobs:
             --allow-unauthenticated \
             --min-instances=1 \
             --service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com \
-            --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,SARVAM_MODEL=sarvam-30b,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=asia-south1 \
+            --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,SARVAM_MODEL=sarvam-30b,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=asia-south1,TRUST_EDGE_AUTH=true \
             --remove-env-vars=VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG \
             --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest\
             --remove-secrets=CF_PAGES_DEPLOY_HOOK,CF_ACCOUNT_ID,CLOUDFLARE_ACCOUNT_ID,CLOUDFLARE_KV_API_TOKEN,CLOUDFLARE_KV_NAMESPACE_ID,GCS_CONTENT_BUCKET
@@ -167,6 +167,32 @@ jobs:
           done
           echo "✘ Backend failed health check after 180s"
           exit 1
+
+      - name: Prewarm CONTENT_KV (non-blocking)
+        run: |
+          SERVICE_URL="${{ steps.get-url.outputs.service_url }}"
+          SECRET=$(gcloud secrets versions access latest \
+            --secret="translate-cron-secret" \
+            --project="$PROJECT" 2>/dev/null || echo "")
+          if [[ -z "$SECRET" ]]; then
+            echo "⚠ translate-cron-secret not found in SM — skipping KV prewarm"
+            exit 0
+          fi
+          echo "Starting CONTENT_KV prewarm (batch push rendered HTML)..."
+          HTTP=$(curl -sf -o /tmp/kv_prewarm.json -w "%{http_code}" \
+            -X POST "${SERVICE_URL}/api/v1/admin/content/kv-prewarm" \
+            -H "Authorization: Bearer ${SECRET}" \
+            -H "Content-Type: application/json" \
+            --max-time 300 2>/dev/null || echo "000")
+          echo "KV prewarm HTTP: ${HTTP}"
+          if [[ -f /tmp/kv_prewarm.json ]]; then
+            cat /tmp/kv_prewarm.json
+          fi
+          if [[ "$HTTP" == "200" ]]; then
+            echo "✔ CONTENT_KV prewarm complete"
+          else
+            echo "⚠ KV prewarm returned HTTP ${HTTP} — non-blocking, continuing deploy"
+          fi
 
   deploy-edge:
     name: Deploy Edge (Cloudflare Worker)
@@ -253,8 +279,10 @@ jobs:
           }
 
           # Sync auth secrets from GCP Secret Manager
-          sync_gcp_secret "jwt-secret"         "JWT_SECRET"
-          sync_gcp_secret "edge-shared-secret" "EDGE_SHARED_SECRET"
+          sync_gcp_secret "jwt-secret"                        "JWT_SECRET"
+          sync_gcp_secret "edge-shared-secret"                "EDGE_SHARED_SECRET"
+          # Sync SA key so the edge worker can obtain OIDC tokens for /health/full
+          sync_gcp_secret "GOOGLE_APPLICATION_CREDENTIALS_JSON" "GOOGLE_SA_KEY"
 
           # Auto-sync BACKEND_URL from Cloud Run output (keeps CF Worker always current)
           if [[ -n "$BACKEND_SERVICE_URL" ]]; then
@@ -275,6 +303,8 @@ jobs:
     name: Deploy Frontend (Cloudflare Pages)
     runs-on: ubuntu-latest
     if: github.event.inputs.backend_only != 'true'
+    env:
+      INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
@@ -294,14 +324,15 @@ jobs:
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://api.syrabit.ai' }}
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: pages deploy apps/frontend/dist --project-name=syrabitfrontend
+        run: |
+          cd apps/edge
+          pnpm exec wrangler pages deploy ../frontend/dist --project-name=syrabitfrontend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Submit URLs to IndexNow
-        if: ${{ secrets.INDEXNOW_SECRET != '' }}
+        if: ${{ env.INDEXNOW_SECRET != '' }}
         run: node apps/frontend/scripts/indexnow-submit.mjs
         env:
           INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}

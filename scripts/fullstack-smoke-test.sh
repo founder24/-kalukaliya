@@ -7,7 +7,18 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-https://api.syrabit.ai}"
 FRONTEND_URL="${FRONTEND_URL:-https://syrabit.ai}"
-DIRECT_URL="${DIRECT_URL:-https://syrabit-backend-bl6wu3psza-el.a.run.app}"
+# Resolve the live Cloud Run URL dynamically; fall back to the last-known URL
+# if gcloud is unavailable (local runs without ADC, or older CI images).
+if [[ -z "${DIRECT_URL:-}" ]]; then
+  DIRECT_URL=$(gcloud run services describe syrabit-backend \
+    --region=asia-south1 \
+    --project=blissful-acumen-495019-t6 \
+    --format="value(status.url)" 2>/dev/null || echo "")
+  if [[ -z "$DIRECT_URL" ]]; then
+    DIRECT_URL="https://syrabit-backend-bl6wu3psza-el.a.run.app"
+    echo "⚠  Could not resolve Cloud Run URL via gcloud — using cached fallback"
+  fi
+fi
 
 PASS=0
 FAIL=0
@@ -142,7 +153,7 @@ REDIS_STATUS=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('redis',{}).get('
 if [ "$REDIS_STATUS" = "healthy" ]; then
   pass "Redis healthy"
 elif [ "$REDIS_STATUS" = "disabled" ]; then
-  pass "Redis healthy (disabled — Upstash not configured, using in-process fallback)"
+  pass "Redis disabled (UPSTASH credentials not configured — expected in this environment)"
 else
   fail "Redis unhealthy: $(json_field "$DEEP_BODY" "d.get('checks',{}).get('redis',{}).get('error','')")"
 fi

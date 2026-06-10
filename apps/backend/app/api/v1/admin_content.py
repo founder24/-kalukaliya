@@ -1168,3 +1168,73 @@ async def sync_to_gcs(request: Request):
     except Exception as e:
         logger.error(f"GCS sync error: {e}")
         raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+
+
+# ============================
+# LAYER 6: Cloudflare KV Pre-warm
+# ============================
+
+
+@router.post("/content/kv-prewarm")
+async def kv_prewarm(request: Request):
+    """
+    Bulk-push all rendered chapter HTML to Cloudflare CONTENT_KV.
+
+    Auth: Bearer token matching TRANSLATE_CRON_SECRET (same pattern as /content/translate/cron).
+    Reads every KnowledgeObject that has rendered_html and calls _push_cloudflare_kv.
+    Suitable for CI/CD post-deploy step to warm the edge cache after a fresh deploy.
+
+    Returns: { pushed, failed, skipped, total }
+    """
+    from app.config import settings
+
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    token = auth_header[7:]
+    if not settings.TRANSLATE_CRON_SECRET or token != settings.TRANSLATE_CRON_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+    try:
+        from app.models.knowledge import KnowledgeObject
+        from app.services.content.pipeline import content_pipeline
+        import asyncio
+
+        objects = await KnowledgeObject.find(
+            {"rendered_html": {"$exists": True, "$ne": {}}}
+        ).to_list()
+
+        pushed = 0
+        failed = 0
+        skipped = 0
+
+        semaphore = asyncio.Semaphore(10)
+
+        async def _push_one(ko):
+            nonlocal pushed, failed, skipped
+            rh = getattr(ko, "rendered_html", None)
+            if not rh:
+                skipped += 1
+                return
+            async with semaphore:
+                try:
+                    ok = await content_pipeline._push_cloudflare_kv(ko)
+                    if ok:
+                        pushed += 1
+                    else:
+                        failed += 1
+                except Exception as exc:
+                    logger.error(f"kv-prewarm failed for {getattr(ko, 'slug', '?')}: {exc}")
+                    failed += 1
+
+        await asyncio.gather(*[_push_one(ko) for ko in objects])
+
+        total = pushed + failed + skipped
+        logger.info(f"[kv-prewarm] total={total} pushed={pushed} failed={failed} skipped={skipped}")
+        return {"pushed": pushed, "failed": failed, "skipped": skipped, "total": total}
+
+    except ImportError as exc:
+        raise HTTPException(status_code=501, detail=f"Model unavailable: {exc}")
+    except Exception as exc:
+        logger.error(f"[kv-prewarm] unexpected error: {exc}")
+        raise HTTPException(status_code=500, detail=f"KV prewarm failed: {str(exc)}")

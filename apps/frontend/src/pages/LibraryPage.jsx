@@ -734,11 +734,9 @@ export default function LibraryPage() {
               )
             )}
           </div>
-          <LazyOnVisible>
-            <Suspense fallback={null}>
-              <LazyQuestionPapersSection />
-            </Suspense>
-          </LazyOnVisible>
+          <Suspense fallback={null}>
+            <LazyQuestionPapersSection />
+          </Suspense>
           <LazyOnVisible>
             <Suspense fallback={null}>
               <LazyCmsDocsSection />
