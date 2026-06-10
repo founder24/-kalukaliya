@@ -23,7 +23,9 @@ class CloudflareAIClient:
 
     @property
     def api_token(self) -> Optional[str]:
-        return settings.CF_API_TOKEN
+        # CF_WORKER_AI_TOKEN is the current Cloud Run env var name.
+        # Fall back to CF_API_TOKEN for backward compatibility.
+        return settings.CF_WORKER_AI_TOKEN or settings.CF_API_TOKEN
 
     @property
     def base_url(self) -> str:
