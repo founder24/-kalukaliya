@@ -1,7 +1,10 @@
 """
-Chat routing exclusively uses Vertex AI (English) and Sarvam AI (Assamese).
-Cloudflare Workers AI is NOT used for chat - it is only used for OCR and TTS
-endpoints in chat.py.
+Chat routing uses Sarvam AI for both English and Assamese.
+
+Vertex AI / Gemini has been removed. Sarvam-30b and Sarvam-105b handle both
+languages well; the system prompt instructs the model which language to respond in.
+Cloudflare Workers AI is NOT used for chat — it is only used for OCR endpoints
+in chat.py.
 """
 
 import re
@@ -16,21 +19,16 @@ logger = logging.getLogger(__name__)
 def detect_language(text: str) -> str:
     """
     Detect language of input text.
-    Returns 'as' for Assamese, 'en' for English
+    Returns 'as' for Assamese, 'en' for English.
     """
-    # Assamese Unicode range: U+0980 to U+09FF
     assamese_pattern = re.compile(r"[\u0980-\u09FF]")
-
-    # Count Assamese characters
     assamese_chars = len(assamese_pattern.findall(text))
     total_chars = len(text.replace(" ", ""))
 
     if total_chars == 0:
-        return "en"  # Default to English
+        return "en"
 
-    # If >30% Assamese characters, consider it Assamese
     assamese_ratio = assamese_chars / total_chars
-
     if assamese_ratio > 0.3 and assamese_chars >= 3:
         return "as"
     return "en"
@@ -38,50 +36,31 @@ def detect_language(text: str) -> str:
 
 def detect_language_and_route(text: str) -> tuple[str, str]:
     """
-    Detect language and route to appropriate LLM.
+    Detect language and route to the appropriate LLM.
+
+    Both English and Assamese now route to Sarvam AI.
+    The system prompt (built in chat_service) instructs Sarvam which language
+    to respond in.
 
     Returns:
         tuple: (language_code, model_name)
     """
     lang = detect_language(text)
-
-    if lang == "as":
-        # Route to Sarvam for Assamese
-        logger.info("Routing to Sarvam AI for Assamese content")
-        return "as", settings.SARVAM_MODEL
-    else:
-        # Route to Vertex AI for English
-        logger.info("Routing to Vertex AI for English content")
-        return "en", settings.VERTEX_GEMINI_MODEL
+    logger.info(f"Routing to Sarvam AI (lang={lang})")
+    return lang, settings.SARVAM_MODEL
 
 
 async def generate_response(
     system_prompt: str, user_message: str, model: str, stream: bool = False
 ) -> str:
     """
-    Generate response using appropriate AI client based on model.
+    Generate response using Sarvam AI.
     """
-    if "sarvam" in model.lower() or "openhathi" in model.lower():
-        from app.services.ai.sarvam_client import generate_with_sarvam
+    from app.services.ai.sarvam_client import generate_with_sarvam
 
-        return await generate_with_sarvam(
-            system_prompt=system_prompt, user_message=user_message, stream=stream
-        )
-    elif "gemini" in model.lower() or "vertex" in model.lower():
-        from app.services.ai.vertex_client import generate_with_vertex
-
-        # Note: vertex_client currently uses settings.VERTEX_GEMINI_MODEL regardless of model param
-        return await generate_with_vertex(
-            system_prompt=system_prompt,
-            user_message=user_message,
-            model=model,
-            stream=stream,
-        )
-    else:
-        raise RuntimeError(
-            f"Unknown model '{model}': chat routing only supports Vertex AI (gemini) "
-            f"and Sarvam AI (openhathi/sarvam). Cloudflare Workers AI is not used for chat."
-        )
+    return await generate_with_sarvam(
+        system_prompt=system_prompt, user_message=user_message, stream=stream
+    )
 
 
 async def stream_response(
@@ -90,39 +69,17 @@ async def stream_response(
     model: str,
 ) -> AsyncGenerator[str, None]:
     """
-    Stream response from the appropriate AI client based on model name.
+    Stream response from Sarvam AI.
 
-    Routes to:
-    - Sarvam AI (with retry) for Assamese models (sarvam, openhathi, saaras)
-    - Vertex AI for English models
-
-    Yields text chunks as they arrive from the provider.
-    Raises RuntimeError on failure (caller handles fallback).
+    All chat traffic (English and Assamese) routes here.
+    Yields text chunks as they arrive.
+    Raises RuntimeError on failure (caller handles dead-letter / error SSE).
     """
-    if (
-        "sarvam" in model.lower()
-        or "openhathi" in model.lower()
-        or "saaras" in model.lower()
+    from app.services.ai.sarvam_client import sarvam_client
+
+    logger.info(f"Streaming from Sarvam AI (model={model})")
+    async for chunk in sarvam_client.stream_generate_with_retry(
+        system_prompt=system_prompt,
+        user_message=user_message,
     ):
-        from app.services.ai.sarvam_client import sarvam_client
-
-        logger.info(f"Streaming from Sarvam AI (model={model})")
-        async for chunk in sarvam_client.stream_generate_with_retry(
-            system_prompt=system_prompt,
-            user_message=user_message,
-        ):
-            yield chunk
-    elif "gemini" in model.lower() or "vertex" in model.lower():
-        from app.services.ai.vertex_client import vertex_client
-
-        logger.info(f"Streaming from Vertex AI (model={model})")
-        async for chunk in vertex_client.stream_generate_with_retry(
-            system_prompt=system_prompt,
-            user_message=user_message,
-        ):
-            yield chunk
-    else:
-        raise RuntimeError(
-            f"Unknown model '{model}': chat streaming only supports Vertex AI (gemini) "
-            f"and Sarvam AI (openhathi/sarvam/saaras). Cloudflare Workers AI is not used for chat."
-        )
+        yield chunk

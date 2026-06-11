@@ -21,7 +21,6 @@ from datetime import datetime, timezone
 from beanie import PydanticObjectId
 
 from app.models.content import Chapter
-from app.services.ai.vertex_client import vertex_client
 from app.services.ai.sarvam_client import sarvam_client
 
 logger = logging.getLogger(__name__)
@@ -127,9 +126,9 @@ class ContentGenerationService:
             "Generate detailed study notes covering all topics."
         )
 
-        # ── 2. English content via Vertex AI ───────────────────────────────────
+        # ── 2. English content via Sarvam AI ───────────────────────────────────
         logger.info(f"Generating English notes for {chapter.title!r}")
-        content_en = await vertex_client.generate(system_prompt, user_message)
+        content_en = await sarvam_client.generate(system_prompt, user_message)
         chapter.content_en = content_en
 
         # ── 3. Extract per-topic definitions from generated content ───────────
@@ -142,7 +141,7 @@ class ContentGenerationService:
                 "Only output the topic/definition pairs. No extra text."
             )
             try:
-                def_response = await vertex_client.generate(
+                def_response = await sarvam_client.generate(
                     "You are an educational content extractor.",
                     f"{def_prompt}\n\nNotes:\n{content_en[:4000]}",
                 )
@@ -193,14 +192,14 @@ class ContentGenerationService:
                 "Run /generate-notes/as once SARVAM_API_KEY is configured."
             )
 
-        # ── 4. SEO meta + keywords via Vertex AI ───────────────────────────────
+        # ── 4. SEO meta + keywords via Sarvam AI ───────────────────────────────
         meta_prompt = (
             "Extract a concise meta description (max 160 chars) and "
             "comma-separated keywords from this content. "
             "Format: META: <description>\nKEYWORDS: <keywords>"
         )
         try:
-            meta_response = await vertex_client.generate(
+            meta_response = await sarvam_client.generate(
                 "You are an SEO specialist.",
                 f"{meta_prompt}\n\nContent:\n{content_en[:2000]}",
             )
@@ -212,7 +211,7 @@ class ContentGenerationService:
         except Exception as e:
             logger.warning(f"SEO meta generation failed for {chapter.title!r}: {e}")
 
-        # ── 5. FAQ JSON-LD via Vertex AI ───────────────────────────────────────
+        # ── 5. FAQ JSON-LD via Sarvam AI ───────────────────────────────────────
         if not chapter.faq_jsonld or len(chapter.faq_jsonld) < 2:
             faq_prompt = (
                 f"Generate exactly 5 frequently asked questions and answers about: {chapter.title}. "
@@ -221,7 +220,7 @@ class ContentGenerationService:
                 "Make questions specific and educational. Answers should be 1-3 sentences."
             )
             try:
-                faq_response = await vertex_client.generate(
+                faq_response = await sarvam_client.generate(
                     "You are an educational FAQ writer for Indian board exam students.",
                     faq_prompt,
                 )

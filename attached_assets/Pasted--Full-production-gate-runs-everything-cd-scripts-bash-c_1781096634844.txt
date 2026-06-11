@@ -1,0 +1,181 @@
+# Full production gate (runs everything)
+cd scripts && bash check.sh
+
+# Deep chat + latency percentile test (needs AUTH_EMAIL + AUTH_PASSWORD env vars)
+bash test-chat-live.sh --api https://api.syrabit.ai
+
+# Cache MISS→HIT + invalidation
+bash live-deployment-test.sh --categories content --backend https://api.syrabit.ai
+
+# Vector index + MongoDB + Redis
+bash fullstack-smoke-test.sh https://api.syrabit.ai
+
+╔══════════════════════════════════════════════════════════════╗
+║              SYRABIT PRODUCTION CHECK                       ║
+║  2026-06-10 13:02 UTC                                        ║
+╚══════════════════════════════════════════════════════════════╝
+
+  API : https://api.syrabit.ai
+  FE  : https://syrabit.ai
+  User: not set — auth/chat tests will be anonymous
+  GH  : token set
+
+──────────────────────────────────────────────────────────
+  0. Pre-flight
+──────────────────────────────────────────────────────────
+  ✓ Backend reachable: https://api.syrabit.ai/health
+
+──────────────────────────────────────────────────────────
+  1. Cloud Run Status
+──────────────────────────────────────────────────────────
+  ✓ Latest revision: syrabit-backend-00578-l6p
+  ✓ Traffic: 100% on latest revision
+  ✓ APP_ENV=production ✓
+
+──────────────────────────────────────────────────────────
+  2. Backend Health
+──────────────────────────────────────────────────────────
+  ✓ GET /health → HTTP 200 ✓ body
+  ✓ GET /health deep → HTTP 200 ✓ body
+  ✓ GET /health/circuit-breakers → HTTP 200
+  ✓ Vertex AI circuit breaker: CLOSED (healthy)
+  ⚠ GET /docs → HTTP 200  (docs visible — set APP_ENV=production on Cloud Run)
+
+──────────────────────────────────────────────────────────
+  3. Frontend & Cloudflare Edge
+──────────────────────────────────────────────────────────
+  ✓ GET https://syrabit.ai/ → HTTP 301
+  ✓ GET /manifest.json → HTTP 200
+  ✓ GET /robots.txt → HTTP 200
+  ✓ GET /sitemap.xml → HTTP 200
+  ✓ GET /chat/ → HTTP 200
+  ✓ GET /library/ → HTTP 200
+  ✓ Security header: strict-transport-security
+  ✓ Security header: x-frame-options
+  ✓ Security header: x-content-type-options
+  · Cloudflare: cf-ray: a09892b31e7c4a81-TPE
+
+──────────────────────────────────────────────────────────
+  4. Anonymous API Endpoints
+──────────────────────────────────────────────────────────
+  ✓ GET /user/credits (anon) → HTTP 200 ✓ body
+  ✓ GET /user/credits tier:anonymous → HTTP 200 ✓ body
+  ✓ GET /conversations/anon → HTTP 200
+  ✓ GET /chat/history (anon) → HTTP 200
+  ✓ GET /content/library-bundle → HTTP 200 ✓ body
+  ✓ GET /subscription/plans → HTTP 200 ✓ body
+  ✓ GET /config/trustpilot → HTTP 200
+  ✓ GET /sitemap-subjects.xml → HTTP 200
+
+──────────────────────────────────────────────────────────
+  5. Auth Guards
+──────────────────────────────────────────────────────────
+  ✓ GET /users/me (no token) → 401 → HTTP 401
+  ✓ GET /conversations (no token) → 401 → HTTP 401
+  ✓ GET /users/me (bad token) → 401 → HTTP 401
+  ✓ POST /auth/login (bad creds) → 401 → HTTP 401
+
+──────────────────────────────────────────────────────────
+  6. Input Validation
+──────────────────────────────────────────────────────────
+  ✓ POST /chat/stream (empty message) → 422 → HTTP 422
+  ✓ POST /chat/stream (no body) → 422 → HTTP 422
+  ✓ POST /auth/login (empty body) → 422 → HTTP 422
+  ✓ POST /auth/signup (empty) → 422 → HTTP 422
+  ✓ Error responses do not leak stack traces
+
+──────────────────────────────────────────────────────────
+  7. CORS & SSE
+──────────────────────────────────────────────────────────
+  ✓ CORS: access-control-allow-origin present
+  ✓ POST /chat/stream → Content-Type: text/event-stream
+
+──────────────────────────────────────────────────────────
+  8. Security Probes
+──────────────────────────────────────────────────────────
+  ✓ /.env blocked → HTTP 404
+  ✓ /.git/config blocked → HTTP 404
+  ✓ /.htaccess blocked → HTTP 404
+  ✓ /wp-login.php blocked → HTTP 404
+  ✓ /phpinfo.php blocked → HTTP 404
+  ✓ /xmlrpc.php blocked → HTTP 404
+  ✓ POST /webhooks/razorpay unsigned → 400/401 → HTTP 400
+
+──────────────────────────────────────────────────────────
+  9. Chat TTFB  (target: first token < 3000 ms)
+──────────────────────────────────────────────────────────
+  ⚠ No TEST_USER_EMAIL/TEST_USER_PASSWORD — chat runs as anon (may hit 429)
+  ✗ EN short (osmosis): AI error — Service temporarily unavailable. Please try again.  (2491ms)
+  ✗ EN medium (Newton): AI error — Service temporarily unavailable. Please try again.  (2202ms)
+  ✗ EN brief: AI error — Service temporarily unavailable. Please try again.  (1875ms)
+  ✓ AS Assamese
+      TTFB : 2020ms  total=8850ms  server_lat=7678ms
+      model=sarvam-30b  route=sarvam  1063w/2047chunks
+      text : 1.  **Deconstruct the User's Request:**     This Assamese query asks for a definition of o…
+  ⚠ Chat TTFB: one or more queries slow or erroring — see details above
+
+──────────────────────────────────────────────────────────
+  10. Performance Spot Check
+──────────────────────────────────────────────────────────
+  ✓ /api/v1/health → 243ms  (< 500ms)
+  ✓ /api/v1/subscription/plans → 183ms  (< 1000ms)
+  ✓ /api/v1/seo/sitemap-subjects.xml → 420ms  (< 2000ms)
+  ✓ /api/v1/content/library-bundle?slim=1 → 304ms  (< 3000ms)
+
+──────────────────────────────────────────────────────────
+  11. GitHub Actions — Latest Deploy Status
+──────────────────────────────────────────────────────────
+  · 4678 total workflow runs tracked
+    ✗ Deploy — Backend + Edge + Frontend: failure @ 2026-06-10T12:47 [main]
+    ✗ Smoke Tests: failure @ 2026-06-10T12:47 [main]
+    ✓ Agent: Environment Sync: success @ 2026-06-10T12:47 [main]
+    ✓ Agent: Accuracy Report: success @ 2026-06-10T11:42 [main]
+    ✓ Agent: Uptime Monitor: success @ 2026-06-10T10:39 [main]
+    ✓ Agent: Drift Detection: success @ 2026-06-10T09:34 [main]
+    ✗ Deploy — Backend + Edge + Frontend: failure @ 2026-06-10T08:26 [main]  (historical)
+    ✓ Smoke Tests: success @ 2026-06-10T08:26 [main]  (historical)
+    ✓ Agent: Environment Sync: success @ 2026-06-10T08:26 [main]  (historical)
+    ✓ Agent: Environment Sync: success @ 2026-06-10T08:10 [main]  (historical)
+    ✓ Smoke Tests: success @ 2026-06-10T08:10 [main]  (historical)
+    ✗ .github/workflows/deploy.yml: failure @ 2026-06-10T08:10 [main]
+  ✗ Latest deploy workflow: FAILED — check GitHub Actions logs
+
+╔══════════════════════════════════════════════════════════════╗
+║                        SUMMARY                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+  ✓ PASS:   47
+  ✗ FAIL:   1
+  ⚠ WARN:   3
+  · SKIP:   0
+  ⏱ Time:   42s
+
+  FAILURES:
+    • Latest deploy workflow: FAILED — check GitHub Actions logs
+
+  WARNINGS:
+    • GET /docs → HTTP 200  (docs visible — set APP_ENV=production on Cloud Run)
+    • No TEST_USER_EMAIL/TEST_USER_PASSWORD — chat runs as anon (may hit 429)
+    • Chat TTFB: one or more queries slow or erroring — see details above
+
+  ✗  1 failure(s) — review output above
+
+Unknown argument: --api
+Usage: test-chat-live.sh [--dry-run] [--skip-tts] [--skip-image]
+Unknown option: --categories
+Usage: live-deployment-test.sh [OPTIONS]
+
+Options:
+  --backend-url URL   Backend URL (default: https://api.syrabit.ai)
+  --frontend-url URL  Frontend URL (default: https://syrabit.ai)
+  --verbose           Show detailed curl output
+  --category LIST     Comma-separated categories to run
+                      Available: health,auth,content,chat,seo,payments,admin,edge,security,performance,webhook
+  --help              Show this help message
+
+Examples:
+  live-deployment-test.sh --verbose
+  live-deployment-test.sh --category health,auth,seo
+  live-deployment-test.sh --backend-url https://staging-api.example.com
+Unknown arg: https://api.syrabit.ai
+founder@cloudshell:~/syrabit/scripts (blissful-acumen-495019-t6)$ 

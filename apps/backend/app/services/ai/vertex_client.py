@@ -512,18 +512,20 @@ class VertexAIClient:
         retry_delay: float = 0.3,
     ) -> AsyncGenerator[str, None]:
         """
-        Stream with retry logic for resilience.
+        Stream with retry logic and automatic model fallback.
 
-        - On 5xx or timeout: retries up to max_retries times
-        - If all retries exhausted, raises to let caller handle fallback
+        - On 5xx / timeout: retries up to max_retries times with the primary model
+        - If primary model exhausts retries, tries VERTEX_GEMINI_FALLBACK_MODEL once
+        - If all attempts fail, raises to let caller handle fallback to Sarvam / dead-letter
         """
         last_error: Exception | None = None
+        primary_model = self.model
 
         for attempt in range(max_retries + 1):
             try:
                 async for chunk in self.stream_generate(system_prompt, user_message):
                     yield chunk
-                return  # Success - exit after full stream
+                return  # Success — exit after full stream
             except RuntimeError as e:
                 last_error = e
                 if attempt < max_retries:
@@ -535,7 +537,26 @@ class VertexAIClient:
                 else:
                     break
 
-        # All retries exhausted
+        # Try fallback model if it differs from the primary
+        fallback_model = settings.VERTEX_GEMINI_FALLBACK_MODEL
+        if fallback_model and fallback_model != primary_model:
+            logger.warning(
+                f"Primary model {primary_model} exhausted retries — "
+                f"trying fallback model {fallback_model}"
+            )
+            self.model = fallback_model
+            try:
+                async for chunk in self.stream_generate(system_prompt, user_message):
+                    yield chunk
+                return
+            except RuntimeError as e:
+                logger.error(
+                    f"Fallback model {fallback_model} also failed: {e}"
+                )
+                last_error = e
+            finally:
+                self.model = primary_model  # always restore original model
+
         raise last_error or RuntimeError("Vertex AI stream failed after retries")
 
 

@@ -3,6 +3,7 @@
 - [Syrabit chat+auth pipeline bugs](syrabit-pipeline-bugs.md) — Fixed bugs: analytics 404s, conversation_id/session_id mismatch, logout null-token crash
 - [CF↔GCP audit](cf-gcp-audit.md) — Token perms, duplicate SM secrets, BACKEND_URL binding conflict, CF KV cache fix, bot rendering fix
 - [Syrabit chat latency fix](syrabit-chat-latency.md) — gemini-2.5-flash thinking phase (7-8s TTFB) fixed; model switch + thinkingBudget guard
+- [Syrabit Gemini removal](syrabit-gemini-removal.md) — Gemini+Vertex Search removed; all chat+content-gen now routes to Sarvam; vertex_client kept for TTS+Vision only
 - [Syrabit Cloud Run deploy fixes](syrabit-cloudrun-fixes.md) — motor missing, pymongo compat, JWT RS256 degraded mode, Atlas index conflicts
 - [Syrabit Cloud Run secrets strategy](syrabit-cloudrun-envvars.md) — gcloud run deploy DROPS all Secret Manager refs every deploy; must pass --update-secrets explicitly in cloudbuild.yaml every time
 - [Syrabit content model FlexId](syrabit-flexid.md) — DB uses legacy string IDs (e.g. 's13', UUID) not ObjectIds; all reference fields must use FlexId

@@ -25,6 +25,7 @@ set -euo pipefail
 BASE_URL="https://syrabit.ai"
 CHAT_API="${BASE_URL}/api/v1/chat"
 AUTH_API="${BASE_URL}/api/v1/auth"
+CUSTOM_API=""
 
 # Colors
 RED='\033[0;31m'
@@ -53,24 +54,36 @@ TEST_SESSION_ID="test_$(date +%s)_${RANDOM}"
 declare -a LATENCIES=()
 
 # Parse arguments
-for arg in "$@"; do
-  case $arg in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --dry-run)
       DRY_RUN=true
-      ;;
+      shift ;;
     --skip-tts)
       SKIP_TTS=true
-      ;;
+      shift ;;
     --skip-image)
       SKIP_IMAGE=true
-      ;;
+      shift ;;
+    --api|--base-url)
+      CUSTOM_API="$2"
+      shift 2 ;;
+    --api=*|--base-url=*)
+      CUSTOM_API="${1#*=}"
+      shift ;;
     *)
-      echo "Unknown argument: $arg"
-      echo "Usage: $0 [--dry-run] [--skip-tts] [--skip-image]"
-      exit 1
-      ;;
+      echo "Unknown argument: $1"
+      echo "Usage: $0 [--dry-run] [--skip-tts] [--skip-image] [--api <url>]"
+      exit 1 ;;
   esac
 done
+
+# Override BASE_URL / endpoints if --api was supplied
+if [[ -n "$CUSTOM_API" ]]; then
+  BASE_URL="${CUSTOM_API%/}"
+  CHAT_API="${BASE_URL}/api/v1/chat"
+  AUTH_API="${BASE_URL}/api/v1/auth"
+fi
 
 # -----------------------------------------------------------------------------
 # Utility functions

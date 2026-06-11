@@ -14,8 +14,6 @@ aiohttp==3.14.0
     #   google-auth
 aiosignal==1.4.0
     # via aiohttp
-annotated-doc==0.0.4
-    # via fastapi
 annotated-types==0.7.0
     # via pydantic
 anyio==4.13.0
@@ -57,8 +55,6 @@ dnspython==2.8.0
     # via
     #   email-validator
     #   pymongo
-docstring-parser==0.18.0
-    # via google-cloud-aiplatform
 email-validator==2.3.0
     # via
     #   -r /home/runner/workspace/apps/backend/requirements.in
@@ -71,53 +67,29 @@ frozenlist==1.8.0
     #   aiosignal
 google-api-core==2.30.3
     # via
-    #   google-cloud-aiplatform
-    #   google-cloud-bigquery
     #   google-cloud-core
-    #   google-cloud-discoveryengine
-    #   google-cloud-resource-manager
     #   google-cloud-secret-manager
     #   google-cloud-storage
 google-auth==2.53.0
     # via
     #   -r /home/runner/workspace/apps/backend/requirements.in
     #   google-api-core
-    #   google-cloud-aiplatform
-    #   google-cloud-bigquery
     #   google-cloud-core
-    #   google-cloud-discoveryengine
-    #   google-cloud-resource-manager
     #   google-cloud-secret-manager
     #   google-cloud-storage
-    #   google-genai
-google-cloud-aiplatform==1.154.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
-google-cloud-bigquery==3.41.0
-    # via google-cloud-aiplatform
 google-cloud-core==2.6.0
     # via
-    #   google-cloud-bigquery
     #   google-cloud-storage
-google-cloud-discoveryengine==0.19.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
-google-cloud-resource-manager==1.17.0
-    # via google-cloud-aiplatform
 google-cloud-secret-manager==2.29.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
 google-cloud-storage==3.10.1
-    # via
-    #   -r /home/runner/workspace/apps/backend/requirements.in
-    #   google-cloud-aiplatform
+    # via -r /home/runner/workspace/apps/backend/requirements.in
 google-crc32c==1.8.0
     # via
     #   google-cloud-storage
     #   google-resumable-media
-google-genai==2.7.0
-    # via google-cloud-aiplatform
 google-resumable-media==2.9.0
-    # via
-    #   google-cloud-bigquery
-    #   google-cloud-storage
+    # via google-cloud-storage
 googleapis-common-protos==1.75.0
     # via
     #   google-api-core

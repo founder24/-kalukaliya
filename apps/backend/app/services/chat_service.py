@@ -321,21 +321,8 @@ class ChatService:
             )
             return response_text, target_model
         except (RuntimeError, Exception) as e:
-            if detected_lang == "as":
-                logger.warning(f"Sarvam failed ({e}), falling back to Vertex AI")
-                from app.services.ai.vertex_client import vertex_client
-
-                actual_model = settings.VERTEX_GEMINI_MODEL
-                # Use generate_direct to bypass the vertex_circuit_breaker — the
-                # normal circuit-protected path may be tripped by concurrent failures,
-                # but we still want to attempt Vertex AI for this Assamese fallback.
-                response_text = await vertex_client.generate_direct(
-                    system_prompt=system_prompt,
-                    user_message=sanitized_message,
-                )
-                return response_text, actual_model
-            else:
-                raise
+            logger.error(f"Sarvam generate failed (lang={detected_lang}): {e}")
+            raise
 
     @staticmethod
     async def stream_llm(
@@ -367,40 +354,20 @@ class ChatService:
                 yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
 
         except Exception as e:
-            if detected_lang == "as":
-                logger.warning(f"Sarvam stream failed ({e}), falling back to Vertex AI")
-                logger.info(
-                    "chat_fallback",
-                    extra={
-                        "user_id": user_id,
-                        "error": str(e),
-                        "fallback_provider": "vertex",
-                    },
+            logger.error(
+                f"LLM stream failed (lang={detected_lang}): {e}",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+            try:
+                from app.services.dead_letter import store_dead_letter
+
+                await store_dead_letter(
+                    user_id, request_message, detected_lang, str(e)
                 )
-                yield f"data: {json.dumps({'fallback': True, 'provider': 'vertex', 'reason': str(e)})}\n\n"
-
-                try:
-                    from app.services.ai.vertex_client import vertex_client
-
-                    actual_model = settings.VERTEX_GEMINI_MODEL
-                    async for chunk in vertex_client.stream_generate_with_retry(
-                        system_prompt, sanitized_message
-                    ):
-                        full_response += chunk
-                        yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
-                except Exception as fallback_err:
-                    logger.error(f"Vertex fallback also failed: {fallback_err}")
-                    from app.services.dead_letter import store_dead_letter
-
-                    await store_dead_letter(
-                        user_id, request_message, detected_lang, str(fallback_err)
-                    )
-                    yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
-                    return
-            else:
-                logger.error(f"LLM stream failed: {e}")
-                yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
-                return
+            except Exception as dl_err:
+                logger.warning(f"Dead-letter store failed: {dl_err}")
+            yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
+            return
 
         # Emit the sentinel value so the router knows the model/response
         yield f"data: {json.dumps({'__syrabit_stream_complete_7f3a9b2e__': True, 'full_response': full_response, 'actual_model': actual_model})}\n\n"

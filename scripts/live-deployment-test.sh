@@ -49,26 +49,29 @@ show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --backend-url URL   Backend URL (default: $BACKEND_URL)"
-    echo "  --frontend-url URL  Frontend URL (default: $FRONTEND_URL)"
+    echo "  --backend-url URL / --backend URL"
+    echo "                      Backend URL (default: $BACKEND_URL)"
+    echo "  --frontend-url URL / --frontend URL"
+    echo "                      Frontend URL (default: $FRONTEND_URL)"
     echo "  --verbose           Show detailed curl output"
-    echo "  --category LIST     Comma-separated categories to run"
+    echo "  --category LIST / --categories LIST"
+    echo "                      Comma-separated categories to run"
     echo "                      Available: $ALL_CATEGORIES"
     echo "  --help              Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0 --verbose"
-    echo "  $0 --category health,auth,seo"
-    echo "  $0 --backend-url https://staging-api.example.com"
+    echo "  $0 --categories health,auth,seo"
+    echo "  $0 --backend https://staging-api.example.com"
     exit 0
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --backend-url)  BACKEND_URL="$2"; shift 2 ;;
-        --frontend-url) FRONTEND_URL="$2"; shift 2 ;;
+        --backend-url|--backend) BACKEND_URL="$2"; shift 2 ;;
+        --frontend-url|--frontend) FRONTEND_URL="$2"; shift 2 ;;
         --verbose)      VERBOSE=1; shift ;;
-        --category)     CATEGORIES="$2"; shift 2 ;;
+        --category|--categories) CATEGORIES="$2"; shift 2 ;;
         --help|-h)      show_help ;;
         *) echo "Unknown option: $1"; show_help ;;
     esac

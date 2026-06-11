@@ -7,8 +7,6 @@ bcrypt
 beanie>=2.1.0
 fastapi
 google-auth[aiohttp]
-google-cloud-aiplatform
-google-cloud-discoveryengine
 google-cloud-secret-manager
 google-cloud-storage
 gunicorn

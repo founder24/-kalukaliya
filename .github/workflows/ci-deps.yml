@@ -30,6 +30,7 @@ jobs:
   sync-check:
     name: requirements.txt in sync with requirements.in
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 

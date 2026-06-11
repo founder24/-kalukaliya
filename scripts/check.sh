@@ -369,12 +369,38 @@ else:
     print(f"  {Y}·{X} Sarvam status not exposed in /health/deep — skipping direct probe")
 PROVIDERS_PYEOF
 
-# /docs visibility (follow redirects — 404/403 is correct in production)
-_docs_code=$(curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 "${API}/docs" 2>/dev/null || echo "000")
-if [[ "$_docs_code" == "404" || "$_docs_code" == "403" ]]; then
-  _ok "GET /docs → HTTP ${_docs_code} (hidden — APP_ENV=production ✓)"
+# /docs visibility check — must verify content, not just status code.
+# The Cloudflare Worker serves the frontend SPA shell (200, text/html) for
+# any path not matching the /api/ prefix, so a plain HTTP 200 on /docs does
+# NOT mean FastAPI docs are exposed.  We check the raw direct backend URL
+# (bypassing CF) if available, otherwise verify Content-Type / body.
+_docs_direct_url=""
+if command -v gcloud &>/dev/null; then
+  _docs_direct_url=$(gcloud run services describe syrabit-backend \
+    --project="${GCP_PROJECT}" --region="${GCP_REGION}" \
+    --format="value(status.url)" 2>/dev/null || echo "")
+fi
+
+if [[ -n "$_docs_direct_url" ]]; then
+  # Direct Cloud Run hit (no CF Worker in front) — accurate check
+  _docs_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 \
+    "${_docs_direct_url}/docs" 2>/dev/null || echo "000")
+  if [[ "$_docs_code" == "404" || "$_docs_code" == "403" ]]; then
+    _ok "GET /docs (direct CR) → HTTP ${_docs_code} — docs hidden (APP_ENV=production ✓)"
+  else
+    _warn "GET /docs (direct CR) → HTTP ${_docs_code} — docs may be visible; check APP_ENV on Cloud Run"
+  fi
 else
-  _warn "GET /docs → HTTP ${_docs_code}  (docs visible — set APP_ENV=production on Cloud Run)"
+  # Fallback: check via api.syrabit.ai but inspect Content-Type to distinguish
+  # SPA shell (text/html, benign) from FastAPI docs (text/html with Swagger UI).
+  _docs_ct=$(curl -s -I --max-time 8 "${API}/docs" 2>/dev/null \
+    | grep -i "^content-type:" | tr -d '\r' | head -1)
+  _docs_body=$(curl -s --max-time 8 "${API}/docs" 2>/dev/null | head -c 500)
+  if echo "$_docs_body" | grep -qi "swagger\|redoc\|openapi"; then
+    _warn "GET /docs — Swagger/ReDoc UI detected (real docs exposed) — set APP_ENV=production on Cloud Run"
+  else
+    _ok "GET /docs → SPA shell served by CF Worker (docs not exposed on backend ✓)"
+  fi
 fi
 
 # =============================================================================
