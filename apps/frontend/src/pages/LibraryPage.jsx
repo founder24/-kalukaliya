@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue, useTransition, lazy, Suspense } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue, useTransition } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Search, Bookmark, BookOpen } from './library/icons';
 import { ChevronRight, Clock } from 'lucide-react';
@@ -18,10 +18,9 @@ import VirtualSubjectGrid from './library/VirtualSubjectGrid';
 import LibrarySkeleton from './library/LibrarySkeleton';
 import FilterChip from './library/FilterChip';
 import ScrollableFilterRow from './library/ScrollableFilterRow';
-
-const LazyCmsDocsSection = lazy(() => import('./library/CmsDocsSection'));
-const LazyCmsPostsGrid = lazy(() => import('./library/CmsPostsGrid'));
-const LazyQuestionPapersSection = lazy(() => import('./library/QuestionPapersSection'));
+import CmsDocsSection from './library/CmsDocsSection';
+import CmsPostsGrid from './library/CmsPostsGrid';
+import QuestionPapersSection from './library/QuestionPapersSection';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AD POLICY: /library and its /browser alias are intentionally AD-FREE in the
@@ -734,18 +733,12 @@ export default function LibraryPage() {
               )
             )}
           </div>
-          <Suspense fallback={null}>
-            <LazyQuestionPapersSection />
-          </Suspense>
+          <QuestionPapersSection />
           <LazyOnVisible>
-            <Suspense fallback={null}>
-              <LazyCmsDocsSection />
-            </Suspense>
+            <CmsDocsSection />
           </LazyOnVisible>
           <LazyOnVisible>
-            <Suspense fallback={null}>
-              <LazyCmsPostsGrid />
-            </Suspense>
+            <CmsPostsGrid />
           </LazyOnVisible>
         </div>
 
