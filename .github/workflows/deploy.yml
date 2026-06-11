@@ -282,24 +282,7 @@ jobs:
           # Sync SA key via Python + direct CF REST API (wrangler stdin fails for large JSON blobs)
           SA_KEY=$(gcloud secrets versions access latest --secret="GOOGLE_APPLICATION_CREDENTIALS_JSON" --project="$PROJECT" 2>/dev/null || true)
           if [[ -n "$SA_KEY" ]]; then
-            python3 - "$SA_KEY" << 'PYEOF'
-import json, urllib.request, os, sys
-token      = os.environ["CLOUDFLARE_API_TOKEN"]
-account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
-worker     = "syrabitworker-prod"
-val        = sys.argv[1]
-url  = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts/{worker}/secrets"
-body = json.dumps({"name": "GOOGLE_SA_KEY", "text": val, "type": "secret_text"}).encode()
-req  = urllib.request.Request(url, data=body, method="PUT",
-         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
-with urllib.request.urlopen(req) as r:
-    resp = json.loads(r.read())
-if resp.get("success"):
-    print("✅ GOOGLE_SA_KEY synced to CF Worker via REST API")
-else:
-    print(f"✘ GOOGLE_SA_KEY sync failed: {resp.get('errors')}", file=sys.stderr)
-    sys.exit(1)
-PYEOF
+            python3 scripts/sync_cf_sa_key.py "$SA_KEY"
           else
             echo "⚠  GOOGLE_APPLICATION_CREDENTIALS_JSON not found in GCP SM — skipping GOOGLE_SA_KEY"
           fi
