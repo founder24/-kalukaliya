@@ -23,8 +23,6 @@ logger = logging.getLogger(__name__)
 # Map: settings attribute name → GCP Secret Manager secret ID
 _SECRET_MAP: dict[str, str] = {
     "SARVAM_API_KEY": "SARVAM_API_KEY",
-    "UPSTASH_REDIS_REST_URL": "upstash-redis-rest-url",
-    "UPSTASH_REDIS_REST_TOKEN": "upstash-redis-rest-token",
 }
 
 
