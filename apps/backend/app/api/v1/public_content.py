@@ -847,6 +847,35 @@ async def get_published_topics(chapter_id: str):
     }
 
 
+@router.get("/chapters/{chapter_id}/topics-published")
+async def get_topics_published(chapter_id: str):
+    """Alias for published-topics — frontend compatibility route."""
+    return await get_published_topics(chapter_id)
+
+
+@router.get("/chapters/{chapter_id}/topics-related")
+async def get_topics_related(chapter_id: str, limit: int = Query(6, ge=1, le=20)):
+    """Return topics related to a chapter.
+
+    Fetches the chapter's own published topics and returns them as the
+    related set. A real cross-chapter similarity query can replace this
+    once a vector index is available.
+    """
+    try:
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid chapter_id")
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    topics = [t.model_dump() for t in (chapter.published_topics or [])][:limit]
+    return {
+        "chapter_id": chapter_id,
+        "related_topics": topics,
+        "total": len(topics),
+    }
+
+
 @router.get("/chapters/{chapter_id}/topic-pyqs")
 async def get_topic_pyqs(
     chapter_id: str,

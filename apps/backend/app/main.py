@@ -387,6 +387,7 @@ def create_app() -> FastAPI:
         analytics.router, prefix="/api/analytics", tags=["Analytics Legacy"]
     )
     app.include_router(config.router, prefix="/api/v1/config", tags=["Config"])
+    app.include_router(config.router, prefix="/api/config", tags=["Config Legacy"])
     app.include_router(admin_corpus.router, prefix="/api/v1", tags=["Admin Corpus"])
     app.include_router(
         admin_db_health.router, prefix="/api/v1/admin", tags=["Admin DB Health"]

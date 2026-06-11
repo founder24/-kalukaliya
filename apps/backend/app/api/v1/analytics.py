@@ -91,6 +91,16 @@ async def ad_impression(request: Request):
     return JSONResponse({"status": "ok"})
 
 
+@router.get("/top-routes")
+async def top_routes():
+    """Top navigated routes — stub for admin analytics dashboard.
+
+    Returns an empty list until a real aggregation pipeline is wired up.
+    The frontend reads this defensively and hides the widget when empty.
+    """
+    return JSONResponse({"routes": [], "period": "7d"})
+
+
 @router.post("/hydrate-event")
 async def hydrate_event(request: Request):
     """Hydration / page-chunk preload health events mirrored from the frontend.
