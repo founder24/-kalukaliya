@@ -84,6 +84,15 @@ export async function renderRoute({ url, bundleSlim, seed } = {}) {
   if (kind) {
     try { await preloadPageForKind(kind); } catch {}
   }
+  // Pre-await LibraryPage's own internal lazy() sections so renderToString
+  // never suspends on them. Both /library and /browser render LibraryPage.
+  if (kind === "library") {
+    await Promise.all([
+      import("./pages/library/CmsDocsSection").catch(() => {}),
+      import("./pages/library/CmsPostsGrid").catch(() => {}),
+      import("./pages/library/QuestionPapersSection").catch(() => {}),
+    ]);
+  }
   // Mirror per-request preloads onto `globalThis` AFTER the only
   // `await` between us and `renderToString`, so concurrent
   // `renderRoute()` calls (the prerender script runs them with

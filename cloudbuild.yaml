@@ -103,9 +103,9 @@ steps:
       - >-
         --remove-env-vars=VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG
       - >-
-        --remove-secrets=VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG,POSTHOG_API_KEY,INDEXNOW_API_KEY,INDEXNOW_INTERNAL_SECRET
+        --remove-secrets=VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN,POSTHOG_API_KEY,INDEXNOW_API_KEY,INDEXNOW_INTERNAL_SECRET
       - >-
-        --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest,UPSTASH_REDIS_REST_URL=upstash-redis-rest-url:latest,UPSTASH_REDIS_REST_TOKEN=upstash-redis-rest-token:latest
+        --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest
 
   # ── Step 5: Attach optional secrets (CF KV + GCS + CF Pages) ─────────────
   # These secrets may not exist yet in Secret Manager. This step probes for
@@ -189,6 +189,22 @@ steps:
           echo "  ✓ SENTRY_DSN"
         else
           echo "  ⚠ SENTRY_DSN not in SM — Sentry error tracking disabled"
+        fi
+
+        # UPSTASH_REDIS_REST_URL — rate limiting (optional: app degrades gracefully without Redis)
+        if gcloud secrets describe upstash-redis-rest-url --project="$$PROJECT" >/dev/null 2>&1; then
+          UPDATES="$${UPDATES:+$$UPDATES,}UPSTASH_REDIS_REST_URL=upstash-redis-rest-url:latest"
+          echo "  ✓ upstash-redis-rest-url"
+        else
+          echo "  ⚠ upstash-redis-rest-url not in SM — Redis rate limiting disabled"
+        fi
+
+        # UPSTASH_REDIS_REST_TOKEN — rate limiting (optional)
+        if gcloud secrets describe upstash-redis-rest-token --project="$$PROJECT" >/dev/null 2>&1; then
+          UPDATES="$${UPDATES:+$$UPDATES,}UPSTASH_REDIS_REST_TOKEN=upstash-redis-rest-token:latest"
+          echo "  ✓ upstash-redis-rest-token"
+        else
+          echo "  ⚠ upstash-redis-rest-token not in SM — Redis rate limiting disabled"
         fi
 
         # POSTHOG_API_KEY — product analytics (optional)

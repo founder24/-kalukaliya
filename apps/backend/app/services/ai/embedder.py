@@ -156,8 +156,11 @@ async def _get_embedding_access_token() -> str:
             import google.auth.transport.requests
 
             request = google.auth.transport.requests.Request()
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, creds.refresh, request)
+            if asyncio.iscoroutinefunction(creds.refresh):
+                await creds.refresh(request)
+            else:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, creds.refresh, request)
 
         _cached_token = creds.token
         # Token typically valid for 1 hour
