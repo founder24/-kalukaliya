@@ -11,7 +11,6 @@ import time
 
 from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
-from app.db.redis import init_redis, close_redis
 from app.api.v1 import (
     chat,
     auth,
@@ -75,16 +74,6 @@ async def lifespan(app: FastAPI):
         )
         logger.critical(err_msg)
         settings.startup_errors.append(err_msg)
-
-    try:
-        await init_redis()
-        logger.info("Redis initialized successfully")
-    except Exception as e:
-        # Same rationale as MongoDB above — degrade gracefully, don't crash.
-        logger.critical(
-            f"Redis initialization failed ({settings.APP_ENV}): {e} — "
-            "service is DEGRADED. Set UPSTASH_REDIS_REST_URL/TOKEN env vars to restore."
-        )
 
     # ── Load SARVAM_API_KEY from GCP Secret Manager ───────────────────────────
     # The service account JSON in GOOGLE_APPLICATION_CREDENTIALS_JSON is used
@@ -181,15 +170,19 @@ async def lifespan(app: FastAPI):
 
     # Initialize Sentry with FastAPI integration
     if settings.SENTRY_DSN:
+        import os as _os
         sentry_sdk.init(
             dsn=settings.SENTRY_DSN,
             environment=settings.SENTRY_ENVIRONMENT,
             traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
             profiles_sample_rate=0.1,
+            send_default_pii=False,
             integrations=[
                 FastApiIntegration(transaction_style="endpoint"),
             ],
         )
+        sentry_sdk.set_tag("revision", _os.environ.get("K_REVISION", "local"))
+        sentry_sdk.set_tag("service", "syrabit-backend")
         logger.info("Sentry initialized")
 
     # Initialize PostHog
@@ -213,7 +206,6 @@ async def lifespan(app: FastAPI):
     await razorpay_client.close()
     await close_resend_client()
     await close_mongo()
-    await close_redis()
     logger.info("Application shutdown complete")
 
 

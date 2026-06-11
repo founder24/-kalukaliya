@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
+import "./sentry";
 import App, { preloadPageForKind } from "./App";
 import { initWebVitals } from "./utils/webVitals";
 import Analytics from "./utils/analytics";

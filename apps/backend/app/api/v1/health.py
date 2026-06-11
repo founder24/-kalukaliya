@@ -50,33 +50,6 @@ async def mongo_ping() -> Dict[str, Any]:
         return {"status": "unhealthy", "error": str(e)}
 
 
-async def redis_ping() -> Dict[str, Any]:
-    """Ping Upstash Redis connection.
-
-    Returns "disabled" (not "unhealthy") when UPSTASH credentials are absent —
-    Redis is an optional dependency; missing credentials is an intentional
-    configuration choice, not a service failure.
-    """
-    from app.config import settings
-
-    if not settings.UPSTASH_REDIS_REST_URL or not settings.UPSTASH_REDIS_REST_TOKEN:
-        return {"status": "disabled", "reason": "UPSTASH credentials not configured"}
-
-    try:
-        from app.db.redis import get_redis
-
-        redis = get_redis()
-        t0 = time.monotonic()
-        result = await redis.ping()
-        latency_ms = round((time.monotonic() - t0) * 1000, 1)
-        if result:
-            return {"status": "healthy", "latency_ms": latency_ms}
-        else:
-            return {"status": "unhealthy", "error": "Ping returned false"}
-    except Exception as e:
-        logger.warning(f"Redis ping failed: {str(e)}")
-        return {"status": "unhealthy", "error": str(e)}
-
 
 async def mongo_vector_search_ping() -> Dict[str, Any]:
     """Ping MongoDB vector search (topic embeddings cache)."""
@@ -216,27 +189,22 @@ async def deep_health_check():
 
     Checks:
     - MongoDB connection
-    - Redis connection
-    - Vertex AI Search service
-    - Vertex AI configuration
+    - MongoDB vector search (topic embeddings)
+    - Sarvam AI reachability
     """
     results = await asyncio.gather(
         _safe_check(mongo_ping()),
-        _safe_check(redis_ping()),
         _safe_check(mongo_vector_search_ping()),
         _safe_check(sarvam_ping()),
     )
     checks = {
         "mongodb": results[0],
-        "redis": results[1],
-        "mongo_vector_search": results[2],
-        "sarvam_ai": results[3],
+        "mongo_vector_search": results[1],
+        "sarvam_ai": results[2],
     }
 
-    # Determine overall status
-    # Redis is optional — "disabled" (no credentials) is acceptable, not a failure.
-    CORE_SERVICES = {"mongodb", "redis"}
-    ACCEPTABLE = {"healthy", "disabled"}
+    CORE_SERVICES = {"mongodb"}
+    ACCEPTABLE = {"healthy"}
 
     core_healthy = all(checks[svc].get("status") in ACCEPTABLE for svc in CORE_SERVICES)
     all_healthy = all(check.get("status") == "healthy" for check in checks.values())
@@ -333,11 +301,10 @@ async def provider_health_check():
       unhealthy — ≥1 provider explicitly unhealthy
     """
     results = await asyncio.gather(
-        _safe_check(vertex_ping(),           timeout=10.0),
-        _safe_check(sarvam_ping(),           timeout=10.0),
-        _safe_check(google_tts_ping(),       timeout=5.0),
-        _safe_check(mongo_vector_search_ping(), timeout=10.0),
-        _safe_check(redis_ping(),            timeout=5.0),
+        _safe_check(vertex_ping(),               timeout=10.0),
+        _safe_check(sarvam_ping(),               timeout=10.0),
+        _safe_check(google_tts_ping(),           timeout=5.0),
+        _safe_check(mongo_vector_search_ping(),  timeout=10.0),
         _safe_check(cloudflare_workers_ai_ping(), timeout=10.0),
     )
 
@@ -346,8 +313,7 @@ async def provider_health_check():
         "sarvam_ai":             results[1],
         "google_tts":            results[2],
         "vector_search":         results[3],
-        "redis":                 results[4],
-        "cloudflare_workers_ai": results[5],
+        "cloudflare_workers_ai": results[4],
     }
 
     statuses = [p.get("status", "unknown") for p in providers.values()]

@@ -25,8 +25,10 @@ if not _deprecation_warned:
     )
     _deprecation_warned = True
 
-from upstash_redis.asyncio import Redis
 from app.config import settings
+
+class Redis:  # noqa: F811 — stub replaces upstash_redis.asyncio.Redis after removal
+    """Stub to avoid import errors in this deprecated module. Do not use."""
 
 # Signal that nothing should be imported from this module
 __all__ = []

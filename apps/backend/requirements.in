@@ -28,5 +28,4 @@ razorpay
 resend
 sentry-sdk
 tenacity
-upstash-redis
 uvicorn

@@ -9,6 +9,7 @@ from app.models.chat import Chat
 from app.models.feedback import ChatFeedback
 from app.models.knowledge import KnowledgeObject
 from app.models.cms import CmsDocument
+from app.models.quota import QuotaUsage
 from app.models.content import (
     Board,
     Class,
@@ -68,6 +69,7 @@ async def init_mongo() -> None:
                     ChatFeedback,
                     KnowledgeObject,
                     CmsDocument,
+                    QuotaUsage,
                     Board,
                     Class,
                     Stream,

@@ -259,8 +259,6 @@ typing-inspection==0.4.2
     #   fastapi
     #   pydantic
     #   pydantic-settings
-upstash-redis==1.7.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
 urllib3==2.7.0
     # via
     #   requests

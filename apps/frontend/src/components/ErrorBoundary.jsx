@@ -6,6 +6,7 @@
 import { Component } from 'react';
 import { RefreshCw, Home, AlertTriangle } from 'lucide-react';
 import { log } from '@/utils/logger';
+import { Sentry } from '../sentry';
 
 export class ErrorBoundary extends Component {
   constructor(props) {
@@ -20,10 +21,8 @@ export class ErrorBoundary extends Component {
   componentDidCatch(error, errorInfo) {
     this.setState({ errorInfo });
 
-    // Report to Sentry if available
-    if (window.Sentry) {
-      window.Sentry.captureException(error, { extra: errorInfo });
-    }
+    // Report to Sentry SDK
+    try { Sentry.captureException(error, { extra: errorInfo }); } catch {}
 
     // Report to PostHog if available
     if (window.posthog) {

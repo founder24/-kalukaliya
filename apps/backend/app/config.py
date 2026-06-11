@@ -32,9 +32,9 @@ class Settings(BaseSettings):
     CF_R2_ACCESS_KEY: Optional[str] = None
     CF_R2_SECRET_KEY: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
-    # NOTE: CF_AI_MODEL is used ONLY for OCR (vision_analyze) and TTS (text_to_speech).
-    # English chat routing was moved to Vertex AI (VERTEX_GEMINI_MODEL) for performance.
-    CF_AI_MODEL: str = "@cf/meta/llama-3.1-8b-instruct"
+    # CF_AI_MODEL: primary model for English chat + OCR + TTS via CF Workers AI REST API.
+    # AWQ quantized variant is faster and available across all CF Workers AI regions.
+    CF_AI_MODEL: str = "@cf/meta/llama-3.1-8b-instruct-awq"
     CF_AI_VISION_MODEL: str = "@cf/unum/uform-gen2-qwen-500m"
     CF_AI_TTS_MODEL: str = "@cf/myshell/melotts"
     # Cloudflare Pages deploy hook — triggers a rebuild to regenerate static content
@@ -58,9 +58,7 @@ class Settings(BaseSettings):
     # Note (HF-111): MONGODB_MAX_POOL_SIZE=50 is sufficient. Monitor via OTel metrics.
     MONGODB_MIN_POOL_SIZE: int = 10
 
-    # --- P5: Upstash (Gatekeeper) ---
-    UPSTASH_REDIS_REST_URL: Optional[str] = None
-    UPSTASH_REDIS_REST_TOKEN: Optional[str] = None
+    # --- P5: Rate Limiting (quota via MongoDB, burst via Cloudflare KV) ---
     RATE_LIMIT_FREE_TIER: int = 30
     RATE_LIMIT_PRO_TIER: int = 999999
 
@@ -245,8 +243,6 @@ class Settings(BaseSettings):
                     logger.error(f"CONFIG ERROR: {msg}")
             if not self.MONGODB_URI:
                 logger.warning("MONGODB_URI is not set in production")
-            if not self.UPSTASH_REDIS_REST_URL:
-                logger.warning("UPSTASH_REDIS_REST_URL is not set in production")
             if not self.VERTEX_SEARCH_DATASTORE_ID:
                 logger.warning("VERTEX_SEARCH_DATASTORE_ID is not set in production")
             # Warn about missing service credentials
