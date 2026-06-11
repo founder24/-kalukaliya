@@ -142,3 +142,4 @@ async def load_secrets_into_settings() -> dict[str, str]:
         results[secret_id] = status
 
     return results
+
