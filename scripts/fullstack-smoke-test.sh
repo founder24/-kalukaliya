@@ -32,6 +32,7 @@ CYAN='\033[0;36m';  BOLD='\033[1m';   RESET='\033[0m'
 pass() { echo -e "  ${GREEN}✓${RESET}  $1"; PASS=$((PASS+1)); }
 fail() { echo -e "  ${RED}✗${RESET}  $1"; FAIL=$((FAIL+1)); }
 skip() { echo -e "  ${YELLOW}–${RESET}  $1 (skipped)"; SKIP=$((SKIP+1)); }
+warn() { echo -e "  ${YELLOW}⚠${RESET}  $1"; }
 header() { echo -e "\n${CYAN}${BOLD}── $1 ──${RESET}"; }
 
 http_status()        { curl -s  -o /dev/null -w "%{http_code}" --max-time 15 "$@" || echo "000"; }
@@ -149,14 +150,7 @@ else
   echo    "  Action: check /health/deep for full status, review Cloud Run logs for init error."
 fi
 
-REDIS_STATUS=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('redis',{}).get('status','')")
-if [ "$REDIS_STATUS" = "healthy" ]; then
-  pass "Redis healthy"
-elif [ "$REDIS_STATUS" = "disabled" ]; then
-  pass "Redis disabled (UPSTASH credentials not configured — expected in this environment)"
-else
-  fail "Redis unhealthy: $(json_field "$DEEP_BODY" "d.get('checks',{}).get('redis',{}).get('error','')")"
-fi
+skip "Redis check (Upstash Redis removed — quota tracking moved to MongoDB)"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 5b. Vector Index Verification (Atlas Search / Vector Search)
