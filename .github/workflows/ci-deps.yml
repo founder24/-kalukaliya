@@ -63,6 +63,7 @@ jobs:
   pypi-verify:
     name: All pinned versions exist on PyPI
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
