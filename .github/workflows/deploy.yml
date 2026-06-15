@@ -128,7 +128,8 @@ jobs:
             gcloud run services update syrabit-backend \
               --region="$REGION" \
               --project="$PROJECT" \
-              --update-secrets="$UPDATES"
+              --update-secrets="$UPDATES" || \
+            echo "⚠  Optional secret attach returned non-zero — continuing (non-blocking)"
           fi
 
           if [[ -n "$REMOVALS" ]]; then
