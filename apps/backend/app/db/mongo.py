@@ -250,6 +250,14 @@ async def create_indexes() -> None:
     except Exception as e:
         logger.warning(f"Topic-embeddings index creation failed (non-fatal): {e}")
 
+    # ── Auth rate limit (IP-based, 90s TTL buckets) ───────────────────────────
+    # _id is the rate key (endpoint:ip:minute_bucket), expires_at drives TTL.
+    # Short TTL (90s) covers the current minute + partial next minute so no
+    # bucket survives longer than needed.
+    await _ensure_ttl_index(
+        db.auth_rate_limit, [("expires_at", ASCENDING)], 0
+    )
+
     logger.info("MongoDB indexes created/verified")
 
 

@@ -113,9 +113,11 @@ async def sarvam_ping() -> Dict[str, Any]:
             )
         latency_ms = round((time.monotonic() - t0) * 1000, 1)
 
-        # Any non-connection-error response means the endpoint is reachable
+        # Any non-connection-error response means the endpoint is reachable.
+        # The base URL (/v1) returning 404 is expected — it has no GET handler.
+        # Only 5xx responses indicate a real Sarvam infrastructure problem.
         if resp.status_code < 500:
-            return {"status": "healthy", "latency_ms": latency_ms, "http": resp.status_code}
+            return {"status": "healthy", "latency_ms": latency_ms}
         return {"status": "unhealthy", "error": f"HTTP {resp.status_code}", "latency_ms": latency_ms}
     except Exception as e:
         logger.warning(f"Sarvam ping failed: {str(e)}")

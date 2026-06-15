@@ -471,18 +471,20 @@ async def get_current_user_optional(
 
 async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) -> None:
     """
-    IP-based rate limiting using Upstash Redis.
+    IP-based rate limiting using MongoDB (auth_rate_limit collection, TTL-keyed).
     Raises HTTP 429 if limit exceeded. Fails open (logs warning, allows request)
-    if Redis is unavailable — blocking auth entirely is worse than a brief burst.
-    In development mode, rate limiting is skipped entirely so local/Replit dev works
-    without Redis configured.
+    if MongoDB is unavailable — blocking auth entirely is worse than a brief burst.
+    In development mode, rate limiting is skipped entirely so local/Replit dev works.
     """
     if settings.APP_ENV == "development":
         return
     try:
-        from app.db.redis import get_redis
+        from app.db.mongo import get_mongo_client
+        from pymongo import ReturnDocument
 
-        redis = get_redis()
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+
         client_ip = (
             request.headers.get("CF-Connecting-IP")
             or request.headers.get("X-Real-IP")
@@ -490,11 +492,21 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
             or (request.client.host if request.client else "unknown")
         )
         minute_bucket = int(time.time() // 60)
-        rate_key = f"auth_limit:{endpoint}:{client_ip}:{minute_bucket}"
+        rate_key = f"{endpoint}:{client_ip}:{minute_bucket}"
 
-        attempt_count = await redis.incr(rate_key)
-        if attempt_count == 1:
-            await redis.expire(rate_key, 60)
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(seconds=90)
+
+        result = await db.auth_rate_limit.find_one_and_update(
+            {"_id": rate_key},
+            {
+                "$inc": {"count": 1},
+                "$setOnInsert": {"expires_at": expires_at},
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        attempt_count = result["count"] if result else 1
 
         if attempt_count > max_attempts:
             raise HTTPException(
@@ -502,14 +514,14 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
                 detail=f"Too many {endpoint} attempts. Please try again in 1 minute.",
             )
     except HTTPException:
-        raise  # Re-raise 429
+        raise
     except Exception as e:
-        # Fail-open: Redis unavailable → log and allow the request through.
-        # Blocking auth entirely when Redis is down is worse than the risk of
-        # a burst of unauthenticated attempts; bcrypt cost still throttles
-        # brute-force, and Cloudflare WAF provides an outer rate-limit layer.
+        # Fail-open: MongoDB unavailable → log and allow the request through.
+        # Blocking auth entirely when DB is down is worse than a brief burst;
+        # bcrypt cost still throttles brute-force and Cloudflare WAF provides
+        # an outer rate-limit layer.
         logger.warning(
-            f"Rate limiting unavailable ({endpoint}), failing open: {type(e).__name__}"
+            f"Auth rate limiting unavailable ({endpoint}), failing open: {type(e).__name__}"
         )
 
 
