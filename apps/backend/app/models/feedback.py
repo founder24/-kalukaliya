@@ -19,7 +19,7 @@ class ChatFeedback(Document):
     session_id: Optional[str] = None
     message_id: str
     lang: Literal["en", "as"]
-    model_provider: str  # "vertex" | "sarvam"
+    model_provider: str  # "sarvam"
     rating: Literal[1, -1]  # 1 = thumbs up, -1 = thumbs down
     latency_ms: Optional[int] = None
     query_text: Optional[str] = None  # First 100 chars for debugging

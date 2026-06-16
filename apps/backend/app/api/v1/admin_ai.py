@@ -21,18 +21,7 @@ async def ai_providers(request: Request):
 
     providers = []
 
-    # Vertex AI (Google)
-    providers.append(
-        {
-            "name": "vertex_ai",
-            "model": settings.VERTEX_GEMINI_MODEL,
-            "location": settings.VERTEX_LOCATION,
-            "configured": bool(settings.VERTEX_PROJECT_ID),
-            "status": "configured" if settings.VERTEX_PROJECT_ID else "not_configured",
-        }
-    )
-
-    # Sarvam AI (Indic)
+    # Sarvam AI (Indic + English)
     providers.append(
         {
             "name": "sarvam_ai",
@@ -52,23 +41,13 @@ async def reset_circuit_breakers(request: Request):
     Use before running integration tests or after a transient AI outage."""
     await _validate_admin_session(request)
 
-    from app.core.circuit_breaker import (
-        vertex_circuit_breaker,
-        sarvam_circuit_breaker,
-    )
+    from app.core.circuit_breaker import sarvam_circuit_breaker
 
-    before = {
-        "vertex_ai": vertex_circuit_breaker.get_status()["state"],
-        "sarvam_ai": sarvam_circuit_breaker.get_status()["state"],
-    }
+    before = {"sarvam_ai": sarvam_circuit_breaker.get_status()["state"]}
 
-    vertex_circuit_breaker.reset()
     sarvam_circuit_breaker.reset()
 
-    after = {
-        "vertex_ai": vertex_circuit_breaker.get_status()["state"],
-        "sarvam_ai": sarvam_circuit_breaker.get_status()["state"],
-    }
+    after = {"sarvam_ai": sarvam_circuit_breaker.get_status()["state"]}
 
     logger.info("Circuit breakers manually reset by admin")
     return {
@@ -84,18 +63,11 @@ async def ai_status(request: Request):
     """Current AI system status."""
     await _validate_admin_session(request)
 
-    vertex_ok = bool(settings.VERTEX_PROJECT_ID)
     sarvam_ok = bool(settings.SARVAM_API_KEY)
-
-    overall = "healthy"
-    if not vertex_ok and not sarvam_ok:
-        overall = "degraded"
-    elif not vertex_ok or not sarvam_ok:
-        overall = "partial"
+    overall = "healthy" if sarvam_ok else "degraded"
 
     return {
         "overall_status": overall,
-        "vertex_ai": "ok" if vertex_ok else "not_configured",
         "sarvam_ai": "ok" if sarvam_ok else "not_configured",
-        "active_model": settings.VERTEX_GEMINI_MODEL,
+        "active_model": settings.SARVAM_MODEL,
     }

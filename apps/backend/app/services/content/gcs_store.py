@@ -2,7 +2,6 @@
 GCS Content Store - Source of truth for educational content.
 
 Writes content documents to Google Cloud Storage.
-Vertex AI Search Datastore indexes from this bucket.
 Cloudflare Pages rebuild reads from this bucket at build time.
 """
 
@@ -25,24 +24,26 @@ class GCSContentStore:
         self._client: Optional[storage.Client] = None
 
     @property
+    def _project_id(self) -> str:
+        """Extract GCP project ID from SA credentials JSON."""
+        creds = settings.google_credentials
+        return creds.get("project_id", "") if creds else ""
+
+    @property
     def _bucket_name(self) -> str:
-        return (
-            settings.GCS_CONTENT_BUCKET
-            or f"{settings.VERTEX_PROJECT_ID}-syrabit-content"
-        )
+        return settings.GCS_CONTENT_BUCKET or f"{self._project_id}-syrabit-content"
 
     def _get_client(self) -> storage.Client:
         if self._client is None:
+            project = self._project_id or None
             if settings.google_credentials:
                 credentials = service_account.Credentials.from_service_account_info(
                     settings.google_credentials
                 )
-                self._client = storage.Client(
-                    project=settings.VERTEX_PROJECT_ID, credentials=credentials
-                )
+                self._client = storage.Client(project=project, credentials=credentials)
             else:
                 # Use Application Default Credentials (e.g., on Cloud Run)
-                self._client = storage.Client(project=settings.VERTEX_PROJECT_ID)
+                self._client = storage.Client(project=project)
         return self._client
 
     def _get_bucket(self):

@@ -50,7 +50,6 @@ from app.api.v1 import (
     payments,
 )
 from app.api.webhooks import razorpay
-from app.api.v1 import search_compare
 
 logger = logging.getLogger(__name__)
 
@@ -113,15 +112,6 @@ async def lifespan(app: FastAPI):
         )
     except Exception as e:
         logger.warning(f"Topic embedding warm-up failed (non-fatal): {e}")
-
-    # Warm up Vertex AI OAuth token
-    try:
-        from app.services.ai.vertex_client import vertex_client
-
-        await vertex_client._get_access_token()
-        logger.info("Vertex AI OAuth token pre-fetched")
-    except Exception as e:
-        logger.warning(f"Vertex AI token warm-up failed: {e}")
 
     # ── Admin Bootstrap ──────────────────────────────────────────────────────
     # Creates or updates the admin user when ADMIN_EMAIL + ADMIN_PASSWORD are set.
@@ -196,12 +186,10 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    from app.services.ai.vertex_client import vertex_client
     from app.services.ai.sarvam_client import sarvam_client
     from app.services.payment.razorpay_client import razorpay_client
     from app.services.comms.resend_client import close_resend_client
 
-    await vertex_client.close()
     await sarvam_client.close()
     await razorpay_client.close()
     await close_resend_client()
@@ -297,9 +285,6 @@ def create_app() -> FastAPI:
         tags=["Conversations"],
     )
     app.include_router(edu.router, prefix="/api/v1", tags=["Education"])
-    app.include_router(
-        search_compare.router, prefix="/api/v1", tags=["Search Benchmark"]
-    )
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
     app.include_router(
         subscription.router, prefix="/api/v1/subscription", tags=["Subscription"]

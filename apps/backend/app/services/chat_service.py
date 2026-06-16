@@ -2,10 +2,10 @@
 ChatService: Encapsulates RAG chat business logic.
 
 Responsibilities:
-- Language resolution & model routing
-- RAG retrieval (embedding + hybrid search)
+- Language resolution & model routing (Sarvam AI for all languages)
+- RAG retrieval (embedding + MongoDB vector search)
 - Prompt building with citation format
-- LLM calling with Sarvam-to-Vertex fallback
+- LLM calling via Sarvam AI
 - Chat persistence (fire-and-forget) with dead letter on double failure
 - Conversation history loading with Redis caching
 """
@@ -65,11 +65,7 @@ class ChatService:
         """Resolve language and target model from message and optional override."""
         if lang_override:
             detected_lang = lang_override
-            target_model = (
-                settings.SARVAM_MODEL
-                if lang_override == "as"
-                else settings.VERTEX_GEMINI_MODEL
-            )
+            target_model = settings.SARVAM_MODEL
         else:
             detected_lang, target_model = detect_language_and_route(message)
         return detected_lang, target_model

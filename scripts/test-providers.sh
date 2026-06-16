@@ -4,11 +4,9 @@
 # =============================================================================
 #
 # Tests /api/v1/health/providers to verify every live AI integration:
-#   vertex_gemini, sarvam_ai, google_tts, vector_search,
-#   redis, cloudflare_workers_ai
+#   sarvam_ai, vector_search, cloudflare_workers_ai
 #
-# Works against local dev server OR production. Gracefully handles the case
-# where the endpoint is not yet deployed to Cloud Run (404 → skip with hint).
+# Works against local dev server OR production.
 #
 # Usage:
 #   # Local dev:
@@ -22,7 +20,7 @@
 #     bash scripts/test-providers.sh
 #
 # Exit codes:
-#   0 — all critical providers healthy (or skipped with --skip-missing)
+#   0 — all critical providers healthy
 #   1 — one or more critical providers failed
 # =============================================================================
 set -uo pipefail
@@ -52,15 +50,13 @@ jv() {
   echo "$1" | python3 -c "import json,sys; d=json.load(sys.stdin); v=$2; print(v if v is not None else '')" 2>/dev/null || echo ""
 }
 
-# ── Latency threshold checks (ms) ────────────────────────────────────────────
-# Critical providers — failure = overall degraded
-CRITICAL_PROVIDERS=(vertex_gemini sarvam_ai)
-# Optional providers — not_configured is OK; unhealthy = warn but don't fail
-OPTIONAL_PROVIDERS=(google_tts vector_search redis cloudflare_workers_ai)
-
-VERTEX_LATENCY_WARN=8000    # warn if Vertex > 8s
+# ── Latency thresholds (ms) ───────────────────────────────────────────────────
 SARVAM_LATENCY_WARN=15000   # warn if Sarvam > 15s (reasoning phase expected)
-REDIS_LATENCY_WARN=500      # warn if Redis > 500ms
+
+# Critical providers — failure = overall fail
+CRITICAL_PROVIDERS=(sarvam_ai)
+# Optional providers — not_configured is OK; unhealthy = warn only
+OPTIONAL_PROVIDERS=(vector_search cloudflare_workers_ai)
 
 printf "\n${C}${B}Syrabit Provider Health Check${N}\n"
 printf "  Endpoint : %s\n" "$ENDPOINT"
@@ -88,10 +84,8 @@ fi
 if [[ "$HTTP_CODE" == "404" ]]; then
   skip "Endpoint not found (HTTP 404)"
   echo ""
-  echo -e "  ${Y}The /health/providers endpoint has not been deployed to Cloud Run yet.${N}"
-  echo    "  It exists in the local dev build. Deploy the backend to test it in production."
-  echo    "  You can test locally with:"
-  echo    "    BASE_URL=http://localhost:8000 bash scripts/test-providers.sh"
+  echo -e "  ${Y}The /health/providers endpoint may not be deployed yet.${N}"
+  echo    "  Test locally: BASE_URL=http://localhost:8000 bash scripts/test-providers.sh"
   exit 0
 fi
 
@@ -111,7 +105,7 @@ printf "  Overall status: %b\n" \
 # =============================================================================
 # 2. Per-provider checks
 # =============================================================================
-header "Critical Providers (vertex_gemini, sarvam_ai)"
+header "Critical Providers (sarvam_ai)"
 
 check_provider() {
   local name="$1"
@@ -170,57 +164,30 @@ check_provider() {
   esac
 }
 
-check_provider "vertex_gemini"      "$VERTEX_LATENCY_WARN" "true"
-check_provider "sarvam_ai"          "$SARVAM_LATENCY_WARN" "true"
+check_provider "sarvam_ai" "$SARVAM_LATENCY_WARN" "true"
 
-header "Optional Providers (google_tts, vector_search, redis, cloudflare_workers_ai)"
+header "Optional Providers (vector_search, cloudflare_workers_ai)"
 
-check_provider "google_tts"              "0"              "false"
-check_provider "vector_search"           "0"              "false"
-check_provider "redis"                   "$REDIS_LATENCY_WARN" "false"
-check_provider "cloudflare_workers_ai"   "0"              "false"
+check_provider "vector_search"           "0"  "false"
+check_provider "cloudflare_workers_ai"   "0"  "false"
 
 # =============================================================================
-# 3. Redis-specific assertion (we just configured it)
-# =============================================================================
-header "Redis Credential Verification"
-
-REDIS_STATUS=$(jv "$BODY" "d.get('providers',{}).get('redis',{}).get('status','')")
-case "$REDIS_STATUS" in
-  healthy)
-    pass "Redis is connected and healthy (Upstash credentials are valid)"
-    REDIS_LATENCY=$(jv "$BODY" "d.get('providers',{}).get('redis',{}).get('latency_ms','')")
-    [[ -n "$REDIS_LATENCY" ]] && info "Ping latency: ${REDIS_LATENCY}ms"
-    ;;
-  disabled|not_configured)
-    skip "Redis disabled/not_configured — UPSTASH_REDIS_REST_URL may not be bound yet"
-    info "If you just ran gcloud run services update --update-secrets, wait 1 min and re-test"
-    ;;
-  unhealthy|degraded)
-    fail "Redis is $REDIS_STATUS — credentials may be wrong or Upstash endpoint unreachable"
-    REDIS_ERROR=$(jv "$BODY" "d.get('providers',{}).get('redis',{}).get('error','')")
-    [[ -n "$REDIS_ERROR" ]] && info "Error: $REDIS_ERROR"
-    ;;
-esac
-
-# =============================================================================
-# 4. CF Workers AI-specific assertion (we just configured it)
+# 3. CF Workers AI credential verification
 # =============================================================================
 header "Cloudflare Workers AI Credential Verification"
 
 CF_STATUS=$(jv "$BODY" "d.get('providers',{}).get('cloudflare_workers_ai',{}).get('status','')")
 case "$CF_STATUS" in
   healthy)
-    pass "Cloudflare Workers AI is connected and healthy (CF_WORKER_AI_TOKEN is valid)"
+    pass "Cloudflare Workers AI token is valid"
     CF_LATENCY=$(jv "$BODY" "d.get('providers',{}).get('cloudflare_workers_ai',{}).get('latency_ms','')")
     [[ -n "$CF_LATENCY" ]] && info "Latency: ${CF_LATENCY}ms"
     ;;
   disabled|not_configured)
-    skip "Cloudflare Workers AI not_configured — CF_WORKER_AI_TOKEN may not be deployed yet"
-    info "Deploy the new backend image to Cloud Run for this check to work in production"
+    skip "CF Workers AI not_configured — CF_WORKER_AI_TOKEN may not be deployed yet"
     ;;
   unhealthy|degraded)
-    fail "Cloudflare Workers AI is $CF_STATUS — check CF_WORKER_AI_TOKEN and CF_ACCOUNT_ID"
+    fail "CF Workers AI is $CF_STATUS — check CF_WORKER_AI_TOKEN and CF_ACCOUNT_ID"
     CF_ERROR=$(jv "$BODY" "d.get('providers',{}).get('cloudflare_workers_ai',{}).get('error','')")
     [[ -n "$CF_ERROR" ]] && info "Error: $CF_ERROR"
     ;;

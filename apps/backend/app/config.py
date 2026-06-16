@@ -39,19 +39,13 @@ class Settings(BaseSettings):
     CF_AI_TTS_MODEL: str = "@cf/myshell/melotts"
     # Cloudflare Pages deploy hook — triggers a rebuild to regenerate static content
     CF_PAGES_DEPLOY_HOOK: Optional[str] = None
-    # GCS bucket name for educational content (source of truth for Vertex AI + CF Pages)
+    # GCS bucket name for educational content (source of truth for CF Pages)
     GCS_CONTENT_BUCKET: Optional[str] = None
 
-    # --- P2: Azure Compute (Backend) --- metadata only, not used at runtime ---
-    # (Removed: AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, etc. - migrated to GCP)
-
-    # --- P3: Vertex AI Search (Discovery Engine) ---
-    VERTEX_SEARCH_DATASTORE_ID: Optional[str] = None
-    VERTEX_SEARCH_SERVING_CONFIG: str = "default_search"
-    VERTEX_SEARCH_LOCATION: str = "global"
+    # --- MongoDB Search Cache ---
     SEARCH_CACHE_ENABLED: bool = True
 
-    # --- P4: MongoDB (Data) ---
+    # --- MongoDB (Data) ---
     MONGODB_URI: Optional[str] = None
     MONGODB_DB_NAME: str = "syrabit_prod"
     MONGODB_MAX_POOL_SIZE: int = 50
@@ -62,20 +56,14 @@ class Settings(BaseSettings):
     RATE_LIMIT_FREE_TIER: int = 30
     RATE_LIMIT_PRO_TIER: int = 999999
 
-    # --- P6: Vertex AI (Google) ---
+    # --- GCP Credentials (SA key for Cloud Run OIDC, topic embeddings) ---
     # Option 1 (recommended): Path to service account key file
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
-    # Option 2 (legacy): Inline JSON string of service account key
+    # Option 2: Inline JSON string of service account key
+    # Used by CF Worker for Cloud Run OIDC auth; also used by the embedding API.
     GOOGLE_APPLICATION_CREDENTIALS_JSON: Optional[str] = None
-    # Option 3: Gemini API key (Generative Language API - bypasses Vertex AI SDK)
-    GEMINI_API_KEY: Optional[str] = None
-    VERTEX_PROJECT_ID: Optional[str] = None
-    VERTEX_LOCATION: str = "us-central1"
-    VERTEX_GEMINI_MODEL: str = "gemini-2.0-flash"
-    VERTEX_GEMINI_FALLBACK_MODEL: str = "gemini-1.5-flash"
-    VERTEX_VISION_MODEL: str = "gemini-1.5-pro-vision"
 
-    # --- P7: Sarvam AI (Indic) ---
+    # --- Sarvam AI (Indic + English) ---
     SARVAM_API_KEY: Optional[str] = None
     SARVAM_BASE_URL: str = "https://api.sarvam.ai/v1"
     # Valid Sarvam chat-completion models (as of 2025-06): sarvam-30b, sarvam-105b
@@ -243,14 +231,6 @@ class Settings(BaseSettings):
                     logger.error(f"CONFIG ERROR: {msg}")
             if not self.MONGODB_URI:
                 logger.warning("MONGODB_URI is not set in production")
-            if not self.VERTEX_SEARCH_DATASTORE_ID:
-                logger.warning("VERTEX_SEARCH_DATASTORE_ID is not set in production")
-            # Warn about missing service credentials
-            if (
-                not self.VERTEX_PROJECT_ID
-                or not self.GOOGLE_APPLICATION_CREDENTIALS_JSON
-            ):
-                logger.warning("Vertex AI credentials not configured in production")
             if not self.SARVAM_API_KEY:
                 logger.warning("Sarvam AI API key not configured in production")
             if not self.RAZORPAY_KEY_ID or not self.RAZORPAY_KEY_SECRET:

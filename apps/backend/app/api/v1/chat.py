@@ -21,7 +21,6 @@ from app.core.anon import resolve_anon_id, ANON_ID_PATTERN
 from app.services.chat_service import ChatService
 from app.api.deps.rate_limit import check_rate_limit
 from app.utils.tracking import track_chat_completed
-from app.services.ai.vertex_client import vertex_client
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -276,21 +275,6 @@ async def chat(
                     extra={"user_id": user_id, "query": sanitized_message[:50]},
                 )
 
-            # For non-streaming Assamese: override to Gemini.
-            # Sarvam-30b buffered (non-streaming) responses take 15-90s to
-            # complete — always hitting the 15s endpoint timeout.  Gemini
-            # returns a full Assamese response in 1-3s when given the
-            # Assamese-language system prompt built below.  Streaming Assamese
-            # stays on Sarvam (TTFB ~2s with enable_thinking=False).
-            if detected_lang == "as" and (
-                "sarvam" in target_model.lower() or "openhathi" in target_model.lower()
-            ):
-                target_model = settings.VERTEX_GEMINI_MODEL
-                logger.info(
-                    "assamese_nonstream_gemini_override",
-                    extra={"user_id": user_id, "model": target_model},
-                )
-
             # 3. Build system prompt
             system_prompt = ChatService.build_system_prompt(
                 detected_lang, context_chunks
@@ -376,10 +360,7 @@ async def chat(
                 extra={
                     "user_id": user_id,
                     "lang": detected_lang,
-                    "provider": "sarvam"
-                    if "sarvam" in actual_model.lower()
-                    or "openhathi" in actual_model.lower()
-                    else "vertex",
+                    "provider": "sarvam",
                     "latency_ms": latency_ms,
                     "response_length": len(response_text),
                 },
@@ -535,18 +516,6 @@ async def chat_stream(
                 "X-RateLimit-Remaining": "0",
                 "Retry-After": "3600",
             },
-        )
-
-    # Pre-flight circuit breaker check — if Vertex AI is OPEN, return 503 immediately
-    # before streaming starts (once streaming begins the HTTP 200 header is already sent
-    # and the client cannot see a later status change).
-    from app.core.circuit_breaker import vertex_circuit_breaker, CircuitState
-
-    if vertex_circuit_breaker.state == CircuitState.OPEN:
-        raise HTTPException(
-            status_code=503,
-            detail="AI service temporarily unavailable. Please try again shortly.",
-            headers={"Retry-After": "30"},
         )
 
     # Sanitize input to prevent prompt injection
@@ -716,7 +685,7 @@ async def chat_stream(
 
         # -- Final event --
         latency_ms = int((time.time() - start_time) * 1000)
-        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'route_trace': {'decision': 'sarvam' if ('sarvam' in target_model.lower() or 'openhathi' in target_model.lower()) else 'vertex', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model}})}\n\n"
+        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'route_trace': {'decision': 'sarvam', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model}})}\n\n"
 
         # Record final metrics in OTel span
         with tracer.start_as_current_span("chat.stream.complete") as final_span:
@@ -724,13 +693,7 @@ async def chat_stream(
             final_span.set_attribute("chat.response_length", len(full_response))
             final_span.set_attribute("chat.lang", detected_lang)
             final_span.set_attribute("chat.model", actual_model)
-            final_span.set_attribute(
-                "chat.provider",
-                "sarvam"
-                if "sarvam" in actual_model.lower()
-                or "openhathi" in actual_model.lower()
-                else "vertex",
-            )
+            final_span.set_attribute("chat.provider", "sarvam")
 
         # Track in PostHog
         await track_chat_completed(
@@ -965,14 +928,10 @@ async def analyze_image(
     if len(image_bytes) > 4 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Image must be less than 4MB")
 
-    try:
-        result = await vertex_client.vision_analyze(image_bytes, sanitized_prompt)
-        return ImageAnalysisResponse(text=result, model=settings.VERTEX_VISION_MODEL)
-    except RuntimeError as e:
-        logger.error(f"Vision analysis failed: {e}")
-        raise HTTPException(
-            status_code=502, detail="AI vision service temporarily unavailable"
-        )
+    raise HTTPException(
+        status_code=501,
+        detail="Vision analysis is not available. Gemini has been removed from this deployment.",
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1005,15 +964,7 @@ async def text_to_speech(
     if not allowed and not _is_admin:
         raise HTTPException(status_code=429, detail="Rate limit exceeded.")
 
-    try:
-        audio_bytes = await vertex_client.text_to_speech(request.text, request.lang)
-        return StreamingResponse(
-            io.BytesIO(audio_bytes),
-            media_type="audio/wav",
-            headers={"Content-Disposition": "attachment; filename=speech.wav"},
-        )
-    except RuntimeError as e:
-        logger.error(f"TTS failed: {e}")
-        raise HTTPException(
-            status_code=502, detail="AI TTS service temporarily unavailable"
-        )
+    raise HTTPException(
+        status_code=501,
+        detail="Text-to-speech via Gemini is not available. Use Cloudflare Workers AI TTS instead.",
+    )

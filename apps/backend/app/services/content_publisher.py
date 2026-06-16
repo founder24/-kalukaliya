@@ -1,5 +1,5 @@
 """
-ContentPublisherService - Publishes content to Vertex AI Search and Cloudflare.
+ContentPublisherService - Publishes content to Cloudflare and GCS.
 """
 
 import asyncio
@@ -19,10 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class ContentPublisherService:
-    """Service for publishing chapters to Vertex AI Search and Cloudflare."""
-
-    def __init__(self):
-        self._vertex_client = None
+    """Service for publishing chapters to Cloudflare and GCS."""
 
     async def _resolve_hierarchy(self, chapter: Chapter) -> dict:
         """Resolve full Board > Class > Stream > Subject hierarchy for a chapter."""
@@ -38,21 +35,6 @@ class ContentPublisherService:
         board = await Board.get(cls.board_id) if cls and cls.board_id else None
 
         return {"subject": subject, "stream": stream, "cls": cls, "board": board}
-
-    def _get_vertex_client(self):
-        """Lazily initialize and cache the DocumentServiceClient."""
-        if self._vertex_client is None:
-            from google.cloud import discoveryengine_v1
-            from google.oauth2 import service_account
-
-            credentials = service_account.Credentials.from_service_account_info(
-                settings.google_credentials,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-            self._vertex_client = discoveryengine_v1.DocumentServiceClient(
-                credentials=credentials,
-            )
-        return self._vertex_client
 
     def _chunk_content(self, text: str, max_tokens: int = 512) -> list[str]:
         """Split content into chunks of approximately max_tokens tokens (~4 chars per token)."""
@@ -73,167 +55,13 @@ class ContentPublisherService:
         return chunks
 
     async def publish_to_vertex_search(self, chapter: Chapter) -> dict:
-        """Vertex AI Search removed — MongoDB vector search is now the sole RAG backend.
-        This stub is kept so existing callers (admin APIs, content_publisher) don't break.
-        """
-        logger.debug(
-            f"publish_to_vertex_search: skipped for '{chapter.title}' "
-            "(Vertex Search removed; topic embeddings handle RAG)"
-        )
+        """Vertex AI Search removed — MongoDB vector search is now the sole RAG backend."""
         return {"status": "skipped", "reason": "vertex_search_removed"}
 
     async def _publish_to_vertex_search_legacy(self, chapter: Chapter) -> dict:
-        """Legacy Vertex AI Search indexing — disabled. Kept for reference only."""
-        if (
-            not settings.VERTEX_PROJECT_ID
-            or not settings.GOOGLE_APPLICATION_CREDENTIALS_JSON
-            or not settings.VERTEX_SEARCH_DATASTORE_ID
-        ):
-            return {"status": "skipped", "reason": "not_configured"}
+        """Legacy Vertex AI Search indexing — removed. Stub kept for reference."""
+        return {"status": "skipped", "reason": "vertex_search_removed"}
 
-        try:
-            from google.cloud import discoveryengine_v1
-            from google.protobuf import struct_pb2
-
-            client = self._get_vertex_client()
-
-            parent = client.branch_path(
-                project=settings.VERTEX_PROJECT_ID,
-                location=settings.VERTEX_SEARCH_LOCATION,
-                data_store=settings.VERTEX_SEARCH_DATASTORE_ID,
-                branch="default_branch",
-            )
-
-            chunks = self._chunk_content(chapter.content_en or "")
-
-            hierarchy = await self._resolve_hierarchy(chapter)
-            subject = hierarchy["subject"]
-            stream = hierarchy["stream"]
-            cls = hierarchy["cls"]
-            board = hierarchy["board"]
-
-            documents = []
-            for i, chunk in enumerate(chunks):
-                doc_id = f"{str(chapter.id)}_{i}"
-                struct_data = struct_pb2.Struct()
-                struct_data.update(
-                    {
-                        "chapter_id": str(chapter.id),
-                        "title": chapter.title,
-                        "slug": chapter.slug,
-                        "content": chunk,
-                        "chunk_index": i,
-                        "meta_description": chapter.meta_description or "",
-                        "keywords": chapter.keywords or "",
-                        "topics": ", ".join(
-                            t.title for t in (chapter.published_topics or [])
-                        ),
-                        "topic_definitions": "; ".join(
-                            f"{t.title}: {t.definition}"
-                            for t in (chapter.published_topics or [])
-                            if t.definition
-                        ),
-                        "subject_name": subject.name if subject else "",
-                        "class_name": cls.name if cls else "",
-                        "board_name": board.name if board else "",
-                        "stream_name": stream.name if stream else "",
-                        "hierarchy": " > ".join(
-                            seg
-                            for seg in [
-                                board.name if board else "",
-                                cls.name if cls else "",
-                                stream.name if stream else "",
-                                subject.name if subject else "",
-                                chapter.title,
-                            ]
-                            if seg
-                        ),
-                    }
-                )
-                doc = discoveryengine_v1.Document(
-                    id=doc_id,
-                    struct_data=struct_data,
-                    content=discoveryengine_v1.Document.Content(
-                        raw_bytes=chunk.encode("utf-8"),
-                        mime_type="text/plain",
-                    ),
-                )
-                documents.append(doc)
-
-            if documents:
-                for doc in documents:
-                    doc.name = f"{parent}/documents/{doc.id}"
-                    request = discoveryengine_v1.UpdateDocumentRequest(
-                        document=doc,
-                        allow_missing=True,
-                    )
-                    await asyncio.to_thread(client.update_document, request=request)
-
-                # Index each topic as a micro-document for precise matching
-                for topic in chapter.published_topics or []:
-                    topic_doc_id = f"{str(chapter.id)}_topic_{topic.topic_slug}"
-                    topic_struct = struct_pb2.Struct()
-                    topic_content = topic.definition or (
-                        f"{topic.title} is a topic in {chapter.title} "
-                        f"({subject.name if subject else ''}, {cls.name if cls else ''}, {board.name if board else ''})"
-                    )
-                    topic_struct.update(
-                        {
-                            "chapter_id": str(chapter.id),
-                            "title": f"{topic.title} - {chapter.title}",
-                            "content": topic_content,
-                            "topic_title": topic.title,
-                            "topic_slug": topic.topic_slug,
-                            "subject_name": subject.name if subject else "",
-                            "class_name": cls.name if cls else "",
-                            "board_name": board.name if board else "",
-                            "stream_name": stream.name if stream else "",
-                            "hierarchy": " > ".join(
-                                seg
-                                for seg in [
-                                    board.name if board else "",
-                                    cls.name if cls else "",
-                                    stream.name if stream else "",
-                                    subject.name if subject else "",
-                                    chapter.title,
-                                    topic.title,
-                                ]
-                                if seg
-                            ),
-                            "keywords": chapter.keywords or "",
-                            "is_topic_doc": "true",
-                        }
-                    )
-                    if topic.wikidata_uri:
-                        topic_struct.update({"wikidata_uri": topic.wikidata_uri})
-                    topic_doc = discoveryengine_v1.Document(
-                        id=topic_doc_id,
-                        struct_data=topic_struct,
-                        content=discoveryengine_v1.Document.Content(
-                            raw_bytes=topic_content.encode("utf-8"),
-                            mime_type="text/plain",
-                        ),
-                    )
-                    topic_doc.name = f"{parent}/documents/{topic_doc.id}"
-                    request = discoveryengine_v1.UpdateDocumentRequest(
-                        document=topic_doc,
-                        allow_missing=True,
-                    )
-                    await asyncio.to_thread(client.update_document, request=request)
-
-                return {
-                    "status": "uploaded",
-                    "chunks": len(documents),
-                    "topic_docs": len(chapter.published_topics or []),
-                }
-
-            return {"status": "no_content"}
-        except ImportError:
-            logger.warning("google-cloud-discoveryengine not installed, skipping")
-            return {"status": "skipped", "reason": "package_not_installed"}
-        except Exception as e:
-            logger.error(f"Vertex AI Search upload failed: {e}")
-            return {"status": "error", "detail": str(e)}
 
     async def publish_to_cloudflare(self, chapter: Chapter) -> dict:
         """Trigger Cloudflare prerender for the chapter page."""
@@ -256,8 +84,8 @@ class ContentPublisherService:
 
     async def publish_to_gcs(self, chapter: Chapter) -> dict:
         """Write chapter content to GCS (source of truth for educational content)."""
-        if not settings.VERTEX_PROJECT_ID or not settings.GOOGLE_APPLICATION_CREDENTIALS_JSON:
-            logger.warning("GCS not configured (missing VERTEX_PROJECT_ID or credentials), skipping")
+        if not settings.GOOGLE_APPLICATION_CREDENTIALS_JSON:
+            logger.warning("GCS not configured (missing GOOGLE_APPLICATION_CREDENTIALS_JSON), skipping")
             return {"status": "skipped", "reason": "not_configured"}
 
         try:
@@ -304,7 +132,7 @@ class ContentPublisherService:
             logger.warning(f"Failed to trigger Pages rebuild: {e}")
 
     async def publish_chapter(self, chapter_id: str) -> dict:
-        """Full publish pipeline: GCS + Vertex AI Search + CF rebuild."""
+        """Full publish pipeline: GCS + topic embeddings + CF rebuild."""
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
         if not chapter:
             raise ValueError(f"Chapter {chapter_id} not found")
@@ -361,7 +189,7 @@ class ContentPublisherService:
             "chapter_id": chapter_id,
             "status": "published",
             "gcs": gcs_result,
-            "vertex_search": search_result,
+            "search_index": search_result,
             "cloudflare": cf_result,
             "indexnow": indexnow_result,
             "wikidata": wikidata_result,

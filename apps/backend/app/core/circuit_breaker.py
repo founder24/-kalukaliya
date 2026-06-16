@@ -210,16 +210,6 @@ class CircuitBreaker:
 
 
 # Pre-configured circuit breakers for each AI provider.
-# vertex_ai: threshold=8 (needs more failures to trip), reset=15s (recovers faster)
-# This reduces false-trips during integration tests that fire requests in quick succession.
-vertex_circuit_breaker = CircuitBreaker(
-    name="Vertex AI", failure_threshold=8, reset_timeout=15
-)
-
 sarvam_circuit_breaker = CircuitBreaker(
     name="Sarvam AI", failure_threshold=5, reset_timeout=30
-)
-
-vertex_search_circuit_breaker = CircuitBreaker(
-    name="Vertex Search", failure_threshold=3, reset_timeout=30
 )

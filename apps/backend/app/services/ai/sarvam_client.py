@@ -51,7 +51,7 @@ class SarvamAIClient:
     ) -> str:
         """Generate response using Sarvam AI (sarvam-m model).
 
-        Retry policy (mirrors vertex_client):
+        Retry policy:
           - 429 Too Many Requests → wait 3 s then retry once
           - 500 / 502 / 503 from Sarvam → wait 2 s then retry once
         httpx.HTTPStatusError is re-raised after exhaustion so chat.py can

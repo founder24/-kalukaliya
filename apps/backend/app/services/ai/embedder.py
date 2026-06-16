@@ -8,7 +8,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# --- Module-level token cache (Issue #1: mirrors vertex_client.py pattern) ---
+# --- Module-level token cache ---
 _token_lock = asyncio.Lock()
 _cached_token: str | None = None
 _token_expiry: float = 0
@@ -30,16 +30,13 @@ def _get_http_client() -> httpx.AsyncClient:
 
 async def generate_embedding(text: str) -> str:
     """
-    Sanitize and return text for Vertex AI Search's built-in embedding.
-
-    Vertex AI Search handles embedding internally via its serving configuration.
-    This function simply returns the sanitized text.
+    Sanitize and return text.
 
     Args:
-        text: Input text to embed
+        text: Input text
 
     Returns:
-        The sanitized text string (Vertex AI Search handles vectorization)
+        Sanitized text string.
     """
     # Strip excessive whitespace and normalize
     sanitized = " ".join(text.split())
@@ -52,7 +49,7 @@ async def generate_embedding_vector(text: str) -> list[float]:
     """
     Generate a 768-dimension embedding vector using Vertex AI text-embedding-005.
 
-    Calls the Vertex AI REST API directly (same httpx + OAuth2 pattern as vertex_client.py).
+    Calls the Vertex AI REST API directly using the GCP service account credentials.
     The resulting vector is stored in MongoDB for cosine similarity matching.
 
     Args:
@@ -68,11 +65,16 @@ async def generate_embedding_vector(text: str) -> list[float]:
     if not sanitized:
         raise ValueError("Cannot generate embedding for empty text")
 
-    project_id = settings.VERTEX_PROJECT_ID
-    location = settings.VERTEX_LOCATION
+    # Extract project_id from SA credentials JSON (no separate VERTEX_PROJECT_ID needed)
+    creds_json = settings.google_credentials
+    project_id = creds_json.get("project_id") if creds_json else None
+    location = "us-central1"  # text-embedding-005 is available in us-central1
 
     if not project_id:
-        raise RuntimeError("VERTEX_PROJECT_ID is not configured")
+        raise RuntimeError(
+            "project_id not found in Google credentials. "
+            "Set GOOGLE_APPLICATION_CREDENTIALS_JSON."
+        )
 
     # Get access token (cached with 60s-before-expiry check)
     token = await _get_embedding_access_token()
@@ -80,7 +82,7 @@ async def generate_embedding_vector(text: str) -> list[float]:
     url = (
         f"https://{location}-aiplatform.googleapis.com/v1/"
         f"projects/{project_id}/locations/{location}/"
-        f"publishers/google/models/text-embedding-005:predict"
+        "publishers/google/models/text-embedding-005:predict"
     )
 
     payload = {

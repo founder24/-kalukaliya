@@ -6,7 +6,7 @@ import asyncio
 import os
 import time
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
 import logging
@@ -65,33 +65,6 @@ async def mongo_vector_search_ping() -> Dict[str, Any]:
         return {"status": "healthy", "topic_count": count}
     except Exception as e:
         logger.warning(f"MongoDB vector search ping failed: {str(e)}")
-        return {"status": "unhealthy", "error": str(e)}
-
-
-async def vertex_ping() -> Dict[str, Any]:
-    """Ping Vertex AI (lightweight check)"""
-    try:
-        from app.config import settings
-
-        project_id = settings.VERTEX_PROJECT_ID
-        # Treat placeholder/unconfigured values as missing
-        _placeholder = {"not-configured", "not_configured", "", None}
-        if project_id in _placeholder:
-            return {"status": "degraded", "error": "VERTEX_PROJECT_ID not configured"}
-
-        if settings.GOOGLE_APPLICATION_CREDENTIALS_JSON:
-            return {"status": "healthy", "project_id": project_id}
-        elif os.environ.get("K_SERVICE"):
-            # Running on Cloud Run with Workload Identity - ADC is available
-            return {
-                "status": "healthy",
-                "project_id": project_id,
-                "auth": "workload_identity",
-            }
-        else:
-            return {"status": "degraded", "error": "No credentials (SA key or Workload Identity)"}
-    except Exception as e:
-        logger.warning(f"Vertex AI check failed: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
 
 
@@ -227,27 +200,6 @@ async def deep_health_check():
     )
 
 
-async def google_tts_ping() -> Dict[str, Any]:
-    """Check Google TTS / Cloud Text-to-Speech credentials availability."""
-    try:
-        from app.config import settings
-
-        if not settings.GOOGLE_APPLICATION_CREDENTIALS_JSON and not os.environ.get("K_SERVICE"):
-            return {"status": "not_configured", "note": "No SA key and not on Cloud Run (Workload Identity)"}
-
-        import json as _json
-
-        if settings.GOOGLE_APPLICATION_CREDENTIALS_JSON:
-            cred_data = _json.loads(settings.GOOGLE_APPLICATION_CREDENTIALS_JSON)
-            project_id = cred_data.get("project_id", "unknown")
-            return {"status": "healthy", "auth": "service_account", "project_id": project_id}
-
-        return {"status": "healthy", "auth": "workload_identity"}
-    except Exception as e:
-        logger.warning(f"Google TTS check failed: {str(e)}")
-        return {"status": "unhealthy", "error": str(e)[:120]}
-
-
 async def cloudflare_workers_ai_ping() -> Dict[str, Any]:
     """Verify CF Workers AI token by calling the lightweight /ai/models endpoint."""
     try:
@@ -290,11 +242,8 @@ async def provider_health_check():
     Check all AI provider integrations in parallel.
 
     Providers checked:
-      - vertex_gemini       : Vertex AI / Gemini (credential config)
       - sarvam_ai           : Sarvam API endpoint reachability
-      - google_tts          : Cloud Text-to-Speech credentials
       - vector_search       : MongoDB topic embedding cache
-      - redis               : Upstash Redis session store
       - cloudflare_workers_ai : CF Workers AI token validity
 
     Overall status:
@@ -303,19 +252,15 @@ async def provider_health_check():
       unhealthy — ≥1 provider explicitly unhealthy
     """
     results = await asyncio.gather(
-        _safe_check(vertex_ping(),               timeout=10.0),
         _safe_check(sarvam_ping(),               timeout=10.0),
-        _safe_check(google_tts_ping(),           timeout=5.0),
         _safe_check(mongo_vector_search_ping(),  timeout=10.0),
         _safe_check(cloudflare_workers_ai_ping(), timeout=10.0),
     )
 
     providers = {
-        "vertex_gemini":         results[0],
-        "sarvam_ai":             results[1],
-        "google_tts":            results[2],
-        "vector_search":         results[3],
-        "cloudflare_workers_ai": results[4],
+        "sarvam_ai":             results[0],
+        "vector_search":         results[1],
+        "cloudflare_workers_ai": results[2],
     }
 
     statuses = [p.get("status", "unknown") for p in providers.values()]
@@ -340,18 +285,118 @@ async def provider_health_check():
     )
 
 
+@router.get("/chat-pipeline")
+async def chat_pipeline_health(request: Request):
+    """
+    End-to-end chat pipeline integration test.
+
+    Exercises the full Sarvam AI → MongoDB RAG → response pipeline with a
+    minimal probe question. Intended for CI post-deploy smoke testing.
+
+    Auth: Bearer token matching TRANSLATE_CRON_SECRET (same as cron endpoints).
+    Returns 200 on success, 503 on failure, 401 on bad/missing token.
+    """
+    import time as _time
+
+    from app.config import settings
+
+    # ── Auth: require TRANSLATE_CRON_SECRET ──────────────────────────────────
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    expected = settings.TRANSLATE_CRON_SECRET
+    if not expected or token != expected:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "unauthorized", "error": "Valid TRANSLATE_CRON_SECRET required"},
+        )
+
+    result: Dict[str, Any] = {}
+
+    # ── Step 1: Sarvam AI live generation call ───────────────────────────────
+    try:
+        import httpx
+
+        if not settings.SARVAM_API_KEY:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unhealthy", "error": "SARVAM_API_KEY not configured"},
+            )
+
+        payload = {
+            "model": settings.SARVAM_MODEL or "sarvam-30b",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a test probe. Respond with exactly the single word PONG and nothing else.",
+                },
+                {"role": "user", "content": "ping"},
+            ],
+            "max_tokens": 10,
+            "temperature": 0,
+        }
+
+        t0 = _time.monotonic()
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"{settings.SARVAM_BASE_URL}/chat/completions",
+                headers={
+                    "API-Subscription-Key": settings.SARVAM_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        sarvam_latency_ms = round((_time.monotonic() - t0) * 1000, 1)
+
+        if resp.status_code != 200:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "unhealthy",
+                    "step": "sarvam_call",
+                    "error": f"HTTP {resp.status_code}",
+                    "latency_ms": sarvam_latency_ms,
+                },
+            )
+
+        body = resp.json()
+        response_text = (
+            body.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        )
+        result["sarvam_latency_ms"] = sarvam_latency_ms
+        result["response_preview"] = response_text[:40]
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "step": "sarvam_call", "error": str(e)[:120]},
+        )
+
+    # ── Step 2: MongoDB vector search reachability ───────────────────────────
+    try:
+        from app.services.ai.topic_matcher import topic_matcher
+
+        if not topic_matcher._is_cache_valid():
+            await asyncio.wait_for(topic_matcher._load_embeddings(), timeout=5.0)
+
+        topic_count = len(topic_matcher._embeddings or [])
+        result["rag_topics_cached"] = topic_count
+        result["rag_status"] = "healthy" if topic_count > 0 else "degraded"
+    except Exception as e:
+        result["rag_status"] = "unavailable"
+        result["rag_error"] = str(e)[:80]
+
+    result["status"] = "healthy"
+    return JSONResponse(status_code=200, content=result)
+
+
 @router.get("/circuit-breakers")
 async def circuit_breaker_status():
     """
     Get status of all circuit breakers.
     Useful for monitoring service resilience.
     """
-    from app.core.circuit_breaker import (
-        vertex_circuit_breaker,
-        sarvam_circuit_breaker,
-    )
+    from app.core.circuit_breaker import sarvam_circuit_breaker
 
     return {
-        "vertex_ai": vertex_circuit_breaker.get_status(),
         "sarvam_ai": sarvam_circuit_breaker.get_status(),
     }

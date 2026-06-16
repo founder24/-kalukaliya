@@ -87,10 +87,10 @@ jobs:
             --allow-unauthenticated \
             --min-instances=1 \
             --service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com \
-            --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,SARVAM_MODEL=sarvam-30b,VERTEX_PROJECT_ID=blissful-acumen-495019-t6,VERTEX_LOCATION=asia-south1,TRUST_EDGE_AUTH=true \
-            --remove-env-vars=VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG \
-            --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest\
-            --remove-secrets=CF_PAGES_DEPLOY_HOOK,CF_ACCOUNT_ID,CLOUDFLARE_ACCOUNT_ID,CLOUDFLARE_KV_API_TOKEN,CLOUDFLARE_KV_NAMESPACE_ID,GCS_CONTENT_BUCKET,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN
+            --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,SARVAM_MODEL=sarvam-30b,TRUST_EDGE_AUTH=true \
+            --remove-env-vars=VERTEX_PROJECT_ID,VERTEX_LOCATION,VERTEX_GEMINI_MODEL,VERTEX_GEMINI_FALLBACK_MODEL,VERTEX_VISION_MODEL,VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG \
+            --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest\
+            --remove-secrets=CF_PAGES_DEPLOY_HOOK,CF_ACCOUNT_ID,CLOUDFLARE_ACCOUNT_ID,CLOUDFLARE_KV_API_TOKEN,CLOUDFLARE_KV_NAMESPACE_ID,GCS_CONTENT_BUCKET,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN,GEMINI_API_KEY
 
       - name: Attach optional secrets (guarded — skips if secret missing in SM)
         run: |
@@ -112,7 +112,6 @@ jobs:
           _check POSTHOG_API_KEY             posthog-api-key
           _check INDEXNOW_API_KEY            indexnow-api-key
           _check INDEXNOW_INTERNAL_SECRET    indexnow-internal-secret
-          _check VERTEX_SEARCH_DATASTORE_ID  VERTEX_SEARCH_DATASTORE_ID
           _check SENTRY_DSN                  SENTRY_DSN
           _check CF_ACCOUNT_ID               CF_ACCOUNT_ID
           _check CLOUDFLARE_ACCOUNT_ID        CF_ACCOUNT_ID
@@ -340,6 +339,81 @@ jobs:
         run: node apps/frontend/scripts/indexnow-submit.mjs
         env:
           INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
+
+  gcp-stack-test:
+    name: GCP Stack Test
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-edge]
+    if: |
+      always() &&
+      needs.deploy-backend.result == 'success' &&
+      (needs.deploy-edge.result == 'success' || needs.deploy-edge.result == 'skipped')
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      GCP_PROJECT: blissful-acumen-495019-t6
+      GCP_REGION: asia-south1
+      GCP_SERVICE: syrabit-backend
+      API_URL: https://api.syrabit.ai
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install Python google-auth (for SA key validity check)
+        run: pip install --quiet google-auth requests
+
+      - name: Run GCP stack test
+        run: bash scripts/test-gcp-stack.sh
+
+      - name: Chat pipeline integration test
+        run: |
+          PROJECT=blissful-acumen-495019-t6
+          REGION=asia-south1
+          SERVICE=syrabit-backend
+
+          SVC_URL=$(gcloud run services describe "$SERVICE" \
+            --region "$REGION" --project "$PROJECT" \
+            --format "value(status.url)" 2>/dev/null || echo "")
+
+          if [[ -z "$SVC_URL" ]]; then
+            echo "⚠ Could not get Cloud Run URL — skipping chat pipeline test"
+            exit 0
+          fi
+
+          CRON_SECRET=$(gcloud secrets versions access latest \
+            --secret="translate-cron-secret" --project="$PROJECT" 2>/dev/null || echo "")
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "⚠ translate-cron-secret not found — skipping chat pipeline test"
+            exit 0
+          fi
+
+          echo "Hitting ${SVC_URL}/api/v1/health/chat-pipeline ..."
+          HTTP=$(curl -s -o /tmp/chat_pipeline.json \
+            -w "%{http_code}" \
+            --max-time 35 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${SVC_URL}/api/v1/health/chat-pipeline" 2>/dev/null || echo "000")
+
+          echo "HTTP: $HTTP"
+          cat /tmp/chat_pipeline.json 2>/dev/null && echo ""
+
+          if [[ "$HTTP" == "200" ]]; then
+            SARVAM_MS=$(python3 -c "import json; d=json.load(open('/tmp/chat_pipeline.json')); print(d.get('sarvam_latency_ms','?'))" 2>/dev/null || echo "?")
+            PREVIEW=$(python3 -c "import json; d=json.load(open('/tmp/chat_pipeline.json')); print(d.get('response_preview','?'))" 2>/dev/null || echo "?")
+            echo "✔ Chat pipeline healthy — Sarvam: ${SARVAM_MS}ms, response: '${PREVIEW}'"
+          else
+            echo "::error title=Chat pipeline failed::HTTP ${HTTP} — Sarvam AI or MongoDB RAG is not responding correctly"
+            exit 1
+          fi
 
   smoke-test:
     name: Smoke Tests
