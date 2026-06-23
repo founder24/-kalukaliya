@@ -54,7 +54,7 @@ jobs:
       PROJECT: blissful-acumen-495019-t6
       REGION: asia-south1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Authenticate to GCP (Service Account Key)
         uses: google-github-actions/auth@v2
@@ -204,7 +204,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -309,7 +309,7 @@ jobs:
     env:
       INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -357,7 +357,7 @@ jobs:
       GCP_SERVICE: syrabit-backend
       API_URL: https://api.syrabit.ai
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2

@@ -29,7 +29,7 @@ jobs:
       complexity_warnings: ${{ steps.complexity.outputs.warnings }}
       dead_code: ${{ steps.deadcode.outputs.findings }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -115,7 +115,7 @@ jobs:
       bundle_size_kb: ${{ steps.bundle-size.outputs.size_kb }}
       bundle_exceeded: ${{ steps.bundle-size.outputs.exceeded }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
