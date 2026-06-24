@@ -36,7 +36,7 @@ function LanguageSelector({ responseLang, setResponseLang }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-medium transition-all border"
+        className="flex items-center gap-1 px-1.5 sm:px-2 py-1.5 rounded-lg text-[11px] font-medium transition-all border"
         style={
           responseLang !== 'en'
             ? { background: 'rgba(139,92,246,0.12)', borderColor: 'rgba(139,92,246,0.30)', color: '#8b5cf6' }
@@ -46,9 +46,9 @@ function LanguageSelector({ responseLang, setResponseLang }) {
         title={`Responding in ${current.nativeLabel}`}
         data-testid="lang-selector"
       >
-        <Globe size={13} />
-        <span>{current.label}</span>
-        <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        <Globe size={13} className="flex-shrink-0" />
+        <span className="hidden min-[360px]:inline">{current.label}</span>
+        <ChevronDown size={10} className={`transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open && (
@@ -82,20 +82,23 @@ export function ModelSelector({ model, setModel, showModelMenu, setShowModelMenu
   const modelLabel = MODELS.find((m) => m.value === model) || MODELS[0];
 
   return (
-    <div className="relative flex items-center gap-2" ref={modelMenuRef}>
+    <div className="relative flex items-center gap-1.5 sm:gap-2" ref={modelMenuRef}>
       <button
         onClick={() => setShowModelMenu((v) => !v)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold text-foreground hover:text-primary transition-all border border-border/50 hover:border-primary/30 hover:shadow-[0_0_12px_rgba(139,92,246,0.1)]"
+        className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-lg text-sm font-semibold text-foreground hover:text-primary transition-all border border-border/50 hover:border-primary/30 hover:shadow-[0_0_12px_rgba(139,92,246,0.1)]"
         data-testid="model-selector-button"
       >
-        <img src="/logo-56.webp" alt="" width="16" height="16" className="w-4 h-4 rounded-sm" />
-        <span>{modelLabel.label}</span>
+        <img src="/logo-56.webp" alt="" width="16" height="16" className="w-4 h-4 rounded-sm flex-shrink-0" />
+        <span className="hidden sm:inline">{modelLabel.label}</span>
         {!modelLabel.disabled && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+          <span className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
             {modelLabel.badge.replace(/[🧠⚡🔜]\s*/, '')}
           </span>
         )}
-        <ChevronDown size={14} className={`text-muted-foreground transition-transform ${showModelMenu ? 'rotate-180' : ''}`} />
+        <span className="sm:hidden text-[11px] font-semibold text-primary/80">
+          {modelLabel.badge.replace(/[🧠⚡🔜]\s*/, '')}
+        </span>
+        <ChevronDown size={12} className={`text-muted-foreground transition-transform flex-shrink-0 ${showModelMenu ? 'rotate-180' : ''}`} />
       </button>
       {showModelMenu && (
         <div

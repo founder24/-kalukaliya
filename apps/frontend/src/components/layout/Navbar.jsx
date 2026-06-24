@@ -13,7 +13,7 @@ export const Navbar = ({ pageTitle }) => {
 
   return (
     <header
-      className="sticky top-0 z-40 h-14 flex items-center border-b border-border/60 gap-4 px-4 sm:px-6"
+      className="sticky top-0 z-40 h-14 flex items-center border-b border-border/60 gap-2 px-3 sm:px-4 md:px-6"
       style={{
         background: 'var(--popover-glass)',
         backdropFilter: 'blur(24px) saturate(1.8)',
