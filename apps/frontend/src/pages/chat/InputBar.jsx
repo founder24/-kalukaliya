@@ -175,8 +175,13 @@ export function InputBar({
 
   return (
     <div
-      className="fixed bottom-0 left-0 right-0 z-20 border-t border-border/50 px-4 md:px-6 py-3 pb-[calc(0.75rem+68px+env(safe-area-inset-bottom,0px))] md:pb-3"
-      style={{ background: 'var(--card)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
+      className="fixed bottom-0 left-0 right-0 z-20 border-t border-border/40 px-3 sm:px-4 md:px-6 pt-2 sm:pt-3 pb-[calc(0.5rem+64px+env(safe-area-inset-bottom,0px))] md:pb-3"
+      style={{
+        background: 'color-mix(in srgb, var(--card) 97%, transparent)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        boxShadow: '0 -1px 0 0 rgba(139,92,246,0.08)',
+      }}
       data-testid="chat-input"
     >
       <div className="max-w-3xl mx-auto">
@@ -272,7 +277,7 @@ export function InputBar({
         )}
 
         <div
-          className="relative flex items-end gap-2 p-2.5 pl-2 rounded-3xl border transition-all duration-200"
+          className="relative flex items-end gap-1.5 sm:gap-2 p-2 sm:p-2.5 pl-1.5 sm:pl-2 rounded-3xl border transition-all duration-200"
           style={
             isOutOfCredits
               ? { borderColor: 'rgba(239,68,68,0.20)', opacity: 0.6, background: 'rgba(239,68,68,0.02)' }
@@ -461,8 +466,8 @@ export function InputBar({
                 <span data-testid="anon-credits-remaining">
                   {remaining !== null
                     ? (isOutOfCredits
-                        ? `0 / ${effectiveLimit} free messages left today`
-                        : `${remaining} / ${effectiveLimit} free messages left today`)
+                        ? <><span className="sm:hidden">0 / {effectiveLimit} left</span><span className="hidden sm:inline">0 / {effectiveLimit} free messages left today</span></>
+                        : <><span className="sm:hidden">{remaining} / {effectiveLimit} left</span><span className="hidden sm:inline">{remaining} / {effectiveLimit} free messages left today</span></>)
                     : ''}
                 </span>
                 {remaining !== null && remaining <= Math.ceil(effectiveLimit / 2) && (
