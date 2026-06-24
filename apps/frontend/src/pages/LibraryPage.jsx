@@ -525,8 +525,10 @@ export default function LibraryPage() {
             contain: 'layout',
           }}
         >
-          <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 md:px-6 pt-3 sm:pt-4 pb-2 sm:pb-3 space-y-2 sm:space-y-3">
-            <div className="flex items-center justify-between gap-2 sm:gap-3">
+          <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 md:px-6 pt-3 sm:pt-4 pb-2 sm:pb-3">
+
+            {/* Desktop: heading + lang switcher row */}
+            <div className="hidden sm:flex items-center justify-between gap-3 mb-3">
               <div className="min-w-0">
                 <h1
                   className="text-foreground shimmer-text"
@@ -534,37 +536,66 @@ export default function LibraryPage() {
                 >
                   {t.heading}
                 </h1>
-                <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                <p className="text-sm text-muted-foreground mt-0.5">
                   {t.browse(subjects.length, allChapters.length)}
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0 rounded-xl p-0.5" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.12)' }}>
                 <button
                   onClick={() => switchLang('en')}
-                  className={`h-9 px-3 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                    contentLang === 'en'
-                      ? 'text-white bg-violet-600 shadow-sm'
-                      : 'text-violet-600 hover:bg-violet-50'
-                  }`}
+                  className={`h-9 px-3 rounded-lg text-xs font-semibold transition-all ${contentLang === 'en' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600 hover:bg-violet-50'}`}
                   aria-label="Switch to English"
-                >
-                  English
-                </button>
+                >English</button>
                 <button
                   onClick={() => switchLang('as')}
-                  className={`h-9 px-3 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                    contentLang === 'as'
-                      ? 'text-white bg-violet-600 shadow-sm'
-                      : 'text-violet-600 hover:bg-violet-50'
-                  }`}
+                  className={`h-9 px-3 rounded-lg text-xs font-semibold transition-all ${contentLang === 'as' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600 hover:bg-violet-50'}`}
                   aria-label="Switch to Assamese"
-                >
-                  অসমীয়া
-                </button>
+                >অসমীয়া</button>
               </div>
             </div>
 
-            <div className="relative group/search">
+            {/* Mobile: search + compact lang switcher in one row */}
+            <div className="flex sm:hidden items-center gap-2 mb-2">
+              <div className="relative flex-1 group/search">
+                <Search
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none text-muted-foreground group-focus-within/search:text-primary transition-colors"
+                  aria-hidden="true"
+                />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={handleSearchChange}
+                  aria-label="Search subjects"
+                  placeholder={t.searchPlaceholder}
+                  className="w-full h-10 pl-9 pr-8 rounded-xl text-sm text-foreground outline-none transition-all focus:ring-2 focus:ring-primary/20"
+                  style={{ background: 'var(--card)', border: '1px solid rgba(139,92,246,0.15)', color: 'hsl(var(--foreground))' }}
+                  data-testid="library-search-input"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={handleSearchClear}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground text-xs px-1 py-0.5 rounded transition-colors"
+                    aria-label="Clear search"
+                    data-testid="library-search-clear"
+                  >×</button>
+                )}
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0 rounded-lg p-0.5" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.12)' }}>
+                <button
+                  onClick={() => switchLang('en')}
+                  className={`h-8 px-2 rounded-md text-[11px] font-semibold transition-all ${contentLang === 'en' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600'}`}
+                  aria-label="Switch to English"
+                >EN</button>
+                <button
+                  onClick={() => switchLang('as')}
+                  className={`h-8 px-2 rounded-md text-[11px] font-semibold transition-all ${contentLang === 'as' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600'}`}
+                  aria-label="Switch to Assamese"
+                >অস</button>
+              </div>
+            </div>
+
+            {/* Desktop: search bar (standalone row) */}
+            <div className="hidden sm:block relative group/search">
               <Search
                 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none transition-colors text-muted-foreground group-focus-within/search:text-primary"
                 aria-hidden="true"
@@ -576,11 +607,7 @@ export default function LibraryPage() {
                 aria-label="Search subjects"
                 placeholder={t.searchPlaceholder}
                 className="w-full h-11 pl-10 pr-4 rounded-xl text-sm text-foreground outline-none transition-all focus:ring-2 focus:ring-primary/20"
-                style={{
-                  background: 'var(--card)',
-                  border: '1px solid rgba(139,92,246,0.15)',
-                  color: 'hsl(var(--foreground))',
-                }}
+                style={{ background: 'var(--card)', border: '1px solid rgba(139,92,246,0.15)', color: 'hsl(var(--foreground))' }}
                 data-testid="library-search-input"
               />
               {searchQuery && (
@@ -589,9 +616,7 @@ export default function LibraryPage() {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground text-xs px-1.5 py-0.5 rounded transition-colors"
                   aria-label="Clear search"
                   data-testid="library-search-clear"
-                >
-                  {t.clear}
-                </button>
+                >{t.clear}</button>
               )}
             </div>
 
