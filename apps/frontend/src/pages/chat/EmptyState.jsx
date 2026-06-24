@@ -11,7 +11,6 @@ const EMPTY_STATE_T = {
   en: {
     askAboutSubject: (name) => `Ask me about ${name}`,
     headingLine1: "Hi! I'm Syra — Educational Browser",
-    headingLine2: 'For Assam Board Students',
     subjectSubtitle: 'Syllabus-first answers powered by web search.',
     documentSubtitle: 'Document loaded as primary source. Ask any question.',
     browseSyllabus: 'Browse Syllabus →',
@@ -19,7 +18,6 @@ const EMPTY_STATE_T = {
   as: {
     askAboutSubject: (name) => `${name} বিষয়ে সুধক`,
     headingLine1: 'নমস্কাৰ! মই চিৰা — শৈক্ষিক ব্ৰাউজাৰ',
-    headingLine2: 'আছাম ব’ৰ্ডৰ ছাত্ৰ-ছাত্ৰীৰ বাবে',
     subjectSubtitle: 'ৱেব সন্ধানৰ সহায়ত পাঠ্যক্ৰম-প্ৰথম উত্তৰ।',
     documentSubtitle: 'ডকুমেণ্ট প্ৰাথমিক উৎস হিচাপে লোড হৈছে। যিকোনো প্ৰশ্ন সুধক।',
     browseSyllabus: 'পাঠ্যক্ৰম চাওক →',
@@ -40,27 +38,28 @@ export function EmptyState({ subject, documentId, defaultPrompts, setInput, text
   const showDocumentText = mounted && documentId;
 
   return (
-    <div className="flex flex-col items-center justify-center text-center space-y-5 py-8">
+    <div className="flex flex-col items-center justify-center text-center space-y-4 py-6 px-4">
       <div>
         <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center"
+          className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center"
           style={{
             background: 'linear-gradient(135deg,rgba(124,58,237,0.20),rgba(139,92,246,0.15))',
             border: '1px solid rgba(139,92,246,0.25)',
           }}
         >
-          <BookOpen size={36} className="text-violet-600" />
+          <BookOpen size={30} className="text-violet-600 sm:hidden" />
+          <BookOpen size={36} className="text-violet-600 hidden sm:block" />
         </div>
       </div>
 
       <div>
         <h2
           className="text-foreground mb-1.5 shimmer-text"
-          style={{ fontSize: '1.2rem', fontWeight: 700 }}
+          style={{ fontSize: 'clamp(1rem, 4vw, 1.2rem)', fontWeight: 700 }}
         >
-          {subject ? t.askAboutSubject(subject.name) : <>{t.headingLine1}<br />{t.headingLine2}</>}
+          {subject ? t.askAboutSubject(subject.name) : t.headingLine1}
         </h2>
-        <p className="text-muted-foreground text-sm max-w-sm mx-auto">
+        <p className="text-muted-foreground text-sm max-w-xs sm:max-w-sm mx-auto">
           {showDocumentText
             ? t.documentSubtitle
             : subject
@@ -85,7 +84,7 @@ export function EmptyState({ subject, documentId, defaultPrompts, setInput, text
         </button>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-lg">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-xs sm:max-w-lg">
         {defaultPrompts.map((prompt) => (
           <button
             key={prompt}

@@ -121,9 +121,8 @@ export default function LoginPage() {
               className="mb-4 text-foreground"
               style={{ fontSize: 'clamp(1.6rem, 3vw, 2.2rem)', fontWeight: 800, lineHeight: 1.18, letterSpacing: '-0.02em' }}
             >
-              Educational Browser For<br />
               <span style={{ background: 'linear-gradient(135deg,#7c3aed,#a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-                AssamBoard Students
+                Educational Browser
               </span>
             </h2>
             <p className="mb-10 max-w-sm leading-relaxed text-muted-foreground" style={{ fontSize: '0.95rem' }}>

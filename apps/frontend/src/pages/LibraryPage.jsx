@@ -30,7 +30,6 @@ import QuestionPapersSection from './library/QuestionPapersSection';
 const _t = {
   en: {
     heading: 'Educational Browser',
-    subheading: 'For Assam Board Students',
     browse: (s, c) => `Browse ${s} subjects · ${c} chapters`,
     searchPlaceholder: 'Search subjects, topics, chapters...',
     clear: 'Clear',
@@ -50,7 +49,6 @@ const _t = {
   },
   as: {
     heading: 'শৈক্ষিক ব্ৰাউজাৰ',
-    subheading: 'অসম বোৰ্ডৰ ছাত্ৰ-ছাত্ৰীৰ বাবে',
     browse: (s, c) => `${s} টা বিষয় · ${c} টা অধ্যায় চাওক`,
     searchPlaceholder: 'বিষয়, বিষয়বস্তু, অধ্যায় সন্ধান কৰক...',
     clear: 'মচক',
@@ -524,18 +522,17 @@ export default function LibraryPage() {
             backdropFilter: 'blur(16px)',
             WebkitBackdropFilter: 'blur(16px)',
             borderBottom: '1px solid rgba(139,92,246,0.08)',
-            minHeight: '140px',
             contain: 'layout',
           }}
         >
-          <div className="w-full max-w-6xl mx-auto px-4 md:px-6 pt-5 pb-3 space-y-3">
-            <div className="flex items-center justify-between gap-3">
+          <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 md:px-6 pt-3 sm:pt-4 pb-2 sm:pb-3 space-y-2 sm:space-y-3">
+            <div className="flex items-center justify-between gap-2 sm:gap-3">
               <div className="min-w-0">
                 <h1
                   className="text-foreground shimmer-text"
-                  style={{ fontSize: 'clamp(0.95rem, 3.2vw, 1.5rem)', fontWeight: 700, lineHeight: 1.25 }}
+                  style={{ fontSize: 'clamp(1rem, 3.5vw, 1.4rem)', fontWeight: 700, lineHeight: 1.2 }}
                 >
-                  {t.heading}<br />{t.subheading}
+                  {t.heading}
                 </h1>
                 <p className="text-xs sm:text-sm text-muted-foreground mt-1">
                   {t.browse(subjects.length, allChapters.length)}
@@ -602,7 +599,7 @@ export default function LibraryPage() {
         </div>
 
         <div className="flex-1 overflow-y-auto" ref={setScrollContainerEl}>
-          <div className="w-full max-w-6xl mx-auto px-4 md:px-6 py-5">
+          <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 md:px-6 py-3 sm:py-5">
 
             <ContinueRail contentLang={contentLang} />
             <TrendingRail
@@ -707,7 +704,7 @@ export default function LibraryPage() {
               ) : (
               <>
               <div
-                className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5"
+                className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-5"
                 data-testid="library-subject-grid"
                 style={{ contain: 'layout style', minHeight: '420px' }}
               >
