@@ -47,7 +47,7 @@ function LanguageSelector({ responseLang, setResponseLang }) {
         data-testid="lang-selector"
       >
         <Globe size={13} className="flex-shrink-0" />
-        <span className="hidden min-[360px]:inline">{current.label}</span>
+        <span>{current.label}</span>
         <ChevronDown size={10} className={`transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`} />
       </button>
 
