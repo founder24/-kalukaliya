@@ -828,9 +828,9 @@ export default function ChatPage() {
           </div>
         )}
         <div className="flex-1 overflow-y-auto min-h-0 pb-[calc(8rem+68px+env(safe-area-inset-bottom,0px))] md:pb-32" onClick={() => setShowModelMenu(false)} role="log" aria-label="Chat messages" aria-live="polite">
-          <div className="max-w-3xl mx-auto px-4 md:px-6 py-4">
+          <div className="max-w-3xl mx-auto px-3 sm:px-4 md:px-6 py-3 sm:py-4">
             {messages.length === 0 && (
-              <div style={{ minHeight: '420px' }}>
+              <div style={{ minHeight: 'min(420px, calc(100dvh - 240px))' }}>
                 <EmptyState subject={subject} documentId={documentId} defaultPrompts={defaultPrompts} setInput={setInput} textareaRef={textareaRef} />
               </div>
             )}

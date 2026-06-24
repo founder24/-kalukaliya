@@ -38,28 +38,28 @@ export function EmptyState({ subject, documentId, defaultPrompts, setInput, text
   const showDocumentText = mounted && documentId;
 
   return (
-    <div className="flex flex-col items-center justify-center text-center space-y-4 py-6 px-4">
+    <div className="flex flex-col items-center justify-center text-center space-y-3 sm:space-y-4 py-4 sm:py-6 px-3 sm:px-4">
       <div>
         <div
-          className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center"
+          className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center"
           style={{
             background: 'linear-gradient(135deg,rgba(124,58,237,0.20),rgba(139,92,246,0.15))',
             border: '1px solid rgba(139,92,246,0.25)',
           }}
         >
-          <BookOpen size={30} className="text-violet-600 sm:hidden" />
-          <BookOpen size={36} className="text-violet-600 hidden sm:block" />
+          <BookOpen size={26} className="text-violet-600 sm:hidden" />
+          <BookOpen size={32} className="text-violet-600 hidden sm:block" />
         </div>
       </div>
 
-      <div>
+      <div className="w-full max-w-[18rem] sm:max-w-sm mx-auto">
         <h2
-          className="text-foreground mb-1.5 shimmer-text"
-          style={{ fontSize: 'clamp(1rem, 4vw, 1.2rem)', fontWeight: 700 }}
+          className="text-foreground mb-1.5 shimmer-text leading-snug"
+          style={{ fontSize: 'clamp(0.875rem, 3.8vw, 1.15rem)', fontWeight: 700 }}
         >
           {subject ? t.askAboutSubject(subject.name) : t.headingLine1}
         </h2>
-        <p className="text-muted-foreground text-sm max-w-xs sm:max-w-sm mx-auto">
+        <p className="text-muted-foreground text-xs sm:text-sm mx-auto">
           {showDocumentText
             ? t.documentSubtitle
             : subject
@@ -72,19 +72,19 @@ export function EmptyState({ subject, documentId, defaultPrompts, setInput, text
       {!subject && (
         <button
           onClick={() => navigate('/library')}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 hover:opacity-90 active:scale-95"
+          className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 hover:opacity-90 active:scale-95"
           style={{
             background: 'linear-gradient(135deg,rgba(124,58,237,0.15),rgba(139,92,246,0.15))',
             border: '1px solid rgba(139,92,246,0.25)',
             color: 'hsl(var(--primary))',
           }}
         >
-          <BookOpen size={15} />
+          <BookOpen size={13} />
           {t.browseSyllabus}
         </button>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-xs sm:max-w-lg">
+      <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-1.5 sm:gap-2 w-full max-w-[18rem] min-[400px]:max-w-xs sm:max-w-lg">
         {defaultPrompts.map((prompt) => (
           <button
             key={prompt}

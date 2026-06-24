@@ -641,7 +641,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                       <span className="text-[13px] font-bold text-foreground" style={{ textTransform: 'uppercase', letterSpacing: '0.03em' }}>{sourceMeta.kindLabel}</span>
                     </div>
                   )}
-                  <div className={`flex items-center gap-1.5 mt-1 transition-opacity ${responseLang && responseLang !== 'en' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                  <div className={`flex flex-wrap items-center gap-1 sm:gap-1.5 mt-1 transition-opacity ${responseLang && responseLang !== 'en' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                     {timeStr && (
                       <span className="text-[11px] text-muted-foreground">{timeStr}</span>
                     )}
