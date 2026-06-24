@@ -358,24 +358,24 @@ export function InputBar({
                 ? 'Reading image…'
                 : isOutOfCredits
                 ? (isAnon
-                    ? 'Free daily messages used — sign in to keep chatting'
-                    : 'No credits remaining — upgrade to continue')
+                    ? 'Sign in to keep chatting…'
+                    : 'No credits — upgrade to continue')
                 : activeChapter
                 ? (responseLang === 'as'
-                    ? `${activeChapter.title} সম্পৰ্কে প্ৰশ্ন সুধিব…`
+                    ? `${activeChapter.title} সম্পৰ্কে সুধিব…`
                     : `Ask about ${activeChapter.title}…`)
                 : subject
                 ? (responseLang === 'as'
-                    ? `${subject.name} সম্পৰ্কে অসমীয়াত প্ৰশ্ন সুধিব…`
+                    ? `${subject.name} সম্পৰ্কে সুধিব…`
                     : `Ask about ${subject.name}…`)
                 : (responseLang === 'as'
-                    ? 'অসমীয়াত প্ৰশ্ন সুধিব...'
-                    : 'Ask anything about your Syllabus...')
+                    ? 'সুধিব…'
+                    : 'Message Syra…')
             }
             disabled={isOutOfCredits}
             rows={1}
-            className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed py-2"
-            style={{ minHeight: 24, maxHeight: maxTextareaHeight }}
+            className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground/60 disabled:cursor-not-allowed py-2 leading-relaxed"
+            style={{ minHeight: 28, maxHeight: maxTextareaHeight }}
             aria-label="Type your message"
           />
           <div className="flex items-center gap-1.5 flex-shrink-0">
