@@ -554,6 +554,11 @@ export default function LibraryPage() {
               </div>
             </div>
 
+            {/* Mobile: browse count */}
+            <p className="sm:hidden text-xs text-muted-foreground mb-1.5">
+              {t.browse(subjects.length, allChapters.length)}
+            </p>
+
             {/* Mobile: search + compact lang switcher in one row */}
             <div className="flex sm:hidden items-center gap-2 mb-2">
               <div className="relative flex-1 group/search">
