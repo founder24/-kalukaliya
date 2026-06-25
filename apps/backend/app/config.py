@@ -289,22 +289,30 @@ class Settings(BaseSettings):
 
         Priority:
         1. GOOGLE_APPLICATION_CREDENTIALS (file path) - recommended, safer
-        2. GOOGLE_APPLICATION_CREDENTIALS_JSON (inline JSON) - legacy fallback
-        3. On Cloud Run with Workload Identity, neither is needed (uses ADC)
+        2. GOOGLE_SA_KEY (Replit secret — service account JSON)
+        3. GOOGLE_APPLICATION_CREDENTIALS_JSON (inline JSON) - legacy fallback
+        4. On Cloud Run with Workload Identity, neither is needed (uses ADC)
         """
+        import os
+
         # Option 1: Load from file path
         if self.GOOGLE_APPLICATION_CREDENTIALS:
-            import os
-
             creds_path = os.path.expanduser(self.GOOGLE_APPLICATION_CREDENTIALS)
             try:
                 with open(creds_path) as f:
                     return json.load(f)
             except (FileNotFoundError, json.JSONDecodeError) as e:
                 logger.warning(f"Failed to load credentials from {creds_path}: {e}")
-                return {}
 
-        # Option 2: Inline JSON string
+        # Option 2: GOOGLE_SA_KEY Replit secret
+        google_sa_key = os.environ.get("GOOGLE_SA_KEY")
+        if google_sa_key:
+            try:
+                return json.loads(google_sa_key)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse GOOGLE_SA_KEY: {e}")
+
+        # Option 3: Inline JSON string
         if self.GOOGLE_APPLICATION_CREDENTIALS_JSON:
             try:
                 return json.loads(self.GOOGLE_APPLICATION_CREDENTIALS_JSON)
@@ -312,7 +320,6 @@ class Settings(BaseSettings):
                 logger.warning(
                     f"Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON: {e}"
                 )
-                return {}
 
         return {}
 

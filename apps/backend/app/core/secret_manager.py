@@ -23,6 +23,16 @@ logger = logging.getLogger(__name__)
 # Map: settings attribute name → GCP Secret Manager secret ID
 _SECRET_MAP: dict[str, str] = {
     "SARVAM_API_KEY": "SARVAM_API_KEY",
+    "JWT_SECRET": "JWT_SECRET",
+    "ADMIN_JWT_SECRET": "ADMIN_JWT_SECRET",
+    "RESET_TOKEN_SECRET": "RESET_TOKEN_SECRET",
+    "RAZORPAY_KEY_ID": "RAZORPAY_KEY_ID",
+    "RAZORPAY_KEY_SECRET": "RAZORPAY_KEY_SECRET",
+    "RAZORPAY_WEBHOOK_SECRET": "RAZORPAY_WEBHOOK_SECRET",
+    "RESEND_API_KEY": "RESEND_API_KEY",
+    "POSTHOG_API_KEY": "POSTHOG_API_KEY",
+    "INDEXNOW_API_KEY": "INDEXNOW_API_KEY",
+    "EDGE_SHARED_SECRET": "EDGE_SHARED_SECRET",
 }
 
 
@@ -97,7 +107,8 @@ async def load_secrets_into_settings() -> dict[str, str]:
     creds_info = settings.google_credentials
     if not creds_info:
         logger.warning(
-            "Secret Manager: GOOGLE_APPLICATION_CREDENTIALS_JSON not set — "
+            "Secret Manager: no GCP credentials found (checked GOOGLE_SA_KEY, "
+            "GOOGLE_APPLICATION_CREDENTIALS_JSON, GOOGLE_APPLICATION_CREDENTIALS) — "
             "all secrets will use env-var fallback"
         )
         return {sid: "skipped_no_creds" for sid in _SECRET_MAP.values()}
