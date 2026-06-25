@@ -1,0 +1,259 @@
+Yes — the clean final design is: **book PDF content is chunked topic-wise for RAG, stored as metadata records in MongoDB, and embedded in Cloudflare Vectorize; the frontend page-by-page view is stored separately in Cloudflare for browsing only**. Cloudflare Vectorize supports metadata filtering, and MongoDB chunking guidance recommends document-specific or recursive chunking with overlap for RAG-quality retrieval. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+## 1) API routes
+### Admin ingestion
+- `POST /api/admin/upload/book`
+- `POST /api/admin/upload/syllabus`
+- `POST /api/admin/upload/pyq`
+- `POST /api/admin/upload/chapter-questions`
+- `POST /api/admin/reindex/:documentId`
+- `GET /api/admin/jobs/:jobId`
+
+### Content editing
+- `GET /api/content/subjects`
+- `GET /api/content/chapters?subjectId=&medium=`
+- `GET /api/content/topics?subjectId=&chapterId=&medium=`
+- `GET /api/content/node/:nodeId`
+- `PATCH /api/content/node/:nodeId`
+- `POST /api/content/node/:nodeId/publish`
+
+### Generation and chat
+- `POST /api/chat/stream`
+- `POST /api/chat/generate-notes`
+- `POST /api/chat/generate-questions`
+- `POST /api/chat/feedback`
+
+### Cloudflare frontend
+- `GET /learn/:medium/:subjectSlug/:chapterSlug`
+- `GET /learn/:medium/:subjectSlug/:chapterSlug/:topicSlug`
+- `GET /browse/:medium/:subjectSlug`
+
+Sarvam chat completion is the generation backend, and its docs support multilingual chat flows suitable for English and Assamese modes. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat/chat-completions)
+
+## 2) MongoDB schema
+### subjects
+```json
+{
+  "_id": "subj_math",
+  "name": "Math",
+  "slug": "math",
+  "grade": "10"
+}
+```
+
+### chapters
+```json
+{
+  "_id": "chap_math_03",
+  "subjectId": "subj_math",
+  "title": "Trigonometry",
+  "slug": "trigonometry",
+  "chapterNo": 3
+}
+```
+
+### topics
+```json
+{
+  "_id": "topic_math_03_01",
+  "subjectId": "subj_math",
+  "chapterId": "chap_math_03",
+  "title": "Basic identities",
+  "slug": "basic-identities",
+  "order": 1
+}
+```
+
+### documents
+```json
+{
+  "_id": "doc_001",
+  "subjectId": "subj_math",
+  "medium": "english",
+  "sourceType": "book_pdf",
+  "fileUrl": "cloudflare://...",
+  "status": "processed"
+}
+```
+
+### chunks
+```json
+{
+  "_id": "chk_001",
+  "documentId": "doc_001",
+  "subjectId": "subj_math",
+  "chapterId": "chap_math_03",
+  "topicId": "topic_math_03_01",
+  "medium": "english",
+  "sourceType": "book_pdf",
+  "chunkText": "...",
+  "pageStart": 41,
+  "pageEnd": 42,
+  "vectorId": "cf_vec_abc",
+  "chunkType": "topic_chunk"
+}
+```
+
+### content_nodes
+```json
+{
+  "_id": "node_001",
+  "subjectId": "subj_math",
+  "chapterId": "chap_math_03",
+  "topicId": "topic_math_03_01",
+  "medium": "english",
+  "nodeType": "note",
+  "status": "draft",
+  "version": 1
+}
+```
+
+### page_assets
+```json
+{
+  "_id": "page_001",
+  "subjectId": "subj_math",
+  "chapterId": "chap_math_03",
+  "topicId": "topic_math_03_01",
+  "medium": "english",
+  "cloudflarePath": "/learn/english/math/trigonometry/basic-identities.json",
+  "pageType": "frontend_view"
+}
+```
+
+### generation_jobs
+```json
+{
+  "_id": "job_001",
+  "jobType": "generate_notes",
+  "subjectId": "subj_math",
+  "chapterId": "chap_math_03",
+  "medium": "assamese",
+  "status": "running"
+}
+```
+
+## 3) Cloudflare schema
+Cloudflare Vectorize stores embeddings plus metadata. Metadata filtering works on indexed properties and is applied before top-k retrieval. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/client-api/)
+
+### vector record
+```json
+{
+  "id": "cf_vec_abc",
+  "values": [0.12, 0.98, 0.44],
+  "metadata": {
+    "subjectId": "subj_math",
+    "chapterId": "chap_math_03",
+    "topicId": "topic_math_03_01",
+    "medium": "english",
+    "sourceType": "book_pdf",
+    "chunkType": "topic_chunk",
+    "pageStart": 41,
+    "pageEnd": 42,
+    "blockId": "blk_001"
+  }
+}
+```
+
+### metadata indexes
+Create indexes for:
+- `subjectId`
+- `chapterId`
+- `topicId`
+- `medium`
+- `sourceType`
+- `chunkType`
+
+Only these indexed fields should be used in filters at query time. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+### page storage
+Store rendered frontend page JSON/HTML in Cloudflare as static assets:
+- chapter page view,
+- topic page view,
+- medium-specific public pages,
+- cached generated note pages.
+
+That keeps browsing fast and separate from the RAG data path. [blog.cloudflare](https://blog.cloudflare.com/full-stack-development-on-cloudflare-workers/)
+
+## 4) Ingestion pipeline
+### Step 1: upload
+Admin uploads English or Assamese book PDFs separately.
+
+### Step 2: extract
+Extract text with page markers and preserve chapter headings.
+
+### Step 3: structure
+Map content into:
+- subject,
+- chapter,
+- topic,
+- note text,
+- question text.
+
+### Step 4: chunk for RAG
+Chunk the book PDF into **topic-wise chunks** using recursive or document-specific chunking with overlap. That is better aligned with retrieval than one large PDF blob. [learn.mongodb](https://learn.mongodb.com/courses/chunking-data-for-rag-applications)
+
+### Step 5: persist in MongoDB
+Store:
+- document metadata,
+- chunk registry,
+- topic mapping,
+- edit history,
+- generation job status.
+
+### Step 6: embed and index
+Generate embeddings and upsert to Cloudflare Vectorize with metadata.
+
+### Step 7: generate frontend pages
+Render page-by-page browser assets and store them on Cloudflare.
+
+### Step 8: validate
+Run retrieval tests and note generation checks before publishing.
+
+## 5) Retrieval logic
+### English mode
+- Accept any input language.
+- Normalize the query internally.
+- Retrieve only from English-medium content.
+- Generate output in English only.
+
+### Assamese mode
+- Accept any input language.
+- Normalize the query internally.
+- Retrieve only from Assamese-medium content.
+- Generate output in Assamese only.
+
+Sarvam’s multilingual chat and translation capabilities support this mode-controlled output flow. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/getting-started/models/sarvam-105b)
+
+### Query flow
+1. User selects medium.
+2. Detect subject/chapter/topic.
+3. Build Cloudflare metadata filter.
+4. Query Vectorize.
+5. Fetch top-k topic chunks.
+6. Build Sarvam prompt using retrieved context.
+7. Stream response to client.
+
+### Retrieval priority
+For notes:
+1. exact medium,
+2. exact subject,
+3. exact chapter,
+4. exact topic,
+5. `sourceType = book_pdf`.
+
+For questions:
+1. exact medium,
+2. exact subject,
+3. `sourceType = pyq` or `chapter_question`,
+4. chapter if relevant,
+5. topic if relevant.
+
+### Key rule
+- **RAG data** = topic-wise chunks from the book PDF.
+- **Frontend view data** = page-by-page Cloudflare content.
+- **MongoDB** = registry, edits, and source-of-truth metadata.
+
+That separation gives you precise retrieval and a clean editable hierarchy. [dev](https://dev.to/mongodb/building-a-rag-knowledge-base-on-mongodb-atlas-4jmj)
+
+If you want, I can now turn this into a **database ER diagram and route-by-route request/response spec**.
