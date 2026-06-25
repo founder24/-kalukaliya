@@ -50,7 +50,16 @@ def _get_admin_verification_key() -> tuple:
 async def _csrf_check(request: Request):
     """Validate Origin/Referer for CSRF protection on admin endpoints."""
     if request.method in ("POST", "PUT", "DELETE"):
-        origin = request.headers.get("origin") or request.headers.get("referer", "")
+        origin = request.headers.get("origin", "")
+        if not origin:
+            # Browsers send Referer as a full URL (e.g. https://syrabit.ai/admin/login).
+            # Strip to scheme+host so is_origin_allowed() can match it correctly.
+            referer = request.headers.get("referer", "")
+            if referer:
+                from urllib.parse import urlparse
+                parsed = urlparse(referer)
+                if parsed.scheme and parsed.netloc:
+                    origin = f"{parsed.scheme}://{parsed.netloc}"
         # Skip CSRF check if no Origin/Referer header is present.
         # CSRF protection is only meaningful when a browser sends a cross-origin
         # request. API clients and test runners do not send Origin headers.

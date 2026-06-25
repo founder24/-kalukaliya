@@ -45,6 +45,22 @@ async def get_boards(response: Response):
         return []
 
 
+def _flex_id_variants(id_str: str) -> list:
+    """Return both string and ObjectId variants of an ID for cross-type matching.
+
+    The DB stores reference fields (board_id, class_id) as either legacy string
+    IDs (e.g. 's13', UUID) or MongoDB ObjectIds depending on when the document
+    was created. Querying with $in across both types ensures matches regardless
+    of how the FK was stored.
+    """
+    variants: list = [id_str]
+    try:
+        variants.append(PydanticObjectId(id_str))
+    except Exception:
+        pass
+    return variants
+
+
 @router.get("/classes")
 async def get_classes(response: Response, board_id: Optional[str] = Query(None)):
     """Return all active/published classes, optionally filtered by board_id."""
@@ -52,7 +68,7 @@ async def get_classes(response: Response, board_id: Optional[str] = Query(None))
     try:
         query: dict = {"status": {"$in": ["active", "published"]}}
         if board_id:
-            query["board_id"] = board_id
+            query["board_id"] = {"$in": _flex_id_variants(board_id)}
         classes = await Class.find(query).to_list(length=None)
         return [
             {"id": str(c.id), "name": c.name, "board_id": str(c.board_id), "status": c.status}
@@ -70,7 +86,7 @@ async def get_streams(response: Response, class_id: Optional[str] = Query(None))
     try:
         query: dict = {"status": {"$in": ["active", "published"]}}
         if class_id:
-            query["class_id"] = class_id
+            query["class_id"] = {"$in": _flex_id_variants(class_id)}
         streams = await Stream.find(query).to_list(length=None)
         return [
             {"id": str(s.id), "name": s.name, "class_id": str(s.class_id), "status": s.status}
