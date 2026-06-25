@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     # GCS bucket name for educational content (source of truth for CF Pages)
     GCS_CONTENT_BUCKET: Optional[str] = None
 
+    # --- Cloudflare Vectorize (RAG vector store) ---
+    # Index name created via: wrangler vectorize create syrabit-rag --dimensions=1024 --metric=cosine
+    # Uses the same CF_ACCOUNT_ID and CF_API_TOKEN / CF_WORKER_AI_TOKEN as Workers AI.
+    CF_VECTORIZE_INDEX_NAME: str = "syrabit-rag"
+    # Optional separate token scoped to Vectorize only; falls back to CF_API_TOKEN / CF_WORKER_AI_TOKEN.
+    CF_VECTORIZE_API_TOKEN: Optional[str] = None
+    # Workers AI token (current Cloud Run env var name; also used for embeddings)
+    CF_WORKER_AI_TOKEN: Optional[str] = None
+
     # --- MongoDB Search Cache ---
     SEARCH_CACHE_ENABLED: bool = True
 

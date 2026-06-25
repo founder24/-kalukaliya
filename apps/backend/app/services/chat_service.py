@@ -216,30 +216,44 @@ class ChatService:
             return []
 
     @staticmethod
-    async def retrieve_context(sanitized_message: str, user_tier: str) -> list[dict]:
+    async def retrieve_context(
+        sanitized_message: str,
+        user_tier: str,
+        lang: str = "en",
+        filters: Optional[dict] = None,
+    ) -> list[dict]:
         """
-        Full MongoDB vector search RAG: embed query → cosine match topics →
-        fetch chapter content.  Replaces Vertex AI Search entirely.
+        Full RAG retrieval: tries Vectorize (v2) first, falls back to legacy
+        Atlas $vectorSearch → in-memory cosine on topic_embeddings.
+
+        Path priority (handled inside retrieve_v2):
+          1. TopicMatcher fast path (in-memory, <5ms)
+          2. CF Vectorize top-K + MongoDB chunk hydration (~120ms)
+          3. Atlas $vectorSearch on rag_chunks (legacy v1)
+          4. In-memory cosine on topic_embeddings (pre-ingest fallback)
         """
         try:
             async def _do_retrieval():
-                chunks, _ = await mongo_vector_search.search_context(
+                from app.services.rag.retrieval_v2 import retrieve_v2
+                chunks, path = await retrieve_v2(
                     query=sanitized_message,
-                    lang="en",
+                    lang=lang,
+                    filters=filters or {},
                     limit=settings.MAX_CONTEXT_DOCS,
                 )
-                chunks = [
-                    c for c in chunks
-                    if c.get("score", 0) >= SIMILARITY_THRESHOLD
-                ]
+                chunks = [c for c in chunks if c.get("score", 0) >= SIMILARITY_THRESHOLD]
+                logger.info(
+                    f"retrieve_context: path={path} lang={lang} "
+                    f"chunks_returned={len(chunks)}"
+                )
                 return truncate_chunks_to_budget(chunks, max_tokens=3000)
 
-            return await asyncio.wait_for(_do_retrieval(), timeout=5.0)
+            return await asyncio.wait_for(_do_retrieval(), timeout=8.0)
         except asyncio.TimeoutError:
-            logger.warning("MongoDB vector RAG timed out after 5s")
+            logger.warning("retrieve_context timed out after 8s")
             return []
         except Exception as e:
-            logger.error(f"MongoDB vector RAG failed: {e}")
+            logger.error(f"retrieve_context failed: {e}")
             return []
 
     # ------------------------------------------------------------------

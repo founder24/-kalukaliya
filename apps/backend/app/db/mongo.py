@@ -19,6 +19,13 @@ from app.models.content import (
     TopicEmbedding,
     QuestionPaper,
 )
+from app.models.rag import (
+    RagDocument,
+    Chunk,
+    ContentNode,
+    PageAsset,
+    GenerationJob,
+)
 from app.db.migrations.runner import check_and_apply_migrations
 import logging
 
@@ -77,6 +84,11 @@ async def init_mongo() -> None:
                     Chapter,
                     TopicEmbedding,
                     QuestionPaper,
+                    RagDocument,
+                    Chunk,
+                    ContentNode,
+                    PageAsset,
+                    GenerationJob,
                 ],
             )
 
@@ -250,11 +262,7 @@ async def create_indexes() -> None:
     except Exception as e:
         logger.warning(f"Topic-embeddings index creation failed (non-fatal): {e}")
 
-    # ── RAG chunks ────────────────────────────────────────────────────────────
-    # Pre-filter indexes used by Atlas $vectorSearch and direct chunk lookups.
-    # The vector index itself (rag_chunks_vector) must be created via Atlas UI/API:
-    #   path=embedding, dims=1024, similarity=cosine
-    #   filter fields: language, source_type, subject_id, chapter_id, board, class_level
+    # ── RAG chunks (v1 — Atlas Vector Search, kept for backward compat) ──────
     try:
         await db.rag_chunks.create_index([("chapter_id", ASCENDING)])
         await db.rag_chunks.create_index([("subject_id", ASCENDING), ("language", ASCENDING)])
@@ -262,7 +270,61 @@ async def create_indexes() -> None:
         await db.rag_chunks.create_index([("board", ASCENDING), ("class_level", ASCENDING)])
         await db.rag_chunks.create_index([("updated_at", DESCENDING)])
     except Exception as e:
-        logger.warning(f"RAG chunks index creation failed (non-fatal): {e}")
+        logger.warning(f"RAG chunks (v1) index creation failed (non-fatal): {e}")
+
+    # ── RAG documents (v2 ingestion) ──────────────────────────────────────────
+    try:
+        await db.rag_documents.create_index([("subject_id", ASCENDING), ("medium", ASCENDING)])
+        await db.rag_documents.create_index([("status", ASCENDING)])
+        await db.rag_documents.create_index([("source_type", ASCENDING)])
+        await db.rag_documents.create_index([("updated_at", DESCENDING)])
+    except Exception as e:
+        logger.warning(f"rag_documents index creation failed (non-fatal): {e}")
+
+    # ── Chunks (v2 — Vectorize-linked, text + metadata only, no embedding) ───
+    try:
+        await db.chunks.create_index([("document_id", ASCENDING)])
+        await db.chunks.create_index([("subject_id", ASCENDING), ("medium", ASCENDING)])
+        await db.chunks.create_index([("chapter_id", ASCENDING), ("medium", ASCENDING)])
+        await db.chunks.create_index([("topic_id", ASCENDING)])
+        await db.chunks.create_index([("source_type", ASCENDING), ("medium", ASCENDING)])
+        await db.chunks.create_index([("vector_id", ASCENDING)], sparse=True)
+        await db.chunks.create_index([("updated_at", DESCENDING)])
+    except Exception as e:
+        logger.warning(f"chunks index creation failed (non-fatal): {e}")
+
+    # ── Content nodes ─────────────────────────────────────────────────────────
+    try:
+        await db.content_nodes.create_index(
+            [("subject_id", ASCENDING), ("chapter_id", ASCENDING), ("medium", ASCENDING)]
+        )
+        await db.content_nodes.create_index([("topic_id", ASCENDING), ("medium", ASCENDING)])
+        await db.content_nodes.create_index([("status", ASCENDING)])
+        await db.content_nodes.create_index([("node_type", ASCENDING), ("status", ASCENDING)])
+        await db.content_nodes.create_index([("updated_at", DESCENDING)])
+    except Exception as e:
+        logger.warning(f"content_nodes index creation failed (non-fatal): {e}")
+
+    # ── Page assets ───────────────────────────────────────────────────────────
+    try:
+        await db.page_assets.create_index([("cloudflare_path", ASCENDING)], unique=True)
+        await db.page_assets.create_index(
+            [("subject_id", ASCENDING), ("chapter_id", ASCENDING), ("medium", ASCENDING)]
+        )
+        await db.page_assets.create_index([("topic_id", ASCENDING), ("medium", ASCENDING)])
+        await db.page_assets.create_index([("invalidated", ASCENDING)])
+    except Exception as e:
+        logger.warning(f"page_assets index creation failed (non-fatal): {e}")
+
+    # ── Generation jobs ───────────────────────────────────────────────────────
+    try:
+        await db.generation_jobs.create_index([("status", ASCENDING), ("created_at", DESCENDING)])
+        await db.generation_jobs.create_index([("document_id", ASCENDING)], sparse=True)
+        await db.generation_jobs.create_index([("subject_id", ASCENDING), ("medium", ASCENDING)])
+        await db.generation_jobs.create_index([("job_type", ASCENDING), ("status", ASCENDING)])
+        await db.generation_jobs.create_index([("created_at", DESCENDING)])
+    except Exception as e:
+        logger.warning(f"generation_jobs index creation failed (non-fatal): {e}")
 
     # ── Auth rate limit (IP-based, 90s TTL buckets) ───────────────────────────
     # _id is the rate key (endpoint:ip:minute_bucket), expires_at drives TTL.

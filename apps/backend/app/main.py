@@ -42,6 +42,7 @@ from app.api.v1 import (
     admin_security,
     admin_corpus,
     admin_db_health,
+    admin_rag,
     seo,
     indexnow,
     content,
@@ -369,6 +370,7 @@ def create_app() -> FastAPI:
     app.include_router(
         admin_db_health.router, prefix="/api/v1/admin", tags=["Admin DB Health"]
     )
+    app.include_router(admin_rag.router, prefix="/api/v1/admin", tags=["Admin RAG"])
 
     # CORS middleware — added last so it becomes the outermost layer and
     # handles OPTIONS preflight before any other middleware runs.

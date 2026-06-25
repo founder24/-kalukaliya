@@ -24,3 +24,4 @@
 - [Upstash must stay optional in cloudbuild.yaml](upstash-optional-secret.md) — Upstash secrets don't exist in SM; putting them in mandatory --update-secrets causes SecretsAccessCheckFailed; always keep in Step 5 optional probe + add to --remove-secrets to clean stale refs
 - [React lazy SSR with renderToString](react-lazy-ssr.md) — React.lazy() _status is -1 until first render; pre-importing modules does NOT help renderToString; only fix is static imports OR renderToPipeableStream
 - [Gunicorn SIGABRT on Cloud Run](gunicorn-sigabrt.md) — Gunicorn timeout=30s caused SIGABRT on long AI requests; set timeout=120 for async AI workloads; graceful_timeout can stay at 30
+- [Syrabit RAG v2 pipeline](syrabit-rag-v2.md) — Vectorize+MongoDB dual-write pipeline; CF metadata uses camelCase (subjectId/chapterId/topicId/medium/sourceType/chunkType); medium='english'/'assamese' not 'en'/'as'
