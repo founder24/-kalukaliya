@@ -1,0 +1,43 @@
+Yes — that means **PYQ should be a source type under the subject**, not under chapter. So your hierarchy should be: **subject → source type → chapter/topic**, where PYQ is usually a **subject-level question bank** and chapter-wise questions are a separate chapter-level source. [shshell](https://www.shshell.com/blog/multimodal-rag-module-7-lesson-5-metadata-schemas)
+
+## Better metadata model
+Use fields like:
+- **subject**
+- **source_type**: syllabus, pyq, chapter_question
+- **chapter**: optional, only when the item truly belongs to a chapter
+- **topic** or **unit**: optional
+- **language**
+- **class/grade**
+- **book/page/chunk id** [apxml](https://apxml.com/courses/getting-started-rag/chapter-3-data-preparation-for-rag/chunk-metadata)
+
+## How to assign PYQ
+For PYQs:
+- set `source_type = pyq`,
+- set `subject = math/science/assamese/etc.`,
+- leave `chapter` empty unless the question clearly maps to one chapter,
+- optionally add `topic` if you can classify it. [gigaspaces](https://www.gigaspaces.com/question/what-types-of-metadata-can-self-querying-rag-models-use)
+
+That way a query like “Class 10 Science PYQ” searches the **science PYQ bucket**, not a chapter bucket first. [alawiii.github](https://alawiii.github.io/Rag-book/chapter4/metadata.html)
+
+## How to assign chapter questions
+For chapter-wise questions:
+- set `source_type = chapter_question`,
+- set `subject`,
+- set `chapter`,
+- optionally set `topic`. [apxml](https://apxml.com/courses/getting-started-rag/chapter-3-data-preparation-for-rag/chunk-metadata)
+
+This makes retrieval cleaner because the system can tell the difference between:
+- “questions from a chapter,” and
+- “exam questions from the whole subject.” [docs.dev.cognipeer](https://docs.dev.cognipeer.com/blog/rag-best-practices)
+
+## Suggested retrieval logic
+1. Detect subject.
+2. Detect whether the query is asking for **PYQ** or **chapter-wise** material.
+3. Filter by `source_type`.
+4. If chapter is mentioned, also filter by `chapter`.
+5. Use language filtering for Assamese or English. [arxiv](https://arxiv.org/html/2601.11863v1)
+
+## Practical rule
+If content is **not naturally chapter-bound**, do **not force it into chapter metadata**. PYQs often belong better to **subject + exam pattern + topic mapping**, with chapter as optional only when classification is reliable. [shshell](https://www.shshell.com/blog/multimodal-rag-module-7-lesson-5-metadata-schemas)
+
+If you want, I can design the exact **JSON schema** for your indices next.
