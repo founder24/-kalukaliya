@@ -99,10 +99,11 @@ class Chapter(Document):
 
 
 class TopicEmbedding(Document):
-    """Stores pre-computed embeddings for topic titles (text-embedding-005, 768 dims).
+    """Stores pre-computed embeddings for topic titles (CF bge-m3, 1024 dims).
 
     Used for fast cosine-similarity matching in the chat pipeline to decide
     whether a user query is related to any published topic before invoking RAG.
+    Embedding model: @cf/baai/bge-m3 via Cloudflare Workers AI (multilingual EN+AS).
     """
 
     topic_id: str

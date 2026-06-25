@@ -110,7 +110,7 @@ class TopicMatcher:
         Find the best matching topic for a query embedding.
 
         Args:
-            query_embedding: 768-dim embedding vector for the user query.
+            query_embedding: 1024-dim embedding vector (CF bge-m3) for the user query.
 
         Returns:
             Dict with topic metadata and score if best match >= threshold, else None.

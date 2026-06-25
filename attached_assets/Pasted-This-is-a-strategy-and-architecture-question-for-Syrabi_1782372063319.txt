@@ -1,0 +1,202 @@
+This is a strategy and architecture question for Syrabit's RAG pipeline. Let me give you a concrete recommendation tailored to your stack (MongoDB Atlas + Vertex AI + Sarvam AI + bilingual Assamese/English content).
+
+RAG Development & Evaluation for Syrabit
+Best Framework Choice
+Recommended: Custom pipeline with LlamaIndex + RAGAS
+
+Layer	Tool	Why
+Orchestration	LlamaIndex	Best MongoDB Atlas Vector Search integration, native metadata filtering, bilingual support
+Evaluation	RAGAS	Measures faithfulness, answer relevancy, context recall — all without labels
+Vector Store	MongoDB Atlas Vector Search	You already use Atlas; avoids a separate Pinecone/Weaviate service
+Embeddings	text-multilingual-embedding-002 (Vertex AI)	768-dim, supports Assamese, already on your GCP SA
+Data Cleaning & Chunking
+Your content hierarchy drives the chunking strategy:
+Board → Class → Subject → Chapter → Topic → Chunk
+
+Chunking rules by source_type:
+
+CHUNK_CONFIG = {
+    "notes": {
+        "strategy": "semantic",       # split at H2/H3 headings
+        "max_tokens": 400,
+        "overlap": 50,
+    },
+    "definition": {
+        "strategy": "sentence",       # each definition = 1 chunk
+        "max_tokens": 150,
+        "overlap": 0,
+    },
+    "important_questions": {
+        "strategy": "qa_pair",        # Q + A = 1 chunk
+        "max_tokens": 300,
+        "overlap": 0,
+    },
+    "mcqs": {
+        "strategy": "qa_pair",        # stem + all options + answer = 1 chunk
+        "max_tokens": 200,
+        "overlap": 0,
+    },
+    "pyq": {
+        "strategy": "qa_pair",        # question + answer/solution = 1 chunk
+        "max_tokens": 350,
+        "overlap": 0,
+    },
+}
+
+Cleaning steps (critical for Assamese text):
+
+Strip markdown artifacts (**, ##, ---) but preserve structure signals
+Normalize Unicode — Assamese has font-encoding inconsistencies (Bijoy vs Unicode)
+Remove boilerplate (page headers, "Syrabit.ai", footer text)
+Detect language per-chunk (langdetect or lingua) and store as metadata
+Metadata Schema (per your attached doc)
+{
+  "chunk_id": "uuid",
+  "board": "ahsec",
+  "class": "12",
+  "stream": "science",
+  "subject": "physics",
+  "subject_id": "s13",
+  "chapter": "wave-optics",
+  "chapter_id": "c42",
+  "topic": "interference",
+  "topic_id": "t101",
+  "source_type": "pyq",
+  "language": "en",
+  "year": 2023,
+  "marks": 4,
+  "content": "...",
+  "token_count": 287,
+  "embedding_model": "text-multilingual-embedding-002"
+}
+
+For PYQs: chapter is optional — only fill it when the question reliably maps to one chapter. Leave empty and use topic instead if uncertain.
+
+Embedding + Vector Store Setup
+Atlas Vector Search Index (recommended)
+{
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 768,
+      "similarity": "cosine"
+    },
+    { "type": "filter", "path": "board" },
+    { "type": "filter", "path": "class" },
+    { "type": "filter", "path": "subject_id" },
+    { "type": "filter", "path": "chapter_id" },
+    { "type": "filter", "path": "source_type" },
+    { "type": "filter", "path": "language" }
+  ]
+}
+
+Retrieval query flow (matches the attached doc's logic):
+async def retrieve(query: str, filters: dict) -> list[Chunk]:
+    # 1. Embed query
+    q_embedding = await embed(query)
+    # 2. Build pre-filter from detected context
+    pre_filter = {
+        "subject_id": filters["subject_id"],
+        "language": filters["language"],  # "en" or "as"
+    }
+    if filters.get("source_type"):          # "pyq" vs "chapter_question"
+        pre_filter["source_type"] = filters["source_type"]
+    if filters.get("chapter_id"):
+        pre_filter["chapter_id"] = filters["chapter_id"]
+    # 3. Atlas $vectorSearch with pre-filter
+    return await vector_search(q_embedding, pre_filter, top_k=5)
+
+Evaluation with RAGAS
+from ragas import evaluate
+from ragas.metrics import faithfulness, answer_relevancy, context_recall
+# Build a test set of (question, ground_truth, generated_answer, retrieved_contexts)
+results = evaluate(
+    dataset=test_dataset,
+    metrics=[faithfulness, answer_relevancy, context_recall],
+)
+# Target: faithfulness > 0.85, answer_relevancy > 0.80
+
+Build your eval set from:
+
+AHSEC/SEBA past exam questions where you know the correct answer
+Cover both languages (50 English + 50 Assamese minimum)
+Include PYQ queries and chapter-specific queries separately
+Summary Recommendation
+Use MongoDB Atlas Vector Search — you already pay for Atlas, no new infra
+text-multilingual-embedding-002 via Vertex AI — already on your GCP SA
+Chunk by source_type — don't use one-size-fits-all chunking
+Store source_type + language as filter fields — enables PYQ vs notes routing without changing the model
+Evaluate with RAGAS before going live — faithfulness is especially important since students rely on exam accuracy
+Want me to build the actual chunking pipeline, set up the Atlas vector index, or scaffold the RAGAS evaluation harness into the codebase?
+
+Next, I can build the complete RAG ingestion pipeline — chunker, embedder, and Atlas vector index setup — directly into the backend codebase. Would you like me to do that?
+
+
+Checkpoint made
+6 minutes ago
+here will sarvam will be used as the multilingual llm, cant we use cloudflare worker embeddings
+
+2 minutes ago
+
+Choosing embedding model for RAG (10 seconds)
+Good question — yes, you can use Cloudflare Workers AI for embeddings, and it's actually a smart cost move since you already have a CF account set up. Here's the honest breakdown:
+
+Sarvam as the RAG Generator LLM ✅
+Sarvam (sarvam-30b / sarvam-105b) is already in your backend. For the RAG answer generation step it's ideal:
+
+Trained on Indic languages including Assamese
+Understands AHSEC/SEBA exam vocabulary natively
+Already handles streaming in your chat pipeline
+Cloudflare Workers AI for Embeddings — Can it work?
+Yes — use @cf/baai/bge-m3
+
+Model	Dims	Languages	Assamese?
+@cf/baai/bge-small-en-v1.5	384	English only	❌
+@cf/baai/bge-large-en-v1.5	1024	English only	❌
+@cf/baai/bge-m3	1024	100+ languages	✅
+BGE-M3 specifically supports Assamese (ISO code as) — it's trained on the mC4 multilingual corpus which includes Assamese text.
+
+How to call it from your Python backend — you already have CF_ACCOUNT_ID and CF_WORKER_AI_TOKEN in config:
+
+# apps/backend/app/services/ai/cf_embedder.py
+import httpx
+from app.config import settings
+CF_EMBED_URL = (
+    f"https://api.cloudflare.com/client/v4/accounts/"
+    f"{settings.CF_ACCOUNT_ID}/ai/run/@cf/baai/bge-m3"
+)
+async def embed_texts(texts: list[str]) -> list[list[float]]:
+    """Embed a batch of texts using CF Workers AI bge-m3 (1024 dims, multilingual)."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            CF_EMBED_URL,
+            headers={"Authorization": f"Bearer {settings.CF_WORKER_AI_TOKEN}"},
+            json={"text": texts},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["result"]["data"]  # list of 1024-dim vectors
+
+Trade-offs vs Vertex AI Multilingual Embedding
+CF bge-m3	Vertex text-multilingual-embedding-002
+Dims	1024	768
+Assamese quality	Good (mC4 corpus)	Better (Google's Indic data)
+Cost	~$0.02/M tokens	~$0.025/M tokens
+Latency	~100-200ms	~150-300ms
+Already on infra	✅ CF account exists	✅ GCP SA exists
+Batch size limit	100 texts	250 texts
+Honest verdict: For Assamese educational content (short definitions, questions, notes), bge-m3 will work well and is cheaper. If you find retrieval quality lacking for Assamese-heavy queries specifically, you can always switch to Vertex later — the vector index just needs a reindex.
+
+Final RAG Stack for Syrabit
+Query (EN or AS)
+       ↓
+CF bge-m3 → 1024-dim vector
+       ↓
+MongoDB Atlas Vector Search (pre-filter: subject, source_type, language)
+       ↓
+Top-5 chunks retrieved
+       ↓
+Sarvam sarvam-30b → answer (streams back to frontend)
+
+Want me to build this out — the cf_embedder.py service, a rag_pipeline.py that wires retrieval into the chat handler, and the Atlas vector index definition with 1024 dims for bge-m3?

@@ -1,6 +1,19 @@
+"""
+CF Workers AI Embedder — replaces Vertex AI text-embedding-005.
+
+Uses @cf/baai/bge-m3 (1024-dim, multilingual, supports Assamese + English).
+Auth: CF_WORKER_AI_TOKEN ?? CF_API_TOKEN (already in settings).
+
+Latency profile:
+  CF bge-m3   ~100-200 ms  (REST API, global CF network)
+  Vertex      ~150-300 ms  (gRPC, GCP regional)
+
+All callers receive a list[float] of length 1024 — same interface as before,
+only the dimension changed from 768 → 1024.
+"""
+
 import asyncio
 import logging
-import time as _time
 
 import httpx
 
@@ -8,37 +21,46 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# --- Module-level token cache ---
-_token_lock = asyncio.Lock()
-_cached_token: str | None = None
-_token_expiry: float = 0
+_EMBED_DIM = 1024
+_CF_MODEL = "@cf/baai/bge-m3"
 
-# --- Module-level httpx client for connection reuse (Issue #3) ---
 _http_client: httpx.AsyncClient | None = None
 
 
 def _get_http_client() -> httpx.AsyncClient:
-    """Return a module-level httpx.AsyncClient for connection pooling."""
     global _http_client
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0, connect=3.0),
+            timeout=httpx.Timeout(15.0, connect=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
     return _http_client
 
 
+def _cf_embed_url() -> str:
+    account_id = settings.CF_ACCOUNT_ID
+    if not account_id:
+        raise RuntimeError(
+            "CF_ACCOUNT_ID is not set. Cannot call CF Workers AI embedding API."
+        )
+    return (
+        f"https://api.cloudflare.com/client/v4/accounts/"
+        f"{account_id}/ai/run/{_CF_MODEL}"
+    )
+
+
+def _cf_auth_token() -> str:
+    token = getattr(settings, "CF_WORKER_AI_TOKEN", None) or settings.CF_API_TOKEN
+    if not token:
+        raise RuntimeError(
+            "CF_WORKER_AI_TOKEN (or CF_API_TOKEN) is not set. "
+            "Cannot authenticate with CF Workers AI."
+        )
+    return token
+
+
 async def generate_embedding(text: str) -> str:
-    """
-    Sanitize and return text.
-
-    Args:
-        text: Input text
-
-    Returns:
-        Sanitized text string.
-    """
-    # Strip excessive whitespace and normalize
+    """Sanitize and return text (legacy helper used by admin tools)."""
     sanitized = " ".join(text.split())
     if not sanitized:
         raise ValueError("Cannot generate embedding for empty text")
@@ -47,47 +69,59 @@ async def generate_embedding(text: str) -> str:
 
 async def generate_embedding_vector(text: str) -> list[float]:
     """
-    Generate a 768-dimension embedding vector using Vertex AI text-embedding-005.
+    Generate a 1024-dimension embedding vector using CF Workers AI bge-m3.
 
-    Calls the Vertex AI REST API directly using the GCP service account credentials.
-    The resulting vector is stored in MongoDB for cosine similarity matching.
+    Supports both English and Assamese text — bge-m3 is trained on the
+    mC4 multilingual corpus which includes Assamese (ISO code: as).
 
     Args:
-        text: Input text to embed (topic title, user query, etc.)
+        text: Input text to embed (topic title, user query, chunk content).
 
     Returns:
-        A list of 768 floats representing the text embedding.
+        A list of 1024 floats (cosine-normalized via Atlas vector index).
 
     Raises:
-        RuntimeError: If the API call fails or credentials are missing.
+        RuntimeError: If CF credentials are missing or the API call fails.
+        ValueError: If the input text is empty after sanitization.
     """
     sanitized = " ".join(text.split())
     if not sanitized:
         raise ValueError("Cannot generate embedding for empty text")
 
-    # Extract project_id from SA credentials JSON (no separate VERTEX_PROJECT_ID needed)
-    creds_json = settings.google_credentials
-    project_id = creds_json.get("project_id") if creds_json else None
-    location = "us-central1"  # text-embedding-005 is available in us-central1
+    return (await embed_batch([sanitized]))[0]
 
-    if not project_id:
-        raise RuntimeError(
-            "project_id not found in Google credentials. "
-            "Set GOOGLE_APPLICATION_CREDENTIALS_JSON."
+
+async def embed_batch(texts: list[str]) -> list[list[float]]:
+    """
+    Embed a batch of texts in a single CF Workers AI call.
+
+    CF bge-m3 accepts up to 100 texts per request.
+    Returns a list of 1024-dim vectors in the same order as input.
+
+    Args:
+        texts: List of strings to embed (max 100 per call).
+
+    Returns:
+        List of 1024-dim float vectors.
+    """
+    if not texts:
+        return []
+
+    sanitized = [" ".join(t.split()) for t in texts]
+    empty_indices = [i for i, t in enumerate(sanitized) if not t]
+    if empty_indices:
+        raise ValueError(f"Empty text at indices {empty_indices} in batch")
+
+    if len(sanitized) > 100:
+        raise ValueError(
+            f"CF bge-m3 batch limit is 100 texts; got {len(sanitized)}. "
+            "Split into smaller batches using embed_batch_chunked()."
         )
 
-    # Get access token (cached with 60s-before-expiry check)
-    token = await _get_embedding_access_token()
+    url = _cf_embed_url()
+    token = _cf_auth_token()
 
-    url = (
-        f"https://{location}-aiplatform.googleapis.com/v1/"
-        f"projects/{project_id}/locations/{location}/"
-        "publishers/google/models/text-embedding-005:predict"
-    )
-
-    payload = {
-        "instances": [{"content": sanitized}],
-    }
+    payload = {"text": sanitized if len(sanitized) > 1 else sanitized[0]}
 
     client = _get_http_client()
     response = await client.post(
@@ -101,71 +135,42 @@ async def generate_embedding_vector(text: str) -> list[float]:
 
     if response.status_code != 200:
         logger.error(
-            f"Embedding API error: {response.status_code} - {response.text[:200]}"
+            f"CF bge-m3 API error: {response.status_code} — {response.text[:300]}"
         )
         raise RuntimeError(
-            f"Vertex AI embedding API failed with status {response.status_code}"
+            f"CF Workers AI embedding API returned HTTP {response.status_code}"
         )
 
     data = response.json()
+    if not data.get("success"):
+        errors = data.get("errors", [])
+        raise RuntimeError(f"CF Workers AI embedding API failed: {errors}")
 
-    try:
-        embedding = data["predictions"][0]["embeddings"]["values"]
-    except (KeyError, IndexError) as e:
-        logger.error(f"Unexpected embedding response structure: {e}")
-        raise RuntimeError("Failed to parse embedding response from Vertex AI")
+    raw = data["result"]["data"]
 
-    return embedding
+    if isinstance(raw[0], float):
+        return [raw]
+    return raw
 
 
-async def _get_embedding_access_token() -> str:
-    """Get OAuth2 access token for Vertex AI embedding API with caching and lock."""
-    global _cached_token, _token_expiry
+async def embed_batch_chunked(
+    texts: list[str], batch_size: int = 50
+) -> list[list[float]]:
+    """
+    Embed an arbitrarily large list of texts by splitting into batches.
 
-    if not settings.google_credentials:
-        raise RuntimeError(
-            "Google credentials not configured. "
-            "Set GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_APPLICATION_CREDENTIALS_JSON."
-        )
+    Uses asyncio.gather for concurrent batches (up to CF rate limits).
 
-    # Return cached token if still valid (with 60s buffer before expiry)
-    if _cached_token and _time.time() < _token_expiry - 60:
-        return _cached_token
+    Args:
+        texts: Any number of strings to embed.
+        batch_size: Number of texts per CF API call (default 50, max 100).
 
-    async with _token_lock:
-        # Double-check after acquiring lock
-        if _cached_token and _time.time() < _token_expiry - 60:
-            return _cached_token
-
-        from google.oauth2 import service_account
-
-        creds = service_account.Credentials.from_service_account_info(
-            settings.google_credentials,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
-
-        try:
-            from google.auth.transport._aiohttp_requests import (
-                Request as AiohttpRequest,
-            )
-
-            aiohttp_request = AiohttpRequest()
-            try:
-                await creds.refresh(aiohttp_request)
-            finally:
-                await aiohttp_request.close()
-        except (ImportError, AttributeError):
-            import google.auth.transport.requests
-
-            request = google.auth.transport.requests.Request()
-            if asyncio.iscoroutinefunction(creds.refresh):
-                await creds.refresh(request)
-            else:
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, creds.refresh, request)
-
-        _cached_token = creds.token
-        # Token typically valid for 1 hour
-        _token_expiry = _time.time() + 3600
-
-        return _cached_token
+    Returns:
+        List of 1024-dim float vectors, same order as input.
+    """
+    batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
+    results = await asyncio.gather(*[embed_batch(b) for b in batches])
+    merged: list[list[float]] = []
+    for r in results:
+        merged.extend(r)
+    return merged

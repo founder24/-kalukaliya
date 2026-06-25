@@ -1,22 +1,20 @@
 """
 MongoVectorSearchService — RAG retrieval using MongoDB + in-memory cosine similarity.
 
-Alternative to Vertex AI Search (Discovery Engine).  Uses the pre-computed
-topic embeddings already stored in the `topic_embeddings` collection:
+Uses pre-computed topic embeddings stored in the `topic_embeddings` collection:
 
-  1. Generate a 768-dim query embedding via Vertex text-embedding-005.
+  1. Generate a 1024-dim query embedding via CF Workers AI bge-m3.
   2. Vectorised cosine similarity against all topic embeddings (numpy, in-memory).
   3. Collect top-K topics above the similarity threshold.
   4. Fetch chapter content for each matched topic from the `chapters` collection.
-  5. Return chunks in the same format as VertexSearchService so callers are
-     interchangeable.
+  5. Return chunks in the same format as the retrieval pipeline.
 
 Latency profile (warm cache):
-  embedding     ~1.5-2.0 s  (Vertex text-embedding-005, network-bound)
-  cosine match  < 5 ms      (numpy vectorised, ~N embeddings in memory)
-  chapter fetch ~20-60 ms   (Motor async, Atlas connection pool)
-  ─────────────────────────────────────────────────────────────────
-  total         ~1.6-2.1 s  (vs Vertex Search 800-3 000 ms)
+  embedding     ~100-200 ms  (CF bge-m3 REST API, global CF network)
+  cosine match  < 5 ms       (numpy vectorised, ~N embeddings in memory)
+  chapter fetch ~20-60 ms    (Motor async, Atlas connection pool)
+  ──────────────────────────────────────────────────────────────────
+  total         ~130-270 ms  (vs Vertex Search 800-3 000 ms)
 
 Note: the embedding call is the dominant cost.  When the caller already has
 a query_embedding (e.g. from check_topic_match), it can pass it directly via

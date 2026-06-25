@@ -250,6 +250,20 @@ async def create_indexes() -> None:
     except Exception as e:
         logger.warning(f"Topic-embeddings index creation failed (non-fatal): {e}")
 
+    # ── RAG chunks ────────────────────────────────────────────────────────────
+    # Pre-filter indexes used by Atlas $vectorSearch and direct chunk lookups.
+    # The vector index itself (rag_chunks_vector) must be created via Atlas UI/API:
+    #   path=embedding, dims=1024, similarity=cosine
+    #   filter fields: language, source_type, subject_id, chapter_id, board, class_level
+    try:
+        await db.rag_chunks.create_index([("chapter_id", ASCENDING)])
+        await db.rag_chunks.create_index([("subject_id", ASCENDING), ("language", ASCENDING)])
+        await db.rag_chunks.create_index([("source_type", ASCENDING), ("language", ASCENDING)])
+        await db.rag_chunks.create_index([("board", ASCENDING), ("class_level", ASCENDING)])
+        await db.rag_chunks.create_index([("updated_at", DESCENDING)])
+    except Exception as e:
+        logger.warning(f"RAG chunks index creation failed (non-fatal): {e}")
+
     # ── Auth rate limit (IP-based, 90s TTL buckets) ───────────────────────────
     # _id is the rate key (endpoint:ip:minute_bucket), expires_at drives TTL.
     # Short TTL (90s) covers the current minute + partial next minute so no
