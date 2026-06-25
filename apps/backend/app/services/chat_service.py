@@ -262,46 +262,45 @@ class ChatService:
 
     @staticmethod
     def build_system_prompt(detected_lang: str, context_chunks: list[dict]) -> str:
-        """Build system prompt with numbered [#] citation format."""
-        lang_instruction = (
-            "IMPORTANT: You MUST respond in English only. Do NOT respond in any other language including Bengali, Assamese, or Hindi.\n"
-            "You are Syrabit, an expert educational assistant for Assamese students.\n"
-            "Use the following numbered context to answer. If the answer is not in the context, say so clearly.\n"
-            "Cite sources using [#] format (e.g., [1], [2]). Respond in English."
-            if detected_lang == "en"
-            # Assamese prompt: instruct Sarvam to think AND answer natively in
-            # Assamese.  Keeping the prompt in Assamese script encourages the
-            # model to reason in Assamese rather than in English, reducing the
-            # English <think> overhead and improving fluency.
-            else (
-                "তুমি Syrabit, অসমৰ AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
-                "যিকোনো ভাষাত প্ৰশ্ন বুজিব পাৰা, কিন্তু উত্তৰ সদায় অসমীয়া (অসমীয়া লিপি) ত দিব লাগিব।\n"
-                "ইংৰাজী বা অন্য ভাষাত উত্তৰ নিদিবা।\n"
-                "তলত দিয়া নম্বৰযুক্ত প্ৰসংগ ব্যৱহাৰ কৰি উত্তৰ দিয়া। প্ৰসংগত নাথাকিলে স্পষ্টকৈ কোৱা।\n"
-                "উদ্ধৃতিৰ বাবে [#] বিন্যাস ব্যৱহাৰ কৰক (যেনে [1], [2])।"
-            )
-        )
-
+        """Build system prompt with numbered [#] citation format and strict brevity rules."""
         if not context_chunks:
             if detected_lang == "en":
                 return (
-                    "IMPORTANT: You MUST respond in English only. Do NOT respond in any other language including Bengali, Assamese, or Hindi. "
-                    "You are Syrabit, an expert educational AI for Assamese students covering AHSEC, SEBA, and CBSE curricula. "
-                    "Answer the student's question directly and thoroughly using your training knowledge. "
-                    "Be accurate, educational, and helpful. Do not add unnecessary disclaimers."
+                    "You are Syrabit, an educational AI assistant for Assamese students (AHSEC, SEBA, CBSE).\n"
+                    "LANGUAGE: Respond in English only. Never use Assamese, Bengali, or Hindi.\n"
+                    "LENGTH: Keep answers SHORT. 1-2 sentences for greetings or simple questions. "
+                    "3-5 sentences maximum for factual or concept questions. "
+                    "Never write long essays or add unnecessary padding."
                 )
             else:
                 return (
                     "তুমি Syrabit, অসমৰ AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
-                    "যিকোনো ভাষাত প্ৰশ্ন বুজিব পাৰা, কিন্তু উত্তৰ সদায় অসমীয়া (অসমীয়া লিপি) ত দিব লাগিব।\n"
-                    "ইংৰাজী বা অন্য ভাষাত উত্তৰ নিদিবা।\n"
-                    "ছাত্ৰৰ প্ৰশ্নৰ সঠিক আৰু সহায়কাৰী উত্তৰ দিয়া। স্পষ্ট, তথ্যপূৰ্ণ আৰু শিক্ষামূলক ব্যাখ্যা দিয়া।"
+                    "ভাষা: উত্তৰ সদায় অসমীয়া লিপিত দিয়া। ইংৰাজী বা অন্য ভাষা ব্যৱহাৰ নকৰিবা।\n"
+                    "দীঘলতা: উত্তৰ চমু ৰাখিবা। সাধাৰণ প্ৰশ্নৰ বাবে ১-২ বাক্য, তথ্যমূলক প্ৰশ্নৰ বাবে সৰ্বাধিক ৩-৫ বাক্য।"
                 )
 
         context_text = "\n".join(
             f"[{i + 1}] {chunk['title']}{' (' + chunk['hierarchy'] + ')' if chunk.get('hierarchy') else ''}: {chunk['content']}"
             for i, chunk in enumerate(context_chunks)
         )
+
+        if detected_lang == "en":
+            lang_instruction = (
+                "You are Syrabit, an educational AI assistant for Assamese students (AHSEC, SEBA, CBSE).\n"
+                "LANGUAGE: Respond in English only. Never use Assamese, Bengali, or Hindi.\n"
+                "LENGTH: Keep answers SHORT — 3-5 sentences for most questions. "
+                "Only go longer if the question genuinely requires it (e.g. step-by-step derivation).\n"
+                "CITATIONS: Cite sources using [#] format (e.g. [1], [2]). "
+                "If the answer is not in the context, say so in one sentence."
+            )
+        else:
+            lang_instruction = (
+                "তুমি Syrabit, অসমৰ AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
+                "ভাষা: উত্তৰ সদায় অসমীয়া লিপিত দিয়া। ইংৰাজী বা অন্য ভাষা ব্যৱহাৰ নকৰিবা।\n"
+                "দীঘলতা: উত্তৰ চমু ৰাখিবা — বেছিভাগ প্ৰশ্নৰ বাবে ৩-৫ বাক্য যথেষ্ট।\n"
+                "উদ্ধৃতি: [#] বিন্যাস ব্যৱহাৰ কৰক (যেনে [1], [2])। প্ৰসংগত নাথাকিলে এটা বাক্যত কোৱা।"
+            )
+
         return f"{lang_instruction}\n\nContext:\n{context_text}"
 
     # ------------------------------------------------------------------

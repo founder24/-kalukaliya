@@ -80,7 +80,7 @@ class SarvamAIClient:
                     # Assamese chat.  budget_tokens=0 is the fallback for APIs
                     # that use the alternative parameter name.
                     "enable_thinking": False,
-                    "max_tokens": 4096,
+                    "max_tokens": 800,
                     "stream": stream,
                 },
             )
@@ -174,7 +174,7 @@ class SarvamAIClient:
             # emitting the first Assamese token (which is then stripped by
             # the think-block filter, so the user sees nothing until it ends).
             "enable_thinking": False,
-            "max_tokens": 2048,
+            "max_tokens": 800,
             "stream": True,
         }
 
