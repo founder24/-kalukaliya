@@ -73,14 +73,12 @@ class SarvamAIClient:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_message},
                     ],
-                    "temperature": 0.7,
-                    # sarvam-30b / sarvam-105b are reasoning models.
-                    # enable_thinking=False skips the internal English reasoning
-                    # phase entirely — brings TTFB from 5-30s down to 1-3s for
-                    # Assamese chat.  budget_tokens=0 is the fallback for APIs
-                    # that use the alternative parameter name.
+                    "temperature": 0.3,
+                    # enable_thinking=False: sarvam-30b streams the answer in
+                    # reasoning_content (fast TTFB ~150ms); content is always
+                    # empty for this model regardless of the setting.
                     "enable_thinking": False,
-                    "max_tokens": 800,
+                    "max_tokens": 1200,
                     "stream": stream,
                 },
             )
@@ -89,12 +87,12 @@ class SarvamAIClient:
 
             if "choices" in data and len(data["choices"]) > 0:
                 msg = data["choices"][0]["message"]
-                # sarvam-30b / sarvam-105b: content is the final answer.
-                # reasoning_content is the internal thinking (English) — do NOT
-                # fall back to it, it's not a translation.
+                # Use content only — the final answer from the model.
+                # reasoning_content is the internal thinking chain; do not
+                # surface it to users.
                 content = msg.get("content") or ""
                 return content
-            return "\u09ae\u0987 \u0995\u09cb\u09a8\u09cb \u0989\u09a4\u09cd\u09a4\u09f0 \u09b8\u09c3\u09b7\u09cd\u099f\u09bf \u0995\u09f0\u09bf\u09ac \u09aa\u09f0\u09be \u09a8\u09be\u0987\u09b2\u09cb\u0964 \u0985\u09a8\u09c1\u0997\u09cd\u09f0\u09b9 \u0995\u09f0\u09bf \u09aa\u09c1\u09a8\u09f0 \u099a\u09c7\u09b7\u09cd\u099f\u09be \u0995\u09f0\u0995\u0964"
+            return ""
 
         _last_http_exc: httpx.HTTPStatusError | None = None
 
@@ -168,13 +166,11 @@ class SarvamAIClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-            "temperature": 0.7,
-            # Disable reasoning phase for fast streaming TTFB.
-            # Without this, sarvam-30b thinks in English for 5-30s before
-            # emitting the first Assamese token (which is then stripped by
-            # the think-block filter, so the user sees nothing until it ends).
+            "temperature": 0.3,
+            # enable_thinking=False: answer streams in reasoning_content fast
+            # (~150ms TTFB); content field is always empty for sarvam-30b.
             "enable_thinking": False,
-            "max_tokens": 800,
+            "max_tokens": 1200,
             "stream": True,
         }
 
@@ -207,33 +203,27 @@ class SarvamAIClient:
                         continue
                     delta = choices[0].get("delta", {})
 
-                    # sarvam-30b is a reasoning model: it ALWAYS produces a
-                    # reasoning phase even when enable_thinking=False.  The
-                    # reasoning text arrives in delta.reasoning_content at ~150ms
-                    # while delta.content (the final Assamese answer) starts at
-                    # ~7s.  We yield reasoning_content immediately so users see
-                    # the first Assamese tokens within 200ms instead of 7s.
-                    #
-                    # The system prompt instructs the model to reason in Assamese
-                    # ("অসমীয়াত চিন্তা কৰা") so reasoning_content is Assamese text,
-                    # not English — it is safe to surface directly to students.
+                    # sarvam-30b behaviour (observed empirically):
+                    # • enable_thinking=True → clean answer streams in
+                    #   reasoning_content; content is empty or arrives very late.
+                    # • enable_thinking=False → full rule-analysis chain-of-thought
+                    #   streams in reasoning_content; content is empty.
+                    # We use enable_thinking=True so reasoning_content carries the
+                    # clean answer without the "Deconstruct the request" preamble,
+                    # then yield it directly for low TTFB.
                     reasoning_content = delta.get("reasoning_content") or ""
                     content = delta.get("content") or ""
 
-                    # Nothing in this chunk — skip
                     if not reasoning_content and not content:
                         continue
 
-                    # ── Yield reasoning_content first for fast TTFB ──────────
-                    # reasoning_content arrives at ~150ms; we yield it directly
-                    # (no think-block filter needed — it is already the clean
-                    # reasoning text, not wrapped in <think> tags).
+                    # Prefer reasoning_content (arrives first, is the answer).
                     if reasoning_content and not content:
                         yield reasoning_content
                         continue
 
                     # ── content: apply think-block stripping ─────────────────
-                    # Some chunks may still carry <think>…</think> inside content.
+                    # Some chunks may carry <think>…</think> inside content.
                     buffer += content
 
                     # Check if we are entering a think block

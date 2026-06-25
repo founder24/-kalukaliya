@@ -267,28 +267,24 @@ class ChatService:
 
         detected_lang is the RESPONSE language (set by the user's language selector,
         not detected from the input text). The model must accept questions in any
-        language (English, Assamese, Hindi, transliterated Assamese, etc.) but always
-        reply in the selected response language.
+        language but always reply in the selected response language.
+
+        Response philosophy: dense study-note style — cover every key fact,
+        subtopic and subpoint in the fewest possible words. No padding.
         """
         if detected_lang == "en":
             base = (
-                "You are Syrabit, an educational AI assistant for students of AHSEC, SEBA, and CBSE.\n"
-                "INPUT LANGUAGE: The student may ask in any language (English, Assamese, Hindi, or transliterated text). "
-                "Understand the question regardless of what language it is written in.\n"
-                "RESPONSE LANGUAGE: Always reply in English only. Never write a single word in Assamese, Bengali, Hindi, or any other language.\n"
-                "LENGTH: Keep answers short and direct. "
-                "1-2 sentences for greetings or simple questions. "
-                "3-5 sentences for factual or concept questions. "
-                "Only go longer for step-by-step derivations or multi-part questions. No padding."
+                "You are Syrabit, an educational AI assistant for students of AHSEC, SEBA, and CBSE. "
+                "The student may ask in any language — always reply in English only. "
+                "Give a concise answer that covers all key facts, subtopics, and subpoints in as few words as possible. "
+                "No padding, no intro phrases, no closing phrases."
             )
         else:
             base = (
-                "তুমি Syrabit, AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
-                "ইনপুট ভাষা: ছাত্ৰ-ছাত্ৰীয়ে যিকোনো ভাষাত (ইংৰাজী, অসমীয়া, হিন্দী বা অসমীয়া লেটিনীকৰণ) প্ৰশ্ন সুধিব পাৰে। "
-                "যিকোনো ভাষাৰ প্ৰশ্ন বুজিবলৈ সক্ষম হোৱা।\n"
-                "উত্তৰৰ ভাষা: সদায় অসমীয়া লিপিত উত্তৰ দিয়া। ইংৰাজী, হিন্দী বা অন্য কোনো ভাষা একো শব্দ ব্যৱহাৰ নকৰিবা।\n"
-                "দীঘলতা: উত্তৰ চমু আৰু প্ৰত্যক্ষ ৰাখিবা। সাধাৰণ প্ৰশ্নৰ বাবে ১-২ বাক্য, "
-                "তথ্যমূলক প্ৰশ্নৰ বাবে ৩-৫ বাক্য। অপ্ৰয়োজনীয় কথা নিলিখিবা।"
+                "তুমি Syrabit, AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ এজন শিক্ষামূলক AI সহায়ক। "
+                "ছাত্ৰ-ছাত্ৰীয়ে যিকোনো ভাষাত প্ৰশ্ন সুধিব পাৰে — সদায় কেৱল অসমীয়া লিপিত উত্তৰ দিয়া। "
+                "সকলো মূল তথ্য, উপবিষয় আৰু উপবিন্দু আটাইতকৈ কম শব্দত আবৰা চমু উত্তৰ দিয়া। "
+                "অপ্ৰয়োজনীয় আৰম্ভণি বা সামৰণি বাক্য নিলিখিবা।"
             )
 
         if not context_chunks:
@@ -301,16 +297,16 @@ class ChatService:
 
         if detected_lang == "en":
             citation_note = (
-                "CITATIONS: Cite sources as [1], [2], etc. "
-                "If the answer is not in the context below, say so in one sentence."
+                "CITATIONS: Cite sources inline as [1], [2], etc. after the relevant fact. "
+                "If the answer is not in the context, say so in one sentence."
             )
         else:
             citation_note = (
-                "উদ্ধৃতি: উৎস [1], [2] আদি বিন্যাসত উল্লেখ কৰক। "
+                "উদ্ধৃতি: প্ৰাসংগিক তথ্যৰ পিছত [1], [2] আদি বিন্যাসত উৎস উল্লেখ কৰক। "
                 "তলৰ প্ৰসংগত উত্তৰ নাথাকিলে এটা বাক্যত কোৱা।"
             )
 
-        return f"{base}\n{citation_note}\n\nContext:\n{context_text}"
+        return f"{base}\n\n{citation_note}\n\nContext:\n{context_text}"
 
     # ------------------------------------------------------------------
     # LLM calling (with Sarvam -> Vertex AI fallback)
