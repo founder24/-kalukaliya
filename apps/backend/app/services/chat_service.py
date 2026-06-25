@@ -262,22 +262,37 @@ class ChatService:
 
     @staticmethod
     def build_system_prompt(detected_lang: str, context_chunks: list[dict]) -> str:
-        """Build system prompt with numbered [#] citation format and strict brevity rules."""
+        """
+        Build the system prompt based on the selected response language.
+
+        detected_lang is the RESPONSE language (set by the user's language selector,
+        not detected from the input text). The model must accept questions in any
+        language (English, Assamese, Hindi, transliterated Assamese, etc.) but always
+        reply in the selected response language.
+        """
+        if detected_lang == "en":
+            base = (
+                "You are Syrabit, an educational AI assistant for students of AHSEC, SEBA, and CBSE.\n"
+                "INPUT LANGUAGE: The student may ask in any language (English, Assamese, Hindi, or transliterated text). "
+                "Understand the question regardless of what language it is written in.\n"
+                "RESPONSE LANGUAGE: Always reply in English only. Never write a single word in Assamese, Bengali, Hindi, or any other language.\n"
+                "LENGTH: Keep answers short and direct. "
+                "1-2 sentences for greetings or simple questions. "
+                "3-5 sentences for factual or concept questions. "
+                "Only go longer for step-by-step derivations or multi-part questions. No padding."
+            )
+        else:
+            base = (
+                "তুমি Syrabit, AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
+                "ইনপুট ভাষা: ছাত্ৰ-ছাত্ৰীয়ে যিকোনো ভাষাত (ইংৰাজী, অসমীয়া, হিন্দী বা অসমীয়া লেটিনীকৰণ) প্ৰশ্ন সুধিব পাৰে। "
+                "যিকোনো ভাষাৰ প্ৰশ্ন বুজিবলৈ সক্ষম হোৱা।\n"
+                "উত্তৰৰ ভাষা: সদায় অসমীয়া লিপিত উত্তৰ দিয়া। ইংৰাজী, হিন্দী বা অন্য কোনো ভাষা একো শব্দ ব্যৱহাৰ নকৰিবা।\n"
+                "দীঘলতা: উত্তৰ চমু আৰু প্ৰত্যক্ষ ৰাখিবা। সাধাৰণ প্ৰশ্নৰ বাবে ১-২ বাক্য, "
+                "তথ্যমূলক প্ৰশ্নৰ বাবে ৩-৫ বাক্য। অপ্ৰয়োজনীয় কথা নিলিখিবা।"
+            )
+
         if not context_chunks:
-            if detected_lang == "en":
-                return (
-                    "You are Syrabit, an educational AI assistant for Assamese students (AHSEC, SEBA, CBSE).\n"
-                    "LANGUAGE: Respond in English only. Never use Assamese, Bengali, or Hindi.\n"
-                    "LENGTH: Keep answers SHORT. 1-2 sentences for greetings or simple questions. "
-                    "3-5 sentences maximum for factual or concept questions. "
-                    "Never write long essays or add unnecessary padding."
-                )
-            else:
-                return (
-                    "তুমি Syrabit, অসমৰ AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
-                    "ভাষা: উত্তৰ সদায় অসমীয়া লিপিত দিয়া। ইংৰাজী বা অন্য ভাষা ব্যৱহাৰ নকৰিবা।\n"
-                    "দীঘলতা: উত্তৰ চমু ৰাখিবা। সাধাৰণ প্ৰশ্নৰ বাবে ১-২ বাক্য, তথ্যমূলক প্ৰশ্নৰ বাবে সৰ্বাধিক ৩-৫ বাক্য।"
-                )
+            return base
 
         context_text = "\n".join(
             f"[{i + 1}] {chunk['title']}{' (' + chunk['hierarchy'] + ')' if chunk.get('hierarchy') else ''}: {chunk['content']}"
@@ -285,23 +300,17 @@ class ChatService:
         )
 
         if detected_lang == "en":
-            lang_instruction = (
-                "You are Syrabit, an educational AI assistant for Assamese students (AHSEC, SEBA, CBSE).\n"
-                "LANGUAGE: Respond in English only. Never use Assamese, Bengali, or Hindi.\n"
-                "LENGTH: Keep answers SHORT — 3-5 sentences for most questions. "
-                "Only go longer if the question genuinely requires it (e.g. step-by-step derivation).\n"
-                "CITATIONS: Cite sources using [#] format (e.g. [1], [2]). "
-                "If the answer is not in the context, say so in one sentence."
+            citation_note = (
+                "CITATIONS: Cite sources as [1], [2], etc. "
+                "If the answer is not in the context below, say so in one sentence."
             )
         else:
-            lang_instruction = (
-                "তুমি Syrabit, অসমৰ AHSEC, SEBA আৰু CBSE ছাত্ৰ-ছাত্ৰীৰ বাবে এজন শিক্ষামূলক সহায়ক।\n"
-                "ভাষা: উত্তৰ সদায় অসমীয়া লিপিত দিয়া। ইংৰাজী বা অন্য ভাষা ব্যৱহাৰ নকৰিবা।\n"
-                "দীঘলতা: উত্তৰ চমু ৰাখিবা — বেছিভাগ প্ৰশ্নৰ বাবে ৩-৫ বাক্য যথেষ্ট।\n"
-                "উদ্ধৃতি: [#] বিন্যাস ব্যৱহাৰ কৰক (যেনে [1], [2])। প্ৰসংগত নাথাকিলে এটা বাক্যত কোৱা।"
+            citation_note = (
+                "উদ্ধৃতি: উৎস [1], [2] আদি বিন্যাসত উল্লেখ কৰক। "
+                "তলৰ প্ৰসংগত উত্তৰ নাথাকিলে এটা বাক্যত কোৱা।"
             )
 
-        return f"{lang_instruction}\n\nContext:\n{context_text}"
+        return f"{base}\n{citation_note}\n\nContext:\n{context_text}"
 
     # ------------------------------------------------------------------
     # LLM calling (with Sarvam -> Vertex AI fallback)
