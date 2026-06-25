@@ -9,6 +9,8 @@ Routes:
   POST /admin/rag/upload/pyq                — register + queue a PYQ document
   POST /admin/rag/upload/chapter-questions  — register + queue chapter questions
   POST /admin/rag/reindex/:document_id      — delete chunks + re-ingest
+  POST /admin/rag/reindex/subject/:id       — bulk re-index all chapters for a subject
+  POST /admin/rag/reindex/chapter/:id       — re-index a single chapter from DB content
   GET  /admin/rag/jobs/:job_id              — poll job status + progress
   GET  /admin/rag/jobs                      — list recent jobs (paginated)
   GET  /admin/rag/documents                 — list RagDocuments (paginated)
@@ -69,6 +71,18 @@ class ContentNodePatch(BaseModel):
     status: Optional[str] = None
     content: Optional[dict] = None
     node_type: Optional[str] = None
+
+
+class BulkReindexRequest(BaseModel):
+    source_type: str = "notes"
+    parallelism: int = 3
+    dry_run: bool = False
+    chapter_ids: Optional[list] = None
+
+
+class ChapterReindexRequest(BaseModel):
+    source_type: str = "notes"
+    dry_run: bool = False
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -222,6 +236,311 @@ async def reindex_document(document_id: str, request: Request):
         "job_id": str(job.id),
         "status": "queued",
         "message": "Reindex queued. Old chunks will be purged then re-ingested.",
+    }
+
+
+# ── Bulk chapter re-index helpers ─────────────────────────────────────────────
+
+async def _run_bulk_chapter_reindex(
+    subject_id: str,
+    chapters: list,
+    source_type: str,
+    parallelism: int,
+    job_id: str,
+    dry_run: bool,
+) -> None:
+    """
+    Background task: concurrently re-index all chapters for a subject.
+
+    Uses asyncio.Semaphore(parallelism) so at most `parallelism` chapters
+    are being embedded + upserted at the same time, avoiding CF API rate limits.
+    Progress is written back to the master GenerationJob so the caller can
+    poll /admin/rag/jobs/{job_id}.
+    """
+    import asyncio as _asyncio
+    from app.models.rag import GenerationJob as _Job
+    from app.services.rag.ingestion_v2 import ingest_chapter_v2
+
+    total = len(chapters)
+    processed = 0
+    errors: list[str] = []
+    chapter_results: dict = {}
+
+    try:
+        job = await _Job.get(job_id)
+        if job:
+            await job.update({
+                "$set": {
+                    "status": "running",
+                    "total_chunks": total,
+                    "started_at": _now(),
+                    "updated_at": _now(),
+                }
+            })
+    except Exception:
+        pass
+
+    sem = _asyncio.Semaphore(max(1, min(parallelism, 10)))
+
+    async def _process_one(chapter) -> None:
+        nonlocal processed
+        chapter_id = str(chapter.id)
+        async with sem:
+            try:
+                result = await ingest_chapter_v2(
+                    chapter_id=chapter_id,
+                    content_en=chapter.content_en,
+                    content_as=chapter.content_as,
+                    metadata={"subject_id": subject_id},
+                    source_type=source_type,
+                    dry_run=dry_run,
+                )
+                en = result.get("en", {})
+                as_ = result.get("as", {})
+                chapter_results[chapter_id] = {
+                    "title": chapter.title,
+                    "en_chunks": en.get("chunks_total", 0),
+                    "en_vectorized": en.get("vectorize_upserted", 0),
+                    "as_chunks": as_.get("chunks_total", 0),
+                    "as_vectorized": as_.get("vectorize_upserted", 0),
+                    "errors": en.get("errors", []) + as_.get("errors", []),
+                }
+                logger.info(
+                    f"[bulk-reindex] chapter={chapter_id} ({chapter.title}) "
+                    f"en={en.get('chunks_total',0)}ch/{en.get('vectorize_upserted',0)}v "
+                    f"as={as_.get('chunks_total',0)}ch/{as_.get('vectorize_upserted',0)}v"
+                )
+            except Exception as exc:
+                err_msg = f"chapter={chapter_id} ({chapter.title}): {exc}"
+                logger.error(f"[bulk-reindex] {err_msg}")
+                errors.append(err_msg)
+                chapter_results[chapter_id] = {
+                    "title": chapter.title,
+                    "error": str(exc),
+                }
+            finally:
+                processed += 1
+                progress = int(processed / max(total, 1) * 100)
+                try:
+                    _job = await _Job.get(job_id)
+                    if _job:
+                        await _job.update({
+                            "$set": {
+                                "processed_chunks": processed,
+                                "progress": progress,
+                                "updated_at": _now(),
+                            }
+                        })
+                except Exception:
+                    pass
+
+    await _asyncio.gather(*[_process_one(ch) for ch in chapters], return_exceptions=True)
+
+    total_en = sum(r.get("en_chunks", 0) for r in chapter_results.values() if isinstance(r, dict))
+    total_as = sum(r.get("as_chunks", 0) for r in chapter_results.values() if isinstance(r, dict))
+    total_vec = sum(
+        r.get("en_vectorized", 0) + r.get("as_vectorized", 0)
+        for r in chapter_results.values() if isinstance(r, dict)
+    )
+    summary = {
+        "chapters_processed": processed,
+        "chapters_total": total,
+        "total_en_chunks": total_en,
+        "total_as_chunks": total_as,
+        "total_vectorized": total_vec,
+        "error_count": len(errors),
+        "errors": errors[:20],
+        "chapters": chapter_results,
+    }
+
+    try:
+        job = await _Job.get(job_id)
+        if job:
+            final_status = "done" if not errors or processed > 0 else "failed"
+            await job.update({
+                "$set": {
+                    "status": final_status,
+                    "progress": 100,
+                    "result": summary,
+                    "finished_at": _now(),
+                    "updated_at": _now(),
+                }
+            })
+    except Exception as e:
+        logger.error(f"[bulk-reindex] failed to write final job status: {e}")
+
+
+# ── Bulk subject re-index ──────────────────────────────────────────────────────
+
+@router.post("/rag/reindex/subject/{subject_id}")
+async def reindex_subject_chapters(
+    subject_id: str,
+    req: BulkReindexRequest,
+    request: Request,
+):
+    """
+    Bulk re-index all chapters for a subject from their MongoDB content.
+
+    Iterates every Chapter document with `subject_id` that has `content_en`
+    or `content_as`, runs `ingest_chapter_v2()` concurrently (bounded by
+    `parallelism`, default 3), and writes results back to a GenerationJob
+    you can poll at /admin/rag/jobs/{job_id}.
+
+    Query params / body:
+      source_type   — chunking strategy (notes/definition/pyq/mcqs). Default: notes.
+      parallelism   — max concurrent chapter ingestions (1-10). Default: 3.
+      dry_run       — embed + chunk but skip all writes. Default: false.
+      chapter_ids   — if set, only re-index these specific chapter IDs.
+    """
+    import asyncio as _asyncio
+    await _validate_admin_session(request)
+
+    parallelism = max(1, min(req.parallelism, 10))
+
+    from app.models.content import Chapter
+    from app.models.rag import GenerationJob
+
+    query: dict = {"subject_id": subject_id}
+    all_chapters = (
+        await Chapter.find(query)
+        .sort([("chapter_number", 1)])
+        .to_list()
+    )
+
+    if req.chapter_ids:
+        requested = set(str(c) for c in req.chapter_ids)
+        all_chapters = [ch for ch in all_chapters if str(ch.id) in requested]
+
+    eligible = [
+        ch for ch in all_chapters
+        if ch.content_en or ch.content_as
+    ]
+
+    if not eligible:
+        return {
+            "subject_id": subject_id,
+            "chapters_found": len(all_chapters),
+            "chapters_eligible": 0,
+            "status": "skipped",
+            "message": "No chapters have content_en or content_as to ingest.",
+        }
+
+    job = GenerationJob(
+        job_type="bulk_reindex_subject",
+        subject_id=subject_id,
+        status="pending",
+        total_chunks=len(eligible),
+    )
+    await job.insert()
+    job_id = str(job.id)
+
+    _asyncio.create_task(
+        _run_bulk_chapter_reindex(
+            subject_id=subject_id,
+            chapters=eligible,
+            source_type=req.source_type,
+            parallelism=parallelism,
+            job_id=job_id,
+            dry_run=req.dry_run,
+        )
+    )
+
+    logger.info(
+        f"[bulk-reindex] queued subject={subject_id} "
+        f"chapters={len(eligible)} parallelism={parallelism} "
+        f"source_type={req.source_type} dry_run={req.dry_run} job={job_id}"
+    )
+
+    return {
+        "job_id": job_id,
+        "subject_id": subject_id,
+        "chapters_found": len(all_chapters),
+        "chapters_eligible": len(eligible),
+        "parallelism": parallelism,
+        "source_type": req.source_type,
+        "dry_run": req.dry_run,
+        "status": "queued",
+        "message": f"Re-indexing {len(eligible)} chapters. Poll /admin/rag/jobs/{job_id} for progress.",
+    }
+
+
+# ── Single chapter re-index from DB content ───────────────────────────────────
+
+@router.post("/rag/reindex/chapter/{chapter_id}")
+async def reindex_chapter(
+    chapter_id: str,
+    req: ChapterReindexRequest,
+    request: Request,
+):
+    """
+    Re-index a single chapter by reading its content_en / content_as from MongoDB.
+
+    Purges existing chunks (MongoDB `chunks` collection + Cloudflare Vectorize),
+    then runs the full ingest pipeline synchronously and returns the result.
+
+    Use this for targeted re-indexing after editing a chapter's content in the
+    admin CMS, or for testing chunking/embedding on individual chapters before
+    running a full subject bulk-reindex.
+    """
+    await _validate_admin_session(request)
+
+    from app.models.content import Chapter
+    from app.services.rag.ingestion_v2 import ingest_chapter_v2
+
+    chapter = await Chapter.get(chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail=f"Chapter not found: {chapter_id}")
+
+    if not chapter.content_en and not chapter.content_as:
+        raise HTTPException(
+            status_code=422,
+            detail="Chapter has no content_en or content_as to ingest.",
+        )
+
+    subject_id = str(chapter.subject_id)
+
+    logger.info(
+        f"[chapter-reindex] chapter={chapter_id} ({chapter.title}) "
+        f"subject={subject_id} source_type={req.source_type} dry_run={req.dry_run}"
+    )
+
+    result = await ingest_chapter_v2(
+        chapter_id=chapter_id,
+        content_en=chapter.content_en,
+        content_as=chapter.content_as,
+        metadata={"subject_id": subject_id},
+        source_type=req.source_type,
+        dry_run=req.dry_run,
+    )
+
+    en = result.get("en", {})
+    as_ = result.get("as", {})
+    all_errors = en.get("errors", []) + as_.get("errors", [])
+
+    return {
+        "chapter_id": chapter_id,
+        "chapter_title": chapter.title,
+        "subject_id": subject_id,
+        "source_type": req.source_type,
+        "dry_run": req.dry_run,
+        "en": {
+            "chunks_total": en.get("chunks_total", 0),
+            "chunks_embedded": en.get("chunks_embedded", 0),
+            "mongo_inserted": en.get("mongo_inserted", 0),
+            "vectorize_upserted": en.get("vectorize_upserted", 0),
+            "errors": en.get("errors", []),
+        },
+        "as": {
+            "chunks_total": as_.get("chunks_total", 0),
+            "chunks_embedded": as_.get("chunks_embedded", 0),
+            "mongo_inserted": as_.get("mongo_inserted", 0),
+            "vectorize_upserted": as_.get("vectorize_upserted", 0),
+            "errors": as_.get("errors", []),
+        },
+        "total_chunks": en.get("chunks_total", 0) + as_.get("chunks_total", 0),
+        "total_vectorized": en.get("vectorize_upserted", 0) + as_.get("vectorize_upserted", 0),
+        "errors": all_errors,
+        "status": "dry_run" if req.dry_run else ("ok" if not all_errors else "partial"),
     }
 
 
