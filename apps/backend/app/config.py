@@ -56,6 +56,7 @@ class Settings(BaseSettings):
 
     # --- MongoDB (Data) ---
     MONGODB_URI: Optional[str] = None
+    MONGODB_URL: Optional[str] = None  # Alias used by Replit secret store
     MONGODB_DB_NAME: str = "syrabit_prod"
     MONGODB_MAX_POOL_SIZE: int = 50
     # Note (HF-111): MONGODB_MAX_POOL_SIZE=50 is sufficient. Monitor via OTel metrics.
@@ -157,11 +158,14 @@ class Settings(BaseSettings):
         """Convert empty strings to None so Optional fields work correctly.
 
         Note (HF-112): empty_strings_to_none intentionally converts "" to None for all fields.
+        Also maps MONGODB_URL → MONGODB_URI for Replit compatibility.
         """
         if isinstance(values, dict):
             for key, val in values.items():
                 if val == "":
                     values[key] = None
+            if not values.get("MONGODB_URI") and values.get("MONGODB_URL"):
+                values["MONGODB_URI"] = values["MONGODB_URL"]
         return values
 
     @model_validator(mode="after")
