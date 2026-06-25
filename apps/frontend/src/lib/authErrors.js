@@ -11,6 +11,12 @@ const FRIENDLY = {
   reset_token_expired: 'This password reset link has expired. Please request a new one.',
 };
 
+function extractPydanticMsg(msg) {
+  if (!msg) return null;
+  const m = String(msg).match(/Value error,\s*(.+)/i);
+  return m ? m[1].trim() : msg;
+}
+
 export function formatAuthError(err, fallback = 'Something went wrong. Please try again.') {
   const detail = err?.response?.data?.detail;
   if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
@@ -27,7 +33,8 @@ export function formatAuthError(err, fallback = 'Something went wrong. Please tr
   if (Array.isArray(detail) && detail.length > 0) {
     const first = detail[0];
     if (typeof first === 'string') return FRIENDLY[first] || first;
-    if (first?.msg) return first.msg;
+    const rawMsg = first?.msg || first?.message;
+    if (rawMsg) return extractPydanticMsg(rawMsg);
   }
   return fallback;
 }

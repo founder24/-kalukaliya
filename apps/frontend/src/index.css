@@ -1339,10 +1339,14 @@
   html, body { overflow-x: hidden; }
 }
 
-/* Auth form card — scroll-safe on short viewports */
-.auth-form-card {
-  max-height: calc(100vh - 6rem);
-  max-height: calc(100svh - 6rem);
+/* Auth form card — scroll-safe on short viewports.
+   On mobile the page body scrolls naturally (no max-height constraint).
+   On desktop/tablet with enough height we clamp and scroll inside the card. */
+@media (min-height: 640px) and (min-width: 640px) {
+  .auth-form-card {
+    max-height: calc(100vh - 6rem);
+    max-height: calc(100svh - 6rem);
+  }
 }
 
 /* Auth link hover/active states — touch-friendly */

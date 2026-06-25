@@ -56,8 +56,10 @@ async def _csrf_check(request: Request):
         # request. API clients and test runners do not send Origin headers.
         if not origin:
             return
-        allowed = settings.allowed_origins_list
-        if not any(origin.startswith(o) for o in allowed):
+        # Use is_origin_allowed() which handles wildcard patterns for Replit dev
+        # domains (e.g. https://*.sisko.replit.dev) and CF Pages preview URLs,
+        # not just the exact-match list in allowed_origins_list.
+        if not settings.is_origin_allowed(origin):
             raise HTTPException(
                 status_code=403, detail="CSRF validation failed: origin not allowed"
             )
@@ -220,12 +222,16 @@ async def admin_login(request: Request):
     response = JSONResponse(
         {"status": "ok", "name": user.name or "", "user_id": str(user.id)}
     )
+    # In development, cookies must not require HTTPS (secure=False) and use
+    # SameSite=Lax so the Vite dev proxy can relay them correctly.
+    # In production (Cloud Run ↔ CF Worker), enforce Secure + SameSite=Strict.
+    is_prod = settings.APP_ENV == "production"
     response.set_cookie(
         key="syrabit_admin_session",
         value=admin_token,
         httponly=True,
-        secure=True,
-        samesite="strict",
+        secure=is_prod,
+        samesite="strict" if is_prod else "lax",
         max_age=28800,  # 8 hours
         path="/api/",
     )
@@ -265,11 +271,12 @@ async def admin_logout(request: Request):
         "message": "Logged out",
         "server_revocation": server_revocation,
     })
+    is_prod = settings.APP_ENV == "production"
     response.delete_cookie(
         key="syrabit_admin_session",
         path="/api/",
         httponly=True,
-        secure=True,
-        samesite="strict",
+        secure=is_prod,
+        samesite="strict" if is_prod else "lax",
     )
     return response
