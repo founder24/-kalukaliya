@@ -160,7 +160,7 @@ class ChatService:
             return None, None
 
     @staticmethod
-    def build_source_card(
+    async def build_source_card(
         topic_match: Optional[dict],
         context_chunks: list[dict],
         web_chunks: list[dict],
@@ -173,6 +173,9 @@ class ChatService:
         Priority: topic_match metadata > first chunk metadata > web > llm_only.
         topic_match keys from TopicMatcher: topic_id, topic_title, chapter_id,
         chapter_title, subject_slug, board_slug, class_level, score.
+
+        subject_name is resolved from the Subject collection by slug so the SSE
+        payload is self-contained and the frontend fallback is only backup.
         """
         from app.models.source_card import SourceCard
 
@@ -190,8 +193,20 @@ class ChatService:
             source_type = "llm_only"
 
         if topic_match:
+            subject_slug = topic_match.get("subject_slug")
+            subject_name: Optional[str] = None
+            if subject_slug:
+                try:
+                    from app.models.content import Subject
+                    subj = await Subject.find_one({"slug": subject_slug})
+                    if subj:
+                        subject_name = subj.name
+                except Exception as e:
+                    logger.debug(f"build_source_card: subject lookup failed: {e}")
+
             return SourceCard(
-                subject_slug=topic_match.get("subject_slug"),
+                subject_name=subject_name,
+                subject_slug=subject_slug,
                 chapter_name=topic_match.get("chapter_title"),
                 topic_name=topic_match.get("topic_title"),
                 class_level=topic_match.get("class_level"),
@@ -411,8 +426,10 @@ class ChatService:
         if detected_lang == "en":
             base = (
                 "You are Syrabit, an educational AI assistant for AHSEC, SEBA, and CBSE students.\n"
-                "LANGUAGE RULE: The student may write in any language. "
-                "You MUST reply in English ONLY — never mix in Assamese, Hindi, or any other language.\n"
+                "LANGUAGE RULE: The student selected English mode. "
+                "You MUST reply in English ONLY — never mix in Assamese, Hindi, or any other language. "
+                "This rule is absolute: even if the student's question is written in Assamese, Hindi, or any other language, "
+                "your entire response must be in English only. Do not switch languages mid-response.\n"
                 "STYLE: Give a dense, syllabus-aligned answer covering every key fact, subtopic, and "
                 "subpoint in as few words as possible. No filler phrases, no opening/closing pleasantries.\n"
                 "ACCURACY: Prioritise curriculum sources. If unsure, say so clearly."
@@ -447,8 +464,10 @@ class ChatService:
         else:
             base = (
                 "তুমি Syrabit — AHSEC, SEBA আৰু CBSE ৰ ছাত্ৰ-ছাত্ৰীৰ বাবে এটা শিক্ষামূলক AI সহায়ক।\n"
-                "ভাষাৰ নিয়ম: ছাত্ৰই যিকোনো ভাষাত প্ৰশ্ন কৰিব পাৰে। "
-                "তুমি কেৱল সম্পূৰ্ণ অসমীয়া ভাষাতহে উত্তৰ দিবা — ইংৰাজী, হিন্দী বা অন্য কোনো ভাষা মিহলি নকৰিবা।\n"
+                "ভাষাৰ নিয়ম: ছাত্ৰই অসমীয়া ম'ড বাছি লৈছে। "
+                "তুমি কেৱল সম্পূৰ্ণ অসমীয়া ভাষাতহে উত্তৰ দিবা — ইংৰাজী, হিন্দী বা অন্য কোনো ভাষা মিহলি নকৰিবা। "
+                "এই নিয়ম নিৰপেক্ষ: ছাত্ৰই ইংৰাজী বা অন্য ভাষাত প্ৰশ্ন কৰিলেও তোমাৰ সম্পূৰ্ণ উত্তৰ কেৱল অসমীয়াত হ'ব লাগিব। "
+                "মাজত ভাষা সলনি নকৰিবা — কেৱল প্ৰযুক্তিগত পৰিভাষা বা ব্ৰেণ্ড নামহে ইংৰাজীত ৰাখিব পাৰিবা।\n"
                 "শৈলী: পাঠ্যক্ৰম-সংগতিপূৰ্ণ, ঘন আৰু তথ্যসমৃদ্ধ উত্তৰ দিয়া — সকলো মূল তথ্য আৰু উপবিষয় "
                 "যথাসম্ভৱ কম শব্দত আৱৰিব। অপ্ৰয়োজনীয় ভূমিকা বা সমাপ্তি বাক্য লিখিব নালাগে।\n"
                 "শুদ্ধতা: পাঠ্যক্ৰমৰ উৎসক অগ্ৰাধিকাৰ দিয়া। অনিশ্চিত হ'লে স্পষ্টকৈ কোৱা।"

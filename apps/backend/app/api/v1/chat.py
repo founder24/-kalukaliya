@@ -578,7 +578,7 @@ async def chat_stream(
                     extra={"user_id": user_id, "query": sanitized_message[:30]},
                 )
                 history = await ChatService.load_conversation_history(request.session_id)
-                source_card = ChatService.build_source_card(None, [], [], "none", "generic")
+                source_card = await ChatService.build_source_card(None, [], [], "none", "generic")
 
             else:
                 # ── Phase 1: embed + topic match + conversation history in parallel.
@@ -715,7 +715,7 @@ async def chat_stream(
                         extra={"user_id": user_id, "web_chunks": len(web_chunks)},
                     )
 
-                source_card = ChatService.build_source_card(
+                source_card = await ChatService.build_source_card(
                     topic_match, context_chunks, web_chunks, rag_path, confidence_tier
                 )
 
@@ -734,7 +734,7 @@ async def chat_stream(
         web_chunks = []
         confidence_tier = "error"
         rag_path = "none"
-        source_card = ChatService.build_source_card(None, [], [], "none", "error")
+        source_card = await ChatService.build_source_card(None, [], [], "none", "error")
 
     # -- Build system prompt with weighted RAG 50% / Web 20% / LLM 30% --
     system_prompt = ChatService.build_system_prompt(

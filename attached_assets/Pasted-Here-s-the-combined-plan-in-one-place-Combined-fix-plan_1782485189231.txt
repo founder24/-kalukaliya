@@ -1,0 +1,43 @@
+Here’s the combined plan in one place.
+
+## Combined fix plan
+- Add `subject_name` to the backend source-card payload so the card is self-contained.
+- Keep the frontend fallback only as backup, not as the primary source of truth.
+- Build separate system prompts for the two modes:
+  - **English mode:** think and respond in English only.
+  - **Assamese mode:** think and respond in Assamese only.
+- Make **mode selection override input language** for both retrieval and generation.
+- Route retrieval through the matching mode’s RAG:
+  - English mode → **English RAG**.
+  - Assamese mode → **Assamese RAG**, even if the input text is English or another language.
+
+## Prompt policy
+- English mode: final output must be English only, with no Assamese mixed in.
+- Assamese mode: final output must be Assamese only, with no English mixed in unless it is a proper term or brand name.
+- Internal reasoning stays hidden in both modes.
+
+## Source card rule
+- Add `subject_name` directly from the matched curriculum context or a lookup before `to_sse_dict()`.
+- Keep existing frontend fallback so current messages do not break during rollout.
+- Continue showing topic, chapter, subject, and class in the source card.
+
+## Retrieval rule
+- **English mode:** use English mode RAG and English prompt flow.
+- **Assamese mode:** use Assamese mode RAG and Assamese prompt flow.
+- Input language does not control retrieval mode; the selected mode does.
+
+## Suggested order
+1. Patch backend source-card payload.
+2. Add mode-specific prompt builders.
+3. Wire prompt selection from `response_lang`.
+4. Ensure English and Assamese mode RAG routing is correct.
+5. Verify source cards and final output in both modes end to end.
+
+## Acceptance check
+- English mode always returns English.
+- Assamese mode always returns Assamese.
+- Assamese mode still works even when the user types English or mixed input.
+- Source card shows `subject_name` without depending on frontend fallback.
+- Existing confidence-aware RAG routing still works unchanged.
+
+Would you like me to turn this into a short commit-ready checklist?
