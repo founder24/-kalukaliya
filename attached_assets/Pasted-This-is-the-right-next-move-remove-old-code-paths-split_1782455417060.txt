@@ -1,0 +1,31 @@
+This is the right next move: **remove old code paths, split the current content editor from the new RAG editor, keep page-view content on Cloudflare, and make the RAG editor store JSON meant only for retrieval**. Cloudflare Workers static assets are a good fit for page-view content, and Vectorize metadata filtering is a good fit for topic/chapter/medium-scoped RAG data. [developers.cloudflare](https://developers.cloudflare.com/workers/static-assets/)
+
+## Recommended split
+- **Content Editor:** keeps the current frontend content structure; page-view data is stored on Cloudflare and served directly, with no backend dependency for browsing. [developers.cloudflare](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/configuration/static-assets/)
+- **RAG Editor:** a new panel that looks like the content editor but stores structured **JSON RAG data** only, for ingestion into MongoDB chunks and Cloudflare Vectorize. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+## What to remove
+- Old duplicated editor logic.
+- Legacy RAG code paths that bypass the new schema.
+- Any page-view flow that still reads from backend tables when Cloudflare static assets should serve it directly. [github](https://github.com/cloudflare/cloudflare-docs/blob/production/content/pages/tutorials/use-r2-as-static-asset-storage-for-pages/index.md)
+
+## New storage rule
+- **Frontend page views:** Cloudflare static assets / page assets.
+- **Editable content metadata:** MongoDB.
+- **RAG JSON payloads:** MongoDB + Vectorize metadata/embeddings. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/client-api/)
+
+## Best upgrade path
+1. Freeze old code.
+2. Split editor UIs.
+3. Move page-view content to Cloudflare-only storage.
+4. Add the new RAG editor panel with JSON export.
+5. Wire ingestion to create MongoDB chunks + Vectorize vectors.
+6. Delete the old fallback paths after validation. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/wrangler-commands/)
+
+## Extra upgrades to plan
+- Separate English and Assamese medium data handling.
+- Add validation for chapter/topic JSON before publish.
+- Add bulk reindex and diff-based update tools.
+- Add route cleanup so only one source of truth remains for each section. [developers.cloudflare](https://developers.cloudflare.com/vectorize/platform/changelog/)
+
+If you want, I can turn this into a **migration checklist with exact folders/files to delete, keep, and add**.
