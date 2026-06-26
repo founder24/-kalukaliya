@@ -56,4 +56,15 @@ interface Env {
   // Pre-seeded content HTML store (written by backend content pipeline).
   // Keys: {board}/{class_level}/{subject}/{chapter}/{page_type}
   CONTENT_KV: KVNamespace;
+  // Workers AI binding — used for TTS and OCR directly at the edge.
+  AI?: Ai;
+}
+
+// Minimal Cloudflare Workers AI binding type.
+// Full types are provided by @cloudflare/workers-types when installed.
+declare interface Ai {
+  run(
+    model: string,
+    inputs: Record<string, unknown>
+  ): Promise<Response | Record<string, unknown>>;
 }

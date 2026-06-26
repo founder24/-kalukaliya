@@ -928,9 +928,17 @@ async def analyze_image(
     if len(image_bytes) > 4 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Image must be less than 4MB")
 
-    raise HTTPException(
-        status_code=501,
-        detail="Vision analysis is not available. Gemini has been removed from this deployment.",
+    from app.services.ai.cloudflare_client import cloudflare_client
+
+    try:
+        extracted_text = await cloudflare_client.vision_analyze(image_bytes, sanitized_prompt)
+    except Exception as exc:
+        logger.error(f"OCR via Cloudflare Workers AI failed: {exc}")
+        raise HTTPException(status_code=502, detail="Image analysis failed. Please try again.")
+
+    return ImageAnalysisResponse(
+        text=extracted_text,
+        model=settings.CF_AI_VISION_MODEL,
     )
 
 
@@ -964,7 +972,13 @@ async def text_to_speech(
     if not allowed and not _is_admin:
         raise HTTPException(status_code=429, detail="Rate limit exceeded.")
 
-    raise HTTPException(
-        status_code=501,
-        detail="Text-to-speech via Gemini is not available. Use Cloudflare Workers AI TTS instead.",
-    )
+    from app.services.ai.cloudflare_client import cloudflare_client
+    from fastapi.responses import Response as FastAPIResponse
+
+    try:
+        audio_bytes = await cloudflare_client.text_to_speech(request.text, request.lang)
+    except Exception as exc:
+        logger.error(f"TTS via Cloudflare Workers AI failed: {exc}")
+        raise HTTPException(status_code=502, detail="Text-to-speech failed. Please try again.")
+
+    return FastAPIResponse(content=audio_bytes, media_type="audio/mpeg")

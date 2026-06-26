@@ -408,6 +408,125 @@ export default {
       return secured;
     }
 
+    // ── Edge-handled AI routes (Workers AI binding — never hit the Python backend) ──
+
+    /**
+     * TTS: POST /api/v1/chat/tts
+     * Body: { text: string, lang: "en" | "as" }
+     * Returns: audio/mpeg binary
+     *
+     * Handled entirely at the edge using env.AI so the backend never receives
+     * large audio payloads and Cloud Run compute is not wasted on audio synthesis.
+     */
+    if (url.pathname === '/api/v1/chat/tts' && request.method === 'POST') {
+      const origin = request.headers.get('Origin') || '';
+      const userId = request.headers.get('X-User-ID');
+      if (!userId || userId === 'anonymous') {
+        const r = jsonResponse(401, { error: 'Authentication required' });
+        applyCorsHeaders(r.headers, origin);
+        r.headers.set('X-Request-ID', requestId);
+        return r;
+      }
+
+      if (!env.AI) {
+        // AI binding not configured — fall through to backend proxy
+      } else {
+        try {
+          const body = await request.json() as { text?: string; lang?: string };
+          const text = (body.text || '').trim().slice(0, 5000);
+          if (!text) {
+            const r = jsonResponse(400, { error: 'text is required' });
+            applyCorsHeaders(r.headers, origin);
+            r.headers.set('X-Request-ID', requestId);
+            return r;
+          }
+          const lang = (body.lang || 'en').toLowerCase().startsWith('as') ? 'AS' : 'EN';
+          const aiResult = await env.AI.run('@cf/myshell/melotts', { prompt: text, language: lang });
+          // Workers AI TTS returns a Response with audio content
+          const audioBytes = aiResult instanceof Response
+            ? await aiResult.arrayBuffer()
+            : new ArrayBuffer(0);
+          const ttsResp = new Response(audioBytes, {
+            status: 200,
+            headers: { 'Content-Type': 'audio/mpeg' },
+          });
+          applyCorsHeaders(ttsResp.headers, origin);
+          ttsResp.headers.set('X-Request-ID', requestId);
+          return ttsResp;
+        } catch (err) {
+          const r = jsonResponse(500, { error: 'TTS failed', detail: err instanceof Error ? err.message : 'unknown' });
+          applyCorsHeaders(r.headers, origin);
+          r.headers.set('X-Request-ID', requestId);
+          return r;
+        }
+      }
+    }
+
+    /**
+     * OCR: POST /api/v1/chat/image
+     * Body: multipart/form-data — "file" (image), "prompt" (optional string)
+     * Returns: { text: string, model: string }
+     *
+     * Handled at the edge with Workers AI vision model so image bytes never
+     * travel over the internet to Cloud Run.
+     */
+    if (url.pathname === '/api/v1/chat/image' && request.method === 'POST') {
+      const origin = request.headers.get('Origin') || '';
+      const userId = request.headers.get('X-User-ID');
+      if (!userId || userId === 'anonymous') {
+        const r = jsonResponse(401, { error: 'Authentication required' });
+        applyCorsHeaders(r.headers, origin);
+        r.headers.set('X-Request-ID', requestId);
+        return r;
+      }
+
+      if (!env.AI) {
+        // AI binding not configured — fall through to backend proxy
+      } else {
+        try {
+          const form = await request.formData();
+          const file = form.get('file') as File | null;
+          const prompt = (form.get('prompt') as string | null) || 'Extract all text from this image. Return only the text content, no commentary.';
+
+          if (!file) {
+            const r = jsonResponse(400, { error: 'file is required' });
+            applyCorsHeaders(r.headers, origin);
+            r.headers.set('X-Request-ID', requestId);
+            return r;
+          }
+
+          const imageBytes = await file.arrayBuffer();
+          if (imageBytes.byteLength > 4 * 1024 * 1024) {
+            const r = jsonResponse(400, { error: 'Image must be less than 4MB' });
+            applyCorsHeaders(r.headers, origin);
+            r.headers.set('X-Request-ID', requestId);
+            return r;
+          }
+
+          const imageArray = [...new Uint8Array(imageBytes)];
+          const aiResult = await env.AI.run('@cf/unum/uform-gen2-qwen-500m', {
+            image: imageArray,
+            prompt,
+            max_tokens: 512,
+          }) as { description?: string; response?: string };
+
+          const text = (aiResult.description || aiResult.response || '').trim();
+          const ocrResp = new Response(
+            JSON.stringify({ text, model: '@cf/unum/uform-gen2-qwen-500m' }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+          applyCorsHeaders(ocrResp.headers, origin);
+          ocrResp.headers.set('X-Request-ID', requestId);
+          return ocrResp;
+        } catch (err) {
+          const r = jsonResponse(500, { error: 'OCR failed', detail: err instanceof Error ? err.message : 'unknown' });
+          applyCorsHeaders(r.headers, origin);
+          r.headers.set('X-Request-ID', requestId);
+          return r;
+        }
+      }
+    }
+
     // API routes → proxy to backend
     // Note: /health/full is handled above; remaining /health/ sub-paths (e.g. /health/deep)
     // are proxied to backend. /health is handled at edge above.

@@ -134,11 +134,13 @@ export function useTTS() {
     const lang = getTTSLang();
 
     const fetchChunkAudio = async (chunk, signal) => {
+      // Normalise BCP-47 codes like "en-IN" or "as-IN" → short codes "en" / "as"
+      const shortLang = lang.split('-')[0].toLowerCase();
       const res = await fetch(`${API_BASE}/chat/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ text: chunk, language: lang }),
+        body: JSON.stringify({ text: chunk, lang: shortLang }),
         signal,
       });
       if (!res.ok) {

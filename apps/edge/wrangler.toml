@@ -37,6 +37,9 @@ preview_id = "981e939bcca445c481d4be818ebefee7"
 binding = "R2_BUCKET"
 bucket_name = "syrabit-assets"
 
+[ai]
+binding = "AI"
+
 [triggers]
 crons = []
 
@@ -62,6 +65,9 @@ preview_id = "981e939bcca445c481d4be818ebefee7"
 [[env.production.r2_buckets]]
 binding = "R2_BUCKET"
 bucket_name = "syrabit-assets"
+
+[env.production.ai]
+binding = "AI"
 
 # ── Required Secrets (set via Wrangler CLI or CF Dashboard) ──────────────────
 # npx wrangler secret put <NAME> --env production

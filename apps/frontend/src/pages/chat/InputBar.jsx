@@ -106,7 +106,7 @@ export function InputBar({
       if (isAnon) {
         try { headers['x-anon-id'] = getAnonId(); } catch {}
       }
-      const { data } = await axios.post(`${API_BASE}/ai/ocr-image`, fd, {
+      const { data } = await axios.post(`${API_BASE}/chat/image`, fd, {
         withCredentials: true,
         headers,
         timeout: 60000,
