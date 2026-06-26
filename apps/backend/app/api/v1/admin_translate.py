@@ -1,71 +1,34 @@
 """
 Admin Translation Endpoints - Bulk and single content translation to Assamese.
+
+Note: The cron-triggered endpoint (Bearer token auth) lives in admin_cron.py.
+All endpoints here require admin session via router-level dependency.
 """
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 
-from app.api.v1.admin import _validate_admin_session, _csrf_check
+from app.api.v1.admin import require_admin_session, csrf_guard
 from app.services.content.translator import ContentTranslator
 from app.models.knowledge import KnowledgeObject
 
-router = APIRouter(tags=["Admin Translation"])
+router = APIRouter(
+    tags=["Admin Translation"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
 translator = ContentTranslator()
-
-
-@router.post("/content/translate/cron")
-async def cron_translate(request: Request):
-    """Cron/CI-triggered translation. Auth via Bearer token (TRANSLATE_CRON_SECRET)."""
-    from app.config import settings
-
-    auth_header = request.headers.get("authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Bearer token")
-
-    token = auth_header[7:]
-    expected = settings.TRANSLATE_CRON_SECRET
-    if not expected or token != expected:
-        raise HTTPException(status_code=403, detail="Invalid token")
-
-    body = await request.json() if await request.body() else {}
-
-    # Initialize status on app state
-    request.app.state.translation_status = {
-        "running": True,
-        "total": 0,
-        "completed": 0,
-        "failed": 0,
-        "current_slug": "",
-        "errors": [],
-        "started_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    # Run synchronously (not background task) since this is a CI job
-    result = await translator.bulk_translate(
-        request.app.state,
-        board=body.get("board"),
-        subject=body.get("subject"),
-        limit=body.get("limit", 100),
-        skip_existing=True,
-    )
-    return result
 
 
 @router.post("/content/translate/bulk")
 async def bulk_translate(request: Request, background_tasks: BackgroundTasks):
     """Trigger bulk translation. Body: {board?, subject?, limit?, skip_existing?}"""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
-
     body = await request.json() if await request.body() else {}
 
-    # Check if already running
     status = getattr(request.app.state, "translation_status", None)
     if status and status.get("running"):
         raise HTTPException(status_code=409, detail="Translation job already running")
 
-    # Initialize status
     request.app.state.translation_status = {
         "running": True,
         "total": 0,
@@ -90,7 +53,6 @@ async def bulk_translate(request: Request, background_tasks: BackgroundTasks):
 @router.get("/content/translate/status")
 async def get_translate_status(request: Request):
     """Get current translation job status."""
-    await _validate_admin_session(request)
     status = getattr(request.app.state, "translation_status", None)
     if not status:
         return {"running": False, "message": "No translation job has been run"}
@@ -98,16 +60,12 @@ async def get_translate_status(request: Request):
 
 
 @router.post("/content/translate/{slug}")
-async def translate_single(request: Request, slug: str):
+async def translate_single(slug: str):
     """Translate a single knowledge object. Runs synchronously."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
-
     ko = await KnowledgeObject.find_one({"slug": slug})
     if not ko:
         raise HTTPException(status_code=404, detail="Knowledge object not found")
 
-    # Check if already translated
     existing = await KnowledgeObject.find_one({"slug": f"{slug}-as"})
     if existing:
         raise HTTPException(status_code=409, detail="Assamese version already exists")

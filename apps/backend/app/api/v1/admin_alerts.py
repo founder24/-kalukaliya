@@ -3,23 +3,24 @@ Admin Alerts Endpoints
 Alert management: unacknowledged count, cooldowns.
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends
 import logging
 
-from app.api.v1.admin import _validate_admin_session
+from app.api.v1.admin import require_admin_session, csrf_guard
 from app.config import settings
 from app.db.mongo import get_mongo_client
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Admin Alerts"])
+router = APIRouter(
+    tags=["Admin Alerts"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
 
 
 @router.get("/alerts/unacknowledged/count")
-async def unacknowledged_alerts_count(request: Request):
+async def unacknowledged_alerts_count():
     """Count of unacknowledged alerts."""
-    await _validate_admin_session(request)
-
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
@@ -32,10 +33,8 @@ async def unacknowledged_alerts_count(request: Request):
 
 
 @router.get("/alerts/cooldowns")
-async def alert_cooldowns(request: Request):
+async def alert_cooldowns():
     """Active alert cooldowns."""
-    await _validate_admin_session(request)
-
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]

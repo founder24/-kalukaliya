@@ -6,27 +6,28 @@ User listing, status, plan, role, and credit management.
 from datetime import datetime, timezone
 
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 import logging
 
-from app.api.v1.admin import _validate_admin_session, _csrf_check
+from app.api.v1.admin import require_admin_session, csrf_guard
 from app.config import settings
 from app.db.mongo import get_mongo_client
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Admin Users"])
+router = APIRouter(
+    tags=["Admin Users"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
 
 
 @router.get("/users")
 async def list_users(
-    request: Request,
     limit: int = 20,
     offset: int = 0,
     search: str = "",
 ):
     """Paginated user list with optional search."""
-    await _validate_admin_session(request)
     limit = min(limit, 100)
 
     try:
@@ -85,11 +86,8 @@ async def list_users(
 
 
 @router.patch("/users/{user_id}/status")
-async def update_user_status(request: Request, user_id: str):
+async def update_user_status(user_id: str, request: Request):
     """Update user status (active/suspended/banned)."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
-
     body = await request.json()
     status = body.get("status")
     if status not in ("active", "suspended", "banned"):
@@ -123,11 +121,8 @@ async def update_user_status(request: Request, user_id: str):
 
 
 @router.patch("/users/{user_id}/plan")
-async def update_user_plan(request: Request, user_id: str):
+async def update_user_plan(user_id: str, request: Request):
     """Update user subscription tier (free/pro)."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
-
     body = await request.json()
     plan = body.get("plan")
     if plan not in ("free", "pro"):
@@ -160,11 +155,8 @@ async def update_user_plan(request: Request, user_id: str):
 
 
 @router.patch("/users/{user_id}/role")
-async def update_user_role(request: Request, user_id: str):
+async def update_user_role(user_id: str, request: Request):
     """Update user role (student/educator/admin)."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
-
     body = await request.json()
     role = body.get("role")
     if role not in ("student", "educator", "admin"):
@@ -192,11 +184,8 @@ async def update_user_role(request: Request, user_id: str):
 
 
 @router.patch("/users/{user_id}/credits")
-async def adjust_user_credits(request: Request, user_id: str):
+async def adjust_user_credits(user_id: str, request: Request):
     """Adjust user credits (add/deduct/reset)."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
-
     body = await request.json()
     action = body.get("action")
     amount = body.get("amount", 0)

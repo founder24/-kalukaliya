@@ -26,6 +26,7 @@ from app.models.rag import (
     PageAsset,
     GenerationJob,
 )
+from app.models.ai_usage_log import AiUsageLog
 from app.db.migrations.runner import check_and_apply_migrations
 import logging
 
@@ -89,6 +90,7 @@ async def init_mongo() -> None:
                     ContentNode,
                     PageAsset,
                     GenerationJob,
+                    AiUsageLog,
                 ],
             )
 
@@ -325,6 +327,20 @@ async def create_indexes() -> None:
         await db.generation_jobs.create_index([("created_at", DESCENDING)])
     except Exception as e:
         logger.warning(f"generation_jobs index creation failed (non-fatal): {e}")
+
+    # ── AI usage logs ──────────────────────────────────────────────────────────
+    try:
+        await db.ai_usage_logs.create_index([("created_at", DESCENDING)])
+        await db.ai_usage_logs.create_index([("provider", ASCENDING), ("created_at", DESCENDING)])
+        await db.ai_usage_logs.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+        # TTL: auto-delete records older than 90 days
+        await db.ai_usage_logs.create_index(
+            [("created_at", ASCENDING)],
+            expireAfterSeconds=90 * 24 * 3600,
+            name="ai_usage_logs_ttl",
+        )
+    except Exception as e:
+        logger.warning(f"ai_usage_logs index creation failed (non-fatal): {e}")
 
     # ── Auth rate limit (IP-based, 90s TTL buckets) ───────────────────────────
     # _id is the rate key (endpoint:ip:minute_bucket), expires_at drives TTL.

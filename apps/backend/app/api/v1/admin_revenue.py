@@ -3,23 +3,24 @@ Admin Revenue Endpoints
 Revenue overview and subscription management.
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends
 import logging
 
-from app.api.v1.admin import _validate_admin_session
+from app.api.v1.admin import require_admin_session, csrf_guard
 from app.config import settings
 from app.db.mongo import get_mongo_client
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Admin Revenue"])
+router = APIRouter(
+    tags=["Admin Revenue"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
 
 
 @router.get("/revenue/overview")
-async def revenue_overview(request: Request):
-    """Revenue overview: pro users, monthly revenue estimate."""
-    await _validate_admin_session(request)
-
+async def revenue_overview():
+    """Revenue overview: pro users, Razorpay transaction sum."""
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
@@ -28,31 +29,52 @@ async def revenue_overview(request: Request):
             {"subscription_tier": "pro", "subscription_status": "active"}
         )
 
-        # Placeholder revenue calculation
-        # In production, integrate with Razorpay API
-        estimated_monthly_revenue = pro_users * 299  # INR per month estimate
+        # Sum captured Razorpay transactions (amount is in paise)
+        txn_agg = await db.transactions.aggregate(
+            [
+                {"$match": {"status": "captured"}},
+                {"$group": {"_id": None, "total_paise": {"$sum": "$amount"}}},
+            ]
+        ).to_list(length=1)
+        total_inr = round((txn_agg[0]["total_paise"] if txn_agg else 0) / 100, 2)
+
+        # Current month
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_agg = await db.transactions.aggregate(
+            [
+                {"$match": {"status": "captured", "created_at": {"$gte": month_start}}},
+                {"$group": {"_id": None, "total_paise": {"$sum": "$amount"}}},
+            ]
+        ).to_list(length=1)
+        month_inr = round((month_agg[0]["total_paise"] if month_agg else 0) / 100, 2)
+
+        txn_count = await db.transactions.count_documents({"status": "captured"})
 
         return {
             "pro_users": pro_users,
-            "monthly_revenue": estimated_monthly_revenue,
+            "revenue_total_inr": total_inr,
+            "revenue_month_inr": month_inr,
+            "transaction_count": txn_count,
             "currency": "INR",
-            "source": "estimate",
+            "source": "transactions_collection",
         }
     except Exception as e:
         logger.error(f"Revenue overview error: {e}")
         return {
             "pro_users": 0,
-            "monthly_revenue": 0,
+            "revenue_total_inr": 0,
+            "revenue_month_inr": 0,
+            "transaction_count": 0,
             "currency": "INR",
-            "source": "estimate",
+            "source": "unavailable",
         }
 
 
 @router.get("/revenue/subscriptions")
-async def list_subscriptions(request: Request):
+async def list_subscriptions():
     """List active subscriptions."""
-    await _validate_admin_session(request)
-
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]

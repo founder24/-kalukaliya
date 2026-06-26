@@ -7,15 +7,18 @@ subjects, chapters (with notes), and knowledge objects.
 from datetime import datetime, timezone
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from app.api.v1.admin import _validate_admin_session
+from app.api.v1.admin import require_admin_session, csrf_guard
 from app.db.mongo import get_mongo_client
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Admin DB Health"])
+router = APIRouter(
+    tags=["Admin DB Health"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
 
 SKIP_DBS = {"admin", "local", "config"}
 
@@ -122,7 +125,6 @@ async def admin_db_health(request: Request):
     Reports subjects, chapters with notes (EN/AS), and knowledge objects.
     Verdicts: complete | has_data | no_notes | empty
     """
-    await _validate_admin_session(request)
 
     client = get_mongo_client()
 

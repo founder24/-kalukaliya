@@ -1,0 +1,352 @@
+Syrabit Admin Panel — Full Upgrade Plan
+What the Audit Found (Problems to Fix)
+Code size problem — two monolith files dominate the panel:
+
+AdminDashboard.jsx — 5,663 lines, 8 KPI fields returning {"source":"placeholder"}
+AdminHealth.jsx — 4,971 lines, dozens of widgets crammed into one file
+Analytics section is almost completely fake:
+
+10 of 11 analytics endpoints return hardcoded zeros — the entire analytics section renders empty charts
+Auth is inconsistent across routers:
+
+admin_dashboard.py — uses clean router-level Depends(require_admin_session, csrf_guard) ✅
+admin_analytics.py, admin_ai.py, admin_translate.py, admin_users.py, admin_conversations.py, admin_notifications.py, admin_revenue.py — all use inline _validate_admin_session() with no CSRF protection ❌
+Frontend calls non-existent backend routes:
+
+GET /admin/analytics/funnel → 404
+GET /admin/analytics/content-heatmap → 404
+Duplicate routes:
+
+/admin/cf-overview exists in both admin_dashboard.py and admin_analytics.py, both returning zeros
+/admin/health in admin_dashboard.py duplicates /health/deep from health.py
+The core architectural problem (from your plan doc):
+AdminContentHub mixes three completely different concerns with no visual or code separation:
+
+Page-view content (notes/MCQs shown to students) → should live in CF KV / R2
+RAG retrieval chunks (text for AI context) → lives in MongoDB chunks + Vectorize
+EN→AS translation pipeline → completely different workflow
+AI Hub only shows Sarvam — Gemini/Vertex AI and CF Workers AI are completely absent from the providers panel despite being the actual models serving production traffic.
+
+Architecture Decisions
+Storage rule — one source of truth per data type:
+
+Data type	Storage	Serve path
+Student page views (notes, MCQs, summary)	CF KV CONTENT_KV + R2	Edge-served, zero backend dependency
+Curriculum metadata (boards/classes/subjects/chapters)	MongoDB	Backend is source, CF KV is read cache
+RAG retrieval chunks	MongoDB chunks + CF Vectorize	Backend for write, Vectorize for retrieval
+AI generation jobs	MongoDB generation_jobs	Backend tracks, admin polls
+Translation status	app.state in-memory	Ephemeral — jobs are short-lived, acceptable
+New sidebar section map:
+
+MAIN
+├── Dashboard v2     ← real KPIs: users/revenue/messages/latency/tokens/vector health
+├── Content Editor   ← ONLY page-view content → writes to CF KV on publish
+├── RAG Editor       ← NEW: structured JSON chunks → MongoDB + Vectorize
+└── SEO Manager      ← unchanged
+AUDIENCE
+├── Users            ← add credit history timeline
+├── Conversations    ← add AI model breakdown per conversation
+└── Notifications    ← unchanged
+OPERATIONS
+├── AI & Automation  ← expand to show ALL 3 providers + circuit breakers + token usage
+├── Revenue          ← wire to real Razorpay transactions
+└── Analytics        ← wire all 11 stubs to real MongoDB time-series + CF Analytics API
+SYSTEM
+├── Access & Security ← add token blacklist viewer
+├── Logs              ← unchanged (already solid)
+├── Health / Uptime   ← split 4,971-line monolith into 8 focused sub-cards
+├── Ops Console       ← unchanged
+├── GCP Integrations  ← unchanged
+└── Site Settings     ← move Roadmap here as a tab
+
+Phase Plan
+Phase 1 — Auth Standardization (1 day) · No dependencies
+All 8 routers that currently call _validate_admin_session() inline get converted to router-level Depends:
+
+router = APIRouter(
+    tags=["Admin X"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)]
+)
+
+Files: admin_analytics.py, admin_ai.py, admin_translate.py, admin_users.py, admin_conversations.py, admin_notifications.py, admin_revenue.py, admin_seo.py, admin_settings.py, admin_rag.py
+
+Also in Phase 1:
+
+Delete GET /admin/cf-overview from admin_dashboard.py (duplicate of analytics version)
+Delete GET /admin/health from admin_dashboard.py (duplicate of /health/deep)
+Extract /content/translate/cron (Bearer token auth) into its own admin_cron.py router so it isn't mixed with session-protected routes
+Phase 2 — Dashboard v2 (2 days) · Depends on Phase 1
+Backend — wire all 8 placeholder fields in admin_dashboard.py:
+
+Field	Real data source
+revenue_total	MongoDB transactions collection — sum amount where status="captured" ÷ 100
+revenue_month	Same, filter by created_at >= month_start
+latency	MongoDB request_logs — p50/p95 of duration_ms
+token_spend	MongoDB ai_usage_logs (new collection, written by chat_service)
+top_queries	Aggregate first messages from chats collection by keyword frequency
+vector_stats	CF Vectorize REST API — GET /accounts/{id}/vectorize/v2/indexes/{index}/info
+chat_fallbacks	Count chats where model_used is the fallback model
+chat_speedups	Remove — no meaningful definition yet
+Fields without data yet return {"source": "unavailable"} — never {"source": "placeholder"}.
+
+New model to add — AiUsageLog collection written after each AI response:
+
+class AiUsageLog(Document):
+    user_id: Optional[str]
+    provider: Literal["sarvam_ai", "vertex_ai", "cf_workers_ai"]
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: Optional[float]
+    lang: str
+    latency_ms: int
+    created_at: datetime
+    class Settings:
+        name = "ai_usage_logs"
+        indexes = [[("created_at", -1)], [("provider", 1), ("created_at", -1)]]
+
+Frontend — split AdminDashboard.jsx (5,663 lines) into:
+
+dashboard/
+├── DashboardPage.jsx          ← shell only (layout + fetch orchestration)
+└── widgets/
+    ├── KpiStrip.jsx           ← users/messages/signups (already real)
+    ├── RevenueWidget.jsx      ← total + monthly from Razorpay
+    ├── LatencyWidget.jsx      ← p50/p95 chart
+    ├── TokenSpendWidget.jsx   ← daily token cost per provider
+    ├── TopQueriesWidget.jsx   ← most common student questions
+    ├── VectorIndexWidget.jsx  ← Vectorize vector count + freshness
+    ├── FeedbackWidget.jsx     ← positive/negative rate sparkline
+    └── ChatModelWidget.jsx    ← sarvam vs. gemini usage breakdown
+
+Traffic/crawl/bot cards (already working) move to dashboard/traffic/. Cron pills move to dashboard/health/. AdminDashboard.jsx becomes a 1-line re-export of DashboardPage.
+
+Phase 3 — Analytics (3 days) · Depends on Phase 1
+Wire all 10 empty stubs:
+
+GET /analytics/daily:
+
+# MongoDB aggregation: group chats.created_at by day, count messages/chats/signups
+# Query param: ?days=7|30|90  (default 30)
+
+GET /analytics/funnel (create from 404):
+
+# Conversion funnel: registered → had ≥1 chat → paid subscriber
+return {"steps": [
+    {"label": "Registered", "count": total_users},
+    {"label": "Had a chat", "count": distinct_chatters},
+    {"label": "Pro subscriber", "count": pro_users},
+]}
+
+GET /analytics/content-heatmap (create from 404):
+
+# Group chunks collection by subject_id + chapter_id
+# Returns: which chapters have most RAG coverage
+
+GET /analytics/revenue:
+
+# Monthly Razorpay breakdown from transactions collection
+# MRR = sum of active pro subscriptions × price
+
+GET /analytics/cf-overview:
+
+# Call CF GraphQL API: https://api.cloudflare.com/client/v4/graphql
+# Query httpRequests1dGroups for requests, bandwidth, threats
+# Needs CF_ZONE_ID + CF_ANALYTICS_TOKEN in settings
+
+GET /analytics/predictor:
+
+# Simple linear regression on last 30 days of daily signups
+# Project 30 days forward, return R² as confidence
+
+GET /analytics/bot-traffic:
+
+# From CF WAF events (if CF_ANALYTICS_TOKEN configured) or MongoDB request_logs
+
+Remaining three (hydrate-stats, review-prompt-stats, content-card-views):
+→ wire to their respective MongoDB event collections, or return {"source": "unavailable", "message": "Event collection not yet populated"} — honest, not zeros.
+
+New config fields:
+
+CF_ZONE_ID: Optional[str] = None          # Cloudflare zone for analytics
+CF_ANALYTICS_TOKEN: Optional[str] = None  # Cloudflare Analytics API token
+
+Frontend: Wire the 9 sub-tabs in AdminAnalytics.jsx that currently render empty. Add try/catch on the two /funnel and /content-heatmap calls (currently crash on 404).
+
+Phase 4 — Content Editor Split + New RAG Editor (4 days) · Depends on Phase 1
+The big architectural change.
+
+Step 4.1 — New sidebar entry:
+
+// AdminPage.jsx SECTIONS array — add after 'contenthub':
+{ id: 'rageditor', icon: Database, label: 'RAG Editor', group: 'main' },
+
+Step 4.2 — Refactor AdminContentHub (page-view content ONLY):
+Remove from it: translation tab, progress tab, any RAG upload controls.
+Add: new Publish tab → ContentPublishPanel.jsx which calls:
+
+POST /admin/content/chapters/{chapter_id}/publish-to-edge
+
+This endpoint renders ContentNode to HTML and writes to CONTENT_KV under key {board}/{class}/{subject}/{chapter}/notes. After publish, edge worker serves this directly from KV — no backend involved on reads.
+
+Step 4.3 — Extract translation to AdminTranslationHub.jsx:
+
+Tabs:
+├── Bulk Translate  → POST /admin/content/translate/bulk (with board/subject filter)
+├── Progress        → GET  /admin/content/translate/status (live progress bar, polls every 2s)
+├── Coverage        → table: which chapters have AS translations
+└── Single          → translate one chapter by slug
+
+Step 4.4 — New AdminRagEditor.jsx:
+
+Tabs:
+├── Browser   → subject/chapter tree (left) + chunk preview (right)
+├── Editor    → JSON textarea with schema validation + publish button
+├── Reindex   → subject/chapter/medium selector + progress bar + cancel
+├── Coverage  → heatmap: EN chunks vs. AS chunks per chapter, freshness
+└── Jobs      → list of active/recent ingestion jobs
+
+Browser tab calls:
+
+GET /admin/content/subjects (existing) — populate tree
+GET /admin/rag/content-nodes?chapter_id=X (existing) — populate chunk list
+Reindex tab calls the updated endpoint:
+
+POST /admin/rag/reindex/chapter/{chapter_id}
+Body: { force: bool, medium: "english"|"assamese"|"both", purge_stale: bool }
+
+Polls GET /admin/rag/jobs/{job_id} every 2s for live progress.
+
+Coverage tab calls new endpoint:
+
+Step 4.5 — New backend endpoint GET /admin/rag/coverage:
+
+# MongoDB aggregation on chunks collection:
+# Group by {chapter_id, medium} → count, max(created_at)
+# Returns: [{chapter_id, english_count, assamese_count, last_indexed_at}]
+# Optional filters: ?subject_id=X&board=ahsec
+
+Step 4.6 — New Chapter model fields:
+
+rag_indexed_at: Optional[Dict[str, datetime]] = None   # {"english": dt, "assamese": dt}
+rag_chunk_count: Optional[Dict[str, int]] = None        # {"english": 42, "assamese": 38}
+
+Set by the reindex job after successful Vectorize upsert. Powers the Coverage tab without a separate aggregation on every page load.
+
+Step 4.7 — New CF Worker route:
+
+// apps/edge/src/index.ts — before /api/ proxy
+// GET /api/v1/content/page/{board}/{class}/{subject}/{chapter}
+// Reads from CONTENT_KV → returns JSON → zero backend latency on cache hit
+if (url.pathname.startsWith('/api/v1/content/page/') && request.method === 'GET') {
+  const kvKey = url.pathname.replace('/api/v1/content/page/', '');
+  const cached = await env.CONTENT_KV.get(kvKey);
+  if (cached) { /* serve from edge */ }
+  // MISS → fall through to backend for on-demand generation
+}
+
+Phase 5 — AI Hub Upgrade (2 days) · Depends on Phase 1
+Backend — expand GET /admin/ai/providers from Sarvam-only to all 3 providers:
+
+# Sarvam AI — configured + CB state + supported languages
+# Vertex AI / Gemini — configured + CB state + model name
+# CF Workers AI — configured + models dict (chat/vision/tts/embedding) + account ID
+
+New backend endpoints:
+
+GET  /admin/ai/circuit-breakers   → state of all CBs: CLOSED/OPEN/HALF_OPEN + failure count
+POST /admin/ai/reset-circuit      → body: {"provider": "sarvam_ai"|"vertex_ai"|"all"}
+GET  /admin/ai/usage              → last 24h token counts per provider from ai_usage_logs
+GET  /admin/ai/routing-pools      → current language→model routing table (en→gemini, as→sarvam)
+
+Frontend — expand AdminAiHub tabs:
+
+providers   → AdminProviderCards.jsx (3 provider cards)
+circuit     → AdminCircuitBreakers.jsx (CB state + reset buttons)
+routing     → AdminRoutingMatrix.jsx (language × provider matrix)
+usage       → AdminAiUsage.jsx (daily token/cost bar chart via recharts)
+jobs        → existing RAG job list
+
+Create apps/frontend/src/components/admin/ai/ directory with these 4 components.
+
+Phase 6 — Health Panel Split (2 days) · No dependencies
+Split AdminHealth.jsx (4,971 lines) into:
+
+health/
+├── HealthPage.jsx          ← shell: grid of sub-cards, ~50 lines
+├── SystemHealthCard.jsx    ← MongoDB/Redis/Vertex/Sarvam ping
+├── CronHealthPanel.jsx     ← all cron pills consolidated
+├── VectorizeHealthCard.jsx ← CF Vectorize index stats
+├── RateLimitStatusCard.jsx ← current rate limit counters per tier
+├── EmbedStackCard.jsx      ← embedding backfill status
+├── D1MirrorCard.jsx        ← D1 mirror lag
+├── CfAuditPanel.jsx        ← CF WAF audit latest
+└── SarvamHealthCard.jsx    ← keep as-is (already a component)
+
+AdminHealth.jsx becomes a ~15-line shell that imports and arranges these.
+
+Phase 7 — Revenue Section (1 day) · Depends on Phase 1
+Wire admin_revenue.py to read actual Razorpay transactions MongoDB collection:
+
+GET /admin/revenue/overview → total INR, month INR, pro subscriber count, transaction count
+GET /admin/revenue/subscriptions → paginated list of captured transactions with user email
+Phase 8 — Legacy Cleanup (1 day) · Depends on Phases 4+5
+Backend files to review for deletion:
+
+admin_knowledge.py — if all routes are covered by admin_content.py, delete
+admin_corpus.py — if superseded by admin_rag.py, delete
+admin_dead_letters.py — if dead letter queue is unused, replace with honest "not configured" stub
+KnowledgeObject freeze:
+
+Keep the knowledge.py model (existing data)
+Remove all admin endpoints that CREATE new KnowledgeObjects
+New content only flows through ContentNode + Chapter models
+Migration script: set archived=True on all existing KnowledgeObjects
+Frontend:
+
+AdminAwsNativePanel.jsx — if AWS services aren't configured, replace content with "Coming Soon"
+Move AdminRoadmap from hidden section → tab inside AdminSettings
+Complete File Change List
+New backend files:
+
+apps/backend/app/api/v1/admin_cron.py        ← cron-triggered endpoints (no session auth)
+apps/backend/app/services/analytics/
+    __init__.py
+    time_series.py   ← MongoDB daily/weekly aggregation helpers
+    cf_analytics.py  ← Cloudflare GraphQL query helpers
+apps/backend/app/models/ai_usage_log.py      ← AiUsageLog document model
+
+New frontend files:
+
+apps/frontend/src/components/admin/
+├── AdminRagEditor.jsx
+├── AdminTranslationHub.jsx
+├── dashboard/
+│   ├── DashboardPage.jsx
+│   └── widgets/ (8 files)
+├── ai/
+│   ├── AdminProviderCards.jsx
+│   ├── AdminRoutingMatrix.jsx
+│   ├── AdminCircuitBreakers.jsx
+│   └── AdminAiUsage.jsx
+└── health/
+    ├── HealthPage.jsx
+    └── (7 sub-card files)
+
+Implementation Order & Estimated Time
+Phase	What	Days	Can start
+1	Auth standardization + remove duplicates	1	Immediately
+6	Health panel split	2	Immediately (parallel with P1)
+2	Dashboard v2 (widget split + real KPIs)	2	After Phase 1
+3	Analytics (wire 11 stubs)	3	After Phase 1
+4	Content/RAG split + new RAG Editor	4	After Phase 1
+5	AI Hub (all 3 providers)	2	After Phase 1
+7	Revenue (Razorpay wire)	1	After Phase 1
+8	Legacy cleanup	1	After Phases 4+5
+Total		~16 days	
+Quick Wins (can be done right now, < 2 hours total)
+Auth fix — add Depends(require_admin_session, csrf_guard) to 8 routers — closes real CSRF exposure
+Delete 2 duplicate routes — /admin/cf-overview and /admin/health from admin_dashboard.py
+Add Gemini + CF Workers AI to /admin/ai/providers — AI Hub immediately shows all 3 providers
+Guard the 2 missing analytics calls in AdminAnalytics.jsx with try/catch so the section doesn't crash
+Replace 8 placeholder strings in dashboard response with {"source": "unavailable"} — stops the frontend showing misleading zeros

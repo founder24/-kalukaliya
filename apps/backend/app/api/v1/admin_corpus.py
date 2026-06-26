@@ -7,14 +7,17 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
-from app.api.v1.admin import _validate_admin_session
+from app.api.v1.admin import require_admin_session, csrf_guard
 from app.models.content import Chapter
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Admin Corpus"])
+router = APIRouter(
+    tags=["Admin Corpus"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
 
 
 # ─── Public health endpoint ────────────────────────────────────────────────────
@@ -80,7 +83,7 @@ async def corpus_assamese_health(request: Request):
 @router.get("/admin/corpus/assamese/progress")
 async def corpus_assamese_progress(request: Request):
     """Returns real-time backfill progress (fast, no DB queries)."""
-    await _validate_admin_session(request)
+
     progress = getattr(request.app.state, "corpus_assamese_progress", {})
     lock_held = any(c.get("running") for c in progress.values())
     return {
@@ -97,7 +100,7 @@ async def corpus_assamese_backfill(request: Request):
     Trigger an Assamese content backfill pass using Sarvam AI.
     Runs in the background. Returns immediately.
     """
-    await _validate_admin_session(request)
+
 
     body = await request.json() if await request.body() else {}
     max_docs = int(body.get("max_docs", 50))

@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     # GCS bucket name for educational content (source of truth for CF Pages)
     GCS_CONTENT_BUCKET: Optional[str] = None
 
+    # --- Cloudflare Analytics (traffic + WAF stats) ---
+    # Zone ID from the Cloudflare dashboard (Overview → Zone ID on the right sidebar).
+    CF_ZONE_ID: Optional[str] = None
+    # API token with Analytics:Read permission (separate from CF_API_TOKEN).
+    CF_ANALYTICS_TOKEN: Optional[str] = None
+
     # --- Cloudflare Vectorize (RAG vector store) ---
     # Index name created via: wrangler vectorize create syrabit-rag --dimensions=1024 --metric=cosine
     # Uses the same CF_ACCOUNT_ID and CF_API_TOKEN / CF_WORKER_AI_TOKEN as Workers AI.

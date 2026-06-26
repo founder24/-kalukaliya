@@ -1,7 +1,7 @@
 """
 Admin RAG endpoints — ingestion, reindexing, job tracking, content editing.
 
-All endpoints require admin session (Bearer token via _validate_admin_session).
+All endpoints require admin session (router-level Depends on require_admin_session + csrf_guard).
 
 Routes:
   POST /admin/rag/upload/book               — register + queue a book PDF
@@ -28,13 +28,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from app.api.v1.admin import _validate_admin_session
+from app.api.v1.admin import require_admin_session, csrf_guard
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["Admin RAG"])
+router = APIRouter(
+    tags=["Admin RAG"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
 
 
 def _now() -> datetime:
@@ -148,7 +151,7 @@ async def _kick_ingest(document_id: str, job_id: str, content: Optional[str]) ->
 @router.post("/rag/upload/book")
 async def upload_book(req: UploadRequest, request: Request):
     """Register an English or Assamese book PDF and queue it for ingestion."""
-    await _validate_admin_session(request)
+
     doc, job = await _create_document(req, source_type="book_pdf")
     import asyncio
     asyncio.create_task(_kick_ingest(str(doc.id), str(job.id), req.content))
@@ -163,7 +166,7 @@ async def upload_book(req: UploadRequest, request: Request):
 @router.post("/rag/upload/syllabus")
 async def upload_syllabus(req: UploadRequest, request: Request):
     """Register a syllabus document and queue for ingestion."""
-    await _validate_admin_session(request)
+
     doc, job = await _create_document(req, source_type="syllabus")
     import asyncio
     asyncio.create_task(_kick_ingest(str(doc.id), str(job.id), req.content))
@@ -177,7 +180,7 @@ async def upload_syllabus(req: UploadRequest, request: Request):
 @router.post("/rag/upload/pyq")
 async def upload_pyq(req: UploadRequest, request: Request):
     """Register a Past Year Question paper and queue for ingestion."""
-    await _validate_admin_session(request)
+
     doc, job = await _create_document(req, source_type="pyq")
     import asyncio
     asyncio.create_task(_kick_ingest(str(doc.id), str(job.id), req.content))
@@ -191,7 +194,7 @@ async def upload_pyq(req: UploadRequest, request: Request):
 @router.post("/rag/upload/chapter-questions")
 async def upload_chapter_questions(req: UploadRequest, request: Request):
     """Register chapter-exercise questions and queue for ingestion."""
-    await _validate_admin_session(request)
+
     doc, job = await _create_document(req, source_type="chapter_question")
     import asyncio
     asyncio.create_task(_kick_ingest(str(doc.id), str(job.id), req.content))
@@ -211,7 +214,7 @@ async def reindex_document(document_id: str, request: Request):
     The document's original content_override must be re-supplied via the body,
     OR the document must have file_url set (PDF extraction stub).
     """
-    await _validate_admin_session(request)
+
     from app.models.rag import RagDocument, GenerationJob
 
     doc = await RagDocument.get(document_id)
@@ -393,7 +396,7 @@ async def reindex_subject_chapters(
       chapter_ids   — if set, only re-index these specific chapter IDs.
     """
     import asyncio as _asyncio
-    await _validate_admin_session(request)
+
 
     parallelism = max(1, min(req.parallelism, 10))
 
@@ -482,7 +485,7 @@ async def reindex_chapter(
     admin CMS, or for testing chunking/embedding on individual chapters before
     running a full subject bulk-reindex.
     """
-    await _validate_admin_session(request)
+
 
     from app.models.content import Chapter
     from app.services.rag.ingestion_v2 import ingest_chapter_v2
@@ -552,7 +555,7 @@ async def ingest_text_endpoint(req: IngestTextRequest, request: Request):
     Directly ingest a text block without creating a RagDocument record first.
     Useful for testing chunking/embedding before wiring up a full PDF pipeline.
     """
-    await _validate_admin_session(request)
+
     from app.services.rag.ingestion_v2 import ingest_document_text
 
     result = await ingest_document_text(
@@ -574,7 +577,7 @@ async def ingest_text_endpoint(req: IngestTextRequest, request: Request):
 @router.get("/rag/jobs/{job_id}")
 async def get_job(job_id: str, request: Request):
     """Poll a GenerationJob for status and progress."""
-    await _validate_admin_session(request)
+
     from app.models.rag import GenerationJob
 
     job = await GenerationJob.get(job_id)
@@ -615,7 +618,7 @@ async def list_jobs(
     skip: int = 0,
 ):
     """List recent GenerationJobs, optionally filtered by status or job_type."""
-    await _validate_admin_session(request)
+
     from app.models.rag import GenerationJob
 
     query: dict = {}
@@ -667,7 +670,7 @@ async def list_documents(
     skip: int = 0,
 ):
     """List RagDocuments with optional filters."""
-    await _validate_admin_session(request)
+
     from app.models.rag import RagDocument
 
     query: dict = {}
@@ -719,7 +722,7 @@ async def rag_stats(request: Request):
     Return chunk counts broken down by medium and source_type.
     Also returns Vectorize index info if CF is configured.
     """
-    await _validate_admin_session(request)
+
     from app.db.mongo import get_mongo_client
     from app.config import settings as _s
 
@@ -792,7 +795,7 @@ async def rag_stats(request: Request):
 @router.get("/rag/vectorize/info")
 async def vectorize_info(request: Request):
     """Return raw Cloudflare Vectorize index metadata."""
-    await _validate_admin_session(request)
+
     try:
         from app.services.vectorize.client import vectorize_client
         info = await vectorize_client.get_index_info()
@@ -815,7 +818,7 @@ async def list_content_nodes(
     skip: int = 0,
 ):
     """List ContentNodes with optional filters."""
-    await _validate_admin_session(request)
+
     from app.models.rag import ContentNode
 
     query: dict = {}
@@ -863,7 +866,7 @@ async def list_content_nodes(
 @router.patch("/rag/content-nodes/{node_id}")
 async def update_content_node(node_id: str, patch: ContentNodePatch, request: Request):
     """Update a ContentNode's status, content, or node_type."""
-    await _validate_admin_session(request)
+
     from app.models.rag import ContentNode
 
     node = await ContentNode.get(node_id)
@@ -887,7 +890,7 @@ async def publish_content_node(node_id: str, request: Request):
     """
     Publish a ContentNode: set status='published', bump version, record timestamp.
     """
-    await _validate_admin_session(request)
+
     from app.models.rag import ContentNode
 
     node = await ContentNode.get(node_id)
@@ -909,3 +912,112 @@ async def publish_content_node(node_id: str, request: Request):
         "version": node.version + 1,
         "published_at": now.isoformat(),
     }
+
+
+@router.get("/rag/coverage")
+async def rag_coverage():
+    """
+    RAG coverage summary per subject+medium.
+
+    Returns chunk counts, document counts, and job stats grouped by (subject_id, medium).
+    Use this to identify gaps (subjects/chapters with zero RAG chunks).
+    """
+    from app.db.mongo import get_mongo_client
+    from app.config import settings
+
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+
+        # ── Chunk counts by (subject_id, medium) ────────────────────────────
+        chunk_pipeline = [
+            {
+                "$group": {
+                    "_id": {"subject_id": "$subject_id", "medium": "$medium"},
+                    "chunk_count": {"$sum": 1},
+                    "chapter_ids": {"$addToSet": "$chapter_id"},
+                    "last_indexed_at": {"$max": "$created_at"},
+                }
+            },
+            {"$sort": {"_id.subject_id": 1, "_id.medium": 1}},
+        ]
+        chunk_rows = await db.chunks.aggregate(chunk_pipeline).to_list(length=500)
+
+        # ── Document counts by (subject_id, medium) ──────────────────────────
+        doc_pipeline = [
+            {
+                "$group": {
+                    "_id": {"subject_id": "$subject_id", "medium": "$medium"},
+                    "doc_count": {"$sum": 1},
+                    "source_types": {"$addToSet": "$source_type"},
+                }
+            }
+        ]
+        doc_rows = await db.rag_documents.aggregate(doc_pipeline).to_list(length=500)
+        doc_map = {
+            (r["_id"].get("subject_id"), r["_id"].get("medium")): r
+            for r in doc_rows
+        }
+
+        # ── Active/failed job counts ──────────────────────────────────────────
+        active_jobs = await db.generation_jobs.count_documents(
+            {"status": {"$in": ["pending", "running"]}}
+        )
+        failed_jobs = await db.generation_jobs.count_documents({"status": "failed"})
+        completed_jobs = await db.generation_jobs.count_documents({"status": "completed"})
+
+        coverage = []
+        for row in chunk_rows:
+            key = (row["_id"].get("subject_id"), row["_id"].get("medium"))
+            doc_info = doc_map.get(key, {})
+            coverage.append(
+                {
+                    "subject_id": key[0],
+                    "medium": key[1],
+                    "chunk_count": row["chunk_count"],
+                    "chapter_count": len(
+                        [c for c in row.get("chapter_ids", []) if c]
+                    ),
+                    "document_count": doc_info.get("doc_count", 0),
+                    "source_types": doc_info.get("source_types", []),
+                    "last_indexed_at": row["last_indexed_at"].isoformat()
+                    if row.get("last_indexed_at")
+                    else None,
+                }
+            )
+
+        total_chunks = sum(r["chunk_count"] for r in chunk_rows)
+        english_chunks = sum(
+            r["chunk_count"] for r in chunk_rows if r["_id"].get("medium") == "english"
+        )
+        assamese_chunks = sum(
+            r["chunk_count"] for r in chunk_rows if r["_id"].get("medium") == "assamese"
+        )
+
+        return {
+            "coverage": coverage,
+            "summary": {
+                "total_chunks": total_chunks,
+                "english_chunks": english_chunks,
+                "assamese_chunks": assamese_chunks,
+                "subjects_covered": len({r["_id"].get("subject_id") for r in chunk_rows}),
+                "active_jobs": active_jobs,
+                "failed_jobs": failed_jobs,
+                "completed_jobs": completed_jobs,
+            },
+        }
+    except Exception as e:
+        logger.error(f"RAG coverage error: {e}")
+        return {
+            "coverage": [],
+            "summary": {
+                "total_chunks": 0,
+                "english_chunks": 0,
+                "assamese_chunks": 0,
+                "subjects_covered": 0,
+                "active_jobs": 0,
+                "failed_jobs": 0,
+                "completed_jobs": 0,
+            },
+            "error": str(e),
+        }

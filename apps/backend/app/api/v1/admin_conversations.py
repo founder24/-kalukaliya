@@ -3,16 +3,19 @@ Admin Conversations Endpoints
 View chat sessions and individual conversation messages.
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 import logging
 
-from app.api.v1.admin import _validate_admin_session
+from app.api.v1.admin import require_admin_session, csrf_guard
 from app.config import settings
 from app.db.mongo import get_mongo_client
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Admin Conversations"])
+router = APIRouter(
+    tags=["Admin Conversations"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
 
 
 @router.get("/conversations")
@@ -23,7 +26,7 @@ async def list_conversations(
     search: str = "",
 ):
     """Paginated list of chat sessions."""
-    await _validate_admin_session(request)
+
     limit = min(limit, 100)
 
     try:
@@ -90,7 +93,7 @@ async def list_conversations(
 @router.get("/conversations/{session_id}")
 async def get_conversation(request: Request, session_id: str):
     """Get full messages for a specific chat session."""
-    await _validate_admin_session(request)
+
 
     try:
         client = get_mongo_client()

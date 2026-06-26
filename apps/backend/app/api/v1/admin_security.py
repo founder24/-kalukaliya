@@ -3,16 +3,19 @@ Admin Security Endpoints
 Bot detection, IP blocking, and security monitoring stubs.
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 import logging
 
-from app.api.v1.admin import _validate_admin_session
+from app.api.v1.admin import require_admin_session, csrf_guard
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Admin Security"])
+router = APIRouter(
+    tags=["Admin Security"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
 
 
 class BlockIpRequest(BaseModel):
@@ -26,30 +29,26 @@ class UnblockIpRequest(BaseModel):
 
 
 @router.get("/security/spoofed-bots")
-async def get_spoofed_bots(request: Request):
+async def get_spoofed_bots():
     """Get list of detected spoofed bot user agents."""
-    await _validate_admin_session(request)
     return {"spoofed_bots": [], "total": 0}
 
 
 @router.get("/security/blocked-ips")
-async def get_blocked_ips(request: Request):
+async def get_blocked_ips():
     """Get currently blocked IP hashes."""
-    await _validate_admin_session(request)
     return {"blocked_ips": [], "total": 0}
 
 
 @router.get("/security/block-trends")
-async def get_block_trends(request: Request):
+async def get_block_trends():
     """Get IP block trends over time."""
-    await _validate_admin_session(request)
     return {"trends": [], "total_blocks": 0}
 
 
 @router.post("/security/block-ip")
-async def block_ip(body: BlockIpRequest, request: Request):
+async def block_ip(body: BlockIpRequest):
     """Block an IP hash."""
-    await _validate_admin_session(request)
     logger.info(
         "IP block requested", extra={"ip_hash": body.ip_hash, "reason": body.reason}
     )
@@ -57,22 +56,19 @@ async def block_ip(body: BlockIpRequest, request: Request):
 
 
 @router.post("/security/unblock-ip")
-async def unblock_ip(body: UnblockIpRequest, request: Request):
+async def unblock_ip(body: UnblockIpRequest):
     """Unblock an IP hash."""
-    await _validate_admin_session(request)
     logger.info("IP unblock requested", extra={"ip_hash": body.ip_hash})
     return {"status": "ok", "message": "IP unblocked", "ip_hash": body.ip_hash}
 
 
 @router.get("/security/ttl-monitor")
-async def get_ttl_monitor(request: Request):
+async def get_ttl_monitor():
     """Get TTL monitor status for security collections."""
-    await _validate_admin_session(request)
     return {"collections": [], "status": "healthy"}
 
 
 @router.get("/security/collection-size-history")
-async def get_collection_size_history(request: Request):
+async def get_collection_size_history():
     """Get collection size history for security monitoring."""
-    await _validate_admin_session(request)
     return {"history": [], "current_sizes": {}}

@@ -5,23 +5,24 @@ Manage system notifications.
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 import logging
 
-from app.api.v1.admin import _validate_admin_session, _csrf_check
+from app.api.v1.admin import require_admin_session, csrf_guard
 from app.config import settings
 from app.db.mongo import get_mongo_client
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Admin Notifications"])
+router = APIRouter(
+    tags=["Admin Notifications"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
 
 
 @router.get("/notifications")
-async def list_notifications(request: Request):
+async def list_notifications():
     """List all notifications."""
-    await _validate_admin_session(request)
-
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
@@ -54,9 +55,6 @@ async def list_notifications(request: Request):
 @router.post("/notifications")
 async def create_notification(request: Request):
     """Create a new notification."""
-    await _validate_admin_session(request)
-    await _csrf_check(request)
-
     body = await request.json()
     title = body.get("title")
     message = body.get("message")

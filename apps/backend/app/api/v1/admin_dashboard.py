@@ -1,6 +1,10 @@
 """
 Admin Dashboard Endpoints
-Aggregate stats, health checks, and Cloudflare overview.
+Aggregate KPI stats for the admin panel overview card.
+
+Duplicate endpoints removed per audit:
+  - GET /admin/health     → use GET /health/deep (canonical)
+  - GET /admin/cf-overview → use GET /admin/analytics/cf-overview (canonical)
 """
 
 from datetime import datetime, timezone
@@ -14,20 +18,24 @@ from app.db.mongo import get_mongo_client
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Admin Dashboard"], dependencies=[Depends(require_admin_session), Depends(csrf_guard)])
+router = APIRouter(
+    tags=["Admin Dashboard"],
+    dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
 
 
 @router.get("/dashboard")
 async def admin_dashboard(request: Request):
-    """Aggregate stats for the admin dashboard overview."""
-
+    """Aggregate KPI stats for the admin dashboard overview."""
     try:
         client = get_mongo_client()
         db = client[settings.MONGODB_DB_NAME]
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
+        # ── Core counts ───────────────────────────────────────────────────────
         total_users = await db.users.count_documents({})
         active_today = await db.users.count_documents(
             {"updated_at": {"$gte": today_start}}
@@ -35,46 +43,124 @@ async def admin_dashboard(request: Request):
         signups_today = await db.users.count_documents(
             {"created_at": {"$gte": today_start}}
         )
+        pro_users = await db.users.count_documents({"subscription_tier": "pro"})
+        free_users = await db.users.count_documents({"subscription_tier": "free"})
 
-        total_messages = await db.chats.aggregate(
+        # ── Message counts ────────────────────────────────────────────────────
+        total_messages_agg = await db.chats.aggregate(
             [
                 {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
                 {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
             ]
         ).to_list(length=1)
-        total_messages = total_messages[0]["total"] if total_messages else 0
+        total_messages = total_messages_agg[0]["total"] if total_messages_agg else 0
 
-        messages_today_result = await db.chats.aggregate(
+        messages_today_agg = await db.chats.aggregate(
             [
                 {"$match": {"updated_at": {"$gte": today_start}}},
                 {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
                 {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
             ]
         ).to_list(length=1)
-        messages_today = (
-            messages_today_result[0]["total"] if messages_today_result else 0
-        )
+        messages_today = messages_today_agg[0]["total"] if messages_today_agg else 0
 
-        pro_users = await db.users.count_documents({"subscription_tier": "pro"})
-        free_users = await db.users.count_documents({"subscription_tier": "free"})
+        # ── Revenue: sum captured Razorpay transactions ───────────────────────
+        try:
+            rev_agg = await db.transactions.aggregate(
+                [
+                    {"$match": {"status": "captured"}},
+                    {"$group": {"_id": None, "total_paise": {"$sum": "$amount"}}},
+                ]
+            ).to_list(length=1)
+            revenue_total = round((rev_agg[0]["total_paise"] if rev_agg else 0) / 100, 2)
+
+            rev_month_agg = await db.transactions.aggregate(
+                [
+                    {"$match": {"status": "captured", "created_at": {"$gte": month_start}}},
+                    {"$group": {"_id": None, "total_paise": {"$sum": "$amount"}}},
+                ]
+            ).to_list(length=1)
+            revenue_month = round(
+                (rev_month_agg[0]["total_paise"] if rev_month_agg else 0) / 100, 2
+            )
+            revenue_source = "transactions_collection"
+        except Exception:
+            revenue_total = 0
+            revenue_month = 0
+            revenue_source = "unavailable"
+
+        # ── Vectorize index info ──────────────────────────────────────────────
+        vector_stats: dict = {"source": "unavailable"}
+        try:
+            from app.services.vectorize.client import vectorize_client
+            info = await vectorize_client.get_index_info()
+            vector_stats = {
+                "source": "cf_vectorize",
+                "index": info.get("name"),
+                "vector_count": info.get("vectorsCount", 0),
+                "dimensions": info.get("config", {}).get("dimensions"),
+                "metric": info.get("config", {}).get("metric"),
+            }
+        except Exception:
+            pass
+
+        # ── Token spend (last 24h from ai_usage_logs) ─────────────────────────
+        token_spend: dict = {"source": "unavailable"}
+        try:
+            from datetime import timedelta
+            since = now - timedelta(hours=24)
+            spend_agg = await db.ai_usage_logs.aggregate(
+                [
+                    {"$match": {"created_at": {"$gte": since}}},
+                    {
+                        "$group": {
+                            "_id": "$provider",
+                            "calls": {"$sum": 1},
+                            "input": {"$sum": "$input_tokens"},
+                            "output": {"$sum": "$output_tokens"},
+                        }
+                    },
+                ]
+            ).to_list(length=10)
+            if spend_agg:
+                token_spend = {
+                    "source": "ai_usage_logs",
+                    "window_hours": 24,
+                    "providers": [
+                        {"provider": r["_id"], "calls": r["calls"],
+                         "input_tokens": r["input"], "output_tokens": r["output"]}
+                        for r in spend_agg
+                    ],
+                }
+        except Exception:
+            pass
+
+        # ── Feedback stats ────────────────────────────────────────────────────
+        total_fb = await db.chat_feedback.count_documents({})
+        pos_fb = await db.chat_feedback.count_documents({"rating": 1})
+        feedback_stats = {
+            "total": total_fb,
+            "positive": pos_fb,
+            "positive_rate": round(pos_fb / total_fb, 3) if total_fb else 0,
+        }
 
         return {
             "total_users": total_users,
             "active_today": active_today,
             "total_messages": total_messages,
             "messages_today": messages_today,
-            "revenue_total": 0,
-            "revenue_month": 0,
+            "revenue_total": revenue_total,
+            "revenue_total_source": revenue_source,
+            "revenue_month": revenue_month,
             "pro_users": pro_users,
             "free_users": free_users,
             "system_health": "ok",
             "signups_today": signups_today,
-            "chat_fallbacks": {"source": "placeholder"},
-            "latency": {"source": "placeholder"},
-            "token_spend": {"source": "placeholder"},
-            "top_queries": {"source": "placeholder"},
-            "chat_speedups": {"source": "placeholder"},
-            "vector_stats": {"source": "placeholder"},
+            "feedback": feedback_stats,
+            "vector_stats": vector_stats,
+            "token_spend": token_spend,
+            "top_queries": {"source": "unavailable"},
+            "chat_fallbacks": {"source": "unavailable"},
         }
     except Exception as e:
         logger.error(f"Dashboard stats error: {e}")
@@ -89,51 +175,9 @@ async def admin_dashboard(request: Request):
             "free_users": 0,
             "system_health": "degraded",
             "signups_today": 0,
-            "chat_fallbacks": {"source": "placeholder"},
-            "latency": {"source": "placeholder"},
-            "token_spend": {"source": "placeholder"},
-            "top_queries": {"source": "placeholder"},
-            "chat_speedups": {"source": "placeholder"},
-            "vector_stats": {"source": "placeholder"},
+            "feedback": {"total": 0, "positive": 0, "positive_rate": 0},
+            "vector_stats": {"source": "unavailable"},
+            "token_spend": {"source": "unavailable"},
+            "top_queries": {"source": "unavailable"},
+            "chat_fallbacks": {"source": "unavailable"},
         }
-
-
-@router.get("/health")
-async def admin_health(request: Request):
-    """Detailed dependency health check for admin panel."""
-
-    health = {"mongo": "unknown", "redis": "unknown"}
-
-    try:
-        client = get_mongo_client()
-        await client.admin.command("ping")
-        health["mongo"] = "healthy"
-    except Exception as e:
-        health["mongo"] = f"unhealthy: {str(e)}"
-
-    try:
-        from app.db.redis import get_redis
-
-        redis = get_redis()
-        if redis:
-            await redis.ping()
-            health["redis"] = "healthy"
-        else:
-            health["redis"] = "not configured"
-    except Exception as e:
-        health["redis"] = f"unhealthy: {str(e)}"
-
-    return health
-
-
-@router.get("/cf-overview")
-async def admin_cf_overview(request: Request):
-    """Placeholder Cloudflare stats."""
-
-    return {
-        "source": "placeholder",
-        "requests_24h": 0,
-        "bandwidth_24h": 0,
-        "threats_blocked": 0,
-        "cache_hit_ratio": 0,
-    }
