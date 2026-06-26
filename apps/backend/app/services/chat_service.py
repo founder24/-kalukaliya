@@ -23,6 +23,7 @@ from app.core.token_budget import truncate_chunks_to_budget
 from app.db.redis import get_redis
 from app.services.ai.router import detect_language_and_route
 from app.services.search.mongo_vector_search import mongo_vector_search
+from app.services.search.web_search import web_search as _web_search
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,31 @@ class ChatService:
             return []
 
     @staticmethod
+    async def retrieve_web_context(
+        query: str,
+        lang: str = "en",
+    ) -> list[dict]:
+        """
+        Fetch web snippets via DuckDuckGo (no API key).
+
+        Returns [] on any failure so the caller degrades gracefully.
+        Budget: up to 4 snippets, capped to ~600 tokens in build_system_prompt.
+        """
+        try:
+            chunks = await asyncio.wait_for(
+                _web_search(query, lang=lang),
+                timeout=5.0,
+            )
+            logger.info(f"web_context: {len(chunks)} snippets for lang={lang}")
+            return chunks
+        except asyncio.TimeoutError:
+            logger.warning("retrieve_web_context timed out (5s)")
+            return []
+        except Exception as e:
+            logger.warning(f"retrieve_web_context failed: {e}")
+            return []
+
+    @staticmethod
     async def retrieve_context(
         sanitized_message: str,
         user_tier: str,
@@ -261,53 +287,133 @@ class ChatService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def build_system_prompt(detected_lang: str, context_chunks: list[dict]) -> str:
+    def build_system_prompt(
+        detected_lang: str,
+        context_chunks: list[dict],
+        web_chunks: list[dict] | None = None,
+    ) -> str:
         """
-        Build the system prompt based on the selected response language.
+        Build weighted system prompt.
 
-        detected_lang is the RESPONSE language (set by the user's language selector,
-        not detected from the input text). The model must accept questions in any
-        language but always reply in the selected response language.
+        Source priority and token budget:
+          RAG available   → RAG 50% (~1500 tok) · Web 20% (~600 tok) · LLM 30%
+          RAG unavailable → Web 50% (~1500 tok) · LLM 50%
 
-        Response philosophy: dense study-note style — cover every key fact,
-        subtopic and subpoint in the fewest possible words. No padding.
+        detected_lang is the RESPONSE language (driven by the user's language
+        selector, not auto-detected from input).  The model must always reply
+        in that language regardless of the input language.
         """
+        web_chunks = web_chunks or []
+        has_rag = bool(context_chunks)
+        has_web = bool(web_chunks)
+
+        # ── Language-specific base instruction ──────────────────────────────
         if detected_lang == "en":
             base = (
-                "You are Syrabit, an educational AI assistant for students of AHSEC, SEBA, and CBSE. "
-                "The student may ask in any language — always reply in English only. "
-                "Give a concise answer that covers all key facts, subtopics, and subpoints in as few words as possible. "
-                "No padding, no intro phrases, no closing phrases."
+                "You are Syrabit, an educational AI assistant for AHSEC, SEBA, and CBSE students.\n"
+                "LANGUAGE RULE: The student may write in any language. "
+                "You MUST reply in English ONLY — never mix in Assamese, Hindi, or any other language.\n"
+                "STYLE: Give a dense, syllabus-aligned answer covering every key fact, subtopic, and "
+                "subpoint in as few words as possible. No filler phrases, no opening/closing pleasantries.\n"
+                "ACCURACY: Prioritise curriculum sources. If unsure, say so clearly."
+            )
+            rag_header = "## Curriculum Knowledge (PRIMARY — weight 50%)"
+            web_header = "## Supplementary Web Sources (weight 20%)"
+            blend_rule_with_rag = (
+                "SOURCE BLENDING RULES:\n"
+                "1. Base your answer primarily on the Curriculum Knowledge (50% weight).\n"
+                "2. Use Supplementary Web Sources only to add detail not in the curriculum (20% weight).\n"
+                "3. Apply your own reasoning and knowledge to connect and explain (30% weight).\n"
+                "4. Cite curriculum chunks as [C1], [C2]… and web snippets as [W1], [W2]… inline.\n"
+                "5. If the curriculum context does not cover the question, say so in one sentence "
+                "before using web/LLM knowledge."
+            )
+            blend_rule_web_only = (
+                "SOURCE BLENDING RULES (no curriculum context available):\n"
+                "1. Use the Web Sources below as your primary reference (50% weight).\n"
+                "2. Apply your own knowledge and reasoning for the remaining 50%.\n"
+                "3. Cite web snippets as [W1], [W2]… inline.\n"
+                "4. Clearly flag any fact you are not certain about."
+            )
+            blend_rule_llm_only = (
+                "No curriculum or web context is available for this query.\n"
+                "Answer using your own knowledge, but clearly note that your answer "
+                "is based on general knowledge, not a retrieved curriculum source.\n"
+                "Keep the answer syllabus-aligned with AHSEC/SEBA/CBSE where applicable."
+            )
+            citation_note_rag = (
+                "CITATIONS: cite inline as [C1], [C2]… for curriculum, [W1], [W2]… for web."
             )
         else:
             base = (
-                "তুমি Syrabit — AHSEC, SEBA আৰু CBSE ৰ ছাত্ৰ-ছাত্ৰীৰ বাবে এটা শিক্ষামূলক AI সহায়ক। "
-                "যিকোনো ভাষাত প্ৰশ্ন কৰিলেও, সম্পূৰ্ণ অসমীয়া ভাষাত চিন্তা কৰা আৰু কেৱল অসমীয়া লিপিতে উত্তৰ দিয়া। "
-                "ইংৰাজী বা অন্য কোনো ভাষা ব্যৱহাৰ নকৰিবা। "
-                "সংক্ষিপ্ত আৰু তথ্যসমৃদ্ধ উত্তৰ দিয়া — সকলো মূল তথ্য, বিষয় আৰু উপবিষয় যথাসম্ভৱ কম শব্দত আৱৰিব। "
-                "অপ্ৰয়োজনীয় ভূমিকা বা সমাপ্তি বাক্য লিখিব নালাগে।"
+                "তুমি Syrabit — AHSEC, SEBA আৰু CBSE ৰ ছাত্ৰ-ছাত্ৰীৰ বাবে এটা শিক্ষামূলক AI সহায়ক।\n"
+                "ভাষাৰ নিয়ম: ছাত্ৰই যিকোনো ভাষাত প্ৰশ্ন কৰিব পাৰে। "
+                "তুমি কেৱল সম্পূৰ্ণ অসমীয়া ভাষাতহে উত্তৰ দিবা — ইংৰাজী, হিন্দী বা অন্য কোনো ভাষা মিহলি নকৰিবা।\n"
+                "শৈলী: পাঠ্যক্ৰম-সংগতিপূৰ্ণ, ঘন আৰু তথ্যসমৃদ্ধ উত্তৰ দিয়া — সকলো মূল তথ্য আৰু উপবিষয় "
+                "যথাসম্ভৱ কম শব্দত আৱৰিব। অপ্ৰয়োজনীয় ভূমিকা বা সমাপ্তি বাক্য লিখিব নালাগে।\n"
+                "শুদ্ধতা: পাঠ্যক্ৰমৰ উৎসক অগ্ৰাধিকাৰ দিয়া। অনিশ্চিত হ'লে স্পষ্টকৈ কোৱা।"
+            )
+            rag_header = "## পাঠ্যক্ৰম জ্ঞান (মুখ্য উৎস — ৫০% গুৰুত্ব)"
+            web_header = "## সম্পূৰক ৱেব উৎস (২০% গুৰুত্ব)"
+            blend_rule_with_rag = (
+                "উৎস সংমিশ্ৰণৰ নিয়ম:\n"
+                "১. পাঠ্যক্ৰম জ্ঞানক মুখ্য ভিত্তি হিচাপে ব্যৱহাৰ কৰা (৫০% গুৰুত্ব)।\n"
+                "২. ৱেব উৎস কেৱল অতিৰিক্ত বিৱৰণৰ বাবে ব্যৱহাৰ কৰা (২০% গুৰুত্ব)।\n"
+                "৩. নিজৰ যুক্তি আৰু জ্ঞান প্ৰয়োগ কৰা (৩০% গুৰুত্ব)।\n"
+                "৪. পাঠ্যক্ৰমৰ তথ্য [C1], [C2]… আৰু ৱেব তথ্য [W1], [W2]… হিচাপে উদ্ধৃত কৰা।\n"
+                "৫. প্ৰসংগত উত্তৰ নাথাকিলে এটা বাক্যত কোৱা।"
+            )
+            blend_rule_web_only = (
+                "উৎস সংমিশ্ৰণৰ নিয়ম (পাঠ্যক্ৰম প্ৰসংগ উপলব্ধ নহয়):\n"
+                "১. তলৰ ৱেব উৎসক মুখ্য তথ্যসূত্ৰ হিচাপে ব্যৱহাৰ কৰা (৫০% গুৰুত্ব)।\n"
+                "২. নিজৰ জ্ঞান আৰু যুক্তি বাকী ৫০%ত প্ৰয়োগ কৰা।\n"
+                "৩. ৱেব তথ্য [W1], [W2]… হিচাপে উদ্ধৃত কৰা।"
+            )
+            blend_rule_llm_only = (
+                "এই প্ৰশ্নৰ বাবে কোনো পাঠ্যক্ৰম বা ৱেব প্ৰসংগ উপলব্ধ নহয়।\n"
+                "নিজৰ জ্ঞানৰ পৰা উত্তৰ দিয়া, কিন্তু স্পষ্টকৈ উল্লেখ কৰা যে উত্তৰটো সাধাৰণ জ্ঞানৰ ওপৰত ভিত্তি কৰি দিয়া হৈছে।\n"
+                "AHSEC/SEBA/CBSE পাঠ্যক্ৰমৰ সৈতে সংগতি ৰক্ষা কৰা।"
+            )
+            citation_note_rag = (
+                "উদ্ধৃতি: পাঠ্যক্ৰম তথ্যৰ বাবে [C1], [C2]… আৰু ৱেব তথ্যৰ বাবে [W1], [W2]… ইনলাইনত লিখক।"
             )
 
-        if not context_chunks:
-            return base
+        # ── No context at all ───────────────────────────────────────────────
+        if not has_rag and not has_web:
+            return f"{base}\n\n{blend_rule_llm_only}"
 
-        context_text = "\n".join(
-            f"[{i + 1}] {chunk['title']}{' (' + chunk['hierarchy'] + ')' if chunk.get('hierarchy') else ''}: {chunk['content']}"
-            for i, chunk in enumerate(context_chunks)
-        )
+        # ── Build context sections ───────────────────────────────────────────
+        sections: list[str] = [base]
 
-        if detected_lang == "en":
-            citation_note = (
-                "CITATIONS: Cite sources inline as [1], [2], etc. after the relevant fact. "
-                "If the answer is not in the context, say so in one sentence."
+        if has_rag:
+            # Token budget for RAG: ~1500 tokens (50% of 3000 total)
+            rag_chunks = truncate_chunks_to_budget(context_chunks, max_tokens=1500)
+            rag_text = "\n".join(
+                f"[C{i + 1}] {c['title']}"
+                f"{' (' + c['hierarchy'] + ')' if c.get('hierarchy') else ''}: "
+                f"{c['content']}"
+                for i, c in enumerate(rag_chunks)
             )
+            sections.append(f"{rag_header}\n{rag_text}")
+
+        if has_web:
+            # Token budget for web: ~1500 tok when RAG empty, else ~600 tok
+            web_budget = 600 if has_rag else 1500
+            web_capped = truncate_chunks_to_budget(web_chunks, max_tokens=web_budget)
+            web_text = "\n".join(
+                f"[W{i + 1}] {c['title']}: {c['content']}"
+                for i, c in enumerate(web_capped)
+            )
+            sections.append(f"{web_header}\n{web_text}")
+
+        # ── Blend rule ───────────────────────────────────────────────────────
+        if has_rag:
+            sections.append(blend_rule_with_rag)
+            sections.append(citation_note_rag)
         else:
-            citation_note = (
-                "উদ্ধৃতি: প্ৰাসংগিক তথ্যৰ পিছত [1], [2] আদি বিন্যাসত উৎস উল্লেখ কৰক। "
-                "তলৰ প্ৰসংগত উত্তৰ নাথাকিলে এটা বাক্যত কোৱা।"
-            )
+            sections.append(blend_rule_web_only)
 
-        return f"{base}\n\n{citation_note}\n\nContext:\n{context_text}"
+        return "\n\n".join(sections)
 
     # ------------------------------------------------------------------
     # LLM calling (with Sarvam -> Vertex AI fallback)

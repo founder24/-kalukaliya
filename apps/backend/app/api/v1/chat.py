@@ -269,15 +269,23 @@ async def chat(
                     sources=[],
                 )
 
-            if not context_chunks:
-                logger.warning(
-                    "rag_empty_context",
-                    extra={"user_id": user_id, "query": sanitized_message[:50]},
+            # 2c. Web search (20% slice when RAG present; 50% slice when RAG empty).
+            # Skipped for generic greetings. Runs after cache check so cache hits
+            # never pay the web-search latency penalty.
+            web_chunks: list[dict] = []
+            if not skip_rag:
+                web_chunks = await ChatService.retrieve_web_context(
+                    sanitized_message, lang=detected_lang
                 )
+                if not context_chunks:
+                    logger.info(
+                        "rag_empty_using_web_fallback",
+                        extra={"user_id": user_id, "web_chunks": len(web_chunks)},
+                    )
 
-            # 3. Build system prompt
+            # 3. Build system prompt with weighted RAG 50% / Web 20% / LLM 30%
             system_prompt = ChatService.build_system_prompt(
-                detected_lang, context_chunks
+                detected_lang, context_chunks, web_chunks=web_chunks
             )
 
             # Include multi-turn conversation history
@@ -538,6 +546,8 @@ async def chat_stream(
 
     tracer = get_tracer()
 
+    is_generic = ChatService.is_generic_query(sanitized_message)
+
     try:
         with tracer.start_as_current_span("chat.stream.rag_retrieval") as rag_span:
             rag_span.set_attribute("chat.lang", detected_lang)
@@ -548,7 +558,8 @@ async def chat_stream(
             async def _noop_context():
                 return []
 
-            if ChatService.is_generic_query(sanitized_message):
+            web_chunks: list[dict] = []
+            if is_generic:
                 logger.info(
                     "generic_query_skip_rag",
                     extra={"user_id": user_id, "query": sanitized_message[:30]},
@@ -558,12 +569,24 @@ async def chat_stream(
                     ChatService.load_conversation_history(request.session_id),
                 )
             else:
-                # Run topic match in parallel with history load
-                # so that embedding latency overlaps with history I/O.
-                topic_match, history = await asyncio.gather(
+                # Run topic match + history + web search in parallel
+                topic_match, history, web_chunks = await asyncio.gather(
                     ChatService.check_topic_match(sanitized_message),
                     ChatService.load_conversation_history(request.session_id),
+                    ChatService.retrieve_web_context(sanitized_message, lang=detected_lang),
+                    return_exceptions=True,
                 )
+                # Treat exceptions as safe defaults
+                if isinstance(topic_match, Exception):
+                    logger.warning(f"topic_match failed: {topic_match}")
+                    topic_match = None
+                if isinstance(history, Exception):
+                    logger.warning(f"history load failed: {history}")
+                    history = ""
+                if isinstance(web_chunks, Exception):
+                    logger.warning(f"web_search failed: {web_chunks}")
+                    web_chunks = []
+
                 if topic_match is None:
                     logger.info(
                         "no_topic_match_stream",
@@ -590,23 +613,34 @@ async def chat_stream(
                         context_chunks = await ChatService.retrieve_context(
                             sanitized_message, user_tier
                         )
+
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
                 "rag.top_score", context_chunks[0]["score"] if context_chunks else 0.0
             )
+            rag_span.set_attribute("web.chunks", len(web_chunks) if not is_generic else 0)
     except Exception as e:
         logger.error(f"RAG retrieval failed in stream: {e}")
         context_chunks = []
         history = ""
+        web_chunks = []
 
-    if not context_chunks:
-        logger.warning(
-            "rag_empty_context",
-            extra={"user_id": user_id, "query": sanitized_message[:50]},
-        )
+    if not is_generic:
+        if not context_chunks and not web_chunks:
+            logger.warning(
+                "rag_and_web_empty",
+                extra={"user_id": user_id, "query": sanitized_message[:50]},
+            )
+        elif not context_chunks:
+            logger.info(
+                "rag_empty_using_web_fallback_stream",
+                extra={"user_id": user_id, "web_chunks": len(web_chunks)},
+            )
 
-    # -- Build system prompt --
-    system_prompt = ChatService.build_system_prompt(detected_lang, context_chunks)
+    # -- Build system prompt with weighted RAG 50% / Web 20% / LLM 30% --
+    system_prompt = ChatService.build_system_prompt(
+        detected_lang, context_chunks, web_chunks=web_chunks if not is_generic else []
+    )
 
     # Include multi-turn conversation history
     if history:
