@@ -138,7 +138,19 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
   const { cleanContent, sourceLine } = useMemo(() => {
     if (!msg.content) return { cleanContent: msg.content, sourceLine: '' };
     let extracted = '';
-    const cleaned = msg.content
+    // Defense-in-depth: strip any debug/meta lines that may have slipped
+    // through backend cleaning (QAroute=, Prompt policy:, numbered reasoning
+    // headers like "2. Analyze the Core Question", etc.).
+    const DEBUG_PATTERNS = [
+      /^QAroute\s*=/i,
+      /^Prompt\s+policy\s*:/i,
+      /^\d+[\.\)]\s+(Analyze|Deconstruct|Synthesize|Draft|Polish)\b/i,
+    ];
+    const safeLines = msg.content
+      .split('\n')
+      .filter((line) => !DEBUG_PATTERNS.some((re) => re.test(line.trim())));
+    const cleaned = safeLines
+      .join('\n')
       .replace(/\n*\n?Sources?:\s*((\[(PAGE|CHAPTER):[^\]]+\][,\s]*)+\.?\s*)$/gi, '')
       .replace(/\n*\n?SOURCE\s*:\s*(.+)$/i, (_, match) => { extracted = match.trim(); return ''; })
       .trim();

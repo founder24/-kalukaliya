@@ -81,29 +81,27 @@ def _has_assamese(text: str) -> bool:
     return any(ord(c) in _ASSAMESE_RANGE for c in text)
 
 
-_re_section_header = re.compile(r'^\d+[\.\)]\s+\S')
-
 def _clean_educational_sections(text: str) -> str:
-    """Strip meta-analysis lines and section headers from model output.
+    """Strip meta-analysis lines from model output.
 
     Removes:
-    - Numbered section headers (e.g. "2. Analyze the Core Question")
-    - Lines containing known debug/meta phrases
-    - Bullet-prefixed meta-analysis lines
+    - Lines containing known debug/meta phrases (QAroute=, Prompt policy, etc.)
+    - Bullet-prefixed meta-analysis lines (Let me…, I'll…, Good but…)
     - Bold question sub-bullets
+
+    NOTE: Does NOT strip all numbered list items — "1. Photosynthesis…" is
+    valid educational content.  The numbered reasoning section *headers*
+    (e.g. "2. Analyze the Core Question") are caught by _META_PHRASES.
     """
     lines = text.split("\n")
     cleaned = []
     for line in lines:
         stripped = line.strip()
-        # Skip numbered section headers (e.g. "2. Analyze...", "3. Synthesize...")
-        if _re_section_header.match(stripped):
-            continue
         if any(phrase in stripped for phrase in _META_PHRASES):
             continue
         if _re_meta_line.match(stripped):
             continue
-        # Also skip bold-question sub-bullets (e.g. "    *   **How to ...?**")
+        # Skip bold-question sub-bullets (e.g. "    *   **How to ...?**")
         if stripped.endswith("?**") and stripped.startswith("*"):
             continue
         cleaned.append(line)
@@ -495,9 +493,12 @@ class SarvamAIClient:
 
             # ── End-of-stream flush ──────────────────────────────────────────
             if preamble_buf and not preamble_done:
-                # Preamble never resolved — yield whatever we accumulated
+                # Preamble never resolved — clean before yielding so debug
+                # phrases can't leak through this fallback path.
                 if not is_assamese:
-                    yield preamble_buf
+                    cleaned_flush = _clean_educational_sections(preamble_buf)
+                    if cleaned_flush.strip():
+                        yield cleaned_flush
                 else:
                     edu_buf += preamble_buf
 
