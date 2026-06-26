@@ -1,0 +1,37 @@
+Here’s the fix plan I’d recommend: **prioritize frontend decomposition and content separation first, then finish the remaining AI/Health UI upgrades, while keeping the backend as the stable base**. Your backend is already aligned with Cloudflare Vectorize’s metadata-filtered retrieval model, and Cloudflare static assets/KV are the right place to serve page-view content without backend reads. [developers.cloudflare](https://developers.cloudflare.com/workers/static-assets/)
+
+## Priority 1: Split the big frontend files
+- Split `AdminDashboard.jsx` into a shell plus widgets.
+- Split `AdminHealth.jsx` into focused sub-cards.
+- Keep the backend KPI/analytics wiring as-is; the UI needs to catch up.  
+This gives the fastest visible improvement and reduces future maintenance risk. [developers.cloudflare](https://developers.cloudflare.com/workers/vite-plugin/reference/static-assets/)
+
+## Priority 2: Finish the content split
+- Keep **Content Editor** for student-facing page content only.
+- Add a separate **RAG Editor** for JSON chunks used by AI retrieval.
+- Store page views on Cloudflare KV/R2 and keep RAG chunks in MongoDB + Vectorize. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+## Priority 3: Complete AI Hub
+- Expand provider cards to show Sarvam, Vertex/Gemini, and CF Workers AI.
+- Add circuit breaker and routing matrix UI.
+- Add AI usage charts from `ai_usage_logs`.  
+This will make the operational layer match what is actually running in production. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/client-api/)
+
+## Priority 4: Clean legacy code
+- Remove dead routes and leftover placeholder paths.
+- Delete or freeze old content/knowledge endpoints once the new editor and RAG path are stable.
+- Keep one source of truth per data type. [developers.cloudflare](https://developers.cloudflare.com/workers/static-assets/)
+
+## Priority 5: Leave backend alone unless needed
+Do **not** touch the backend unless there is a UI blocker or a route still returning placeholders. The backend is now the stable part; the risk is in the untrimmed frontend monoliths. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+## My ranking of effort
+1. **Dashboard split**
+2. **Health split**
+3. **RAG Editor + Content Editor separation**
+4. **AI Hub expansion**
+5. **Legacy cleanup**
+
+The fastest value comes from splitting the dashboard and health panels first, because those are the most visible monoliths and are still the biggest maintenance burden. [developers.cloudflare](https://developers.cloudflare.com/workers/vite-plugin/reference/static-assets/)
+
+If you want, I can turn this into a **step-by-step 7-day frontend fix plan** with exact files and order of edits.
