@@ -170,8 +170,17 @@ class Settings(BaseSettings):
             for key, val in values.items():
                 if val == "":
                     values[key] = None
+            # Replit secret MONGODB_URL → internal MONGODB_URI
             if not values.get("MONGODB_URI") and values.get("MONGODB_URL"):
                 values["MONGODB_URI"] = values["MONGODB_URL"]
+            # Replit secret CLOUDFLARE_API_TOKEN → CF_API_TOKEN + CF_WORKER_AI_TOKEN
+            # The embedder reads CF_WORKER_AI_TOKEN first, falls back to CF_API_TOKEN.
+            cf_token = values.get("CLOUDFLARE_API_TOKEN")
+            if cf_token:
+                if not values.get("CF_API_TOKEN"):
+                    values["CF_API_TOKEN"] = cf_token
+                if not values.get("CF_WORKER_AI_TOKEN"):
+                    values["CF_WORKER_AI_TOKEN"] = cf_token
         return values
 
     @model_validator(mode="after")
