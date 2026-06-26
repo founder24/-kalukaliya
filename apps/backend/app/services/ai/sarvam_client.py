@@ -46,6 +46,16 @@ _META_PHRASES = (
     "This is good, but",
     "This is good.",
     "Good. Let",
+    # Debug/routing metadata that must never reach users
+    "Prompt policy",
+    "QAroute=",
+    "QA route",
+    "Analyze the Core Question",
+    "Deconstruct the User",
+    "Synthesize the Answer",
+    "Synthesize and Draft",
+    "Draft the Answer",
+    "Polish the Answer",
 )
 
 # Regex patterns for meta-analysis lines (applied in addition to _META_PHRASES).
@@ -71,12 +81,24 @@ def _has_assamese(text: str) -> bool:
     return any(ord(c) in _ASSAMESE_RANGE for c in text)
 
 
+_re_section_header = re.compile(r'^\d+[\.\)]\s+\S')
+
 def _clean_educational_sections(text: str) -> str:
-    """Strip meta-analysis lines from section 2 of the model's response."""
+    """Strip meta-analysis lines and section headers from model output.
+
+    Removes:
+    - Numbered section headers (e.g. "2. Analyze the Core Question")
+    - Lines containing known debug/meta phrases
+    - Bullet-prefixed meta-analysis lines
+    - Bold question sub-bullets
+    """
     lines = text.split("\n")
     cleaned = []
     for line in lines:
         stripped = line.strip()
+        # Skip numbered section headers (e.g. "2. Analyze...", "3. Synthesize...")
+        if _re_section_header.match(stripped):
+            continue
         if any(phrase in stripped for phrase in _META_PHRASES):
             continue
         if _re_meta_line.match(stripped):
@@ -371,10 +393,12 @@ class SarvamAIClient:
                                 preamble_filter_active = stripped.startswith("1.")
 
                             if preamble_filter_active is False:
-                                # No preamble — passthrough immediately
+                                # No preamble — passthrough immediately (still clean meta lines)
                                 preamble_done = True
                                 if not is_assamese:
-                                    yield preamble_buf
+                                    cleaned_pass = _clean_educational_sections(preamble_buf)
+                                    if cleaned_pass.strip():
+                                        yield cleaned_pass
                                 else:
                                     edu_buf += preamble_buf
                                 preamble_buf = ""
@@ -388,10 +412,19 @@ class SarvamAIClient:
                                         # Assamese: buffer everything for end-of-stream extraction
                                         edu_buf += remainder
                                     else:
-                                        # English: yield section-2 start immediately.
-                                        # Do NOT also add to edu_buf — edu_buf starts
-                                        # empty so the later section-3 cutoff only
-                                        # sees post-remainder content (no double-output).
+                                        # English: strip the section header line itself
+                                        # (e.g. "2. Analyze the Core Question") before yielding.
+                                        # m.start() points to the \n before "2. …", so remainder
+                                        # starts with "\n2. Analyze…\n<content>". We skip to the
+                                        # newline after the header line so only the content yields.
+                                        nl_after_header = remainder.find('\n', 1)
+                                        if nl_after_header >= 0:
+                                            remainder = remainder[nl_after_header:]
+                                        else:
+                                            remainder = ""
+                                        # Run through the cleaner in case the first content lines
+                                        # still contain meta-analysis noise.
+                                        remainder = _clean_educational_sections(remainder)
                                         if remainder.strip():
                                             yield remainder
                                 elif len(preamble_buf) > 3000:
@@ -400,7 +433,9 @@ class SarvamAIClient:
                                     if is_assamese:
                                         edu_buf += preamble_buf
                                     else:
-                                        yield preamble_buf
+                                        cleaned_overflow = _clean_educational_sections(preamble_buf)
+                                        if cleaned_overflow.strip():
+                                            yield cleaned_overflow
                                     preamble_buf = ""
 
                         # ── Phase 2: post-preamble content handling ───────────
