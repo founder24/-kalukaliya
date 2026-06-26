@@ -55,6 +55,12 @@ class ChatRequest(BaseModel):
     # by the model_validator below so existing clients keep working.
     conversation_id: Optional[str] = None
     context_messages: List[dict] = Field(default=[], max_length=10)
+    # Card context — set when user asks from within a chapter card.
+    # chapter_id biases RAG retrieval toward the active chapter when the
+    # topic matcher confidence is low/none (spec §1 "card context").
+    chapter_id: Optional[str] = None
+    chapter_name: Optional[str] = None
+    subject_id: Optional[str] = None
 
     @model_validator(mode="after")
     def coalesce_conversation_id(self) -> "ChatRequest":
@@ -693,16 +699,34 @@ async def chat_stream(
                     web_chunks = web_result if not isinstance(web_result, Exception) else []
 
                 else:
-                    # NONE (< 0.50): no usable topic signal → web + LLM only, RAG skipped.
+                    # NONE (< 0.50): no usable topic signal.
+                    # If the frontend provided an explicit chapter_id (card context),
+                    # use it for fast-path RAG before falling back to web-only.
                     confidence_tier = "none"
                     logger.info(
                         "no_topic_match_stream",
                         extra={"user_id": user_id, "query": sanitized_message[:30]},
                     )
-                    web_chunks = await ChatService.retrieve_web_context(
-                        sanitized_message, lang=detected_lang
-                    )
-                    rag_path = "web" if web_chunks else "none"
+                    if request.chapter_id:
+                        context_chunks = await ChatService.retrieve_context_from_chapter(
+                            chapter_id=request.chapter_id,
+                            chapter_title=request.chapter_name or "",
+                            detected_lang=detected_lang,
+                        )
+                        rag_path = "mongodb" if context_chunks else "none"
+                        logger.info(
+                            "card_context_rag_fallback",
+                            extra={
+                                "user_id": user_id,
+                                "chapter_id": request.chapter_id,
+                                "chunks": len(context_chunks),
+                            },
+                        )
+                    if not context_chunks:
+                        web_chunks = await ChatService.retrieve_web_context(
+                            sanitized_message, lang=detected_lang
+                        )
+                        rag_path = "web" if web_chunks else "none"
 
                 if not context_chunks and not web_chunks:
                     logger.warning(

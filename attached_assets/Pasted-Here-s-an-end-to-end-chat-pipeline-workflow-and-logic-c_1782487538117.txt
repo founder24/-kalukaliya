@@ -1,0 +1,84 @@
+Here’s an end-to-end **chat pipeline, workflow, and logic checklist** for Syrabit.
+
+## 1) Input and mode
+- Receive user text, voice, or image input.
+- Resolve `response_lang` / mode first: English mode or Assamese mode.
+- If Assamese mode is selected, treat even English input as Assamese-mode retrieval and response.
+- Normalize and sanitize the user message.
+- Attach conversation context, user profile, and any card context. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat/chat-completions)
+
+## 2) Early routing
+- Detect generic greetings and trivial fillers.
+- If generic, skip RAG and web search.
+- Otherwise continue to retrieval planning.
+- Resolve identity: authenticated user or anonymous hash.
+- Apply rate limiting and input validation. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat-completion/overview)
+
+## 3) Topic and embedding
+- Compute the query embedding once.
+- Run topic matcher against cached topic vectors.
+- Save topic score, topic title, chapter title, subject slug, board slug, and class level.
+- Classify confidence tier: high, mid, low, none.
+- Build a source-card payload from the topic match. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+## 4) Retrieval logic
+- **High confidence:** use chapter fast-path RAG first.
+- **Mid confidence:** use chapter/RAG plus light web support.
+- **Low confidence:** use syllabus-structured RAG as the base, then web as scaffold.
+- **None:** skip RAG and use web or LLM-only flow.
+- For Vectorize, filter by metadata such as subject, chapter, topic, medium, source type, and chunk type. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/client-api/)
+
+## 5) Prompt assembly
+- Build the system prompt according to the active mode.
+- English mode prompt: final answer must be English only.
+- Assamese mode prompt: final answer must be Assamese only.
+- Include curriculum context first, then web context if present, then prior conversation.
+- Keep prompt policy and debug text out of user-visible output. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/models/sarvam-30b)
+
+## 6) Model call
+- Send the assembled messages to Sarvam chat completions with streaming enabled.
+- Use one model path consistently for the selected mode.
+- Keep reasoning hidden and stream only clean answer text.
+- If model output includes reasoning/meta headers, strip them before emission. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat/chat-completions)
+
+## 7) Streaming and SSE
+- Stream chunks as SSE to the frontend.
+- Emit a source-card event before the first answer token when a match exists.
+- Emit a final done event with route trace, latency, model, and confidence data.
+- Keep heartbeat and timeout guards active.
+- Ensure only assistant content is streamed, never raw debug metadata. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat-completion/overview)
+
+## 8) Frontend rendering
+- Parse SSE incrementally and rebuild the final response content.
+- Show the source card using backend-provided metadata.
+- Render only clean assistant content in the chat bubble.
+- Keep QA/debug traces dev-only.
+- Do not render prompt policies, route traces, or internal reasoning in production UI. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/models/sarvam-30b)
+
+## 9) Persistence and feedback
+- Save the completed chat asynchronously.
+- Store user, session, message content, latency, model, and rag sources.
+- Invalidate cached history after save.
+- Record usage logs for token spend and analytics.
+- Store feedback actions like thumbs up/down. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat/chat-completions)
+
+## 10) Verification checklist
+- English mode query returns English only.
+- Assamese mode query returns Assamese only.
+- Assamese mode still works when the user types English.
+- Source card includes subject, chapter, topic, and class.
+- High-confidence topic queries avoid unnecessary web search.
+- Low-confidence queries use syllabus-first fallback.
+- No prompt text, QAroute text, or reasoning headers appear in the visible chat.
+- SSE completion still works cleanly for both modes. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+## 11) Failure handling
+- If topic matching fails, fall back gracefully.
+- If RAG retrieval fails, use web or LLM-only as designed.
+- If streaming is interrupted, preserve clean partial output handling.
+- If debug text leaks, strip it in both backend and frontend.
+- If the selected mode is ambiguous, keep the current mode or require explicit override. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat-completion/overview)
+
+This is the clean production logic: **mode first, retrieval second, prompt third, stream last, render only final content**. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+Would you like me to turn this into a **single-page flowchart checklist** next?
