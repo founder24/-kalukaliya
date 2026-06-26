@@ -514,6 +514,8 @@ export default function ChatPage() {
         ragBoardName: null, ragClassName: null, ragTopicName: null,
         ragChunkSnippet: null, ragStreamName: null, ragBoardSlug: null,
         ragClassSlug: null, ragSubjectSlug: null, libSources: [], hasError: false,
+        // Source card fields emitted by backend before LLM starts
+        matchScore: null, sourceType: null, confidenceTier: null, ragPath: null,
       };
 
       let pendingChunk = '';
@@ -568,6 +570,12 @@ export default function ChatPage() {
           if (parsed.content_card_board && !meta.ragBoardName) meta.ragBoardName = parsed.content_card_board;
           if (parsed.content_card_class && !meta.ragClassName) meta.ragClassName = parsed.content_card_class;
           if (parsed.content_card_subject && !meta.ragSubjectName) meta.ragSubjectName = parsed.content_card_subject;
+          // Source card fields — populated by the backend source_card SSE event
+          // emitted before LLM starts (confidence_tier, match_score, source_type, rag_path)
+          if (parsed.match_score != null) meta.matchScore = parsed.match_score;
+          if (parsed.source_type) meta.sourceType = parsed.source_type;
+          if (parsed.confidence_tier) meta.confidenceTier = parsed.confidence_tier;
+          if (parsed.rag_path) meta.ragPath = parsed.rag_path;
           if (parsed.wai_chapter_match) {
             meta.waiChapterMatch = parsed.wai_chapter_match;
             setMessages((prev) => prev.map((m) =>
@@ -674,7 +682,7 @@ export default function ChatPage() {
       } else { setConversationId(meta.convId); }
       setMessages((prev) => prev.map((m) =>
         m.id === aiMsgId
-          ? { ...m, content: fullContent, streaming: false, rag_source: meta.ragSource, rag_chunks: meta.ragChunks, rag_subject_id: meta.ragSubjectId, rag_subject_name: meta.ragSubjectName, rag_chapter_name: meta.ragChapterName, rag_chapter_slug: meta.ragChapterSlug, rag_board_name: meta.ragBoardName, rag_class_name: meta.ragClassName, rag_stream_name: meta.ragStreamName, rag_board_slug: meta.ragBoardSlug, rag_class_slug: meta.ragClassSlug, rag_subject_slug: meta.ragSubjectSlug, rag_topic_name: meta.ragTopicName, rag_chunk_snippet: meta.ragChunkSnippet, ctx_subject_name: subject?.name || null, ctx_subject_icon: meta.ragSubjectIcon || subject?.icon || null, ctx_subject_gradient: meta.ragSubjectGradient || subject?.gradient || null, sources: meta.libSources, route_trace: meta.routeTrace || null }
+          ? { ...m, content: fullContent, streaming: false, rag_source: meta.ragSource, rag_chunks: meta.ragChunks, rag_subject_id: meta.ragSubjectId, rag_subject_name: meta.ragSubjectName, rag_chapter_name: meta.ragChapterName, rag_chapter_slug: meta.ragChapterSlug, rag_board_name: meta.ragBoardName, rag_class_name: meta.ragClassName, rag_stream_name: meta.ragStreamName, rag_board_slug: meta.ragBoardSlug, rag_class_slug: meta.ragClassSlug, rag_subject_slug: meta.ragSubjectSlug, rag_topic_name: meta.ragTopicName, rag_chunk_snippet: meta.ragChunkSnippet, ctx_subject_name: subject?.name || null, ctx_subject_icon: meta.ragSubjectIcon || subject?.icon || null, ctx_subject_gradient: meta.ragSubjectGradient || subject?.gradient || null, sources: meta.libSources, route_trace: meta.routeTrace || null, match_score: meta.matchScore, source_type: meta.sourceType, confidence_tier: meta.confidenceTier, rag_path: meta.ragPath }
           : m
       ));
       setSyncState('idle');

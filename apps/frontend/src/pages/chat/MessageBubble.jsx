@@ -553,6 +553,20 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               // cached library answers) showed no clickable badge at all.
               const isLibrary = msg.rag_source && !isDocument && !isWeb && msg.rag_source !== 'none';
               const hasContext = boardLabel || subjectLabel || (msg.rag_source && msg.rag_source !== 'none');
+              // Confidence tier chip styling
+              const confidenceTierLabel = msg.confidence_tier === 'high' ? 'High confidence'
+                : msg.confidence_tier === 'mid' ? 'Good match'
+                : msg.confidence_tier === 'low' ? 'Partial match'
+                : null;
+              const confidenceTierColor = msg.confidence_tier === 'high'
+                ? { bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.28)', text: '#15803d' }
+                : msg.confidence_tier === 'mid'
+                ? { bg: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.28)', text: '#b45309' }
+                : msg.confidence_tier === 'low'
+                ? { bg: 'rgba(249,115,22,0.10)', border: 'rgba(249,115,22,0.28)', text: '#c2410c' }
+                : null;
+              const matchPct = (msg.match_score != null && msg.match_score > 0)
+                ? Math.round(msg.match_score * 100) : null;
 
               const hasAnything = hasContext || sourceLine;
               if (!hasAnything) return null;
@@ -624,6 +638,29 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                           )}
                           <span className="source-card-badge text-[11px] font-medium px-1.5 py-0.5 rounded">{subjectLabel}</span>
                         </div>
+                        {/* Confidence tier + match score — from backend source_card event */}
+                        {(confidenceTierLabel || matchPct != null) && (
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            {confidenceTierLabel && confidenceTierColor && (
+                              <span
+                                className="text-[10.5px] font-semibold px-1.5 py-0.5 rounded-md"
+                                style={{ background: confidenceTierColor.bg, border: `1px solid ${confidenceTierColor.border}`, color: confidenceTierColor.text }}
+                                title={`Embedding match confidence: ${msg.confidence_tier}`}
+                              >
+                                {confidenceTierLabel}
+                              </span>
+                            )}
+                            {matchPct != null && (
+                              <span
+                                className="text-[10.5px] font-medium px-1.5 py-0.5 rounded-md"
+                                style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)', color: '#6d28d9' }}
+                                title={`Cosine similarity: ${msg.match_score?.toFixed(4)}`}
+                              >
+                                {matchPct}% match
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

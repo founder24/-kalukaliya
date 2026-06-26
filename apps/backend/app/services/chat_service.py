@@ -36,6 +36,15 @@ _RESPONSE_CACHE_TTL = 10 * 60
 # Similarity threshold for filtering low-relevance RAG chunks
 SIMILARITY_THRESHOLD = 0.60
 
+# Confidence gate thresholds for the topic embedding match score.
+# HIGH  (≥ 0.80): strong match → MongoDB fast path only, web skipped
+# MID   (≥ 0.65): good match  → MongoDB fast path + light web in parallel
+# LOW   (≥ 0.50): weak match  → retrieve_v2 full pipeline + web as scaffold
+# NONE  (< 0.50): no match    → web + LLM only
+CONFIDENCE_HIGH = 0.80
+CONFIDENCE_MID = 0.65   # mirrors MATCH_THRESHOLD in topic_matcher
+CONFIDENCE_LOW = 0.50
+
 # Pattern for detecting generic/greeting queries that should skip RAG
 GENERIC_QUERY_PATTERN = re.compile(
     r"^(hi|hello|hey|thanks|thank you|ok|okay|bye|good morning|good evening|good night|how are you|what can you do|who are you|what are you)[\s!?.]*$",
@@ -119,24 +128,105 @@ class ChatService:
         Returns match info dict (with score, topic metadata) if a topic matches
         above the 0.65 threshold, otherwise None.
         """
+        match, _ = await ChatService.check_topic_match_with_embedding(query)
+        return match
+
+    @staticmethod
+    async def check_topic_match_with_embedding(
+        query: str,
+    ) -> tuple[Optional[dict], Optional[list[float]]]:
+        """
+        Generate an embedding for the user query and check against TopicMatcher.
+
+        Returns (match_dict, embedding_vector) so callers can reuse the
+        embedding in downstream retrieval without a second CF API call.
+        match_dict is None when no topic clears the threshold.
+        embedding_vector is None only on hard embedding failure.
+        """
         try:
             from app.services.ai.embedder import generate_embedding_vector
             from app.services.ai.topic_matcher import topic_matcher
 
-            # Bound the embedding call to 2.0s — the 0.5s limit was too
-            # tight on cold GCP instances and caused RAG to be silently
-            # skipped. topic_matcher.match_topic also hits MongoDB on first
-            # call, so we give the full round-trip 2s budget.
             query_embedding = await asyncio.wait_for(
                 generate_embedding_vector(query), timeout=2.0
             )
-            return await topic_matcher.match_topic(query_embedding)
+            match = await topic_matcher.match_topic(query_embedding)
+            return match, query_embedding
         except asyncio.TimeoutError:
             logger.warning("Topic match embedding call timed out (2.0s)")
-            return None
+            return None, None
         except Exception as e:
             logger.warning(f"Topic match check failed: {e}")
-            return None
+            return None, None
+
+    @staticmethod
+    def build_source_card(
+        topic_match: Optional[dict],
+        context_chunks: list[dict],
+        web_chunks: list[dict],
+        rag_path: str,
+        confidence_tier: str,
+    ) -> "SourceCard":
+        """
+        Build a SourceCard from the best available retrieval signal.
+
+        Priority: topic_match metadata > first chunk metadata > web > llm_only.
+        topic_match keys from TopicMatcher: topic_id, topic_title, chapter_id,
+        chapter_title, subject_slug, board_slug, class_level, score.
+        """
+        from app.models.source_card import SourceCard
+
+        if rag_path in ("fast", "mongodb"):
+            source_type = "rag_chapter"
+        elif rag_path == "vectorize":
+            source_type = "rag_vectorize"
+        elif rag_path in ("legacy_atlas",):
+            source_type = "rag_atlas"
+        elif rag_path in ("legacy_inmem",):
+            source_type = "rag_inmem"
+        elif rag_path == "web":
+            source_type = "web"
+        else:
+            source_type = "llm_only"
+
+        if topic_match:
+            return SourceCard(
+                subject_slug=topic_match.get("subject_slug"),
+                chapter_name=topic_match.get("chapter_title"),
+                topic_name=topic_match.get("topic_title"),
+                class_level=topic_match.get("class_level"),
+                board_slug=topic_match.get("board_slug"),
+                match_score=topic_match.get("score", 0.0),
+                source_type=source_type,
+                rag_path=rag_path,
+                confidence_tier=confidence_tier,
+                rag_chunks=len(context_chunks),
+            )
+
+        if context_chunks:
+            first = context_chunks[0]
+            return SourceCard(
+                chapter_name=first.get("title"),
+                chapter_slug=first.get("url", "").lstrip("/") or None,
+                match_score=first.get("score", 0.0),
+                source_type=source_type,
+                rag_path=rag_path,
+                confidence_tier=confidence_tier,
+                rag_chunks=len(context_chunks),
+            )
+
+        if web_chunks:
+            return SourceCard(
+                source_type="web",
+                rag_path="web",
+                confidence_tier=confidence_tier,
+            )
+
+        return SourceCard(
+            source_type="llm_only",
+            rag_path="none",
+            confidence_tier=confidence_tier,
+        )
 
     # ------------------------------------------------------------------
     # RAG retrieval
@@ -247,10 +337,19 @@ class ChatService:
         user_tier: str,
         lang: str = "en",
         filters: Optional[dict] = None,
-    ) -> list[dict]:
+        embedding: Optional[list[float]] = None,
+    ) -> tuple[list[dict], str]:
         """
         Full RAG retrieval: tries Vectorize (v2) first, falls back to legacy
         Atlas $vectorSearch → in-memory cosine on topic_embeddings.
+
+        Args:
+            embedding: Pre-computed query embedding from check_topic_match_with_embedding.
+                       When supplied, retrieve_v2 skips the CF Workers AI embed call
+                       (eliminates the double-embed latency hit).
+
+        Returns:
+            (chunks, rag_path) where rag_path ∈ {'fast','vectorize','legacy_atlas','legacy_inmem','empty'}
 
         Path priority (handled inside retrieve_v2):
           1. TopicMatcher fast path (in-memory, <5ms)
@@ -266,21 +365,22 @@ class ChatService:
                     lang=lang,
                     filters=filters or {},
                     limit=settings.MAX_CONTEXT_DOCS,
+                    embedding=embedding,
                 )
                 chunks = [c for c in chunks if c.get("score", 0) >= SIMILARITY_THRESHOLD]
                 logger.info(
                     f"retrieve_context: path={path} lang={lang} "
                     f"chunks_returned={len(chunks)}"
                 )
-                return truncate_chunks_to_budget(chunks, max_tokens=3000)
+                return truncate_chunks_to_budget(chunks, max_tokens=3000), path
 
             return await asyncio.wait_for(_do_retrieval(), timeout=8.0)
         except asyncio.TimeoutError:
             logger.warning("retrieve_context timed out after 8s")
-            return []
+            return [], "empty"
         except Exception as e:
             logger.error(f"retrieve_context failed: {e}")
-            return []
+            return [], "empty"
 
     # ------------------------------------------------------------------
     # Prompt building

@@ -47,6 +47,7 @@ async def retrieve_v2(
     lang: str = "en",
     filters: Optional[dict] = None,
     limit: int = MAX_CHUNKS,
+    embedding: Optional[list[float]] = None,
 ) -> tuple[list[dict], str]:
     """
     Main retrieval entry point (v2).
@@ -57,6 +58,9 @@ async def retrieve_v2(
         filters: Optional narrowing hints:
                    { subject_id, chapter_id, topic_id, source_type }
         limit: Max chunks to return.
+        embedding: Pre-computed query embedding. When supplied, the CF Workers AI
+                   embed call is skipped entirely — eliminates the double-embed
+                   latency when chat_stream already ran check_topic_match_with_embedding.
 
     Returns:
         (chunks, path_used)
@@ -65,17 +69,20 @@ async def retrieve_v2(
     t0 = time.time()
     filters = filters or {}
 
-    try:
-        from app.services.ai.embedder import generate_embedding_vector
-        query_embedding = await asyncio.wait_for(
-            generate_embedding_vector(query), timeout=5.0
-        )
-    except asyncio.TimeoutError:
-        logger.warning("retrieve_v2: embedding timed out (5s)")
-        return [], "empty"
-    except Exception as e:
-        logger.error(f"retrieve_v2: embedding failed: {e}")
-        return [], "empty"
+    if embedding is not None:
+        query_embedding = embedding
+    else:
+        try:
+            from app.services.ai.embedder import generate_embedding_vector
+            query_embedding = await asyncio.wait_for(
+                generate_embedding_vector(query), timeout=5.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("retrieve_v2: embedding timed out (5s)")
+            return [], "empty"
+        except Exception as e:
+            logger.error(f"retrieve_v2: embedding failed: {e}")
+            return [], "empty"
 
     fast_chunks = await _fast_path(query_embedding, lang=lang, limit=limit)
     if fast_chunks:

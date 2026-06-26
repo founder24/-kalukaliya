@@ -18,7 +18,12 @@ from app.models.user import User
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.security import sanitize_user_input
 from app.core.anon import resolve_anon_id, ANON_ID_PATTERN
-from app.services.chat_service import ChatService
+from app.services.chat_service import (
+    ChatService,
+    CONFIDENCE_HIGH,
+    CONFIDENCE_MID,
+    CONFIDENCE_LOW,
+)
 from app.api.deps.rate_limit import check_rate_limit
 from app.utils.tracking import track_chat_completed
 from app.config import settings
@@ -201,7 +206,8 @@ async def chat(
                 if mongo_chunks:
                     return mongo_chunks
                 # Fallback: Vertex AI Search (when MongoDB chapter has no content)
-                return await ChatService.retrieve_context(sanitized_message, user_tier)
+                chunks, _ = await ChatService.retrieve_context(sanitized_message, user_tier)
+                return chunks
 
             results = await asyncio.gather(
                 _maybe_retrieve(),
@@ -548,6 +554,17 @@ async def chat_stream(
 
     is_generic = ChatService.is_generic_query(sanitized_message)
 
+    # Retrieval state — set by the confidence-gated block below.
+    context_chunks: list[dict] = []
+    web_chunks: list[dict] = []
+    history: str = ""
+    confidence_tier: str = "generic"
+    match_score: float = 0.0
+    query_embedding: list | None = None
+    rag_path: str = "none"
+    topic_match: dict | None = None
+    source_card = None
+
     try:
         with tracer.start_as_current_span("chat.stream.rag_retrieval") as rag_span:
             rag_span.set_attribute("chat.lang", detected_lang)
@@ -555,87 +572,169 @@ async def chat_stream(
             rag_span.set_attribute("user.tier", user_tier)
             rag_span.set_attribute("user.id", user_id)
 
-            async def _noop_context():
-                return []
-
-            web_chunks: list[dict] = []
             if is_generic:
                 logger.info(
                     "generic_query_skip_rag",
                     extra={"user_id": user_id, "query": sanitized_message[:30]},
                 )
-                context_chunks, history = await asyncio.gather(
-                    _noop_context(),
-                    ChatService.load_conversation_history(request.session_id),
-                )
+                history = await ChatService.load_conversation_history(request.session_id)
+                source_card = ChatService.build_source_card(None, [], [], "none", "generic")
+
             else:
-                # Run topic match + history + web search in parallel
-                topic_match, history, web_chunks = await asyncio.gather(
-                    ChatService.check_topic_match(sanitized_message),
+                # ── Phase 1: embed + topic match + conversation history in parallel.
+                # Web search is intentionally NOT started here — it fires only when
+                # topic match confidence is MID or below, eliminating wasted DuckDuckGo
+                # calls on strong on-curriculum queries.
+                phase1_results = await asyncio.gather(
+                    ChatService.check_topic_match_with_embedding(sanitized_message),
                     ChatService.load_conversation_history(request.session_id),
-                    ChatService.retrieve_web_context(sanitized_message, lang=detected_lang),
                     return_exceptions=True,
                 )
-                # Treat exceptions as safe defaults
-                if isinstance(topic_match, Exception):
-                    logger.warning(f"topic_match failed: {topic_match}")
-                    topic_match = None
-                if isinstance(history, Exception):
-                    logger.warning(f"history load failed: {history}")
-                    history = ""
-                if isinstance(web_chunks, Exception):
-                    logger.warning(f"web_search failed: {web_chunks}")
-                    web_chunks = []
 
-                if topic_match is None:
-                    logger.info(
-                        "no_topic_match_stream",
-                        extra={"user_id": user_id, "query": sanitized_message[:30]},
-                    )
-                    context_chunks = []
+                match_result = phase1_results[0]
+                history_result = phase1_results[1]
+
+                if isinstance(match_result, Exception):
+                    logger.warning(f"topic_match_with_embedding failed: {match_result}")
+                    topic_match, query_embedding = None, None
+                elif isinstance(match_result, tuple):
+                    topic_match, query_embedding = match_result
                 else:
+                    topic_match, query_embedding = None, None
+
+                if isinstance(history_result, Exception):
+                    logger.warning(f"history load failed: {history_result}")
+                    history = ""
+                else:
+                    history = history_result or ""
+
+                match_score = topic_match.get("score", 0.0) if topic_match else 0.0
+
+                # ── Phase 2: confidence-gated retrieval ──────────────────────────────
+                if match_score >= CONFIDENCE_HIGH:
+                    # HIGH (≥ 0.80): strong match → MongoDB fast path only, web skipped.
+                    # Saves ~5s of DuckDuckGo latency on on-curriculum queries.
+                    confidence_tier = "high"
                     logger.info(
-                        "topic_matched_stream",
+                        "confidence_high",
                         extra={
                             "user_id": user_id,
+                            "score": round(match_score, 3),
                             "topic": topic_match.get("topic_title"),
-                            "score": topic_match.get("score"),
                         },
                     )
-                    # Fast path: MongoDB chapter fetch (~30ms vs 800-3000ms Vertex)
                     context_chunks = await ChatService.retrieve_context_from_chapter(
                         chapter_id=topic_match.get("chapter_id"),
                         chapter_title=topic_match.get("chapter_title", ""),
                         detected_lang=detected_lang,
                     )
+                    rag_path = "mongodb" if context_chunks else "none"
                     if not context_chunks:
-                        # Fallback: Vertex AI Search
-                        context_chunks = await ChatService.retrieve_context(
-                            sanitized_message, user_tier
+                        # Chapter has no stored content — fall through to v2.
+                        # Reuse the pre-computed embedding to avoid a second CF call.
+                        context_chunks, rag_path = await ChatService.retrieve_context(
+                            sanitized_message,
+                            user_tier,
+                            lang=detected_lang,
+                            embedding=query_embedding,
                         )
+
+                elif match_score >= CONFIDENCE_MID:
+                    # MID (0.65–0.80): good match → MongoDB fast path + light web in parallel.
+                    confidence_tier = "mid"
+                    logger.info(
+                        "confidence_mid",
+                        extra={
+                            "user_id": user_id,
+                            "score": round(match_score, 3),
+                            "topic": topic_match.get("topic_title"),
+                        },
+                    )
+                    mongo_result, web_result = await asyncio.gather(
+                        ChatService.retrieve_context_from_chapter(
+                            chapter_id=topic_match.get("chapter_id"),
+                            chapter_title=topic_match.get("chapter_title", ""),
+                            detected_lang=detected_lang,
+                        ),
+                        ChatService.retrieve_web_context(
+                            sanitized_message, lang=detected_lang
+                        ),
+                        return_exceptions=True,
+                    )
+                    context_chunks = mongo_result if not isinstance(mongo_result, Exception) else []
+                    web_chunks = web_result if not isinstance(web_result, Exception) else []
+                    rag_path = "mongodb" if context_chunks else "none"
+
+                elif match_score >= CONFIDENCE_LOW:
+                    # LOW (0.50–0.65): weak match → full v2 pipeline + web as scaffold.
+                    # Pre-computed embedding is passed through so v2 skips re-embedding.
+                    confidence_tier = "low"
+                    logger.info(
+                        "confidence_low",
+                        extra={"user_id": user_id, "score": round(match_score, 3)},
+                    )
+                    v2_result, web_result = await asyncio.gather(
+                        ChatService.retrieve_context(
+                            sanitized_message,
+                            user_tier,
+                            lang=detected_lang,
+                            embedding=query_embedding,
+                        ),
+                        ChatService.retrieve_web_context(
+                            sanitized_message, lang=detected_lang
+                        ),
+                        return_exceptions=True,
+                    )
+                    if isinstance(v2_result, Exception):
+                        logger.warning(f"retrieve_context failed: {v2_result}")
+                        context_chunks, rag_path = [], "empty"
+                    else:
+                        context_chunks, rag_path = v2_result
+                    web_chunks = web_result if not isinstance(web_result, Exception) else []
+
+                else:
+                    # NONE (< 0.50): no usable topic signal → web + LLM only, RAG skipped.
+                    confidence_tier = "none"
+                    logger.info(
+                        "no_topic_match_stream",
+                        extra={"user_id": user_id, "query": sanitized_message[:30]},
+                    )
+                    web_chunks = await ChatService.retrieve_web_context(
+                        sanitized_message, lang=detected_lang
+                    )
+                    rag_path = "web" if web_chunks else "none"
+
+                if not context_chunks and not web_chunks:
+                    logger.warning(
+                        "rag_and_web_empty",
+                        extra={"user_id": user_id, "query": sanitized_message[:50]},
+                    )
+                elif not context_chunks:
+                    logger.info(
+                        "rag_empty_using_web_fallback_stream",
+                        extra={"user_id": user_id, "web_chunks": len(web_chunks)},
+                    )
+
+                source_card = ChatService.build_source_card(
+                    topic_match, context_chunks, web_chunks, rag_path, confidence_tier
+                )
 
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
                 "rag.top_score", context_chunks[0]["score"] if context_chunks else 0.0
             )
-            rag_span.set_attribute("web.chunks", len(web_chunks) if not is_generic else 0)
+            rag_span.set_attribute("web.chunks", len(web_chunks))
+            rag_span.set_attribute("chat.confidence_tier", confidence_tier)
+            rag_span.set_attribute("chat.topic_score", round(match_score, 4))
+
     except Exception as e:
         logger.error(f"RAG retrieval failed in stream: {e}")
         context_chunks = []
         history = ""
         web_chunks = []
-
-    if not is_generic:
-        if not context_chunks and not web_chunks:
-            logger.warning(
-                "rag_and_web_empty",
-                extra={"user_id": user_id, "query": sanitized_message[:50]},
-            )
-        elif not context_chunks:
-            logger.info(
-                "rag_empty_using_web_fallback_stream",
-                extra={"user_id": user_id, "web_chunks": len(web_chunks)},
-            )
+        confidence_tier = "error"
+        rag_path = "none"
+        source_card = ChatService.build_source_card(None, [], [], "none", "error")
 
     # -- Build system prompt with weighted RAG 50% / Web 20% / LLM 30% --
     system_prompt = ChatService.build_system_prompt(
@@ -670,6 +769,13 @@ async def chat_stream(
         MAX_STREAM_DURATION = 60  # seconds
         HEARTBEAT_INTERVAL = 15  # seconds
         last_heartbeat = time.time()
+
+        # Emit source card metadata before the LLM starts streaming.
+        # The frontend already parses all these SSE field names from the meta
+        # object (rag_subject_name, rag_chapter_name, ctx_board_name, etc.) so
+        # source cards populate immediately — not just after the full response.
+        if source_card is not None and source_card.source_type != "llm_only":
+            yield f"data: {json.dumps(source_card.to_sse_dict())}\n\n"
 
         # NOTE: The timeout check below fires between chunks only. If the upstream
         # LLM connection stalls mid-chunk (never yields), this timeout will not
@@ -719,7 +825,7 @@ async def chat_stream(
 
         # -- Final event --
         latency_ms = int((time.time() - start_time) * 1000)
-        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'route_trace': {'decision': 'sarvam', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model}})}\n\n"
+        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'route_trace': {'decision': 'sarvam', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model, 'confidence_tier': confidence_tier, 'topic_score': round(match_score, 4), 'web_used': bool(web_chunks), 'rag_path': rag_path, 'rag_chunks': len(context_chunks)}})}\n\n"
 
         # Record final metrics in OTel span
         with tracer.start_as_current_span("chat.stream.complete") as final_span:

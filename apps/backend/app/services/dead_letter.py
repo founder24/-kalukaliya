@@ -125,7 +125,7 @@ async def replay_dead_letter(dead_letter_id: str) -> dict:
         detected_lang, target_model = ChatService.resolve_language_and_model(
             message, lang_override=lang
         )
-        context_chunks = await ChatService.retrieve_context(message, "free")
+        context_chunks, _ = await ChatService.retrieve_context(message, "free")
         system_prompt = ChatService.build_system_prompt(detected_lang, context_chunks)
         response, _ = await ChatService.call_llm(
             system_prompt=system_prompt,

@@ -1,0 +1,36 @@
+Your audit is strong, and the **desired behavior should be made explicit as the main retrieval policy**: detect English vs Assamese mode first, match user profile/context next, then run topic embedding search, and only fall back to syllabus-structured RAG plus web search when the topic match is weak. Cloudflare Vectorize supports metadata filtering on indexed fields, which fits returning source cards with subject/chapter/class/topic metadata. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+## What the pipeline should do
+- Detect **mode**: English or Assamese.
+- Match **user profile** and conversation context.
+- Run **topic embedding search** first.
+- If the match is strong, use **RAG chunks**.
+- If the match is weak, use **syllabus structure as the base** and blend in **web search** for syllabus-aligned support.
+- Always return **source cards** showing matched topic, chapter, subject, and class. [developers.cloudflare](https://developers.cloudflare.com/vectorize/best-practices/)
+
+## What should change in behavior
+Right now, the biggest architectural improvement is to make retrieval **confidence-aware** instead of always blending web results in parallel. If the topic match is strong, web should either be skipped or used only as a light supplement; if it is weak, the syllabus structure should become the scaffold and web should fill gaps. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+## Source card rule
+The response should include a visible source card for the best match and any fallback sources, with fields like:
+- subject,
+- chapter,
+- topic,
+- class,
+- board,
+- match score,
+- source type.  
+
+That fits Vectorize metadata filtering and lets the frontend render a clean “why this answer” panel. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/client-api/)
+
+## Recommended fix list
+1. Add a **confidence gate** after topic embedding search.
+2. Route **high-confidence** matches directly to RAG.
+3. Route **low-confidence** matches to syllabus-structured retrieval plus web search.
+4. Emit **source card metadata** from the backend, not from frontend scaffolding.
+5. Make source cards the canonical match summary for English and Assamese. [developers.cloudflare](https://developers.cloudflare.com/vectorize/best-practices/)
+
+## My audit verdict
+The current pipeline is good, but it is still **over-eager** because web search runs too often and the frontend expects metadata that the backend does not reliably emit. The fix is to make the backend authoritative for both **retrieval confidence** and **source-card metadata**. [developers.cloudflare](https://developers.cloudflare.com/vectorize/platform/changelog/)
+
+If you want, I can turn this into a **concrete decision tree / pseudo-code spec** for the chat pipeline.

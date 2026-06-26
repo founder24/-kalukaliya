@@ -26,3 +26,4 @@
 - [Gunicorn SIGABRT on Cloud Run](gunicorn-sigabrt.md) — Gunicorn timeout=30s caused SIGABRT on long AI requests; set timeout=120 for async AI workloads; graceful_timeout can stay at 30
 - [Syrabit RAG v2 pipeline](syrabit-rag-v2.md) — Vectorize+MongoDB dual-write pipeline; CF metadata uses camelCase (subjectId/chapterId/topicId/medium/sourceType/chunkType); medium='english'/'assamese' not 'en'/'as'
 - [Syrabit admin auth pattern](syrabit-admin-auth.md) — All admin routers use router-level Depends; cron routes (Bearer token) live in admin_cron.py; AiUsageLog model tracks per-request token spend
+- [Syrabit confidence-aware chat pipeline](syrabit-confidence-chat.md) — 2-phase embed+gate retrieval; SourceCard SSE emitted before LLM; source card enhances existing MessageBubble card (not a new panel)
