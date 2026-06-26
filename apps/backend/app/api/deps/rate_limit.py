@@ -36,7 +36,18 @@ async def check_rate_limit(
 
     Uses MongoDB quota_usage collection via an atomic upsert. No Redis required.
     The request parameter is retained for caller compatibility but is not inspected.
+
+    Dev bypass: when APP_ENV=development the monthly quota is never enforced so
+    engineers can test the full pipeline without hitting the free-tier cap.
     """
+    if getattr(settings, "APP_ENV", "production") == "development":
+        limit = (
+            settings.RATE_LIMIT_PRO_TIER
+            if user_tier == "pro"
+            else settings.RATE_LIMIT_FREE_TIER
+        )
+        return True, 0, limit, "monthly_dev_bypass"
+
     limit = (
         settings.RATE_LIMIT_PRO_TIER
         if user_tier == "pro"

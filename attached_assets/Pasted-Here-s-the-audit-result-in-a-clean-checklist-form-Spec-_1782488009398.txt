@@ -1,0 +1,55 @@
+Here’s the audit result in a clean checklist form.
+
+## Spec audit checklist
+- Confirm `lang` override wins over auto-detection.
+- Confirm Assamese mode stays Assamese even when the user types English or mixed text.
+- Confirm English mode stays English only.
+- Confirm sanitized input, auth identity, and rate limiting run before retrieval.
+- Confirm card context fields now reach the backend request model.
+- Confirm topic embedding is computed once and reused.
+- Confirm confidence tiers route correctly: high, mid, low, none.
+- Confirm high confidence uses chapter fast-path first.
+- Confirm none confidence uses card chapter first, then web fallback.
+- Confirm Vectorize metadata filtering uses the right chapter/subject/topic/medium fields.
+- Confirm metadata indexes exist before relying on filtered Vectorize queries. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat/chat-completions)
+
+## Prompt and output
+- Confirm English system prompt says English only, even for Assamese input.
+- Confirm Assamese system prompt says Assamese only, even for English input.
+- Confirm reasoning headers and debug lines are stripped before stream emission.
+- Confirm frontend only renders cleaned assistant content.
+- Confirm QA/debug overlays stay dev-only.
+- Confirm source cards are emitted from backend metadata, not guessed in the UI. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat-completion/overview)
+
+## Streaming and render
+- Confirm Sarvam streaming works through SSE.
+- Confirm the preamble flush path is cleaned before yielding.
+- Confirm the source-card event arrives before the first answer token.
+- Confirm `syrabit_done` contains route trace, confidence, latency, and path data.
+- Confirm no prompt policy text leaks into visible chat.
+- Confirm English and Assamese both pass end-to-end without metadata leakage. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/models/sarvam-30b)
+
+## RAG and context
+- Confirm English mode uses English RAG.
+- Confirm Assamese mode uses Assamese RAG.
+- Confirm topic matcher fields include topic, chapter, subject, board, and class.
+- Confirm source card now includes `subject_name`.
+- Confirm a chapter card context can ground a query even when the topic score is low.
+- Confirm web search remains a fallback, not a leak into strong matches. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+## Persistence and failure handling
+- Confirm chats still save asynchronously after streaming.
+- Confirm history cache invalidates after save.
+- Confirm fallback paths still work when topic match or RAG fails.
+- Confirm frontend root still redirects to `/library`.
+- Confirm all debug/meta text is blocked both backend and frontend. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat/chat-completions)
+
+## Final pass
+- Run one English test.
+- Run one Assamese test.
+- Run one mixed-language switch test.
+- Run one chapter-card-context test.
+- Run one generic greeting test.
+- Verify all outputs are clean, mode-correct, and source-card complete. [developers.cloudflare](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
+
+If you want, I can turn this into a **pass/fail QA sheet** with three columns: item, expected result, actual result.

@@ -18,11 +18,9 @@ logger = logging.getLogger(__name__)
 # "Deconstruct" preamble pattern ("\n2.  " or "\n2 " etc.)
 _re_section = re.compile(r'\n[ \t]*2[\.\s]')
 
-# Compiled regex for detecting the start of section 4+ (synthesis / drafting
-# sections that are pure meta-analysis and should not be shown to users).
-# Sections 2-3 contain the core educational content (definition + types/examples);
-# section 4 onwards is synthesis / drafting meta-analysis.
-_re_cutoff = re.compile(r'\n[ \t]*[4-9][\.\s]|\n[ \t]*1\d[\.\s]')
+# Regex for any numbered section start — used by the end-of-stream extractor
+# to locate the last reasoning section and skip to the answer after it.
+_re_any_section = re.compile(r'\n\d+\.\s+\S')
 
 # Phrases that appear on meta-analysis lines inside educational section 2.
 # Lines containing any of these are stripped from the output.
@@ -147,6 +145,42 @@ def _extract_assamese_answer(text: str) -> str:
 
     ordered = [raw_assamese[i] for i in sorted(set(seen.values()))]
     return "\n".join(ordered)
+
+
+def _extract_english_answer(text: str) -> str:
+    """
+    Extract the final English answer from sarvam-30b's full reasoning buffer.
+
+    The model always outputs numbered meta-reasoning sections first:
+        2. Brainstorm / Analyze the Core Question   ← meta, skip
+        3. Structuring the Answer / Synthesize      ← meta, skip
+        [blank line]
+        [actual clean answer in plain prose]        ← keep THIS
+
+    Strategy: find the last numbered-section marker, advance past the section
+    body (first double-newline after it), and return the content that follows.
+    Falls back to cleaning the entire text if the pattern is not found.
+    """
+    last_sec_start = -1
+    for m in _re_any_section.finditer(text):
+        last_sec_start = m.start()
+
+    if last_sec_start == -1:
+        # No numbered sections detected — clean and return as-is.
+        return _clean_educational_sections(text)
+
+    remainder = text[last_sec_start:]
+    sep = remainder.find('\n\n')
+    if sep == -1:
+        # No blank-line separator — clean and return everything.
+        return _clean_educational_sections(text)
+
+    answer = remainder[sep:].strip()
+    if not answer:
+        # Nothing after the separator — fall back to the whole cleaned text.
+        return _clean_educational_sections(text)
+
+    return _clean_educational_sections(answer)
 
 
 def _strip_think_block(text: str | None) -> str:
@@ -317,21 +351,19 @@ class SarvamAIClient:
 
         # sarvam-30b always streams its answer in reasoning_content.
         # It always starts with a numbered analysis chain:
-        #   1. Deconstruct the User's Request  ← skip entirely
-        #   2. Analyze the Core Question       ← English: show this
-        #   3. Synthesize / Draft              ← English: cut here; Assamese: all English
-        #   4. Final Draft / Polish            ← Assamese answer often starts here
-        #   [unnumbered]                       ← final formatted answer
+        #   1. Deconstruct the User's Request  ← skip (preamble)
+        #   2. Brainstorm / Analyze            ← meta, skip
+        #   3. Synthesize / Structure          ← meta, skip
+        #   [unnumbered block]                 ← ACTUAL answer (extract this)
         #
-        # Strategy:
-        #  • English mode: skip section 1, stream section 2, stop at section 3.
-        #    Section 2 contains the full educational answer for English requests.
-        #  • Assamese mode: buffer the ENTIRE response (the model reasons in English
-        #    throughout sections 1-5) then call _extract_assamese_answer() at the
-        #    end to pull out only the Assamese-script content.
+        # Strategy (both modes): buffer the ENTIRE reasoning_content stream,
+        # then at end-of-stream call the appropriate extractor:
+        #  • English:  _extract_english_answer()  — returns the unnumbered block
+        #              after the last numbered section.
+        #  • Assamese: _extract_assamese_answer() — collects Assamese-script lines.
         #
-        # Both modes share the same preamble-detection state machine; they diverge
-        # only once the preamble (section 1) has been detected and stripped.
+        # Both modes share the same preamble-detection state machine.
+        # No incremental yielding of reasoning_content happens in either mode.
 
         # ── State for <think> block stripping (applied to `content` field) ──
         in_think_block = False
@@ -349,7 +381,7 @@ class SarvamAIClient:
         #   stopping when section 3 starts.
         # For Assamese: we buffer the whole thing and process at stream end.
         edu_buf = ""
-        edu_cutoff_done = False  # True once English cutoff point reached
+        # (edu_cutoff_done removed — both modes now buffer to end-of-stream)
 
         try:
             async with self._client.stream(
@@ -391,14 +423,10 @@ class SarvamAIClient:
                                 preamble_filter_active = stripped.startswith("1.")
 
                             if preamble_filter_active is False:
-                                # No preamble — passthrough immediately (still clean meta lines)
+                                # No numbered preamble detected — buffer everything;
+                                # the extractor will find the answer at end-of-stream.
                                 preamble_done = True
-                                if not is_assamese:
-                                    cleaned_pass = _clean_educational_sections(preamble_buf)
-                                    if cleaned_pass.strip():
-                                        yield cleaned_pass
-                                else:
-                                    edu_buf += preamble_buf
+                                edu_buf += preamble_buf
                                 preamble_buf = ""
                             elif preamble_filter_active:
                                 m = _re_section.search(preamble_buf)
@@ -406,65 +434,21 @@ class SarvamAIClient:
                                     preamble_done = True
                                     remainder = preamble_buf[m.start():]
                                     preamble_buf = ""
-                                    if is_assamese:
-                                        # Assamese: buffer everything for end-of-stream extraction
-                                        edu_buf += remainder
-                                    else:
-                                        # English: strip the section header line itself
-                                        # (e.g. "2. Analyze the Core Question") before yielding.
-                                        # m.start() points to the \n before "2. …", so remainder
-                                        # starts with "\n2. Analyze…\n<content>". We skip to the
-                                        # newline after the header line so only the content yields.
-                                        nl_after_header = remainder.find('\n', 1)
-                                        if nl_after_header >= 0:
-                                            remainder = remainder[nl_after_header:]
-                                        else:
-                                            remainder = ""
-                                        # Run through the cleaner in case the first content lines
-                                        # still contain meta-analysis noise.
-                                        remainder = _clean_educational_sections(remainder)
-                                        if remainder.strip():
-                                            yield remainder
+                                    # Both modes: buffer for end-of-stream extraction.
+                                    edu_buf += remainder
                                 elif len(preamble_buf) > 3000:
-                                    # Safety: never hold back more than 3 KB
+                                    # Safety: never hold back more than 3 KB.
                                     preamble_done = True
-                                    if is_assamese:
-                                        edu_buf += preamble_buf
-                                    else:
-                                        cleaned_overflow = _clean_educational_sections(preamble_buf)
-                                        if cleaned_overflow.strip():
-                                            yield cleaned_overflow
+                                    edu_buf += preamble_buf
                                     preamble_buf = ""
 
                         # ── Phase 2: post-preamble content handling ───────────
                         else:
                             chunk_text = preamble_buf
                             preamble_buf = ""
+                            # Both modes: accumulate into edu_buf; no incremental
+                            # yield — the extractor runs at end-of-stream only.
                             edu_buf += chunk_text
-
-                            if not is_assamese:
-                                # English: stream section 2, stop at section 3
-                                if not edu_cutoff_done:
-                                    m3 = _re_cutoff.search(edu_buf)
-                                    if m3:
-                                        edu_cutoff_done = True
-                                        final_text = _clean_educational_sections(
-                                            edu_buf[: m3.start()]
-                                        )
-                                        edu_buf = ""
-                                        if final_text.strip():
-                                            yield final_text
-                                    elif len(edu_buf) > 400:
-                                        # Yield complete lines, keep 200-char window
-                                        search_in = edu_buf[:-200]
-                                        last_nl = search_in.rfind('\n')
-                                        if last_nl >= 0:
-                                            safe = edu_buf[: last_nl + 1]
-                                            edu_buf = edu_buf[last_nl + 1:]
-                                            cleaned = _clean_educational_sections(safe)
-                                            if cleaned.strip():
-                                                yield cleaned
-                            # Assamese: just keep accumulating in edu_buf (no yield)
                         continue
 
                     # ── content field path (fallback for other models) ────────
@@ -493,26 +477,17 @@ class SarvamAIClient:
 
             # ── End-of-stream flush ──────────────────────────────────────────
             if preamble_buf and not preamble_done:
-                # Preamble never resolved — clean before yielding so debug
-                # phrases can't leak through this fallback path.
-                if not is_assamese:
-                    cleaned_flush = _clean_educational_sections(preamble_buf)
-                    if cleaned_flush.strip():
-                        yield cleaned_flush
-                else:
-                    edu_buf += preamble_buf
+                # Preamble never resolved — move into edu_buf for extraction.
+                edu_buf += preamble_buf
+                preamble_buf = ""
 
             if edu_buf:
                 if is_assamese:
-                    # Extract the Assamese-script content from the full buffer
                     result = _extract_assamese_answer(edu_buf)
-                    if result.strip():
-                        yield result
-                elif not edu_cutoff_done:
-                    # English: no section 3 was found — yield remaining section 2
-                    cleaned = _clean_educational_sections(edu_buf)
-                    if cleaned.strip():
-                        yield cleaned
+                else:
+                    result = _extract_english_answer(edu_buf)
+                if result.strip():
+                    yield result
 
             if buffer and not in_think_block:
                 yield buffer
