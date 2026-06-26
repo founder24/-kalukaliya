@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue, useTransition } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Search, Bookmark, BookOpen } from './library/icons';
-import { ChevronRight, Clock } from 'lucide-react';
-import { getRecentChapters, clearRecentChapters } from '@/utils/recentChapters';
+import { getRecentChapters } from '@/utils/recentChapters';
 
 import PageMeta from '@/components/seo/PageMeta';
 import { Analytics } from '@/utils/analytics';
@@ -104,116 +103,6 @@ const STREAM_CHIPS_AS = [
   { id: 'saved', label: '★ সংৰক্ষিত' },
 ];
 
-function TrendingRail({ chapters = [], subjectsById = new Map(), contentLang = 'en' }) {
-  const items = useMemo(() => {
-    if (!Array.isArray(chapters) || chapters.length === 0) return [];
-    return chapters.slice(0, 8).map((ch) => {
-      const sub = subjectsById.get(ch.subject_id) || {};
-      const path = (sub.boardSlug && sub.classSlug && sub.slug && ch.slug)
-        ? `/${sub.boardSlug}/${sub.classSlug}/${sub.slug}/${ch.slug}`
-        : `/library`;
-      return {
-        path,
-        title: ch.title || ch.slug,
-        subject: sub.name || '',
-        board: (sub.board_name || sub.boardSlug || '').toString().toUpperCase(),
-      };
-    }).filter((it) => it.path !== '/library');
-  }, [chapters, subjectsById]);
-  if (items.length === 0) return null;
-  const isAS = contentLang === 'as';
-  return (
-    <section
-      aria-label={isAS ? 'জনপ্ৰিয় অধ্যায়সমূহ' : 'Trending chapters'}
-      className="mb-5"
-      data-testid="library-trending-rail"
-    >
-      <div className="flex items-center justify-between mb-2.5 px-0.5">
-        <h2 className="text-sm font-bold text-foreground">
-          {isAS ? '🔥 জনপ্ৰিয় অধ্যায়সমূহ' : '🔥 Trending chapters'}
-        </h2>
-      </div>
-      <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 scrollbar-thin">
-        {items.map((it) => (
-          <Link
-            key={it.path}
-            to={it.path}
-            className="group shrink-0 w-[260px] flex flex-col gap-1.5 p-3.5 rounded-xl border border-border/40 hover:border-violet-400/40 hover:bg-violet-500/5 transition-colors"
-            data-testid="library-trending-item"
-          >
-            <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-violet-500/80">
-              <span className="truncate">{it.board || (isAS ? 'বিষয়' : 'Subject')}</span>
-              {it.subject && <><span className="text-muted-foreground/40">·</span><span className="truncate">{it.subject}</span></>}
-            </div>
-            <div className="flex items-start gap-1.5">
-              <span className="text-sm font-semibold text-foreground leading-snug line-clamp-2 group-hover:text-violet-600 transition-colors flex-1">
-                {it.title}
-              </span>
-              <ChevronRight size={14} className="text-muted-foreground/50 shrink-0 mt-0.5" />
-            </div>
-          </Link>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ContinueRail({ contentLang = 'en' }) {
-  const [items, setItems] = useState(() => getRecentChapters());
-  useEffect(() => {
-    setItems(getRecentChapters());
-    const sync = () => setItems(getRecentChapters());
-    window.addEventListener('focus', sync);
-    return () => window.removeEventListener('focus', sync);
-  }, []);
-  if (!items || items.length === 0) return null;
-  const isAS = contentLang === 'as';
-  return (
-    <section
-      aria-label={isAS ? 'অধ্যয়ন চলাই থাকক' : 'Continue where you left off'}
-      className="mb-5"
-      data-testid="library-continue-rail"
-    >
-      <div className="flex items-center justify-between mb-2.5 px-0.5">
-        <div className="flex items-center gap-2">
-          <Clock size={14} className="text-violet-500" />
-          <h2 className="text-sm font-bold text-foreground">
-            {isAS ? 'অধ্যয়ন চলাই থাকক' : 'Continue where you left off'}
-          </h2>
-        </div>
-        <button
-          type="button"
-          onClick={() => { clearRecentChapters(); setItems([]); }}
-          className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-          data-testid="library-continue-clear"
-        >
-          {isAS ? 'মচক' : 'Clear'}
-        </button>
-      </div>
-      <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 scrollbar-thin">
-        {items.map((it) => (
-          <Link
-            key={it.path}
-            to={it.path}
-            className="group shrink-0 w-[260px] flex flex-col gap-1.5 p-3.5 rounded-xl border border-border/40 hover:border-violet-400/40 hover:bg-violet-500/5 transition-colors"
-            data-testid="library-continue-item"
-          >
-            <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-violet-500/80">
-              <span className="truncate">{it.board || (isAS ? 'বিষয়' : 'Subject')}</span>
-              {it.subject && <><span className="text-muted-foreground/40">·</span><span className="truncate">{it.subject}</span></>}
-            </div>
-            <div className="flex items-start gap-1.5">
-              <span className="text-sm font-semibold text-foreground leading-snug line-clamp-2 group-hover:text-violet-600 transition-colors flex-1">
-                {it.title}
-              </span>
-              <ChevronRight size={14} className="text-muted-foreground/50 shrink-0 mt-0.5" />
-            </div>
-          </Link>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function getOnboardingProfile() {
   try { const raw = localStorage.getItem('syrabit:onboarding'); return raw ? JSON.parse(raw) : null; } catch { return null; }
@@ -340,11 +229,6 @@ export default function LibraryPage() {
     });
   }, [subjects, streamMap, classMap, boardMap]);
 
-  const trendingSubjectsById = useMemo(
-    () => new Map(enrichedSubjects.map((s) => [s.id, s])),
-    [enrichedSubjects]
-  );
-
   const savedSubjectsSet = useMemo(() => new Set(savedSubjects), [savedSubjects]);
   const dynamicStreamChips = useMemo(() => {
     const streamSlugs = new Set();
@@ -457,9 +341,36 @@ export default function LibraryPage() {
     io.observe(el);
     return () => io.disconnect();
   }, [filteredSubjects.length, renderLimit, useVirtualGrid]);
+  // Rank filtered subjects: recently-visited subjects bubble up, then saved,
+  // then subjects that appear in the first 8 chapters (trending proxy).
+  const rankedSubjects = useMemo(() => {
+    if (!filteredSubjects.length) return filteredSubjects;
+    const recentChapters = getRecentChapters();
+    // paths are /{board}/{class}/{subjectSlug}/{chapter} — slug is index 2
+    const recentSubjectSlugs = new Set(
+      recentChapters.flatMap((ch) => {
+        const parts = (ch.path || '').split('/').filter(Boolean);
+        return parts.length >= 3 ? [parts[2]] : [];
+      })
+    );
+    const trendingSubjectIds = new Set(
+      allChapters.slice(0, 8).map((ch) => ch.subject_id).filter(Boolean)
+    );
+    const score = (sub) => {
+      let s = 0;
+      if (recentSubjectSlugs.has(sub.slug)) s += 100;
+      if (savedSubjectsSet.has(sub.id)) s += 20;
+      if (trendingSubjectIds.has(sub.id)) s += 10;
+      return s;
+    };
+    const hasBoost = filteredSubjects.some((s) => score(s) > 0);
+    if (!hasBoost) return filteredSubjects;
+    return [...filteredSubjects].sort((a, b) => score(b) - score(a));
+  }, [filteredSubjects, allChapters, savedSubjectsSet]);
+
   const visibleSubjects = useMemo(
-    () => filteredSubjects.slice(0, renderLimit),
-    [filteredSubjects, renderLimit]
+    () => rankedSubjects.slice(0, renderLimit),
+    [rankedSubjects, renderLimit]
   );
 
   const seoTitle = 'Assam Board Subject Library — Notes, MCQs, Definitions & Exam Prep';
@@ -631,13 +542,6 @@ export default function LibraryPage() {
         <div className="flex-1 overflow-y-auto" ref={setScrollContainerEl}>
           <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 md:px-6 py-3 sm:py-5">
 
-            <ContinueRail contentLang={contentLang} />
-            <TrendingRail
-              chapters={allChapters}
-              subjectsById={trendingSubjectsById}
-              contentLang={contentLang}
-            />
-
             <ScrollableFilterRow
               role="group"
               aria-label="Stream filters"
@@ -725,7 +629,7 @@ export default function LibraryPage() {
               useVirtualGrid ? (
                 <VirtualSubjectGrid
                   scrollParent={scrollContainerEl}
-                  subjects={filteredSubjects}
+                  subjects={rankedSubjects}
                   chaptersBySubject={chaptersBySubject}
                   savedSubjects={savedSubjects}
                   onToggleSave={handleToggleSave}
@@ -753,7 +657,7 @@ export default function LibraryPage() {
                   return [card];
                 })}
               </div>
-              {filteredSubjects.length > visibleSubjects.length && (
+              {rankedSubjects.length > visibleSubjects.length && (
                 <div ref={sentinelRef} aria-hidden="true" style={{ height: 1 }} />
               )}
               </>

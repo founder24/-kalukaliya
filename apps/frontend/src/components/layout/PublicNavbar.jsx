@@ -63,7 +63,7 @@ export const PublicNavbar = () => {
       <div className="max-w-6xl mx-auto px-5">
         <div className="flex items-center justify-between h-16">
 
-          <Link to="/" onClick={() => setMenuOpen(false)}>
+          <Link to="/library" onClick={() => setMenuOpen(false)}>
             <LogoFull size="sm" textClassName="text-foreground" hideText={false} hideIcon={true} />
           </Link>
 
