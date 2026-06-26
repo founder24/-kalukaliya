@@ -288,8 +288,8 @@ class SarvamAIClient:
             # enable_thinking=False: answer streams in reasoning_content fast
             # (~150ms TTFB); content field is always empty for sarvam-30b.
             "enable_thinking": False,
-            # Assamese mode: model reasons in English across 4-6 sections before
-            # producing Assamese translations — needs more room.
+            # Assamese mode: system prompt is in Assamese so the model reasons
+            # entirely in Assamese — generous budget for the full reasoning chain.
             # English mode: sections 2-3 are sufficient, 1500 tokens is plenty.
             "max_tokens": 4000 if is_assamese else 1500,
             "stream": True,
