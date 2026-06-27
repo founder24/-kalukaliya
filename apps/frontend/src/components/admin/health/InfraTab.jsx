@@ -27,6 +27,7 @@ import { computeHeavyFreshness, computeThrottleFreshness } from '@/utils/metrics
 
 export default function InfraTab({ adminToken, onNavigate, health, loading, deps, allOk, hasError, chartData, peaks, current, metricsLoading, timeRange, setTimeRange, loadMetrics, loadHealth, benchLatest, benchLoading, loadBenchLatest, cfAddons, cfAddonsLoading, loadCfAddons, awsCredits, awsCreditsLoading, loadAwsCredits, gcpCredits, gcpCreditsLoading, loadGcpCredits, axiomCredits, axiomCreditsLoading, loadAxiomCredits, sentryCredits, sentryCreditsLoading, loadSentryCredits, cfAuditData, cfAuditLoading, loadCfAudit, cfHealthData, cfHealthLoading, loadCfHealth, edgeProxyDeployCronHealth, edgeProxyDeployCronLoading, loadEdgeProxyDeployCronHealth, cfDriftCronHealth, cfDriftCronLoading, loadCfDriftCronHealth, tpCronHealth, tpCronLoading, loadTpCronHealth, unifiedLogsCfPullCronHealth, unifiedLogsCfPullCronLoading, loadUnifiedLogsCfPullCronHealth, edgeProxyDeployCronAlertState, cfDriftCronAlertState, tpCronAlertState, unifiedLogsCfPullCronAlertState, aigGuardrailAlertState, slackWebhookMissingAlertStates, slackWebhookMissingAlertHistories, snoozeSlackWebhookMissing, edgeProxyDeployCronAlertHistory, cfDriftCronAlertHistory, tpCronAlertHistory, unifiedLogsCfPullCronAlertHistory, loadEdgeProxyDeployCronAlertHistory, loadCfDriftCronAlertHistory, loadTpCronAlertHistory, loadUnifiedLogsCfPullCronAlertHistory, d1MirrorLagHealth, d1MirrorLagLoading, loadD1MirrorLagHealth, d1MirrorLagAlertHistory, loadD1MirrorLagAlertHistory, tpJsonldReport, tpJsonldLoading, tpJsonldHistory, tpJsonldAlerts, loadTpJsonldReport, loadTpJsonldHistory, loadTpJsonldAlerts, aiCacheStats, aiCacheLoading, aiCachePurging, loadAiCacheStats, pineconeHealth, pineconeLoading, pineconeSwitch, setPineconeSwitch, loadPineconeHealth, healthUrl, copied, handleCopy, SLACK_WEBHOOK_MISSING_ENVS }) {
   return (
+    <>
         {/*
           Phase 4 — Task #332. AWS workers + Azure cron tiles render
           first inside the Infrastructure tab so any in-progress
@@ -1930,5 +1931,6 @@ export default function InfraTab({ adminToken, onNavigate, health, loading, deps
         <SectionErrorBoundary name="Edge Metrics">
           <EdgeMetricsPanel token={adminToken} />
         </SectionErrorBoundary>
+    </>
   );
 }
