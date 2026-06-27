@@ -33,7 +33,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const [viewerItem, setViewerItem] = useState(null);
 
   const [editView, setEditView] = useState(null);
-  const [contentForm, setContentForm] = useState({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '' });
+  const [contentForm, setContentForm] = useState({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', version: 0 });
   const [editTarget, setEditTarget] = useState(null);
   const [saving, setSaving] = useState(false);
   const [chapterStats, setChapterStats] = useState(null);
@@ -272,7 +272,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     finally { setSaving(false); }
   };
 
-  const handleUpdateChapter = async () => {
+  const handleUpdateChapter = async ({ force = false } = {}) => {
     if (!editTarget || !contentForm.title) return;
     setSaving(true);
     try {
@@ -282,9 +282,33 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       if (contentForm.content_as !== undefined) updatePayload.content_as = contentForm.content_as;
       updatePayload.rag_text_en = contentForm.rag_text_en || '';
       updatePayload.rag_text_as = contentForm.rag_text_as || '';
-      await axios.patch(`${API}/admin/content/chapters/${editTarget.id}`, updatePayload, authHeaders(adminToken));
-      toast.success('Chapter updated successfully'); setEditView(null); setEditTarget(null); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '' }); setChapterStats(null); refreshChapters(selSubject);
-    } catch { toast.error('Failed to update'); }
+      if (!force) updatePayload.version = contentForm.version ?? 0;
+      const res = await axios.patch(`${API}/admin/content/chapters/${editTarget.id}`, updatePayload, authHeaders(adminToken));
+      const newVersion = res.data?.version ?? (contentForm.version + 1);
+      setContentForm(f => ({ ...f, version: newVersion }));
+      toast.success('Chapter updated successfully'); setEditView(null); setEditTarget(null); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', version: 0 }); setChapterStats(null); refreshChapters(selSubject);
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      if (e?.response?.status === 409 && detail?.code === 'version_conflict') {
+        const lastSaved = detail.last_updated_at
+          ? new Date(detail.last_updated_at).toLocaleTimeString()
+          : 'recently';
+        setConfirmDialog({
+          open: true,
+          title: 'Edit conflict',
+          message: `Another editor saved "${contentForm.title}" at ${lastSaved}. Your changes were not saved.\n\nForce overwrite will replace their version with yours.`,
+          confirmLabel: 'Force overwrite',
+          destructive: true,
+          onConfirm: async () => {
+            setConfirmDialog(d => ({ ...d, open: false }));
+            await handleUpdateChapter({ force: true });
+          },
+          onCancel: () => setConfirmDialog(d => ({ ...d, open: false })),
+        });
+      } else {
+        toast.error(detail?.message || detail || 'Failed to update');
+      }
+    }
     finally { setSaving(false); }
   };
 
@@ -801,7 +825,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                       onToggleSelect={toggleChapterSelect}
                       onToggleSelectAll={toggleChapterSelectAll}
                       onViewChapter={(ch) => setViewerItem(ch)}
-                      onEditChapter={(ch) => { setEditTarget(ch); setContentForm({ title: ch.title, slug: ch.slug || '', description: ch.description || '', content: ch.content || '', content_type: ch.content_type || 'notes', order: ch.order || 1, topics: ch.topics || [], content_as: ch.content_as || '', rag_text_en: ch.rag_text_en || '', rag_text_as: ch.rag_text_as || '' }); setEditView('edit-chapter'); loadChapterStats(ch.id); }}
+                      onEditChapter={(ch) => { setEditTarget(ch); setContentForm({ title: ch.title, slug: ch.slug || '', description: ch.description || '', content: ch.content || '', content_type: ch.content_type || 'notes', order: ch.order || 1, topics: ch.topics || [], content_as: ch.content_as || '', rag_text_en: ch.rag_text_en || '', rag_text_as: ch.rag_text_as || '', version: ch.version ?? 0 }); setEditView('edit-chapter'); loadChapterStats(ch.id); }}
                       selSubject={selSubject} subjectData={subjectData}
                       onCreateNew={() => { setEditView('new-chapter'); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: chapters.length + 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '' }); setChapterStats(null); }}
                     />

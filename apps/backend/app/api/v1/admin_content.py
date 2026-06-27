@@ -80,6 +80,7 @@ class ChapterUpdate(BaseModel):
     content_type: Optional[str] = None
     order: Optional[int] = None
     topics: Optional[list[str]] = None
+    version: Optional[int] = None        # optimistic locking — omit to bypass, send current value to guard
 
 
 class ChapterRagUpdate(BaseModel):
@@ -391,11 +392,28 @@ async def get_chapter(request: Request, chapter_id: str):
 
 @router.patch("/content/chapters/{chapter_id}")
 async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate):
-    """Update chapter fields (student-facing content only — use /rag for RAG text)."""
+    """Update chapter fields (student-facing content only — use /rag for RAG text).
+
+    Optimistic locking: if `version` is provided, the current chapter version must
+    match or a 409 Conflict is returned. Omit `version` to bypass the check (force-write).
+    """
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
+
+    # ── Optimistic locking guard ───────────────────────────────────────────────
+    if body.version is not None and chapter.version != body.version:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "version_conflict",
+                "message": "This chapter was modified by another editor since you opened it.",
+                "server_version": chapter.version,
+                "client_version": body.version,
+                "last_updated_at": chapter.updated_at.isoformat(),
+            },
+        )
 
     if body.title is not None:
         chapter.title = body.title
@@ -419,12 +437,14 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate)
     if body.content is not None or body.content_as is not None:
         chapter.content_saved_at = now
     chapter.updated_at = now
+    chapter.version = chapter.version + 1
     await chapter.save()
 
     return {
         "id": str(chapter.id),
         "title": chapter.title,
         "status": chapter.status,
+        "version": chapter.version,
         "content_saved_at": chapter.content_saved_at.isoformat() if chapter.content_saved_at else None,
     }
 
