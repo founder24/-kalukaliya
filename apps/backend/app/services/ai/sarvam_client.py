@@ -391,6 +391,8 @@ class SarvamAIClient:
 
         # Detect response language from the system prompt so we can apply the
         # right post-processing strategy and set an appropriate token budget.
+        # Safe default ensures is_assamese is always bound even if _has_assamese raises.
+        is_assamese = False
         is_assamese = _has_assamese(system_prompt)
 
         # Greeting / chatter detection (inline — avoids circular import).
