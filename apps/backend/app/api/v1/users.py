@@ -357,11 +357,11 @@ async def get_credits(
     MONTHLY_LIMIT_FREE = 30
 
     if user:
-        tier = getattr(user, "subscription_tier", "free")
-        credits_remaining = getattr(user, "credits_remaining", 0) or 0
-        credits_used = getattr(user, "credits_used", 0) or 0
+        tier = getattr(user, "subscription_tier", "free") or "free"
+        credits_used = getattr(user, "monthly_message_count", 0) or 0
         tier_limits = {"free": MONTHLY_LIMIT_FREE, "pro": 999999, "premium": 999999}
         monthly_limit = tier_limits.get(tier, MONTHLY_LIMIT_FREE)
+        credits_remaining = max(0, monthly_limit - credits_used)
         return {
             "credits_remaining": credits_remaining,
             "credits_used": credits_used,
