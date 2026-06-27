@@ -74,6 +74,8 @@ async def lifespan(app: FastAPI):
     try:
         await init_mongo()
         logger.info("MongoDB initialized successfully")
+        from app.services.memory_service import ensure_memory_indexes
+        await ensure_memory_indexes()
     except Exception as e:
         # Log as critical but do NOT raise — allow the app to start in degraded mode.
         # Cloud Run health checks hit /health (not MongoDB), so the service will report

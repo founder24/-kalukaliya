@@ -27,6 +27,7 @@ from app.services.chat_service import (
 from app.api.deps.rate_limit import check_rate_limit
 from app.utils.tracking import track_chat_completed
 from app.config import settings
+from app.services.memory_service import write_qa_memory
 
 logger = logging.getLogger(__name__)
 
@@ -382,6 +383,23 @@ async def chat(
                 )
             )
             task.add_done_callback(_log_task_exception)
+
+            # 5b. Write Q&A memory (fire-and-forget, authenticated users only)
+            if user:
+                mem_task = asyncio.create_task(
+                    write_qa_memory(
+                        user_id=user_id,
+                        user_message=sanitized_message,
+                        assistant_response=response_text,
+                        detected_lang=detected_lang,
+                        confidence_tier=confidence_tier,
+                        context_chunks=context_chunks,
+                        session_id=request.session_id,
+                        chapter_name=getattr(request, "chapter_name", None),
+                        chapter_id=getattr(request, "chapter_id", None),
+                    )
+                )
+                mem_task.add_done_callback(_log_task_exception)
 
             # 6. Update usage counter
             # NOTE: Redis is the authoritative source for rate limiting.
@@ -905,6 +923,23 @@ async def chat_stream(
             )
         )
         task.add_done_callback(_log_task_exception)
+
+        # -- Write Q&A memory (fire-and-forget, authenticated users only) --
+        if user:
+            mem_task = asyncio.create_task(
+                write_qa_memory(
+                    user_id=user_id,
+                    user_message=sanitized_message,
+                    assistant_response=full_response,
+                    detected_lang=detected_lang,
+                    confidence_tier=confidence_tier,
+                    context_chunks=context_chunks,
+                    session_id=request.session_id,
+                    chapter_name=request.chapter_name,
+                    chapter_id=request.chapter_id,
+                )
+            )
+            mem_task.add_done_callback(_log_task_exception)
 
     return StreamingResponse(
         event_stream(),
