@@ -97,6 +97,12 @@ class Chapter(Document):
     notes_generated: bool = False              # legacy flag — kept for backward compat
     published_topics: list[Topic] = Field(default_factory=list)
     faq_jsonld: Optional[list[dict]] = None
+    # Sync lifecycle timestamps — set by their respective operations
+    content_saved_at: Optional[datetime] = None   # stamped on every student-content PATCH save
+    rag_updated_at: Optional[datetime] = None     # stamped when rag_text_en/as changes
+    rag_indexed_at: Optional[datetime] = None     # stamped after successful Vectorize reindex
+    published_at: Optional[datetime] = None       # stamped when chapter is published
+    version: int = 0                              # optimistic locking counter
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

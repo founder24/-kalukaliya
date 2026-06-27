@@ -73,6 +73,18 @@ class ChapterUpdate(BaseModel):
     title: Optional[str] = None
     status: Optional[str] = None
     chapter_number: Optional[int] = None
+    slug: Optional[str] = None
+    description: Optional[str] = None
+    content: Optional[str] = None        # student-facing English content → saved as content_en
+    content_as: Optional[str] = None     # student-facing Assamese content
+    content_type: Optional[str] = None
+    order: Optional[int] = None
+    topics: Optional[list[str]] = None
+
+
+class ChapterRagUpdate(BaseModel):
+    rag_text_en: Optional[str] = None
+    rag_text_as: Optional[str] = None
 
 
 class TopicCreate(BaseModel):
@@ -332,6 +344,10 @@ async def list_chapters(
                 "status": ch.status,
                 "word_count": ch.word_count,
                 "created_at": ch.created_at.isoformat(),
+                "content_saved_at": ch.content_saved_at.isoformat() if ch.content_saved_at else None,
+                "rag_updated_at": ch.rag_updated_at.isoformat() if ch.rag_updated_at else None,
+                "rag_indexed_at": ch.rag_indexed_at.isoformat() if ch.rag_indexed_at else None,
+                "published_at": ch.published_at.isoformat() if ch.published_at else None,
             }
             for ch in chapters
         ],
@@ -356,6 +372,8 @@ async def get_chapter(request: Request, chapter_id: str):
         "status": chapter.status,
         "content_en": chapter.content_en,
         "content_as": chapter.content_as,
+        "rag_text_en": chapter.rag_text_en,
+        "rag_text_as": chapter.rag_text_as,
         "meta_description": chapter.meta_description,
         "keywords": chapter.keywords,
         "word_count": chapter.word_count,
@@ -363,12 +381,17 @@ async def get_chapter(request: Request, chapter_id: str):
         "faq_jsonld": chapter.faq_jsonld,
         "created_at": chapter.created_at.isoformat(),
         "updated_at": chapter.updated_at.isoformat(),
+        "content_saved_at": chapter.content_saved_at.isoformat() if chapter.content_saved_at else None,
+        "rag_updated_at": chapter.rag_updated_at.isoformat() if chapter.rag_updated_at else None,
+        "rag_indexed_at": chapter.rag_indexed_at.isoformat() if chapter.rag_indexed_at else None,
+        "published_at": chapter.published_at.isoformat() if chapter.published_at else None,
+        "version": chapter.version,
     }
 
 
 @router.patch("/content/chapters/{chapter_id}")
 async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate):
-    """Update chapter fields."""
+    """Update chapter fields (student-facing content only — use /rag for RAG text)."""
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
@@ -376,15 +399,91 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate)
 
     if body.title is not None:
         chapter.title = body.title
-        chapter.slug = _slugify(body.title)
+        if not body.slug:
+            chapter.slug = _slugify(body.title)
+    if body.slug is not None:
+        chapter.slug = body.slug
     if body.status is not None:
         chapter.status = body.status
     if body.chapter_number is not None:
         chapter.chapter_number = body.chapter_number
-    chapter.updated_at = datetime.now(timezone.utc)
+    if body.content is not None:
+        chapter.content_en = body.content
+        chapter.word_count = len(body.content.split()) if body.content else 0
+    if body.content_as is not None:
+        chapter.content_as = body.content_as
+    if body.content_type is not None and hasattr(chapter, 'content_type'):
+        chapter.content_type = body.content_type
+    now = datetime.now(timezone.utc)
+    # Stamp content_saved_at whenever student-facing text changes
+    if body.content is not None or body.content_as is not None:
+        chapter.content_saved_at = now
+    chapter.updated_at = now
     await chapter.save()
 
-    return {"id": str(chapter.id), "title": chapter.title, "status": chapter.status}
+    return {
+        "id": str(chapter.id),
+        "title": chapter.title,
+        "status": chapter.status,
+        "content_saved_at": chapter.content_saved_at.isoformat() if chapter.content_saved_at else None,
+    }
+
+
+@router.patch("/content/chapters/{chapter_id}/rag")
+async def update_chapter_rag(request: Request, chapter_id: str, body: ChapterRagUpdate):
+    """Update RAG retrieval text only. Auto-triggers background reindex on Vectorize."""
+
+    import asyncio as _asyncio
+
+    chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    if body.rag_text_en is not None:
+        chapter.rag_text_en = body.rag_text_en
+    if body.rag_text_as is not None:
+        chapter.rag_text_as = body.rag_text_as
+
+    now = datetime.now(timezone.utc)
+    chapter.rag_updated_at = now
+    chapter.updated_at = now
+    await chapter.save()
+
+    # Fire background reindex so Vectorize stays aligned
+    job_id = None
+    try:
+        from app.services.rag.ingestion_v2 import ingest_chapter_v2
+
+        async def _background_reindex():
+            try:
+                ingest_en = chapter.rag_text_en or chapter.content_en
+                ingest_as = chapter.rag_text_as or chapter.content_as
+                if ingest_en or ingest_as:
+                    await ingest_chapter_v2(
+                        chapter_id=chapter_id,
+                        content_en=ingest_en,
+                        content_as=ingest_as,
+                        metadata={"subject_id": str(chapter.subject_id)},
+                        source_type="notes",
+                    )
+                    # Stamp rag_indexed_at on success
+                    fresh = await Chapter.get(PydanticObjectId(chapter_id))
+                    if fresh:
+                        fresh.rag_indexed_at = datetime.now(timezone.utc)
+                        await fresh.save()
+            except Exception as exc:
+                logger.error(f"[rag-save] background reindex failed chapter={chapter_id}: {exc}")
+
+        _asyncio.create_task(_background_reindex())
+    except Exception as exc:
+        logger.warning(f"[rag-save] could not start background reindex: {exc}")
+
+    return {
+        "ok": True,
+        "rag_updated_at": chapter.rag_updated_at.isoformat(),
+        "job_id": job_id,
+        "message": "RAG text saved. Background reindex started — rag_indexed_at will update on completion.",
+    }
 
 
 @router.delete("/content/chapters/{chapter_id}")

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Layers, ChevronRight, Trash2, Loader2, Edit2, AlignLeft, X, CheckCircle, Circle, EyeOff } from 'lucide-react';
+import { Search, Layers, ChevronRight, Trash2, Loader2, Edit2, AlignLeft, X, CheckCircle, Circle, EyeOff, Database, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { isDegreeBoard } from '@/utils/courseTypes';
@@ -57,6 +57,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const [selectedSubjectIds, setSelectedSubjectIds] = useState(() => new Set());
   const [selectedChapterIds, setSelectedChapterIds] = useState(() => new Set());
   const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [ragSaving, setRagSaving] = useState(false);
 
   const subjectData = subjects.find(s => s.id === selSubject);
   const boardData = boards.find(b => b.id === selBoard);
@@ -285,6 +286,24 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     finally { setSaving(false); }
   };
 
+  const handleRagSave = useCallback(async () => {
+    if (!editTarget?.id) return;
+    setRagSaving(true);
+    const tid = toast.loading('Saving RAG text…');
+    try {
+      await axios.patch(
+        `${API}/admin/content/chapters/${editTarget.id}/rag`,
+        { rag_text_en: contentForm.rag_text_en || '', rag_text_as: contentForm.rag_text_as || '' },
+        authHeaders(adminToken),
+      );
+      toast.success('RAG text saved — Vectorize reindex started', { id: tid });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to save RAG text', { id: tid });
+    } finally {
+      setRagSaving(false);
+    }
+  }, [editTarget?.id, contentForm.rag_text_en, contentForm.rag_text_as, adminToken]);
+
   const handleDeleteChapter = (id) => {
     setConfirmDialog({
       open: true,
@@ -376,6 +395,25 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       setBulkUpdating(false);
     }
   };
+
+  const handleBulkReindex = useCallback(async () => {
+    const ids = Array.from(selectedChapterIds);
+    if (ids.length === 0) return;
+    setBulkUpdating(true);
+    try {
+      await axios.post(
+        `${API}/admin/rag/bulk-reindex`,
+        { chapter_ids: ids },
+        authHeaders(adminToken),
+      );
+      toast.success(`${ids.length} chapter${ids.length === 1 ? '' : 's'} queued for RAG reindex`);
+      setSelectedChapterIds(new Set());
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Bulk reindex failed');
+    } finally {
+      setBulkUpdating(false);
+    }
+  }, [selectedChapterIds, adminToken]);
 
   // Clear selection when navigation context changes
   useEffect(() => { setSelectedSubjectIds(new Set()); }, [selStream]);
@@ -483,10 +521,21 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
             <X size={11} /> Clear
           </button>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <ActionBtn status="published" icon={CheckCircle} color="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100">Publish</ActionBtn>
           <ActionBtn status="draft" icon={Circle} color="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100">Draft</ActionBtn>
           <ActionBtn status="unpublished" icon={EyeOff} color="bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200">Unpublish</ActionBtn>
+          {scope === 'chapters' && (
+            <button
+              onClick={handleBulkReindex}
+              disabled={bulkUpdating}
+              className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100"
+              data-testid="bulk-chapters-reindex"
+            >
+              {bulkUpdating ? <Loader2 size={12} className="animate-spin" /> : <Database size={12} />}
+              Reindex RAG
+            </button>
+          )}
         </div>
       </div>
     );
@@ -550,18 +599,30 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
               </div>
             </div>
           ) : editView === 'new-chapter' || editView === 'edit-chapter' ? (
-            <ChapterEditForm
-              editView={editView} editTarget={editTarget} contentForm={contentForm} setContentForm={setContentForm}
-              subjectData={subjectData} saving={saving} chapterStats={chapterStats}
-              onSave={editView === 'edit-chapter' ? handleUpdateChapter : handleCreateChapter}
-              onCancel={() => { setEditView(null); setEditTarget(null); setChapterStats(null); }}
-              onFileAttach={handleFileAttach} uploading={uploading}
-              onAiParse={handleAiParse} aiParsing={aiParsing} onLoadChapterStats={loadChapterStats}
-              editorRef={editorRef} editorKey={editorKey} setEditorKey={setEditorKey}
-              showPreview={showPreview} setShowPreview={setShowPreview}
-              fileInputRef={fileInputRef}
-              adminToken={adminToken} boardId={selBoard} classId={selClass} streamId={selStream}
-            />
+            <div className="flex-1 flex flex-col min-h-0">
+              <div className="flex-shrink-0 mx-6 mt-3 mb-1 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50/80 flex items-center gap-4 flex-wrap text-[10px] text-gray-400">
+                <Info size={11} className="text-gray-400 flex-shrink-0" />
+                <span><span className="font-semibold text-gray-600">MongoDB</span> — live content store</span>
+                <span className="text-gray-300">|</span>
+                <span><span className="font-semibold text-teal-600">Vectorize</span> — RAG retrieval store (updated on reindex)</span>
+                <span className="text-gray-300">|</span>
+                <span><span className="font-semibold text-blue-600">CDN / GCS / Pages</span> — publish-time artifacts</span>
+              </div>
+              <ChapterEditForm
+                editView={editView} editTarget={editTarget} contentForm={contentForm} setContentForm={setContentForm}
+                subjectData={subjectData} saving={saving} chapterStats={chapterStats}
+                onSave={editView === 'edit-chapter' ? handleUpdateChapter : handleCreateChapter}
+                onCancel={() => { setEditView(null); setEditTarget(null); setChapterStats(null); }}
+                onFileAttach={handleFileAttach} uploading={uploading}
+                onAiParse={handleAiParse} aiParsing={aiParsing} onLoadChapterStats={loadChapterStats}
+                editorRef={editorRef} editorKey={editorKey} setEditorKey={setEditorKey}
+                showPreview={showPreview} setShowPreview={setShowPreview}
+                fileInputRef={fileInputRef}
+                adminToken={adminToken} boardId={selBoard} classId={selClass} streamId={selStream}
+                onRagSave={editView === 'edit-chapter' ? handleRagSave : undefined}
+                ragSaving={ragSaving}
+              />
+            </div>
           ) : (
             <div className="flex-1 flex overflow-hidden">
               <HierarchyTree

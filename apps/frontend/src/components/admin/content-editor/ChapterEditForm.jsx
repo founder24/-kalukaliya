@@ -3,7 +3,7 @@ import {
   ArrowLeft, Save, Loader2, Eye, Link2, BarChart3,
   Sparkles, RefreshCw, Layers, LayoutTemplate, Upload,
   FileText, Globe, CheckCircle, Smartphone, Monitor,
-  ImagePlus, Languages,
+  ImagePlus, Languages, Database,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { TEMPLATES } from '@/utils/editorTemplates';
 import { API, autoSlug, authHeaders } from '@/utils/adminHelpers';
 import PYQUploadPanel from './PYQUploadPanel';
+import RagSyncBadge from './RagSyncBadge';
 
 const CONTENT_TYPES = [
   { value: 'notes', label: 'Notes', color: 'violet' },
@@ -31,6 +32,7 @@ export default function ChapterEditForm({
   showPreview, setShowPreview,
   fileInputRef,
   adminToken, boardId, classId, streamId,
+  onRagSave, ragSaving,
 }) {
   const [mobilePreview, setMobilePreview] = useState(true);
   const [imgUploading, setImgUploading] = useState(false);
@@ -221,6 +223,12 @@ export default function ChapterEditForm({
                 <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                   AI retrieval content · separate from reader view
                 </span>
+              )}
+              {contentMode === 'rag' && editTarget?.id && (
+                <RagSyncBadge
+                  ragUpdatedAt={editTarget.rag_updated_at}
+                  ragIndexedAt={editTarget.rag_indexed_at}
+                />
               )}
             </div>
             {/* Language toggle */}
@@ -453,6 +461,26 @@ export default function ChapterEditForm({
             </div>
           )}
         </div>
+
+        {contentMode === 'rag' && editTarget?.id && onRagSave && (
+          <div className="flex-shrink-0 px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50/60 flex items-start gap-2.5">
+            <Database size={14} className="text-emerald-600 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-semibold text-emerald-800 mb-0.5">Save RAG Text separately</p>
+              <p className="text-[10px] text-emerald-700/80 leading-relaxed">
+                This text is used only for AI chat retrieval. Saving triggers an automatic Vectorize reindex — it does not affect the student-facing page.
+              </p>
+            </div>
+            <button
+              onClick={onRagSave}
+              disabled={ragSaving}
+              className="flex-shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-lg text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-all shadow-sm"
+            >
+              {ragSaving ? <Loader2 size={11} className="animate-spin" /> : <Database size={11} />}
+              {ragSaving ? 'Saving…' : 'Save RAG Text'}
+            </button>
+          </div>
+        )}
 
         <div className="flex gap-2.5 flex-shrink-0 pt-1">
           <button onClick={onCancel} className="flex-1 h-11 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors">Cancel</button>

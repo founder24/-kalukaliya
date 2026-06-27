@@ -373,6 +373,65 @@ async def _run_bulk_chapter_reindex(
         logger.error(f"[bulk-reindex] failed to write final job status: {e}")
 
 
+# ── Bulk chapter re-index by IDs ──────────────────────────────────────────────
+
+class BulkChapterReindexRequest(BaseModel):
+    chapter_ids: list[str]
+    source_type: str = "notes"
+    dry_run: bool = False
+
+
+@router.post("/rag/bulk-reindex")
+async def bulk_reindex_chapters(req: BulkChapterReindexRequest, request: Request):
+    """
+    Bulk re-index up to 50 chapters by their IDs. Each chapter is queued as an
+    async background task. Returns a list of {chapter_id, status} pairs.
+
+    Used by the admin bulk-action bar "Reindex RAG" button.
+    """
+    import asyncio as _asyncio
+    from app.models.content import Chapter
+    from app.services.rag.ingestion_v2 import ingest_chapter_v2
+
+    chapter_ids = req.chapter_ids[:50]
+
+    async def _reindex_one(chapter_id: str):
+        try:
+            chapter = await Chapter.get(chapter_id)
+            if not chapter:
+                return {"chapter_id": chapter_id, "status": "not_found"}
+            ingest_en = chapter.rag_text_en or chapter.content_en
+            ingest_as = chapter.rag_text_as or chapter.content_as
+            if not ingest_en and not ingest_as:
+                return {"chapter_id": chapter_id, "status": "no_content"}
+            await ingest_chapter_v2(
+                chapter_id=chapter_id,
+                content_en=ingest_en,
+                content_as=ingest_as,
+                metadata={"subject_id": str(chapter.subject_id)},
+                source_type=req.source_type,
+                dry_run=req.dry_run,
+            )
+            if not req.dry_run:
+                fresh = await Chapter.get(chapter_id)
+                if fresh:
+                    fresh.rag_indexed_at = _now()
+                    await fresh.save()
+            return {"chapter_id": chapter_id, "status": "ok"}
+        except Exception as exc:
+            logger.error(f"[bulk-reindex] chapter={chapter_id} error: {exc}")
+            return {"chapter_id": chapter_id, "status": "error", "error": str(exc)}
+
+    results = await _asyncio.gather(*[_reindex_one(cid) for cid in chapter_ids])
+    ok_count = sum(1 for r in results if r["status"] == "ok")
+    return {
+        "queued": len(chapter_ids),
+        "succeeded": ok_count,
+        "dry_run": req.dry_run,
+        "results": list(results),
+    }
+
+
 # ── Bulk subject re-index ──────────────────────────────────────────────────────
 
 @router.post("/rag/reindex/subject/{subject_id}")
@@ -532,6 +591,16 @@ async def reindex_chapter(
         source_type=req.source_type,
         dry_run=req.dry_run,
     )
+
+    # Stamp rag_indexed_at so sync badges can reflect current state
+    if not req.dry_run:
+        try:
+            fresh = await Chapter.get(chapter_id)
+            if fresh:
+                fresh.rag_indexed_at = _now()
+                await fresh.save()
+        except Exception as _stamp_err:
+            logger.warning(f"[chapter-reindex] could not stamp rag_indexed_at: {_stamp_err}")
 
     en = result.get("en", {})
     as_ = result.get("as", {})
