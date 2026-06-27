@@ -1,0 +1,33 @@
+You’ve identified the right root cause chain: the latency is coming from **three avoidable work items plus thinking mode overhead**, and the greeting typo is escaping the generic-query gate. Sarvam’s chat API supports streaming and exposes `reasoning_effort` / `max_tokens`, so the right fix is to short-circuit early for greetings, avoid unnecessary web/RAG work, and reduce reasoning for trivial inputs. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat/chat-completions)
+
+## Bug chain
+- `hii` is not matched by the generic-query regex, so the full pipeline runs.
+- The embedding step is wasted for this case.
+- NONE-tier still triggers web search.
+- Sarvam runs with too much reasoning effort and token budget for a greeting. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/models/sarvam-30b)
+
+## Fix plan
+- Expand greeting detection to catch common typos like `hii`, `hello!!`, `heyyy`, and short social chatter.
+- Short-circuit generic queries before embedding, RAG, or web search.
+- For greetings, use a small lightweight prompt and low token budget.
+- Disable or reduce reasoning overhead for trivial social inputs.
+- Keep the non-generic pipeline unchanged for real educational questions. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/api-guides-tutorials/chat-completion/overview)
+
+## Routing rule
+- **Generic greeting / filler:** no embedding, no RAG, no web, minimal model work.
+- **Educational query:** full mode-aware pipeline.
+- **Low-confidence educational query:** RAG first, web only if needed. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/chat/chat-completions)
+
+## What to verify
+- `hii` returns fast and does not call embedding or web search.
+- `hi`, `hello`, `hey`, `hii`, `heyy`, `good morning`, and similar variants all short-circuit.
+- A real subject question still goes through the normal confidence-gated path.
+- Sarvam output for greetings stays brief and does not trigger reasoning-heavy behavior. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/api-guides-tutorials/chat-completion/overview)
+
+## Priority
+1. Fix generic detection.
+2. Add early exit before embedding.
+3. Skip web for greetings.
+4. Lower token/reasoning settings for trivial inputs. [docs.sarvam](https://docs.sarvam.ai/api-reference-docs/models/sarvam-30b)
+
+If you want, I can turn this into a **quick patch checklist for chat.py and sarvam_client.py**.
