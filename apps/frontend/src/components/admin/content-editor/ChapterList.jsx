@@ -2,6 +2,7 @@ import {
   Sparkles, Loader2, Eye, Edit2, Trash2,
   CheckCircle, FileText, Layers, Globe, AlertTriangle,
   BookOpen, Hash, Search, ChevronDown, ChevronUp,
+  Send, Clock,
 } from 'lucide-react';
 import { useState } from 'react';
 import StatusBadge, { STATUS_FILTER_OPTIONS } from './StatusBadge';
@@ -25,6 +26,7 @@ export default function ChapterList({
   generatingNotes,
   onGenerateNotes, onDeleteChapter, onChangeChapterStatus,
   onViewChapter, onEditChapter,
+  onPublishChapter, publishingChapters = new Set(),
   selSubject, subjectData, onCreateNew,
   selectedIds, onToggleSelect, onToggleSelectAll,
 }) {
@@ -102,12 +104,16 @@ export default function ChapterList({
           const hasSeoPages  = (assets.seoPagesPublished || 0) > 0;
           const markWise  = assets.markWiseCounts || {};
           const seoTypes  = assets.seoPageTypes || {};
+            const hasUnpublishedEdit = !!(ch.content_saved_at && ch.published_at &&
+            new Date(ch.content_saved_at) > new Date(ch.published_at));
           return (
             <div key={ch.id}
               className="rounded-xl border transition-all"
               style={{
-                borderColor: hasNotes ? 'rgba(16,185,129,0.18)' : '#e5e7eb',
-                background:  '#f9fafb',
+                borderColor: hasUnpublishedEdit
+                  ? 'rgba(245,158,11,0.35)'
+                  : hasNotes ? 'rgba(16,185,129,0.18)' : '#e5e7eb',
+                background: '#f9fafb',
               }}>
               <div className="flex items-start gap-2 p-3 pb-2">
                 {selectionEnabled && (
@@ -152,6 +158,15 @@ export default function ChapterList({
                     {hasAssamese && (
                       <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.20)' }}>অসমীয়া</span>
                     )}
+                    {hasUnpublishedEdit && (
+                      <span
+                        title={`Saved ${new Date(ch.content_saved_at).toLocaleString()} but last published ${new Date(ch.published_at).toLocaleString()}`}
+                        className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide"
+                        style={{ background: 'rgba(245,158,11,0.15)', color: '#d97706', border: '1px solid rgba(245,158,11,0.30)' }}
+                      >
+                        <Clock size={8} /> Unpublished edit
+                      </span>
+                    )}
                   </div>
                   {ch.description && !preview && (
                     <p className="text-xs text-white/35 mt-0.5 truncate">{ch.description}</p>
@@ -181,6 +196,16 @@ export default function ChapterList({
                   <button onClick={() => onEditChapter(ch)}
                     className="p-1.5 rounded-lg hover:bg-violet-500/10 text-gray-400 hover:text-violet-400" title="Edit chapter"><Edit2 size={13} /></button>
                   <button onClick={() => onDeleteChapter(ch.id)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400" title="Delete chapter"><Trash2 size={13} /></button>
+                  {onPublishChapter && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onPublishChapter(ch.id); }}
+                      disabled={publishingChapters.has(ch.id)}
+                      title="Publish to live site (GCS + Cloudflare + IndexNow)"
+                      className="p-1.5 rounded-lg hover:bg-blue-500/10 text-gray-400 hover:text-blue-500 disabled:opacity-40 transition-colors"
+                    >
+                      {publishingChapters.has(ch.id) ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                    </button>
+                  )}
                 </div>
               </div>
               {(hasNotes || hasPyqs || hasFc || hasBlogs || hasSeoTopics || hasSeoPages || ch.slug) && (

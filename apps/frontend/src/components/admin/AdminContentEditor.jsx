@@ -15,6 +15,7 @@ import ConfirmDialog from './content-editor/ConfirmDialog';
 import StatusBadge, { normalizeStatus, STATUS_FILTER_OPTIONS } from './content-editor/StatusBadge';
 import StatusQuickToggle from './content-editor/StatusQuickToggle';
 import RagJobsPanel from './content-editor/RagJobsPanel';
+import PublishJobsPanel from './content-editor/PublishJobTracker';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 export default function AdminContentEditor({ adminToken, onNavigate, hubContext, onHubContext, onHierarchyChange }) {
@@ -60,6 +61,8 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [ragSaving, setRagSaving] = useState(false);
   const [trackedJobIds, setTrackedJobIds] = useState([]);
+  const [publishJobIds, setPublishJobIds] = useState([]);
+  const [publishingChapters, setPublishingChapters] = useState(new Set());
 
   const subjectData = subjects.find(s => s.id === selSubject);
   const boardData = boards.find(b => b.id === selBoard);
@@ -320,6 +323,29 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const handleJobComplete = useCallback((jobId) => {
     if (selSubject) refreshChapters(selSubject);
   }, [selSubject]);
+
+  const addPublishJob = useCallback((jobId) => {
+    if (!jobId) return;
+    setPublishJobIds(prev => prev.includes(jobId) ? prev : [...prev, jobId]);
+  }, []);
+
+  const handlePublishChapter = useCallback(async (chapterId) => {
+    setPublishingChapters(prev => new Set([...prev, chapterId]));
+    const tid = toast.loading('Queuing publish…');
+    try {
+      const res = await axios.post(
+        `${API}/admin/content/chapters/${chapterId}/publish`,
+        {},
+        authHeaders(adminToken),
+      );
+      toast.success('Publish job queued — tracking below', { id: tid });
+      if (res.data?.job_id) addPublishJob(res.data.job_id);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Publish failed', { id: tid });
+    } finally {
+      setPublishingChapters(prev => { const next = new Set(prev); next.delete(chapterId); return next; });
+    }
+  }, [adminToken, addPublishJob]);
 
   const handleRagSave = useCallback(async () => {
     if (!editTarget?.id) return;
@@ -826,6 +852,8 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                       onToggleSelectAll={toggleChapterSelectAll}
                       onViewChapter={(ch) => setViewerItem(ch)}
                       onEditChapter={(ch) => { setEditTarget(ch); setContentForm({ title: ch.title, slug: ch.slug || '', description: ch.description || '', content: ch.content || '', content_type: ch.content_type || 'notes', order: ch.order || 1, topics: ch.topics || [], content_as: ch.content_as || '', rag_text_en: ch.rag_text_en || '', rag_text_as: ch.rag_text_as || '', version: ch.version ?? 0 }); setEditView('edit-chapter'); loadChapterStats(ch.id); }}
+                      onPublishChapter={handlePublishChapter}
+                      publishingChapters={publishingChapters}
                       selSubject={selSubject} subjectData={subjectData}
                       onCreateNew={() => { setEditView('new-chapter'); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: chapters.length + 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '' }); setChapterStats(null); }}
                     />
@@ -852,6 +880,11 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
         trackedJobIds={trackedJobIds}
         adminToken={adminToken}
         onJobComplete={handleJobComplete}
+      />
+      <PublishJobsPanel
+        publishJobIds={publishJobIds}
+        adminToken={adminToken}
+        onJobComplete={() => { if (selSubject) refreshChapters(selSubject); }}
       />
     </SectionErrorBoundary>
   );

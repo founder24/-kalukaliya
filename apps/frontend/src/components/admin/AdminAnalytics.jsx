@@ -16,6 +16,7 @@ import PredictionsTab from './analytics/PredictionsTab';
 import ConversionsTab from './analytics/ConversionsTab';
 import ContentCardViewsTab from './analytics/ContentCardViewsTab';
 import CloudflareAnalyticsBanner from './analytics/CloudflareAnalyticsBanner';
+import AdminActionsTab from './analytics/AdminActionsTab';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 export default function AdminAnalytics({ adminToken, onNavigate }) {
@@ -165,6 +166,7 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
     { id: 'revenue',   label: 'Revenue' },
     { id: 'predict',   label: 'Predictions' },
     { id: 'pages',     label: 'Page Conversions' },
+    { id: 'actions',   label: 'Admin Actions' },
   ];
 
   return (
@@ -254,6 +256,10 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
         {tab === 'pages' && (
           <ConversionsTab pageConvData={pageConvData} pageConvLoading={pageConvLoading}
             loadPageConversions={loadPageConversions} rangeDays={overviewDays} />
+        )}
+
+        {tab === 'actions' && (
+          <AdminActionsTab adminToken={adminToken} />
         )}
 
         <AdminQuickLinks links={['seomanager','users','conversations','monetization','dashboard']} onNavigate={onNavigate} />

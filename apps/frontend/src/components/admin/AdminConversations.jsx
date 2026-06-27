@@ -75,6 +75,9 @@ const VALID_CONV_TABS = new Set(['conversations', 'faqs', 'feedback']);
 export default function AdminConversations({ adminToken, onNavigate, navContext }) {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [convOffset, setConvOffset] = useState(0);
+  const [convTotal, setConvTotal] = useState(0);
+  const PAGE_SIZE = 50;
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState('');
   // Task #296 — honour navContext.tab so deep-links from the legacy
@@ -96,11 +99,19 @@ export default function AdminConversations({ adminToken, onNavigate, navContext 
   const [error, setError] = useState(null);
   const chatEndRef = useRef(null);
 
-  const loadConversations = (token) => {
+  const loadConversations = (token, offset = 0) => {
     setLoading(true);
     setError(null);
-    adminGetConversations(token)
-      .then((res) => { setConversations(Array.isArray(res?.data) ? res.data : []); setError(null); })
+    adminGetConversations(token, { limit: PAGE_SIZE, offset })
+      .then((res) => {
+        const body = res?.data;
+        const items = Array.isArray(body) ? body : (body?.data ?? []);
+        const total = typeof body?.total === 'number' ? body.total : items.length;
+        setConversations(items);
+        setConvTotal(total);
+        setConvOffset(offset);
+        setError(null);
+      })
       .catch((e) => {
         const msg = e?.response?.data?.detail || 'Failed to load conversations';
         setError(msg);
@@ -110,7 +121,7 @@ export default function AdminConversations({ adminToken, onNavigate, navContext 
   };
 
   useEffect(() => {
-    loadConversations(adminToken);
+    loadConversations(adminToken, 0);
     conversationsSentiment(adminToken).then(r => setSentiment(r.data)).catch(() => {});
   }, [adminToken]);
 
@@ -212,7 +223,7 @@ export default function AdminConversations({ adminToken, onNavigate, navContext 
       <div className="flex flex-col h-full" style={{ minHeight: 'calc(100vh - 120px)' }}>
         <div className="flex gap-1.5 px-4 py-2 items-center border-b border-gray-200 bg-white">
           {[
-            { id: 'conversations', label: `Conversations (${conversations.length})` },
+            { id: 'conversations', label: `Conversations (${convTotal || conversations.length})` },
             { id: 'faqs', label: 'FAQ Extractor' },
             { id: 'feedback', label: 'Chat Feedback' },
           ].map(t => (
@@ -303,8 +314,25 @@ export default function AdminConversations({ adminToken, onNavigate, navContext 
           <div className="p-4 border-b border-gray-200 space-y-3">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <h2 className="text-gray-900 font-semibold" data-syra="conversations-header">Conversations ({conversations.length})</h2>
+                <h2 className="text-gray-900 font-semibold" data-syra="conversations-header">Conversations ({convTotal || conversations.length})</h2>
                 <p className="text-xs text-gray-400">{withMessages.length} with messages · {totalMessages} total msgs · {anonymousConvs.length} anonymous</p>
+                {convTotal > PAGE_SIZE && (
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <button
+                      disabled={convOffset === 0 || loading}
+                      onClick={() => loadConversations(adminToken, Math.max(0, convOffset - PAGE_SIZE))}
+                      className="px-2 py-0.5 text-[10px] rounded border border-gray-200 text-gray-500 hover:text-gray-800 disabled:opacity-40 transition-colors"
+                    >← Prev</button>
+                    <span className="text-[10px] text-gray-400">
+                      {convOffset + 1}–{Math.min(convOffset + PAGE_SIZE, convTotal)} of {convTotal}
+                    </span>
+                    <button
+                      disabled={convOffset + PAGE_SIZE >= convTotal || loading}
+                      onClick={() => loadConversations(adminToken, convOffset + PAGE_SIZE)}
+                      className="px-2 py-0.5 text-[10px] rounded border border-gray-200 text-gray-500 hover:text-gray-800 disabled:opacity-40 transition-colors"
+                    >Next →</button>
+                  </div>
+                )}
               </div>
               <div className="flex gap-1 flex-shrink-0">
                 {[

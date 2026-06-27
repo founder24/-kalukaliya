@@ -304,8 +304,8 @@ export const adminUpdateUserRole = (token, userId, role, reason) =>
     { headers: adminHeaders(token), withCredentials: true },
   );
 
-export const adminGetConversations = (token) =>
-  axios.get(`${API_BASE}/admin/conversations`, { headers: adminHeaders(token), withCredentials: true });
+export const adminGetConversations = (token, { limit = 50, offset = 0 } = {}) =>
+  axios.get(`${API_BASE}/admin/conversations`, { headers: adminHeaders(token), withCredentials: true, params: { limit, offset } });
 
 export const adminGetAnalytics = (token, days = 30) =>
   axios.get(`${API_BASE}/admin/analytics`, { headers: adminHeaders(token), withCredentials: true, params: { days } });

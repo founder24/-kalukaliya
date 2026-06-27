@@ -12,7 +12,7 @@ Collections:
 from datetime import datetime, timezone
 from typing import Optional
 from beanie import Document
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 
 def _now() -> datetime:
@@ -174,3 +174,36 @@ class GenerationJob(Document):
 
     class Settings:
         name = "generation_jobs"
+
+
+class PublishJobStep(BaseModel):
+    name: str
+    label: str = ""
+    status: str = "pending"
+    result: Optional[dict] = None
+    error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+
+class PublishJob(Document):
+    """
+    Tracks a full chapter publish pipeline run.
+
+    Steps: gcs | cloudflare | status_update | pages_rebuild | indexnow | wikidata | embeddings
+    Status lifecycle: pending → running → done / failed
+    """
+
+    chapter_id: str
+    chapter_title: Optional[str] = None
+    triggered_by: Optional[str] = None
+    status: str = "pending"
+    steps: list[PublishJobStep] = Field(default_factory=list)
+    error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+    class Settings:
+        name = "publish_jobs"

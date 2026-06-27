@@ -264,6 +264,119 @@ class ContentPublisherService:
 
         return {"status": "generated", "count": generated, "errors": errors}
 
+    async def publish_chapter_with_job(self, chapter_id: str, job_id: str) -> None:
+        """Run the full publish pipeline, updating a PublishJob document at each step."""
+        from app.models.rag import PublishJob, PublishJobStep
+        from beanie import PydanticObjectId as _OID
+
+        now = lambda: datetime.now(timezone.utc)
+
+        job = await PublishJob.get(_OID(job_id))
+        if not job:
+            logger.error(f"PublishJob {job_id} not found")
+            return
+
+        chapter = await Chapter.get(_OID(chapter_id))
+        if not chapter:
+            job.status = "failed"
+            job.error = f"Chapter {chapter_id} not found"
+            job.finished_at = now()
+            await job.save()
+            return
+
+        async def _run_step(name: str, coro):
+            step = next((s for s in job.steps if s.name == name), None)
+            if step is None:
+                return {"status": "skipped"}
+            step.status = "running"
+            step.started_at = now()
+            job.status = "running"
+            if not job.started_at:
+                job.started_at = step.started_at
+            job.updated_at = now()
+            await job.save()
+            try:
+                result = await coro
+                failed = isinstance(result, dict) and result.get("status") in ("error", "failed")
+                step.status = "failed" if failed else "done"
+                step.result = result if isinstance(result, dict) else {"status": str(result)}
+            except Exception as exc:
+                step.status = "failed"
+                step.error = str(exc)
+                result = {"status": "error", "detail": str(exc)}
+            finally:
+                step.finished_at = now()
+                job.updated_at = now()
+                await job.save()
+            return result
+
+        try:
+            await _run_step("gcs", self.publish_to_gcs(chapter))
+            await _run_step("cloudflare", self.publish_to_cloudflare(chapter))
+
+            async def _do_status():
+                chapter.status = "published"
+                chapter.published_at = now()
+                chapter.updated_at = now()
+                await chapter.save()
+                return {"status": "done"}
+
+            await _run_step("status_update", _do_status())
+
+            async def _do_pages():
+                await self.trigger_pages_rebuild()
+                return {"status": "done"}
+
+            await _run_step("pages_rebuild", _do_pages())
+
+            async def _do_indexnow():
+                chapter_url = f"https://syrabit.ai/{chapter.slug}"
+                topic_urls = [
+                    f"https://syrabit.ai/{chapter.slug}/topic/{t.topic_slug}"
+                    for t in (chapter.published_topics or [])
+                ]
+                result = await push_indexnow([chapter_url] + topic_urls)
+                return result if isinstance(result, dict) else {"status": "done"}
+
+            await _run_step("indexnow", _do_indexnow())
+
+            async def _do_wikidata():
+                if not chapter.published_topics:
+                    return {"status": "skipped", "reason": "no_topics"}
+                topic_titles = [t.title for t in chapter.published_topics]
+                wikidata_uris = await batch_lookup_wikidata(topic_titles)
+                updated = False
+                for topic in chapter.published_topics:
+                    uri = wikidata_uris.get(topic.title)
+                    if uri and not getattr(topic, "wikidata_uri", None):
+                        topic.wikidata_uri = uri
+                        updated = True
+                if updated:
+                    await chapter.save()
+                matched = len([u for u in wikidata_uris.values() if u])
+                return {"status": "done", "matched": matched}
+
+            await _run_step("wikidata", _do_wikidata())
+
+            async def _do_embeddings():
+                hierarchy = await self._resolve_hierarchy(chapter)
+                return await self._generate_topic_embeddings(chapter, hierarchy)
+
+            await _run_step("embeddings", _do_embeddings())
+
+            job.status = "done"
+            job.finished_at = now()
+            job.updated_at = now()
+            await job.save()
+
+        except Exception as exc:
+            job.status = "failed"
+            job.error = str(exc)
+            job.finished_at = now()
+            job.updated_at = now()
+            logger.error(f"publish_chapter_with_job {job_id}: {exc}")
+            await job.save()
+
     async def regenerate_sitemap(self) -> str:
         """Generate sitemap XML from all published chapters."""
         chapters = await Chapter.find({"status": "published"}).to_list(length=None)

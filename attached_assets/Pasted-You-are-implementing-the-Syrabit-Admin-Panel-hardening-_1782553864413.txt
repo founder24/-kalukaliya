@@ -1,0 +1,210 @@
+You are implementing the Syrabit Admin Panel hardening roadmap. Follow this rule exactly:
+SAVE changes the data.
+PUBLISH changes delivery.
+REINDEX changes retrieval.
+
+Do not merge those three actions into one ambiguous UI or backend path.
+
+Goal:
+Make the admin panel fully functional, explicit, and safe end to end.
+
+Scope:
+Implement the checklist items in the exact file-by-file order below.
+For every file change, preserve existing behavior unless explicitly replaced.
+If a required field or endpoint already exists, extend it instead of duplicating it.
+If a change depends on a newer API contract, update backend first, then frontend.
+
+Acceptance criteria:
+1) Chapter content and RAG text are clearly separate.
+2) RAG save stamps freshness timestamps and triggers or clearly surfaces reindex.
+3) Publish has job tracking, retry, and visible status.
+4) Chapter list/editor show stale/current badges.
+5) Concurrency conflicts return 409 and can be force-overwritten intentionally.
+6) Audit logs exist for content, RAG, publish, and bulk actions.
+7) Bulk publish and bulk reindex work with clear feedback.
+8) Public library/chapter delivery only shows published content.
+9) Chat uses current retrieval state, not stale vectors.
+10) Admin analytics, logs, and conversation review are paginated.
+11) Admin auth is hardened and browser routes do not rely on Bearer fallback.
+12) Cron/side-effect routes use POST and separate secrets.
+
+Implementation order and exact file-by-file sequence:
+
+PHASE 1 — Correctness first
+1. `apps/backend/app/models/content.py`
+   - Add `rag_updated_at`, `rag_indexed_at`, `content_saved_at`, `published_at`, and `version` to `Chapter`.
+   - Ensure timestamps are set by the correct operation only.
+   - Ensure version increments on each successful save.
+
+2. `apps/backend/app/api/v1/admin_content.py`
+   - Split chapter save and RAG save.
+   - Add `PATCH /admin/content/chapters/{chapter_id}/rag`.
+   - Exclude `rag_text_en` and `rag_text_as` from normal chapter PATCH.
+   - Stamp `rag_updated_at` on RAG save.
+   - Add `content_saved_at` stamping on normal chapter save.
+   - Add version conflict handling and return 409 on mismatch.
+   - Expose `rag_updated_at`, `rag_indexed_at`, `content_saved_at`, `published_at`, and `version` in chapter/card responses.
+   - Make “Publish ≠ Reindex” explicit in response and behavior.
+
+3. `apps/backend/app/api/v1/admin_rag.py`
+   - Stamp `rag_indexed_at` after successful reindex.
+   - Add `POST /admin/rag/bulk-reindex`.
+   - Ensure reindex uses the current retrieval text fields.
+   - Return job/task identifiers for background tracking.
+
+4. `apps/frontend/src/components/admin/content-editor/RagSyncBadge.jsx`
+   - Create the badge component.
+   - Support `RAG current`, `RAG stale`, `Not indexed`, and `Unknown`.
+
+5. `apps/frontend/src/components/admin/content-editor/ChapterEditForm.jsx`
+   - Separate Student Content and RAG Retrieval Text into clear sections/tabs.
+   - Add separate save actions.
+   - Show RAG freshness and publish freshness messages.
+   - Add conflict modal for 409 responses.
+   - Add publish job tracker area.
+   - Add history/audit tab if supported by backend.
+
+6. `apps/frontend/src/components/admin/content-editor/ChapterList.jsx`
+   - Render RAG sync badge and publish-stale badge.
+   - Show timestamps if available.
+
+7. `apps/frontend/src/components/admin/AdminContentEditor.jsx`
+   - Add source-of-truth banner.
+   - Wire bulk reindex.
+   - Wire publish clarity messages.
+   - Refresh chapter list after job completion.
+
+PHASE 2 — Publish and delivery
+8. `apps/backend/app/models/rag.py`
+   - Add `PublishJob` and `PublishJobStep` models.
+   - Persist step state, timestamps, errors, and overall status.
+
+9. `apps/backend/app/services/content_publisher.py`
+   - Track publish steps explicitly.
+   - Create a publish job before execution.
+   - Support retrying failed steps.
+   - Return job ID and final/queued status.
+
+10. `apps/backend/app/api/v1/admin_content.py`
+    - Add publish job endpoints:
+      - `POST /admin/content/chapters/{chapter_id}/publish`
+      - `GET /admin/content/publish-jobs/{job_id}`
+      - `POST /admin/content/publish-jobs/{job_id}/retry`
+      - `GET /admin/content/chapters/{chapter_id}/publish-history`
+    - Ensure publish updates delivery artifacts only.
+
+11. `apps/frontend/src/components/admin/content-editor/PublishJobTracker.jsx`
+    - Create live poller for publish jobs.
+    - Show per-step progress and failures.
+    - Provide retry failed steps UI.
+
+12. `apps/frontend/src/components/admin/AdminContentEditor.jsx`
+    - Add publish status section and retry affordance.
+    - Make publish vs reindex distinction obvious in copy and labels.
+
+PHASE 3 — Safety and workflow
+13. `apps/backend/app/models/audit.py`
+    - Add `ContentAuditLog`.
+
+14. `apps/backend/app/api/v1/admin_content.py`
+    - Add audit helper.
+    - Log content save, RAG save, publish, generate-notes, and bulk status changes.
+    - Add audit log endpoint by chapter.
+
+15. `apps/frontend/src/components/admin/content-editor/ChapterEditForm.jsx`
+    - Add History tab or audit panel.
+    - Show timestamp, admin, action, and changed fields.
+
+16. `apps/backend/app/api/v1/admin_rag.py`
+    - Add bulk reindex endpoint if not already complete.
+    - Make sure bulk operations are bounded.
+
+17. `apps/backend/app/api/v1/admin_content.py`
+    - Add bulk publish endpoint.
+    - Enforce caps and return queue/job feedback.
+
+18. `apps/frontend/src/components/admin/AdminContentEditor.jsx`
+    - Add bulk reindex and bulk publish buttons.
+    - Disable buttons when no chapter is selected.
+    - Show queued counts/job IDs and feedback.
+
+PHASE 4 — Public delivery and consistency
+19. `apps/backend/app/api/v1/public_content.py`
+    - Enforce published-only visibility.
+    - Add stale publish flag if content was updated after publish.
+    - Ensure drafts never leak.
+
+20. `apps/frontend/src/components/admin/AdminContentEditor.jsx`
+    - Show unpublished-edit badge in admin library/chapter cards.
+    - Show publish freshness state.
+
+21. `apps/backend/app/api/v1/chat.py`
+    - Ensure chat uses the latest retrieval index.
+    - Avoid unnecessary retrieval or web work when a strong match exists.
+    - Keep latency-sensitive logic efficient.
+
+22. `apps/backend/app/api/v1/conversations.py`
+    - Verify conversation persistence and history shape.
+
+23. `apps/backend/app/api/v1/users.py`
+    - Verify profile updates propagate into personalization logic.
+
+PHASE 5 — Pagination and ops
+24. `apps/backend/app/api/v1/admin_conversations.py`
+    - Add pagination support.
+    - Return `items`, `total`, `page`, and `pages`.
+
+25. `apps/frontend/src/components/admin/AdminConversations.jsx`
+    - Use paginated loading.
+    - Add page controls or infinite scroll.
+
+26. `apps/backend/app/api/v1/admin_analytics.py`
+    - Add admin action metrics endpoint.
+    - Verify existing analytics support publish/reindex/generate-notes visibility.
+    - Add log pagination if not already complete.
+
+27. `apps/frontend/src/components/admin/AdminLogsExplorer.jsx`
+    - Use paginated log loading.
+
+28. `apps/frontend/src/components/admin/AdminAnalytics.jsx`
+    - Add admin actions chart or section.
+    - Show publish, reindex, and generate-notes usage.
+
+PHASE 6 — Auth and cron safety
+29. `apps/backend/app/api/v1/admin.py`
+    - Minimize Bearer fallback for browser-facing routes.
+    - Harden logout revocation path.
+    - Ensure session checks are cookie-first.
+    - Keep CSRF on mutating endpoints.
+
+30. `apps/frontend/src/pages/AdminPage.jsx`
+    - Add a global 401 interceptor behavior.
+    - Shorten verify interval if needed.
+    - Ensure redirect to login is immediate on auth failure.
+
+31. `apps/backend/app/api/v1/admin_cron.py`
+    - Convert any side-effectful GET routes to POST.
+    - Keep cron secret separate from admin auth.
+
+32. `apps/frontend/src/pages/AdminLoginPage.jsx`
+    - Verify login and redirect behavior.
+    - Ensure admin token never leaks into browser storage.
+
+Verification rules:
+- After each phase, run typecheck/lint/build or at least the relevant backend and frontend compile checks.
+- If any endpoint or component breaks an existing contract, update all dependents in the same phase.
+- If a field is added to backend response models, update frontend consumption immediately.
+- Keep UI language explicit:
+  - “Save” = data only.
+  - “Publish” = delivery only.
+  - “Reindex” = retrieval only.
+
+Definition of done:
+- Admin panel clearly separates content save, RAG save, publish, and reindex.
+- Freshness and stale-state are visible everywhere they matter.
+- Concurrency conflicts are handled safely.
+- Publish and reindex each have visible status and retry paths.
+- Library, chat, history, profile, analytics, and ops are consistent with admin changes.
+- No silent data drift remains between saved data, published delivery, and retrieval vectors.
+
+Proceed file by file in this order, and do not skip verification after each phase.

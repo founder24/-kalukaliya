@@ -501,3 +501,59 @@ async def analytics_content_card_views():
         "by_day": [],
         "source": "unavailable",
     }
+
+
+@router.get("/analytics/admin-actions")
+async def analytics_admin_actions(days: int = 30):
+    """
+    Admin action metrics from ContentAuditLog.
+
+    Returns per-action-type counts + daily breakdown for the last N days.
+    """
+    try:
+        from app.models.content import ContentAuditLog
+        from collections import defaultdict
+
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+        logs = await ContentAuditLog.find(
+            ContentAuditLog.timestamp >= since
+        ).to_list(length=None)
+
+        by_action: dict[str, int] = defaultdict(int)
+        by_day: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+        for log in logs:
+            action = getattr(log, "action", "unknown") or "unknown"
+            by_action[action] += 1
+            day_key = log.timestamp.strftime("%Y-%m-%d") if log.timestamp else "unknown"
+            by_day[day_key][action] += 1
+
+        by_action_list = [
+            {"action": k, "count": v}
+            for k, v in sorted(by_action.items(), key=lambda x: -x[1])
+        ]
+
+        by_day_list = [
+            {
+                "date": day,
+                "total": sum(counts.values()),
+                "by_action": dict(counts),
+            }
+            for day, counts in sorted(by_day.items(), reverse=True)
+        ]
+
+        return {
+            "total": len(logs),
+            "days": days,
+            "by_action": by_action_list,
+            "by_day": by_day_list,
+        }
+    except Exception as e:
+        logger.error(f"admin-actions analytics error: {e}")
+        return {
+            "total": 0,
+            "days": days,
+            "by_action": [],
+            "by_day": [],
+        }

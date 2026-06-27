@@ -26,6 +26,7 @@ from app.models.rag import (
     ContentNode,
     PageAsset,
     GenerationJob,
+    PublishJob,
 )
 from app.models.ai_usage_log import AiUsageLog
 from app.db.migrations.runner import check_and_apply_migrations
@@ -91,6 +92,7 @@ async def init_mongo() -> None:
                     ContentNode,
                     PageAsset,
                     GenerationJob,
+                    PublishJob,
                     AiUsageLog,
                     ContentAuditLog,
                 ],

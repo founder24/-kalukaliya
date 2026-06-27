@@ -917,16 +917,101 @@ async def generate_notes_assamese(request: Request, chapter_id: str, body: Gener
 
 @router.post("/content/chapters/{chapter_id}/publish")
 async def publish_chapter(request: Request, chapter_id: str):
-    """Full publish pipeline: Vertex AI Search + Cloudflare + status update."""
+    """Full publish pipeline with job tracking. Returns immediately with job_id."""
+    import asyncio as _asyncio
+    from app.models.rag import PublishJob, PublishJobStep
+
+    chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    job = PublishJob(
+        chapter_id=chapter_id,
+        chapter_title=chapter.title,
+        status="pending",
+        steps=[
+            PublishJobStep(name="gcs", label="Write to GCS"),
+            PublishJobStep(name="cloudflare", label="Cloudflare prerender"),
+            PublishJobStep(name="status_update", label="Update DB status"),
+            PublishJobStep(name="pages_rebuild", label="CF Pages rebuild"),
+            PublishJobStep(name="indexnow", label="IndexNow ping"),
+            PublishJobStep(name="wikidata", label="Wikidata enrichment"),
+            PublishJobStep(name="embeddings", label="Topic embeddings"),
+        ],
+    )
+    await job.insert()
+    job_id = str(job.id)
+
+    _asyncio.create_task(
+        content_publisher_service.publish_chapter_with_job(chapter_id, job_id)
+    )
+
+    return {"job_id": job_id, "status": "queued", "chapter_id": chapter_id}
+
+
+@router.get("/content/publish-jobs/{job_id}")
+async def get_publish_job(request: Request, job_id: str):
+    """Poll publish job status and step progress."""
+    from app.models.rag import PublishJob
 
     try:
-        result = await content_publisher_service.publish_chapter(chapter_id)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error(f"Publish chapter error: {e}")
-        raise HTTPException(status_code=500, detail="Publishing failed")
+        job = await PublishJob.get(PydanticObjectId(job_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {
+        "job_id": job_id,
+        "chapter_id": job.chapter_id,
+        "chapter_title": job.chapter_title,
+        "status": job.status,
+        "error": job.error,
+        "steps": [s.model_dump() for s in job.steps],
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+    }
+
+
+@router.post("/content/publish-jobs/{job_id}/retry")
+async def retry_publish_job(request: Request, job_id: str):
+    """Retry a failed publish job."""
+    import asyncio as _asyncio
+    from app.models.rag import PublishJob, PublishJobStep
+
+    try:
+        job = await PublishJob.get(PydanticObjectId(job_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status not in ("failed",):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job status is '{job.status}'; only 'failed' jobs can be retried",
+        )
+
+    job.status = "pending"
+    job.error = None
+    job.finished_at = None
+    job.steps = [
+        PublishJobStep(name="gcs", label="Write to GCS"),
+        PublishJobStep(name="cloudflare", label="Cloudflare prerender"),
+        PublishJobStep(name="status_update", label="Update DB status"),
+        PublishJobStep(name="pages_rebuild", label="CF Pages rebuild"),
+        PublishJobStep(name="indexnow", label="IndexNow ping"),
+        PublishJobStep(name="wikidata", label="Wikidata enrichment"),
+        PublishJobStep(name="embeddings", label="Topic embeddings"),
+    ]
+    await job.save()
+
+    _asyncio.create_task(
+        content_publisher_service.publish_chapter_with_job(job.chapter_id, job_id)
+    )
+    return {"job_id": job_id, "status": "queued"}
 
 
 @router.post("/content/chapters/{chapter_id}/publish/search-index")
