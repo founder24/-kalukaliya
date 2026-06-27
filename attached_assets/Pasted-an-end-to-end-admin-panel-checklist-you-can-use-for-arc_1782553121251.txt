@@ -1,0 +1,99 @@
+an end-to-end admin panel checklist you can use for architecture, workflow, pipeline, and logic. It is structured to match the rule: save changes the data, publish changes delivery, reindex changes retrieval.[developers.cloudflare]
+Admin checklist
+1) Auth and access
+Admin login uses a separate auth flow from user login.
+Admin session is cookie-based for browser routes.
+Admin verify runs on page load and on session refresh.
+Logout clears session and revokes the token server-side.
+Bearer fallback is limited to machine-triggered routes only.
+CSRF protection exists on all mutating admin routes.[developers.cloudflare]
+2) Admin shell and navigation
+Admin dashboard layout loads correctly.
+Sidebar sections map to the correct admin modules.
+Lazy-loaded panels do not break route state.
+Legacy route redirects still work.
+Global 401 handling logs out and redirects cleanly.
+Shared admin context stays in sync across panels.[reactrouter]
+3) Content editor
+Student content and RAG content are separated in the UI.
+Content editor saves only display content fields.
+RAG editor saves only retrieval text fields.
+Save buttons are separate or clearly scoped.
+Editor explains that content save does not equal publish.
+Editor explains that RAG save does not equal retrieval freshness.[developers.cloudflare]
+4) RAG pipeline
+RAG save updates rag_text_*.
+RAG save stamps rag_updated_at.
+Reindex runs after RAG save or is strongly prompted.
+Reindex stamps rag_indexed_at on success.
+Vectorize metadata indexes exist for required filter fields.
+Chat retrieval uses current indexed chunks, not stale content.[developers.cloudflare]
+5) Publish pipeline
+Publish updates delivery artifacts, not retrieval text.
+Publish job has step-by-step tracking.
+Publish status is visible in the admin UI.
+Failed publish steps can be retried.
+Publish and reindex are clearly presented as different operations.
+Public-facing content only shows published chapters.[developers.cloudflare]
+6) Chapter state and sync
+Chapter cards show content_saved_at.
+Chapter cards show published_at.
+Chapter cards show rag_updated_at.
+Chapter cards show rag_indexed_at.
+Badges show “RAG current,” “RAG stale,” or “Not indexed.”
+Badges show unpublished edits when content is newer than publish state.[developers.cloudflare]
+7) Safety and concurrency
+Versioning prevents silent overwrite.
+Conflicting edits return 409.
+Force overwrite is explicit and intentional.
+Audit logs exist for content, RAG, publish, and bulk actions.
+Admin actions are traceable by user and timestamp.
+Concurrent edits do not silently corrupt chapter state.[developers.cloudflare]
+8) Bulk operations
+Bulk reindex exists and respects limits.
+Bulk publish exists and respects limits.
+Bulk actions show queued counts or job IDs.
+Bulk actions have clear feedback on success/failure.
+Empty selections disable buttons.[developers.cloudflare]
+9) Library and public delivery
+Library page reads from the correct source of truth.
+Public chapter pages ignore drafts.
+Unpublished edits are only visible in admin views.
+Cached or prerendered content can be invalidated through publish.
+Search and CDN reflect publish state consistently.[developers.cloudflare]
+10) Chat, history, profile
+Chat uses the latest retrieval index.
+History reflects saved conversation state correctly.
+Profile updates propagate into personalization logic.
+Admin can inspect conversations with pagination.
+Admin can inspect logs with pagination.
+Latency-sensitive flows avoid unnecessary work.[reactrouter]
+11) Analytics and ops
+Analytics show publish, reindex, generate-notes, and admin usage.
+Health panels expose system and AI status.
+Side-effectful cron routes use POST, not GET.
+Cron routes use separate secrets from admin auth.
+Operational panels do not expose unsafe actions to the browser.
+Metrics help identify slow or failing steps.[developers.cloudflare]
+Recommended audit labels
+Use these labels for each checklist item:
+Exists — implemented and verified.
+Missing — not present.
+Needs verification — present in code summary but not yet confirmed end to end.[reactrouter]
+Best structure for your document
+You can organize the final admin checklist like this:
+Auth and access.
+Admin shell.
+Content editor.
+RAG pipeline.
+Publish pipeline.
+State and sync.
+Safety and concurrency.
+Bulk actions.
+Library/public delivery.
+Chat/history/profile.
+Analytics and ops.[developers.cloudflare]
+Short rule to keep on top
+Save changes the data. Publish changes delivery. Reindex changes retrieval.
+That should appear at the top of the checklist and in the admin panel itself.[developers.cloudflare]
+turn this into a table with columns: Area, Checkpoint, Status, Risk, File, Fix Priority.
