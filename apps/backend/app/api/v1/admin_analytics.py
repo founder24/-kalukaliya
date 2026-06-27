@@ -708,3 +708,105 @@ async def analytics_admin_actions(days: int = 30):
             "by_action": [],
             "by_day": [],
         }
+
+
+@router.get("/analytics/top-routes")
+async def analytics_top_routes(days: int = 30, limit: int = 25):
+    """
+    Most-viewed content pages aggregated from the request_logs collection.
+
+    Each document in request_logs is expected to have:
+      path      str   — e.g. "/browse/physics/chapter-1"
+      method    str   — HTTP method; only GET is counted
+      status    int   — HTTP status; only 2xx are counted
+      created_at datetime
+
+    Falls back gracefully when the collection is absent or empty.
+    """
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+
+        collections = await db.list_collection_names()
+        if "request_logs" not in collections:
+            return {
+                "routes": [],
+                "days": days,
+                "source": "unavailable",
+                "message": (
+                    "request_logs collection not found. "
+                    "Instrument your middleware to write request logs to enable this widget."
+                ),
+            }
+
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+        pipeline = [
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "method": {"$in": ["GET", "get"]},
+                    "status": {"$gte": 200, "$lt": 300},
+                    "path": {
+                        "$regex": r"^/(?:browse|chapter|topic|subject|lesson)",
+                        "$options": "i",
+                    },
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$path",
+                    "views": {"$sum": 1},
+                    "unique_ips": {"$addToSet": "$ip"},
+                    "last_seen": {"$max": "$created_at"},
+                }
+            },
+            {"$sort": {"views": -1}},
+            {"$limit": limit},
+            {
+                "$project": {
+                    "_id": 0,
+                    "path": "$_id",
+                    "views": 1,
+                    "unique_visitors": {"$size": "$unique_ips"},
+                    "last_seen": 1,
+                }
+            },
+        ]
+
+        rows = await db.request_logs.aggregate(pipeline).to_list(length=limit)
+
+        total_pipeline = [
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "method": {"$in": ["GET", "get"]},
+                    "status": {"$gte": 200, "$lt": 300},
+                }
+            },
+            {"$count": "total"},
+        ]
+        total_raw = await db.request_logs.aggregate(total_pipeline).to_list(length=1)
+        total_page_views = total_raw[0]["total"] if total_raw else 0
+
+        for row in rows:
+            if isinstance(row.get("last_seen"), datetime):
+                row["last_seen"] = row["last_seen"].isoformat()
+
+        return {
+            "routes": rows,
+            "total_page_views": total_page_views,
+            "days": days,
+            "limit": limit,
+            "source": "request_logs",
+        }
+
+    except Exception as e:
+        logger.error(f"top-routes analytics error: {e}")
+        return {
+            "routes": [],
+            "total_page_views": 0,
+            "days": days,
+            "source": "unavailable",
+            "message": str(e),
+        }
