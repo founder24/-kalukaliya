@@ -482,14 +482,165 @@ async def analytics_hydrate_stats():
 
 @router.get("/analytics/review-prompt-stats")
 async def analytics_review_prompt_stats():
-    """Review prompt funnel stats."""
-    return {
-        "total_shown": 0,
-        "total_clicked": 0,
-        "ctr": 0,
-        "by_reason": [],
-        "source": "unavailable",
-    }
+    """Review prompt funnel stats — aggregated from review_prompt_events collection."""
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        collections = await db.list_collection_names()
+        if "review_prompt_events" not in collections:
+            return {
+                "total_shown": 0,
+                "total_clicked": 0,
+                "ctr": 0,
+                "by_reason": [],
+                "source": "unavailable",
+                "message": "No review_prompt_events data yet",
+            }
+        total_shown = await db.review_prompt_events.count_documents({"event": "shown"})
+        total_clicked = await db.review_prompt_events.count_documents({"event": "clicked"})
+        ctr = round(total_clicked / total_shown, 4) if total_shown else 0
+        by_reason_raw = await db.review_prompt_events.aggregate([
+            {"$match": {"event": "shown"}},
+            {"$group": {"_id": "$reason", "shown": {"$sum": 1}}},
+        ]).to_list(length=50)
+        clicked_by_reason_raw = await db.review_prompt_events.aggregate([
+            {"$match": {"event": "clicked"}},
+            {"$group": {"_id": "$reason", "clicked": {"$sum": 1}}},
+        ]).to_list(length=50)
+        clicked_map = {r["_id"]: r["clicked"] for r in clicked_by_reason_raw}
+        by_reason = [
+            {
+                "reason": r["_id"],
+                "shown": r["shown"],
+                "clicked": clicked_map.get(r["_id"], 0),
+                "ctr": round(clicked_map.get(r["_id"], 0) / r["shown"], 4) if r["shown"] else 0,
+            }
+            for r in sorted(by_reason_raw, key=lambda x: -x["shown"])
+        ]
+        return {
+            "total_shown": total_shown,
+            "total_clicked": total_clicked,
+            "ctr": ctr,
+            "by_reason": by_reason,
+            "source": "review_prompt_events",
+        }
+    except Exception as e:
+        logger.error(f"review-prompt-stats error: {e}")
+        return {"total_shown": 0, "total_clicked": 0, "ctr": 0, "by_reason": [], "source": "unavailable"}
+
+
+@router.get("/analytics/review-prompt-stats/baseline-noise")
+async def analytics_review_prompt_baseline_noise(window_days: int = 7):
+    """Per-reason baseline mean CTR + stddev + current z-score for volatility band."""
+    try:
+        import math
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        collections = await db.list_collection_names()
+        if "review_prompt_events" not in collections:
+            return {"baselines": [], "window_days": window_days, "source": "unavailable"}
+
+        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        pipeline = [
+            {"$match": {"event": "shown", "created_at": {"$gte": since}}},
+            {"$group": {
+                "_id": {"reason": "$reason", "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}}},
+                "shown": {"$sum": 1},
+            }},
+            {"$sort": {"_id.date": 1}},
+        ]
+        rows = await db.review_prompt_events.aggregate(pipeline).to_list(length=1000)
+        clicked_pipeline = [
+            {"$match": {"event": "clicked", "created_at": {"$gte": since}}},
+            {"$group": {
+                "_id": {"reason": "$reason", "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}}},
+                "clicked": {"$sum": 1},
+            }},
+        ]
+        clicked_rows = await db.review_prompt_events.aggregate(clicked_pipeline).to_list(length=1000)
+        clicked_map = {(r["_id"]["reason"], r["_id"]["date"]): r["clicked"] for r in clicked_rows}
+
+        from collections import defaultdict
+        by_reason: dict = defaultdict(list)
+        for r in rows:
+            reason = r["_id"]["reason"]
+            date = r["_id"]["date"]
+            shown = r["shown"]
+            clicked = clicked_map.get((reason, date), 0)
+            ctr = clicked / shown if shown else 0
+            by_reason[reason].append(ctr)
+
+        baselines = []
+        for reason, ctrs in by_reason.items():
+            if not ctrs:
+                continue
+            mean = sum(ctrs) / len(ctrs)
+            variance = sum((c - mean) ** 2 for c in ctrs) / len(ctrs) if len(ctrs) > 1 else 0
+            stddev = math.sqrt(variance)
+            current = ctrs[-1] if ctrs else 0
+            z = (current - mean) / stddev if stddev > 0 else 0
+            baselines.append({
+                "reason": reason,
+                "mean_ctr": round(mean, 4),
+                "stddev": round(stddev, 4),
+                "current_ctr": round(current, 4),
+                "z_score": round(z, 2),
+                "data_points": len(ctrs),
+            })
+
+        return {"baselines": baselines, "window_days": window_days, "source": "review_prompt_events"}
+    except Exception as e:
+        logger.error(f"baseline-noise error: {e}")
+        return {"baselines": [], "window_days": window_days, "source": "unavailable"}
+
+
+@router.get("/analytics/review-prompt-stats/by-reason-trend")
+async def analytics_review_prompt_by_reason_trend(reason: str, weeks: int = 8, compare: str = None):
+    """Per-reason weekly CTR trend, with optional compare series."""
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        collections = await db.list_collection_names()
+        if "review_prompt_events" not in collections:
+            return {"series": [], "compare_series": [], "reason": reason, "weeks": weeks, "source": "unavailable"}
+
+        since = datetime.now(timezone.utc) - timedelta(weeks=weeks)
+
+        async def _build_series(r: str):
+            pipeline = [
+                {"$match": {"created_at": {"$gte": since}, "reason": r}},
+                {"$group": {
+                    "_id": {"$dateToString": {"format": "%Y-W%V", "date": "$created_at"}},
+                    "shown": {"$sum": {"$cond": [{"$eq": ["$event", "shown"]}, 1, 0]}},
+                    "clicked": {"$sum": {"$cond": [{"$eq": ["$event", "clicked"]}, 1, 0]}},
+                }},
+                {"$sort": {"_id": 1}},
+            ]
+            rows = await db.review_prompt_events.aggregate(pipeline).to_list(length=weeks + 2)
+            return [
+                {
+                    "week": row["_id"],
+                    "shown": row["shown"],
+                    "clicked": row["clicked"],
+                    "ctr": round(row["clicked"] / row["shown"], 4) if row["shown"] else 0,
+                }
+                for row in rows
+            ]
+
+        series = await _build_series(reason)
+        compare_series = await _build_series(compare) if compare else []
+
+        return {
+            "reason": reason,
+            "weeks": weeks,
+            "series": series,
+            "compare": compare,
+            "compare_series": compare_series,
+            "source": "review_prompt_events",
+        }
+    except Exception as e:
+        logger.error(f"by-reason-trend error: {e}")
+        return {"series": [], "compare_series": [], "reason": reason, "weeks": weeks, "source": "unavailable"}
 
 
 @router.get("/analytics/content-card-views")
