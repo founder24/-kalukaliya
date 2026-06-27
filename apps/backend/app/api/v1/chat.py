@@ -61,6 +61,10 @@ class ChatRequest(BaseModel):
     chapter_id: Optional[str] = None
     chapter_name: Optional[str] = None
     subject_id: Optional[str] = None
+    # Student profile — forwarded from the user's saved board/class in the frontend.
+    # Used to personalise the system prompt without requiring auth lookup.
+    board_name: Optional[str] = None
+    class_name: Optional[str] = None
 
     @model_validator(mode="after")
     def coalesce_conversation_id(self) -> "ChatRequest":
@@ -317,7 +321,8 @@ async def chat(
 
             # 3. Build system prompt with weighted RAG 50% / Web 20% / LLM 30%
             system_prompt = ChatService.build_system_prompt(
-                detected_lang, context_chunks, web_chunks=web_chunks
+                detected_lang, context_chunks, web_chunks=web_chunks,
+                user_board=request.board_name, user_class=request.class_name,
             )
 
             # Include multi-turn conversation history
@@ -776,7 +781,9 @@ async def chat_stream(
 
     # -- Build system prompt with weighted RAG 50% / Web 20% / LLM 30% --
     system_prompt = ChatService.build_system_prompt(
-        detected_lang, context_chunks, web_chunks=web_chunks if not is_generic else []
+        detected_lang, context_chunks,
+        web_chunks=web_chunks if not is_generic else [],
+        user_board=request.board_name, user_class=request.class_name,
     )
 
     # Include multi-turn conversation history

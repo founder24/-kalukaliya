@@ -36,6 +36,7 @@ export default function ChapterEditForm({
   const [imgUploading, setImgUploading] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [editorLang, setEditorLang] = useState('en');
+  const [contentMode, setContentMode] = useState('reader'); // 'reader' | 'rag'
   const [translating, setTranslating] = useState(false);
 
   const handleTranslateToAssamese = useCallback(async () => {
@@ -58,15 +59,19 @@ export default function ChapterEditForm({
     }
   }, [editTarget?.id, adminToken, setContentForm]);
 
-  const activeContent = editorLang === 'as' ? (contentForm.content_as || '') : contentForm.content;
+  const _contentField = useCallback(() => {
+    if (contentMode === 'rag') return editorLang === 'as' ? 'rag_text_as' : 'rag_text_en';
+    return editorLang === 'as' ? 'content_as' : 'content';
+  }, [contentMode, editorLang]);
+
+  const activeContent = contentMode === 'rag'
+    ? (editorLang === 'as' ? (contentForm.rag_text_as || '') : (contentForm.rag_text_en || ''))
+    : (editorLang === 'as' ? (contentForm.content_as || '') : contentForm.content);
+
   const handleContentChange = useCallback((e) => {
     const md = e.target.value;
-    if (editorLang === 'as') {
-      setContentForm(f => ({ ...f, content_as: md }));
-    } else {
-      setContentForm(f => ({ ...f, content: md }));
-    }
-  }, [editorLang, setContentForm]);
+    setContentForm(f => ({ ...f, [_contentField()]: md }));
+  }, [_contentField, setContentForm]);
 
   const imageUploadHandler = useCallback(async (image) => {
     const formData = new FormData();
@@ -100,7 +105,7 @@ export default function ChapterEditForm({
         }
         const current = editorRef.current?.value ?? activeContent;
         const pagesMd = urls.map((u, i) => `![Page ${i + 1}](${u})`).join('\n\n');
-        const field = editorLang === 'as' ? 'content_as' : 'content';
+        const field = _contentField();
         setContentForm(f => ({ ...f, [field]: current + (current.trim() ? '\n\n' : '') + pagesMd + '\n' }));
         setEditorKey(k => k + 1);
         toast.success(`${urls.length} page(s) added`, { id: tid });
@@ -192,22 +197,49 @@ export default function ChapterEditForm({
         )}
 
         {(editView === 'edit-chapter' || editView === 'new-chapter') && contentForm.content_type !== 'question_paper' && (
-          <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-50/50 border border-violet-200/50">
-            <Languages size={14} className="text-violet-500 shrink-0" />
-            <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ background: 'rgba(139,92,246,0.1)' }}>
-              <button
-                onClick={() => { setEditorLang('en'); setEditorKey(k => k + 1); }}
-                className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${editorLang === 'en' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600 hover:bg-violet-100'}`}
-              >
-                English
-              </button>
-              <button
-                onClick={() => { setEditorLang('as'); setEditorKey(k => k + 1); }}
-                className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${editorLang === 'as' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600 hover:bg-violet-100'}`}
-              >
-                অসমীয়া
-              </button>
+          <div className="flex-shrink-0 flex flex-col gap-2 px-3 py-2 rounded-lg bg-violet-50/50 border border-violet-200/50">
+            {/* Content mode: Reader vs RAG */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-violet-500 uppercase tracking-wider w-8">Mode</span>
+              <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ background: 'rgba(139,92,246,0.1)' }}>
+                <button
+                  onClick={() => { setContentMode('reader'); setEditorKey(k => k + 1); }}
+                  className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${contentMode === 'reader' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600 hover:bg-violet-100'}`}
+                  title="Student-facing content (content_en / content_as)"
+                >
+                  Reader
+                </button>
+                <button
+                  onClick={() => { setContentMode('rag'); setEditorKey(k => k + 1); }}
+                  className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${contentMode === 'rag' ? 'text-white bg-emerald-600 shadow-sm' : 'text-emerald-700 hover:bg-emerald-50'}`}
+                  title="Clean retrieval text for AI (rag_text_en / rag_text_as)"
+                >
+                  RAG Text
+                </button>
+              </div>
+              {contentMode === 'rag' && (
+                <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  AI retrieval content · separate from reader view
+                </span>
+              )}
             </div>
+            {/* Language toggle */}
+            <div className="flex items-center gap-2">
+              <Languages size={14} className="text-violet-500 shrink-0" />
+              <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ background: 'rgba(139,92,246,0.1)' }}>
+                <button
+                  onClick={() => { setEditorLang('en'); setEditorKey(k => k + 1); }}
+                  className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${editorLang === 'en' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600 hover:bg-violet-100'}`}
+                >
+                  English
+                </button>
+                <button
+                  onClick={() => { setEditorLang('as'); setEditorKey(k => k + 1); }}
+                  className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${editorLang === 'as' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600 hover:bg-violet-100'}`}
+                >
+                  অসমীয়া
+                </button>
+              </div>
             {editorLang === 'as' && (
               contentForm.content_as ? (
                 <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200">{contentForm.content_as.split(/\s+/).length} words</span>
@@ -240,6 +272,7 @@ export default function ChapterEditForm({
                 {translating ? 'Translating…' : 'Re-translate'}
               </button>
             )}
+            </div>
           </div>
         )}
 
@@ -310,7 +343,7 @@ export default function ChapterEditForm({
                   key={t.label}
                   onClick={() => {
                     const current = editorRef.current?.value ?? activeContent;
-                    const field = editorLang === 'as' ? 'content_as' : 'content';
+                    const field = _contentField();
                     setContentForm(f => ({ ...f, [field]: current + t.shortcode }));
                     setEditorKey(k => k + 1);
                   }}

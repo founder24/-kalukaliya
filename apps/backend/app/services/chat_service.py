@@ -447,6 +447,8 @@ class ChatService:
         detected_lang: str,
         context_chunks: list[dict],
         web_chunks: list[dict] | None = None,
+        user_board: str | None = None,
+        user_class: str | None = None,
     ) -> str:
         """
         Build weighted system prompt.
@@ -464,7 +466,7 @@ class ChatService:
         has_web = bool(web_chunks)
 
         # ── Language-specific base instruction ──────────────────────────────
-        if detected_lang == "en":
+        if detected_lang == "en":  # noqa: SIM108
             base = (
                 "You are Syrabit, an educational AI assistant for AHSEC, SEBA, and CBSE students.\n"
                 "LANGUAGE RULE: The student selected English mode. "
@@ -536,6 +538,15 @@ class ChatService:
             )
             citation_note_rag = (
                 "উদ্ধৃতি: পাঠ্যক্ৰম তথ্যৰ বাবে [C1], [C2]… আৰু ৱেব তথ্যৰ বাবে [W1], [W2]… ইনলাইনত লিখক।"
+            )
+
+        # ── Student profile context (board / class) ──────────────────────────
+        if user_board or user_class:
+            profile_ctx = " · ".join(filter(None, [user_board, user_class]))
+            base += (
+                f"\nSTUDENT PROFILE: This student is from {profile_ctx}. "
+                "Tailor all syllabus references, examples, and board-specific content accordingly. "
+                "Prioritise chapters and exam patterns relevant to their board and class."
             )
 
         # ── No context at all ───────────────────────────────────────────────

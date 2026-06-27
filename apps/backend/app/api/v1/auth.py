@@ -26,6 +26,33 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Authentication"])
+
+
+# ── MongoDB token-blacklist helpers (Redis fallback) ──────────────────────────
+
+async def _mongo_is_blacklisted(token_hash: str) -> bool:
+    """Return True if token_hash is in the MongoDB token_blacklist collection."""
+    try:
+        col = User.get_motor_collection().database["token_blacklist"]
+        doc = await col.find_one(
+            {"token_hash": token_hash, "expires_at": {"$gt": datetime.now(timezone.utc)}}
+        )
+        return doc is not None
+    except Exception as e:
+        logger.error(f"_mongo_is_blacklisted failed: {e}")
+        return False
+
+
+async def _mongo_blacklist_write(token_hash: str, expires_at: datetime) -> None:
+    """Upsert a blacklist entry into MongoDB token_blacklist collection."""
+    col = User.get_motor_collection().database["token_blacklist"]
+    await col.update_one(
+        {"token_hash": token_hash},
+        {"$set": {"token_hash": token_hash, "expires_at": expires_at}},
+        upsert=True,
+    )
+
+
 security = HTTPBearer()
 
 
@@ -354,6 +381,15 @@ async def get_current_user(
             raise
         except Exception as e:
             logger.error(f"Redis unavailable for token blacklist check: {e}")
+            # MongoDB fallback: check token_blacklist collection
+            try:
+                token_hash_fb = hashlib.sha256(token.encode()).hexdigest()
+                if await _mongo_is_blacklisted(token_hash_fb):
+                    raise HTTPException(status_code=401, detail="Token has been revoked")
+            except HTTPException:
+                raise
+            except Exception as mongo_err:
+                logger.error(f"MongoDB blacklist fallback also failed: {mongo_err}")
             # Fail-closed for payment/subscription endpoints
             req_path = str(request.url.path) if request else ""
             if req_path.startswith("/api/v1/payments/") or req_path.startswith(
@@ -894,13 +930,23 @@ async def logout(
             except InvalidTokenError:
                 pass  # Invalid refresh token — ignore
     except Exception as e:
-        # Redis unavailable or Upstash transient error.  Log with full trace
-        # so production logs capture the real cause.  Proceed with logout so
-        # the user is not stuck — the access token will expire on its own.
+        # Redis unavailable — write to MongoDB token_blacklist as fallback.
         logger.warning(
-            f"Token blacklisting skipped during logout (Redis error): "
-            f"{type(e).__name__}: {e}",
-            exc_info=True,
+            f"Token blacklisting: Redis failed ({type(e).__name__}: {e}), "
+            "falling back to MongoDB.",
+            exc_info=False,
         )
+        if ttl > 0:
+            try:
+                await _mongo_blacklist_write(
+                    token_hash,
+                    datetime.now(timezone.utc).replace(microsecond=0)
+                    + timedelta(seconds=ttl),
+                )
+            except Exception as mongo_err:
+                logger.error(
+                    f"MongoDB blacklist write also failed: {type(mongo_err).__name__}: {mongo_err}",
+                    exc_info=True,
+                )
 
     return MessageResponse(message="Logged out successfully")

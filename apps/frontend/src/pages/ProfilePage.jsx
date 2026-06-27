@@ -112,6 +112,11 @@ export default function ProfilePage() {
       await apiClient().patch('/user/profile', { [editField.key]: editValue.trim() });
       setProfile((p) => ({ ...p, [editField.key]: editValue.trim() }));
       toast.success(`${editField.label} updated`);
+      if (['board_id', 'board_name', 'class_id', 'class_name', 'stream_id', 'stream_name'].includes(editField.key)) {
+        window.dispatchEvent(new CustomEvent('syrabit:onboarding-updated', {
+          detail: { field: editField.key, value: editValue.trim() },
+        }));
+      }
       setEditField(null);
     } catch {
       toast.error('Failed to update');

@@ -496,6 +496,34 @@ export default function AdminConversations({ adminToken, onNavigate, navContext 
                         }`}
                       >
                         <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>
+                        {msg.role === 'assistant' && (msg.model_used || msg.rag_source || msg.latency_ms != null || msg.match_score != null) && (
+                          <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-violet-100">
+                            {msg.model_used && (
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 border border-violet-200">
+                                {msg.model_used}
+                              </span>
+                            )}
+                            {msg.rag_source && (
+                              <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${
+                                msg.rag_source === 'rag' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                msg.rag_source === 'web' ? 'bg-sky-50 text-sky-700 border-sky-200' :
+                                'bg-gray-100 text-gray-500 border-gray-200'
+                              }`}>
+                                {msg.rag_source}
+                              </span>
+                            )}
+                            {msg.latency_ms != null && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200">
+                                {msg.latency_ms}ms
+                              </span>
+                            )}
+                            {msg.match_score != null && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                                score {(msg.match_score * 100).toFixed(0)}%
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

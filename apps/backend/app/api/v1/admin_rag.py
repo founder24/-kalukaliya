@@ -494,23 +494,40 @@ async def reindex_chapter(
     if not chapter:
         raise HTTPException(status_code=404, detail=f"Chapter not found: {chapter_id}")
 
-    if not chapter.content_en and not chapter.content_as:
+    # Prefer rag_text_* over content_* for ingestion (P2.3)
+    # rag_text_* is the clean retrieval-optimised version written by admins;
+    # fall back to content_* which is the reader-facing version.
+    ingest_en = getattr(chapter, "rag_text_en", None) or chapter.content_en
+    ingest_as = getattr(chapter, "rag_text_as", None) or chapter.content_as
+
+    if not ingest_en and not ingest_as:
         raise HTTPException(
             status_code=422,
-            detail="Chapter has no content_en or content_as to ingest.",
+            detail="Chapter has no content to ingest (rag_text_en/as and content_en/as are all empty).",
         )
 
     subject_id = str(chapter.subject_id)
 
+    rag_indicator = []
+    if getattr(chapter, "rag_text_en", None):
+        rag_indicator.append("rag_text_en")
+    elif chapter.content_en:
+        rag_indicator.append("content_en")
+    if getattr(chapter, "rag_text_as", None):
+        rag_indicator.append("rag_text_as")
+    elif chapter.content_as:
+        rag_indicator.append("content_as")
+
     logger.info(
         f"[chapter-reindex] chapter={chapter_id} ({chapter.title}) "
-        f"subject={subject_id} source_type={req.source_type} dry_run={req.dry_run}"
+        f"subject={subject_id} source_type={req.source_type} dry_run={req.dry_run} "
+        f"using_fields={rag_indicator}"
     )
 
     result = await ingest_chapter_v2(
         chapter_id=chapter_id,
-        content_en=chapter.content_en,
-        content_as=chapter.content_as,
+        content_en=ingest_en,
+        content_as=ingest_as,
         metadata={"subject_id": subject_id},
         source_type=req.source_type,
         dry_run=req.dry_run,

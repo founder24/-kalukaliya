@@ -1272,7 +1272,7 @@ export default function ChapterPage() {
           <article ref={articleRef} data-savable="true" className="flex-1 min-w-0">
             <div
               id="chapter-content-top"
-              className="chapter-textbook rounded-2xl p-5 sm:p-8 scroll-mt-20"
+              className="chapter-textbook rounded-2xl p-5 sm:p-8 scroll-mt-20 max-w-[720px] mx-auto text-[14px] leading-relaxed"
             >
               {data.meta_description && /^\s*(\*|\-|#{2,})/.test(data.content || '') && (
                 <p className="text-base leading-relaxed text-muted-foreground mb-6 pb-4 border-b border-border/30">

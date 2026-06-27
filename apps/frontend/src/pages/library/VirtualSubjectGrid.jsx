@@ -10,21 +10,15 @@ import SubjectCard from './SubjectCard';
 function useColumnCount() {
   const [cols, setCols] = useState(() => {
     if (typeof window === 'undefined') return 1;
-    if (window.matchMedia('(min-width: 1280px)').matches) return 3;
-    if (window.matchMedia('(min-width: 768px)').matches) return 2;
+    if (window.matchMedia('(min-width: 640px)').matches) return 2;
     return 1;
   });
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const mqlXl = window.matchMedia('(min-width: 1280px)');
-    const mqlMd = window.matchMedia('(min-width: 768px)');
-    const update = () => setCols(mqlXl.matches ? 3 : mqlMd.matches ? 2 : 1);
-    mqlXl.addEventListener('change', update);
-    mqlMd.addEventListener('change', update);
-    return () => {
-      mqlXl.removeEventListener('change', update);
-      mqlMd.removeEventListener('change', update);
-    };
+    const mqlSm = window.matchMedia('(min-width: 640px)');
+    const update = () => setCols(mqlSm.matches ? 2 : 1);
+    mqlSm.addEventListener('change', update);
+    return () => mqlSm.removeEventListener('change', update);
   }, []);
   return cols;
 }

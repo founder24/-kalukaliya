@@ -638,7 +638,7 @@ export default function LibraryPage() {
               ) : (
               <>
               <div
-                className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-5"
+                className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5"
                 data-testid="library-subject-grid"
                 style={{ contain: 'layout style', minHeight: '420px' }}
               >

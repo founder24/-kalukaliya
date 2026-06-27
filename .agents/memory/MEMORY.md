@@ -27,5 +27,5 @@
 - [Syrabit RAG v2 pipeline](syrabit-rag-v2.md) — Vectorize+MongoDB dual-write pipeline; CF metadata uses camelCase (subjectId/chapterId/topicId/medium/sourceType/chunkType); medium='english'/'assamese' not 'en'/'as'
 - [Syrabit admin auth pattern](syrabit-admin-auth.md) — All admin routers use router-level Depends; cron routes (Bearer token) live in admin_cron.py; AiUsageLog model tracks per-request token spend
 - [Syrabit confidence-aware chat pipeline](syrabit-confidence-chat.md) — 2-phase embed+gate retrieval; SourceCard SSE emitted before LLM; source card enhances existing MessageBubble card (not a new panel)
-- [Syrabit god-level upgrade progress](syrabit-upgrade-progress.md) — Sprint 1+2 complete: web search gating fixed, MID tier web removed, rag_text fields added, titles on first save, source card SSE keys fixed
+- [Syrabit god-level upgrade progress](syrabit-upgrade-progress.md) — Sprints 1-4 complete: all P1-P8.1 items done; admin chapter editor has Reader/RAG mode tabs; MongoDB token blacklist fallback live
 - [Sarvam enable_thinking mode strategy](sarvam-enable-thinking.md) — English: enable_thinking=True → clean content field; Assamese: False → extract from reasoning_content
