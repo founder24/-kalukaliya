@@ -6,3 +6,9 @@ id = "S7ovUJ44LN6nNmlsBKwZX"
 uri = "file://scripts/fullstack-layer-test.txt"
 type = "text"
 title = "fullstack-layer-test.sh (v3 — 1000+ assertions, 22 layers)"
+
+[[outputs]]
+id = "Fh64CCpQ_UNIYP4RYMkXN"
+uri = "file://.local/app_audit.md"
+type = "text"
+title = "Syrabit — Full App Pipeline & Logic Audit"
