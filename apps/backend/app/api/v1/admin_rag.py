@@ -384,51 +384,105 @@ class BulkChapterReindexRequest(BaseModel):
 @router.post("/rag/bulk-reindex")
 async def bulk_reindex_chapters(req: BulkChapterReindexRequest, request: Request):
     """
-    Bulk re-index up to 50 chapters by their IDs. Each chapter is queued as an
-    async background task. Returns a list of {chapter_id, status} pairs.
+    Bulk re-index up to 50 chapters by their IDs.
+    Creates a tracked GenerationJob, then runs reindexing as a background task.
+    Returns job_id immediately — poll /admin/rag/jobs/{job_id} for progress.
 
     Used by the admin bulk-action bar "Reindex RAG" button.
     """
     import asyncio as _asyncio
     from app.models.content import Chapter
+    from app.models.rag import GenerationJob
     from app.services.rag.ingestion_v2 import ingest_chapter_v2
 
     chapter_ids = req.chapter_ids[:50]
+    if not chapter_ids:
+        raise HTTPException(status_code=422, detail="chapter_ids must be non-empty")
 
-    async def _reindex_one(chapter_id: str):
-        try:
-            chapter = await Chapter.get(chapter_id)
-            if not chapter:
-                return {"chapter_id": chapter_id, "status": "not_found"}
-            ingest_en = chapter.rag_text_en or chapter.content_en
-            ingest_as = chapter.rag_text_as or chapter.content_as
-            if not ingest_en and not ingest_as:
-                return {"chapter_id": chapter_id, "status": "no_content"}
-            await ingest_chapter_v2(
-                chapter_id=chapter_id,
-                content_en=ingest_en,
-                content_as=ingest_as,
-                metadata={"subject_id": str(chapter.subject_id)},
-                source_type=req.source_type,
-                dry_run=req.dry_run,
-            )
-            if not req.dry_run:
-                fresh = await Chapter.get(chapter_id)
-                if fresh:
-                    fresh.rag_indexed_at = _now()
-                    await fresh.save()
-            return {"chapter_id": chapter_id, "status": "ok"}
-        except Exception as exc:
-            logger.error(f"[bulk-reindex] chapter={chapter_id} error: {exc}")
-            return {"chapter_id": chapter_id, "status": "error", "error": str(exc)}
+    # Create the trackable job up-front so the frontend can poll immediately
+    job = GenerationJob(
+        job_type="bulk_reindex_chapters",
+        status="pending",
+        total_chunks=len(chapter_ids),
+        processed_chunks=0,
+        progress=0,
+    )
+    await job.insert()
+    job_id = str(job.id)
 
-    results = await _asyncio.gather(*[_reindex_one(cid) for cid in chapter_ids])
-    ok_count = sum(1 for r in results if r["status"] == "ok")
+    async def _run(cids=chapter_ids, _job_id=job_id):
+        from app.models.rag import GenerationJob as _Job
+        errors: list[str] = []
+        processed = 0
+
+        _job = await _Job.get(_job_id)
+        if _job:
+            await _job.update({"$set": {"status": "running", "started_at": _now(), "updated_at": _now()}})
+
+        for chapter_id in cids:
+            try:
+                chapter = await Chapter.get(chapter_id)
+                if not chapter:
+                    errors.append(f"{chapter_id}: not_found")
+                    processed += 1
+                    continue
+                ingest_en = getattr(chapter, "rag_text_en", None) or chapter.content_en
+                ingest_as = getattr(chapter, "rag_text_as", None) or chapter.content_as
+                if not ingest_en and not ingest_as:
+                    errors.append(f"{chapter_id}: no_content")
+                    processed += 1
+                    continue
+                await ingest_chapter_v2(
+                    chapter_id=chapter_id,
+                    content_en=ingest_en,
+                    content_as=ingest_as,
+                    metadata={"subject_id": str(chapter.subject_id)},
+                    source_type=req.source_type,
+                    dry_run=req.dry_run,
+                )
+                if not req.dry_run:
+                    fresh = await Chapter.get(chapter_id)
+                    if fresh:
+                        fresh.rag_indexed_at = _now()
+                        await fresh.save()
+            except Exception as exc:
+                logger.error(f"[bulk-reindex] chapter={chapter_id} error: {exc}")
+                errors.append(f"{chapter_id}: {str(exc)[:120]}")
+            finally:
+                processed += 1
+                pct = int(processed / len(cids) * 100)
+                _job = await _Job.get(_job_id)
+                if _job:
+                    await _job.update({"$set": {
+                        "processed_chunks": processed,
+                        "progress": pct,
+                        "updated_at": _now(),
+                    }})
+
+        final_status = "done" if not errors or processed > len(errors) else "failed"
+        _job = await _Job.get(_job_id)
+        if _job:
+            await _job.update({"$set": {
+                "status": final_status,
+                "progress": 100,
+                "finished_at": _now(),
+                "updated_at": _now(),
+                "result": {
+                    "total": len(cids),
+                    "succeeded": processed - len(errors),
+                    "errors": errors[:20],
+                    "dry_run": req.dry_run,
+                },
+            }})
+
+    _asyncio.create_task(_run())
+
     return {
+        "job_id": job_id,
         "queued": len(chapter_ids),
-        "succeeded": ok_count,
         "dry_run": req.dry_run,
-        "results": list(results),
+        "status": "queued",
+        "message": f"Reindexing {len(chapter_ids)} chapters. Poll /admin/rag/jobs/{job_id} for progress.",
     }
 
 

@@ -14,6 +14,7 @@ import ThumbnailStudio from './content-editor/ThumbnailStudio';
 import ConfirmDialog from './content-editor/ConfirmDialog';
 import StatusBadge, { normalizeStatus, STATUS_FILTER_OPTIONS } from './content-editor/StatusBadge';
 import StatusQuickToggle from './content-editor/StatusQuickToggle';
+import RagJobsPanel from './content-editor/RagJobsPanel';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 export default function AdminContentEditor({ adminToken, onNavigate, hubContext, onHubContext, onHierarchyChange }) {
@@ -58,6 +59,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const [selectedChapterIds, setSelectedChapterIds] = useState(() => new Set());
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [ragSaving, setRagSaving] = useState(false);
+  const [trackedJobIds, setTrackedJobIds] = useState([]);
 
   const subjectData = subjects.find(s => s.id === selSubject);
   const boardData = boards.find(b => b.id === selBoard);
@@ -286,23 +288,33 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     finally { setSaving(false); }
   };
 
+  const addTrackedJob = useCallback((jobId) => {
+    if (!jobId) return;
+    setTrackedJobIds(prev => prev.includes(jobId) ? prev : [...prev, jobId]);
+  }, []);
+
+  const handleJobComplete = useCallback((jobId) => {
+    if (selSubject) refreshChapters(selSubject);
+  }, [selSubject]);
+
   const handleRagSave = useCallback(async () => {
     if (!editTarget?.id) return;
     setRagSaving(true);
     const tid = toast.loading('Saving RAG text…');
     try {
-      await axios.patch(
+      const res = await axios.patch(
         `${API}/admin/content/chapters/${editTarget.id}/rag`,
         { rag_text_en: contentForm.rag_text_en || '', rag_text_as: contentForm.rag_text_as || '' },
         authHeaders(adminToken),
       );
-      toast.success('RAG text saved — Vectorize reindex started', { id: tid });
+      toast.success('RAG text saved — watching reindex progress…', { id: tid });
+      if (res.data?.job_id) addTrackedJob(res.data.job_id);
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to save RAG text', { id: tid });
     } finally {
       setRagSaving(false);
     }
-  }, [editTarget?.id, contentForm.rag_text_en, contentForm.rag_text_as, adminToken]);
+  }, [editTarget?.id, contentForm.rag_text_en, contentForm.rag_text_as, adminToken, addTrackedJob]);
 
   const handleDeleteChapter = (id) => {
     setConfirmDialog({
@@ -401,19 +413,20 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     if (ids.length === 0) return;
     setBulkUpdating(true);
     try {
-      await axios.post(
+      const res = await axios.post(
         `${API}/admin/rag/bulk-reindex`,
         { chapter_ids: ids },
         authHeaders(adminToken),
       );
-      toast.success(`${ids.length} chapter${ids.length === 1 ? '' : 's'} queued for RAG reindex`);
+      toast.success(`${ids.length} chapter${ids.length === 1 ? '' : 's'} queued — tracking progress below`);
       setSelectedChapterIds(new Set());
+      if (res.data?.job_id) addTrackedJob(res.data.job_id);
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Bulk reindex failed');
     } finally {
       setBulkUpdating(false);
     }
-  }, [selectedChapterIds, adminToken]);
+  }, [selectedChapterIds, adminToken, addTrackedJob]);
 
   // Clear selection when navigation context changes
   useEffect(() => { setSelectedSubjectIds(new Set()); }, [selStream]);
@@ -810,6 +823,12 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
           onCancel={confirmDialog.onCancel || (() => setConfirmDialog(d => ({ ...d, open: false })))}
         />
       </div>
+
+      <RagJobsPanel
+        trackedJobIds={trackedJobIds}
+        adminToken={adminToken}
+        onJobComplete={handleJobComplete}
+      />
     </SectionErrorBoundary>
   );
 }

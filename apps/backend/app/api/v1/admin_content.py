@@ -449,32 +449,53 @@ async def update_chapter_rag(request: Request, chapter_id: str, body: ChapterRag
     chapter.updated_at = now
     await chapter.save()
 
-    # Fire background reindex so Vectorize stays aligned
+    # Fire background reindex so Vectorize stays aligned — create a trackable job first
     job_id = None
     try:
         from app.services.rag.ingestion_v2 import ingest_chapter_v2
+        from app.models.rag import GenerationJob
 
-        async def _background_reindex():
-            try:
-                ingest_en = chapter.rag_text_en or chapter.content_en
-                ingest_as = chapter.rag_text_as or chapter.content_as
-                if ingest_en or ingest_as:
+        ingest_en = chapter.rag_text_en or chapter.content_en
+        ingest_as = chapter.rag_text_as or chapter.content_as
+
+        if ingest_en or ingest_as:
+            job = GenerationJob(
+                job_type="reindex_chapter",
+                chapter_id=chapter_id,
+                subject_id=str(chapter.subject_id),
+                status="pending",
+                total_chunks=1,
+            )
+            await job.insert()
+            job_id = str(job.id)
+
+            async def _background_reindex(_job_id=job_id, _en=ingest_en, _as=ingest_as):
+                from app.models.rag import GenerationJob as _Job
+                _job = await _Job.get(_job_id)
+                try:
+                    if _job:
+                        await _job.update({"$set": {"status": "running", "started_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}})
                     await ingest_chapter_v2(
                         chapter_id=chapter_id,
-                        content_en=ingest_en,
-                        content_as=ingest_as,
+                        content_en=_en,
+                        content_as=_as,
                         metadata={"subject_id": str(chapter.subject_id)},
                         source_type="notes",
                     )
-                    # Stamp rag_indexed_at on success
                     fresh = await Chapter.get(PydanticObjectId(chapter_id))
                     if fresh:
                         fresh.rag_indexed_at = datetime.now(timezone.utc)
                         await fresh.save()
-            except Exception as exc:
-                logger.error(f"[rag-save] background reindex failed chapter={chapter_id}: {exc}")
+                    _job = await _Job.get(_job_id)
+                    if _job:
+                        await _job.update({"$set": {"status": "done", "progress": 100, "processed_chunks": 1, "finished_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}})
+                except Exception as exc:
+                    logger.error(f"[rag-save] background reindex failed chapter={chapter_id}: {exc}")
+                    _job = await _Job.get(_job_id)
+                    if _job:
+                        await _job.update({"$set": {"status": "failed", "error_message": str(exc)[:400], "finished_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}})
 
-        _asyncio.create_task(_background_reindex())
+            _asyncio.create_task(_background_reindex())
     except Exception as exc:
         logger.warning(f"[rag-save] could not start background reindex: {exc}")
 
