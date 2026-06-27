@@ -54,6 +54,15 @@ _META_PHRASES = (
     "Synthesize and Draft",
     "Draft the Answer",
     "Polish the Answer",
+    # Post-answer meta sentences the model appends in the final block
+    "The final response is ready",
+    "This looks like the best possible response",
+    "It's structured, factual, and follows",
+    "the user's specific and strict rules",
+    "Final check:",
+    "This is the best possible",
+    "This response is complete",
+    "This is my final answer",
 )
 
 # Regex patterns for meta-analysis lines (applied in addition to _META_PHRASES).
@@ -175,10 +184,57 @@ def _extract_english_answer(text: str) -> str:
         # No blank-line separator — clean and return everything.
         return _clean_educational_sections(text)
 
-    answer = remainder[sep:].strip()
+    # ── Find the actual answer boundary ────────────────────────────────────
+    # We need the FIRST double-newline in `remainder` that is followed by
+    # non-indented, non-bullet content — this marks the start of the real
+    # answer block.  A plain find('\n\n') finds the wrong spot when the last
+    # numbered section has internal paragraph breaks between "Option" bullets.
+    #
+    # Lookahead: next char is NOT whitespace, *, ", or a digit (section number).
+    _re_boundary = re.compile(r'\n\n(?=[^\s*"\d])')
+    bm = _re_boundary.search(remainder)
+
+    if bm:
+        answer = remainder[bm.end():].strip()
+    else:
+        answer = ""
+
+    # ── Fallback: quoted-string extractor ───────────────────────────────────
+    # For greetings / edge-cases the model embeds its final draft as a quoted
+    # string inside the last numbered section and never writes an unnumbered
+    # block.  Extract the last quoted string ≥30 chars from the last section.
     if not answer:
-        # Nothing after the separator — fall back to the whole cleaned text.
-        return _clean_educational_sections(text)
+        quotes = re.findall(r'"([^"]{30,400})"', remainder)
+        if quotes:
+            answer = quotes[-1].strip()
+        else:
+            # Hard fallback: return the entire text cleaned.
+            return _clean_educational_sections(text)
+
+    # ── Inline stop markers ─────────────────────────────────────────────────
+    # The model sometimes appends "Attempt N:" or "Draft:" labels inline
+    # (no newline) after the clean answer text.  Truncate at the first one.
+    _INLINE_STOPS = (
+        '*   *Draft:',
+        '*   *Final check:',
+        '*   *Attempt',
+        '*Draft:',
+        '*Attempt ',
+        '    *   *Draft',
+        '    *   *Final',
+        '    *   *Attempt',
+        # Inline meta sentences that follow the real answer without a newline
+        'This systematic process ensures',
+        'Therefore, the final response',
+        'Therefore, my final response',
+        'This ensures all constraints',
+        'This response meets all',
+        'The response is complete',
+    )
+    for stop in _INLINE_STOPS:
+        idx = answer.find(stop)
+        if idx > 0:
+            answer = answer[:idx].rstrip()
 
     return _clean_educational_sections(answer)
 
@@ -339,31 +395,28 @@ class SarvamAIClient:
                 {"role": "user", "content": user_message},
             ],
             "temperature": 0.3,
-            # enable_thinking=False: answer streams in reasoning_content fast
-            # (~150ms TTFB); content field is always empty for sarvam-30b.
-            "enable_thinking": False,
-            # Assamese mode: system prompt is in Assamese so the model reasons
-            # entirely in Assamese — generous budget for the full reasoning chain.
-            # English mode: sections 2-3 are sufficient, 1500 tokens is plenty.
-            "max_tokens": 4000 if is_assamese else 1500,
+            # English mode: enable_thinking=True separates the model's reasoning
+            # into reasoning_content (hidden) from the clean final answer in
+            # content (streamed directly).  No extraction logic required.
+            #
+            # Assamese mode: keep enable_thinking=False — the model reasons in
+            # English in reasoning_content and embeds Assamese draft lines there;
+            # _extract_assamese_answer() collects those at end-of-stream.
+            "enable_thinking": not is_assamese,
+            "max_tokens": 4000 if is_assamese else 2000,
             "stream": True,
         }
 
-        # sarvam-30b always streams its answer in reasoning_content.
-        # It always starts with a numbered analysis chain:
-        #   1. Deconstruct the User's Request  ← skip (preamble)
-        #   2. Brainstorm / Analyze            ← meta, skip
-        #   3. Synthesize / Structure          ← meta, skip
-        #   [unnumbered block]                 ← ACTUAL answer (extract this)
+        # Response strategy:
+        #  • English (enable_thinking=True):
+        #      reasoning_content = internal thinking — buffered to edu_buf, not yielded.
+        #      content           = clean final answer — streamed directly token-by-token.
+        #      At end-of-stream: if no content arrived, fall back to _extract_english_answer(edu_buf).
         #
-        # Strategy (both modes): buffer the ENTIRE reasoning_content stream,
-        # then at end-of-stream call the appropriate extractor:
-        #  • English:  _extract_english_answer()  — returns the unnumbered block
-        #              after the last numbered section.
-        #  • Assamese: _extract_assamese_answer() — collects Assamese-script lines.
-        #
-        # Both modes share the same preamble-detection state machine.
-        # No incremental yielding of reasoning_content happens in either mode.
+        #  • Assamese (enable_thinking=False):
+        #      reasoning_content = full English reasoning + embedded Assamese draft lines.
+        #      content           = empty.
+        #      At end-of-stream: _extract_assamese_answer(edu_buf) collects Assamese lines.
 
         # ── State for <think> block stripping (applied to `content` field) ──
         in_think_block = False
@@ -376,12 +429,12 @@ class SarvamAIClient:
         preamble_buf = ""   # accumulates tokens until preamble decision is made
 
         # ── State for post-preamble content handling ──────────────────────────
-        # edu_buf holds the content AFTER section 1 has been stripped.
-        # For English: we stream it incrementally (line-boundary aligned),
-        #   stopping when section 3 starts.
-        # For Assamese: we buffer the whole thing and process at stream end.
+        # edu_buf accumulates the ENTIRE reasoning_content stream (both modes).
+        # At end-of-stream, the appropriate extractor runs on the full buffer:
+        #   English  → _extract_english_answer()  (fallback only)
+        #   Assamese → _extract_assamese_answer()
         edu_buf = ""
-        # (edu_cutoff_done removed — both modes now buffer to end-of-stream)
+        content_was_yielded = False  # True once any content-field token is streamed
 
         try:
             async with self._client.stream(
@@ -473,6 +526,7 @@ class SarvamAIClient:
 
                     # Not in a think block, yield content as it arrives
                     buffer = ""
+                    content_was_yielded = True
                     yield content
 
             # ── End-of-stream flush ──────────────────────────────────────────
@@ -481,7 +535,9 @@ class SarvamAIClient:
                 edu_buf += preamble_buf
                 preamble_buf = ""
 
-            if edu_buf:
+            if edu_buf and not content_was_yielded:
+                # English: content-field streaming took care of the answer.
+                # Only run extraction if the content field was empty (fallback).
                 if is_assamese:
                     result = _extract_assamese_answer(edu_buf)
                 else:

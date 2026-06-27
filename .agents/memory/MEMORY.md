@@ -27,3 +27,4 @@
 - [Syrabit RAG v2 pipeline](syrabit-rag-v2.md) — Vectorize+MongoDB dual-write pipeline; CF metadata uses camelCase (subjectId/chapterId/topicId/medium/sourceType/chunkType); medium='english'/'assamese' not 'en'/'as'
 - [Syrabit admin auth pattern](syrabit-admin-auth.md) — All admin routers use router-level Depends; cron routes (Bearer token) live in admin_cron.py; AiUsageLog model tracks per-request token spend
 - [Syrabit confidence-aware chat pipeline](syrabit-confidence-chat.md) — 2-phase embed+gate retrieval; SourceCard SSE emitted before LLM; source card enhances existing MessageBubble card (not a new panel)
+- [Sarvam enable_thinking mode strategy](sarvam-enable-thinking.md) — English: enable_thinking=True → clean content field; Assamese: False → extract from reasoning_content
