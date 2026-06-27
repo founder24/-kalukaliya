@@ -23,6 +23,10 @@ args = "Start application"
 task = "workflow.run"
 args = "Backend API"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start backend"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -32,7 +36,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd apps/frontend && pnpm install && pnpm dev"
+args = "pnpm --filter @workspace/syrabit run dev"
 waitForPort = 5000
 
 [[workflows.workflow]]
@@ -47,13 +51,21 @@ task = "shell.exec"
 args = "cd apps/backend && APP_ENV=development python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 waitForPort = 8000
 
+[[workflows.workflow]]
+name = "Start backend"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd apps/backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+waitForPort = 8000
+
+[workflows.workflow.metadata]
+outputType = "console"
+
 [[ports]]
 localPort = 5000
 externalPort = 80
-
-[[ports]]
-localPort = 5001
-externalPort = 3000
 
 [[ports]]
 localPort = 8000
