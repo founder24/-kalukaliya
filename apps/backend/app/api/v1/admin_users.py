@@ -227,3 +227,139 @@ async def adjust_user_credits(user_id: str, request: Request):
     except Exception as e:
         logger.error(f"Adjust credits error: {e}")
         raise HTTPException(status_code=500, detail="Failed to adjust user credits")
+
+
+# ── Export & Risk Analysis ────────────────────────────────────────────────────
+
+from fastapi.responses import StreamingResponse as _StreamingResponse
+import io as _io
+import csv as _csv
+
+
+@router.get("/users/export")
+async def users_export(plan: str = None, status_filter: str = None):
+    """Export users as CSV — optionally filtered by plan or status."""
+    try:
+        db = get_mongo_client()[settings.MONGODB_DB_NAME]
+        query: dict = {}
+        if plan:
+            query["plan"] = plan
+        if status_filter:
+            query["status"] = status_filter
+        cursor = db.users.find(query).sort("created_at", -1).limit(10000)
+        rows = await cursor.to_list(length=10000)
+        output = _io.StringIO()
+        fields = ["id", "email", "name", "plan", "status", "created_at", "last_active_at"]
+        writer = _csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for u in rows:
+            writer.writerow({
+                "id": str(u["_id"]),
+                "email": u.get("email", ""),
+                "name": u.get("name", ""),
+                "plan": u.get("plan", "free"),
+                "status": u.get("status", "active"),
+                "created_at": u["created_at"].isoformat() if u.get("created_at") else "",
+                "last_active_at": u["last_active_at"].isoformat() if u.get("last_active_at") else "",
+            })
+        return _StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=users_export.csv"},
+        )
+    except Exception as e:
+        logger.error(f"Users export error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/users/churn-risk")
+async def users_churn_risk(days_inactive: int = 14, limit: int = 50):
+    """
+    List users at churn risk — active plan holders who haven't logged in recently.
+    """
+    try:
+        db = get_mongo_client()[settings.MONGODB_DB_NAME]
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days_inactive)
+        query = {
+            "plan": {"$ne": "free"},
+            "$or": [
+                {"last_active_at": {"$lt": cutoff}},
+                {"last_active_at": None},
+            ],
+        }
+        cursor = db.users.find(query).sort("last_active_at", 1).limit(limit)
+        rows = await cursor.to_list(length=limit)
+        users_at_risk = []
+        for u in rows:
+            users_at_risk.append({
+                "id": str(u["_id"]),
+                "email": u.get("email"),
+                "plan": u.get("plan"),
+                "last_active_at": u["last_active_at"].isoformat() if u.get("last_active_at") else None,
+                "days_inactive": (datetime.now(timezone.utc) - u["last_active_at"]).days if u.get("last_active_at") else None,
+            })
+        total = await db.users.count_documents(query)
+        return {"users": users_at_risk, "total": total, "days_inactive_threshold": days_inactive}
+    except Exception as e:
+        logger.error(f"Churn risk error: {e}")
+        return {"users": [], "total": 0}
+
+
+@router.get("/users/{user_id}/quiz-quota")
+async def get_user_quiz_quota(user_id: str):
+    """Get a user's quiz quota configuration."""
+    try:
+        db = get_mongo_client()[settings.MONGODB_DB_NAME]
+        user = await db.users.find_one({"_id": ObjectId(user_id)}, {"quiz_quota": 1, "plan": 1})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {
+            "user_id": user_id,
+            "plan": user.get("plan", "free"),
+            "quiz_quota": user.get("quiz_quota", {"daily": 5, "custom": False}),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/users/{user_id}/quiz-quota")
+async def set_user_quiz_quota(user_id: str, request: Request):
+    """Override a user's quiz quota."""
+    body = await request.json()
+    daily = body.get("daily")
+    if daily is None:
+        raise HTTPException(status_code=400, detail="daily is required")
+    try:
+        db = get_mongo_client()[settings.MONGODB_DB_NAME]
+        result = await db.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"quiz_quota": {"daily": int(daily), "custom": True}, "updated_at": datetime.now(timezone.utc)}},
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {"ok": True, "user_id": user_id, "quiz_quota": {"daily": daily, "custom": True}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/users/{user_id}/quiz-quota/reset")
+async def reset_user_quiz_quota(user_id: str):
+    """Reset a user's quiz quota to plan defaults."""
+    try:
+        db = get_mongo_client()[settings.MONGODB_DB_NAME]
+        result = await db.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$unset": {"quiz_quota": ""}, "$set": {"updated_at": datetime.now(timezone.utc)}},
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {"ok": True, "user_id": user_id, "quota_reset": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

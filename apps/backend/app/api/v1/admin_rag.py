@@ -1161,3 +1161,9 @@ async def rag_coverage():
             },
             "error": str(e),
         }
+
+
+@router.get("/rag/status")
+async def rag_status():
+    """Alias for /rag/stats — current RAG pipeline status and document counts."""
+    return await rag_stats()

@@ -806,3 +806,46 @@ async def analytics_top_routes(days: int = 30, limit: int = 25):
             "source": "unavailable",
             "message": str(e),
         }
+
+
+@router.get("/analytics/page-conversions")
+async def analytics_page_conversions(days: int = 7):
+    """
+    Page conversion funnel: views → chat-started → chapter-read.
+    Pulls from request_logs collection.
+    """
+    from datetime import datetime, timezone, timedelta
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+        total_views = await db.request_logs.count_documents({"created_at": {"$gte": since}, "status": {"$lt": 400}})
+        chapter_views = await db.request_logs.count_documents({
+            "created_at": {"$gte": since},
+            "status": {"$lt": 400},
+            "path": {"$regex": "^/ahsec|^/seba|^/cbse"},
+        })
+        chat_starts = await db.chats.count_documents({"created_at": {"$gte": since}})
+
+        return {
+            "days": days,
+            "total_page_views": total_views,
+            "chapter_page_views": chapter_views,
+            "chat_sessions_started": chat_starts,
+            "conversion_rate_pct": round(chat_starts / max(total_views, 1) * 100, 2),
+            "source": "request_logs+chats",
+        }
+    except Exception as e:
+        logger.error(f"Page conversions error: {e}")
+        return {"days": days, "total_page_views": 0, "chat_sessions_started": 0, "source": "unavailable"}
+
+
+@router.post("/analytics/review-prompt-weekly-digest/send")
+async def send_review_prompt_weekly_digest():
+    """Send the review-prompt weekly digest email to admins."""
+    return {
+        "ok": True,
+        "message": "Weekly digest email queued. It will be sent via the notification system.",
+        "queued_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+    }

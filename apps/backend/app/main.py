@@ -51,6 +51,10 @@ from app.api.v1 import (
     admin_ga4,
     admin_ads,
     admin_syra,
+    admin_logs,
+    admin_vertex,
+    admin_indexnow_admin,
+    admin_seo_advanced,
     seo,
     indexnow,
     content,
@@ -480,6 +484,10 @@ def create_app() -> FastAPI:
     app.include_router(admin_ga4.router, prefix="/api/v1/admin", tags=["Admin GA4"])
     app.include_router(admin_ads.router, prefix="/api/v1/admin", tags=["Admin Ads"])
     app.include_router(admin_syra.router, prefix="/api/v1/admin", tags=["Admin Syra"])
+    app.include_router(admin_logs.router, prefix="/api/v1/admin", tags=["Admin Logs"])
+    app.include_router(admin_vertex.router, prefix="/api/v1/admin", tags=["Admin Vertex"])
+    app.include_router(admin_indexnow_admin.router, prefix="/api/v1/admin", tags=["Admin IndexNow"])
+    app.include_router(admin_seo_advanced.router, prefix="/api/v1/admin", tags=["Admin SEO Advanced"])
 
     # CORS middleware — added last so it becomes the outermost layer and
     # handles OPTIONS preflight before any other middleware runs.

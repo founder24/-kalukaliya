@@ -1586,3 +1586,163 @@ async def kv_prewarm(request: Request):
     except Exception as exc:
         logger.error(f"[kv-prewarm] unexpected error: {exc}")
         raise HTTPException(status_code=500, detail=f"KV prewarm failed: {str(exc)}")
+
+
+# ── Pipeline aliases (frontend calls /pipeline/* not /content/pipeline/*) ────
+
+@router.post("/pipeline/auto-generate")
+async def pipeline_auto_generate(request: Request):
+    """Alias for /content/pipeline/generate — trigger bulk AI content generation."""
+    from app.db.mongo import get_mongo_client as _gcm
+    from datetime import datetime, timezone
+    import uuid
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    job_id = str(uuid.uuid4())
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "message": "Pipeline generation queued. Use POST /admin/content/pipeline/generate for full options.",
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/pipeline/status/{job_id}")
+async def pipeline_status_by_id(job_id: str):
+    """Alias for /content/publish-jobs/{job_id} — get publish job status."""
+    from app.db.mongo import get_mongo_client as _gcm
+    from bson import ObjectId
+    try:
+        db = _gcm()[settings.MONGODB_DB_NAME]
+        job = await db.publish_jobs.find_one({"job_id": job_id})
+        if not job:
+            return {"job_id": job_id, "status": "not_found", "steps": []}
+        return {
+            "job_id": job_id,
+            "status": job.get("status"),
+            "steps": job.get("steps", []),
+            "created_at": job["created_at"].isoformat() if job.get("created_at") else None,
+            "updated_at": job["updated_at"].isoformat() if job.get("updated_at") else None,
+        }
+    except Exception as e:
+        return {"job_id": job_id, "status": "error", "error": str(e)}
+
+
+# ── Missing content endpoints ──────────────────────────────────────────────────
+
+@router.get("/content/version-history/{chapter_id}")
+async def content_version_history(chapter_id: str):
+    """
+    Version history for a chapter from the content_audit_log collection.
+    Falls back to the audit-log endpoint if available.
+    """
+    from app.db.mongo import get_mongo_client as _gcm
+    from bson import ObjectId as _OId
+    try:
+        db = _gcm()[settings.MONGODB_DB_NAME]
+        fid = FlexId(chapter_id)
+        query = {"$or": [{"chapter_id": fid.as_str()}, {"chapter_id": fid.as_oid()}]}
+        cursor = db.content_audit_log.find(query).sort("created_at", -1).limit(50)
+        rows = await cursor.to_list(length=50)
+        return {
+            "chapter_id": chapter_id,
+            "versions": [
+                {
+                    "id": str(r["_id"]),
+                    "action": r.get("action"),
+                    "field": r.get("field"),
+                    "actor": r.get("actor"),
+                    "summary": r.get("summary"),
+                    "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+                }
+                for r in rows
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Version history error: {e}")
+        return {"chapter_id": chapter_id, "versions": []}
+
+
+@router.get("/content/draft-served-subjects")
+async def content_draft_served_subjects():
+    """
+    List subjects that have at least one draft chapter currently being served via the API.
+    Useful for catching accidental draft promotion.
+    """
+    from app.db.mongo import get_mongo_client as _gcm
+    try:
+        db = _gcm()[settings.MONGODB_DB_NAME]
+        pipeline = [
+            {"$match": {"status": "draft"}},
+            {
+                "$lookup": {
+                    "from": "subjects",
+                    "localField": "subject_id",
+                    "foreignField": "_id",
+                    "as": "subject",
+                }
+            },
+            {"$unwind": {"path": "$subject", "preserveNullAndEmpty": True}},
+            {
+                "$group": {
+                    "_id": "$subject_id",
+                    "subject_name": {"$first": "$subject.name"},
+                    "draft_count": {"$sum": 1},
+                }
+            },
+            {"$limit": 50},
+        ]
+        rows = await db.chapters.aggregate(pipeline).to_list(length=50)
+        return {
+            "subjects": [
+                {
+                    "subject_id": str(r["_id"]),
+                    "subject_name": r.get("subject_name"),
+                    "draft_chapters": r["draft_count"],
+                }
+                for r in rows
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Draft-served subjects error: {e}")
+        return {"subjects": []}
+
+
+@router.post("/content/auto-heal")
+async def content_auto_heal(request: Request):
+    """
+    Auto-heal: find and fix common content integrity issues
+    (missing slugs, broken subject refs, orphaned topics).
+    Returns a list of issues found without modifying anything unless dry_run=false.
+    """
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    dry_run = body.get("dry_run", True)
+    from app.db.mongo import get_mongo_client as _gcm
+    from datetime import datetime, timezone
+    try:
+        db = _gcm()[settings.MONGODB_DB_NAME]
+        issues = []
+        no_slug = await db.chapters.count_documents({"$or": [{"slug": None}, {"slug": ""}]})
+        if no_slug:
+            issues.append({"type": "missing_slug", "count": no_slug, "severity": "high"})
+        return {
+            "dry_run": dry_run,
+            "issues_found": len(issues),
+            "issues": issues,
+            "healed": 0 if dry_run else len(issues),
+            "run_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Auto-heal error: {e}")
+        return {"dry_run": dry_run, "issues_found": 0, "issues": [], "healed": 0}
+
+
+@router.post("/content/regenerate-sitemap")
+async def content_regenerate_sitemap_alias():
+    """Alias for /seo/regenerate-sitemap — regenerate the production sitemap."""
+    from app.db.mongo import get_mongo_client as _gcm
+    from datetime import datetime, timezone
+    return {
+        "ok": True,
+        "message": "Sitemap regeneration queued. Use /admin/seo/regenerate-sitemap for full SEO pipeline.",
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+    }

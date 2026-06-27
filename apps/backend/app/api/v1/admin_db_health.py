@@ -167,3 +167,9 @@ async def admin_db_health(request: Request):
         "summary": summary,
         "databases": results,
     }
+
+
+@router.get("/db/health")
+async def db_health_alias():
+    """Alias for /db-health — returns the same MongoDB health check."""
+    return await db_health()

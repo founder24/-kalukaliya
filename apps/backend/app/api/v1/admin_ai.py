@@ -254,3 +254,104 @@ async def ai_status():
         "active_chat_model": settings.SARVAM_MODEL,
         "active_embedding_model": "@cf/baai/bge-m3",
     }
+
+
+@router.get("/ai/overview")
+async def ai_overview():
+    """AI system overview — alias for /ai/status with provider detail."""
+    sarvam_ok = bool(settings.SARVAM_API_KEY)
+    cf_ok = _cf_configured()
+    vertex_ok = _vertex_configured()
+    overall = "healthy" if sarvam_ok else ("degraded" if cf_ok or vertex_ok else "critical")
+    return {
+        "overall_status": overall,
+        "sarvam_ai": "ok" if sarvam_ok else "not_configured",
+        "vertex_ai": "ok" if vertex_ok else "not_configured",
+        "cf_workers_ai": "ok" if cf_ok else "not_configured",
+        "active_chat_model": settings.SARVAM_MODEL,
+        "active_embedding_model": "@cf/baai/bge-m3",
+        "providers_count": sum([sarvam_ok, cf_ok, vertex_ok]),
+    }
+
+
+@router.get("/intelligence/overview")
+async def intelligence_overview():
+    """
+    AI intelligence metrics: conversation summary, content coverage, quiz stats.
+    Aggregates from conversations and chapters collections.
+    """
+    from app.db.mongo import get_mongo_client
+    try:
+        db = get_mongo_client()[settings.MONGODB_DB_NAME]
+        total_conversations = await db.conversations.count_documents({})
+        active_7d_start = __import__("datetime").datetime.now(__import__("datetime").timezone.utc) - __import__("datetime").timedelta(days=7)
+        active_7d = await db.conversations.count_documents({"updated_at": {"$gte": active_7d_start}})
+        total_chapters = await db.chapters.count_documents({"status": "published"})
+        chapters_with_notes = await db.chapter_notes.count_documents({})
+        total_quizzes = await db.quiz_attempts.count_documents({}) if hasattr(db, "quiz_attempts") else 0
+    except Exception:
+        total_conversations = active_7d = total_chapters = chapters_with_notes = total_quizzes = 0
+
+    return {
+        "conversations": {
+            "total": total_conversations,
+            "active_last_7d": active_7d,
+        },
+        "content": {
+            "published_chapters": total_chapters,
+            "chapters_with_notes": chapters_with_notes,
+            "coverage_pct": round(chapters_with_notes / max(total_chapters, 1) * 100, 1),
+        },
+        "quizzes": {
+            "total_attempts": total_quizzes,
+        },
+        "models": {
+            "chat": settings.SARVAM_MODEL,
+            "embedding": settings.CF_AI_EMBED_MODEL,
+        },
+    }
+
+
+@router.get("/health/llm-costs")
+async def health_llm_costs(days: int = 7):
+    """
+    LLM cost estimate from the ai_usage_log collection.
+    Aggregates token spend by provider over the last N days.
+    """
+    from app.db.mongo import get_mongo_client
+    from datetime import datetime, timezone, timedelta
+    try:
+        db = get_mongo_client()[settings.MONGODB_DB_NAME]
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since}}},
+            {
+                "$group": {
+                    "_id": "$provider",
+                    "total_tokens": {"$sum": "$total_tokens"},
+                    "prompt_tokens": {"$sum": "$prompt_tokens"},
+                    "completion_tokens": {"$sum": "$completion_tokens"},
+                    "calls": {"$sum": 1},
+                }
+            },
+        ]
+        rows = await db.ai_usage_log.aggregate(pipeline).to_list(length=20)
+        providers = {}
+        for r in rows:
+            providers[r["_id"] or "unknown"] = {
+                "calls": r["calls"],
+                "total_tokens": r["total_tokens"],
+                "prompt_tokens": r["prompt_tokens"],
+                "completion_tokens": r["completion_tokens"],
+            }
+        total_tokens = sum(p["total_tokens"] for p in providers.values())
+        return {
+            "days": days,
+            "providers": providers,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": None,
+            "source": "ai_usage_log",
+        }
+    except Exception as e:
+        logger.error(f"LLM costs error: {e}")
+        return {"days": days, "providers": {}, "total_tokens": 0, "source": "unavailable"}

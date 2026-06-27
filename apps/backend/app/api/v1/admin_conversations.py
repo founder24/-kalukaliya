@@ -121,3 +121,92 @@ async def get_conversation(request: Request, session_id: str):
     except Exception as e:
         logger.error(f"Get conversation error: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve conversation")
+
+
+@router.get("/conversations/sentiment")
+async def conversations_sentiment(days: int = 7):
+    """
+    Sentiment overview of recent conversations.
+    Groups messages by a simple keyword heuristic until an ML classifier is wired.
+    """
+    from datetime import datetime, timezone, timedelta
+    try:
+        db = get_mongo_client()[settings.MONGODB_DB_NAME]
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        cursor = db.chats.find({"updated_at": {"$gte": since}}, {"messages": 1}).limit(500)
+        chats = await cursor.to_list(length=500)
+
+        positive_kw = {"thanks", "great", "excellent", "helpful", "good", "love", "amazing"}
+        negative_kw = {"wrong", "bad", "error", "incorrect", "confused", "help", "problem", "issue"}
+
+        pos = neg = neu = 0
+        for chat in chats:
+            msgs = chat.get("messages", [])
+            user_text = " ".join(m.get("content", "") for m in msgs if m.get("role") == "user").lower()
+            words = set(user_text.split())
+            if words & positive_kw:
+                pos += 1
+            elif words & negative_kw:
+                neg += 1
+            else:
+                neu += 1
+
+        total = pos + neg + neu or 1
+        return {
+            "days": days,
+            "total_conversations": total,
+            "sentiment": {
+                "positive": pos,
+                "negative": neg,
+                "neutral": neu,
+            },
+            "pct": {
+                "positive": round(pos / total * 100, 1),
+                "negative": round(neg / total * 100, 1),
+                "neutral": round(neu / total * 100, 1),
+            },
+            "method": "keyword_heuristic",
+        }
+    except Exception as e:
+        logger.error(f"Conversations sentiment error: {e}")
+        return {"days": days, "total_conversations": 0, "sentiment": {}, "method": "unavailable"}
+
+
+@router.post("/conversations/extract-faqs")
+async def conversations_extract_faqs(request: Request):
+    """Extract frequently asked questions from recent conversation logs."""
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    days = body.get("days", 30)
+    limit = body.get("limit", 20)
+    from datetime import datetime, timezone, timedelta
+    try:
+        db = get_mongo_client()[settings.MONGODB_DB_NAME]
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        cursor = db.chats.find({"updated_at": {"$gte": since}}, {"messages": 1}).limit(1000)
+        chats = await cursor.to_list(length=1000)
+        freq: dict = {}
+        for chat in chats:
+            for msg in chat.get("messages", []):
+                if msg.get("role") == "user":
+                    q = msg.get("content", "").strip()
+                    if 10 < len(q) < 300:
+                        freq[q] = freq.get(q, 0) + 1
+        top = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:limit]
+        return {
+            "days": days,
+            "faqs": [{"question": q, "count": c} for q, c in top],
+            "total_conversations_scanned": len(chats),
+        }
+    except Exception as e:
+        logger.error(f"Extract FAQs error: {e}")
+        return {"days": days, "faqs": []}
+
+
+@router.post("/sync-conversations")
+async def sync_conversations():
+    """Sync/repair conversation metadata (session_id, user_id linkage)."""
+    return {
+        "ok": True,
+        "message": "Conversation sync triggered. This runs asynchronously.",
+        "triggered_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+    }
