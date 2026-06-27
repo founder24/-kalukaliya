@@ -1,0 +1,134 @@
+a full upgrade plan to make the whole system coherent: frontend editors, RAG storage, chat, library, history, profile, admin, and the latency budget. The right way to do it is as a layered product architecture, where each layer has one contract, one storage truth, and one rendering truth.
+
+Core decisions
+Frontend editor data is for user-facing content only: summaries, notes, PYQ PDFs, and polished chapter pages.
+
+RAG data is for retrieval only: full chapter text, extracted PYQ text, chapter-level metadata, and chunked vectors.
+
+Cloudflare Pages hosts the frontend/library UI, while backend APIs are only used where needed.
+
+Target architecture
+Frontend content layer
+Library page should feel like website cards, not raw tiles.
+
+Chapter pages should feel like real blog/textbook pages with dense content, small font, minimal edge padding, and a clean reading layout.
+
+Frontend editor must upload notes/PDFs successfully and store user-facing assets on Cloudflare-side storage.
+
+Frontend view should not need backend calls for static library browsing.
+
+RAG content layer
+For each chapter, store:
+
+frontend content: summary notes, readable chapter preview, visible PDFs.
+
+RAG content: full chapter text from book PDFs, extracted chunks, topic metadata.
+
+For PYQ:
+
+frontend content: visible PYQ PDF.
+
+RAG content: text extracted from the PYQ so it can be searched and retrieved.
+
+Metadata should match on both sides: board, class, subject, chapter, topic, medium, and source type.
+
+Chat layer
+First resolve mode: English or Assamese.
+
+Then run embedding match.
+
+If match exists: use RAG as the main source.
+
+Use web search as polishing support, not as a replacement for strong RAG hits.
+
+If no match: use web search + LLM knowledge.
+
+Keep source cards linked from question → topic → chapter → subject → class → board.
+
+Keep end-to-end latency under 3 seconds for normal cases by reducing retrieval work and context size.
+
+Pipeline priorities
+1. Chat correctness
+English mode must use an English system prompt.
+
+Assamese mode must use an Assamese system prompt.
+
+Greeting and generic queries should short-circuit before embeddings and web.
+
+Strong topic matches should not trigger unnecessary web search.
+
+Source cards must still show the content trail clearly.
+
+2. Library and chapter UX
+Library cards should be visually rich and web-like.
+
+Chapter pages should look like full reading pages, not padded product cards.
+
+Content hierarchy should stay strict: board → class → subject → chapter → topic.
+
+The chapter page should prioritize readability and density.
+
+3. Editor split
+Separate the editor into:
+
+Frontend editor for notes and user-visible assets.
+
+RAG editor for full-text searchable content.
+
+Same metadata, different payload purpose.
+
+This prevents the user-facing view from being polluted by raw retrieval text.
+
+4. Admin and analytics
+Admin should be able to see all conversations.
+
+Admin should see all analytics and health data.
+
+Admin content tools should drive both library and RAG publishing states.
+
+Admin should also manage AI config, vector sync, and content publishing.
+
+5. Auth, profile, and signup
+Signup flow should be fully functional: email → board → class → stream.
+
+Profile should allow board, class, stream edits.
+
+Subject selection in profile should follow the same hierarchy as the frontend.
+
+Any profile change should update library defaults and chat context.
+
+Latency upgrade plan
+Eliminate embedding work for greetings and trivial queries.
+
+Tighten generic-query detection so typos like hii still short-circuit.
+
+Reduce RAG context size and use high-confidence early exits.
+
+Keep web search only where it improves weak RAG, not everywhere.
+
+Lower model reasoning cost for easy cases.
+
+Cache query, retrieval, and prompt work wherever safe.
+
+What to fix first
+Chat routing and latency.
+
+Frontend vs RAG editor split.
+
+Library and chapter page redesign.
+
+Profile/signup hierarchy sync.
+
+Admin analytics and conversation visibility.
+
+Storage placement and Cloudflare/static hosting rules.
+
+Single source of truth rule
+Frontend content and RAG content must share the same metadata.
+
+Only the payload differs by purpose.
+
+UI assets should never be the only source for retrieval.
+
+Retrieval text should never be the only thing visible to users.
+

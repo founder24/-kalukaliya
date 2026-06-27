@@ -12,3 +12,9 @@ id = "Fh64CCpQ_UNIYP4RYMkXN"
 uri = "file://.local/app_audit.md"
 type = "text"
 title = "Syrabit — Full App Pipeline & Logic Audit"
+
+[[outputs]]
+id = "Ih-WQZyTOw4p8QY2SFxSu"
+uri = "file://.local/upgrade_plan.md"
+type = "text"
+title = "Syrabit — God-Level Full-Stack Upgrade Plan"
