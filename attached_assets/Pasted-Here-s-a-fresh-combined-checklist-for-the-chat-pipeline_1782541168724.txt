@@ -1,0 +1,64 @@
+Here’s a fresh combined checklist for the **chat pipeline** and **admin panel pipeline** based on the latest audit and fixes.
+
+## Chat pipeline checklist
+
+| Item | Expected result | Actual result |
+|---|---|---|
+| English mode prompt | English-only system prompt is used, even if the user types Assamese or mixed input. |  |
+| Assamese mode prompt | Assamese-only system prompt is used, even if the user types English or mixed input. |  |
+| Mode routing | Selected mode overrides input language for retrieval and output. |  |
+| Input sanitization | User text is sanitized before routing and retrieval. |  |
+| Card context ingestion | `chapter_id`, `subject_id`, and card context reach the backend request model. |  |
+| Generic queries | Greetings and filler text skip RAG and web. |  |
+| Topic matching | Query embedding is computed once and reused. |  |
+| Confidence tiers | High, mid, low, and none route correctly. |  |
+| High confidence | Uses chapter fast-path first. |  |
+| Mid confidence | Uses RAG plus light web support. |  |
+| Low confidence | Uses syllabus-first RAG plus web scaffold. |  |
+| None confidence | Uses card chapter first, then web fallback. |  |
+| Vectorize retrieval | Metadata filtering uses the right chapter/subject/topic/medium fields. |  |
+| Source card | Source card includes topic, chapter, subject, class, and match score. |  |
+| SSE emission | Source card is emitted before the first answer token. |  |
+| Final event | `syrabit_done` includes route trace, confidence, latency, and path. |  |
+| English stream cleanup | Reasoning headers and inline meta text are stripped before emission. |  |
+| Assamese stream cleanup | Assamese output is cleaned without mixing English prompt text. |  |
+| Frontend render | Only clean assistant content is shown to the user. |  |
+| Debug UI | QA/debug overlays stay dev-only. |  |
+| Persistence | Chat is saved asynchronously after the stream completes. |  |
+| Cache invalidation | Session history cache is invalidated after save. |  |
+| Failure handling | RAG or topic failures degrade gracefully. |  |
+| Mixed-language switch | Explicit language change mid-chat updates mode correctly. |  |
+
+## Admin panel checklist
+
+| Item | Expected result | Actual result |
+|---|---|---|
+| Auth standardization | All admin routers use router-level `Depends(require_admin_session)` and `Depends(csrf_guard)`. |  |
+| Duplicate routes | Duplicate `/admin/cf-overview` and `/admin/health` routes are removed. |  |
+| Dashboard split | `AdminDashboard.jsx` is split into shell + widgets. |  |
+| Health split | `AdminHealth.jsx` is split into shell + sub-cards. |  |
+| Analytics | All analytics endpoints return real data, not zeros. |  |
+| RAG editor | New RAG editor exists and is separate from content editor. |  |
+| Content editor | Page-view content stays separate from RAG JSON content. |  |
+| AI hub | All providers are shown, with circuit breaker and usage views. |  |
+| Revenue | Revenue data comes from live transactions, not placeholders. |  |
+| Source card support | Admin-side content/RAG changes still preserve source metadata. |  |
+| Health metrics | Health UI shows real system, vector, and cron status. |  |
+| Legacy cleanup | Old dead routes and placeholder code are removed or isolated. |  |
+| Route integrity | Admin routes mount cleanly and app startup succeeds. |  |
+| Frontend checks | Vite/TS build passes with zero errors. |  |
+| UI render | Dashboard and health pages load correctly after the split. |  |
+
+## End-to-end logic
+| Item | Expected result | Actual result |
+|---|---|---|
+| User asks in English | English mode RAG and English-only response. |  |
+| User asks in Assamese | Assamese mode RAG and Assamese-only response. |  |
+| User switches language mid-chat | Mode changes cleanly without breaking context. |  |
+| User clicks chapter card | Backend uses chapter context if topic confidence is weak. |  |
+| No strong topic match | System falls back to syllabus-structured retrieval. |  |
+| No RAG result | System falls back to web or LLM-only behavior. |  |
+| No debug leakage | No prompt policy, QAroute, or reasoning text appears to users. |  |
+| Source visibility | User always sees a meaningful source card when retrieval is used. |  |
+
+If you want, I can turn this into a **single master QA sheet** with one combined table for chat + admin.
