@@ -24,3 +24,9 @@ id = "ODWyhNXtJ32R3Z5q3qaRO"
 uri = "file://admin-panel-upgrade-roadmap.md"
 type = "text"
 title = "Admin Panel Upgrade — File-by-File Roadmap"
+
+[[outputs]]
+id = "IcePTuprvgbw2hsooaa_q"
+uri = "file://attached_assets/admin-panel-checklist.md"
+type = "text"
+title = "Syrabit Admin Panel — End-to-End Checklist"
