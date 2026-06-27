@@ -548,6 +548,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               const subjectLabel = msg.rag_subject_name || msg.ctx_subject_name || null;
               const boardLabel = msg.rag_board_name || null;
               const classLabel = msg.rag_class_name || null;
+              const topicLabel = msg.rag_topic_name || null;
               const chapterLabel = msg.rag_chapter_name || null;
               const chapterSlug = msg.rag_chapter_slug || null;
               const basePath = (msg.rag_board_slug && msg.rag_class_slug && msg.rag_subject_slug)
@@ -629,6 +630,14 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                           <span className="source-card-label text-[10px] font-semibold uppercase tracking-wider">Source</span>
                           <span className="text-[10px] text-muted-foreground" aria-hidden="true">·</span>
                           <span className="source-card-browser text-[10.5px] font-medium">{sourceMeta.kindLabel}</span>
+                        </div>
+                        {/* Full breadcrumb chain: AHSEC › Class 12 › Physics › Chapter › Topic */}
+                        <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 mt-0.5 mb-1" style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
+                          {boardLabel && <><span className="font-medium">{boardLabel}</span><span aria-hidden="true" className="opacity-50">›</span></>}
+                          {classLabel && <><span>{classLabel}</span><span aria-hidden="true" className="opacity-50">›</span></>}
+                          {subjectLabel && <><span>{subjectLabel}</span>{(chapterLabel || topicLabel) && <span aria-hidden="true" className="opacity-50">›</span>}</>}
+                          {chapterLabel && <><span className="truncate max-w-[120px]">{chapterLabel}</span>{topicLabel && <span aria-hidden="true" className="opacity-50">›</span>}</>}
+                          {topicLabel && <span className="font-medium truncate max-w-[120px]" style={{ color: 'hsl(var(--primary))' }}>{topicLabel}</span>}
                         </div>
                         {chapterLabel && (
                           <h4 className="source-card-title font-semibold leading-tight truncate" style={{ fontSize: '0.85rem', letterSpacing: '0.01em' }}>

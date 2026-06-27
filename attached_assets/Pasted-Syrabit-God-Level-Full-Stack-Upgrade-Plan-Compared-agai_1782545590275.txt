@@ -1,0 +1,492 @@
+Syrabit — God-Level Full-Stack Upgrade Plan
+Compared against app_audit.md (June 27, 2026) Gap analysis → Layered architecture → Phase-by-phase execution
+
+EXECUTIVE GAP ANALYSIS
+This table shows every gap between the current codebase and the target architecture.
+
+Area	Current State	Target State	Gap Severity
+Chat — non-streaming	Web search runs on ALL non-generic queries (no confidence gate)	Confidence-gated same as stream endpoint	🔴 Bug
+Chat — web search trigger	MID confidence (0.65-0.80) triggers web search	Web search only at LOW (< 0.65) + NONE	🔴 Logic error
+Chat — system prompt	Language set per call; prompt not fully bilingual-clean	English prompt in en mode, Assamese prompt in as mode, strict	🟡 Incomplete
+Chat — source card	Shows subject/chapter/topic but chain is partial in UI	Full board→class→subject→chapter→topic in MessageBubble	🟡 Incomplete
+Conversation titles	Always "Untitled conversation" — title never generated	Auto-title from first user message on save	🟠 Missing feature
+Content model	Single content_en/content_as field for BOTH display AND retrieval	Separate rag_text_en/rag_text_as (retrieval) from display fields	🔴 Architecture flaw
+RAG retrieval	Falls back to content_en for retrieval — mixes display HTML with RAG text	RAG reads rag_text_en (pure prose), display reads content_en	🔴 Architecture flaw
+Admin editor	Single text editor for content — no frontend vs RAG split	Two-tab editor: "Reader Content" tab + "RAG Content" tab	🔴 Architecture flaw
+Notes storage	notes_generated: bool only — no actual notes fields	notes_en, notes_as fields on Chapter model	🟠 Missing
+PYQ PDF storage	No PDF URL field on Chapter	pyq_pdf_url field on Chapter, visible in chapter page	🟠 Missing
+Library cards	Basic VirtualSubjectGrid tiles — minimal info	Rich web-like cards: thumbnail, description, chapter count, tags	🟡 UX gap
+Chapter page layout	Card-like p-5 sm:p-8 padding, normal font size	Dense textbook layout: tight leading, 13-14px body, narrow reading column	🟡 UX gap
+Signup → onboarding	Signup → onboarding on separate page (correct flow, works)	Confirm flow always redirects and feels seamless	🟢 Mostly OK
+Profile → Library sync	Profile board/class update does NOT re-fetch Library boot bundle	Profile save dispatches event → Library re-fetches for active board	🟡 Logic gap
+Profile → Chat context	Chat ignores user's board/class from profile	System prompt injects user's board/class for relevance bias	🟡 Missing context
+Admin conversations	Admin sees metadata only (user_id, count, dates)	Admin can expand any conversation to read messages	🟠 Missing feature
+Auth — anon identity	Frontend sends anon_XXXX, backend uses IP (mismatch in prod CF)	Consistent: CF worker injects CF-Connecting-IP so backend always resolves same IP	🟡 Prod gap
+Token blacklist	Redis-only; if Redis down, logout does NOT blacklist token (fail-open)	MongoDB fallback blacklist for logout even when Redis absent	🟡 Security gap
+ARCHITECTURE DECISIONS (IMMUTABLE RULES)
+These rules govern every change below. All future work must obey them.
+
+RULE 1 — CONTENT DUAL-PURPOSE SPLIT
+  content_en / content_as   = user-facing display text (HTML/Markdown, summaries, notes)
+  rag_text_en / rag_text_as = retrieval-only plain prose (extracted from PDFs, full book text)
+  SAME metadata on both: board, class, subject, chapter, topic, medium
+  NEVER use display content for retrieval. NEVER show raw rag_text in UI.
+RULE 2 — WEB SEARCH GATING (STRICT)
+  Greeting / generic → no embedding, no web, no RAG → LLM only (fast path)
+  HIGH (≥0.80)       → MongoDB fast path only. NO web search.
+  MID  (0.65-0.80)   → MongoDB fast path only. NO web search. (CHANGE from current)
+  LOW  (0.50-0.65)   → MongoDB fast path + Vectorize + light web (scaffold only)
+  NONE (< 0.50)      → web + LLM knowledge only
+  BOTH stream and non-stream endpoints must apply this rule identically.
+RULE 3 — SINGLE SOURCE OF TRUTH PER LAYER
+  MongoDB    = authoritative for all structured data (chapters, users, chats)
+  CF KV      = edge cache for library bundles (invalidated by admin)
+  Redis      = ephemeral cache only (responses, history, rate limits) — never authoritative
+  localStorage = UI state only (tokens, anon_id, filter preferences) — never structural data
+RULE 4 — SYSTEM PROMPT LANGUAGE
+  lang="en"  → English system prompt, English citations, English answer
+  lang="as"  → Assamese system prompt, Assamese citations, Assamese answer
+  No mixing. If rag_text is English-only, backend translates section headers only,
+  not the full content (Sarvam handles cross-lingual generation).
+RULE 5 — CONTENT HIERARCHY CHAIN
+  Every RAG result, source card, and library card must carry the full chain:
+  board_slug → class_level → stream_slug (optional) → subject_slug → chapter_slug → topic_id
+  Partial chains are not allowed past the Chapter level.
+
+PHASE 1 — CHAT CORRECTNESS
+Priority: IMMEDIATE (bugs + logic errors) Impact: chat quality, latency, cost
+
+P1.1 — Fix non-streaming endpoint confidence-gated web search
+File: apps/backend/app/api/v1/chat.py — async def chat() (lines 111-486)
+
+Problem: The non-streaming /chat/ endpoint runs ChatService.retrieve_web_context() for ALL non-generic queries (line 288-295). It has no topic match score or confidence tier check. The streaming endpoint has full confidence gating; the non-streaming does not.
+
+Fix:
+
+# In _process_chat() inside async def chat():
+# BEFORE (current — wrong):
+web_chunks: list[dict] = []
+if not skip_rag:
+    web_chunks = await ChatService.retrieve_web_context(sanitized_message, lang=detected_lang)
+# AFTER (correct — mirrors stream endpoint):
+web_chunks: list[dict] = []
+confidence_tier = "generic"
+if not skip_rag:
+    topic_match, query_embedding = await ChatService.check_topic_match_with_embedding(sanitized_message)
+    match_score = topic_match.get("score", 0.0) if topic_match else 0.0
+    if match_score >= CONFIDENCE_HIGH or match_score >= CONFIDENCE_MID:
+        confidence_tier = "high" if match_score >= CONFIDENCE_HIGH else "mid"
+        # High/Mid: MongoDB only, no web
+        context_chunks = await ChatService.retrieve_context_from_chapter(
+            chapter_id=topic_match.get("chapter_id"),
+            chapter_title=topic_match.get("chapter_title", ""),
+            detected_lang=detected_lang,
+        ) if topic_match else []
+    elif match_score >= CONFIDENCE_LOW:
+        confidence_tier = "low"
+        # Low: MongoDB + light web
+        context_chunks = await ChatService.retrieve_context_from_chapter(...) if topic_match else []
+        web_chunks = await ChatService.retrieve_web_context(sanitized_message, lang=detected_lang)
+    else:
+        confidence_tier = "none"
+        # None: web only
+        web_chunks = await ChatService.retrieve_web_context(sanitized_message, lang=detected_lang)
+
+Acceptance: POST /api/v1/chat/ with a well-matched educational query returns no web_chunks and latency drops by ~200-400ms (eliminates DuckDuckGo call for HIGH/MID matches).
+
+P1.2 — Remove web search from MID confidence tier in streaming endpoint
+File: apps/backend/app/api/v1/chat.py — streaming chat_stream() function, lines ~648-672
+
+Problem: MID (0.65-0.80) currently triggers a parallel web search in the stream endpoint. A score of 0.72 is a good topic match — web search adds noise and 200-400ms of latency.
+
+Fix:
+
+# BEFORE:
+elif match_score >= CONFIDENCE_MID:
+    # MID: MongoDB fast path + light web in parallel
+    confidence_tier = "mid"
+    mongo_result, web_result = await asyncio.gather(
+        ChatService.retrieve_context_from_chapter(...),
+        ChatService.retrieve_web_context(sanitized_message, lang=detected_lang),
+        return_exceptions=True,
+    )
+    context_chunks = mongo_result if not isinstance(mongo_result, Exception) else []
+    web_chunks = web_result if not isinstance(web_result, Exception) else []
+# AFTER:
+elif match_score >= CONFIDENCE_MID:
+    # MID: MongoDB fast path ONLY — score is strong enough, web adds noise
+    confidence_tier = "mid"
+    context_chunks = await ChatService.retrieve_context_from_chapter(
+        chapter_id=topic_match.get("chapter_id"),
+        chapter_title=topic_match.get("chapter_title", ""),
+        detected_lang=detected_lang,
+    )
+    web_chunks = []  # explicitly empty — no web at MID
+
+Acceptance: A query scoring 0.72 on topic match produces no web_used: true in the SSE done event route_trace. TTFB drops by ~200ms for these cases.
+
+P1.3 — Enforce strict language in system prompt building
+File: apps/backend/app/services/chat_service.py — build_system_prompt()
+
+Problem: System prompt builds Syra's persona in English regardless of detected_lang. Assamese queries receive an English-language system prompt with Assamese content appended.
+
+Fix: Add lang parameter to build_system_prompt(). When lang="as", use Assamese persona lines. Keep citation format headers (Chapter, Source) in Assamese too.
+
+# chat_service.py — build_system_prompt
+SYSTEM_PROMPT_EN = """You are Syra, an expert AI study assistant for Assam board students.
+Answer in clear, concise English. Use the provided chapter content as your primary source.
+Cite sources with [Chapter: {name}] format. If content is insufficient, say so clearly."""
+SYSTEM_PROMPT_AS = """আপুনি চিৰা, অসম বোৰ্ডৰ শিক্ষাৰ্থীৰ বাবে এজন বিশেষজ্ঞ AI অধ্যয়ন সহায়ক।
+স্পষ্ট, সংক্ষিপ্ত অসমীয়াত উত্তৰ দিয়ক। প্ৰদান কৰা অধ্যায়ৰ বিষয়বস্তুক প্ৰাথমিক উৎস হিচাপে ব্যৱহাৰ কৰক।"""
+@staticmethod
+def build_system_prompt(lang: str, context_chunks: list, web_chunks: list = None) -> str:
+    base = SYSTEM_PROMPT_AS if lang == "as" else SYSTEM_PROMPT_EN
+    # ... rest of chunk formatting
+
+Acceptance: Assamese queries produce fully Assamese system prompts. English queries produce fully English prompts. No mixing of languages in the prompt preamble.
+
+P1.4 — Full source card chain in MessageBubble
+File: apps/frontend/src/pages/chat/MessageBubble.jsx
+
+Problem: Source card SSE event carries board_slug, class_level, subject_name, chapter_name, topic_name but MessageBubble only displays a partial breadcrumb.
+
+Fix: Render the complete chain as a clickable breadcrumb row beneath the answer:
+
+📚 AHSEC › Class 12 › Physics › Chapter 1: Electric Charges › Coulomb's Law
+
+Each segment that has a URL (subject_slug → /subjects/{slug}, chapter_slug → /chapters/{slug}) becomes a link. Segments without a URL are plain text.
+
+Files:
+
+apps/frontend/src/pages/chat/MessageBubble.jsx — add SourceBreadcrumb sub-component
+apps/backend/app/models/source_card.py — confirm all 5 chain fields are present (they are)
+PHASE 2 — CONTENT MODEL SPLIT
+Priority: HIGH (architecture correctness) Impact: RAG quality, editor usability, UI/retrieval separation
+
+P2.1 — Add RAG content fields to Chapter model
+File: apps/backend/app/models/content.py — Chapter class
+
+Problem: content_en/content_as serves both display and retrieval. When an admin writes rich HTML notes for students, that HTML bleeds into RAG chunks, reducing retrieval quality.
+
+New fields:
+
+class Chapter(Document):
+    # ... existing fields ...
+    content_en: Optional[str] = None          # user-facing: HTML/Markdown notes, summaries
+    content_as: Optional[str] = None          # user-facing: Assamese notes
+    rag_text_en: Optional[str] = None         # retrieval-only: full plain-text from book PDF
+    rag_text_as: Optional[str] = None         # retrieval-only: Assamese plain-text
+    notes_en: Optional[str] = None            # structured study notes (Markdown), English
+    notes_as: Optional[str] = None            # structured study notes (Markdown), Assamese
+    pyq_pdf_url: Optional[str] = None         # URL to PYQ PDF (user-facing)
+    pyq_rag_text: Optional[str] = None        # extracted text from PYQ PDF (retrieval-only)
+    notes_generated: bool = False             # legacy flag — keep for backward compat
+
+No migration needed: Beanie/MongoDB is schemaless. Old documents without these fields return None for them. New fields appear only when admin explicitly fills them.
+
+P2.2 — Update RAG retrieval to prefer rag_text fields
+File: apps/backend/app/services/chat_service.py — retrieve_context_from_chapter()
+
+Problem: retrieve_context_from_chapter() reads chapter.content_as or chapter.content_en. If rag_text_en exists, that should be used instead (it's cleaner for retrieval).
+
+Fix:
+
+@staticmethod
+async def retrieve_context_from_chapter(chapter_id, chapter_title, detected_lang):
+    chapter = await Chapter.get(...)
+    # Prefer rag_text (pure prose) over content (may contain HTML/UI markup)
+    if detected_lang == "as":
+        content = chapter.rag_text_as or chapter.content_as
+    else:
+        content = chapter.rag_text_en or chapter.content_en
+    # Cross-lingual fallback: if Assamese rag_text absent, use English
+    if not content and detected_lang == "as":
+        content = chapter.rag_text_en or chapter.content_en
+
+Acceptance: retrieve_context_from_chapter() returns rag_text_en content when available. For chapters with only content_en (legacy), behavior is identical to before.
+
+P2.3 — Update Vectorize chunk ingestion to use rag_text
+File: apps/backend/app/api/v1/admin.py or admin cron endpoint that triggers chunk ingestion
+
+Fix: When slicing a chapter into vector chunks, read chapter.rag_text_en first, fall back to chapter.content_en. Store source_field: "rag_text" in chunk metadata.
+
+PHASE 3 — ADMIN EDITOR SPLIT
+Priority: HIGH (editor usability + content quality) Impact: admin workflow, content accuracy
+
+P3.1 — Two-tab chapter editor in AdminContentHub
+File: apps/frontend/src/components/admin/AdminContentHub.jsx (and sub-editor components)
+
+Current state: Single editor writes to content_en/content_as. No separation.
+
+New design:
+
+Chapter Editor
+├── Tab A: "Reader Content" (user-facing)
+│     ├── content_en  → Markdown/HTML editor (what students read on chapter page)
+│     ├── content_as  → Assamese editor
+│     ├── notes_en    → Study notes editor (Markdown)
+│     ├── notes_as    → Assamese notes
+│     └── pyq_pdf_url → URL input for PYQ PDF
+│
+└── Tab B: "RAG Content" (retrieval-only)
+      ├── rag_text_en  → Plain-text area (paste from book PDF extract)
+      ├── rag_text_as  → Assamese plain text
+      ├── pyq_rag_text → Extracted PYQ text for search
+      └── [Re-index button] → triggers POST /admin/content/chunks/ingest {chapter_id}
+
+Backend: Add rag_text_en, rag_text_as, notes_en, notes_as, pyq_pdf_url, pyq_rag_text to the PUT /admin/content/chapters/{id} request body schema.
+
+PHASE 4 — AUTO CONVERSATION TITLES
+Priority: MEDIUM (UX polish) Impact: History page readability
+
+P4.1 — Generate title on first message save
+File: apps/backend/app/services/chat_service.py — save_chat()
+
+Problem: chat.title is never set. Every conversation shows "Untitled conversation".
+
+Fix: On first save (no existing session_id found in DB), auto-generate a title:
+
+@staticmethod
+def _generate_title(user_message: str) -> str:
+    """First 8 words of user message, max 60 chars, stripped of special chars."""
+    clean = re.sub(r'[^\w\s\u0980-\u09FF]', '', user_message.strip())
+    words = clean.split()[:8]
+    title = ' '.join(words)
+    return title[:60] if title else "Chat"
+@staticmethod
+async def save_chat(user_id, session_id, user_message, ...):
+    existing = await Chat.find_one({"session_id": session_id}) if session_id else None
+    if not existing:
+        title = ChatService._generate_title(user_message)
+        chat = Chat(user_id=user_id, session_id=session_id or str(uuid4()), title=title, ...)
+    else:
+        # append message to existing chat, don't overwrite title
+
+Acceptance: New conversations show their first question (truncated) as the title in HistoryPage. Old conversations remain "Untitled conversation" until next message.
+
+PHASE 5 — LIBRARY + CHAPTER PAGE REDESIGN
+Priority: MEDIUM (UX quality) Impact: student first impression, content discoverability
+
+P5.1 — Rich Library Subject Cards
+File: apps/frontend/src/pages/library/SubjectCard.jsx
+
+Current: Minimal tile — subject name + chapter count + bookmark icon.
+
+Target:
+
+┌─────────────────────────────────────────┐
+│ [thumbnail or gradient icon]            │
+│                                         │
+│ Physics                          ★      │
+│ Class 12 · AHSEC                        │
+│ ─────────────────────────────────────── │
+│ Electrostatics, Current, Optics…        │
+│                            14 chapters → │
+└─────────────────────────────────────────┘
+
+Changes to SubjectCard.jsx:
+
+Add thumbnail_url display (already in Subject model) with gradient fallback
+Add description field (already in Subject model)
+Add tags[] display (first 3 tags as chips)
+Add class_level + board_slug below subject name
+Add chapter_count derived from bundle data
+Make bookmark icon always visible (currently hover-only on desktop)
+Clicking card → /subjects/{slug} (same as now)
+Changes to VirtualSubjectGrid.jsx:
+
+Change from single-column list to 2-column grid on md+ screens
+Each card gets min-height: 160px for thumbnail area
+P5.2 — Textbook-style Chapter Page Layout
+File: apps/frontend/src/pages/ChapterPage.jsx
+
+Current: chapter-textbook rounded-2xl p-5 sm:p-8 mt-6 — feels like a product card.
+
+Target reading experience:
+
+max-width: 720px (reading column)
+padding: 0 16px (minimal horizontal padding — let the text breathe, not the card)
+font-size: 14px (body), 13px (secondary)
+line-height: 1.7 (comfortable reading)
+font-family: system-ui (fast, familiar)
+No rounded card wrapper around the body text
+Heading hierarchy: 20px h2, 16px h3, 14px h4
+
+Specific CSS changes:
+
+/* BEFORE: */
+.chapter-textbook { padding: 1.25rem; border-radius: 1rem; }
+/* AFTER: */
+.chapter-page-body {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  font-size: 14px;
+  line-height: 1.75;
+}
+/* No card wrapper — text is the page, not content inside a card */
+
+Add breadcrumb at top of chapter page:
+
+AHSEC › Class 12 › Physics › Chapter 1: Electric Charges and Fields
+
+Each segment is a link back up the hierarchy.
+
+Notes section: If chapter.notes_en exists, render it below the main content in a visually distinct "Study Notes" panel (light purple background, card border).
+
+PYQ section: If chapter.pyq_pdf_url exists, show a "Previous Year Questions" button that opens the PDF in a new tab (already partially exists).
+
+PHASE 6 — PROFILE → LIBRARY + CHAT SYNC
+Priority: MEDIUM (personalization) Impact: relevance, user experience
+
+P6.1 — Profile board/class change refreshes Library
+File: apps/frontend/src/pages/profile/AcademicDetails.jsx
+
+Problem: When a user changes their board from AHSEC to CBSE in Profile, the Library page still shows the old board's content until manual refresh. The syrabit:onboarding-updated event is dispatched from OnboardingPage but NOT from ProfilePage's AcademicDetails save.
+
+Fix: In AcademicDetails.jsx after a successful PATCH /user/profile:
+
+// Dispatch the same event onboarding uses — triggers Library boot bundle re-fetch
+window.dispatchEvent(new Event('syrabit:onboarding-updated'));
+updateUser({ board_id, class_level, stream_id });
+
+Acceptance: Changing board in Profile → Library page auto-filters to new board within 1s without requiring page refresh.
+
+P6.2 — Inject board/class context into chat system prompt
+File: apps/backend/app/services/chat_service.py — build_system_prompt()
+
+Problem: Chat has no idea what board/class the student is in. "What is Newton's second law?" could be answered differently for Class 9 SEBA vs Class 11 AHSEC physics.
+
+Fix:
+
+Frontend ChatPage.jsx: include board_name, class_level from user (AuthContext) in the chat request body (new optional fields, ignored if absent).
+Backend ChatRequest model: add board_name: Optional[str], class_level: Optional[str].
+build_system_prompt(): if these are set, prepend to persona:
+The student is in {class_level} ({board_name}). Tailor explanations to this level.
+
+Acceptance: A logged-in Class 12 AHSEC student asking "what is photosynthesis" gets an answer calibrated to Class 12 depth, not Class 6.
+
+PHASE 7 — ADMIN CONVERSATIONS VIEWER
+Priority: MEDIUM (admin tooling) Impact: moderation, support, analytics
+
+P7.1 — Expand conversation message view in AdminConversations
+File: apps/frontend/src/components/admin/AdminConversations.jsx File: apps/backend/app/api/v1/admin.py — GET /admin/conversations/{id}
+
+Current: Admin sees list of conversations (user_id, session_id, message_count, dates). Clicking a row does nothing. Message content is not exposed.
+
+Fix:
+
+Backend: Add GET /admin/conversations/{conversation_id} endpoint:
+@router.get("/admin/conversations/{conversation_id}")
+async def admin_get_conversation(conversation_id: str, admin=Depends(get_admin_user)):
+    chat = await Chat.get(conversation_id) or await Chat.find_one({"session_id": conversation_id})
+    if not chat:
+        raise HTTPException(404)
+    return {"id": str(chat.id), "user_id": chat.user_id, "messages": chat.messages, ...}
+
+Frontend: Click row → slide-in panel showing full message thread, model used per turn, lang, latency_ms, timestamp. Read-only. Close button dismisses panel.
+Acceptance: Admin clicks a conversation row → right panel shows the full Q&A thread.
+
+PHASE 8 — AUTH HARDENING
+Priority: LOW (security improvements) Impact: token security at logout
+
+P8.1 — MongoDB fallback for token blacklist on logout
+File: apps/backend/app/api/v1/auth.py — logout() endpoint
+
+Problem: If Redis is unavailable, logout() still returns 200 but the access token is NOT blacklisted. The user's old token remains valid until natural expiry.
+
+Fix: On Redis failure during logout, write to MongoDB revoked_tokens collection:
+
+try:
+    redis = get_redis()
+    await redis.set(f"blacklisted_token:{token_hash}", "1", ex=remaining_ttl)
+except Exception:
+    # Fallback: MongoDB revoked_tokens collection with TTL index on expires_at
+    await db.revoked_tokens.insert_one({
+        "_id": token_hash,
+        "expires_at": datetime.now(timezone.utc) + timedelta(seconds=remaining_ttl),
+    })
+    logger.warning("Redis unavailable for token blacklist — used MongoDB fallback")
+
+In get_current_user(), check MongoDB revoked_tokens as fallback after Redis miss:
+
+if not blacklisted:  # Redis miss
+    mongo_revoked = await db.revoked_tokens.find_one({"_id": token_hash})
+    blacklisted = mongo_revoked is not None
+
+Create TTL index: db.revoked_tokens.create_index("expires_at", expireAfterSeconds=0)
+
+PHASE 9 — ANONYMOUS IDENTITY HARDENING (PROD)
+Priority: LOW (prod correctness) Impact: anon history in CF-proxied production only
+
+P9.1 — Ensure CF Worker passes CF-Connecting-IP to backend
+Context: In production, CF Worker sits between browser and Cloud Run backend. resolve_anon_id() checks CF-Connecting-IP header first. If CF Worker does NOT forward this header, backend falls back to TCP client (Cloud Run's internal IP), making ALL anonymous users share the same identity.
+
+Fix (CF Worker apps/edge/src/worker.ts or middleware):
+
+// Ensure CF-Connecting-IP is forwarded to backend
+const clientIP = request.headers.get('CF-Connecting-IP') || '';
+newHeaders.set('CF-Connecting-IP', clientIP);
+
+Verify: GET /api/v1/debug/anon-id (dev-only endpoint) should return ip_xxx_xxx_xxx_xxx with the actual client IP, not ip_127_0_0_1 or Cloud Run's internal IP.
+
+IMPLEMENTATION ORDER + EFFORT
+Phase	Task	Effort	Risk	Do First
+P1.1	Fix non-stream confidence gating	1h	Low	✅ YES
+P1.2	Remove web from MID confidence	30m	Low	✅ YES
+P1.3	Strict bilingual system prompts	1h	Low	✅ YES
+P1.4	Full source card chain in UI	2h	Low	✅ YES
+P4.1	Auto conversation titles	1h	Low	✅ YES
+P2.1	Add rag_text/notes/pyq fields to model	1h	Low	✅ YES
+P2.2	RAG retrieval prefers rag_text	30m	Low	✅ YES
+P2.3	Vectorize ingestion uses rag_text	1h	Medium	YES
+P3.1	Admin editor two-tab split	4h	Medium	YES
+P6.1	Profile board change → Library refresh	1h	Low	YES
+P6.2	Board/class in chat system prompt	2h	Low	YES
+P5.1	Rich library subject cards	3h	Low	YES
+P5.2	Textbook chapter page layout	2h	Low	YES
+P7.1	Admin conversation message viewer	3h	Low	YES
+P8.1	MongoDB token blacklist fallback	2h	Medium	Later
+P9.1	CF Worker IP header forwarding	1h	Low	Later
+Total estimate: ~26 hours of focused implementation
+
+EXECUTION SEQUENCE (RECOMMENDED)
+Sprint 1 (Chat correctness — highest value, zero risk):
+  P1.1 → P1.2 → P1.3 → P1.4 → P4.1
+  Result: Chat is fully correct, latency improves by 200-400ms, titles appear
+Sprint 2 (Content model foundation — enables everything else):
+  P2.1 → P2.2 → P2.3 → P3.1
+  Result: Admin can push RAG text separately from display text; RAG quality improves
+Sprint 3 (UX + Personalization):
+  P5.1 → P5.2 → P6.1 → P6.2
+  Result: Library feels like a real educational website; chat is personalized
+Sprint 4 (Admin tooling + Security):
+  P7.1 → P8.1 → P9.1
+  Result: Admin can moderate; auth is hardened; prod anon identity is consistent
+
+SINGLE FILE CHANGE REFERENCE
+Every file touched by this plan:
+
+BACKEND
+apps/backend/app/models/content.py          P2.1 — new Chapter fields
+apps/backend/app/api/v1/chat.py             P1.1 — non-stream confidence gate
+                                            P1.2 — remove web from MID in stream
+apps/backend/app/services/chat_service.py   P1.3 — bilingual system prompts
+                                            P2.2 — rag_text preference in retrieval
+                                            P4.1 — auto title generation in save_chat
+apps/backend/app/api/v1/admin.py            P7.1 — admin conversation detail endpoint
+                                            P3.1 — new chapter fields in PATCH schema
+apps/backend/app/api/v1/auth.py             P8.1 — MongoDB blacklist fallback
+FRONTEND
+apps/frontend/src/pages/chat/MessageBubble.jsx         P1.4 — full source breadcrumb
+apps/frontend/src/pages/library/SubjectCard.jsx        P5.1 — rich library cards
+apps/frontend/src/pages/library/VirtualSubjectGrid.jsx P5.1 — 2-col grid layout
+apps/frontend/src/pages/ChapterPage.jsx                P5.2 — textbook reading layout
+apps/frontend/src/pages/profile/AcademicDetails.jsx    P6.1 — dispatch onboarding event
+apps/frontend/src/pages/ChatPage.jsx                   P6.2 — send board/class in request
+apps/frontend/src/components/admin/AdminContentHub.jsx P3.1 — two-tab editor
+apps/frontend/src/components/admin/AdminConversations.jsx P7.1 — message viewer panel
+EDGE
+apps/edge/src/worker.ts (or middleware)     P9.1 — forward CF-Connecting-IP
+
+This plan was built by diffing the live app_audit.md against your requirements document. Every gap is traceable to specific lines of real code, not assumptions.

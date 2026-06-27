@@ -38,25 +38,30 @@ class SourceCard:
 
     def to_sse_dict(self) -> dict:
         """
-        Emit SSE payload. Keys match the field names ChatPage.jsx already reads
-        from the SSE stream meta object (rag_subject_name, rag_chapter_name, etc.)
-        so no frontend changes are needed to display the data.
+        Emit SSE payload. Keys match the field names ChatPage.jsx reads
+        from the SSE stream meta object (rag_subject_name, rag_chapter_name, etc.).
         """
+        # Derive class_slug from class_level: "Class 12" → "class-12"
+        class_slug = (
+            self.class_level.lower().replace(" ", "-") if self.class_level else None
+        )
         return {
             "event": "source_card",
             # Subject
             "rag_subject_id": self.subject_id,
             "rag_subject_name": self.subject_name,
+            "rag_subject_slug": self.subject_slug,
             "rag_subject_icon": self.subject_icon,
             "rag_subject_gradient": self.subject_gradient,
             # Chapter / topic
             "rag_chapter_name": self.chapter_name,
             "rag_chapter_slug": self.chapter_slug,
             "rag_topic_name": self.topic_name,
-            # Board / class
-            "ctx_board_name": self.board_name,
-            "ctx_board_slug": self.board_slug,
-            "ctx_class_name": self.class_level,
+            # Board / class — use rag_ prefix so MessageBubble reads them correctly
+            "rag_board_name": self.board_name,
+            "rag_board_slug": self.board_slug,
+            "rag_class_name": self.class_level,
+            "rag_class_slug": class_slug,
             # Meta
             "rag_source": self.rag_path,
             "rag_chunks": self.rag_chunks,

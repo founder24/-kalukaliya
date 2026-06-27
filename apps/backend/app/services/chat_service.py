@@ -222,6 +222,7 @@ class ChatService:
 
         if topic_match:
             subject_slug = topic_match.get("subject_slug")
+            board_slug = topic_match.get("board_slug")
             subject_name: Optional[str] = None
             if subject_slug:
                 try:
@@ -232,13 +233,17 @@ class ChatService:
                 except Exception as e:
                     logger.debug(f"build_source_card: subject lookup failed: {e}")
 
+            # Derive board_name from slug for display: "ahsec" → "AHSEC"
+            board_name = board_slug.upper() if board_slug else None
+
             return SourceCard(
                 subject_name=subject_name,
                 subject_slug=subject_slug,
                 chapter_name=topic_match.get("chapter_title"),
                 topic_name=topic_match.get("topic_title"),
                 class_level=topic_match.get("class_level"),
-                board_slug=topic_match.get("board_slug"),
+                board_name=board_name,
+                board_slug=board_slug,
                 match_score=topic_match.get("score", 0.0),
                 source_type=source_type,
                 rag_path=rag_path,
@@ -311,11 +316,19 @@ class ChatService:
                 logger.debug(f"mongo_fast_path: chapter {chapter_id!r} not found")
                 return []
 
-            content = (
-                chapter.content_as
-                if detected_lang == "as" and chapter.content_as
-                else chapter.content_en
-            )
+            # Prefer rag_text (pure prose, retrieval-optimised) over content_* (may
+            # contain HTML/UI markup that degrades RAG quality).
+            # Cross-lingual fallback: if Assamese rag_text absent, fall back to English.
+            if detected_lang == "as":
+                content = (
+                    chapter.rag_text_as
+                    or chapter.content_as
+                    or chapter.rag_text_en
+                    or chapter.content_en
+                )
+            else:
+                content = chapter.rag_text_en or chapter.content_en
+
             if not content:
                 logger.debug(
                     f"mongo_fast_path: chapter '{chapter.title}' has no content"
@@ -659,6 +672,18 @@ class ChatService:
             return messages
 
     @staticmethod
+    def _generate_title(user_message: str) -> str:
+        """Generate a short conversation title from the first user message.
+
+        Takes the first 8 words, strips special characters, caps at 60 chars.
+        Assamese/Bengali Unicode script is preserved ([\u0980-\u09FF]).
+        """
+        clean = re.sub(r"[^\w\s\u0980-\u09FF]", "", user_message.strip())
+        words = clean.split()[:8]
+        title = " ".join(words)
+        return title[:60] if title else "Chat"
+
+    @staticmethod
     async def save_chat(
         user_id: str,
         session_id: Optional[str],
@@ -681,9 +706,16 @@ class ChatService:
         try:
             from app.models.chat import Chat
 
+            # Auto-title: set only on the first doc for this session.
+            # Subsequent saves (multi-turn) leave title=None so the first
+            # doc's title remains the canonical conversation name.
+            existing = await Chat.find_one({"session_id": resolved_session_id})
+            title = ChatService._generate_title(user_message) if not existing else None
+
             chat_doc = Chat(
                 user_id=user_id,
                 session_id=resolved_session_id,
+                title=title,
             )
             chat_doc.add_message(role="user", content=user_message)
             chat_doc.add_message(

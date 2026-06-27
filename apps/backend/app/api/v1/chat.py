@@ -180,26 +180,41 @@ async def chat(
             skip_rag = ChatService.is_generic_query(sanitized_message)
 
             async def _maybe_retrieve():
+                """
+                Confidence-gated retrieval — mirrors the streaming endpoint logic.
+
+                Returns (chunks, match_score) tuple so the caller can gate
+                web search without a second embedding call.
+
+                Confidence tiers:
+                  NONE (<0.50)  → no topic signal → return ([], 0.0)
+                  LOW  (0.50–0.65) → MongoDB fast path (+ web added below)
+                  MID  (0.65–0.80) → MongoDB fast path only, no web
+                  HIGH (≥0.80)     → MongoDB fast path only, no web
+                """
                 if skip_rag:
                     logger.info(
                         "generic_query_detected",
                         extra={"user_id": user_id, "query": sanitized_message[:30]},
                     )
-                    return []
-                # Topic embedding match: only proceed with RAG if query matches a topic
-                topic_match = await ChatService.check_topic_match(sanitized_message)
-                if topic_match is None:
+                    return ([], 0.0)
+
+                topic_match, query_embedding = await ChatService.check_topic_match_with_embedding(sanitized_message)
+                match_score = topic_match.get("score", 0.0) if topic_match else 0.0
+
+                if not topic_match or match_score < CONFIDENCE_LOW:
                     logger.info(
                         "no_topic_match",
                         extra={"user_id": user_id, "query": sanitized_message[:30]},
                     )
-                    return []
+                    return ([], match_score)
+
                 logger.info(
                     "topic_matched",
                     extra={
                         "user_id": user_id,
                         "topic": topic_match.get("topic_title"),
-                        "score": topic_match.get("score"),
+                        "score": match_score,
                     },
                 )
                 # Fast path: fetch chapter content from MongoDB directly
@@ -210,10 +225,12 @@ async def chat(
                     detected_lang=detected_lang,
                 )
                 if mongo_chunks:
-                    return mongo_chunks
-                # Fallback: Vertex AI Search (when MongoDB chapter has no content)
-                chunks, _ = await ChatService.retrieve_context(sanitized_message, user_tier)
-                return chunks
+                    return (mongo_chunks, match_score)
+                # Fallback: full pipeline when chapter has no stored content
+                chunks, _ = await ChatService.retrieve_context(
+                    sanitized_message, user_tier, embedding=query_embedding
+                )
+                return (chunks, match_score)
 
             results = await asyncio.gather(
                 _maybe_retrieve(),
@@ -223,9 +240,11 @@ async def chat(
             )
 
             # Unpack results, treating exceptions as safe defaults
-            context_chunks = results[0] if not isinstance(results[0], Exception) else []
+            raw_retrieve = results[0] if not isinstance(results[0], Exception) else ([], 0.0)
             if isinstance(results[0], Exception):
                 logger.error(f"RAG retrieval failed: {results[0]}")
+                raw_retrieve = ([], 0.0)
+            context_chunks, match_score = raw_retrieve
 
             history = results[1] if not isinstance(results[1], Exception) else ""
             if isinstance(results[1], Exception):
@@ -281,11 +300,12 @@ async def chat(
                     sources=[],
                 )
 
-            # 2c. Web search (20% slice when RAG present; 50% slice when RAG empty).
-            # Skipped for generic greetings. Runs after cache check so cache hits
-            # never pay the web-search latency penalty.
+            # 2c. Confidence-gated web search.
+            # HIGH/MID (≥0.65): MongoDB content is strong — web adds noise and latency.
+            # LOW/NONE (<0.65):  web search as scaffold or primary source.
+            # Skipped entirely for generic greetings and after cache hits.
             web_chunks: list[dict] = []
-            if not skip_rag:
+            if not skip_rag and match_score < CONFIDENCE_MID:
                 web_chunks = await ChatService.retrieve_web_context(
                     sanitized_message, lang=detected_lang
                 )
@@ -646,7 +666,8 @@ async def chat_stream(
                         )
 
                 elif match_score >= CONFIDENCE_MID:
-                    # MID (0.65–0.80): good match → MongoDB fast path + light web in parallel.
+                    # MID (0.65–0.80): good match → MongoDB fast path ONLY.
+                    # Score is strong enough; web adds noise and 200-400ms latency.
                     confidence_tier = "mid"
                     logger.info(
                         "confidence_mid",
@@ -656,19 +677,12 @@ async def chat_stream(
                             "topic": topic_match.get("topic_title"),
                         },
                     )
-                    mongo_result, web_result = await asyncio.gather(
-                        ChatService.retrieve_context_from_chapter(
-                            chapter_id=topic_match.get("chapter_id"),
-                            chapter_title=topic_match.get("chapter_title", ""),
-                            detected_lang=detected_lang,
-                        ),
-                        ChatService.retrieve_web_context(
-                            sanitized_message, lang=detected_lang
-                        ),
-                        return_exceptions=True,
+                    context_chunks = await ChatService.retrieve_context_from_chapter(
+                        chapter_id=topic_match.get("chapter_id"),
+                        chapter_title=topic_match.get("chapter_title", ""),
+                        detected_lang=detected_lang,
                     )
-                    context_chunks = mongo_result if not isinstance(mongo_result, Exception) else []
-                    web_chunks = web_result if not isinstance(web_result, Exception) else []
+                    web_chunks = []
                     rag_path = "mongodb" if context_chunks else "none"
 
                 elif match_score >= CONFIDENCE_LOW:

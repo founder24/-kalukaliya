@@ -83,12 +83,18 @@ class Chapter(Document):
     subject_id: FlexId
     chapter_number: int
     status: str = "draft"
-    content_en: Optional[str] = None
-    content_as: Optional[str] = None
+    content_en: Optional[str] = None           # user-facing: HTML/Markdown notes, summaries
+    content_as: Optional[str] = None           # user-facing: Assamese notes
+    rag_text_en: Optional[str] = None          # retrieval-only: full plain-text from book PDF
+    rag_text_as: Optional[str] = None          # retrieval-only: Assamese plain-text
+    notes_en: Optional[str] = None             # structured study notes (Markdown), English
+    notes_as: Optional[str] = None             # structured study notes (Markdown), Assamese
+    pyq_pdf_url: Optional[str] = None          # URL to PYQ PDF (user-facing)
+    pyq_rag_text: Optional[str] = None         # extracted text from PYQ PDF (retrieval-only)
     meta_description: Optional[str] = None
     keywords: Optional[str] = None
     word_count: Optional[int] = None
-    notes_generated: bool = False
+    notes_generated: bool = False              # legacy flag — kept for backward compat
     published_topics: list[Topic] = Field(default_factory=list)
     faq_jsonld: Optional[list[dict]] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
