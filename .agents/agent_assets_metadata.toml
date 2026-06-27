@@ -18,3 +18,9 @@ id = "Ih-WQZyTOw4p8QY2SFxSu"
 uri = "file://.local/upgrade_plan.md"
 type = "text"
 title = "Syrabit — God-Level Full-Stack Upgrade Plan"
+
+[[outputs]]
+id = "ODWyhNXtJ32R3Z5q3qaRO"
+uri = "file://admin-panel-upgrade-roadmap.md"
+type = "text"
+title = "Admin Panel Upgrade — File-by-File Roadmap"
