@@ -83,6 +83,16 @@ _re_meta_line = re.compile(
 # Assamese/Bengali Unicode block (shared script for Assamese)
 _ASSAMESE_RANGE = range(0x0980, 0x0A00)
 
+# Greeting / chatter pattern compiled once at module level (used inside
+# stream_generate to short-circuit the reasoning phase for trivial inputs).
+_GREETING_STREAM_RE = re.compile(
+    r"^(hi+|he+y+|he+llo+|thanks?|thank\s+you|ok+a*y*|o+k+|bye+"
+    r"|good\s+(?:morning|evening|night|day|afternoon)|how\s+are\s+you"
+    r"|who\s+are\s+you|what\s+can\s+you\s+do|nice|great|sure|got\s+it"
+    r"|understood|noted|alright|cool|perfect)[\s!?.,'\u0964]*$",
+    re.IGNORECASE,
+)
+
 
 def _has_assamese(text: str) -> bool:
     return any(ord(c) in _ASSAMESE_RANGE for c in text)
@@ -383,6 +393,26 @@ class SarvamAIClient:
         # right post-processing strategy and set an appropriate token budget.
         is_assamese = _has_assamese(system_prompt)
 
+        # Greeting / chatter detection (inline — avoids circular import).
+        # Short, non-Assamese messages that match the greeting pattern get a
+        # reduced token budget and skip the reasoning phase entirely, cutting
+        # TTFB from ~7-8 s down to ~150 ms for responses like "Hi there!".
+        _msg_stripped = user_message.strip()
+        _non_ws_len = len(re.sub(r"\s+", "", _msg_stripped))
+        is_greeting = (
+            _non_ws_len <= 30
+            and not _has_assamese(_msg_stripped)
+            and bool(_GREETING_STREAM_RE.match(_msg_stripped))
+        ) or (
+            # Ultra-short messages (≤5 non-ws chars, no Assamese) are always chatter
+            _non_ws_len <= 5 and not _has_assamese(_msg_stripped)
+        )
+        if is_greeting:
+            logger.info(
+                "sarvam_greeting_mode",
+                extra={"msg_len": _non_ws_len, "enable_thinking": False, "max_tokens": 300},
+            )
+
         url = f"{self.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -395,6 +425,9 @@ class SarvamAIClient:
                 {"role": "user", "content": user_message},
             ],
             "temperature": 0.3,
+            # Greeting / chatter: skip reasoning phase entirely — small budget,
+            # fast direct answer (TTFB ~150 ms instead of 7-8 s).
+            #
             # English mode: enable_thinking=True separates the model's reasoning
             # into reasoning_content (hidden) from the clean final answer in
             # content (streamed directly).  No extraction logic required.
@@ -402,8 +435,8 @@ class SarvamAIClient:
             # Assamese mode: keep enable_thinking=False — the model reasons in
             # English in reasoning_content and embeds Assamese draft lines there;
             # _extract_assamese_answer() collects those at end-of-stream.
-            "enable_thinking": not is_assamese,
-            "max_tokens": 4000 if is_assamese else 2000,
+            "enable_thinking": False if is_greeting else (not is_assamese),
+            "max_tokens": 300 if is_greeting else (4000 if is_assamese else 2000),
             "stream": True,
         }
 

@@ -45,9 +45,22 @@ CONFIDENCE_HIGH = 0.80
 CONFIDENCE_MID = 0.65   # mirrors MATCH_THRESHOLD in topic_matcher
 CONFIDENCE_LOW = 0.50
 
-# Pattern for detecting generic/greeting queries that should skip RAG
+# Pattern for detecting generic/greeting queries that should skip RAG.
+# Covers typos with repeated chars (hii, heyy, heyyy, helloo) and common
+# affirmatives / farewells that carry no educational intent.
 GENERIC_QUERY_PATTERN = re.compile(
-    r"^(hi|hello|hey|thanks|thank you|ok|okay|bye|good morning|good evening|good night|how are you|what can you do|who are you|what are you)[\s!?.]*$",
+    r"^("
+    r"hi+|he+y+|he+llo+|helo+|"                              # hi / hey / hello variants
+    r"thanks?|thank\s+you|ty|"                               # thanks / thank you
+    r"ok+a*y*|o+k+|k|"                                       # ok / okay / okk / k
+    r"bye+|good\s*bye+|"                                     # bye / goodbye
+    r"good\s+(?:morning|evening|night|day|afternoon)|"       # time greetings
+    r"how\s+are\s+you|"                                      # how are you
+    r"what\s+can\s+you\s+do|"                               # what can you do
+    r"who\s+are\s+you|what\s+are\s+you|"                    # identity questions
+    r"nice|great|awesome|cool|perfect|"                      # short affirmatives
+    r"sure|got\s+it|understood|noted|alright|alrite"         # acknowledgements
+    r")[\s!?.,'\u0964]*$",                                   # trailing punctuation incl. । (Devanagari danda)
     re.IGNORECASE,
 )
 
@@ -61,8 +74,23 @@ class ChatService:
 
     @staticmethod
     def is_generic_query(message: str) -> bool:
-        """Detect generic/greeting queries that should skip RAG entirely."""
-        return bool(GENERIC_QUERY_PATTERN.match(message.strip()))
+        """Detect generic/greeting queries that should skip RAG entirely.
+
+        Two-gate check:
+        1. Regex match against known greeting / chatter patterns (handles typos
+           like 'hii', 'heyy', repeated chars).
+        2. Ultra-short fallback: messages with ≤ 5 non-whitespace characters
+           that contain no Assamese/Bengali script are almost never substantive
+           educational questions ('k', 'ok', 'ty', '?', '??', etc.).
+        """
+        stripped = message.strip()
+        if GENERIC_QUERY_PATTERN.match(stripped):
+            return True
+        # Fallback: ultra-short messages with no Assamese script
+        non_ws = re.sub(r"\s+", "", stripped)
+        if len(non_ws) <= 5 and not re.search(r"[\u0980-\u09FF]", stripped):
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Language & model resolution
