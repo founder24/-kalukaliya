@@ -284,7 +284,11 @@ export default function HistoryPage() {
     if (isAnon === null) return; // auth not yet resolved
     try {
       const res = isAnon ? await getAnonConversations() : await getConversations();
-      const data = (res.data || []).map((c) => ({
+      // Both endpoints return { conversations: [...], pagination: {...} }
+      const list = Array.isArray(res.data)
+        ? res.data
+        : (res.data?.conversations ?? []);
+      const data = list.map((c) => ({
         ...c,
         tokens:   Math.round((c.preview || '').length * 1.3),
         starred:  c.starred || false,
