@@ -15,13 +15,49 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.api.v1.admin import require_admin_session, csrf_guard
-from app.models.content import Board, Class, Stream, Subject, Chapter, Topic
+from app.models.content import Board, Class, Stream, Subject, Chapter, Topic, ContentAuditLog
+from app.models.user import User
 from app.services.content_generation import content_generation_service
 from app.services.content_publisher import content_publisher_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Admin Content"], dependencies=[Depends(require_admin_session), Depends(csrf_guard)])
+
+
+# ── Audit log helper ──────────────────────────────────────────────────────────
+
+async def _stamp_audit(
+    chapter_id: str,
+    action: str,
+    actor_id: str,
+    subject_id: Optional[str] = None,
+    version_before: Optional[int] = None,
+    version_after: Optional[int] = None,
+    changes: Optional[dict] = None,
+) -> None:
+    """Fire-and-forget: write one ContentAuditLog entry. Errors are swallowed."""
+    try:
+        actor_email: Optional[str] = None
+        try:
+            user = await User.get(actor_id)
+            if user:
+                actor_email = user.email
+        except Exception:
+            pass
+        entry = ContentAuditLog(
+            chapter_id=chapter_id,
+            subject_id=subject_id,
+            action=action,
+            actor_id=actor_id,
+            actor_email=actor_email,
+            version_before=version_before,
+            version_after=version_after,
+            changes=changes,
+        )
+        await entry.insert()
+    except Exception as exc:
+        logger.warning(f"[audit] failed to write audit log for chapter={chapter_id}: {exc}")
 
 
 # --- Helpers ---
@@ -298,7 +334,7 @@ async def list_subjects(request: Request, stream_id: Optional[str] = Query(None)
 
 
 @router.post("/content/chapters")
-async def create_chapter(request: Request, body: ChapterCreate):
+async def create_chapter(request: Request, body: ChapterCreate, _admin: dict = Depends(require_admin_session)):
     """Create a new chapter."""
 
     slug = _slugify(body.title)
@@ -309,6 +345,15 @@ async def create_chapter(request: Request, body: ChapterCreate):
         chapter_number=body.chapter_number,
     )
     await chapter.insert()
+    await _stamp_audit(
+        chapter_id=str(chapter.id),
+        action="created",
+        actor_id=_admin["sub"],
+        subject_id=body.subject_id,
+        version_before=None,
+        version_after=0,
+        changes={"title": {"after": body.title}},
+    )
     return {
         "id": str(chapter.id),
         "title": chapter.title,
@@ -391,7 +436,7 @@ async def get_chapter(request: Request, chapter_id: str):
 
 
 @router.patch("/content/chapters/{chapter_id}")
-async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate):
+async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate, _admin: dict = Depends(require_admin_session)):
     """Update chapter fields (student-facing content only — use /rag for RAG text).
 
     Optimistic locking: if `version` is provided, the current chapter version must
@@ -414,6 +459,24 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate)
                 "last_updated_at": chapter.updated_at.isoformat(),
             },
         )
+
+    # ── Capture diff for audit log ────────────────────────────────────────────
+    version_before = chapter.version
+    changes: dict = {}
+    if body.title is not None and body.title != chapter.title:
+        changes["title"] = {"before": chapter.title, "after": body.title}
+    if body.status is not None and body.status != chapter.status:
+        changes["status"] = {"before": chapter.status, "after": body.status}
+    if body.content is not None:
+        changes["content_en"] = {
+            "words_before": len(chapter.content_en.split()) if chapter.content_en else 0,
+            "words_after": len(body.content.split()) if body.content else 0,
+        }
+    if body.content_as is not None:
+        changes["content_as"] = {
+            "words_before": len(chapter.content_as.split()) if chapter.content_as else 0,
+            "words_after": len(body.content_as.split()) if body.content_as else 0,
+        }
 
     if body.title is not None:
         chapter.title = body.title
@@ -440,6 +503,16 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate)
     chapter.version = chapter.version + 1
     await chapter.save()
 
+    await _stamp_audit(
+        chapter_id=chapter_id,
+        action="updated",
+        actor_id=_admin["sub"],
+        subject_id=str(chapter.subject_id),
+        version_before=version_before,
+        version_after=chapter.version,
+        changes=changes if changes else None,
+    )
+
     return {
         "id": str(chapter.id),
         "title": chapter.title,
@@ -450,7 +523,7 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate)
 
 
 @router.patch("/content/chapters/{chapter_id}/rag")
-async def update_chapter_rag(request: Request, chapter_id: str, body: ChapterRagUpdate):
+async def update_chapter_rag(request: Request, chapter_id: str, body: ChapterRagUpdate, _admin: dict = Depends(require_admin_session)):
     """Update RAG retrieval text only. Auto-triggers background reindex on Vectorize."""
 
     import asyncio as _asyncio
@@ -459,15 +532,25 @@ async def update_chapter_rag(request: Request, chapter_id: str, body: ChapterRag
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
+    rag_changes: dict = {}
     if body.rag_text_en is not None:
+        rag_changes["rag_text_en"] = True
         chapter.rag_text_en = body.rag_text_en
     if body.rag_text_as is not None:
+        rag_changes["rag_text_as"] = True
         chapter.rag_text_as = body.rag_text_as
 
     now = datetime.now(timezone.utc)
     chapter.rag_updated_at = now
     chapter.updated_at = now
     await chapter.save()
+    await _stamp_audit(
+        chapter_id=chapter_id,
+        action="rag_updated",
+        actor_id=_admin["sub"],
+        subject_id=str(chapter.subject_id),
+        changes=rag_changes if rag_changes else None,
+    )
 
     # Fire background reindex so Vectorize stays aligned — create a trackable job first
     job_id = None
@@ -528,15 +611,55 @@ async def update_chapter_rag(request: Request, chapter_id: str, body: ChapterRag
 
 
 @router.delete("/content/chapters/{chapter_id}")
-async def delete_chapter(request: Request, chapter_id: str):
+async def delete_chapter(request: Request, chapter_id: str, _admin: dict = Depends(require_admin_session)):
     """Delete a chapter."""
 
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
+    subject_id = str(chapter.subject_id)
+    version_before = chapter.version
+    title = chapter.title
     await chapter.delete()
+    await _stamp_audit(
+        chapter_id=chapter_id,
+        action="deleted",
+        actor_id=_admin["sub"],
+        subject_id=subject_id,
+        version_before=version_before,
+        version_after=None,
+        changes={"title": title},
+    )
     return {"status": "deleted", "id": chapter_id}
+
+
+@router.get("/content/chapters/{chapter_id}/audit-log")
+async def get_chapter_audit_log(request: Request, chapter_id: str, limit: int = Query(50, ge=1, le=200)):
+    """Return the audit trail for a chapter, newest first."""
+
+    entries = (
+        await ContentAuditLog.find({"chapter_id": chapter_id})
+        .sort("-created_at")
+        .limit(limit)
+        .to_list(length=limit)
+    )
+    return {
+        "chapter_id": chapter_id,
+        "entries": [
+            {
+                "id": str(e.id),
+                "action": e.action,
+                "actor_id": e.actor_id,
+                "actor_email": e.actor_email,
+                "version_before": e.version_before,
+                "version_after": e.version_after,
+                "changes": e.changes,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in entries
+        ],
+    }
 
 
 # ============================

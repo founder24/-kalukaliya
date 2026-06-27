@@ -110,6 +110,29 @@ class Chapter(Document):
         name = "chapters"
 
 
+class ContentAuditLog(Document):
+    """Lightweight audit trail for chapter CMS operations.
+
+    action: "created" | "updated" | "deleted" | "rag_updated"
+    actor_id: the admin JWT `sub` (user ObjectId string)
+    actor_email: resolved email at write time for display
+    changes: dict summarising what was different (field-level diff summary)
+    """
+
+    chapter_id: str
+    subject_id: Optional[str] = None
+    action: str
+    actor_id: str
+    actor_email: Optional[str] = None
+    version_before: Optional[int] = None
+    version_after: Optional[int] = None
+    changes: Optional[dict] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    class Settings:
+        name = "content_audit_log"
+
+
 class TopicEmbedding(Document):
     """Stores pre-computed embeddings for topic titles (CF bge-m3, 1024 dims).
 

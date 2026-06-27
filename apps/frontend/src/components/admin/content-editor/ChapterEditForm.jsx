@@ -3,7 +3,7 @@ import {
   ArrowLeft, Save, Loader2, Eye, Link2, BarChart3,
   Sparkles, RefreshCw, Layers, LayoutTemplate, Upload,
   FileText, Globe, CheckCircle, Smartphone, Monitor,
-  ImagePlus, Languages, Database,
+  ImagePlus, Languages, Database, Clock,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -13,6 +13,7 @@ import { TEMPLATES } from '@/utils/editorTemplates';
 import { API, autoSlug, authHeaders } from '@/utils/adminHelpers';
 import PYQUploadPanel from './PYQUploadPanel';
 import RagSyncBadge from './RagSyncBadge';
+import ChapterAuditLog from './ChapterAuditLog';
 
 const CONTENT_TYPES = [
   { value: 'notes', label: 'Notes', color: 'violet' },
@@ -120,13 +121,35 @@ export default function ChapterEditForm({
     input.click();
   }, [imageUploadHandler, editorRef, activeContent, editorLang, setContentForm, setEditorKey]);
 
+  const [showAuditLog, setShowAuditLog] = useState(false);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 pt-5 pb-3 flex-shrink-0">
-        <button onClick={onCancel} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 mb-4 transition-colors"><ArrowLeft size={15} /> Back</button>
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={onCancel} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors"><ArrowLeft size={15} /> Back</button>
+          {editView === 'edit-chapter' && editTarget?.id && (
+            <button
+              onClick={() => setShowAuditLog(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-gray-500 hover:text-violet-700 hover:bg-violet-50 transition-colors border border-gray-200 hover:border-violet-200"
+              title="View edit history"
+            >
+              <Clock size={12} />
+              History
+            </button>
+          )}
+        </div>
         <h3 className="text-xl font-bold text-gray-900 mb-0.5">{editView === 'edit-chapter' ? 'Edit Chapter' : 'Create Chapter'}</h3>
         <p className="text-gray-500 text-xs">{subjectData?.name}</p>
       </div>
+
+      {showAuditLog && editTarget?.id && (
+        <ChapterAuditLog
+          chapterId={editTarget.id}
+          adminToken={adminToken}
+          onClose={() => setShowAuditLog(false)}
+        />
+      )}
 
       <div className="flex-1 flex flex-col min-h-0 px-6 pb-6 gap-3 overflow-y-auto">
         <div className="flex-shrink-0 grid grid-cols-1 lg:grid-cols-2 gap-2.5">

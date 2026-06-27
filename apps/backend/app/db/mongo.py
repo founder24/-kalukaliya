@@ -18,6 +18,7 @@ from app.models.content import (
     Chapter,
     TopicEmbedding,
     QuestionPaper,
+    ContentAuditLog,
 )
 from app.models.rag import (
     RagDocument,
@@ -91,6 +92,7 @@ async def init_mongo() -> None:
                     PageAsset,
                     GenerationJob,
                     AiUsageLog,
+                    ContentAuditLog,
                 ],
             )
 
