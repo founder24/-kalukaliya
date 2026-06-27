@@ -272,7 +272,7 @@ export function AppRoutes() {
       <Routes>
       {/* ── Public routes ── */}
       <Route path="/"         element={<Navigate to="/library" replace />} />
-      <Route path="/home"     element={<LandingPage />} />
+      <Route path="/home"     element={<Navigate to="/library" replace />} />
       <Route path="/pricing"  element={<PricingPage />} />
       <Route path="/terms"    element={<TermsPage />} />
       <Route path="/privacy"       element={<PrivacyPage />} />

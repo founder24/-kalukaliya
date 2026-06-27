@@ -747,15 +747,11 @@ async def analytics_top_routes(days: int = 30, limit: int = 25):
                     "created_at": {"$gte": since},
                     "method": {"$in": ["GET", "get"]},
                     "status": {"$gte": 200, "$lt": 300},
-                    "path": {
-                        "$regex": r"^/(?:browse|chapter|topic|subject|lesson)",
-                        "$options": "i",
-                    },
                 }
             },
             {
                 "$group": {
-                    "_id": "$path",
+                    "_id": "$path",        # path = derived frontend URL (e.g. /ahsec/hs-1st-year/physics/...)
                     "views": {"$sum": 1},
                     "unique_ips": {"$addToSet": "$ip"},
                     "last_seen": {"$max": "$created_at"},

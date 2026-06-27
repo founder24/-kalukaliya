@@ -9,6 +9,9 @@ import logging
 import uuid
 import time
 
+import asyncio
+import re
+
 from app.config import settings
 from app.db.mongo import init_mongo, close_mongo
 from app.api.v1 import (
@@ -203,6 +206,98 @@ async def lifespan(app: FastAPI):
     logger.info("Application shutdown complete")
 
 
+# Content API paths that fire when users load content pages.
+# These are the real signals — frontend routes never reach FastAPI.
+#
+# Signals tracked:
+#   chapter-by-slug  → user opened a chapter page
+#   resolve-subject  → user opened a subject/stream page
+#   library-bundle   → user loaded the library/browse page
+#   subjects         → user loaded the library listing
+#   chapters/{id}/published-topics → secondary chapter-load signal (filtered out below
+#                                     because the id gives no readable frontend path)
+_CONTENT_API_RE = re.compile(
+    r"^/api/v1/content/(?:chapter-by-slug|resolve-subject|library-bundle|subjects\b)",
+    re.IGNORECASE,
+)
+
+
+def _api_path_to_frontend(path: str) -> str:
+    """
+    Convert a content API path to the equivalent frontend URL that caused the call.
+
+    Examples
+    --------
+    /api/v1/content/chapter-by-slug/ahsec/hs-1st-year/physics/units-and-measurements
+      → /ahsec/hs-1st-year/physics/units-and-measurements
+
+    /api/v1/content/resolve-subject/ahsec/hs-1st-year/physics
+      → /ahsec/hs-1st-year/physics
+
+    /api/v1/content/library-bundle  → /library
+    /api/v1/content/subjects        → /library
+    """
+    if "/chapter-by-slug/" in path:
+        # Strip prefix up to and including "chapter-by-slug/"
+        slug_part = path.split("/chapter-by-slug/", 1)[-1]
+        return "/" + slug_part.strip("/")
+    if "/resolve-subject/" in path:
+        slug_part = path.split("/resolve-subject/", 1)[-1]
+        return "/" + slug_part.strip("/")
+    if "/library-bundle" in path or "/subjects" in path:
+        return "/library"
+    return path  # fallback: store as-is
+
+
+def _maybe_log_request(request: Request, status_code: int, latency_ms: int) -> None:
+    """
+    Fire-and-forget: write a lightweight document to request_logs when a content
+    API call succeeds (GET 2xx). Converts the API path to the equivalent frontend
+    URL so the top-routes widget shows human-readable page paths.
+
+    Scheduled with asyncio.create_task — never blocks the HTTP response.
+    """
+    if request.method != "GET":
+        return
+    if status_code < 200 or status_code >= 300:
+        return
+    path = request.url.path
+    if not _CONTENT_API_RE.match(path):
+        return
+
+    frontend_path = _api_path_to_frontend(path)
+
+    async def _write() -> None:
+        try:
+            from app.db.mongo import get_mongo_client
+            from datetime import datetime, timezone
+
+            db = get_mongo_client()[settings.MONGODB_DB_NAME]
+            ip = (
+                request.headers.get("cf-connecting-ip")
+                or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                or (request.client.host if request.client else "unknown")
+            )
+            await db.request_logs.insert_one({
+                "path": frontend_path,   # readable frontend URL shown in top-routes
+                "api_path": path,        # raw API path for debugging
+                "method": "GET",
+                "status": status_code,
+                "ip": ip,
+                "latency_ms": latency_ms,
+                "user_agent": request.headers.get("user-agent", "")[:200],
+                "referer": request.headers.get("referer", "")[:200],
+                "created_at": datetime.now(timezone.utc),
+            })
+        except Exception:
+            pass  # Never raise from fire-and-forget logging
+
+    try:
+        asyncio.create_task(_write())
+    except RuntimeError:
+        pass  # No running loop in tests — silently skip
+
+
 def create_app() -> FastAPI:
     """Factory function to create FastAPI application"""
     from app.core.logging_config import setup_logging
@@ -273,6 +368,10 @@ def create_app() -> FastAPI:
                 "request_id": request_id,
             },
         )
+
+        # Fire-and-forget request log to MongoDB (powers /analytics/top-routes).
+        # Only logs GET 2xx requests to content paths; skips health/admin/static.
+        _maybe_log_request(request, response.status_code, elapsed_ms)
 
         return response
 
