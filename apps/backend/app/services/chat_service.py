@@ -176,12 +176,12 @@ class ChatService:
             from app.services.ai.topic_matcher import topic_matcher
 
             query_embedding = await asyncio.wait_for(
-                generate_embedding_vector(query), timeout=2.0
+                generate_embedding_vector(query), timeout=1.0
             )
             match = await topic_matcher.match_topic(query_embedding)
             return match, query_embedding
         except asyncio.TimeoutError:
-            logger.warning("Topic match embedding call timed out (2.0s)")
+            logger.warning("Topic match embedding call timed out (1.0s) — falling back to web")
             return None, None
         except Exception as e:
             logger.warning(f"Topic match check failed: {e}")
@@ -376,12 +376,12 @@ class ChatService:
         try:
             chunks = await asyncio.wait_for(
                 _web_search(query, lang=lang),
-                timeout=5.0,
+                timeout=1.5,
             )
             logger.info(f"web_context: {len(chunks)} snippets for lang={lang}")
             return chunks
         except asyncio.TimeoutError:
-            logger.warning("retrieve_web_context timed out (5s)")
+            logger.warning("retrieve_web_context timed out (1.5s) — skipping web fallback")
             return []
         except Exception as e:
             logger.warning(f"retrieve_web_context failed: {e}")
@@ -430,9 +430,9 @@ class ChatService:
                 )
                 return truncate_chunks_to_budget(chunks, max_tokens=3000), path
 
-            return await asyncio.wait_for(_do_retrieval(), timeout=8.0)
+            return await asyncio.wait_for(_do_retrieval(), timeout=3.0)
         except asyncio.TimeoutError:
-            logger.warning("retrieve_context timed out after 8s")
+            logger.warning("retrieve_context timed out after 3s — falling back to web")
             return [], "empty"
         except Exception as e:
             logger.error(f"retrieve_context failed: {e}")

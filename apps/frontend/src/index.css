@@ -1568,9 +1568,18 @@
 .source-card-label { color: #7c3aed; opacity: 0.85; }
 .source-card-browser { color: #92400e; }
 .source-card-title { color: #15803d; }
+.source-card-subject {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #15803d;
+  line-height: 1.2;
+}
 .source-card-badge {
-  background: rgba(124, 58, 237, 0.08);
-  color: #6d28d9;
+  background: rgba(124, 58, 237, 0.10);
+  color: #5b21b6;
+  border: 1px solid rgba(124, 58, 237, 0.20);
 }
 
 /* ── Source Card dark mode ── */
@@ -1588,9 +1597,13 @@
 .dark .source-card-label { color: #a78bfa; opacity: 0.9; }
 .dark .source-card-browser { color: #fbbf24; }
 .dark .source-card-title { color: #34d399; }
+.dark .source-card-subject {
+  color: #4ade80;
+}
 .dark .source-card-badge {
-  background: rgba(139, 92, 246, 0.15);
+  background: rgba(139, 92, 246, 0.18);
   color: #c4b5fd;
+  border-color: rgba(139, 92, 246, 0.30);
 }
 
 

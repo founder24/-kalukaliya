@@ -625,46 +625,40 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                       aria-label={`Open ${chapterLabel || subjectLabel} in Syrabit Browser`}
                     >
                       <div className="px-3 py-2.5">
-                        <div className="flex items-center gap-1.5 mb-1">
+                        {/* Header: source type */}
+                        <div className="flex items-center gap-1.5 mb-2">
                           <sourceMeta.Icon size={11} className="source-card-icon" />
                           <span className="source-card-label text-[10px] font-semibold uppercase tracking-wider">Source</span>
                           <span className="text-[10px] text-muted-foreground" aria-hidden="true">·</span>
                           <span className="source-card-browser text-[10.5px] font-medium">{sourceMeta.kindLabel}</span>
                         </div>
-                        {/* Full breadcrumb chain: AHSEC › Class 12 › Physics › Chapter › Topic */}
-                        <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 mt-0.5 mb-1" style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
-                          {boardLabel && <><span className="font-medium">{boardLabel}</span><span aria-hidden="true" className="opacity-50">›</span></>}
-                          {classLabel && <><span>{classLabel}</span><span aria-hidden="true" className="opacity-50">›</span></>}
-                          {subjectLabel && <><span>{subjectLabel}</span>{(chapterLabel || topicLabel) && <span aria-hidden="true" className="opacity-50">›</span>}</>}
-                          {chapterLabel && <><span className="truncate max-w-[120px]">{chapterLabel}</span>{topicLabel && <span aria-hidden="true" className="opacity-50">›</span>}</>}
-                          {topicLabel && <span className="font-medium truncate max-w-[120px]" style={{ color: 'hsl(var(--primary))' }}>{topicLabel}</span>}
-                        </div>
-                        {chapterLabel && (
-                          <h4 className="source-card-title font-semibold leading-tight truncate" style={{ fontSize: '0.85rem', letterSpacing: '0.01em' }}>
-                            {chapterLabel}
-                          </h4>
+                        {/* Subject name — prominent green headline */}
+                        {subjectLabel && (
+                          <div className="source-card-subject mb-1.5">
+                            {subjectLabel}
+                          </div>
                         )}
-                        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-1.5">
+                        {/* Compact metadata pill badges */}
+                        <div className="flex flex-wrap items-center gap-1">
                           {boardLabel && (
-                            <>
-                              <span className="source-card-badge text-[11px] font-medium px-1.5 py-0.5 rounded">{boardLabel}</span>
-                              <span className="text-[11px] text-muted-foreground" aria-hidden="true">·</span>
-                            </>
+                            <span className="source-card-badge text-[10.5px] font-semibold px-2 py-0.5 rounded-full">{boardLabel}</span>
                           )}
                           {classLabel && (
-                            <>
-                              <span className="source-card-badge text-[11px] font-medium px-1.5 py-0.5 rounded">{classLabel}</span>
-                              <span className="text-[11px] text-muted-foreground" aria-hidden="true">·</span>
-                            </>
+                            <span className="source-card-badge text-[10.5px] font-semibold px-2 py-0.5 rounded-full">{classLabel}</span>
                           )}
-                          <span className="source-card-badge text-[11px] font-medium px-1.5 py-0.5 rounded">{subjectLabel}</span>
+                          {chapterLabel && (
+                            <span className="source-card-badge text-[10.5px] font-medium px-2 py-0.5 rounded-full truncate max-w-[140px]">{chapterLabel}</span>
+                          )}
+                          {topicLabel && !chapterLabel && (
+                            <span className="source-card-badge text-[10.5px] font-medium px-2 py-0.5 rounded-full truncate max-w-[140px]">{topicLabel}</span>
+                          )}
                         </div>
-                        {/* Confidence tier + match score — from backend source_card event */}
+                        {/* Confidence tier + match score */}
                         {(confidenceTierLabel || matchPct != null) && (
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                          <div className="flex flex-wrap items-center gap-1 mt-1.5">
                             {confidenceTierLabel && confidenceTierColor && (
                               <span
-                                className="text-[10.5px] font-semibold px-1.5 py-0.5 rounded-md"
+                                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
                                 style={{ background: confidenceTierColor.bg, border: `1px solid ${confidenceTierColor.border}`, color: confidenceTierColor.text }}
                                 title={`Embedding match confidence: ${msg.confidence_tier}`}
                               >
@@ -673,7 +667,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                             )}
                             {matchPct != null && (
                               <span
-                                className="text-[10.5px] font-medium px-1.5 py-0.5 rounded-md"
+                                className="text-[10px] font-medium px-2 py-0.5 rounded-full"
                                 style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)', color: '#6d28d9' }}
                                 title={`Cosine similarity: ${msg.match_score?.toFixed(4)}`}
                               >
