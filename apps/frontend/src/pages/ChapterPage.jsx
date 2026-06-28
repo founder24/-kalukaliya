@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
-import { createPortal } from 'react-dom';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
@@ -26,7 +25,6 @@ import RelatedTopicsNav from '@/components/chapter/RelatedTopicsNav';
 import { pushRecentChapter } from '@/utils/recentChapters';
 import { HighlightSavePopover } from '@/components/study/HighlightSavePopover';
 import { ReadAloudButton } from '@/components/study/ReadAloudButton';
-import { QuizModal } from '@/components/study/QuizModal';
 // ─────────────────────────────────────────────────────────────────────────────
 // AD POLICY: Chapter routes (/{board}/...) are intentionally AD-FREE in the
 // Task #526 rollout. Do NOT import <AdSlot /> or any ad-network script here.
@@ -138,7 +136,7 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
   const hasMW = sortedMarks.length > 0 && sortedMarks.some(m => (markWise[m] || []).length > 0);
 
   return (
-    <div className="chapter-textbook rounded-2xl p-5 sm:p-8 mt-6">
+    <div className="chapter-textbook rounded-2xl p-3 sm:p-4 mt-4">
       <div className="flex items-center gap-2 mb-4">
         <HelpCircle size={20} className="text-purple-600" />
         <h2 className="text-xl font-bold text-gray-900" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", border: 'none', margin: 0, padding: 0 }}>
@@ -292,7 +290,7 @@ export default function ChapterPage() {
       : null,
   );
   const articleRef = useRef(null);
-  const [quizOpen, setQuizOpen] = useState(false);
+  const [contentMode, setContentMode] = useState('notes');
   const [activeId, setActiveId] = useState('');
   const [relatedChapterTopics, setRelatedChapterTopics] = useState([]);
   // Task #914 Step 3 — published topics with `definition_status=ok`
@@ -1138,7 +1136,7 @@ export default function ChapterPage() {
       />
 
       <header className="border-b border-border/40 bg-card/80 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 py-5">
+        <div className="max-w-7xl mx-auto px-4 py-3">
           <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4 flex-wrap">
             <Link to="/" className="hover:text-primary transition-colors flex items-center gap-1">
               <Home size={13} /> Home
@@ -1164,9 +1162,6 @@ export default function ChapterPage() {
               <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground leading-tight">
                 {chapterTitle}
               </h1>
-              {data.meta_description && (
-                <p className="text-muted-foreground mt-1.5 text-sm leading-relaxed max-w-2xl line-clamp-2">{data.meta_description}</p>
-              )}
               {/* Topical-authority byline — visible last-updated +
                   author signal that mirrors the JSON-LD `dateModified`
                   / `author` fields. Crawlers and humans see the same
@@ -1223,15 +1218,6 @@ export default function ChapterPage() {
             >
               {sharing ? <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg> : <Share2 size={14} />} {contentLang === 'as' ? 'শ্বেয়াৰ' : 'Share'}
             </button>
-            {!isQuestionPaper && (
-              <button
-                onClick={() => setQuizOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-muted-foreground transition-all hover:text-foreground hover:bg-accent/30 active:scale-95"
-                style={{ border: '1px solid hsl(var(--border) / 0.3)' }}
-              >
-                <HelpCircle size={14} /> {contentLang === 'as' ? 'কুইজ' : 'Quiz Me'}
-              </button>
-            )}
             {isQuestionPaper ? (
               <span className="ml-auto px-3 py-1 rounded-lg text-xs font-bold bg-amber-100 text-amber-700 border border-amber-200">
                 Question Paper
@@ -1267,67 +1253,90 @@ export default function ChapterPage() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 py-6">
+      <div className="max-w-7xl mx-auto px-3 py-3">
         <div className="flex gap-8">
           <article ref={articleRef} data-savable="true" className="flex-1 min-w-0">
+            {/* 3-mode content tab switcher */}
+            {!isQuestionPaper && (
+              <div className="flex items-center gap-1 mb-2 p-0.5 rounded-lg w-fit max-w-[720px] mx-auto" style={{ background: 'rgba(139,92,246,0.07)', border: '1px solid rgba(139,92,246,0.12)' }}>
+                {[
+                  { id: 'notes', label: contentLang === 'as' ? 'নোটছ' : 'Notes', icon: FileText },
+                  { id: 'qa', label: contentLang === 'as' ? 'প্ৰশ্নোত্তৰ' : 'Q & A', icon: HelpCircle },
+                  { id: 'pyq', label: contentLang === 'as' ? 'প্ৰশ্নকাকত' : 'Question Paper', icon: BookOpen },
+                ].map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    onClick={() => setContentMode(id)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                      contentMode === id
+                        ? 'text-white bg-violet-600 shadow-sm'
+                        : 'text-violet-600 hover:bg-violet-50'
+                    }`}
+                  >
+                    <Icon size={11} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div
               id="chapter-content-top"
-              className="chapter-textbook rounded-2xl p-5 sm:p-8 scroll-mt-20 max-w-[720px] mx-auto text-[14px] leading-relaxed"
+              className="chapter-textbook rounded-2xl p-3 sm:p-4 scroll-mt-20 max-w-[720px] mx-auto text-[12px] leading-relaxed"
             >
-              {data.meta_description && /^\s*(\*|\-|#{2,})/.test(data.content || '') && (
-                <p className="text-base leading-relaxed text-muted-foreground mb-6 pb-4 border-b border-border/30">
-                  {data.meta_description}
+              {/* Notes mode — main markdown content */}
+              {(isQuestionPaper || contentMode === 'notes') && (
+                <Suspense fallback={
+                  <div className="space-y-3">
+                    {[...Array(6)].map((_, i) => (
+                      <Skeleton key={i} className="h-5 w-full" style={{ width: `${65 + (i % 3) * 12}%` }} />
+                    ))}
+                  </div>
+                }>
+                  <MarkdownRenderer components={markdownComponents}>
+                    {displayContent}
+                  </MarkdownRenderer>
+                </Suspense>
+              )}
+              {/* Q&A mode — source citation / topic definition cards */}
+              {!isQuestionPaper && contentMode === 'qa' && (
+                <div data-testid="topic-answer-cards">
+                  {publishedTopics.length > 0 ? (
+                    publishedTopics.map((t) => {
+                      const tSlug = t.topic_slug || t.slug || '';
+                      return (
+                        <TopicAnswerCard
+                          key={t.id || tSlug}
+                          topic={t}
+                          chapterUrl={chapterUrl}
+                          fromChat={!!(fromChatTopicSlug && fromChatTopicSlug === tSlug)}
+                        />
+                      );
+                    })
+                  ) : (
+                    <p className="text-xs text-muted-foreground py-8 text-center">
+                      {contentLang === 'as' ? 'এই অধ্যায়ৰ বাবে Q&A উপলব্ধ নহয়।' : 'No Q&A available for this chapter yet.'}
+                    </p>
+                  )}
+                </div>
+              )}
+              {/* Question Paper mode — placeholder when no pyq data */}
+              {!isQuestionPaper && contentMode === 'pyq' && (!pyqData || pyqData.total === 0) && (
+                <p className="text-xs text-muted-foreground py-8 text-center">
+                  {contentLang === 'as' ? 'প্ৰশ্নকাকত উপলব্ধ নহয়।' : 'No question paper data available yet.'}
                 </p>
               )}
-              {/* Task #914 Step 3 — visible AI answer cards. Rendered
-                  before the markdown body so:
-                    1. Bots reading the linear DOM see the citable
-                       attribution sentence + definition immediately.
-                    2. The topic deep-link `#topic-<slug>` anchor lands
-                       above the fold once useHashScroll fires.
-                  Same React tree, same DOM for SSR / prerender / SPA —
-                  the spec's "no cloaking, single source of truth"
-                  contract is preserved. */}
-              {publishedTopics.length > 0 && (
-                <div data-testid="topic-answer-cards" className="mb-8">
-                  {publishedTopics.map((t) => {
-                    const tSlug = t.topic_slug || t.slug || '';
-                    return (
-                      <TopicAnswerCard
-                        key={t.id || tSlug}
-                        topic={t}
-                        chapterUrl={chapterUrl}
-                        fromChat={!!(fromChatTopicSlug && fromChatTopicSlug === tSlug)}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-              {/* Topical-mapping — siblings + cross-chapter related
-                  topics rendered as real <a href> links so bots see the
-                  full internal-linking graph in the linear DOM (no JS
-                  required). Sibling links jump in-page to the
-                  matching answer card; cross-chapter links use the
-                  Task #914 deep-link route. Renders nothing when both
-                  arrays are empty. */}
-              <ChapterTopicGraph
-                siblings={topicGraph.siblings}
-                crossChapter={topicGraph.cross_chapter}
-              />
-              <Suspense fallback={
-                <div className="space-y-3">
-                  {[...Array(6)].map((_, i) => (
-                    <Skeleton key={i} className="h-5 w-full" style={{ width: `${65 + (i % 3) * 12}%` }} />
-                  ))}
-                </div>
-              }>
-                <MarkdownRenderer components={markdownComponents}>
-                  {displayContent}
-                </MarkdownRenderer>
-              </Suspense>
             </div>
 
-            <ImportantQuestions chapterTitle={chapterTitle} pyqData={pyqData} />
+            {/* Question Paper tab content — rendered as own card below */}
+            {!isQuestionPaper && contentMode === 'pyq' && pyqData && pyqData.total > 0 && (
+              <ImportantQuestions chapterTitle={chapterTitle} pyqData={pyqData} />
+            )}
+
+            {/* Topical-mapping graph — related topic links at bottom */}
+            <ChapterTopicGraph
+              siblings={topicGraph.siblings}
+              crossChapter={topicGraph.cross_chapter}
+            />
 
             {(() => {
               const subjChapters = (_bundle?.chapters || []).filter(
@@ -1408,19 +1417,9 @@ export default function ChapterPage() {
         sourceTitle={`${chapterTitle} — ${subjectName}`}
         chapterRef={`${board}/${classSlug}/${subjectSlug}/${chapterSlug}`}
         subjectName={subjectName}
-        hideQuiz={isQuestionPaper}
+        hideQuiz={true}
         hideSave={isQuestionPaper}
       />
-      {!isQuestionPaper && typeof document !== 'undefined' && createPortal(
-        <QuizModal
-          open={quizOpen} onClose={() => setQuizOpen(false)}
-          topic={chapterTitle} subject_name={subjectName}
-          chapter_ref={`${board}/${classSlug}/${subjectSlug}/${chapterSlug}`}
-          response_lang={contentLang}
-          count={7}
-        />,
-        document.body,
-      )}
     </div>
   );
 }
