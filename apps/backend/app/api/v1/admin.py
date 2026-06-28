@@ -50,6 +50,12 @@ def _get_admin_verification_key() -> tuple:
 async def _csrf_check(request: Request):
     """Validate Origin/Referer for CSRF protection on admin endpoints."""
     if request.method in ("POST", "PUT", "DELETE"):
+        # Skip entirely in test/development — mirrors the global middleware behaviour.
+        # In dev the Replit preview domain is the trusted host and blocking it would
+        # make the admin panel unusable during local development.
+        if settings.APP_ENV in ("test", "development"):
+            return
+
         origin = request.headers.get("origin", "")
         if not origin:
             # Browsers send Referer as a full URL (e.g. https://syrabit.ai/admin/login).
