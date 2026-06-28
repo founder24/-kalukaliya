@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Layers, ChevronRight, Trash2, Loader2, Edit2, AlignLeft, X, CheckCircle, Circle, EyeOff, Database, Info } from 'lucide-react';
+import { Search, Layers, ChevronRight, Trash2, Loader2, Edit2, AlignLeft, X, CheckCircle, Circle, EyeOff, Database, Info, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { isDegreeBoard } from '@/utils/courseTypes';
@@ -478,6 +478,36 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     }
   }, [selectedChapterIds, adminToken, addTrackedJob]);
 
+  const handleBulkPublish = useCallback(async () => {
+    if (!selSubject) return;
+    const ids = Array.from(selectedChapterIds);
+    setBulkUpdating(true);
+    try {
+      const res = await axios.post(
+        `${API}/admin/content/subjects/${selSubject}/bulk-publish`,
+        ids.length > 0 ? { chapter_ids: ids } : {},
+        authHeaders(adminToken),
+      );
+      const queued = res.data?.queued ?? 0;
+      toast.success(`${queued} chapter${queued === 1 ? '' : 's'} queued for publish pipeline`);
+      setSelectedChapterIds(new Set());
+      const jobIds = res.data?.job_ids || [];
+      if (jobIds.length > 0) {
+        setPublishJobIds(prev => {
+          const next = [...prev];
+          for (const jid of jobIds) {
+            if (!next.includes(jid)) next.push(jid);
+          }
+          return next;
+        });
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Bulk publish failed');
+    } finally {
+      setBulkUpdating(false);
+    }
+  }, [selectedChapterIds, selSubject, adminToken]);
+
   // Clear selection when navigation context changes
   useEffect(() => { setSelectedSubjectIds(new Set()); }, [selStream]);
   useEffect(() => { setSelectedChapterIds(new Set()); }, [selSubject]);
@@ -589,15 +619,27 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
           <ActionBtn status="draft" icon={Circle} color="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100">Draft</ActionBtn>
           <ActionBtn status="unpublished" icon={EyeOff} color="bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200">Unpublish</ActionBtn>
           {scope === 'chapters' && (
-            <button
-              onClick={handleBulkReindex}
-              disabled={bulkUpdating}
-              className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100"
-              data-testid="bulk-chapters-reindex"
-            >
-              {bulkUpdating ? <Loader2 size={12} className="animate-spin" /> : <Database size={12} />}
-              Reindex RAG
-            </button>
+            <>
+              <button
+                onClick={handleBulkReindex}
+                disabled={bulkUpdating}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100"
+                data-testid="bulk-chapters-reindex"
+              >
+                {bulkUpdating ? <Loader2 size={12} className="animate-spin" /> : <Database size={12} />}
+                Reindex RAG
+              </button>
+              <button
+                onClick={handleBulkPublish}
+                disabled={bulkUpdating || !selSubject}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                data-testid="bulk-chapters-publish-pipeline"
+                title={selectedChapterIds.size > 0 ? `Publish ${selectedChapterIds.size} selected chapters through full delivery pipeline` : 'Publish all chapters in this subject through full delivery pipeline'}
+              >
+                {bulkUpdating ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                {selectedChapterIds.size > 0 ? `Publish Pipeline (${selectedChapterIds.size})` : 'Publish All'}
+              </button>
+            </>
           )}
         </div>
       </div>

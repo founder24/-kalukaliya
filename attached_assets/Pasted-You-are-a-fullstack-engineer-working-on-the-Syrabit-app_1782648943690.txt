@@ -1,0 +1,85 @@
+You are a fullstack engineer working on the Syrabit app.
+
+Environment:
+- Frontend: Cloudflare Pages / Cloudflare frontend
+- Backend: Cloud Run / Google Cloud backend
+- Database: MongoDB
+- External services: Cloudflare, GitHub, Google Cloud
+
+Use these environment variables only through secure runtime config:
+- CLOUDFLARE_API_TOKEN
+- GITHUB_TOKEN
+- GOOGLE_APPLICATION_CREDENTIALS_JSON
+- GOOGLE_SA_KEY
+- MONGODB_URL
+
+Core rule:
+SAVE changes the data.
+PUBLISH changes delivery.
+REINDEX changes retrieval.
+
+Objective:
+Fix the full admin panel end to end so all admin workflows are functional, observable, and safe.
+
+What to verify and fix:
+1. Auth and access.
+2. Admin shell and routing.
+3. Content editor.
+4. RAG pipeline.
+5. Publish pipeline.
+6. Chapter state and sync badges.
+7. Safety, concurrency, and audit logs.
+8. Bulk operations.
+9. Library/public delivery.
+10. Chat/history/profile.
+11. Analytics and ops.
+12. Frontend build, backend startup, and runtime console cleanliness.
+
+Implementation rules:
+- Keep save, publish, and reindex as separate concepts.
+- Do not mix delivery changes with retrieval changes.
+- Do not introduce new secrets in code.
+- Use existing job tracking if present.
+- Preserve backward compatibility where possible.
+- Update frontend and backend together when response shapes change.
+- Add null-safe UI states for missing data.
+- Keep admin routes behind cookie-first auth.
+- Keep machine/cron routes separate and POST-only for side effects.
+
+File-by-file order:
+1. Backend models
+2. Backend routes
+3. Backend services
+4. Backend audit/logging
+5. Frontend admin shell
+6. Frontend editor panels
+7. Frontend job trackers
+8. Frontend analytics/logs
+9. Public delivery routes
+10. Chat and personalization
+11. Auth/cron hardening
+12. Final verification
+
+Acceptance criteria:
+- Admin panel loads without console crashes.
+- All admin sections render with proper boundaries.
+- Save updates data only.
+- Publish updates delivery only.
+- Reindex updates retrieval only.
+- RAG freshness and publish freshness are visible in UI.
+- Concurrency conflicts return 409 and support intentional overwrite.
+- Bulk publish and bulk reindex show job IDs and progress.
+- Public pages only show published content.
+- Chat uses current indexed retrieval.
+- Analytics, logs, and conversations are paginated.
+- All critical admin actions are audited.
+- Backend starts clean and frontend builds clean.
+- No endpoint depends on hidden or hardcoded secrets.
+
+Verification:
+- Run backend startup check.
+- Run frontend build check.
+- Confirm admin auth flow works logged out and logged in.
+- Confirm job tracker, badges, analytics, and pagination work.
+- Confirm publish and reindex are independent.
+- Confirm all pre-existing 404 widgets degrade gracefully.

@@ -949,6 +949,69 @@ async def publish_chapter(request: Request, chapter_id: str):
     return {"job_id": job_id, "status": "queued", "chapter_id": chapter_id}
 
 
+@router.post("/content/subjects/{subject_id}/bulk-publish")
+async def bulk_publish_subject(request: Request, subject_id: str):
+    """
+    Bulk publish pipeline for all (or selected) chapters in a subject.
+
+    Body (optional): { chapter_ids: [str, ...] }
+    If chapter_ids is omitted or empty, all chapters in the subject are queued.
+
+    Returns { job_ids: [...], queued: N }.
+    Each job_id can be polled via GET /content/publish-jobs/{job_id}.
+    """
+    import asyncio as _asyncio
+    from app.models.rag import PublishJob, PublishJobStep
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    requested_ids: list[str] = body.get("chapter_ids") or []
+
+    if requested_ids:
+        chapters = []
+        for cid in requested_ids:
+            try:
+                ch = await Chapter.get(PydanticObjectId(cid))
+                if ch:
+                    chapters.append(ch)
+            except Exception:
+                pass
+    else:
+        chapters = await Chapter.find({"subject_id": subject_id}).to_list(length=None)
+
+    if not chapters:
+        raise HTTPException(status_code=404, detail="No chapters found for subject")
+
+    job_ids: list[str] = []
+    for chapter in chapters:
+        chapter_id = str(chapter.id)
+        job = PublishJob(
+            chapter_id=chapter_id,
+            chapter_title=chapter.title,
+            status="pending",
+            steps=[
+                PublishJobStep(name="gcs", label="Write to GCS"),
+                PublishJobStep(name="cloudflare", label="Cloudflare prerender"),
+                PublishJobStep(name="status_update", label="Update DB status"),
+                PublishJobStep(name="pages_rebuild", label="CF Pages rebuild"),
+                PublishJobStep(name="indexnow", label="IndexNow ping"),
+                PublishJobStep(name="wikidata", label="Wikidata enrichment"),
+                PublishJobStep(name="embeddings", label="Topic embeddings"),
+            ],
+        )
+        await job.insert()
+        job_id = str(job.id)
+        job_ids.append(job_id)
+        _asyncio.create_task(
+            content_publisher_service.publish_chapter_with_job(chapter_id, job_id)
+        )
+
+    return {"job_ids": job_ids, "queued": len(job_ids)}
+
+
 @router.get("/content/publish-jobs/{job_id}")
 async def get_publish_job(request: Request, job_id: str):
     """Poll publish job status and step progress."""

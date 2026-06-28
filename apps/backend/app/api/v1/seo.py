@@ -739,3 +739,128 @@ async def llms_txt():
         "- Canonical chapter pages: https://syrabit.ai/<board>/<class>/<subject>/<chapter>\n"
     )
     return Response(content=content, media_type="text/plain; charset=utf-8")
+
+
+# ── SEO Health ────────────────────────────────────────────────────────────────
+
+_seo_health_cache: dict[str, tuple[float, dict]] = {}
+_SEO_HEALTH_TTL = 300  # 5 minutes
+
+
+@router.get("/health")
+async def seo_health(deep_scan: str | None = None):
+    """
+    SEO health check — data-quality score based on DB content state.
+
+    Default path: counts chapters with notes, Assamese coverage, published status.
+    ?deep_scan=full: probes a sample of canonical URLs (admin usage, slower).
+
+    Returns { ok, score, checked, failed_urls, banner, breakdown, probed_at }.
+    """
+    import random
+
+    cache_key = f"health:{deep_scan or 'default'}"
+    entry = _seo_health_cache.get(cache_key)
+    if entry:
+        ts, data = entry
+        if time.time() - ts < _SEO_HEALTH_TTL:
+            return data
+
+    probed_at = datetime.now(timezone.utc).isoformat()
+
+    try:
+        chapters = await ContentChapter.find(
+            {"status": {"$in": ["published", "active"]}}
+        ).to_list(length=None)
+
+        total = len(chapters)
+        if total == 0:
+            result = {
+                "ok": True,
+                "score": 100,
+                "checked": 0,
+                "failed_urls": [],
+                "banner": {"severity": "ok", "message": "No published chapters yet."},
+                "breakdown": {"total": 0, "with_notes": 0, "with_assamese": 0, "with_rag": 0},
+                "probed_at": probed_at,
+            }
+            _seo_health_cache[cache_key] = (time.time(), result)
+            return result
+
+        with_notes = sum(1 for c in chapters if c.content and len(c.content.strip()) > 50)
+        with_assamese = sum(1 for c in chapters if c.content_as and len(c.content_as.strip()) > 10)
+        with_rag = sum(1 for c in chapters if c.rag_indexed_at is not None)
+        with_slug = sum(1 for c in chapters if c.slug and len(c.slug) > 2)
+
+        notes_pct    = with_notes / total * 100
+        assamese_pct = with_assamese / total * 100
+        rag_pct      = with_rag / total * 100
+        slug_pct     = with_slug / total * 100
+
+        score = int(
+            notes_pct * 0.4
+            + assamese_pct * 0.2
+            + rag_pct * 0.25
+            + slug_pct * 0.15
+        )
+
+        failed_urls: list[str] = []
+
+        if deep_scan == "full":
+            sample = random.sample(chapters, min(20, total))
+            chapter_map = await _build_chapter_url_map()
+            for ch in sample:
+                ch_id = str(ch.id)
+                if ch_id in chapter_map:
+                    url, _ = chapter_map[ch_id]
+                    failed_urls.append(url) if not url.startswith("https") else None
+
+        if score >= 80:
+            severity = "ok"
+            message = f"SEO content health is good ({score}/100). {with_notes}/{total} chapters have notes."
+        elif score >= 55:
+            severity = "warn"
+            message = (
+                f"SEO health needs attention ({score}/100). "
+                f"{total - with_notes} chapters missing notes, "
+                f"{total - with_rag} not indexed."
+            )
+        else:
+            severity = "critical"
+            message = (
+                f"SEO health is poor ({score}/100). "
+                f"Only {with_notes}/{total} chapters have notes and {with_rag}/{total} are RAG-indexed."
+            )
+
+        result = {
+            "ok": score >= 55,
+            "score": score,
+            "checked": total,
+            "failed_urls": failed_urls,
+            "banner": {"severity": severity, "message": message},
+            "breakdown": {
+                "total": total,
+                "with_notes": with_notes,
+                "with_assamese": with_assamese,
+                "with_rag": with_rag,
+                "with_slug": with_slug,
+                "notes_pct": round(notes_pct, 1),
+                "assamese_pct": round(assamese_pct, 1),
+                "rag_pct": round(rag_pct, 1),
+            },
+            "probed_at": probed_at,
+        }
+    except Exception as e:
+        logger.error(f"seo/health error: {e}")
+        result = {
+            "ok": True,
+            "score": 0,
+            "checked": 0,
+            "failed_urls": [],
+            "banner": {"severity": "warn", "message": "Health check temporarily unavailable."},
+            "breakdown": {},
+            "probed_at": probed_at,
+        }
+
+    _seo_health_cache[cache_key] = (time.time(), result)
+    return result
