@@ -46,21 +46,31 @@ CONFIDENCE_MID = 0.65   # mirrors MATCH_THRESHOLD in topic_matcher
 CONFIDENCE_LOW = 0.50
 
 # Pattern for detecting generic/greeting queries that should skip RAG.
-# Covers typos with repeated chars (hii, heyy, heyyy, helloo) and common
-# affirmatives / farewells that carry no educational intent.
+# Covers typos with repeated chars (hii, heyy, heyyy, helloo), common
+# English affirmatives / farewells, and Assamese script greetings.
 GENERIC_QUERY_PATTERN = re.compile(
     r"^("
+    # ── English patterns ──────────────────────────────────────────────
     r"hi+|he+y+|he+llo+|helo+|"                              # hi / hey / hello variants
-    r"thanks?|thank\s+you|ty|"                               # thanks / thank you
+    r"thanks?|thank\s+you|ty|thnx|thx|"                     # thanks / thank you
     r"ok+a*y*|o+k+|k|"                                       # ok / okay / okk / k
-    r"bye+|good\s*bye+|"                                     # bye / goodbye
-    r"good\s+(?:morning|evening|night|day|afternoon)|"       # time greetings
-    r"how\s+are\s+you|"                                      # how are you
+    r"bye+|good\s*bye+|see\s+ya|see\s+you|cya|"             # bye / goodbye
+    r"good\s+(?:morning|evening|night|day|afternoon)|gm|gn|" # time greetings + abbreviations
+    r"how\s+are\s+(?:you|u)|how\s+r\s+u|"                   # how are you variants
+    r"whats?\s+up|sup|"                                      # what's up
     r"what\s+can\s+you\s+do|"                               # what can you do
     r"who\s+are\s+you|what\s+are\s+you|"                    # identity questions
     r"nice|great|awesome|cool|perfect|"                      # short affirmatives
-    r"sure|got\s+it|understood|noted|alright|alrite"         # acknowledgements
-    r")[\s!?.,'\u0964]*$",                                   # trailing punctuation incl. । (Devanagari danda)
+    r"sure|got\s+it|understood|noted|alright|alrite|"        # acknowledgements
+    # ── Assamese script greetings (Unicode range \u0980–\u09FF) ───────
+    r"নমস্কাৰ|নমস্কৰ|নমস্কাৰে|"                            # Namaskar variants
+    r"হেলো|হেলৌ|হাই|"                                        # Hello / Hi in Assamese
+    r"ধন্যবাদ|থেংকু|আভাৰী|বহুত\s+ধন্যবাদ|"                 # Thanks
+    r"বিদায়|বাই|যাওঁ|"                                       # Bye
+    r"ঠিক\s+আছে|ঠিকেই|বুজিলোঁ|বেছি\s+ভাল|"                 # Ok / Understood
+    r"কেনে\s+আছা|কেমন\s+আছ|কেনে\s+আছে|ভাল\s+আছানে|"        # How are you
+    r"শুভ\s+ৰাতিপুৱা|শুভ\s+প্ৰভাত|শুভ\s+গধূলি|শুভ\s+নিশা|শুভৰাত্ৰি"  # Time greetings
+    r")[\s!?.,'\u0964\u09F7]*$",                             # trailing punctuation incl. ৷ ।
     re.IGNORECASE,
 )
 

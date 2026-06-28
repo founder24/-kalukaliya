@@ -128,6 +128,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Topic embedding warm-up failed (non-fatal): {e}")
 
+    # Warm up Greeting RAG — pre-embed all greeting queries via CF bge-m3
+    # so casual greetings are served from memory (<5 ms) instead of calling the LLM.
+    try:
+        from app.services.ai.greeting_rag import greeting_rag
+        await greeting_rag.initialize()
+    except Exception as e:
+        logger.warning(f"Greeting RAG warm-up failed (non-fatal, fast-path still works): {e}")
+
     # ── Admin Bootstrap ──────────────────────────────────────────────────────
     # Creates or updates the admin user when ADMIN_EMAIL + ADMIN_PASSWORD are set.
     # Safe to run on every restart — idempotent unless ADMIN_FORCE_RESET=true.
