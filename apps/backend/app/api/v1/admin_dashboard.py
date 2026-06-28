@@ -47,39 +47,39 @@ async def admin_dashboard(request: Request):
         free_users = await db.users.count_documents({"subscription_tier": "free"})
 
         # ── Message counts ────────────────────────────────────────────────────
-        total_messages_agg = await db.chats.aggregate(
+        total_messages_agg = await (await db.chats.aggregate(
             [
                 {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
                 {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
             ]
-        ).to_list(length=1)
+        )).to_list(length=1)
         total_messages = total_messages_agg[0]["total"] if total_messages_agg else 0
 
-        messages_today_agg = await db.chats.aggregate(
+        messages_today_agg = await (await db.chats.aggregate(
             [
                 {"$match": {"updated_at": {"$gte": today_start}}},
                 {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
                 {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
             ]
-        ).to_list(length=1)
+        )).to_list(length=1)
         messages_today = messages_today_agg[0]["total"] if messages_today_agg else 0
 
         # ── Revenue: sum captured Razorpay transactions ───────────────────────
         try:
-            rev_agg = await db.transactions.aggregate(
+            rev_agg = await (await db.transactions.aggregate(
                 [
                     {"$match": {"status": "captured"}},
                     {"$group": {"_id": None, "total_paise": {"$sum": "$amount"}}},
                 ]
-            ).to_list(length=1)
+            )).to_list(length=1)
             revenue_total = round((rev_agg[0]["total_paise"] if rev_agg else 0) / 100, 2)
 
-            rev_month_agg = await db.transactions.aggregate(
+            rev_month_agg = await (await db.transactions.aggregate(
                 [
                     {"$match": {"status": "captured", "created_at": {"$gte": month_start}}},
                     {"$group": {"_id": None, "total_paise": {"$sum": "$amount"}}},
                 ]
-            ).to_list(length=1)
+            )).to_list(length=1)
             revenue_month = round(
                 (rev_month_agg[0]["total_paise"] if rev_month_agg else 0) / 100, 2
             )
@@ -109,7 +109,7 @@ async def admin_dashboard(request: Request):
         try:
             from datetime import timedelta
             since = now - timedelta(hours=24)
-            spend_agg = await db.ai_usage_logs.aggregate(
+            spend_agg = await (await db.ai_usage_logs.aggregate(
                 [
                     {"$match": {"created_at": {"$gte": since}}},
                     {
@@ -121,7 +121,7 @@ async def admin_dashboard(request: Request):
                         }
                     },
                 ]
-            ).to_list(length=10)
+            )).to_list(length=10)
             if spend_agg:
                 token_spend = {
                     "source": "ai_usage_logs",
@@ -180,4 +180,69 @@ async def admin_dashboard(request: Request):
             "token_spend": {"source": "unavailable"},
             "top_queries": {"source": "unavailable"},
             "chat_fallbacks": {"source": "unavailable"},
+        }
+
+
+@router.get("/dashboard/metrics")
+async def admin_dashboard_metrics():
+    """
+    Heavier metrics block: revenue, user tier split, SEO page counts, bot render stats.
+    Polled every 60 s by AdminDashboard. Uses _meta.heavy_cached_at as a freshness signal.
+    """
+    db = get_mongo_client()[settings.MONGODB_DB_NAME]
+    now = datetime.now(timezone.utc)
+    try:
+        paid_count = await db.users.count_documents({"subscription_tier": {"$in": ["pro", "premium"]}})
+        free_count = await db.users.count_documents({"subscription_tier": {"$nin": ["pro", "premium"]}})
+
+        total_revenue = 0
+        mrr = 0
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        async for p in db.payments.find({"status": "captured"}, {"amount": 1, "created_at": 1}):
+            amt = p.get("amount", 0) or 0
+            total_revenue += amt
+            if p.get("created_at") and p["created_at"] >= month_start:
+                mrr += amt
+
+        published_chapters = await db.chapters.count_documents({"is_published": True})
+        topics = await db.chapters.count_documents({"is_published": True, "topics": {"$exists": True, "$not": {"$size": 0}}})
+
+        request_count = await db.request_logs.count_documents(
+            {"created_at": {"$gte": now - __import__("datetime").timedelta(days=1)}}
+        ) if "request_logs" in await db.list_collection_names() else 0
+
+        return {
+            "response_time_ms": None,
+            "revenue": {
+                "total_inr": total_revenue,
+                "mrr_inr": mrr,
+            },
+            "users": {
+                "paid": paid_count,
+                "free": free_count,
+            },
+            "seo": {
+                "published_pages": published_chapters,
+                "topics": topics,
+            },
+            "bot_render": {
+                "total_requests": request_count,
+                "by_page_type": {},
+            },
+            "dependencies": {},
+            "_meta": {
+                "heavy_cached_at": now.timestamp(),
+                "source": "mongodb",
+            },
+        }
+    except Exception as e:
+        logger.error(f"dashboard/metrics error: {e}")
+        return {
+            "response_time_ms": None,
+            "revenue": {"total_inr": 0, "mrr_inr": 0},
+            "users": {"paid": 0, "free": 0},
+            "seo": {"published_pages": 0, "topics": 0},
+            "bot_render": {"total_requests": 0, "by_page_type": {}},
+            "dependencies": {},
+            "_meta": {"heavy_cached_at": now.timestamp(), "source": "unavailable"},
         }

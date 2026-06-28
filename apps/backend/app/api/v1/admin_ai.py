@@ -177,7 +177,8 @@ async def ai_usage():
                 }
             },
         ]
-        rows = await db.ai_usage_logs.aggregate(pipeline).to_list(length=10)
+        _agg_cursor = await db.ai_usage_logs.aggregate(pipeline)
+        rows = await _agg_cursor.to_list(length=10)
 
         if not rows:
             return {
@@ -335,7 +336,7 @@ async def health_llm_costs(days: int = 7):
                 }
             },
         ]
-        rows = await db.ai_usage_log.aggregate(pipeline).to_list(length=20)
+        rows = await (await db.ai_usage_log.aggregate(pipeline)).to_list(length=20)
         providers = {}
         for r in rows:
             providers[r["_id"] or "unknown"] = {
@@ -355,3 +356,71 @@ async def health_llm_costs(days: int = 7):
     except Exception as e:
         logger.error(f"LLM costs error: {e}")
         return {"days": days, "providers": {}, "total_tokens": 0, "source": "unavailable"}
+
+
+@router.get("/ai/cache/stats")
+async def ai_cache_stats():
+    """
+    AI response cache statistics — hit rate, backend config, circuit breaker state.
+    Polled every 30 s by AdminHealth InfraTab.
+    """
+    from app.db.redis import get_redis
+
+    managed: dict = {
+        "backend": "redis",
+        "namespace": "chat_cache",
+        "ttl_seconds": 600,
+        "max_entry_bytes": None,
+        "breaker_open": False,
+        "last_error": None,
+        "hits": 0,
+        "misses": 0,
+        "errors": 0,
+        "hit_rate": None,
+        "bytes_stored": None,
+        "entries_skipped_oversize": 0,
+        "avg_saved_latency_ms": None,
+        "estimated_total_saved_ms": None,
+        "purge_count": 0,
+    }
+    l1: dict = {"size": 0, "maxsize": 0}
+
+    try:
+        redis = get_redis()
+        keys = await redis.keys("chat_cache:*")
+        managed["hits"] = len(keys)
+        managed["hit_rate"] = None
+        total_bytes = 0
+        for k in keys[:50]:
+            v = await redis.get(k)
+            if v:
+                total_bytes += len(v) if isinstance(v, (bytes, str)) else 0
+        managed["bytes_stored"] = total_bytes
+    except Exception as e:
+        managed["breaker_open"] = True
+        managed["last_error"] = str(e)[:120]
+
+    return {"managed": managed, "l1": l1}
+
+
+@router.post("/ai/cache/purge")
+async def ai_cache_purge(pattern: str = "*"):
+    """
+    Purge AI response cache entries matching pattern.
+    Returns {ok, deleted, l1_cleared} for the AdminHealth purge button.
+    """
+    from app.db.redis import get_redis
+
+    deleted = 0
+    try:
+        redis = get_redis()
+        prefix = "chat_cache:"
+        safe_pattern = pattern.lstrip("*") or ""
+        keys = await redis.keys(f"{prefix}{safe_pattern}*")
+        if keys:
+            deleted = await redis.delete(*keys)
+    except Exception as e:
+        logger.error(f"cache/purge error: {e}")
+        return {"ok": False, "deleted": 0, "l1_cleared": 0, "error": str(e)[:120]}
+
+    return {"ok": True, "deleted": deleted, "l1_cleared": 0}

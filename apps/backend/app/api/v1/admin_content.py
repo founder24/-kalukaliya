@@ -1691,7 +1691,7 @@ async def content_draft_served_subjects():
             },
             {"$limit": 50},
         ]
-        rows = await db.chapters.aggregate(pipeline).to_list(length=50)
+        rows = await (await db.chapters.aggregate(pipeline)).to_list(length=50)
         return {
             "subjects": [
                 {

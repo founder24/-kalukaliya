@@ -140,7 +140,7 @@ async def vertex_content_gaps(limit: int = 20):
             {"$limit": limit},
             {"$project": {"title": 1, "slug": 1, "subject_id": 1, "board": 1, "status": 1}},
         ]
-        gaps = await db.chapters.aggregate(pipeline).to_list(length=limit)
+        gaps = await (await db.chapters.aggregate(pipeline)).to_list(length=limit)
         result = []
         for g in gaps:
             result.append({
@@ -279,7 +279,7 @@ async def vertex_semantic_search(request: Request):
             }},
             {"$project": {"content": 1, "metadata": 1, "score": {"$meta": "vectorSearchScore"}}},
         ]
-        results = await db.rag_chunks.aggregate(pipeline).to_list(length=limit)
+        results = await (await db.rag_chunks.aggregate(pipeline)).to_list(length=limit)
         return {"results": [
             {"content": r.get("content", "")[:300], "metadata": r.get("metadata", {}), "score": r.get("score")}
             for r in results

@@ -58,7 +58,7 @@ async def ads_overview(days: int = 30):
                 }
             },
         ]
-        totals_raw = await db.ad_earnings.aggregate(pipeline_totals).to_list(length=1)
+        totals_raw = await (await db.ad_earnings.aggregate(pipeline_totals)).to_list(length=1)
         totals = totals_raw[0] if totals_raw else {}
         totals.pop("_id", None)
         totals.setdefault("revenue_inr", 0)
@@ -77,7 +77,7 @@ async def ads_overview(days: int = 30):
             },
             {"$sort": {"revenue_inr": -1}},
         ]
-        by_network_raw = await db.ad_earnings.aggregate(pipeline_by_network).to_list(length=20)
+        by_network_raw = await (await db.ad_earnings.aggregate(pipeline_by_network)).to_list(length=20)
         by_network = [
             {
                 "network": r["_id"],
@@ -103,7 +103,7 @@ async def ads_overview(days: int = 30):
             },
             {"$sort": {"_id": 1}},
         ]
-        daily_raw = await db.ad_earnings.aggregate(pipeline_daily).to_list(length=days + 5)
+        daily_raw = await (await db.ad_earnings.aggregate(pipeline_daily)).to_list(length=days + 5)
         daily = [
             {
                 "date": r["_id"],
@@ -125,7 +125,7 @@ async def ads_overview(days: int = 30):
             {"$sort": {"revenue_inr": -1}},
             {"$limit": 20},
         ]
-        by_placement_raw = await db.ad_earnings.aggregate(pipeline_by_placement).to_list(length=20)
+        by_placement_raw = await (await db.ad_earnings.aggregate(pipeline_by_placement)).to_list(length=20)
         by_placement = [
             {
                 "placement": r["_id"],

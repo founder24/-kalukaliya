@@ -30,24 +30,24 @@ async def revenue_overview():
         )
 
         # Sum captured Razorpay transactions (amount is in paise)
-        txn_agg = await db.transactions.aggregate(
+        txn_agg = await (await db.transactions.aggregate(
             [
                 {"$match": {"status": "captured"}},
                 {"$group": {"_id": None, "total_paise": {"$sum": "$amount"}}},
             ]
-        ).to_list(length=1)
+        )).to_list(length=1)
         total_inr = round((txn_agg[0]["total_paise"] if txn_agg else 0) / 100, 2)
 
         # Current month
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        month_agg = await db.transactions.aggregate(
+        month_agg = await (await db.transactions.aggregate(
             [
                 {"$match": {"status": "captured", "created_at": {"$gte": month_start}}},
                 {"$group": {"_id": None, "total_paise": {"$sum": "$amount"}}},
             ]
-        ).to_list(length=1)
+        )).to_list(length=1)
         month_inr = round((month_agg[0]["total_paise"] if month_agg else 0) / 100, 2)
 
         txn_count = await db.transactions.count_documents({"status": "captured"})

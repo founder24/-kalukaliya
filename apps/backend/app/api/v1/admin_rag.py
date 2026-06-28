@@ -1081,7 +1081,7 @@ async def rag_coverage():
             },
             {"$sort": {"_id.subject_id": 1, "_id.medium": 1}},
         ]
-        chunk_rows = await db.chunks.aggregate(chunk_pipeline).to_list(length=500)
+        chunk_rows = await (await db.chunks.aggregate(chunk_pipeline)).to_list(length=500)
 
         # ── Document counts by (subject_id, medium) ──────────────────────────
         doc_pipeline = [
@@ -1093,7 +1093,7 @@ async def rag_coverage():
                 }
             }
         ]
-        doc_rows = await db.rag_documents.aggregate(doc_pipeline).to_list(length=500)
+        doc_rows = await (await db.rag_documents.aggregate(doc_pipeline)).to_list(length=500)
         doc_map = {
             (r["_id"].get("subject_id"), r["_id"].get("medium")): r
             for r in doc_rows

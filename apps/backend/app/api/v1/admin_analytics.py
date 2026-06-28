@@ -30,12 +30,12 @@ async def analytics_overview():
         total_users = await db.users.count_documents({})
         total_chats = await db.chats.count_documents({})
 
-        msg_agg = await db.chats.aggregate(
+        msg_agg = await (await db.chats.aggregate(
             [
                 {"$project": {"msg_count": {"$size": {"$ifNull": ["$messages", []]}}}},
                 {"$group": {"_id": None, "total": {"$sum": "$msg_count"}}},
             ]
-        ).to_list(length=1)
+        )).to_list(length=1)
         total_messages = msg_agg[0]["total"] if msg_agg else 0
 
         avg_messages_per_chat = (
@@ -104,7 +104,7 @@ async def analytics_daily(days: int = 30):
             },
             {"$sort": {"_id.y": 1, "_id.m": 1, "_id.d": 1}},
         ]
-        chat_rows = await db.chats.aggregate(chat_pipeline).to_list(length=days + 5)
+        chat_rows = await (await db.chats.aggregate(chat_pipeline)).to_list(length=days + 5)
 
         user_pipeline = [
             {"$match": {"created_at": {"$gte": start}}},
@@ -119,7 +119,7 @@ async def analytics_daily(days: int = 30):
                 }
             },
         ]
-        user_rows = await db.users.aggregate(user_pipeline).to_list(length=days + 5)
+        user_rows = await (await db.users.aggregate(user_pipeline)).to_list(length=days + 5)
         signup_map = {
             f"{r['_id']['y']}-{r['_id']['m']:02d}-{r['_id']['d']:02d}": r["signups"]
             for r in user_rows
@@ -154,13 +154,14 @@ async def analytics_funnel():
 
         total_users = await db.users.count_documents({})
 
-        chatters_agg = await db.chats.aggregate(
+        _chatters_cursor = await db.chats.aggregate(
             [
                 {"$match": {"user_id": {"$ne": None}}},
                 {"$group": {"_id": "$user_id"}},
                 {"$count": "total"},
             ]
-        ).to_list(length=1)
+        )
+        chatters_agg = await _chatters_cursor.to_list(length=1)
         distinct_chatters = chatters_agg[0]["total"] if chatters_agg else 0
 
         pro_users = await db.users.count_documents({"subscription_tier": "pro"})
@@ -209,7 +210,7 @@ async def analytics_content_heatmap():
             {"$sort": {"chunk_count": -1}},
             {"$limit": 200},
         ]
-        rows = await db.chunks.aggregate(pipeline).to_list(length=200)
+        rows = await (await db.chunks.aggregate(pipeline)).to_list(length=200)
 
         return {
             "heatmap": [
@@ -243,20 +244,20 @@ async def analytics_revenue():
         now = datetime.now(timezone.utc)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        total_agg = await db.transactions.aggregate(
+        total_agg = await (await db.transactions.aggregate(
             [
                 {"$match": {"status": "captured"}},
                 {"$group": {"_id": None, "total_paise": {"$sum": "$amount"}}},
             ]
-        ).to_list(length=1)
+        )).to_list(length=1)
         total_inr = round((total_agg[0]["total_paise"] if total_agg else 0) / 100, 2)
 
-        month_agg = await db.transactions.aggregate(
+        month_agg = await (await db.transactions.aggregate(
             [
                 {"$match": {"status": "captured", "created_at": {"$gte": month_start}}},
                 {"$group": {"_id": None, "total_paise": {"$sum": "$amount"}}},
             ]
-        ).to_list(length=1)
+        )).to_list(length=1)
         month_inr = round((month_agg[0]["total_paise"] if month_agg else 0) / 100, 2)
 
         pro_users = await db.users.count_documents({"subscription_tier": "pro"})
@@ -306,7 +307,7 @@ async def analytics_predictor():
             },
             {"$sort": {"_id.y": 1, "_id.m": 1, "_id.d": 1}},
         ]
-        rows = await db.users.aggregate(pipeline).to_list(length=35)
+        rows = await (await db.users.aggregate(pipeline)).to_list(length=35)
 
         if len(rows) < 3:
             return {
@@ -499,14 +500,14 @@ async def analytics_review_prompt_stats():
         total_shown = await db.review_prompt_events.count_documents({"event": "shown"})
         total_clicked = await db.review_prompt_events.count_documents({"event": "clicked"})
         ctr = round(total_clicked / total_shown, 4) if total_shown else 0
-        by_reason_raw = await db.review_prompt_events.aggregate([
+        by_reason_raw = await (await db.review_prompt_events.aggregate([
             {"$match": {"event": "shown"}},
             {"$group": {"_id": "$reason", "shown": {"$sum": 1}}},
-        ]).to_list(length=50)
-        clicked_by_reason_raw = await db.review_prompt_events.aggregate([
+        ])).to_list(length=50)
+        clicked_by_reason_raw = await (await db.review_prompt_events.aggregate([
             {"$match": {"event": "clicked"}},
             {"$group": {"_id": "$reason", "clicked": {"$sum": 1}}},
-        ]).to_list(length=50)
+        ])).to_list(length=50)
         clicked_map = {r["_id"]: r["clicked"] for r in clicked_by_reason_raw}
         by_reason = [
             {
@@ -549,7 +550,7 @@ async def analytics_review_prompt_baseline_noise(window_days: int = 7):
             }},
             {"$sort": {"_id.date": 1}},
         ]
-        rows = await db.review_prompt_events.aggregate(pipeline).to_list(length=1000)
+        rows = await (await db.review_prompt_events.aggregate(pipeline)).to_list(length=1000)
         clicked_pipeline = [
             {"$match": {"event": "clicked", "created_at": {"$gte": since}}},
             {"$group": {
@@ -557,7 +558,7 @@ async def analytics_review_prompt_baseline_noise(window_days: int = 7):
                 "clicked": {"$sum": 1},
             }},
         ]
-        clicked_rows = await db.review_prompt_events.aggregate(clicked_pipeline).to_list(length=1000)
+        clicked_rows = await (await db.review_prompt_events.aggregate(clicked_pipeline)).to_list(length=1000)
         clicked_map = {(r["_id"]["reason"], r["_id"]["date"]): r["clicked"] for r in clicked_rows}
 
         from collections import defaultdict
@@ -616,7 +617,7 @@ async def analytics_review_prompt_by_reason_trend(reason: str, weeks: int = 8, c
                 }},
                 {"$sort": {"_id": 1}},
             ]
-            rows = await db.review_prompt_events.aggregate(pipeline).to_list(length=weeks + 2)
+            rows = await (await db.review_prompt_events.aggregate(pipeline)).to_list(length=weeks + 2)
             return [
                 {
                     "week": row["_id"],
@@ -770,7 +771,7 @@ async def analytics_top_routes(days: int = 30, limit: int = 25):
             },
         ]
 
-        rows = await db.request_logs.aggregate(pipeline).to_list(length=limit)
+        rows = await (await db.request_logs.aggregate(pipeline)).to_list(length=limit)
 
         total_pipeline = [
             {
@@ -782,7 +783,7 @@ async def analytics_top_routes(days: int = 30, limit: int = 25):
             },
             {"$count": "total"},
         ]
-        total_raw = await db.request_logs.aggregate(total_pipeline).to_list(length=1)
+        total_raw = await (await db.request_logs.aggregate(total_pipeline)).to_list(length=1)
         total_page_views = total_raw[0]["total"] if total_raw else 0
 
         for row in rows:
@@ -849,3 +850,50 @@ async def send_review_prompt_weekly_digest():
         "message": "Weekly digest email queued. It will be sent via the notification system.",
         "queued_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
     }
+
+
+@router.get("/analytics/queries")
+async def admin_top_queries(days: int = 7, limit: int = 20):
+    """
+    Top user queries from chat history — used by AdminDashboard top-queries card.
+    Returns {top_queries: [{query, count, last_seen}]} shaped for normalizeTopQueries().
+    """
+    db = get_mongo_client()[settings.MONGODB_DB_NAME]
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    try:
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since}}},
+            {"$unwind": "$messages"},
+            {"$match": {"messages.role": "user"}},
+            {
+                "$group": {
+                    "_id": {"$toLower": "$messages.content"},
+                    "count": {"$sum": 1},
+                    "last_seen": {"$max": "$created_at"},
+                }
+            },
+            {"$sort": {"count": -1}},
+            {"$limit": limit},
+            {
+                "$project": {
+                    "_id": 0,
+                    "query": "$_id",
+                    "count": 1,
+                    "last_seen": 1,
+                }
+            },
+        ]
+        _queries_cursor = await db.chats.aggregate(pipeline)
+        rows = await _queries_cursor.to_list(length=limit)
+        for r in rows:
+            if hasattr(r.get("last_seen"), "isoformat"):
+                r["last_seen"] = r["last_seen"].isoformat()
+        return {
+            "top_queries": rows,
+            "period_days": days,
+            "total_returned": len(rows),
+            "source": "chats",
+        }
+    except Exception as e:
+        logger.error(f"analytics/queries error: {e}")
+        return {"top_queries": [], "period_days": days, "total_returned": 0, "source": "unavailable"}
