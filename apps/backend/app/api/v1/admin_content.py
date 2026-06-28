@@ -1746,3 +1746,45 @@ async def content_regenerate_sitemap_alias():
         "message": "Sitemap regeneration queued. Use /admin/seo/regenerate-sitemap for full SEO pipeline.",
         "queued_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get("/content/coverage")
+async def content_coverage():
+    """
+    Content coverage stats: subjects, chapters, topics, translation status.
+    """
+    from app.db.mongo import get_mongo_client as _gcm
+    from datetime import datetime, timezone
+    try:
+        client = _gcm()
+        db = client[settings.MONGODB_DB_NAME]
+        total_subjects = await db.subjects.count_documents({})
+        total_chapters = await db.chapters.count_documents({})
+        published_chapters = await db.chapters.count_documents({"is_published": True})
+        chapters_with_en = await db.chapters.count_documents(
+            {"is_published": True, "content_en": {"$exists": True, "$ne": None, "$ne": ""}}
+        )
+        chapters_with_as = await db.chapters.count_documents(
+            {"is_published": True, "content_as": {"$exists": True, "$ne": None, "$ne": ""}}
+        )
+        return {
+            "subjects": total_subjects,
+            "chapters": {
+                "total": total_chapters,
+                "published": published_chapters,
+                "with_english": chapters_with_en,
+                "with_assamese": chapters_with_as,
+                "english_coverage_pct": round(chapters_with_en / published_chapters * 100, 1) if published_chapters else 0,
+                "assamese_coverage_pct": round(chapters_with_as / published_chapters * 100, 1) if published_chapters else 0,
+            },
+            "source": "mongodb",
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"content/coverage error: {e}")
+        return {
+            "subjects": 0,
+            "chapters": {"total": 0, "published": 0, "with_english": 0, "with_assamese": 0,
+                         "english_coverage_pct": 0, "assamese_coverage_pct": 0},
+            "source": "unavailable",
+        }

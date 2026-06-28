@@ -267,3 +267,28 @@ async def seo_regenerate_sitemap(request: Request):
     except Exception as e:
         logger.error(f"Sitemap regeneration error: {e}")
         raise HTTPException(status_code=500, detail="Sitemap regeneration failed")
+
+
+@router.get("/seo/prewarm-coverage")
+async def seo_prewarm_coverage():
+    """
+    Chapter pre-warm coverage: how many published chapters have been
+    pre-rendered / cached by the bot-render pipeline.
+    """
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        total_published = await db.chapters.count_documents({"is_published": True})
+        prewarmed = await db.chapters.count_documents(
+            {"is_published": True, "prewarmed_at": {"$exists": True, "$ne": None}}
+        )
+        coverage_pct = round(prewarmed / total_published * 100, 1) if total_published else 0
+        return {
+            "total_published": total_published,
+            "prewarmed": prewarmed,
+            "coverage_pct": coverage_pct,
+            "source": "mongodb",
+        }
+    except Exception as e:
+        logger.error(f"seo/prewarm-coverage error: {e}")
+        return {"total_published": 0, "prewarmed": 0, "coverage_pct": 0, "source": "unavailable"}

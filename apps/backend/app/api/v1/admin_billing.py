@@ -239,3 +239,47 @@ async def billing_sentry():
         "source": "unavailable",
         "message": "Could not fetch Sentry quota. Check SENTRY_AUTH_TOKEN and SENTRY_ORG_SLUG.",
     }
+
+
+@router.get("/billing/tokens")
+async def billing_tokens():
+    """
+    Token spend summary per AI provider from the ai_usage_logs collection.
+    Covers the last 24 h.
+    """
+    from datetime import timedelta
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
+        agg = await (await db.ai_usage_logs.aggregate([
+            {"$match": {"created_at": {"$gte": since}}},
+            {"$group": {
+                "_id": "$provider",
+                "calls": {"$sum": 1},
+                "input_tokens": {"$sum": "$input_tokens"},
+                "output_tokens": {"$sum": "$output_tokens"},
+            }},
+        ])).to_list(length=20)
+        providers = [
+            {
+                "provider": r["_id"],
+                "calls": r["calls"],
+                "input_tokens": r["input_tokens"],
+                "output_tokens": r["output_tokens"],
+                "total_tokens": r["input_tokens"] + r["output_tokens"],
+            }
+            for r in agg
+        ]
+        return {
+            "window_hours": 24,
+            "providers": providers,
+            "total_calls": sum(p["calls"] for p in providers),
+            "total_tokens": sum(p["total_tokens"] for p in providers),
+            "source": "ai_usage_logs" if providers else "empty",
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"billing/tokens error: {e}")
+        return {"window_hours": 24, "providers": [], "total_calls": 0,
+                "total_tokens": 0, "source": "unavailable"}

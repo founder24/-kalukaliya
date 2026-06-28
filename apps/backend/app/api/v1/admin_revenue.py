@@ -122,3 +122,38 @@ async def list_subscriptions():
     except Exception as e:
         logger.error(f"List subscriptions error: {e}")
         return {"subscriptions": [], "total": 0}
+
+
+@router.get("/monetization/funnel")
+async def monetization_funnel():
+    """
+    Conversion funnel: anonymous → registered → pro subscriber.
+    """
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        total_users = await db.users.count_documents({})
+        registered = await db.users.count_documents(
+            {"auth_provider": "local", "email": {"$exists": True, "$ne": None}}
+        )
+        pro = await db.users.count_documents({"subscription_tier": "pro"})
+        anon = total_users - registered
+        return {
+            "funnel": [
+                {"stage": "anonymous", "count": anon},
+                {"stage": "registered", "count": registered},
+                {"stage": "pro", "count": pro},
+            ],
+            "conversion": {
+                "anon_to_registered_pct": round(registered / total_users * 100, 1) if total_users else 0,
+                "registered_to_pro_pct": round(pro / registered * 100, 1) if registered else 0,
+            },
+            "source": "mongodb",
+        }
+    except Exception as e:
+        logger.error(f"monetization/funnel error: {e}")
+        return {
+            "funnel": [],
+            "conversion": {"anon_to_registered_pct": 0, "registered_to_pro_pct": 0},
+            "source": "unavailable",
+        }

@@ -172,3 +172,168 @@ async def delete_notification_trigger(trigger_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Notification Preferences ──────────────────────────────────────────────────
+
+_DEFAULT_NOTIF_PREFS = {
+    "sound_enabled": True,
+    "push_enabled": False,
+    "chime_tone": "default",
+    "sound_severities": ["high_error_rate", "high_latency", "spoofed_bot_surge",
+                         "high_fallback_rate", "endpoint_down", "auto_block_expired"],
+    "push_severities": ["high_error_rate", "spoofed_bot_surge",
+                        "endpoint_down", "auto_block_expired"],
+    "custom_chime_url": None,
+}
+
+
+@router.get("/notification-prefs")
+async def get_notification_prefs():
+    """Return the admin notification preferences document."""
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        doc = await db.admin_notification_prefs.find_one({"_id": "singleton"})
+        if not doc:
+            return _DEFAULT_NOTIF_PREFS
+        doc.pop("_id", None)
+        return {**_DEFAULT_NOTIF_PREFS, **doc}
+    except Exception as e:
+        logger.error(f"get notification-prefs error: {e}")
+        return _DEFAULT_NOTIF_PREFS
+
+
+@router.put("/notification-prefs")
+async def put_notification_prefs(request: Request):
+    """Upsert admin notification preferences."""
+    body = await request.json()
+    allowed = {"sound_enabled", "push_enabled", "chime_tone",
+                "sound_severities", "push_severities", "custom_chime_url"}
+    update = {k: v for k, v in body.items() if k in allowed}
+    if not update:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        await db.admin_notification_prefs.update_one(
+            {"_id": "singleton"},
+            {"$set": {**update, "updated_at": datetime.now(timezone.utc)}},
+            upsert=True,
+        )
+        doc = await db.admin_notification_prefs.find_one({"_id": "singleton"})
+        doc.pop("_id", None)
+        return {**_DEFAULT_NOTIF_PREFS, **doc}
+    except Exception as e:
+        logger.error(f"put notification-prefs error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/notification-prefs/upload-chime")
+async def upload_chime(request: Request):
+    """Accept a custom chime audio upload (stub — returns ok)."""
+    return {"ok": True, "message": "Custom chime upload is not configured on this server."}
+
+
+@router.delete("/notification-prefs/custom-chime")
+async def delete_custom_chime():
+    """Remove custom chime, revert to built-in tone."""
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        await db.admin_notification_prefs.update_one(
+            {"_id": "singleton"},
+            {"$unset": {"custom_chime_url": ""}},
+            upsert=True,
+        )
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"delete custom-chime error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Push Delivery Stats / Log ─────────────────────────────────────────────────
+
+@router.get("/push/delivery-stats")
+async def push_delivery_stats(days: int = 7):
+    """Summarise push notification dispatch outcomes for the given window."""
+    from datetime import timedelta
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+        pipeline = [
+            {"$match": {"dispatched_at": {"$gte": since}}},
+            {"$group": {
+                "_id": "$status",
+                "count": {"$sum": 1},
+            }},
+        ]
+        rows = await (await db.push_dispatch_log.aggregate(pipeline)).to_list(length=20)
+        by_status = {r["_id"]: r["count"] for r in rows}
+
+        total = sum(by_status.values())
+        return {
+            "days": days,
+            "total": total,
+            "delivered": by_status.get("delivered", 0),
+            "failed": by_status.get("failed", 0),
+            "pending": by_status.get("pending", 0),
+            "by_status": by_status,
+            "source": "mongodb" if rows else "empty",
+        }
+    except Exception as e:
+        logger.error(f"push/delivery-stats error: {e}")
+        return {"days": days, "total": 0, "delivered": 0, "failed": 0,
+                "pending": 0, "by_status": {}, "source": "unavailable"}
+
+
+@router.get("/push/delivery-log")
+async def push_delivery_log(limit: int = 50):
+    """Return the most recent push dispatch log entries."""
+    limit = min(limit, 200)
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        rows = await db.push_dispatch_log.find({}).sort(
+            "dispatched_at", -1
+        ).limit(limit).to_list(length=limit)
+        return {
+            "dispatches": [
+                {
+                    "id": str(r["_id"]),
+                    "status": r.get("status"),
+                    "title": r.get("title"),
+                    "body": r.get("body"),
+                    "dispatched_at": r["dispatched_at"].isoformat() if r.get("dispatched_at") else None,
+                    "recipient_count": r.get("recipient_count", 0),
+                    "severity": r.get("severity"),
+                }
+                for r in rows
+            ],
+            "total": len(rows),
+        }
+    except Exception as e:
+        logger.error(f"push/delivery-log error: {e}")
+        return {"dispatches": [], "total": 0}
+
+
+@router.get("/push/delivery-log/{dispatch_id}")
+async def push_delivery_log_detail(dispatch_id: str):
+    """Return a single push dispatch log entry with full detail."""
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        row = await db.push_dispatch_log.find_one({"_id": ObjectId(dispatch_id)})
+        if not row:
+            raise HTTPException(status_code=404, detail="Dispatch not found")
+        row["id"] = str(row.pop("_id"))
+        if row.get("dispatched_at"):
+            row["dispatched_at"] = row["dispatched_at"].isoformat()
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"push/delivery-log/{dispatch_id} error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

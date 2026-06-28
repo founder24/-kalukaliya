@@ -897,3 +897,75 @@ async def admin_top_queries(days: int = 7, limit: int = 20):
     except Exception as e:
         logger.error(f"analytics/queries error: {e}")
         return {"top_queries": [], "period_days": days, "total_returned": 0, "source": "unavailable"}
+
+
+@router.get("/vector/stats")
+async def vector_stats():
+    """CF Vectorize index stats — vector count, dimensions, metric."""
+    try:
+        from app.services.vectorize.client import vectorize_client
+        info = await vectorize_client.get_index_info()
+        return {
+            "source": "cf_vectorize",
+            "index": info.get("name"),
+            "vector_count": info.get("vectorsCount", 0),
+            "dimensions": info.get("config", {}).get("dimensions"),
+            "metric": info.get("config", {}).get("metric"),
+            "pages": {},
+            "chapters": {},
+        }
+    except Exception as e:
+        logger.error(f"vector/stats error: {e}")
+        return {"source": "unavailable", "vector_count": 0, "pages": {}, "chapters": {}}
+
+
+@router.get("/perf/latency")
+async def perf_latency():
+    """Backend endpoint latency summary (p50/p95 from recent request logs)."""
+    from datetime import timedelta
+    try:
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
+        rows = await db.request_logs.find(
+            {"created_at": {"$gte": since}, "latency_ms": {"$exists": True}},
+            {"latency_ms": 1, "path": 1},
+        ).to_list(length=2000)
+        if not rows:
+            return {"source": "unavailable", "daily": [], "p50_ms": None, "p95_ms": None}
+        latencies = sorted(r["latency_ms"] for r in rows if r.get("latency_ms") is not None)
+        p50 = latencies[len(latencies) // 2] if latencies else None
+        p95 = latencies[int(len(latencies) * 0.95)] if latencies else None
+        return {
+            "source": "request_logs",
+            "sample_size": len(latencies),
+            "p50_ms": p50,
+            "p95_ms": p95,
+            "daily": [],
+        }
+    except Exception as e:
+        logger.error(f"perf/latency error: {e}")
+        return {"source": "unavailable", "daily": [], "p50_ms": None, "p95_ms": None}
+
+
+@router.get("/pwa/stats")
+async def pwa_stats():
+    """PWA install / service-worker stats stub."""
+    return {
+        "source": "unavailable",
+        "installs": 0,
+        "active_sw": 0,
+        "push_subscriptions": 0,
+    }
+
+
+@router.get("/analytics/cf-ai-crawl-control")
+async def cf_ai_crawl_control(days: int = 7):
+    """Cloudflare AI-crawler block/allow control overview stub."""
+    return {
+        "source": "unavailable",
+        "days": days,
+        "blocked": 0,
+        "allowed": 0,
+        "rules": [],
+    }

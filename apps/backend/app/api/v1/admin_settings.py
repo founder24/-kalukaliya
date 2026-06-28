@@ -250,3 +250,119 @@ async def get_activity_log():
 async def cache_purge_all():
     """Purge all caches."""
     return {"status": "ok", "message": "All caches purged"}
+
+
+@router.get("/kv-health")
+async def kv_health():
+    """
+    Cloudflare KV namespace health check.
+    Validates that the CF API token can reach the KV namespace.
+    """
+    from app.config import settings as cfg
+    cf_token = getattr(cfg, "CF_WORKER_AI_TOKEN", None) or getattr(cfg, "CF_API_TOKEN", None) or ""
+    if not cf_token:
+        return {"status": "unconfigured", "source": "cloudflare_kv", "latency_ms": None}
+    try:
+        import httpx, time
+        account_id = getattr(cfg, "CLOUDFLARE_ACCOUNT_ID", None) or ""
+        kv_ns = getattr(cfg, "CF_KV_NAMESPACE_ID", None) or ""
+        if not account_id or not kv_ns:
+            return {"status": "unconfigured", "source": "cloudflare_kv",
+                    "message": "CLOUDFLARE_ACCOUNT_ID or CF_KV_NAMESPACE_ID not set"}
+        t0 = time.monotonic()
+        async with httpx.AsyncClient(timeout=5.0) as hc:
+            r = await hc.get(
+                f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces/{kv_ns}",
+                headers={"Authorization": f"Bearer {cf_token}"},
+            )
+        latency = round((time.monotonic() - t0) * 1000)
+        ok = r.status_code == 200 and r.json().get("success")
+        return {
+            "status": "ok" if ok else "degraded",
+            "latency_ms": latency,
+            "source": "cloudflare_kv",
+            "http_status": r.status_code,
+        }
+    except Exception as e:
+        return {"status": "unavailable", "source": "cloudflare_kv", "error": str(e)}
+
+
+@router.get("/r2-storage-health")
+async def r2_storage_health():
+    """Cloudflare R2 bucket health check stub."""
+    from app.config import settings as cfg
+    cf_token = getattr(cfg, "CF_WORKER_AI_TOKEN", None) or getattr(cfg, "CF_API_TOKEN", None) or ""
+    account_id = getattr(cfg, "CLOUDFLARE_ACCOUNT_ID", None) or ""
+    r2_bucket = getattr(cfg, "CF_R2_BUCKET_NAME", None) or ""
+    if not cf_token or not account_id or not r2_bucket:
+        return {
+            "status": "unconfigured",
+            "source": "cloudflare_r2",
+            "message": "CF_WORKER_AI_TOKEN, CLOUDFLARE_ACCOUNT_ID, or CF_R2_BUCKET_NAME not set",
+        }
+    try:
+        import httpx, time
+        t0 = time.monotonic()
+        async with httpx.AsyncClient(timeout=5.0) as hc:
+            r = await hc.get(
+                f"https://api.cloudflare.com/client/v4/accounts/{account_id}/r2/buckets/{r2_bucket}",
+                headers={"Authorization": f"Bearer {cf_token}"},
+            )
+        latency = round((time.monotonic() - t0) * 1000)
+        ok = r.status_code == 200 and r.json().get("success")
+        return {
+            "status": "ok" if ok else "degraded",
+            "latency_ms": latency,
+            "source": "cloudflare_r2",
+            "http_status": r.status_code,
+        }
+    except Exception as e:
+        return {"status": "unavailable", "source": "cloudflare_r2", "error": str(e)}
+
+
+@router.get("/ci-status")
+async def ci_status():
+    """Latest GitHub Actions CI status for the main branch."""
+    from app.config import settings as cfg
+    gh_token = getattr(cfg, "GITHUB_TOKEN", None) or ""
+    gh_repo = getattr(cfg, "GITHUB_REPO", None) or "founder24/-kalukaliya"
+    if not gh_token:
+        return {"status": "unconfigured", "source": "github_actions",
+                "message": "GITHUB_TOKEN not set"}
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=8.0) as hc:
+            r = await hc.get(
+                f"https://api.github.com/repos/{gh_repo}/actions/runs?branch=main&per_page=5",
+                headers={
+                    "Authorization": f"Bearer {gh_token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+        if r.status_code != 200:
+            return {"status": "unavailable", "source": "github_actions",
+                    "http_status": r.status_code}
+        runs = r.json().get("workflow_runs", [])
+        latest = runs[0] if runs else None
+        return {
+            "source": "github_actions",
+            "branch": "main",
+            "latest_run": {
+                "id": latest.get("id") if latest else None,
+                "name": latest.get("name") if latest else None,
+                "status": latest.get("status") if latest else None,
+                "conclusion": latest.get("conclusion") if latest else None,
+                "created_at": latest.get("created_at") if latest else None,
+                "html_url": latest.get("html_url") if latest else None,
+            } if latest else None,
+            "overall_status": (
+                "ok" if (latest and latest.get("conclusion") == "success")
+                else "failing" if (latest and latest.get("conclusion") in ("failure", "cancelled"))
+                else "running" if (latest and latest.get("status") == "in_progress")
+                else "unknown"
+            ),
+        }
+    except Exception as e:
+        logger.error(f"ci-status error: {e}")
+        return {"status": "unavailable", "source": "github_actions", "error": str(e)}

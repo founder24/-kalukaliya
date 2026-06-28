@@ -365,3 +365,39 @@ async def vertex_translate(request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/vertex/probe-status")
+async def vertex_probe_status():
+    """
+    Light probe of Vertex AI / Sarvam availability.
+    Returns status per provider without making expensive inference calls.
+    """
+    from app.config import settings as cfg
+    results = {}
+
+    sarvam_key = getattr(cfg, "SARVAM_API_KEY", None) or ""
+    results["sarvam"] = {
+        "configured": bool(sarvam_key),
+        "model": "sarvam-30b",
+        "status": "configured" if sarvam_key else "missing_key",
+    }
+
+    cf_token = getattr(cfg, "CF_WORKER_AI_TOKEN", None) or getattr(cfg, "CF_API_TOKEN", None) or ""
+    results["cloudflare_workers_ai"] = {
+        "configured": bool(cf_token),
+        "status": "configured" if cf_token else "missing_key",
+    }
+
+    gcp_creds = getattr(cfg, "GOOGLE_APPLICATION_CREDENTIALS_JSON", None) or ""
+    results["vertex_ai"] = {
+        "configured": bool(gcp_creds),
+        "status": "configured" if gcp_creds else "missing_key",
+    }
+
+    return {
+        "probed_at": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).isoformat(),
+        "providers": results,
+    }

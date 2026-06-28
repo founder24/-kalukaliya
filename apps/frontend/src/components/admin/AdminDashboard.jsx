@@ -26,6 +26,8 @@ import AdminDraftServedSubjects from './AdminDraftServedSubjects';
 import AdminQuickLinks from './AdminQuickLinks';
 import {
   GlassCard, StatCard, DepStatusCard, formatTimeAgo, alertColor, adminHdr,
+  normalizeChatFallbacks, normalizeLatency, normalizeTokenSpend,
+  normalizeTopQueries, normalizeChatSpeedups, normalizeVectorStats,
 } from './dashboard/shared';
 import AiHealthWidget from './dashboard/AiHealthWidget';
 import TrafficWidget from './dashboard/TrafficWidget';

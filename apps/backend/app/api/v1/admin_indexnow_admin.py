@@ -229,3 +229,29 @@ async def indexnow_backfill_progress():
     except Exception as e:
         logger.error(f"IndexNow backfill progress error: {e}")
         return {"status": "unavailable", "error": str(e)}
+
+
+@router.get("/indexnow/stats")
+async def indexnow_stats():
+    """Aggregate IndexNow submission stats across all jobs."""
+    try:
+        db = _db()
+        pipeline = [
+            {"$group": {
+                "_id": "$status",
+                "count": {"$sum": 1},
+                "total_submitted": {"$sum": "$submitted"},
+            }},
+        ]
+        rows = await (await db.indexnow_jobs.aggregate(pipeline)).to_list(length=10)
+        by_status = {r["_id"]: {"jobs": r["count"], "urls": r.get("total_submitted", 0)} for r in rows}
+        total_urls = sum(r.get("total_submitted", 0) for r in rows)
+        return {
+            "total_jobs": sum(r["count"] for r in rows),
+            "total_urls_submitted": total_urls,
+            "by_status": by_status,
+            "source": "mongodb" if rows else "empty",
+        }
+    except Exception as e:
+        logger.error(f"indexnow/stats error: {e}")
+        return {"total_jobs": 0, "total_urls_submitted": 0, "by_status": {}, "source": "unavailable"}
