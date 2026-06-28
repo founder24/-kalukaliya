@@ -1,6 +1,6 @@
 from beanie import Document
 from pydantic import EmailStr, Field
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 from datetime import datetime, timezone
 import bcrypt
 import hashlib
@@ -53,6 +53,7 @@ class User(Document):
     preferred_language: Literal["en", "as"] = "as"
     voice_enabled: bool = True
     theme: str = "light"
+    saved_subjects: List[str] = Field(default_factory=list)
 
     # Metadata
     ip_address_first_seen: Optional[str] = None

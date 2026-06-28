@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException, Path
 from pydantic import BaseModel
 from typing import Optional, List
 import logging
@@ -27,6 +27,7 @@ class UserProfile(BaseModel):
     preferred_language: str
     onboarding_done: bool = False
     ads_opt_out: bool = False
+    saved_subjects: List[str] = []
 
 
 class UpdateProfileRequest(BaseModel):
@@ -71,6 +72,7 @@ async def get_current_user_profile(user: User = Depends(get_current_user)):
         preferred_language=user.preferred_language,
         onboarding_done=getattr(user, "onboarding_done", False),
         ads_opt_out=getattr(user, "ads_opt_out", False),
+        saved_subjects=getattr(user, "saved_subjects", []) or [],
     )
 
 
@@ -132,6 +134,7 @@ async def get_profile_alias(user: User = Depends(get_current_user)):
         preferred_language=user.preferred_language,
         onboarding_done=getattr(user, "onboarding_done", False),
         ads_opt_out=getattr(user, "ads_opt_out", False),
+        saved_subjects=getattr(user, "saved_subjects", []) or [],
     )
 
 
@@ -340,12 +343,39 @@ async def get_user_stats(user: User = Depends(get_current_user)):
     credits_used = getattr(user, "credits_used", 0) or 0
     total_tokens = getattr(user, "total_tokens_used", 0) or 0
 
+    saved_subjects_count = len(getattr(user, "saved_subjects", []) or [])
+
     return {
         "conversations": conversations,
-        "saved_subjects": 0,
+        "saved_subjects": saved_subjects_count,
         "total_tokens": total_tokens,
         "credits_used": credits_used,
     }
+
+
+@router.post("/saved-subjects/{subject_id}")
+async def toggle_saved_subject(
+    subject_id: str = Path(..., description="Subject ID to toggle bookmark"),
+    user: User = Depends(get_current_user),
+):
+    """Toggle a subject bookmark — adds if absent, removes if present.
+    Frontend calls POST /api/v1/user/saved-subjects/{subjectId} (optimistic mutation).
+    Returns the updated list so the frontend can sync on settled.
+    """
+    current: List[str] = getattr(user, "saved_subjects", []) or []
+    if subject_id in current:
+        updated = [s for s in current if s != subject_id]
+        action = "removed"
+    else:
+        updated = current + [subject_id]
+        action = "added"
+
+    await user.update({"$set": {"saved_subjects": updated}})
+    logger.info(
+        "saved_subject_toggled",
+        extra={"user_id": str(user.id), "subject_id": subject_id, "action": action},
+    )
+    return {"status": "success", "action": action, "saved_subjects": updated}
 
 
 @router.get("/credits")

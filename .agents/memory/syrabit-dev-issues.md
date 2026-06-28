@@ -13,6 +13,29 @@ The chapter URL API path is `/api/v1/content/chapter-by-slug/{boardSlug}/{classS
 (router prefix is `/api/v1/content`, NOT `/api/v1/public`). Chapter slugs are computed slugs from
 the title, e.g. "Introduction to Economics" → `introduction-to-economics`.
 
+## Rule 18: saved_subjects requires field on User model + toggle endpoint
+`User` model must have `saved_subjects: List[str] = Field(default_factory=list)`.
+`UserProfile` Pydantic response model must include `saved_subjects: List[str] = []`.
+`GET /user/profile` and `GET /user/me` must pass `saved_subjects=getattr(user,'saved_subjects',[]) or []`.
+`POST /user/saved-subjects/{subject_id}` toggle endpoint must be in `users.py` — adds/removes atomically.
+`GET /user/stats` must return `len(user.saved_subjects)` not hardcoded 0.
+**Why:** `useToggleSavedSubject` hook (LibraryPage) and `fetchSavedSubjects` (useContent) both call these
+paths; without them, bookmarks silently fail/empty.
+
+## Rule 19: Non-streaming chat endpoint confidence_tier NameError
+In `apps/backend/app/api/v1/chat.py`, the non-streaming `chat()` function used `confidence_tier`
+without defining it. The streaming path computed it from `match_score` — the non-streaming path must
+compute it the same way, immediately after `context_chunks, match_score = raw_retrieve(...)`.
+**Why:** POST /api/v1/chat (non-streaming) raised `NameError: confidence_tier` on every call without
+MongoDB (match_score = 0.0). The fix: derive tier from CONFIDENCE_HIGH/MID/LOW constants.
+
+## Rule 20: Duplicate backend workflows cause port 8000 conflict
+The Project workflow must only include ONE backend workflow. Running both "Backend API" and "Start backend"
+in parallel causes `OSError: [Errno 98] Address already in use` — both try to bind port 8000.
+Fix: use `removeWorkflow()` via the workflows skill to delete the duplicate.
+**Why:** The `.replit` Project workflow initially listed both; uvicorn's --reload process will crash-loop
+when the port is taken by a sibling process.
+
 ## Rule 16: BACKEND_PROXY_URL must use api.syrabit.ai (NOT edge.syrabit.ai) in Replit dev
 `edge.syrabit.ai` DNS does not resolve from Replit's sandbox container (ENOTFOUND).
 `api.syrabit.ai` resolves fine and returns HTTP 200. Set `BACKEND_PROXY_URL=https://api.syrabit.ai`

@@ -251,6 +251,20 @@ async def chat(
                 raw_retrieve = ([], 0.0)
             context_chunks, match_score = raw_retrieve
 
+            # Derive confidence_tier from match_score — mirrors streaming endpoint logic.
+            # Must be set here so write_qa_memory (fire-and-forget, line ~395) has a
+            # value even when skip_rag is True or RAG retrieval returned no results.
+            if skip_rag:
+                confidence_tier = "generic"
+            elif match_score >= CONFIDENCE_HIGH:
+                confidence_tier = "high"
+            elif match_score >= CONFIDENCE_MID:
+                confidence_tier = "mid"
+            elif match_score >= CONFIDENCE_LOW:
+                confidence_tier = "low"
+            else:
+                confidence_tier = "none"
+
             history = results[1] if not isinstance(results[1], Exception) else ""
             if isinstance(results[1], Exception):
                 logger.error(f"History load failed: {results[1]}")

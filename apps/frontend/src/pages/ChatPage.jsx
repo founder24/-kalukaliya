@@ -29,6 +29,7 @@ import { startTrace, makeTraceparent } from '@/utils/firebasePerf';
 // client paint, instead of waiting for an async chunk. (Task #387)
 import { EmptyState } from './chat/EmptyState';
 import { useHashScroll } from '@/hooks/useHashScroll';
+import { requestReviewPrompt } from '@/components/ReviewPrompt';
 // ─────────────────────────────────────────────────────────────────────────────
 // AD POLICY: /chat is intentionally AD-FREE. Do NOT import <AdSlot /> or any
 // ad-network script here. The ad stack (Task #526) only runs on PYQ and Learn
@@ -696,6 +697,7 @@ export default function ChatPage() {
       if (!meta.hasError) {
         const totalAfterSend = messages.length + 2; // +user +assistant just appended
         if (totalAfterSend >= 8) {
+          requestReviewPrompt();
         }
       }
     } catch (err) {
