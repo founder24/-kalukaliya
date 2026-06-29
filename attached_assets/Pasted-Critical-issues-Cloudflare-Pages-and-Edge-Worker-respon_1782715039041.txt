@@ -1,0 +1,100 @@
+Critical issues
+Cloudflare Pages and Edge Worker responsibilities can overlap.
+You describe both Pages and the Worker as handling bot fallback, prerendering, and routing behavior, which can create conflicting cache and render paths. One should be the clear source of truth for HTML prerender and bot handling.
+
+Multiple auth modes are mixed together.
+User auth, admin auth, browser cookies, in-memory tokens, HS256, RS256 fallback, and machine/cron bearer flows are all present at once. That is workable only if every route is explicitly classified; otherwise some endpoints will randomly reject or accept requests.
+
+Edge JWT + backend JWT semantics are too broad.
+The edge verifies JWTs and the backend also verifies or falls back between algorithms. If the same token class is used for too many purposes, token rotation and migration bugs become likely.
+
+Secret naming is inconsistent.
+You use CF_API_TOKEN, CLOUDFLARE_API_TOKEN, GCP_SA_KEY, GOOGLE_APPLICATION_CREDENTIALS_JSON, GOOGLE_SA_KEY, and EDGE_SHARED_SECRET in different places. If deploy scripts and runtime env vars do not use the exact same names, deploys and API calls will fail.
+
+High-risk logic conflicts
+Publish vs reindex vs prerender are blurred.
+The publish pipeline writes to GCS, triggers CF Pages rebuilds, updates embeddings, regenerates sitemaps, and notifies IndexNow. Reindex also touches embeddings and content chunking. If these are not isolated, a content save could accidentally affect retrieval or public delivery.
+
+Vectorize metadata filtering is assumed to always work.
+Filtering depends on metadata indexes already existing. If ingestion writes vectors before indexes are created, retrieval queries may degrade or fail.
+
+Source-type naming may diverge.
+You use notes, qa, pyq, question_paper, and content_type fields in different places. That can break both the editor and the retrieval filters unless there is one canonical enum and a strict mapping layer.
+
+Admin and user route ownership is not cleanly separated.
+Some admin flows are cookie-first, some allow bearer fallback, and some backend routes appear to support both human and machine usage. That’s fine only if route groups are explicitly segmented.
+
+Deployment blockers
+Cloud Run private-origin auth can fail if OIDC signing and HMAC verification aren’t perfectly aligned.
+The edge adds a Google OIDC token and an HMAC signature, but the backend must verify both in the same request path. If either secret or audience is mismatched, production traffic will 401.
+
+Cloud Build secret injection can fail silently.
+gcloud run deploy --update-secrets only works if the secret IDs, versions, and env names are exactly correct. A mismatch in any deploy-time secret name can ship a container that boots but lacks critical runtime config.
+
+Pages deploy hooks need a single trigger source.
+If both GitHub integration and publish-job hooks deploy the same Pages project, you can get race conditions and stale builds. Pick one canonical build trigger or define precedence clearly.
+
+Functional gaps to verify
+Anonymous limits need one consistent counter source.
+You mention both KV burst limits and MongoDB monthly quotas. That is good, but the UI needs one final decision source or users may see inconsistent blocking behavior.
+
+Chat fast path and vector path need deterministic precedence.
+The chat pipeline uses topic matching, direct MongoDB fetch, Vectorize, Atlas vector search, and web fallback. Without a strict priority contract, the same prompt may hit different paths on different requests.
+
+History and source cards need stable persistence shape.
+If source context is not stored in conversation messages, history pages cannot faithfully reconstruct what the user asked from.
+
+Profile-driven personalization must be written back consistently.
+Board, class, and stream selected at signup need to be saved to the profile and then reused by the library page and Ask AI. If profile and signup sources diverge, content cards will not match the user’s entry path.
+
+Secret and config mismatches
+CLOUDFLARE_API_TOKEN vs CF_API_TOKEN.
+These should be standardized to one name in docs, CI, and runtime. Otherwise deploy steps may look for the wrong variable.
+
+GOOGLE_APPLICATION_CREDENTIALS_JSON vs GOOGLE_SA_KEY.
+Use one canonical Google credential path for Cloud Run and Cloud Build access, and one only if both are explicitly needed.
+
+GCP_SA_KEY vs Google env JSON.
+Cloud Build auth and runtime auth should not be conflated. Separate build identity from runtime identity.
+
+JWT_SECRET vs ADMIN_JWT_SECRET.
+Good separation, but only if user and admin verification code never cross-use them.
+
+Specific code-risk areas
+Router state and useNavigate.
+Since you have deep-linking and section params, any mismatch between route params and search params can blank the page or open the wrong tab.
+
+Vectorize query metadata.
+Your source fields must be camelCase and indexed. If frontend or backend uses snake_case in one place and camelCase in another, filtered retrieval will be broken.
+
+Content editor vs RAG editor field mapping.
+If qa_text_en/as, pyq_pdf_url, rag_text_en/as, and pyq_text_en/as are not consistently mapped by content_type, save and reindex will diverge.
+
+Bot prerender and ISR caches.
+If the Worker caches HTML while Pages also prerenders the same route, search bots may get stale or inconsistent markup.
+
+What to fix first
+Standardize secrets and env names.
+
+Define one owner for bot prerender/HTML generation.
+
+Lock down auth classes per route group.
+
+Standardize content type enums and metadata keys.
+
+Add explicit precedence for chat retrieval paths.
+
+Make publish and reindex mutually exclusive at the action level.
+
+Highest-confidence live-deployment risks
+Missing or misnamed secrets.
+
+Conflicting bot-render and cache layers.
+
+Auth token confusion across edge and backend.
+
+Broken metadata filtering if indexes are absent.
+
+Field name drift between editor, publish, and RAG ingestion.
+
+Race conditions between Pages deploys and publish-triggered rebuilds.

@@ -6,6 +6,37 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# ── Canonical secret / env-var alias table ────────────────────────────────────
+# Every secret has exactly ONE canonical name used in Python code.
+# Aliases (Replit secrets, GCP SM names, Cloud Build vars) map → canonical.
+# The model_validator `empty_strings_to_none` applies the runtime mappings.
+#
+# Canonical Python name        | GCP Secret Manager ID          | Alias(es) accepted
+# ─────────────────────────────┼────────────────────────────────┼────────────────────────────────
+# MONGODB_URI                  | mongodb-uri                    | MONGODB_URL (Replit)
+# CF_API_TOKEN                 | (not in SM)                    | CLOUDFLARE_API_TOKEN (Replit/CI)
+# CF_WORKER_AI_TOKEN           | (not in SM)                    | CLOUDFLARE_API_TOKEN fallback
+# CLOUDFLARE_ACCOUNT_ID        | (not in SM)                    | CF_ACCOUNT_ID
+# GOOGLE_APPLICATION_CREDENTIALS_JSON | GOOGLE_APPLICATION_CREDENTIALS_JSON | GOOGLE_SA_KEY (Replit)
+# JWT_SECRET                   | jwt-secret                     | (none — no alias)
+# ADMIN_JWT_SECRET             | admin-jwt-secret               | (none — keep isolated)
+# SARVAM_API_KEY               | sarvam-api-key                 | (none)
+# RESEND_API_KEY               | resend-api-key                 | (none)
+# POSTHOG_API_KEY              | posthog-api-key                | (none)
+# RAZORPAY_KEY_ID              | razorpay-key-id                | (none)
+# RAZORPAY_KEY_SECRET          | razorpay-key-secret            | (none)
+# RAZORPAY_WEBHOOK_SECRET      | razorpay-webhook-secret        | (none)
+# RESET_TOKEN_SECRET           | reset-token-secret             | (none)
+# EDGE_SHARED_SECRET           | edge-shared-secret             | (none)
+# INDEXNOW_API_KEY             | indexnow-api-key               | (none)
+# TRANSLATE_CRON_SECRET        | translate-cron-secret          | (none)
+#
+# GCP Build vs Runtime identity:
+#   Cloud Build uses GCP_SA_KEY (GitHub secret → gcloud auth) — build identity only.
+#   Cloud Run runtime uses GOOGLE_APPLICATION_CREDENTIALS_JSON / GOOGLE_SA_KEY — runtime only.
+#   These are different service accounts. Never share them.
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 class Settings(BaseSettings):
     """

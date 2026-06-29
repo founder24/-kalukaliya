@@ -1,10 +1,29 @@
 /**
- * ISR (Incremental Static Regeneration) fallback for bot traffic.
+ * ISR (Incremental Static Regeneration) — Edge Worker is the SOLE owner.
  *
- * When a known crawler requests a page that isn't prerendered, this handler
- * proxies the request to the backend, caches the HTML in KV with a 1-hour TTL,
- * and serves subsequent bot hits from cache. Non-bot requests return null so
- * other handlers (SPA shell, R2 assets) take over.
+ * ── Bot prerender ownership boundary ────────────────────────────────────────
+ * EDGE WORKER (this file) — PRIMARY and authoritative for bot HTML.
+ *   - Detects bot UA on every request that reaches api.syrabit.ai.
+ *   - Serves from ISR_CACHE_KV (1-hour TTL) on cache hit.
+ *   - On miss: proxies to Cloud Run backend to fetch rendered HTML,
+ *     stores in KV, returns to bot.
+ *   - Handles: all /api/*, all dynamic page routes proxied through the edge.
+ *
+ * CLOUDFLARE PAGES WORKER (public/_worker.js) — SECONDARY / SPA-only.
+ *   - Handles routes that are served directly from Cloudflare Pages CDN
+ *     (static assets, prebuilt HTML pages) WITHOUT going through this edge worker.
+ *   - Only sees traffic that does NOT pass through api.syrabit.ai.
+ *   - Its bot rendering is a fallback for direct Pages hits only (e.g., direct
+ *     browser navigation to syrabit.ai/library/... before the edge catches it).
+ *   - It proxies to the backend /html/<path> endpoint for bot renders.
+ *
+ * Rule: If a route is proxied through the Edge Worker, the Edge Worker's
+ * ISR cache is the single truth. The Pages worker must NOT also cache the
+ * same route in a competing layer. Routes served only from Pages CDN are
+ * owned by the Pages worker.
+ *
+ * Non-bot requests: return null → other handlers (SPA shell, R2 assets) take over.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
 const BOT_UA_RE =

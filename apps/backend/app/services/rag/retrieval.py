@@ -1,13 +1,35 @@
 """
 RAG Retrieval Pipeline
 
-Two retrieval paths, used in order of preference:
+── Retrieval path precedence (deterministic, always in this order) ──────────
+  1. Fast path  — topic_matcher cosine match on in-memory topic embeddings →
+                  direct MongoDB chapter fetch (~20–60 ms).
+                  Used when confidence ≥ CONFIDENCE_HIGH (0.80).
+                  Web search SKIPPED on this path.
 
-  1. Fast path  — topic_matcher hits a cached topic by cosine similarity →
-                  fetch chapter content directly from MongoDB (~20-60ms total)
+  2. Vector path — embed query via CF bge-m3 → Atlas $vectorSearch on
+                  `rag_chunks` collection with metadata pre-filter
+                  (~150–300 ms). Used when confidence < 0.80 OR fast path
+                  returns nothing.  Atlas fallback: in-memory cosine on
+                  topic_embeddings when index doesn't exist yet.
 
-  2. Vector path — embed query via CF bge-m3 → Atlas $vectorSearch on rag_chunks
-                  with metadata pre-filter (~150-300ms total, more precise)
+  3. Web search  — DuckDuckGo (handled in chat_service, not here).
+                  Used when vector path score < CONFIDENCE_LOW (0.50).
+
+Path 1 wins if it returns any chunks. Path 2 only runs if path 1 returns
+nothing. Path 3 only runs if path 2 score < 0.50. The same prompt will
+always hit the same path given the same topic embedding state — there is
+no randomness in path selection.
+
+── Filter key format boundary ───────────────────────────────────────────────
+  Atlas $vectorSearch (this file):  snake_case   { source_type, subject_id … }
+  Cloudflare Vectorize writes:      camelCase    { sourceType, subjectId … }
+  Cloudflare Vectorize queries:     camelCase — use snake_to_vectorize_filter()
+                                    from source_types.py BEFORE passing filters
+                                    to VectorizeClient.query().
+
+  Never mix formats. Atlas reads from `rag_chunks`, Vectorize is written by
+  ingestion_v2.py. The chat pipeline currently uses Atlas only for retrieval.
 
 Both paths return the same chunk dict format:
   { id, title, content, score, source_type, language, source }

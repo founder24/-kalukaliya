@@ -25,12 +25,46 @@ interface JWTHeader {
   typ?: string;
 }
 
-/** Paths that do NOT require JWT authentication.
+/**
+ * ── Route group auth classification (canonical reference) ──────────────────
+ *
+ * Group A — PUBLIC_PATHS (no JWT at edge, no auth at backend):
+ *   Auth endpoints (/login, /signup, /refresh, /forgot-password, /reset-password)
+ *   Public content (/boards, /classes, /subjects, /chapters, /seo/*, /sitemap/*)
+ *   Analytics, config, health, webhooks
+ *
+ * Group B — OPTIONAL_AUTH_PATHS (JWT verified if present; anonymous allowed):
+ *   /api/v1/chat, /api/v1/conversations, /api/v1/edu
+ *   The backend uses get_current_user_optional() on these routes.
+ *   Anonymous users get a capped monthly quota enforced by MongoDB.
+ *
+ * Group C — PROTECTED (JWT required at edge; backend enforces tier/permissions):
+ *   /api/v1/users/*, /api/v1/subscription/*, /api/v1/feedback/*
+ *   All routes NOT listed in PUBLIC_PATHS or OPTIONAL_AUTH_PATHS.
+ *
+ * Group D — ADMIN routes (/api/v1/admin/*):
+ *   Listed in PUBLIC_PATHS intentionally — admin routes are COOKIE-protected
+ *   on the backend (require_admin_session dependency). They must NOT be
+ *   JWT-gated at the edge because admin sessions use httpOnly cookies, not
+ *   Bearer tokens. The edge cannot inspect cookies without forwarding them.
+ *   EXCEPTION: machine/cron routes in admin_cron.py accept Bearer tokens;
+ *   those are verified entirely by the backend using TRANSLATE_CRON_SECRET.
+ *
+ * Invariant: JWT_SECRET and ADMIN_JWT_SECRET are DIFFERENT keys.
+ *   JWT_SECRET  → signs user access tokens (Group B/C)
+ *   ADMIN_JWT_SECRET → signs admin session tokens (Group D, backend only)
+ *   The edge only sees JWT_SECRET. Admin tokens never pass through edge JWT check.
+ * ───────────────────────────────────────────────────────────────────────────
+ */
+
+/** Paths that do NOT require JWT authentication at the edge.
  *
  * IMPORTANT: This array must be kept in sync with the backend content router
  * (apps/backend/app/api/v1/) when new endpoints are added. A new authenticated
- * endpoint that is accidentally listed here will be publicly accessible without
- * auth. Review both this file and the backend router together when adding routes.
+ * endpoint accidentally listed here will be publicly accessible without auth.
+ * Review both this file and the backend router together when adding routes.
+ *
+ * Admin routes (/api/v1/admin/) are intentionally listed here — see Group D above.
  */
 const PUBLIC_PATHS = [
   '/health',

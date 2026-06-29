@@ -24,7 +24,7 @@ Usage:
         medium="english",
         subject_id="subj_phy",
         chapter_id="chap_phy_01",
-        source_type="book_pdf",
+        source_type="notes",  # canonical: notes | important_questions | pyq | definition | mcqs
     )
 """
 
@@ -39,6 +39,7 @@ from typing import Optional
 from app.services.rag.cleaner import clean_text, detect_language
 from app.services.rag.chunker import chunk_content
 from app.services.ai.embedder import embed_batch_chunked
+from app.services.rag.source_types import normalize_source_type, DEFAULT_SOURCE_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ async def ingest_document_text(
     text: str,
     medium: str,
     subject_id: str,
-    source_type: str = "book_pdf",
+    source_type: str = DEFAULT_SOURCE_TYPE,
     chapter_id: Optional[str] = None,
     topic_id: Optional[str] = None,
     page_start: Optional[int] = None,
@@ -163,6 +164,7 @@ async def ingest_document_text(
     document_id = document_id or str(uuid.uuid4())
     errors: list[str] = []
 
+    source_type = normalize_source_type(source_type)
     cleaned = clean_text(text)
     if not cleaned:
         return {

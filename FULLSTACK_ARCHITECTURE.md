@@ -689,3 +689,74 @@ Deploy: CF Pages CDN → syrabit.ai
 | 18 | SEO prerender (bot) | `seo.py`, bot middleware | ISR KV cache | Pages `_worker.js` |
 | 19 | IndexNow | `indexnow.py` | — | — |
 | 20 | Payments (Razorpay) | `payments.py`, `razorpay` webhook | — | `PricingPage` |
+
+---
+
+## Issue Resolutions (Applied Fixes)
+
+The following critical issues from the audit have been resolved in code:
+
+### 1. Source Type Canonical Enum — FIXED
+**File:** `apps/backend/app/services/rag/source_types.py` (new)
+
+Single source of truth for all source type strings across chunker, ingestion, retrieval, and editor.
+
+| Frontend section | Internal `source_type` (MongoDB/Python) | Vectorize `sourceType` (camelCase) |
+|---|---|---|
+| `notes` | `notes` | `notes` |
+| `qa` | `important_questions` | `importantQuestions` |
+| `pyq` | `pyq` | `pyq` |
+| `definition` | `definition` | `definition` |
+| `mcqs` | `mcqs` | `mcqs` |
+
+Use `normalize_source_type(raw)` to convert any input to canonical form.
+Use `snake_to_vectorize_filter(filters)` before passing filters to `VectorizeClient.query()`.
+
+### 2. Ingestion Default `source_type` — FIXED
+**File:** `apps/backend/app/services/rag/ingestion_v2.py`
+
+Changed default from `"book_pdf"` (not a valid chunker type → silently fell back to semantic strategy with wrong label) to `DEFAULT_SOURCE_TYPE` (`"notes"`). `normalize_source_type()` is now called at ingestion entry so unknown values are caught before chunking.
+
+### 3. Filter Key Format Boundary — DOCUMENTED
+**File:** `apps/backend/app/services/rag/retrieval.py`
+
+Explicit contract now in module docstring:
+- Atlas `$vectorSearch` on `rag_chunks` → **snake_case** (`source_type`, `subject_id`)
+- Cloudflare Vectorize writes → **camelCase** (`sourceType`, `subjectId`)
+- Any future Vectorize query path **must** call `snake_to_vectorize_filter()` first
+
+### 4. Secret / Env-Var Alias Table — FIXED
+**File:** `apps/backend/app/config.py`
+
+Canonical alias table added at module top. Every secret now has one Python name, one GCP Secret Manager ID, and a documented list of accepted aliases. Runtime alias mapping via `empty_strings_to_none` validator covers:
+- `MONGODB_URL` → `MONGODB_URI`
+- `CLOUDFLARE_API_TOKEN` → `CF_API_TOKEN` + `CF_WORKER_AI_TOKEN`
+- `GOOGLE_SA_KEY` → `GOOGLE_APPLICATION_CREDENTIALS_JSON` (via `google_credentials` property)
+- GCP build identity (`GCP_SA_KEY`) explicitly separated from runtime identity (`GOOGLE_SA_KEY`)
+
+### 5. Auth Route Classification — DOCUMENTED
+**File:** `apps/edge/src/middleware/jwt.ts`
+
+Four groups now explicitly documented with invariants:
+- **Group A PUBLIC:** no JWT anywhere (content, auth endpoints, analytics)
+- **Group B OPTIONAL:** JWT verified if present, anonymous allowed (chat, conversations)
+- **Group C PROTECTED:** JWT required (users, subscription, feedback)
+- **Group D ADMIN:** intentionally in PUBLIC_PATHS — cookie-protected on backend; edge cannot inspect httpOnly cookies. `JWT_SECRET` ≠ `ADMIN_JWT_SECRET` invariant documented.
+
+### 6. Bot Prerender Ownership — FIXED
+**File:** `apps/edge/src/routes/isr.ts`
+
+Clear ownership boundary documented:
+- **Edge Worker** = primary/authoritative for all routes proxied through `api.syrabit.ai`
+- **Pages Worker** (`_worker.js`) = secondary, handles only direct CDN hits that bypass the edge
+- Rule: a route cannot be cached by both layers simultaneously
+
+### 7. Retrieval Path Precedence — DOCUMENTED
+**File:** `apps/backend/app/services/rag/retrieval.py`
+
+Deterministic 3-tier contract now in module docstring. Same prompt always hits same path given same topic embedding state — no randomness. Fast path (≥0.80) → Vector path → Web search (<0.50).
+
+### Remaining architectural concerns (not code-fixable, require ops action)
+- **Vectorize metadata indexes:** must be created via `wrangler vectorize create-metadata-index` before filtered retrieval works. Ingestion now calls `normalize_source_type()` so stored values are always valid.
+- **Pages deploy race condition:** pick one canonical trigger — either GitHub integration OR publish-job hook, not both simultaneously.
+- **Cloud Run OIDC audience:** verify `BACKEND_URL` in the edge worker matches the Cloud Run service URL exactly (including trailing slash handling) to prevent 401s.
