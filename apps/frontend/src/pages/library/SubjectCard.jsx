@@ -68,8 +68,8 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     const pyqChs = chapters.filter(ch => ch.content_type === 'question_paper');
     return [
       { key: 'notes', label: isAs ? 'টোকা' : 'Notes', chapters: notesChs, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)' },
-      { key: 'qa', label: isAs ? 'প্ৰশ্ন-উত্তৰ' : 'Question & Answer', chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
-      { key: 'question_paper', label: isAs ? 'প্ৰশ্নকাকত' : 'Question Paper', chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)' },
+      { key: 'qa', label: isAs ? 'প্ৰশ্ন' : 'Questions', chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
+      { key: 'question_paper', label: isAs ? 'পিৱাইকিউ' : 'PYQs', chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)' },
     ];
   }, [chapters, isAs]);
 
@@ -232,8 +232,8 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           if (section.chapters.length === 0) {
             return (
               <div key={section.key} className="px-3 py-4 text-center text-[11px]" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                {section.key === 'qa' && (isAs ? 'প্ৰশ্ন-উত্তৰ সোনকালে আহিব' : 'Q&A content coming soon')}
-                {section.key === 'question_paper' && (isAs ? 'প্ৰশ্নকাকত সোনকালে আহিব' : 'Question papers coming soon')}
+                {section.key === 'qa' && (isAs ? 'প্ৰশ্ন সোনকালে আহিব' : 'Questions coming soon')}
+                {section.key === 'question_paper' && (isAs ? 'পিৱাইকিউ সোনকালে আহিব' : 'PYQs coming soon')}
                 {section.key === 'notes' && (isAs ? 'টোকা প্ৰস্তুত কৰা হৈছে' : 'Notes being prepared')}
               </div>
             );

@@ -292,7 +292,7 @@ export default function ChapterPage() {
   const articleRef = useRef(null);
   const _tabParam = searchParams.get('tab');
   const [contentMode, setContentMode] = useState(
-    ['notes', 'qa', 'pyq'].includes(_tabParam) ? _tabParam : 'notes',
+    ['notes', 'qa'].includes(_tabParam) ? _tabParam : 'notes',
   );
   const [activeId, setActiveId] = useState('');
   const [relatedChapterTopics, setRelatedChapterTopics] = useState([]);
@@ -1264,8 +1264,7 @@ export default function ChapterPage() {
               <div className="flex items-center gap-1 mb-2 p-0.5 rounded-lg w-fit max-w-[720px] mx-auto" style={{ background: 'rgba(139,92,246,0.07)', border: '1px solid rgba(139,92,246,0.12)' }}>
                 {[
                   { id: 'notes', label: contentLang === 'as' ? 'নোটছ' : 'Notes', icon: FileText },
-                  { id: 'qa', label: contentLang === 'as' ? 'প্ৰশ্নোত্তৰ' : 'Q & A', icon: HelpCircle },
-                  { id: 'pyq', label: contentLang === 'as' ? 'প্ৰশ্নকাকত' : 'Question Paper', icon: BookOpen },
+                  { id: 'qa', label: contentLang === 'as' ? 'প্ৰশ্নোত্তৰ' : 'Questions', icon: HelpCircle },
                 ].map(({ id, label, icon: Icon }) => (
                   <button
                     key={id}
@@ -1322,18 +1321,7 @@ export default function ChapterPage() {
                   )}
                 </div>
               )}
-              {/* Question Paper mode — placeholder when no pyq data */}
-              {!isQuestionPaper && contentMode === 'pyq' && (!pyqData || pyqData.total === 0) && (
-                <p className="text-xs text-muted-foreground py-8 text-center">
-                  {contentLang === 'as' ? 'প্ৰশ্নকাকত উপলব্ধ নহয়।' : 'No question paper data available yet.'}
-                </p>
-              )}
             </div>
-
-            {/* Question Paper tab content — rendered as own card below */}
-            {!isQuestionPaper && contentMode === 'pyq' && pyqData && pyqData.total > 0 && (
-              <ImportantQuestions chapterTitle={chapterTitle} pyqData={pyqData} />
-            )}
 
             {/* Topical-mapping graph — related topic links at bottom */}
             <ChapterTopicGraph

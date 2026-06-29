@@ -37,8 +37,8 @@ export default function SubjectLandingPage() {
     const pyqChs = chapters.filter(ch => ch.content_type === 'question_paper');
     return [
       { key: 'notes', label: 'Notes', icon: BookOpen, chapters: notesChs, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
-      { key: 'qa', label: 'Question & Answer', icon: HelpCircle, chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
-      { key: 'question_paper', label: 'Question Paper', icon: FileText, chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
+      { key: 'qa', label: 'Questions', icon: HelpCircle, chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
+      { key: 'question_paper', label: 'PYQs', icon: FileText, chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
     ];
   }, [chapters]);
 
@@ -372,9 +372,9 @@ export default function SubjectLandingPage() {
                 {searchQuery
                   ? 'No chapters match your search'
                   : activeSection === 'qa'
-                    ? 'Question & Answer content coming soon for this subject'
+                    ? 'Questions coming soon for this subject'
                     : activeSection === 'question_paper'
-                      ? 'Question papers will be added here once available'
+                      ? 'PYQs will be added here once available'
                       : 'No chapters available yet'}
               </p>
             </div>

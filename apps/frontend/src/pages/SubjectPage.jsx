@@ -257,8 +257,8 @@ function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null }) {
 
   const SECTION_EMPTY = {
     notes: { icon: BookOpen, msg: 'Notes are being prepared for this subject.' },
-    qa: { icon: HelpCircle, msg: 'Question & Answer content is coming soon for this subject.' },
-    question_paper: { icon: FileText, msg: 'Question papers will be added here once available.' },
+    qa: { icon: HelpCircle, msg: 'Questions are coming soon for this subject.' },
+    question_paper: { icon: FileText, msg: 'PYQs will be added here once available.' },
   };
 
   if (chapters.length === 0) {
@@ -399,8 +399,8 @@ export default function SubjectPage() {
     const pyqChs = chapters.filter(ch => ch.content_type === 'question_paper');
     return [
       { key: 'notes', label: 'Notes', chapters: notesChs, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
-      { key: 'qa', label: 'Question & Answer', chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
-      { key: 'question_paper', label: 'Question Paper', chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
+      { key: 'qa', label: 'Questions', chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
+      { key: 'question_paper', label: 'PYQs', chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
     ];
   }, [chapters]);
 
