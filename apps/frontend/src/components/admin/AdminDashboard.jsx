@@ -905,6 +905,31 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
     adminHdr,
   };
 
+  if (loading && !lastRefresh) {
+    return (
+      <div className="p-4 md:p-6 max-w-[1400px]">
+        <div className="flex items-center gap-3 mb-6">
+          <Loader2 size={18} className="animate-spin text-violet-500" />
+          <span className="text-sm text-gray-500">Loading dashboard…</span>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="rounded-2xl p-5 bg-white border border-gray-200 shadow-sm animate-pulse">
+              <div className="h-3 w-24 bg-gray-200 rounded mb-4" />
+              <div className="h-7 w-20 bg-gray-200 rounded mb-2" />
+              <div className="h-2 w-28 bg-gray-100 rounded" />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="rounded-2xl p-5 bg-white border border-gray-200 shadow-sm animate-pulse h-40" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 md:p-6 space-y-5 max-w-[1400px]" role="main" aria-label="Admin Dashboard">
 

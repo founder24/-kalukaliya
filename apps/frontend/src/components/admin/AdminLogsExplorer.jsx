@@ -17,7 +17,7 @@ import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'rea
 import {
   RefreshCw, Download, Search, Pause, Play, Trash2, Link as LinkIcon,
   Activity, AlertTriangle, AlertOctagon, Info, X, KeyRound, Filter,
-  Copy, ChevronDown, ChevronRight, Shield,
+  Copy, ChevronDown, ChevronRight, Shield, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -764,6 +764,14 @@ export default function AdminLogsExplorer({ adminToken, onNavigate, navContext }
                   </Fragment>
                 );
               })}
+              {loading && logs.length === 0 && (
+                <tr><td colSpan={10} className="text-center py-10">
+                  <div className="flex items-center justify-center gap-2 text-slate-400">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span className="text-sm">Loading logs…</span>
+                  </div>
+                </td></tr>
+              )}
               {!loading && logs.length === 0 && (
                 <tr><td colSpan={10} className="text-center py-10 text-slate-400">
                   No log entries match the current filters.

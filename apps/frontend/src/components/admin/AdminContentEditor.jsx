@@ -64,6 +64,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const [trackedJobIds, setTrackedJobIds] = useState([]);
   const [publishJobIds, setPublishJobIds] = useState([]);
   const [publishingChapters, setPublishingChapters] = useState(new Set());
+  const [chaptersLoading, setChaptersLoading] = useState(false);
 
   const subjectData = subjects.find(s => s.id === selSubject);
   const boardData = boards.find(b => b.id === selBoard);
@@ -217,12 +218,24 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   useEffect(() => { if (!onHubContext || !selSubject) return; const sub = subjects.find(s => s.id === selSubject); const str = streams.find(s => s.id === selStream); const cls = classes.find(c => c.id === selClass); const brd = boards.find(b => b.id === selBoard); onHubContext({ boardId: selBoard || '', boardName: brd?.name || '', classId: selClass || '', className: cls?.name || '', streamId: selStream || '', streamName: str?.name || '', subjectId: selSubject, subjectName: sub?.name || '' }); }, [selSubject]);
 
   const refreshChapters = (subjectId) => {
+    setChaptersLoading(true);
     axios.get(`${API}/admin/content/chapters/${subjectId}`, authHeaders(adminToken))
-      .then(r => { setChapters(r.data || []); axios.get(`${API}/admin/content/chapters/${subjectId}/coverage`, authHeaders(adminToken)).then(covRes => { const covMap = {}; (covRes.data?.chapters || []).forEach(c => { covMap[c.chapter_id] = c.coverage_score; }); setChapters(prev => prev.map(ch => ({ ...ch, coverage_score: covMap[ch.id] ?? ch.coverage_score ?? null }))); }).catch(() => {}); })
-      .catch(() => toast.error('Could not reload chapter list'));
+      .then(r => {
+        setChapters(r.data || []);
+        axios.get(`${API}/admin/content/chapters/${subjectId}/coverage`, authHeaders(adminToken))
+          .then(covRes => { const covMap = {}; (covRes.data?.chapters || []).forEach(c => { covMap[c.chapter_id] = c.coverage_score; }); setChapters(prev => prev.map(ch => ({ ...ch, coverage_score: covMap[ch.id] ?? ch.coverage_score ?? null }))); })
+          .catch(() => {});
+      })
+      .catch(() => toast.error('Could not reload chapter list'))
+      .finally(() => setChaptersLoading(false));
   };
 
-  useEffect(() => { if (selSubject) refreshChapters(selSubject); }, [selSubject]);
+  useEffect(() => {
+    if (selSubject) {
+      setChapters([]);
+      refreshChapters(selSubject);
+    }
+  }, [selSubject]);
 
   const handleCreateBoard = async (name, desc, status = 'published') => { await axios.post(`${API}/admin/content/boards`, { name, description: desc, status }, authHeaders(adminToken)); await reloadAll(); toast.success('Board created'); };
   const handleCreateClass = async (name, desc, status = 'published') => { if (!selBoard) return toast.error('Select a board first'); await axios.post(`${API}/admin/content/classes`, { board_id: selBoard, name, description: desc, status }, authHeaders(adminToken)); await reloadAll(); toast.success('Class created'); };
@@ -888,6 +901,12 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                       )}
                     </div>
                     <ThumbnailStudio adminToken={adminToken} selSubject={selSubject} subjectData={subjectData} onReload={() => reloadAll()} />
+                    {chaptersLoading ? (
+                      <div className="flex items-center justify-center py-16 gap-3">
+                        <Loader2 size={20} className="animate-spin text-violet-400" />
+                        <span className="text-sm text-gray-400">Loading chapters…</span>
+                      </div>
+                    ) : (
                     <ChapterList
                       chapters={filteredChapters} totalChapters={chapters.length}
                       statusFilter={chapterStatusFilter} setStatusFilter={setChapterStatusFilter}
@@ -906,6 +925,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                       selSubject={selSubject} subjectData={subjectData}
                       onCreateNew={() => { setEditView('new-chapter'); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: chapters.length + 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '' }); setChapterStats(null); }}
                     />
+                    )}
                   </div>
                 ) : (
                   <div className="flex items-center justify-center h-full">

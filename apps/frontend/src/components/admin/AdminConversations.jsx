@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Loader2, MessageSquare, BookOpen, Search, Mail, User, Ghost,
-  ChevronRight, Crown, X, Clock, ArrowLeft, Sparkles, TrendingUp, RefreshCw, Flag,
+  ChevronRight, Crown, X, Clock, ArrowLeft, Sparkles, TrendingUp, RefreshCw, Flag, AlertTriangle,
 } from 'lucide-react';
 import AdminQuickLinks from './AdminQuickLinks';
 import AdminFeedback from './AdminFeedback';
@@ -305,6 +305,19 @@ export default function AdminConversations({ adminToken, onNavigate, navContext 
                 <p className="text-gray-400 text-sm">Click "Extract FAQs" to analyse student questions with AI</p>
               </div>
             )}
+          </div>
+        )}
+
+        {tab === 'conversations' && error && (
+          <div className="mx-4 mt-3 flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-200">
+            <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />
+            <p className="text-xs text-red-700 flex-1">{error}</p>
+            <button
+              onClick={() => loadConversations(adminToken, 0)}
+              className="text-xs text-red-700 hover:text-red-900 px-2.5 py-1 rounded-lg bg-red-100 transition-colors"
+            >
+              Retry
+            </button>
           </div>
         )}
 

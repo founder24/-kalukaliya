@@ -32,3 +32,4 @@
 - [Sarvam enable_thinking mode strategy](sarvam-enable-thinking.md) — English: enable_thinking=True → clean content field; Assamese: False → extract from reasoning_content
 - [Syrabit user route aliases](syrabit-user-route-aliases.md) — Frontend uses /user/profile, /user/account, /user/memories; backend must expose these as aliases to /users/me
 - [Admin panel audit findings](admin-panel-audit.md) — AWS-Native section removed (no backend); URL routing via useSearchParams; AdminShellDebug overlay (Ctrl+Shift+D)
+- [Admin panel silent-failure fixes](admin-panel-silent-failures.md) — 4 silent-blank bugs fixed: dashboard skeleton on first load, conversations error banner, logs table loading row, chapters loading spinner
