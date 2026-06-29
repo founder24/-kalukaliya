@@ -1,0 +1,49 @@
+Section,Check,File,Expected value,Failure symptom
+TopicToNotes,Topic chapter ID is identical in notes page and embedding metadata,ChapterPage.jsx | ingestion_v2.py | metadata mapping,Same canonical lesson key is reused,Ask AI grounds on the wrong topic
+TopicToNotes,Notes source type maps to the same vector sourceType,source_types.py | retrieval.py,Frontend and vector metadata agree,Retrieval pulls from the wrong section
+TopicToNotes,Language matches across notes embeddings and retrieval,Localization logic | ingestion pipeline,English and Assamese are tagged correctly,Wrong-language results appear
+TopicToNotes,Filter keys are converted correctly for Vectorize,retrieval.py,Vectorize receives camelCase metadata filters,Filters are ignored or fail
+TopicToNotes,Retrieval is verified with a real filtered query,Test script | retrieval endpoint,Filtering works in practice not just in code,Code looks correct but fails live
+Frontend,Chapter/topic ID matches across library subject chapter and Ask AI source card,LibraryPage.jsx | SubjectPage.jsx | ChapterPage.jsx | InputBar.jsx,Same canonical chapter_id/topic_id is used everywhere,Ask AI opens the wrong lesson or falls back to broad search
+Frontend,Notes page routing uses canonical lesson identity,SubjectPage.jsx | ChapterPage.jsx | router config,Notes links resolve from the same chapter/topic key used elsewhere,Notes page opens but retrieval context is wrong
+Frontend,Assamese and English variants point to the same lesson identity,ChapterPage.jsx | localization mapping | content card components,Language changes content text only not canonical ID,English and Assamese content drift into separate records
+Frontend,Section tabs preserve state on refresh and back navigation,LibraryPage.jsx | SubjectPage.jsx | router logic,Active section survives URL reload and history changes,Tabs reset unexpectedly or show the wrong section
+Frontend,Ask AI always passes chapter_id section lang and source_name,SubjectCard.jsx | LibraryPage.jsx | InputBar.jsx,Chat is seeded with full source context,Chat source chip is missing or incorrect
+Frontend,Source chips clear cleanly,InputBar.jsx | ChatPage.jsx,Dismissing chip removes section and source state,Stale source context persists after dismissal
+Frontend,Loading empty error states exist for key lists and widgets,AdminDashboard.jsx | AdminConversations.jsx | AdminLogsExplorer.jsx | AdminContentEditor.jsx,Each async area shows a visible state in all phases,Blank panels or looks empty confusion
+Frontend,Mobile tabs scroll horizontally instead of squishing,SubjectCard.jsx | CSS or Tailwind classes,Tabs remain tappable on small screens,Tabs compress and become unreadable
+RAG,Notes content and embeddings use the same canonical ID,ingestion_v2.py | retrieval.py | content model files,Same chapter_id/topic_id is used in both,Ask AI retrieves from the wrong lesson
+RAG,Source type mapping is canonical,source_types.py | ingestion_v2.py | retrieval.py,Legacy labels normalize to the approved enum,Content ends up in wrong buckets
+RAG,Language tags are correct for English and Assamese chunks,ingestion_v2.py | embedding metadata mapping,Each chunk carries the correct language metadata,Retrieval returns wrong-language answers
+RAG,Vectorize metadata uses camelCase keys,retrieval.py | vector query builder,Filter payload is converted before query,Filtered retrieval fails silently or returns broad results
+RAG,Atlas queries remain snake_case,retrieval.py | Atlas vector search code,Atlas and Vectorize use different key conventions correctly,One backend works the other breaks intermittently
+RAG,Fast path vector path and web fallback are deterministic,retrieval.py | chat_service.py,Same prompt takes the same path every time,Chat quality changes randomly for the same query
+RAG,Metadata indexes exist before filtered retrieval is enabled,Vectorize setup scripts | infra config,Indexed fields are created first,Filtered queries return errors or ignore filters
+Backend,Source type normalization runs before ingest chunking,ingestion_v2.py | source_types.py,Bad labels are converted before processing,Invalid source values leak into storage
+Backend,Save does not accidentally trigger publish or reindex,admin_content.py | content update handlers,Data save is isolated,Editing one thing causes multiple side effects
+Backend,Chapter update includes bilingual fields and pyq_pdf_url,admin_content.py | ChapterUpdate model,All expected fields are accepted and persisted,Assamese or PYQ updates disappear
+Backend,Admin and user auth secrets remain separate,config.py | auth code,No secret reuse across user/admin tokens,Login works inconsistently or fails in one context
+Backend,Conversation history stores source context,chat.py | conversations.py | message schema,Source card data is persisted with messages,History page cannot reconstruct what was asked
+Backend,Profile board class stream values are saved and reused,users.py | signup/profile handlers,Signup selections become profile defaults,User lands on generic or mismatched content
+Backend,Retrieval filter conversion is always applied,retrieval.py,Vectorize queries are converted using the correct helper,Filters do not narrow results properly
+Edge,JWT handling matches route classification,Edge auth layer | route guard config,Public admin machine paths are treated correctly,Some protected routes 401 unexpectedly
+Edge,Admin cookie routes do not require bearer-only auth,Edge auth layer | backend auth handlers,Cookie-first flows remain valid,Admin login appears broken in browser
+Edge,HMAC and OIDC signing are verified consistently,Edge worker | Cloud Run auth verification,Request provenance checks line up,Backend rejects valid proxied requests
+Edge,OCR TTS ISR ownership is not duplicated,Edge worker | Pages worker,One authoritative path exists per feature,Caching or render behavior conflicts
+Edge,Bot prerender has one source of truth,Edge worker | Pages worker,Only one layer owns bot HTML generation,Search bots see stale or inconsistent pages
+Edge,Edge rate limit and backend monthly quota do not conflict,Edge worker | quota logic in backend,User sees one coherent limit behavior,Users are blocked inconsistently
+Edge,Proxy headers preserve request context,Edge worker,Enough context reaches backend for auth logging,Backend logs or auth checks lose signal
+Deployment,Secret names are standardized across CI runtime docs,Cloud Build config | deploy scripts | env docs,One canonical name per secret,Deploys fail or runtime envs are missing
+Deployment,Build time and runtime Google credentials are separated,Cloud Build | backend runtime config,Build identity and runtime identity are distinct,Builds succeed but runtime secret access fails
+Deployment,Cloudflare API token names are consistent,CI | Wrangler config | secret manager,Same variable name everywhere,Worker or Pages deploy breaks
+Deployment,Pages rebuild hooks and GitHub integration do not race,Publish pipeline | Pages deploy hook,One clear deploy trigger order exists,Stale or conflicting frontend builds
+Deployment,Vectorize indexes are created before filtered use,Infra setup | deployment scripts,Metadata indexes exist before query code depends on them,Retrieval filters fail in production
+Deployment,Publish and reindex are separate deploy paths,Backend job handlers | admin actions,Delivery and retrieval updates are isolated,One action unexpectedly changes both layers
+Deployment,Smoke tests validate auth content chat retrieval,CI pipeline | post deploy checks,Core user flows are tested after deployment,Broken build reaches production unnoticed
+Deployment,Frontend build env vars are present,Cloud Build or Pages env config,Client build has required env values,UI deploys but cannot call APIs correctly
+HiddenBugs,Legacy source labels are fully removed from active code,source_types.py | ingestion | editor forms,No old aliases leak into production paths,Mixed content buckets or broken filters
+HiddenBugs,One page still routes by slug while embeddings filter by ID,Frontend routing | ingestion metadata,Routing and retrieval use the same key family,Page works but Ask AI is off-topic
+HiddenBugs,Assamese UI writes localized labels but retrieval stays English only,Frontend localization | RAG ingestion,Both languages are represented in metadata and content,Assamese user sees English answers
+HiddenBugs,One ingest path skips normalization,ingestion_v2.py | batch import scripts,Every path normalizes source type first,Bad source types appear only in some records
+HiddenBugs,A query still uses snake_case against Vectorize,retrieval.py | query builders,Conversion helper is always applied,Filtered search returns broad or empty results
+HiddenBugs,A URL param is read on one page but not propagated downstream,LibraryPage.jsx | ChatPage.jsx | InputBar.jsx,chapter and section survive through the chain,Ask AI loses source context after navigation
