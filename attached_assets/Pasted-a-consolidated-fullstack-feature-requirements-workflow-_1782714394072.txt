@@ -1,0 +1,407 @@
+a consolidated fullstack feature requirements + workflow + pipeline map based on the session history and the architecture you’ve described. I’ve organized it from user auth all the way through admin, content, chat, and retrieval, with the rule: save changes the data, publish changes delivery, reindex changes retrieval. Cloudflare Pages is the frontend deployment surface, and Vectorize metadata filtering requires metadata indexes to exist before filtered retrieval can work.
+
+1) User auth flow
+User login starts from the auth page and establishes a session.
+
+Admin login is separate from user login.
+
+Admin auth is cookie-first for browser routes.
+
+Admin session verify runs on mount and refresh.
+
+Logout clears the session server-side.
+
+Bearer fallback is limited to machine/cron routes.
+
+Workflow
+User reaches login.
+
+Session is created.
+
+Protected pages check auth before rendering.
+
+Expired sessions redirect to login.
+
+Admin and user auth do not share state in the browser.
+
+2) Board, class, stream, subject navigation
+User selects board.
+
+User selects class.
+
+User selects stream if present.
+
+User lands on a subject page.
+
+Subject page uses syllabus as the navigation spine.
+
+English and Assamese modes remain available across the flow.
+
+Workflow
+Board → class → stream → subject.
+
+Subject page renders the full syllabus.
+
+Topics link to lesson pages.
+
+Browse page splits content into structured sections.
+
+Navigation must be linkable and recoverable from URL state.
+
+3) Library page architecture
+Browse page opens with three section choices:
+
+Notes.
+
+Questions & Answers.
+
+Question Paper.
+
+Full syllabus appears below those sections.
+
+Syllabus is attached to the content card.
+
+Each syllabus topic links to the correct chapter pages.
+
+Browse and chapter views are crawlable and semantic.
+
+Browse supports English and Assamese.
+
+Workflow
+User clicks Browse.
+
+They see section tabs first.
+
+They see the full syllabus underneath.
+
+They click a section or topic.
+
+They land on the correct chapter page.
+
+4) Content card division
+Every content card is split into three sections:
+
+Notes.
+
+Questions & Answers.
+
+Question Paper.
+
+Only sections with content are shown.
+
+Active section is highlighted clearly.
+
+“Ask AI” passes the active section context.
+
+The card retains the syllabus linkage.
+
+Workflow
+Card loads with section availability.
+
+User sees relevant section chips/tabs.
+
+User clicks Notes, Q&A, or Question Paper.
+
+User optionally clicks Ask AI from that exact source.
+
+The source context is attached to the chat query.
+
+5) Full syllabus linking
+Full syllabus is linked to the content card.
+
+Each syllabus chapter topic links to its Notes page.
+
+Each syllabus chapter topic links to its Q&A page when available.
+
+Q&A links are only shown when the lesson has Q&A.
+
+Syllabus is used in SEO/GEO/AEO-friendly page structure.
+
+Topics can be deep-linked by URL and restored.
+
+Workflow
+Subject page renders the syllabus.
+
+Topic links resolve to lesson pages.
+
+Notes and Q&A remain lessonwise.
+
+Question paper remains a distinct path.
+
+The same structure is reused in search and chat contexts.
+
+6) Ask AI button and source card
+Ask AI exists on content cards and chapter pages.
+
+The clicked source name appears above the chat input.
+
+Ask AI includes subject, lesson, section, language, and source name.
+
+Dismissing source chips clears the section param.
+
+Ask AI uses the correct source section and not a generic chapter context.
+
+Workflow
+User clicks Ask AI on a section or chapter.
+
+Source popup shows exact source.
+
+Input bar receives the section context.
+
+Chat pipeline builds grounding from the source card.
+
+Response is generated from the correct content source.
+
+7) Chat pipeline
+Chat receives source context from Ask AI.
+
+Chat uses card context and syllabus alignment.
+
+Chat distinguishes Notes, Q&A, and Question Paper.
+
+Chat uses retrieval data, not display-only data.
+
+Chat works for English and Assamese.
+
+Chat can short-circuit simple intents if needed.
+
+Workflow
+Source context enters chat input.
+
+Query is grounded against RAG data.
+
+Metadata filtering narrows the retrieval scope.
+
+Relevant vectors are returned.
+
+Final answer is produced from retrieved context.
+
+8) History page
+Chat history is persisted.
+
+History reflects saved conversation state correctly.
+
+Conversations page supports pagination.
+
+User can inspect previous chats.
+
+Admin can inspect conversations separately.
+
+Workflow
+Chat is stored with timestamps and source context.
+
+History page lists prior sessions.
+
+User reopens a chat thread.
+
+Admin sees paginated logs and conversation review.
+
+History stays consistent with the chat pipeline.
+
+9) Profile page
+Profile updates persist correctly.
+
+Profile changes flow into personalization logic.
+
+Profile can affect chat behavior or recommendations.
+
+Admin can inspect profile-linked user data where permitted.
+
+UI gracefully handles empty or partial profile data.
+
+Workflow
+User updates profile.
+
+Backend saves the profile.
+
+Chat/personalization logic reads the latest profile.
+
+History and dashboard views remain consistent.
+
+No stale state leaks into chat or library views.
+
+10) Anonymous user tracking and limits
+Anonymous users are tracked by IP address.
+
+Anonymous usage is rate-limited.
+
+Chat limit is 30 per month.
+
+Tracking respects privacy and internal policy.
+
+Limit state is visible to the user when reached.
+
+Anonymous and logged-in usage are separated.
+
+Workflow
+Anonymous user starts chatting.
+
+IP-based tracking identifies usage bucket.
+
+Monthly count increments.
+
+On 30 chats, the system blocks or soft-limits access.
+
+User sees a clear limit message and next-step options.
+
+11) Admin panel full requirement
+Admin shell uses state-driven or URL-driven navigation consistently.
+
+Dashboard loads with skeletons and not zeroed cards.
+
+Conversations show error banners and retry.
+
+Logs show loading rows and empty states.
+
+Content editor shows loading guards and empty states.
+
+RAG editor and content editor are distinct and aligned.
+
+Publish, reindex, and audit panels are visible and functional.
+
+Legacy or unused sections are hidden or removed.
+
+Workflow
+Admin logs in.
+
+Shell loads with safe auth.
+
+Section state is restored.
+
+Each section loads its own data with visible loading.
+
+Job trackers and error states are always explicit.
+
+12) Content editor vs RAG editor
+Content editor is library/page-focused.
+
+RAG editor is chat/retrieval-focused.
+
+Content editor stores summary notes.
+
+Content editor stores user-facing Q&A.
+
+Content editor supports PYQ PDF view.
+
+RAG editor stores full chapter text.
+
+RAG editor stores retrieval-friendly Q&A and PYQ text.
+
+Same metadata model is used across both.
+
+Workflow
+Content editor saves display-ready content.
+
+Publish sends it to delivery.
+
+RAG editor saves retrieval-ready content.
+
+Reindex sends it to embeddings/vector retrieval.
+
+Chat uses the RAG side, library uses the content side.
+
+13) Content editor to library pipeline
+Save updates the database content.
+
+Publish updates delivery artifacts.
+
+The library page reads from published content.
+
+The subject page and chapter page render the published model.
+
+PYQ PDF belongs to the user-facing content editor.
+
+Syllabus topics are linked into browse and chapter views.
+
+Workflow
+Admin edits display content.
+
+Save persists data.
+
+Publish updates public delivery.
+
+Library refreshes to show latest published content.
+
+Browse and chapter pages remain syllabus-linked.
+
+14) RAG editor to chat pipeline
+RAG editor stores retrieval text.
+
+Reindex updates vector embeddings.
+
+Metadata filtering supports subject, chapter, section, language, and source type.
+
+Chat uses the latest indexed retrieval state.
+
+PYQ is text in the RAG layer.
+
+Full chapter text is available for retrieval.
+
+Workflow
+Admin updates RAG content.
+
+Save persists RAG text.
+
+Reindex updates embeddings.
+
+Chat queries the vector store with metadata filters.
+
+The response is grounded from the indexed retrieval content.
+
+15) Embeddings and source card model
+Source card is attached to each AI request.
+
+Source card includes subject, lesson, section, and language.
+
+Embeddings are generated from the RAG text model.
+
+Metadata indexes are created before filtering.
+
+Filters use supported operators and supported property types.
+
+Retrieval remains bounded by the right syllabus scope.
+
+Workflow
+Content is split into retrievable chunks.
+
+Metadata is stored with vectors.
+
+Indexes are created for filterable properties.
+
+Query filters narrow the candidate set.
+
+Answers use the correct source card and topic context.
+
+16) Core separation rules
+Save = data.
+
+Publish = delivery.
+
+Reindex = retrieval.
+
+Content editor = user/library view.
+
+RAG editor = chat/retrieval view.
+
+Notes and Q&A remain lessonwise.
+
+Question paper remains distinct.
+
+Syllabus is the common spine across all views.
+
+Suggested priority order
+Auth and user flow.
+
+Board/class/stream/subject navigation.
+
+Library and syllabus structure.
+
+Ask AI source handling.
+
+Chat, history, profile, and anonymous limits.
+
+Admin content editor vs RAG editor.
+
+Publish/reindex/embeddings and metadata filtering.
+
+Admin dashboard, logs, analytics, and ops.
