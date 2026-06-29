@@ -344,6 +344,33 @@ export default function ChapterEditForm({
           </div>
         )}
 
+        {/* PDF URL — shown only for Question Paper type */}
+        {contentForm.content_type === 'question_paper' && (
+          <div className="flex-shrink-0 px-4 py-3 rounded-xl mx-0 mb-0" style={{ background: 'rgba(217,119,6,0.06)', border: '1px solid rgba(217,119,6,0.18)' }}>
+            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5" style={{ color: '#d97706' }}>
+              PDF URL (public link to Question Paper PDF)
+            </label>
+            <input
+              type="url"
+              value={contentForm.pyq_pdf_url || ''}
+              onChange={e => setContentForm(f => ({ ...f, pyq_pdf_url: e.target.value }))}
+              placeholder="https://example.com/question-paper.pdf"
+              className="w-full text-sm rounded-lg px-3 py-2 border outline-none focus:ring-2 transition-all"
+              style={{ borderColor: 'rgba(217,119,6,0.30)', background: '#fffbf5', color: '#92400e', focusRingColor: 'rgba(217,119,6,0.40)' }}
+            />
+            {contentForm.pyq_pdf_url && (
+              <a
+                href={contentForm.pyq_pdf_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 hover:underline"
+              >
+                <FileText size={10} /> Preview PDF ↗
+              </a>
+            )}
+          </div>
+        )}
+
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex items-center gap-1.5 mb-1.5 flex-shrink-0">
             <div className="flex items-center gap-1">

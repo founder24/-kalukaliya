@@ -305,12 +305,16 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       updatePayload.rag_text_as = contentForm.rag_text_as || '';
       if (contentForm.qa_text_en !== undefined) updatePayload.qa_text_en = contentForm.qa_text_en || '';
       if (contentForm.qa_text_as !== undefined) updatePayload.qa_text_as = contentForm.qa_text_as || '';
+<<<<<<< HEAD
       updatePayload.pyq_pdf_url = contentForm.pyq_pdf_url || '';
+=======
+      if (contentForm.pyq_pdf_url !== undefined) updatePayload.pyq_pdf_url = contentForm.pyq_pdf_url || '';
+>>>>>>> 31b8e4a9 (Add syllabus navigation and question paper PDF uploads)
       if (!force) updatePayload.version = contentForm.version ?? 0;
       const res = await axios.patch(`${API}/admin/content/chapters/${editTarget.id}`, updatePayload, authHeaders(adminToken));
       const newVersion = res.data?.version ?? (contentForm.version + 1);
       setContentForm(f => ({ ...f, version: newVersion }));
-      toast.success('Chapter updated successfully'); setEditView(null); setEditTarget(null); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', version: 0 }); setChapterStats(null); refreshChapters(selSubject);
+      toast.success('Chapter updated successfully'); setEditView(null); setEditTarget(null); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '', version: 0 }); setChapterStats(null); refreshChapters(selSubject);
     } catch (e) {
       const detail = e?.response?.data?.detail;
       if (e?.response?.status === 409 && detail?.code === 'version_conflict') {

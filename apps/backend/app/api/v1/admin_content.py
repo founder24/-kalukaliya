@@ -119,6 +119,7 @@ class ChapterUpdate(BaseModel):
     qa_text_as: Optional[str] = None
     order: Optional[int] = None
     topics: Optional[list[str]] = None
+    pyq_pdf_url: Optional[str] = None   # public URL to Question Paper PDF
     version: Optional[int] = None        # optimistic locking — omit to bypass, send current value to guard
     pyq_pdf_url: Optional[str] = None    # URL to the PYQ PDF (question_paper chapters)
 

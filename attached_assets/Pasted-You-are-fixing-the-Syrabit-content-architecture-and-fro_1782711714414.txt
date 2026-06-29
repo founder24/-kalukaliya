@@ -1,0 +1,118 @@
+You are fixing the Syrabit content architecture and frontend navigation.
+
+Core rule:
+SAVE changes the data.
+PUBLISH changes delivery.
+REINDEX changes retrieval.
+
+Goal:
+Make browse pages, content cards, chapter pages, content editor, and RAG editor syllabus-aware and section-aware, with strong SEO, GEO, and AEO support.
+
+Product requirements:
+
+1) Browse page behavior
+- When the Browse button is clicked, open a page with 3 top sections:
+  - Notes
+  - Questions & Answers
+  - Question Paper
+- Below those 3 sections, show the full syllabus of the subject.
+- The syllabus must be attached to the content card and available from the chapter page.
+- The syllabus should act as the subject-level structure for navigation and SEO.
+- Users can click Notes / Questions & Answers / Question Paper and see all chapter pages under that header.
+
+2) Linking behavior
+- Each chapter topic in the syllabus must link to its respective Notes chapter page.
+- Each chapter topic in the syllabus must also link to its respective Questions & Answers chapter page of the same lesson.
+- Keep English and Assamese modes working in all views.
+- The chapter page should preserve the lesson context and section context.
+
+3) Ask AI behavior
+- Ask AI buttons exist at the content card level and chapter page level.
+- When clicked, Ask AI must use the exact source the user clicked from.
+- The source name should appear above the input box in a popup or source chip before submitting the question.
+- The chat context must include:
+  - subject
+  - chapter
+  - lesson/topic
+  - section type
+  - language
+  - source name
+- Ask AI should respect the syllabus-aligned source and not drift to unrelated chapters.
+
+4) Content editor behavior
+- The content editor is for the frontend/user/library view.
+- It should store summary notes.
+- It should store lesson-wise Questions & Answers.
+- It should support PYQ as PDF for viewing.
+- It should remain aligned to the library page and user reading experience.
+- It should include the full syllabus attached to the content card model.
+
+5) RAG editor behavior
+- The RAG editor is for chat retrieval.
+- It should use the same metadata model as the content editor.
+- It should store the full chapter text, not just the summary.
+- It should store all questions, including multiple questions where needed.
+- PYQ should be stored as text in the RAG layer so chat can answer from it.
+- The RAG editor should remain focused on chat page retrieval quality.
+
+6) Metadata model
+- Each chapter must carry:
+  - subject
+  - lesson/topic
+  - section type: Notes / Questions & Answers / Question Paper
+  - language: English / Assamese
+  - source type: card, chapter, pdf, text, syllabus
+  - syllabus linkage
+- The syllabus itself should be queryable and renderable as a navigation structure.
+- RAG metadata should support filtering by subject, lesson, section, language, and source type.
+- Use Vectorize metadata filtering only after metadata indexes exist.
+
+7) SEO / GEO / AEO
+- The browse page and chapter pages must be structured for discoverability.
+- Use semantic headings for syllabus, Notes, Q&A, and Question Paper.
+- Ensure internal links make the syllabus crawlable.
+- Make the source context explicit in page metadata where relevant.
+- Keep content pages indexable and linkable for search and AI answer engines.
+
+Frontend design requirements:
+- Content cards should no longer show only one generic chapter block.
+- Split each content card into 3 visible sections:
+  - Notes
+  - Questions & Answers
+  - Question Paper
+- The Browse button should open a page where these 3 sections appear first.
+- The syllabus should appear below those 3 section choices.
+- The chapter syllabus topics should link to their corresponding Notes and Q&A pages.
+- The Ask AI popup should show the clicked source name above the chat input.
+- English and Assamese mode toggles must still work.
+
+Backend/data requirements:
+- Separate content-editor data from RAG-editor data.
+- Keep content editor data summary-oriented and user-facing.
+- Keep RAG data retrieval-oriented and chat-facing.
+- Store syllabus linkage in the chapter metadata.
+- Store source type and section type in the record schema.
+- Ensure chapter list/get endpoints return all fields required by the UI.
+
+Implementation order:
+1. Update the data model for syllabus, section type, source type, and language-aware content.
+2. Update the browse/content-card UI to show Notes, Q&A, Question Paper, and syllabus.
+3. Update chapter pages so syllabus topics deep-link to lesson-specific Notes and Q&A pages.
+4. Update Ask AI to carry source name and source context into chat.
+5. Update content editor for summary notes and lesson-wise Q&A.
+6. Update RAG editor for full chapter text, PYQ text, and retrieval metadata.
+7. Update backend APIs and vector metadata indexing to match the new model.
+8. Update SEO metadata, heading structure, and internal links for crawlability.
+
+Acceptance criteria:
+- Browse page shows Notes, Questions & Answers, Question Paper, then syllabus.
+- Syllabus is attached to the content card and chapter page.
+- Each syllabus topic links to its Notes and Q&A chapter pages.
+- Ask AI shows the correct source name before submitting.
+- English and Assamese still work across all views.
+- Content editor is summary-oriented and library-focused.
+- RAG editor is retrieval-oriented and chat-focused.
+- PYQ is PDF in the user-facing editor and text in the RAG editor.
+- Metadata filtering supports subject, lesson, section, language, and source type.
+- SEO/GEO/AEO structure is explicit and crawlable.
+- Save, publish, and reindex remain separate actions.

@@ -586,6 +586,7 @@ export default function SubjectPage() {
         {/* Chapters accordion — filtered by active section */}
         <LegacyAccordion subject={subject} subjectId={subjectId} chapters={filteredChapters} sectionKey={activeSectionKey} />
 
+<<<<<<< HEAD
         {/* Full Syllabus — always-visible, SEO-crawlable chapter index */}
         {(() => {
           const notesChs = chapters.filter(ch => !ch.content_type || (ch.content_type !== 'qa' && ch.content_type !== 'question_paper'));
@@ -625,20 +626,62 @@ export default function SubjectPage() {
                             className="text-[11px] font-medium hover:underline"
                             style={{ color: '#7c3aed' }}
                             title={`${ch.title} — Notes`}
+=======
+        {/* Full Syllabus — always visible, all chapters, Notes/Q&A deep links (SEO/GEO crawlable) */}
+        {chapters.length > 0 && subject?.slug && (
+          <section aria-label="Syllabus" className="space-y-3">
+            <h2 className="text-sm font-bold uppercase tracking-widest px-1 flex items-center gap-2" style={{ color: 'hsl(var(--muted-foreground))' }}>
+              <Layers size={12} />
+              Syllabus
+            </h2>
+            <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(139,92,246,0.12)' }}>
+              {[...chapters]
+                .sort((a, b) => (a.order_index ?? a.order ?? a.chapter_number ?? 0) - (b.order_index ?? b.order ?? b.chapter_number ?? 0))
+                .map((ch, i) => {
+                  const chBase = subject.board_slug && subject.class_slug && subject.slug && ch.slug
+                    ? `/${subject.board_slug}/${subject.class_slug}${subject.stream_slug ? `/${subject.stream_slug}` : ''}/${subject.slug}/${ch.slug}`
+                    : null;
+                  const hasQA = ch.has_qa || ch.content_type === 'qa';
+                  return (
+                    <div
+                      key={ch.id || i}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-violet-50/40 dark:hover:bg-violet-950/20"
+                      style={{ borderBottom: i < chapters.length - 1 ? '1px solid rgba(139,92,246,0.06)' : 'none' }}
+                    >
+                      <span className="w-6 text-center text-[11px] font-bold shrink-0" style={{ color: 'hsl(var(--muted-foreground) / 0.5)' }}>
+                        {ch.chapter_number ?? i + 1}
+                      </span>
+                      <span className="flex-1 font-medium truncate text-foreground">{ch.title}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {chBase && (
+                          <Link
+                            to={`${chBase}?tab=notes`}
+                            className="text-[10px] font-semibold px-2 py-0.5 rounded-full transition-all hover:opacity-80"
+                            style={{ background: 'rgba(124,58,237,0.08)', color: '#7c3aed', border: '1px solid rgba(124,58,237,0.18)' }}
+>>>>>>> 31b8e4a9 (Add syllabus navigation and question paper PDF uploads)
                           >
                             Notes
                           </Link>
                         )}
+<<<<<<< HEAD
                         {base && ch.has_qa && (
                           <Link
                             to={`${base}?tab=qa`}
                             className="text-[11px] font-medium hover:underline"
                             style={{ color: '#2563eb' }}
                             title={`${ch.title} — Q&A`}
+=======
+                        {chBase && hasQA && (
+                          <Link
+                            to={`${chBase}?tab=qa`}
+                            className="text-[10px] font-semibold px-2 py-0.5 rounded-full transition-all hover:opacity-80"
+                            style={{ background: 'rgba(37,99,235,0.08)', color: '#2563eb', border: '1px solid rgba(37,99,235,0.18)' }}
+>>>>>>> 31b8e4a9 (Add syllabus navigation and question paper PDF uploads)
                           >
                             Q&amp;A
                           </Link>
                         )}
+<<<<<<< HEAD
                       </span>
                     </li>
                   );
@@ -647,6 +690,15 @@ export default function SubjectPage() {
             </section>
           );
         })()}
+=======
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </section>
+        )}
+>>>>>>> 31b8e4a9 (Add syllabus navigation and question paper PDF uploads)
       </div>
     </AppLayout>
   );
