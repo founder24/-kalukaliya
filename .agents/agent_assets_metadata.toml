@@ -30,3 +30,9 @@ id = "IcePTuprvgbw2hsooaa_q"
 uri = "file://attached_assets/admin-panel-checklist.md"
 type = "text"
 title = "Syrabit Admin Panel — End-to-End Checklist"
+
+[[outputs]]
+id = "Qhw70fDBJdwPFLJCydWcq"
+uri = "file://FULLSTACK_ARCHITECTURE.md"
+type = "text"
+title = "Syrabit — Full-Stack End-to-End Architecture"
