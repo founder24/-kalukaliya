@@ -232,6 +232,19 @@ export default function ChapterEditForm({
           </div>
         )}
 
+        {contentForm.content_type === 'question_paper' && (
+          <div className="flex-shrink-0">
+            <label className="text-xs text-gray-500 block mb-1">PDF URL <span className="text-gray-400">(link to the question paper PDF)</span></label>
+            <input
+              type="url"
+              value={contentForm.pyq_pdf_url || ''}
+              onChange={(e) => setContentForm(f => ({ ...f, pyq_pdf_url: e.target.value }))}
+              placeholder="https://example.com/question-paper.pdf"
+              className="w-full h-10 px-3.5 rounded-lg text-sm text-gray-900 bg-gray-50 border border-gray-200 outline-none focus:border-amber-500 transition-colors font-mono"
+            />
+          </div>
+        )}
+
         {(editView === 'edit-chapter' || editView === 'new-chapter') && contentForm.content_type !== 'question_paper' && (
           <div className="flex-shrink-0 flex flex-col gap-2 px-3 py-2 rounded-lg bg-violet-50/50 border border-violet-200/50">
             {/* Content mode: Reader vs RAG */}

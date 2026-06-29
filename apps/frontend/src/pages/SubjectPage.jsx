@@ -573,6 +573,68 @@ export default function SubjectPage() {
 
         {/* Chapters accordion — filtered by active section */}
         <LegacyAccordion subject={subject} subjectId={subjectId} chapters={filteredChapters} sectionKey={activeSectionKey} />
+
+        {/* Full Syllabus — always-visible, SEO-crawlable chapter index */}
+        {(() => {
+          const notesChs = chapters.filter(ch => !ch.content_type || (ch.content_type !== 'qa' && ch.content_type !== 'question_paper'));
+          if (notesChs.length === 0) return null;
+          return (
+            <section aria-labelledby="full-syllabus-heading" className="pt-2 pb-6">
+              <h2
+                id="full-syllabus-heading"
+                className="text-sm font-semibold mb-3 flex items-center gap-2"
+                style={{ color: '#555', letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px' }}
+              >
+                <BookOpen size={13} style={{ color: '#7c3aed' }} />
+                Full Syllabus — {subject.name}
+              </h2>
+              <ol className="space-y-1">
+                {notesChs.map((ch) => {
+                  const base = subject.board_slug && subject.class_slug && subject.slug && ch.slug
+                    ? [
+                        '',
+                        subject.board_slug,
+                        subject.class_slug,
+                        ...(subject.stream_slug ? [subject.stream_slug] : []),
+                        subject.slug,
+                        ch.slug,
+                      ].join('/')
+                    : null;
+                  return (
+                    <li key={ch.id} className="flex items-baseline gap-2 text-sm py-1 border-b last:border-b-0" style={{ borderColor: 'rgba(0,0,0,0.05)' }}>
+                      <span className="w-6 text-right flex-shrink-0 text-[11px] font-mono" style={{ color: '#bbb' }}>
+                        {ch.chapter_number ?? '—'}
+                      </span>
+                      <span className="flex-1 font-medium" style={{ color: '#222' }}>{ch.title}</span>
+                      <span className="flex items-center gap-2 flex-shrink-0">
+                        {base && (
+                          <Link
+                            to={base}
+                            className="text-[11px] font-medium hover:underline"
+                            style={{ color: '#7c3aed' }}
+                            title={`${ch.title} — Notes`}
+                          >
+                            Notes
+                          </Link>
+                        )}
+                        {base && ch.has_qa && (
+                          <Link
+                            to={`${base}?tab=qa`}
+                            className="text-[11px] font-medium hover:underline"
+                            style={{ color: '#2563eb' }}
+                            title={`${ch.title} — Q&A`}
+                          >
+                            Q&amp;A
+                          </Link>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          );
+        })()}
       </div>
     </AppLayout>
   );

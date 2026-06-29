@@ -120,6 +120,7 @@ class ChapterUpdate(BaseModel):
     order: Optional[int] = None
     topics: Optional[list[str]] = None
     version: Optional[int] = None        # optimistic locking — omit to bypass, send current value to guard
+    pyq_pdf_url: Optional[str] = None    # URL to the PYQ PDF (question_paper chapters)
 
 
 class ChapterRagUpdate(BaseModel):
@@ -510,6 +511,8 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate,
         chapter.qa_text_en = body.qa_text_en
     if body.qa_text_as is not None:
         chapter.qa_text_as = body.qa_text_as
+    if body.pyq_pdf_url is not None:
+        chapter.pyq_pdf_url = body.pyq_pdf_url
     now = datetime.now(timezone.utc)
     # Stamp content_saved_at whenever student-facing text changes
     if body.content is not None or body.content_as is not None or body.qa_text_en is not None or body.qa_text_as is not None:

@@ -35,7 +35,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const [viewerItem, setViewerItem] = useState(null);
 
   const [editView, setEditView] = useState(null);
-  const [contentForm, setContentForm] = useState({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', version: 0 });
+  const [contentForm, setContentForm] = useState({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '', version: 0 });
   const [editTarget, setEditTarget] = useState(null);
   const [saving, setSaving] = useState(false);
   const [chapterStats, setChapterStats] = useState(null);
@@ -286,8 +286,9 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       if (contentForm.rag_text_as) createPayload.rag_text_as = contentForm.rag_text_as;
       if (contentForm.qa_text_en) createPayload.qa_text_en = contentForm.qa_text_en;
       if (contentForm.qa_text_as) createPayload.qa_text_as = contentForm.qa_text_as;
+      if (contentForm.pyq_pdf_url) createPayload.pyq_pdf_url = contentForm.pyq_pdf_url;
       await axios.post(`${API}/admin/content/chapters`, createPayload, authHeaders(adminToken));
-      toast.success('Chapter created successfully'); setEditView(null); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '' }); setChapterStats(null); refreshChapters(selSubject);
+      toast.success('Chapter created successfully'); setEditView(null); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '' }); setChapterStats(null); refreshChapters(selSubject);
     } catch { toast.error('Failed to create chapter'); }
     finally { setSaving(false); }
   };
@@ -304,6 +305,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       updatePayload.rag_text_as = contentForm.rag_text_as || '';
       if (contentForm.qa_text_en !== undefined) updatePayload.qa_text_en = contentForm.qa_text_en || '';
       if (contentForm.qa_text_as !== undefined) updatePayload.qa_text_as = contentForm.qa_text_as || '';
+      updatePayload.pyq_pdf_url = contentForm.pyq_pdf_url || '';
       if (!force) updatePayload.version = contentForm.version ?? 0;
       const res = await axios.patch(`${API}/admin/content/chapters/${editTarget.id}`, updatePayload, authHeaders(adminToken));
       const newVersion = res.data?.version ?? (contentForm.version + 1);
@@ -923,11 +925,11 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                       onToggleSelect={toggleChapterSelect}
                       onToggleSelectAll={toggleChapterSelectAll}
                       onViewChapter={(ch) => setViewerItem(ch)}
-                      onEditChapter={(ch) => { setEditTarget(ch); setContentForm({ title: ch.title, slug: ch.slug || '', description: ch.description || '', content: ch.content || '', content_type: ch.content_type || 'notes', order: ch.order || 1, topics: ch.topics || [], content_as: ch.content_as || '', rag_text_en: ch.rag_text_en || '', rag_text_as: ch.rag_text_as || '', qa_text_en: ch.qa_text_en || '', qa_text_as: ch.qa_text_as || '', qa_rag_text_en: ch.qa_rag_text_en || '', qa_rag_text_as: ch.qa_rag_text_as || '', version: ch.version ?? 0 }); setEditView('edit-chapter'); loadChapterStats(ch.id); }}
+                      onEditChapter={(ch) => { setEditTarget(ch); setContentForm({ title: ch.title, slug: ch.slug || '', description: ch.description || '', content: ch.content || '', content_type: ch.content_type || 'notes', order: ch.order || 1, topics: ch.topics || [], content_as: ch.content_as || '', rag_text_en: ch.rag_text_en || '', rag_text_as: ch.rag_text_as || '', qa_text_en: ch.qa_text_en || '', qa_text_as: ch.qa_text_as || '', qa_rag_text_en: ch.qa_rag_text_en || '', qa_rag_text_as: ch.qa_rag_text_as || '', pyq_pdf_url: ch.pyq_pdf_url || '', version: ch.version ?? 0 }); setEditView('edit-chapter'); loadChapterStats(ch.id); }}
                       onPublishChapter={handlePublishChapter}
                       publishingChapters={publishingChapters}
                       selSubject={selSubject} subjectData={subjectData}
-                      onCreateNew={() => { setEditView('new-chapter'); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: chapters.length + 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '' }); setChapterStats(null); }}
+                      onCreateNew={() => { setEditView('new-chapter'); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: chapters.length + 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '' }); setChapterStats(null); }}
                     />
                     )}
                   </div>

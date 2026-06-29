@@ -290,7 +290,10 @@ export default function ChapterPage() {
       : null,
   );
   const articleRef = useRef(null);
-  const [contentMode, setContentMode] = useState('notes');
+  const _tabParam = searchParams.get('tab');
+  const [contentMode, setContentMode] = useState(
+    ['notes', 'qa', 'pyq'].includes(_tabParam) ? _tabParam : 'notes',
+  );
   const [activeId, setActiveId] = useState('');
   const [relatedChapterTopics, setRelatedChapterTopics] = useState([]);
   // Task #914 Step 3 — published topics with `definition_status=ok`
