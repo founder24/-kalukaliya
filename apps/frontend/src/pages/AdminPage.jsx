@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard, BookOpen, Users,
   MessageSquare, TrendingUp, Bell, Settings, HeartPulse, LogOut,
   ChevronLeft, ChevronRight, Loader2, Globe,
   Crown, Cpu, Activity, ShieldAlert, Cloud,
-  ExternalLink, Gauge,
+  ExternalLink, Gauge, Bug,
 } from 'lucide-react';
 import axios from 'axios';
 import { adminVerify, adminLogout, adminGetSettings, adminGetUnacknowledgedAlertCount, API_BASE } from '@/utils/api';
@@ -23,21 +23,19 @@ const AdminNotifications   = lazy(() => import('@/components/admin/AdminNotifica
 const AdminSettings        = lazy(() => import('@/components/admin/AdminSettings'));
 const AdminHealth          = lazy(() => import('@/components/admin/AdminHealth'));
 const AdminSeoManager      = lazy(() => import('@/components/admin/AdminSeoManager'));
-// Task #296 — consolidated wrappers fold the previous fragmented panels
-// into tabbed parents (AI & Automation, Revenue, Access & Security, Logs).
 const AdminAiHub           = lazy(() => import('@/components/admin/AdminAiHub'));
 const AdminRevenueHub      = lazy(() => import('@/components/admin/AdminRevenueHub'));
 const AdminAccessSecurity  = lazy(() => import('@/components/admin/AdminAccessSecurity'));
-// Logs Explorer now hosts Admin Actions inline as a `source=admin-actions`
-// pseudo-filter (Task #296) — no separate hub wrapper needed.
 const AdminLogsExplorer    = lazy(() => import('@/components/admin/AdminLogsExplorer'));
 const AdminGcpPanel        = lazy(() => import('@/components/admin/AdminGcpPanel'));
-const AdminAwsNativePanel  = lazy(() => import('@/components/admin/AdminAwsNativePanel'));
 const AdminOpsConsole      = lazy(() => import('@/components/admin/AdminOpsConsole'));
 const SyraAssistant        = lazy(() => import('@/components/admin/SyraAssistant'));
-import { SyraProvider } from '@/components/admin/syra/SyraContext';
+import { SyraProvider, useSyraContext } from '@/components/admin/syra/SyraContext';
 
-// Task #296 — flattened sidebar: 12 sections in 4 groups (was 24 in 6).
+// AWS-Native panel removed: /admin/aws-native/* endpoints are not implemented
+// in the current backend. The section was a frontend-only design stub — hiding
+// it prevents a 404 error on every visit and keeps the sidebar uncluttered.
+
 const SECTIONS = [
   { id: 'dashboard',     icon: LayoutDashboard, label: 'Dashboard',         group: 'main'       },
   { id: 'contenthub',    icon: BookOpen,        label: 'Content Editor',    group: 'main'       },
@@ -53,7 +51,6 @@ const SECTIONS = [
   { id: 'health',        icon: HeartPulse,      label: 'Health / Uptime',   group: 'system'     },
   { id: 'ops',           icon: Gauge,           label: 'Ops Console',       group: 'system'     },
   { id: 'gcp',           icon: Cloud,           label: 'GCP Integrations',  group: 'system'     },
-  { id: 'awsnative',     icon: Cloud,           label: 'AWS-Native Features', group: 'system'   },
   { id: 'settings',      icon: Settings,        label: 'Site Settings',     group: 'system'     },
 ];
 
@@ -81,51 +78,31 @@ const SECTION_COMPONENTS = {
   health:        AdminHealth,
   ops:           AdminOpsConsole,
   gcp:           AdminGcpPanel,
-  awsnative:     AdminAwsNativePanel,
   settings:      AdminSettings,
-  // Roadmap is no longer in the sidebar but stays mounted as a reachable
-  // route via the `roadmap` deep-link redirect / dashboard quick link.
   roadmap:       AdminRoadmap,
 };
 
-// Task #296 — backwards-compat redirect map for legacy section ids.
-// Every old `setActiveSection('apiconfig')` style call (deep links from
-// emails, bookmarks, AdminQuickLinks, SyraAssistant intents, etc.) is
-// rewritten into the new merged section + an initial tab/sub-tab so
-// users land on exactly the right pane.
-//
-// Shape:  { section: 'ai', tab: 'providers', subTab: 'apiconfig' }
-//
-// Forwarders preserve any extra navContext keys (panel, channel, etc.)
-// the caller passed alongside (used by botsecurity alert deep links).
 export const SECTION_REDIRECTS = {
-  // AI & Automation
   apiconfig:    { section: 'ai',       tab: 'providers', subTab: 'apiconfig'    },
   vertex:       { section: 'ai',       tab: 'providers', subTab: 'vertex'       },
   intelligence: { section: 'ai',       tab: 'providers', subTab: 'intelligence' },
   automation:   { section: 'ai',       tab: 'jobs' },
-  // Revenue
   monetization: { section: 'revenue',  tab: 'monetization' },
   plans:        { section: 'revenue',  tab: 'plans' },
   ads:          { section: 'revenue',  tab: 'ads' },
-  // Access & Security
   googleauth:   { section: 'security', tab: 'auth' },
   ratelimits:   { section: 'security', tab: 'ratelimits' },
   botsecurity:  { section: 'security', tab: 'botsecurity' },
   edubrowser:   { section: 'security', tab: 'edubrowser' },
-  // Logs — Admin Actions is now an in-explorer source filter, not a tab.
   logsexplorer: { section: 'logs' },
   activitylog:  { section: 'logs', initialSources: ['admin-actions'] },
-  // Conversations Feedback tab
   feedback:     { section: 'conversations', tab: 'feedback' },
-  // Roadmap was retired from the sidebar but stays mounted; explicit
-  // entry here documents the passthrough for old deep-links.
   roadmap:      { section: 'roadmap' },
+  // Legacy stub — redirect to GCP which is still implemented
+  awsnative:    { section: 'gcp' },
 };
 
 export function resolveSectionRedirect(section, ctx = null) {
-  // Special case retained from earlier behaviour: 'blog' opens the
-  // ContentHub on its blog tab.
   if (section === 'blog') {
     return { section: 'contenthub', navContext: { ...(ctx || {}), initialTab: 'blog' } };
   }
@@ -142,15 +119,108 @@ export function resolveSectionRedirect(section, ctx = null) {
   return { section: redirect.section, navContext: merged };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Shell Debugger — overlays live shell state for development/support debugging.
+// Rendered inside <SyraProvider> so it can read selectedEntity from context.
+// Toggle with Ctrl+Shift+D or the bug icon in the sidebar footer.
+// ─────────────────────────────────────────────────────────────────────────────
+function AdminShellDebug({ activeSection, navContext, adminEmail, adminName, sysStatus, onClose }) {
+  const ctx = useSyraContext();
+  const selectedEntity = ctx?.selectedEntity ?? null;
+
+  const Row = ({ label, value, color = 'text-gray-200' }) => (
+    <div className="flex gap-2 items-start min-w-0">
+      <span className="text-gray-500 w-32 flex-shrink-0 text-[10px] uppercase tracking-wide pt-0.5">{label}</span>
+      <span className={`${color} break-all whitespace-pre-wrap text-[11px] font-mono min-w-0`}>{value}</span>
+    </div>
+  );
+
+  return (
+    <div
+      role="dialog"
+      aria-label="Shell debugger"
+      className="fixed bottom-4 right-4 z-[9999] w-[440px] max-h-[75vh] overflow-y-auto rounded-2xl shadow-2xl border border-gray-700/80 bg-gray-950/97 backdrop-blur-sm p-5"
+      data-testid="admin-shell-debug"
+    >
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Bug size={14} className="text-violet-400" />
+          <span className="text-[11px] font-bold text-violet-400 uppercase tracking-widest">Shell Debugger</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="text-gray-600 hover:text-gray-300 transition-colors text-lg leading-none"
+          aria-label="Close debugger"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="space-y-2.5">
+        <Row label="activeSection"  value={activeSection}                        color="text-emerald-400" />
+        <Row label="sysStatus"      value={sysStatus}                            color="text-amber-400"  />
+        <Row label="auth.email"     value={adminEmail || '(not available)'}      color="text-blue-400"   />
+        <Row label="auth.name"      value={adminName  || '(not available)'}      color="text-blue-300"   />
+        <Row label="auth.mode"      value="httponly-cookie (no localStorage)"    color="text-gray-400"   />
+        <Row
+          label="navContext"
+          value={navContext ? JSON.stringify(navContext, null, 2) : 'null'}
+          color="text-cyan-400"
+        />
+        <Row
+          label="selectedEntity"
+          value={selectedEntity ? JSON.stringify(selectedEntity, null, 2) : 'null'}
+          color="text-pink-400"
+        />
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-gray-800 flex items-center justify-between">
+        <p className="text-[10px] text-gray-600">Ctrl+Shift+D to toggle</p>
+        <div className="flex items-center gap-3 text-[10px] text-gray-600">
+          <span>URL: <span className="text-gray-400 font-mono">{window.location.search || '(none)'}</span></span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Section state — URL-synced via ?s=<id>&t=<tab>&st=<subTab> so that:
+  //   • Browser back/forward navigates between sections
+  //   • Deep links work without the navContext alias system
+  //   • Sharing a URL lands on the correct section and tab
   const [activeSection, setActiveSection] = useState('dashboard');
   const [navContext, setNavContext]        = useState(null);
+
+  // One-time restoration: read ?s / ?t / ?st from URL on first mount.
+  const urlRestoredRef = useRef(false);
+  useEffect(() => {
+    if (urlRestoredRef.current) return;
+    urlRestoredRef.current = true;
+    const s  = searchParams.get('s');
+    const t  = searchParams.get('t')  || undefined;
+    const st = searchParams.get('st') || undefined;
+    if (s && SECTION_COMPONENTS[s]) {
+      const ctx = (t || st) ? { tab: t, subTab: st } : null;
+      setNavContext(ctx);
+      setActiveSection(s);
+    }
+  }, [searchParams]);
+
   const handleNavigate = useCallback((section, ctx = null) => {
     const resolved = resolveSectionRedirect(section, ctx);
     setNavContext(resolved.navContext);
     setActiveSection(resolved.section);
-  }, []);
+    // Mirror to URL so back/forward and deep-links work.
+    const params = { s: resolved.section };
+    if (resolved.navContext?.tab)    params.t  = String(resolved.navContext.tab);
+    if (resolved.navContext?.subTab) params.st = String(resolved.navContext.subTab);
+    setSearchParams(params, { replace: true });
+  }, [setSearchParams]);
+
   const [collapsed, setCollapsed]         = useState(false);
   const [verifying, setVerifying]         = useState(true);
   const [sysStatus, setSysStatus]         = useState('ok');
@@ -160,6 +230,20 @@ export default function AdminPage() {
   const adminToken = verifying ? null : 'cookie';
   const [unackAlertCount, setUnackAlertCount] = useState(0);
   const alertPollRef = useRef(null);
+
+  // Debug overlay state — toggled by Ctrl+Shift+D or sidebar bug icon.
+  const [debugOpen, setDebugOpen] = useState(false);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        setDebugOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   useEffect(() => {
     if (!adminToken || verifying) return;
@@ -173,8 +257,6 @@ export default function AdminPage() {
     return () => clearInterval(alertPollRef.current);
   }, [adminToken, verifying]);
 
-  // Cookie-only admin auth (see prior comments) — adminToken is the
-  // sentinel; the httponly cookie does the actual auth.
   useEffect(() => {
     adminVerify()
       .then((res) => {
@@ -255,9 +337,6 @@ export default function AdminPage() {
   };
   const sc = statusConfig[sysStatus];
 
-  // Sections that consume navContext are now the merged hubs (which all
-  // accept a `tab`/`subTab` initial-state) plus the few legacy panels
-  // that already used it directly (users, contenthub, dashboard).
   const SECTIONS_WITH_CONTEXT = new Set([
     'users', 'contenthub', 'dashboard', 'conversations',
     'ai', 'revenue', 'security', 'logs',
@@ -365,6 +444,19 @@ export default function AdminPage() {
             </button>
           </Link>
           <button
+            onClick={() => setDebugOpen((v) => !v)}
+            title="Shell Debugger (Ctrl+Shift+D)"
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition-all duration-200 ${
+              debugOpen
+                ? 'bg-violet-100 text-violet-700'
+                : 'text-gray-300 hover:text-gray-500 hover:bg-gray-50'
+            }`}
+            data-testid="admin-debug-toggle"
+          >
+            <Bug size={13} className="flex-shrink-0" />
+            {!collapsed && <span>Debug</span>}
+          </button>
+          <button
             onClick={handleLogout}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-red-400 hover:text-red-600 hover:bg-red-50 transition-all duration-200"
           >
@@ -429,6 +521,17 @@ export default function AdminPage() {
           adminEmail={adminEmail}
         />
       </Suspense>
+
+      {debugOpen && (
+        <AdminShellDebug
+          activeSection={activeSection}
+          navContext={navContext}
+          adminEmail={adminEmail}
+          adminName={adminName}
+          sysStatus={sysStatus}
+          onClose={() => setDebugOpen(false)}
+        />
+      )}
     </div>
     </SyraProvider>
   );

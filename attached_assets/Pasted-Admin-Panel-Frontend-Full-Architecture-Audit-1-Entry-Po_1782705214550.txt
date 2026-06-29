@@ -1,0 +1,173 @@
+Admin Panel Frontend — Full Architecture Audit
+1. Entry Point & Routing
+App.jsx
+  /admin/login  →  AdminLoginPage (lazy)
+  /admin        →  AdminGuard → AdminPage (lazy)
+
+AdminGuard is a single-use hook-based guard — calls adminVerify() on mount, shows a spinner while checking, redirects to /admin/login on failure. It uses HTTP-only cookie (syrabit_admin_session) only — no localStorage token, which is correct for XSS safety.
+
+Axios interceptor in api.jsx catches all 401 responses from /admin/* routes and hard-redirects to /admin/login automatically — so session expiry silently bounces the user without any error UI needed.
+
+2. AdminPage — Shell Layout
+AdminPage.jsx is the master shell. It manages:
+
+Concern	Mechanism
+Section switching	activeSection state + SECTION_COMPONENTS map
+Deep-linking	navContext object + SECTION_ALIASES resolver
+Session polling	adminVerify() every 12 hours
+Alert badge	adminGetUnacknowledgedAlertCount() polled on mount
+Break-glass banner	BreakGlassBanner rendered at top if active
+Syra orb	SyraProvider wraps the entire shell
+16 sidebar sections in 4 groups:
+
+Group	Sections
+Main	Dashboard, Content Editor (Hub), SEO Manager
+Audience	Users, Conversations, Notifications
+Operations	AI & Automation, Revenue, Analytics
+System	Access & Security, Logs, Health/Uptime, Ops Console, GCP, AWS-Native, Settings
+Navigation is state-driven, not URL-driven. There is no React Router <Link> inside the admin panel — all navigation is setActiveSection(). This means the browser back button does not work within the panel, and deep links to specific tabs require the navContext alias system.
+
+Section alias resolver (SECTION_ALIASES) maps legacy shallow paths like 'apiconfig' → { section: 'ai', tab: 'providers', subTab: 'apiconfig' } so old internal cross-links still work after the sidebar consolidation (Task #296).
+
+All 17 major components are React.lazy() — the initial admin bundle is small; each section is only loaded when first visited.
+
+3. Auth Pipeline (Full Flow)
+User hits /admin
+  → AdminGuard checks cookie via GET /admin/verify
+  → 200 OK → renders AdminPage
+  → 401 → Navigate to /admin/login
+AdminLoginPage
+  → POST /admin/login (email + password)
+  → Backend sets HttpOnly cookie + returns { admin_token, email }
+  → AdminPage stores adminToken in local state only (not localStorage)
+Session maintenance:
+  → useEffect polls adminVerify() every 12h
+  → window activity listener resets timer
+  → On any 401 from axios interceptor → redirect to login
+Logout:
+  → POST /admin/logout (clears cookie server-side)
+  → Frontend clears adminToken state
+
+Auth header logic (authHeaders() in adminHelpers.js): detects whether token is a real JWT (3-part dot-split) — if yes, sends Authorization: Bearer <token>; if no, sends withCredentials: true only (cookie fallback). This dual-mode works during the RS256→HS256 migration window documented in memory.
+
+4. Component Inventory & Sizes
+Component	Lines	Role
+AdminBotSecurity	2,389	WAF, bot rules, IP blocking — largest, monolithic
+AdminHealth	1,347	Infra/LLM/cron uptime monitoring
+AdminLogsExplorer	1,200	Structured log viewer
+AdminDashboard	1,111	5-widget real-time monitoring
+AdminEduBrowser	1,089	Educational content browser
+SyraAssistant	1,012	AI orb + voice/text control
+AdminContentEditor	933	Chapter/subject CRUD + publish pipeline
+AdminNotifications	836	Push/in-app notification management
+AdminConversations	576	Student chat log review
+AdminUsers	508	User management + plan/role changes
+32,743 total lines across the admin .jsx/.js files.
+
+5. Hub Architecture (Internal Tab Routing)
+Each "hub" manages its own tabs internally via activeTab state, receives navContext from AdminPage, and propagates navigation upward via onNavigate prop.
+
+AdminContentHub (5 tabs, all lazy):
+
+editor       → AdminContentEditor   (chapter CRUD + publish pipeline)
+cms          → AdminCmsDocEditor    (markdown/rich-text CMS docs)
+blog         → BlogPublishWizard    (SEO blog posts)
+translation  → AssameseBackfillPanel (bulk Assamese translation)
+progress     → AdminTranslationProgress (coverage tracker)
+
+AdminSeoManager (14 tabs, all eagerly imported):
+
+review    pipeline   quality   topicDiscovery
+pages     generate   links     remediation
+topics    pilot      schema    entitySeo
+insights  sitemap
+
+Uses the useSeoManager custom hook as its single source of truth — all tab state, review queues, job tracking, and filter state live there.
+
+AdminAiHub: providers / routing-pools / automation (cron jobs)
+AdminRevenueHub: revenue / ads / monetization / plans
+AdminAccessSecurity: rate-limits / google-auth / bot-security / edu-browser
+
+6. Content Editor Pipeline (Most Complex Flow)
+AdminContentEditor
+  ├── HierarchyTree        (stream → subject → chapter selection)
+  ├── ChapterList          (chapter rows with StatusBadge + RagSyncBadge)
+  ├── ChapterEditForm      (tabbed: Notes | RAG/AI | Settings)
+  │     ├── Reader tab     (rendered preview)
+  │     ├── RAG tab        (embedding sync controls)
+  │     └── Settings       (slug, SEO meta, publish status)
+  ├── InlineCreator        (new chapter/subject/stream form)
+  ├── ThumbnailStudio      (AI-generated chapter thumbnails)
+  ├── ContentViewerPopup   (full-screen preview)
+  ├── PublishJobsPanel     (fixed overlay — polls job progress SSE)
+  ├── RagJobsPanel         (background reindex job tracker)
+  ├── ConfirmDialog        (destructive-action confirmation)
+  └── PYQUploadPanel       (past-year question ingest)
+
+Publish pipeline state machine (publishJobIds → PublishJobsPanel):
+
+User clicks "Publish" → POST /admin/content/chapters/{id}/publish
+Backend creates PublishJob (7 steps: GCS, CF prerender, status update, CF Pages rebuild, IndexNow, Wikidata, embeddings)
+Returns { job_id }
+Frontend adds to publishJobIds state → PublishJobsPanel renders fixed overlay
+Panel polls GET /admin/content/publish-jobs/{job_id} every 2s
+Steps update in real-time; panel auto-dismisses when all jobs complete
+Bulk action bar (appears when items are selected):
+
+Status toggle: PATCH /admin/content/chapters (published / draft / unpublished)
+Reindex RAG: POST /admin/rag/bulk-reindex → tracks via RagJobsPanel
+Publish Pipeline: POST /admin/content/subjects/{id}/bulk-publish → tracks via PublishJobsPanel (new)
+7. Data Flow & State Management
+No global state library. The panel uses:
+
+Pattern	Used for
+useState / useReducer	All component-local UI state
+useCallback / useMemo	Memoized handlers in heavy components
+SyraContext	Cross-panel Syra AI orb state
+useEffect + axios	Majority of data fetching (legacy pattern)
+React Query	Light usage in a few newer components
+Props drilling	adminToken passed down to every section
+adminToken prop drilling is the main structural weakness — it flows from AdminPage → every hub → every sub-component. There is no auth context that components can read directly; they all need the token passed as a prop.
+
+8. API Layer (utils/api.jsx)
+50+ named admin functions, all following the same pattern:
+
+export const adminGetX = (token, params) =>
+  axios.get(`${API_BASE}/admin/x`, { headers: adminHeaders(token), withCredentials: true });
+
+API_BASE resolves to:
+
+VITE_BACKEND_URL env var if set (production Cloud Run URL)
+Otherwise empty string → Vite dev proxy handles /api/v1/* → localhost:8000
+Global axios interceptor catches 401s on admin calls and auto-redirects.
+
+9. Syra AI Assistant
+SyraProvider (wraps entire AdminPage)
+  ├── SyraContext — publishes: activeSection, adminToken, adminEmail,
+  │                            selectedEntity, visibleError, activeFilters
+  ├── useSyraSelection()   — sections push "what's selected" (chapter ID, user ID, etc.)
+  ├── useSyraFilters()     — sections push current filter state
+  └── useSyraVisibleError() — sections push visible error messages
+SyraAssistant (orb UI)
+  → POST /admin/syra/chat  (sends transcript + screenContext)
+  → GET  /admin/syra/actions (available quick-actions for current section)
+  → POST /admin/syra/execute-action (performs admin actions by voice/text)
+  → POST /admin/syra/tts / /admin/syra/stt (voice I/O)
+
+10. Error Handling & Resilience
+Mechanism	Scope
+SectionErrorBoundary	Wraps every <Suspense> section — failure in one tab never crashes the shell
+key={activeSection} on boundary	Resets error state when section changes
+Toast (sonner)	User-facing error/success feedback
+Axios 401 interceptor	Session expiry handled globally
+try/catch in useEffect	Most data-fetch failures degrade to empty state (no crash)
+11. Identified Gaps & Risks
+Issue	Severity	Detail
+No URL-based routing inside admin	Medium	Browser back/forward doesn't work; can't bookmark a tab; all deep links require navContext
+adminToken prop-drilled everywhere	Medium	Every component takes adminToken as prop; an auth context would be cleaner
+AdminBotSecurity at 2,389 lines	Medium	Monolithic — should be split into sub-components like the other hubs
+Mixed data-fetching patterns	Low	Some components use useEffect+axios, others use React Query — no consistent convention
+SEO Manager tabs eagerly imported	Low	All 14 tabs are static imports in AdminSeoManager.jsx — adds to that chunk
+No optimistic UI	Low	All mutations wait for server confirmation before updating — can feel slow
+PublishJobsPanel polls every 2s	Low	For bulk-publish of 20+ chapters, this creates 20 concurrent 2-second pollers
+The core pipeline is solid: auth is cookie-only (XSS-safe), error boundaries prevent cascading failures, the publish job tracker is a well-designed real-time overlay, and the hub-and-spoke consolidation keeps the sidebar manageable. The main structural debt is no URL routing inside the panel and the adminToken prop-drilling pattern.

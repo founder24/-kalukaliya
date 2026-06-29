@@ -31,3 +31,4 @@
 - [Syrabit admin publish job pattern](syrabit-publish-job.md) — PublishJob (publish_jobs collection) tracks 7-step pipeline; POST publish returns job_id immediately; asyncio.create_task runs pipeline; GET + retry endpoints exist
 - [Sarvam enable_thinking mode strategy](sarvam-enable-thinking.md) — English: enable_thinking=True → clean content field; Assamese: False → extract from reasoning_content
 - [Syrabit user route aliases](syrabit-user-route-aliases.md) — Frontend uses /user/profile, /user/account, /user/memories; backend must expose these as aliases to /users/me
+- [Admin panel audit findings](admin-panel-audit.md) — AWS-Native section removed (no backend); URL routing via useSearchParams; AdminShellDebug overlay (Ctrl+Shift+D)

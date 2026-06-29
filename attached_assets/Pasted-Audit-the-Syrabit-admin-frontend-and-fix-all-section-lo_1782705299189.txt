@@ -1,0 +1,54 @@
+Audit the Syrabit admin frontend and fix all section-loading failures after login.
+
+Core rule:
+SAVE changes the data.
+PUBLISH changes delivery.
+REINDEX changes retrieval.
+
+Investigate and fix:
+1. Why AdminPage loads but dashboard/content editor/major sections do not render.
+2. Why legacy AWS/admin sections still appear.
+3. Why dashboard widgets show empty or fail silently.
+4. Why content editor and RAG editor do not mount or render data.
+5. Why some admin sections are blank when selected.
+
+Focus on these root causes:
+- SECTION_COMPONENTS registration errors.
+- SECTION_ALIASES mapping errors.
+- Lazy import path errors.
+- adminToken prop mismatch.
+- auth/session mismatch between cookie-first and token fallback.
+- API response shape mismatches.
+- null/undefined selection state in content editor.
+- endpoint 404s for dashboard widgets.
+- error boundaries swallowing useful render errors.
+- missing loading/empty/error states.
+
+File order:
+1. `apps/frontend/src/components/admin/AdminPage.jsx`
+2. `apps/frontend/src/App.jsx` or router config
+3. `apps/frontend/src/components/admin/AdminDashboard.jsx`
+4. `apps/frontend/src/components/admin/AdminContentEditor.jsx`
+5. `apps/frontend/src/components/admin/content-editor/ChapterEditForm.jsx`
+6. `apps/frontend/src/components/admin/content-editor/ChapterList.jsx`
+7. `apps/frontend/src/components/admin/content-editor/RagSyncBadge.jsx`
+8. `apps/frontend/src/components/admin/AdminAnalytics.jsx`
+9. `apps/frontend/src/components/admin/AdminLogsExplorer.jsx`
+10. `apps/frontend/src/components/admin/AdminConversations.jsx`
+11. `apps/frontend/src/components/admin/AdminBotSecurity.jsx` if still present
+12. `apps/frontend/src/components/admin/AdminHealth.jsx`
+13. `apps/frontend/src/components/admin/AdminAccessSecurity.jsx`
+14. `apps/frontend/src/utils/api.jsx`
+15. `apps/backend/app/api/v1/admin.py`
+16. `apps/backend/app/api/v1/admin_content.py`
+17. `apps/backend/app/api/v1/admin_analytics.py`
+
+Acceptance criteria:
+- Admin login leads to a fully visible dashboard.
+- Content editor and RAG editor render every time.
+- Dashboard widgets either load real data or show explicit empty states.
+- AWS/legacy sections are removed or clearly marked inactive.
+- No blank admin sections remain after selection.
+- Auth is stable and session-aware.
+- Backend API payloads match frontend expectations.
+- Frontend build passes and browser console shows no runtime crashes.

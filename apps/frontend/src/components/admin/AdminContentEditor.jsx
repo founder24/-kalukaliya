@@ -19,6 +19,7 @@ import PublishJobsPanel from './content-editor/PublishJobTracker';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 export default function AdminContentEditor({ adminToken, onNavigate, hubContext, onHubContext, onHierarchyChange }) {
+  const [dataLoaded, setDataLoaded] = useState(false);
   const [boards, setBoards] = useState([]);
   const [classes, setClasses] = useState([]);
   const [streams, setStreams] = useState([]);
@@ -195,6 +196,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       ]);
       setBoards(b.data || []); setClasses(c.data || []); setStreams(s.data || []); setSubjects(sub.data || []);
     } catch { toast.error('Failed to load content data'); }
+    finally { setDataLoaded(true); }
   }, [adminToken]);
 
   const reloadAll = useCallback(async () => {
@@ -845,6 +847,11 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                     </div>
                     <InlineCreator placeholder="Subject" onCreate={handleCreateSubject} icon={Layers} color="violet" />
                   </div>
+                ) : selSubject && !dataLoaded ? (
+                  <div className="flex items-center justify-center h-full gap-3">
+                    <Loader2 size={20} className="animate-spin text-violet-400" />
+                    <span className="text-sm text-gray-400">Loading subject data…</span>
+                  </div>
                 ) : selSubject ? (
                   <div className="p-6 max-w-5xl mx-auto space-y-5">
                     {renderBulkBar('chapters')}
@@ -900,7 +907,21 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                       onCreateNew={() => { setEditView('new-chapter'); setContentForm({ title: '', slug: '', description: '', content: '', content_type: 'notes', order: chapters.length + 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '' }); setChapterStats(null); }}
                     />
                   </div>
-                ) : null}
+                ) : (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center">
+                      <Layers size={40} className="mx-auto text-gray-200 mb-3" />
+                      <p className="text-sm font-medium text-gray-500">No selection active</p>
+                      <p className="text-xs text-gray-400 mt-1">Use the tree on the left to pick a stream or subject</p>
+                      <button
+                        onClick={() => { setSelSubject(null); setSelStream(null); setSelClass(null); setSelBoard(null); setEditView(null); }}
+                        className="mt-3 text-xs text-violet-500 hover:text-violet-700 hover:underline"
+                      >
+                        Reset navigation
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
