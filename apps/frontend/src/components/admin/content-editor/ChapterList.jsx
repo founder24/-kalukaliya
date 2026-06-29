@@ -262,7 +262,7 @@ export default function ChapterList({
                         {ch.coverage_score}% Coverage
                       </span>
                     )}
-                    {(hasPyqs || hasSeoTopics || hasSeoPages) && (
+                    {(hasPyqs || hasSeoTopics || hasSeoPages || ch.content_saved_at || ch.published_at || ch.rag_updated_at || ch.rag_indexed_at) && (
                       <button
                         onClick={(e) => { e.stopPropagation(); setExpandedCard(expandedCard === ch.id ? null : ch.id); }}
                         className="ml-auto flex items-center gap-0.5 text-[9px] text-gray-300 hover:text-gray-500 transition"
@@ -323,6 +323,25 @@ export default function ChapterList({
                                 style={{ background: 'rgba(99,102,241,0.10)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.15)' }}>
                                 {SEO_TYPE_LABELS[type] || type}: {count}
                               </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {(ch.content_saved_at || ch.published_at || ch.rag_updated_at || ch.rag_indexed_at) && (
+                        <div>
+                          <p className="text-[9px] text-gray-400 font-semibold uppercase tracking-wider mb-1">Timestamps</p>
+                          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                            {[
+                              { label: 'Saved',       val: ch.content_saved_at },
+                              { label: 'Published',   val: ch.published_at     },
+                              { label: 'RAG updated', val: ch.rag_updated_at   },
+                              { label: 'RAG indexed', val: ch.rag_indexed_at   },
+                            ].filter(r => r.val).map(({ label, val }) => (
+                              <div key={label} className="contents">
+                                <span className="text-[9px] text-gray-400 whitespace-nowrap">{label}</span>
+                                <span className="text-[9px] text-gray-500 font-mono">{new Date(val).toLocaleString()}</span>
+                              </div>
                             ))}
                           </div>
                         </div>

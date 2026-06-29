@@ -1,0 +1,98 @@
+a fullstack checklist tailored to the issues you just fixed in the frontend. I’m using the rule save changes the data, publish changes delivery, reindex changes retrieval as the organizing principle, and I’m including the newly confirmed UI loading/error states as part of the audit. Cloudflare Vectorize supports metadata filtering only when metadata indexes exist first, and React Router’s useNavigate is the right primitive for programmatic admin navigation if you continue expanding section routing.[developers.cloudflare]
+Fullstack audit checklist
+1) Admin shell and routing
+/admin/login loads the login page lazily.
+/admin is protected by AdminGuard.
+adminVerify() runs on mount and on session refresh.
+HTTP-only cookie auth is used for browser routes.
+401 handling redirects cleanly to /admin/login.
+URL-based section state restores dashboard, tab, and subtab correctly.[reactrouter]
+2) Dashboard loading and refresh
+Initial dashboard load shows a skeleton, not zeroed cards.
+loading=true and lastRefresh=null render a visible loading state.
+Background refresh keeps stale data visible while refreshing.
+Dashboard widgets show explicit loading/empty/error states.
+The 18-endpoint batch resolves without silent failures.
+Broken dashboard widgets do not blank the shell.[developers.cloudflare]
+3) Conversations and logs
+Conversations tab shows a visible error banner on failure.
+Conversations tab includes a retry action.
+Conversations error state is visible in the UI, not only in toast.
+Logs table shows a loading row while fetching.
+Logs table does not confuse loading with “no entries.”
+Pagination and empty states render consistently.[developers.cloudflare]
+4) Content editor
+Subject selection shows a loading state while chapters fetch.
+Chapter list does not flash empty before data arrives.
+Null selection renders a visible empty-state card.
+Content editor and chapter editor mount without blank panels.
+Content save only changes data fields.
+Content editor copy explains save vs publish clearly.[developers.cloudflare]
+5) RAG editor
+RAG editor is separate from content editor.
+RAG save updates retrieval text only.
+RAG save stamps freshness timestamps.
+Reindex is clearly a separate action from save.
+RAG editor explains save vs retrieval freshness.
+Vector metadata filtering is supported by actual metadata indexes.[developers.cloudflare]
+6) Sync indicators
+Chapter cards show content_saved_at.
+Chapter cards show published_at.
+Chapter cards show rag_updated_at.
+Chapter cards show rag_indexed_at.
+Badge shows “RAG current.”
+Badge shows “RAG stale.”
+Badge shows “Not indexed.”
+Badge shows unpublished edits when content is newer than publish.[developers.cloudflare]
+7) Publish flow
+Publish updates delivery only.
+Publish jobs return immediately with job IDs.
+Publish progress is visible in a tracker panel.
+Failed publish jobs can be retried.
+Bulk publish is bounded and safe.
+Publish UI is clearly different from reindex UI.[developers.cloudflare]
+8) Reindex flow
+Reindex updates retrieval only.
+Reindex stamps completion on success.
+Bulk reindex is tracked and visible.
+Reindex is not triggered by publish accidentally.
+Chat retrieval uses the current indexed state.
+Vectorize filters are used only with supported metadata indexes.[developers.cloudflare]
+9) Auth and security
+Login is separate from user auth.
+Logout clears session server-side.
+Bearer fallback is limited to machine/cron routes.
+CSRF protection exists on mutating admin routes.
+Version conflicts return 409.
+Force overwrite is explicit.[reactrouter]
+10) Analytics and ops
+Admin analytics tabs load correctly.
+Logs explorer paginates.
+Admin actions analytics render.
+Health and uptime panels are visible.
+Missing endpoints degrade gracefully.
+Operational widgets never hard-crash the shell.[developers.cloudflare]
+11) Public delivery
+Public content shows published items only.
+Drafts do not leak into public routes.
+Publish invalidates or updates delivery caches.
+Search and CDN stay aligned with published state.
+Public chapter pages remain consistent after refresh.[developers.cloudflare]
+12) Chat and personalization
+Chat uses the latest retrieval index.
+History persists correctly.
+Profile updates affect personalization logic.
+Latency-sensitive flows avoid unnecessary work.
+Admin can inspect conversations and logs.
+Empty and error states are visible, not silent.[developers.cloudflare]
+Current frontend fixes to verify
+These are now part of the audit because you confirmed they were addressed:
+Dashboard skeleton on first open.
+Conversations error banner with retry.
+Logs loading row in table body.
+Content editor chapter-list loading guard.
+No blank render path for “no selection active.”[developers.cloudflare]
+Priority order
+P1: Blank renders, loading states, auth/session handling, RAG freshness, publish/reindex separation.
+P2: Job trackers, pagination, sync badges, analytics, retry actions.
+P3: Copy polish, redirect refinement, and shell UX improvements.[reactrouter]
