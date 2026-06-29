@@ -458,7 +458,7 @@ class SarvamAIClient:
         buffer = ""
         think_started = False
 
-        # ── State for numbered-section preamble filter ────────────────────────
+        # ── State for numbered-section preamble filter (reasoning_content) ───
         preamble_filter_active = None  # None=undecided, True=filtering, False=passthrough
         preamble_done = False
         preamble_buf = ""   # accumulates tokens until preamble decision is made
@@ -470,6 +470,18 @@ class SarvamAIClient:
         #   Assamese → _extract_assamese_answer()
         edu_buf = ""
         content_was_yielded = False  # True once any content-field token is streamed
+
+        # ── State for content-field preamble sniff ────────────────────────────
+        # When enable_thinking=True the model SHOULD put reasoning into
+        # reasoning_content and emit only the clean answer in content.
+        # However some model responses (or billing-degraded fallback paths)
+        # emit the full numbered chain-of-thought directly in content, leaking
+        # internal reasoning text to the user.  We sniff the first 150 chars
+        # and, if a numbered-section pattern is detected, redirect the entire
+        # content stream to edu_buf for EOS extraction instead of yielding it.
+        content_sniff_buf = ""      # accumulates until sniff decision
+        content_sniff_done = False  # True once we've committed to a path
+        content_redirected = False  # True → content field ➜ edu_buf (not yielded)
 
         try:
             async with self._client.stream(
@@ -539,8 +551,39 @@ class SarvamAIClient:
                             edu_buf += chunk_text
                         continue
 
-                    # ── content field path (fallback for other models) ────────
-                    buffer += content
+                    # ── content field path (with numbered-section preamble guard) ─
+                    # Fast-path: already decided to redirect content → edu_buf.
+                    if content_redirected:
+                        edu_buf += content
+                        buffer = ""
+                        continue
+
+                    # Sniff phase: buffer first 150 chars to detect whether this
+                    # response erroneously emits its reasoning chain in `content`.
+                    if not content_sniff_done:
+                        content_sniff_buf += content
+                        if len(content_sniff_buf) < 150:
+                            continue  # keep accumulating
+                        # Enough data — make the decision.
+                        content_sniff_done = True
+                        _sniff_stripped = content_sniff_buf.lstrip()
+                        if re.match(r'^[123]\.\s+\S', _sniff_stripped):
+                            # Numbered chain-of-thought detected in content field.
+                            # Redirect everything to edu_buf; EOS extractor will
+                            # recover the clean answer and prevent leaking reasoning.
+                            content_redirected = True
+                            edu_buf += content_sniff_buf
+                            content_sniff_buf = ""
+                            buffer = ""
+                            continue
+                        # Not a preamble — flush the sniff buffer through normal path.
+                        # Note: current `content` chunk is already inside content_sniff_buf,
+                        # so we set buffer to the sniff buf and skip adding content again.
+                        buffer = content_sniff_buf
+                        content_sniff_buf = ""
+                        # Fall through to think-block check / yield below.
+                    else:
+                        buffer += content
 
                     # Check if we are entering a think block
                     if not think_started and buffer.lstrip().startswith("<think>"):
@@ -560,15 +603,32 @@ class SarvamAIClient:
                         continue
 
                     # Not in a think block, yield content as it arrives
+                    to_yield = buffer
                     buffer = ""
-                    content_was_yielded = True
-                    yield content
+                    if to_yield:
+                        content_was_yielded = True
+                        yield to_yield
 
             # ── End-of-stream flush ──────────────────────────────────────────
             if preamble_buf and not preamble_done:
                 # Preamble never resolved — move into edu_buf for extraction.
                 edu_buf += preamble_buf
                 preamble_buf = ""
+
+            # Flush content sniff buffer if the response was shorter than 150 chars
+            # (sniff decision never fired mid-stream).
+            if content_sniff_buf and not content_sniff_done:
+                content_sniff_done = True
+                _sniff_stripped = content_sniff_buf.lstrip()
+                if re.match(r'^[123]\.\s+\S', _sniff_stripped):
+                    content_redirected = True
+                    edu_buf += content_sniff_buf
+                else:
+                    # Short clean response — yield it directly.
+                    if content_sniff_buf.strip():
+                        content_was_yielded = True
+                        yield content_sniff_buf
+                content_sniff_buf = ""
 
             if edu_buf and not content_was_yielded:
                 # English: content-field streaming took care of the answer.
