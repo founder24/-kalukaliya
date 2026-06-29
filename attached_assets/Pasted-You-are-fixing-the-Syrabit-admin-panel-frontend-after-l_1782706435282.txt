@@ -1,0 +1,115 @@
+You are fixing the Syrabit admin panel frontend after login. The shell loads, but dashboard widgets, the content editor, and some sections do not render correctly.
+
+Core rule:
+SAVE changes the data.
+PUBLISH changes delivery.
+REINDEX changes retrieval.
+
+Goal:
+Find and fix the real frontend causes of blank sections, missing widgets, and non-rendering content/RAG editor views.
+
+What to audit:
+1. Why dashboard widgets do not load.
+2. Why content editor and RAG editor appear blank or incomplete.
+3. Why legacy AWS or unused sections still appear.
+4. Why some admin sections render nothing after login.
+5. Why the shell can say “done” while sections are still broken.
+
+Likely root causes:
+- state-driven section navigation mismatch
+- stale SECTION_ALIASES or SECTION_COMPONENTS keys
+- missing or incorrect lazy imports
+- adminToken prop mismatch
+- dataLoaded guards missing in the content editor
+- null fallback rendering to nothing instead of a proper empty state
+- API response shape mismatch
+- 404 stub endpoints used by dashboard widgets
+- error boundaries swallowing render failures
+- auth mode inconsistency between cookie-first and token-fallback flows
+
+File order:
+1. `apps/frontend/src/components/admin/AdminPage.jsx`
+   - Verify every section key maps to a component.
+   - Verify URL/state sync works.
+   - Add visible fallback for unknown sections.
+   - Confirm sidebar navigation changes the rendered section.
+
+2. `apps/frontend/src/components/admin/AdminDashboard.jsx`
+   - Find widgets that rely on missing or stubbed endpoints.
+   - Replace blank states with explicit loading/error/empty states.
+   - Ensure widgets don’t fail silently.
+
+3. `apps/frontend/src/components/admin/AdminContentEditor.jsx`
+   - Verify it only renders when data is loaded or a selection exists.
+   - Add a `dataLoaded` guard.
+   - Replace any `null` return path with a visible empty state card.
+   - Ensure selected stream/subject/chapter state is valid before rendering child forms.
+   - Make sure the content editor and RAG editor sections are visible and mount correctly.
+
+4. `apps/frontend/src/components/admin/content-editor/ChapterEditForm.jsx`
+   - Verify tabs render for Notes, RAG/AI, and Settings.
+   - Ensure empty fields do not crash rendering.
+   - Keep publish/reindex/help text explicit.
+
+5. `apps/frontend/src/components/admin/content-editor/ChapterList.jsx`
+   - Make status badges null-safe.
+   - Ensure card rendering works when timestamps are missing.
+   - Show explicit loading or empty states.
+
+6. `apps/frontend/src/components/admin/content-editor/RagSyncBadge.jsx`
+   - Verify badge logic for current/stale/not indexed/unknown.
+   - Ensure missing timestamps do not hide the badge.
+
+7. `apps/frontend/src/components/admin/AdminAnalytics.jsx`
+   - Verify every tab import and tab ID exists.
+   - Ensure missing data degrades safely.
+
+8. `apps/frontend/src/components/admin/AdminConversations.jsx`
+   - Verify pagination works and does not block render.
+   - Support both array and `{data,total}` payloads.
+
+9. `apps/frontend/src/components/admin/AdminLogsExplorer.jsx`
+   - Ensure loading and empty states render.
+   - Prevent blank panel on request failure.
+
+10. `apps/frontend/src/components/admin/AdminBotSecurity.jsx`
+    - If this section is still present, split it or verify it is not blocking the shell.
+    - Remove or isolate any AWS-related dead UI if the backend no longer supports it.
+
+11. `apps/frontend/src/utils/api.jsx`
+    - Inspect endpoint names and payload expectations.
+    - Normalize response handling for widgets that may receive arrays or paginated objects.
+    - Ensure auth headers are correct for cookie-first admin routes.
+
+12. `apps/backend/app/api/v1/admin.py`
+    - Verify verify/login/logout responses match frontend expectations.
+    - Keep session/auth shape stable.
+
+13. `apps/backend/app/api/v1/admin_content.py`
+    - Verify chapter list/get/update payloads include all fields the frontend uses.
+    - Ensure missing timestamps or selected entity data do not break the editor.
+
+14. `apps/backend/app/api/v1/admin_analytics.py`
+    - Verify analytics endpoints return data in the shape the tabs expect.
+
+15. `apps/backend/app/api/v1/admin_rag.py`
+    - Verify reindex-related endpoints return a stable response shape.
+
+Required fixes:
+- Replace silent blank states with explicit loading/empty/error UI.
+- Make all selection trees null-safe.
+- Ensure the content editor always shows either a loader, a valid editor, or a visible empty-state card.
+- Ensure dashboard widgets either show data or a clear “no data / not implemented” state.
+- Remove or hide dead AWS/legacy admin entries if they are not backed by the current backend.
+- Add logging or temporary debug overlay if needed to verify `activeSection`, `navContext`, `selectedEntity`, and auth state.
+
+Acceptance criteria:
+- After login, dashboard renders visible widgets or explicit empty states.
+- Content editor renders a loader, editor, or empty-state card; never a blank panel.
+- RAG editor renders correctly and safely with missing data.
+- No major admin section renders as a blank screen.
+- AWS/unused sections are removed or clearly deactivated.
+- All errors are visible and recoverable.
+- Frontend build passes and browser console has no new crashes.
+
+Implement the smallest safe fix first, then verify the UI section by section.
