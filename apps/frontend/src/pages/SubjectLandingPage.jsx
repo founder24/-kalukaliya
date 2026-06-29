@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import {
   BookOpen, ChevronRight, Home, Sparkles,
-  Layers, ArrowLeft, Search,
+  Layers, ArrowLeft, Search, FileText, HelpCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -29,14 +29,32 @@ export default function SubjectLandingPage() {
     ? (subjectError.response?.status === 404 ? 'Subject not found' : 'Failed to load subject')
     : null;
 
+  const [activeSection, setActiveSection] = useState('notes');
+
+  const SECTIONS = useMemo(() => {
+    const notesChs = chapters.filter(ch => !ch.content_type || (ch.content_type !== 'qa' && ch.content_type !== 'question_paper'));
+    const qaChs = chapters.filter(ch => ch.content_type === 'qa');
+    const pyqChs = chapters.filter(ch => ch.content_type === 'question_paper');
+    return [
+      { key: 'notes', label: 'Notes', icon: BookOpen, chapters: notesChs, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
+      { key: 'qa', label: 'Question & Answer', icon: HelpCircle, chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
+      { key: 'question_paper', label: 'Question Paper', icon: FileText, chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
+    ];
+  }, [chapters]);
+
+  const activeSectionChapters = useMemo(() => {
+    const sec = SECTIONS.find(s => s.key === activeSection);
+    return sec ? sec.chapters : chapters;
+  }, [SECTIONS, activeSection, chapters]);
+
   const filteredChapters = useMemo(() => {
-    if (!searchQuery.trim()) return chapters;
+    if (!searchQuery.trim()) return activeSectionChapters;
     const q = searchQuery.toLowerCase();
-    return chapters.filter((ch) =>
+    return activeSectionChapters.filter((ch) =>
       ch.title?.toLowerCase().includes(q) ||
       ch.description?.toLowerCase().includes(q)
     );
-  }, [chapters, searchQuery]);
+  }, [activeSectionChapters, searchQuery]);
 
   const basePath = `/${board}/${classSlug}/${subjectSlug}`;
 
@@ -309,11 +327,56 @@ export default function SubjectLandingPage() {
           <ChevronRight size={16} className="text-muted-foreground shrink-0" />
         </Link>
 
+        {/* Section tabs — Notes | Question & Answer | Question Paper */}
+        {chapters.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap mb-5">
+            {SECTIONS.map(sec => {
+              const Icon = sec.icon;
+              const isActive = activeSection === sec.key;
+              return (
+                <button
+                  key={sec.key}
+                  onClick={() => { setActiveSection(sec.key); setSearchQuery(''); }}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+                  style={isActive
+                    ? { background: sec.bg, color: sec.accent, border: `1.5px solid ${sec.border}` }
+                    : { background: 'transparent', color: 'hsl(var(--muted-foreground))', border: '1.5px solid rgba(139,92,246,0.12)' }
+                  }
+                >
+                  <Icon size={14} />
+                  <span>{sec.label}</span>
+                  {sec.chapters.length > 0 && (
+                    <span
+                      className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
+                      style={{
+                        background: isActive ? `${sec.accent}20` : 'rgba(139,92,246,0.07)',
+                        color: isActive ? sec.accent : 'hsl(var(--muted-foreground))',
+                      }}
+                    >
+                      {sec.chapters.length}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <div className="space-y-3">
           {filteredChapters.length === 0 ? (
             <div className="text-center py-12">
-              <BookOpen size={32} className="mx-auto mb-3 text-muted-foreground/40" />
-              <p className="text-muted-foreground">{searchQuery ? 'No chapters match your search' : 'No chapters available yet'}</p>
+              {activeSection === 'qa' && <HelpCircle size={32} className="mx-auto mb-3 text-muted-foreground/40" />}
+              {activeSection === 'question_paper' && <FileText size={32} className="mx-auto mb-3 text-muted-foreground/40" />}
+              {activeSection === 'notes' && <BookOpen size={32} className="mx-auto mb-3 text-muted-foreground/40" />}
+              <p className="text-muted-foreground text-sm">
+                {searchQuery
+                  ? 'No chapters match your search'
+                  : activeSection === 'qa'
+                    ? 'Question & Answer content coming soon for this subject'
+                    : activeSection === 'question_paper'
+                      ? 'Question papers will be added here once available'
+                      : 'No chapters available yet'}
+              </p>
             </div>
           ) : (
             filteredChapters.flatMap((ch, i) => {

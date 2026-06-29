@@ -255,12 +255,22 @@ function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null }) {
     }
   }, [topicSummaries, loadingTopics]);
 
-  if (chapters.length === 0) return (
-    <div className="text-center py-8" style={{ color: '#999' }}>
-      <BookOpen size={32} className="mx-auto mb-2 opacity-30" />
-      <p>No chapters available yet</p>
-    </div>
-  );
+  const SECTION_EMPTY = {
+    notes: { icon: BookOpen, msg: 'Notes are being prepared for this subject.' },
+    qa: { icon: HelpCircle, msg: 'Question & Answer content is coming soon for this subject.' },
+    question_paper: { icon: FileText, msg: 'Question papers will be added here once available.' },
+  };
+
+  if (chapters.length === 0) {
+    const cfg = SECTION_EMPTY[sectionKey] || SECTION_EMPTY.notes;
+    const Icon = cfg.icon;
+    return (
+      <div className="text-center py-12 space-y-3" style={{ color: '#999' }}>
+        <Icon size={32} className="mx-auto opacity-20" />
+        <p className="text-sm">{cfg.msg}</p>
+      </div>
+    );
+  }
 
   return (
     <Accordion type="multiple" className="space-y-2 max-w-4xl mx-auto">
@@ -389,13 +399,13 @@ export default function SubjectPage() {
     const pyqChs = chapters.filter(ch => ch.content_type === 'question_paper');
     return [
       { key: 'notes', label: 'Notes', chapters: notesChs, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
-      { key: 'qa', label: 'Q&A', chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
+      { key: 'qa', label: 'Question & Answer', chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
       { key: 'question_paper', label: 'Question Paper', chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
-    ].filter(s => s.chapters.length > 0);
+    ];
   }, [chapters]);
 
-  const [activeSection, setActiveSection] = useState(null);
-  const activeSectionKey = activeSection ?? subjectSections[0]?.key ?? null;
+  const [activeSection, setActiveSection] = useState('notes');
+  const activeSectionKey = activeSection ?? 'notes';
   const activeSecObj = subjectSections.find(s => s.key === activeSectionKey);
   const filteredChapters = activeSecObj ? activeSecObj.chapters : chapters;
 
@@ -543,8 +553,8 @@ export default function SubjectPage() {
           )}
         </div>
 
-        {/* Section tabs — only shown when 2+ sections have content */}
-        {subjectSections.length > 1 && (
+        {/* Section tabs — always visible for Notes, Question & Answer, Question Paper */}
+        {chapters.length > 0 && (
           <div className="flex items-center gap-2 flex-wrap">
             {subjectSections.map(sec => (
               <button
@@ -557,15 +567,17 @@ export default function SubjectPage() {
                 }
               >
                 <span>{sec.label}</span>
-                <span
-                  className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
-                  style={{
-                    background: activeSectionKey === sec.key ? `${sec.accent}20` : 'rgba(139,92,246,0.07)',
-                    color: activeSectionKey === sec.key ? sec.accent : 'hsl(var(--muted-foreground))',
-                  }}
-                >
-                  {sec.chapters.length}
-                </span>
+                {sec.chapters.length > 0 && (
+                  <span
+                    className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{
+                      background: activeSectionKey === sec.key ? `${sec.accent}20` : 'rgba(139,92,246,0.07)',
+                      color: activeSectionKey === sec.key ? sec.accent : 'hsl(var(--muted-foreground))',
+                    }}
+                  >
+                    {sec.chapters.length}
+                  </span>
+                )}
               </button>
             ))}
           </div>
