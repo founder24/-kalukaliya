@@ -1,0 +1,115 @@
+You are fixing the Syrabit admin + frontend content architecture.
+
+Core rule:
+SAVE changes the data.
+PUBLISH changes delivery.
+REINDEX changes retrieval.
+
+Goal:
+Redesign the content card, chapter page, content editor, and RAG editor so the user-facing library view and chat-facing retrieval view are clearly separated, while keeping English and Assamese modes fully supported.
+
+Product model:
+1. User/library frontend:
+- Focus on reading, browsing, and learning.
+- Chapter cards should be split into 3 visible sections:
+  - Notes
+  - Questions & Answers
+  - Question Paper
+- The browse button should open a page showing these 3 options first.
+- Below the 3 options, show the syllabus for the subject.
+- Clicking Notes / Q&A / Question Paper should open all chapter pages under that section.
+- English and Assamese modes must still work for all of the above.
+- On both content cards and chapter pages, the Ask AI button should use the current source context.
+- When Ask AI is clicked, show a popup above the input box with the source name that the user is asking about.
+
+2. Admin content editor:
+- This is the user/library-facing editor.
+- It should store summary notes for display.
+- It should store questions and answers that are lesson-wise and user-facing.
+- It should support PYQ as PDF for viewing.
+- It should remain focused on the library page / student reading experience.
+
+3. Admin RAG editor:
+- This is the chat/retrieval-facing editor.
+- It should use the same metadata model as the content editor.
+- It should store full chapter text for retrieval.
+- It should store multiple questions and answers for retrieval.
+- It should store PYQ as text so RAG can answer from it well.
+- It should remain focused on chat page retrieval quality.
+
+4. Content organization:
+- Every subject and chapter must support the 3-section model:
+  - Notes
+  - Questions & Answers
+  - Question Paper
+- These three sections should appear consistently in:
+  - content cards
+  - browse page
+  - chapter pages
+  - content editor
+  - RAG editor
+
+Backend/data rules:
+- Content editor data must save display-ready summaries and student-facing material.
+- RAG editor data must save retrieval-ready full text and expanded Q&A.
+- PYQ must be stored as PDF in the content editor flow and as text in the RAG flow.
+- English and Assamese variants must remain supported in both stores.
+- Chapter metadata must clearly indicate which section a vector/source belongs to.
+
+Frontend rules:
+- The Ask AI button must pass the exact source context into chat.
+- The source name should appear in a popup above the chat input before query submission.
+- Section headers should be clickable and act as navigation filters.
+- UI should clearly distinguish:
+  - Notes
+  - Questions & Answers
+  - Question Paper
+- Do not overload the user with one generic chapter card. Split the card into the 3 sections.
+
+RAG rules:
+- The RAG view should be optimized for chat answers.
+- The content editor should be optimized for reading and browsing.
+- The Ask AI source should match the card/section/chapter the user clicked.
+- Metadata filtering must support section, language, subject, chapter, and source type.
+- Ensure vector metadata indexes exist before using filtered RAG queries.
+
+Implementation order:
+1. Update the data model for section-aware content and retrieval.
+2. Update the content editor UI to support the 3-section structure.
+3. Update the RAG editor UI to use full chapter retrieval content.
+4. Update the library/browse page to expose the 3 section choices first.
+5. Update chapter pages to show section-specific navigation and Ask AI source context.
+6. Update chat source popup to show the source name above the input box.
+7. Update backend endpoints and metadata indexing to match the new structure.
+
+File focus:
+- Frontend library/cards:
+  - `apps/frontend/src/components/...`
+- Chapter page:
+  - `apps/frontend/src/components/...`
+- Content editor:
+  - `AdminContentEditor.jsx`, `ChapterEditForm.jsx`
+- RAG editor:
+  - RAG-specific editor component(s)
+- Backend content APIs:
+  - `admin_content.py`
+- Backend RAG APIs:
+  - `admin_rag.py`
+- Retrieval/vector setup:
+  - vector index / ingestion code
+- Chat source context:
+  - chat UI and assistant input components
+
+Acceptance criteria:
+- Content cards are split into Notes, Questions & Answers, and Question Paper.
+- Browse page opens with those 3 options first.
+- Subject syllabus appears below the 3 options.
+- Ask AI shows the correct source name before querying.
+- English and Assamese still work everywhere.
+- Content editor stores summary notes and user-facing Q&A.
+- RAG editor stores full chapter text and retrieval-friendly Q&A.
+- PYQ is PDF in the content editor and text in the RAG editor.
+- RAG retrieval and library browsing use different, correct source models.
+- Metadata filtering works on subject, chapter, section, source type, and language.
+- No blank sections; loading and empty states must be explicit.
+- Save, publish, and reindex remain separate actions.

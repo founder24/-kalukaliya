@@ -62,9 +62,21 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     }
   }, [queryClient, sub.boardSlug, sub.classSlug, sub.slug]);
 
-  const [showAllChapters, setShowAllChapters] = useState(false);
-  const visibleChapters = useMemo(() => showAllChapters ? chapters : chapters.slice(0, 3), [chapters, showAllChapters]);
-  const moreChapters = showAllChapters ? 0 : chapters.length - 3;
+  const SECTIONS = useMemo(() => {
+    const notesChs = chapters.filter(ch => !ch.content_type || (ch.content_type !== 'qa' && ch.content_type !== 'question_paper'));
+    const qaChs = chapters.filter(ch => ch.content_type === 'qa');
+    const pyqChs = chapters.filter(ch => ch.content_type === 'question_paper');
+    return [
+      { key: 'notes', label: isAs ? 'টোকা' : 'Notes', chapters: notesChs, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)' },
+      { key: 'qa', label: 'Q&A', chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
+      { key: 'question_paper', label: isAs ? 'প্ৰশ্নকাকত' : 'Question Paper', chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)' },
+    ].filter(s => s.chapters.length > 0);
+  }, [chapters, isAs]);
+
+  const defaultSection = SECTIONS.length > 0 ? SECTIONS[0].key : null;
+  const [expandedSection, setExpandedSection] = useState(null);
+  const activeSection = expandedSection ?? defaultSection;
+  const [showAllInSection, setShowAllInSection] = useState(false);
 
   return (
     <div
@@ -191,119 +203,80 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         )}
       </div>
 
-      {/* Chapter list */}
-      {visibleChapters.length > 0 && (
+      {/* Chapter sections — Notes | Q&A | Question Paper */}
+      {SECTIONS.length > 0 && (
         <div
           className="mx-3 mb-2 sm:mb-3 rounded-xl overflow-hidden relative z-[2]"
-          style={{
-            background: 'rgba(139,92,246,0.03)',
-            border: '1px solid rgba(139,92,246,0.08)',
-          }}
+          style={{ background: 'rgba(139,92,246,0.03)', border: '1px solid rgba(139,92,246,0.08)' }}
         >
-          <div className="relative z-10">
-            <div
-              className="flex items-center justify-between gap-1.5 px-3 py-1.5"
-              style={{ borderBottom: '1px solid rgba(139,92,246,0.06)' }}
-            >
-              <div className="flex items-center gap-1.5">
-                <Layers size={11} className="text-purple-400/60" />
-                <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                  {chapterCount} {isAs ? 'পাঠ' : 'LESSONS'}
-                </span>
-              </div>
-              {(sub.notes_count > 0 || sub.pyq_count > 0 || sub.flash_count > 0) && (
-                <div className="flex items-center gap-1">
-                  {sub.notes_count > 0 && chapterCount > 0 && (
-                    <span
-                      className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
-                      style={{
-                        background: sub.notes_pct >= 100 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.12)',
-                        color: sub.notes_pct >= 100 ? '#047857' : '#92400e',
-                        border: `1px solid ${sub.notes_pct >= 100 ? 'rgba(16,185,129,0.25)' : 'rgba(245,158,11,0.20)'}`,
-                      }}
-                    >
-                      {sub.notes_count}/{chapterCount} {isAs ? 'টোকা' : 'notes'}
-                    </span>
-                  )}
-                  {sub.pyq_count > 0 && (
-                    <span
-                      className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
-                      style={{ background: 'rgba(99,102,241,0.10)', color: '#4f46e5', border: '1px solid rgba(99,102,241,0.20)' }}
-                    >
-                      {sub.pyq_count} {isAs ? 'পূৰ্বৰ প্ৰশ্ন' : 'PYQs'}
-                    </span>
-                  )}
-                  {sub.flash_count > 0 && (
-                    <span
-                      className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
-                      style={{ background: 'rgba(139,92,246,0.10)', color: 'hsl(var(--primary))', border: '1px solid rgba(139,92,246,0.20)' }}
-                    >
-                      {sub.flash_count} {isAs ? 'ফ্লেশ' : 'Flash'}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {visibleChapters.map((ch, i) => {
-              const effectiveSlug = ch.slug || (ch.title ? ch.title.toLowerCase().replace(/[^\p{L}\p{N}\p{M}]+/gu, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '') : '');
-              const hasValidLink = !!(sub.boardSlug && sub.classSlug && sub.slug && effectiveSlug);
-              const hasContent = ch.notes_generated !== false;
-              const chPath = hasValidLink
-                ? `/${sub.boardSlug}/${sub.classSlug}/${sub.slug}/${effectiveSlug}`
-                : subjectLandingPath;
-              return (
-                <div key={ch.id || i}>
-                  <div
-                    className="flex items-center gap-2 px-3 py-2.5 sm:py-2 text-xs transition-all group/lesson"
-                    style={{
-                      borderBottom: i < visibleChapters.length - 1 ? '1px solid rgba(139,92,246,0.05)' : 'none',
-                    }}
-                  >
-                    <span
-                      className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0"
-                      style={{
-                        background: 'rgba(139,92,246,0.10)',
-                        color: 'hsl(var(--primary))',
-                      }}
-                    >
-                      {i + 1}
-                    </span>
-                    <Link
-                      to={chPath}
-                      className="truncate transition-colors flex-1 font-medium"
-                      title={`${ch.title} — ${sub.name}`}
-                      style={{
-                        color: 'hsl(var(--primary))',
-                        opacity: (hasValidLink && hasContent) ? 1 : 0.5,
-                      }}
-                    >
-                      {(isAs && ch.title_as) ? ch.title_as : ch.title}
-                    </Link>
-                    <ExternalLink
-                      size={10}
-                      className="shrink-0 transition-colors"
-                      style={{ color: 'hsl(var(--muted-foreground) / 0.2)' }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-
-            {moreChapters > 0 && (
+          {/* Section tab pills */}
+          <div className="flex items-center gap-1 px-2.5 py-1.5" style={{ borderBottom: '1px solid rgba(139,92,246,0.06)' }}>
+            {SECTIONS.map(sec => (
               <button
-                onClick={() => setShowAllChapters(true)}
-                className="flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-medium transition-colors w-full"
-                style={{
-                  borderTop: '1px solid rgba(139,92,246,0.06)',
-                  color: 'hsl(var(--primary))',
-                }}
+                key={sec.key}
+                onClick={() => { setExpandedSection(sec.key === activeSection ? null : sec.key); setShowAllInSection(false); }}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide transition-all"
+                style={sec.key === activeSection
+                  ? { background: sec.bg, color: sec.accent, border: `1px solid ${sec.accent}40` }
+                  : { background: 'transparent', color: 'hsl(var(--muted-foreground))', border: '1px solid rgba(139,92,246,0.10)' }
+                }
               >
-                +{moreChapters} {isAs ? 'আৰু পাঠ' : 'more lessons'}
-                <ChevronDown size={11} />
+                {sec.label}
+                <span className="ml-0.5 font-semibold" style={{ opacity: 0.7 }}>{sec.chapters.length}</span>
               </button>
-            )}
+            ))}
           </div>
+
+          {/* Active section chapter list */}
+          {SECTIONS.filter(s => s.key === activeSection).map(section => {
+            const visChapters = showAllInSection ? section.chapters : section.chapters.slice(0, 3);
+            const moreCount = showAllInSection ? 0 : section.chapters.length - 3;
+            return (
+              <div key={section.key}>
+                {visChapters.map((ch, i) => {
+                  const effectiveSlug = ch.slug || (ch.title ? ch.title.toLowerCase().replace(/[^\p{L}\p{N}\p{M}]+/gu, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '') : '');
+                  const hasValidLink = !!(sub.boardSlug && sub.classSlug && sub.slug && effectiveSlug);
+                  const hasContent = ch.notes_generated !== false;
+                  const chPath = hasValidLink
+                    ? `/${sub.boardSlug}/${sub.classSlug}/${sub.slug}/${effectiveSlug}`
+                    : subjectLandingPath;
+                  return (
+                    <div
+                      key={ch.id || i}
+                      className="flex items-center gap-2 px-3 py-2.5 sm:py-2 text-xs transition-all"
+                      style={{ borderBottom: i < visChapters.length - 1 ? '1px solid rgba(139,92,246,0.05)' : 'none' }}
+                    >
+                      <span
+                        className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0"
+                        style={{ background: section.bg, color: section.accent }}
+                      >
+                        {i + 1}
+                      </span>
+                      <Link
+                        to={chPath}
+                        className="truncate transition-colors flex-1 font-medium"
+                        title={`${ch.title} — ${sub.name}`}
+                        style={{ color: section.accent, opacity: (hasValidLink && hasContent) ? 1 : 0.5 }}
+                      >
+                        {(isAs && ch.title_as) ? ch.title_as : ch.title}
+                      </Link>
+                      <ExternalLink size={10} className="shrink-0" style={{ color: 'hsl(var(--muted-foreground) / 0.2)' }} />
+                    </div>
+                  );
+                })}
+                {moreCount > 0 && (
+                  <button
+                    onClick={() => setShowAllInSection(true)}
+                    className="flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-medium transition-colors w-full"
+                    style={{ borderTop: '1px solid rgba(139,92,246,0.06)', color: section.accent }}
+                  >
+                    +{moreCount} {isAs ? 'আৰু' : 'more'}
+                    <ChevronDown size={11} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -350,7 +323,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         </Link>
 
         <button
-          onClick={() => onAskAI(sub.id, hasDocument, sub.name)}
+          onClick={() => onAskAI(sub.id, hasDocument, sub.name, activeSection)}
           aria-label={`Ask AI about ${sub.name}`}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold text-white transition-all duration-200 hover:opacity-90 active:scale-95"
           style={{

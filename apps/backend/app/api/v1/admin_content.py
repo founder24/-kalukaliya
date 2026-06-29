@@ -113,7 +113,10 @@ class ChapterUpdate(BaseModel):
     description: Optional[str] = None
     content: Optional[str] = None        # student-facing English content → saved as content_en
     content_as: Optional[str] = None     # student-facing Assamese content
-    content_type: Optional[str] = None
+    content_type: Optional[str] = None   # section: 'notes' | 'qa' | 'question_paper' | ...
+    # Q&A section student-facing text
+    qa_text_en: Optional[str] = None
+    qa_text_as: Optional[str] = None
     order: Optional[int] = None
     topics: Optional[list[str]] = None
     version: Optional[int] = None        # optimistic locking — omit to bypass, send current value to guard
@@ -122,6 +125,9 @@ class ChapterUpdate(BaseModel):
 class ChapterRagUpdate(BaseModel):
     rag_text_en: Optional[str] = None
     rag_text_as: Optional[str] = None
+    # Q&A section retrieval-ready text
+    qa_rag_text_en: Optional[str] = None
+    qa_rag_text_as: Optional[str] = None
 
 
 class TopicCreate(BaseModel):
@@ -416,10 +422,15 @@ async def get_chapter(request: Request, chapter_id: str):
         "subject_id": str(chapter.subject_id),
         "chapter_number": chapter.chapter_number,
         "status": chapter.status,
+        "content_type": chapter.content_type,
         "content_en": chapter.content_en,
         "content_as": chapter.content_as,
         "rag_text_en": chapter.rag_text_en,
         "rag_text_as": chapter.rag_text_as,
+        "qa_text_en": chapter.qa_text_en,
+        "qa_text_as": chapter.qa_text_as,
+        "qa_rag_text_en": chapter.qa_rag_text_en,
+        "qa_rag_text_as": chapter.qa_rag_text_as,
         "meta_description": chapter.meta_description,
         "keywords": chapter.keywords,
         "word_count": chapter.word_count,
@@ -493,11 +504,15 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate,
         chapter.word_count = len(body.content.split()) if body.content else 0
     if body.content_as is not None:
         chapter.content_as = body.content_as
-    if body.content_type is not None and hasattr(chapter, 'content_type'):
+    if body.content_type is not None:
         chapter.content_type = body.content_type
+    if body.qa_text_en is not None:
+        chapter.qa_text_en = body.qa_text_en
+    if body.qa_text_as is not None:
+        chapter.qa_text_as = body.qa_text_as
     now = datetime.now(timezone.utc)
     # Stamp content_saved_at whenever student-facing text changes
-    if body.content is not None or body.content_as is not None:
+    if body.content is not None or body.content_as is not None or body.qa_text_en is not None or body.qa_text_as is not None:
         chapter.content_saved_at = now
     chapter.updated_at = now
     chapter.version = chapter.version + 1
@@ -539,6 +554,12 @@ async def update_chapter_rag(request: Request, chapter_id: str, body: ChapterRag
     if body.rag_text_as is not None:
         rag_changes["rag_text_as"] = True
         chapter.rag_text_as = body.rag_text_as
+    if body.qa_rag_text_en is not None:
+        rag_changes["qa_rag_text_en"] = True
+        chapter.qa_rag_text_en = body.qa_rag_text_en
+    if body.qa_rag_text_as is not None:
+        rag_changes["qa_rag_text_as"] = True
+        chapter.qa_rag_text_as = body.qa_rag_text_as
 
     now = datetime.now(timezone.utc)
     chapter.rag_updated_at = now

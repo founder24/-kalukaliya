@@ -12,6 +12,17 @@ import { API_BASE, getAnonId } from '@/utils/api';
 const ALLOWED_IMAGE_MIME = /^image\//i;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
+const SECTION_LABELS = {
+  notes: 'Notes',
+  qa: 'Q&A',
+  question_paper: 'Question Paper',
+};
+const SECTION_COLORS = {
+  notes: { text: '#a78bfa', bg: 'rgba(124,58,237,0.10)', border: 'rgba(139,92,246,0.30)' },
+  qa: { text: '#60a5fa', bg: 'rgba(37,99,235,0.10)', border: 'rgba(37,99,235,0.30)' },
+  question_paper: { text: '#fbbf24', bg: 'rgba(217,119,6,0.10)', border: 'rgba(217,119,6,0.30)' },
+};
+
 export function InputBar({
   subject, messages, scopedChapters, input, setInput,
   isLoading, isOutOfCredits, isLow, credits,
@@ -19,6 +30,7 @@ export function InputBar({
   textareaRef, adjustTextarea, sendMsg, handleStop,
   isAnon,
   activeChapter, onDismissChapter,
+  sourceSection,
   responseLang,
 }) {
   const navigate = useNavigate();
@@ -204,29 +216,55 @@ export function InputBar({
           data-testid="chat-gallery-input"
         />
 
-        {/* Active chapter context chip — shows which content card is grounding the RAG. */}
+        {/* Source context popup — shows chapter + section grounding the RAG. */}
         {activeChapter && (
-          <div className="mb-2 flex items-center gap-2" data-testid="chat-chapter-chip">
+          <div className="mb-2" data-testid="chat-chapter-chip">
             <div
-              className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full border text-xs font-medium"
-              style={{
-                borderColor: 'rgba(139,92,246,0.30)',
-                background: 'rgba(124,58,237,0.08)',
-                color: '#a78bfa',
-              }}
+              className="inline-flex items-start gap-2.5 px-3 py-2 rounded-xl border shadow-sm"
+              style={(() => {
+                const s = sourceSection ? SECTION_COLORS[sourceSection] : null;
+                return {
+                  borderColor: s ? s.border : 'rgba(139,92,246,0.30)',
+                  background: s ? s.bg : 'rgba(124,58,237,0.08)',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                };
+              })()}
             >
-              <BookOpen size={12} aria-hidden="true" style={{ flexShrink: 0 }} />
-              <span className="max-w-[240px] truncate" title={activeChapter.title}>
-                {activeChapter.title}
-              </span>
+              <BookOpen
+                size={13}
+                aria-hidden="true"
+                style={{
+                  flexShrink: 0,
+                  marginTop: 1,
+                  color: sourceSection ? SECTION_COLORS[sourceSection]?.text : '#a78bfa',
+                }}
+              />
+              <div className="flex flex-col min-w-0">
+                {sourceSection && SECTION_LABELS[sourceSection] && (
+                  <span
+                    className="text-[9px] font-bold uppercase tracking-widest mb-0.5"
+                    style={{ color: SECTION_COLORS[sourceSection]?.text }}
+                  >
+                    {SECTION_LABELS[sourceSection]}
+                  </span>
+                )}
+                <span
+                  className="text-xs font-medium max-w-[240px] truncate"
+                  title={activeChapter.title}
+                  style={{ color: sourceSection ? SECTION_COLORS[sourceSection]?.text : '#a78bfa' }}
+                >
+                  {activeChapter.title}
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={onDismissChapter}
-                className="ml-0.5 w-4 h-4 rounded-full flex items-center justify-center hover:bg-black/10 transition-colors flex-shrink-0"
+                className="ml-auto w-5 h-5 rounded-full flex items-center justify-center hover:bg-black/10 transition-colors flex-shrink-0 self-center"
                 aria-label={`Remove ${activeChapter.title} filter`}
                 data-testid="chat-chapter-chip-dismiss"
+                style={{ color: sourceSection ? SECTION_COLORS[sourceSection]?.text : '#a78bfa' }}
               >
-                <X size={10} aria-hidden="true" />
+                <X size={11} aria-hidden="true" />
               </button>
             </div>
           </div>

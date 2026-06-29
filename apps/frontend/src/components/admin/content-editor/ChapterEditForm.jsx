@@ -17,6 +17,7 @@ import ChapterAuditLog from './ChapterAuditLog';
 
 const CONTENT_TYPES = [
   { value: 'notes', label: 'Notes', color: 'violet' },
+  { value: 'qa', label: 'Q&A', color: 'blue' },
   { value: 'question_paper', label: 'Question Paper', color: 'amber' },
   { value: 'formula', label: 'Formula Sheet', color: 'pink' },
   { value: 'summary', label: 'Summary', color: 'emerald' },
@@ -62,14 +63,24 @@ export default function ChapterEditForm({
     }
   }, [editTarget?.id, adminToken, setContentForm]);
 
+  const isQA = contentForm.content_type === 'qa';
+
   const _contentField = useCallback(() => {
+    if (isQA) {
+      if (contentMode === 'rag') return editorLang === 'as' ? 'qa_rag_text_as' : 'qa_rag_text_en';
+      return editorLang === 'as' ? 'qa_text_as' : 'qa_text_en';
+    }
     if (contentMode === 'rag') return editorLang === 'as' ? 'rag_text_as' : 'rag_text_en';
     return editorLang === 'as' ? 'content_as' : 'content';
-  }, [contentMode, editorLang]);
+  }, [contentMode, editorLang, isQA]);
 
-  const activeContent = contentMode === 'rag'
-    ? (editorLang === 'as' ? (contentForm.rag_text_as || '') : (contentForm.rag_text_en || ''))
-    : (editorLang === 'as' ? (contentForm.content_as || '') : contentForm.content);
+  const activeContent = isQA
+    ? (contentMode === 'rag'
+        ? (editorLang === 'as' ? (contentForm.qa_rag_text_as || '') : (contentForm.qa_rag_text_en || ''))
+        : (editorLang === 'as' ? (contentForm.qa_text_as || '') : (contentForm.qa_text_en || '')))
+    : (contentMode === 'rag'
+        ? (editorLang === 'as' ? (contentForm.rag_text_as || '') : (contentForm.rag_text_en || ''))
+        : (editorLang === 'as' ? (contentForm.content_as || '') : contentForm.content));
 
   const handleContentChange = useCallback((e) => {
     const md = e.target.value;
@@ -413,7 +424,12 @@ export default function ChapterEditForm({
                   key={`${editTarget?.id ?? '__new__'}-${editorKey}-${editorLang}`}
                   value={activeContent}
                   onChange={handleContentChange}
-                  placeholder="Write markdown content here…"
+                  placeholder={isQA
+                    ? (contentMode === 'rag'
+                        ? 'Write expanded Q&A retrieval text here (for AI search)…'
+                        : 'Write Q&A content here — use ## for questions, answers below…')
+                    : 'Write markdown content here…'
+                  }
                   style={{
                     width: '100%',
                     height: '100%',

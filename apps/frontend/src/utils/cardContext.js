@@ -22,12 +22,15 @@
  * Returns null when there is nothing to ground on (no subject and
  * no seed) so the chat call falls back to its non-grounded path.
  */
+const _SECTION_NAMES = { notes: 'Notes', qa: 'Q&A', question_paper: 'Question Paper' };
+
 export function buildCardContext({
   subject,
   scopedChapters = [],
   activeChapter = null,
   user = null,
   seedContext = '',
+  sourceSection = null,
 } = {}) {
   const seed = (seedContext || '').trim();
   if (!subject && !seed) return null;
@@ -53,6 +56,10 @@ export function buildCardContext({
     // highest — same wording the original ChatPage useMemo used so
     // the rag.py library branch (which keys off "Active chapter
     // (priority context):") keeps working.
+    if (sourceSection && _SECTION_NAMES[sourceSection]) {
+      lines.push(`Content section: ${_SECTION_NAMES[sourceSection]}`);
+    }
+
     if (activeChapter) {
       lines.push('');
       lines.push(`Active chapter (priority context): ${activeChapter.title}`);

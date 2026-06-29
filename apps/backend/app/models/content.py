@@ -83,12 +83,20 @@ class Chapter(Document):
     subject_id: FlexId
     chapter_number: int
     status: str = "draft"
+    # Section discriminator — values: 'notes' | 'qa' | 'question_paper' | 'formula' | 'summary' | 'solution' | 'reference'
+    content_type: Optional[str] = "notes"
     content_en: Optional[str] = None           # user-facing: HTML/Markdown notes, summaries
     content_as: Optional[str] = None           # user-facing: Assamese notes
     rag_text_en: Optional[str] = None          # retrieval-only: full plain-text from book PDF
     rag_text_as: Optional[str] = None          # retrieval-only: Assamese plain-text
     notes_en: Optional[str] = None             # structured study notes (Markdown), English
     notes_as: Optional[str] = None             # structured study notes (Markdown), Assamese
+    # Q&A section — student-facing questions & answers (Markdown)
+    qa_text_en: Optional[str] = None           # user-facing: Q&A content, English
+    qa_text_as: Optional[str] = None           # user-facing: Q&A content, Assamese
+    # Q&A section — retrieval-ready Q&A (plain text, expanded)
+    qa_rag_text_en: Optional[str] = None       # retrieval-only: expanded Q&A, English
+    qa_rag_text_as: Optional[str] = None       # retrieval-only: expanded Q&A, Assamese
     pyq_pdf_url: Optional[str] = None          # URL to PYQ PDF (user-facing)
     pyq_rag_text: Optional[str] = None         # extracted text from PYQ PDF (retrieval-only)
     meta_description: Optional[str] = None

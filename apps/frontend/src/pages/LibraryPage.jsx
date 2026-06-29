@@ -278,10 +278,11 @@ export default function LibraryPage() {
 
   // JSON-LD now emitted via PageMeta (pageType="library"); see src/lib/jsonld.js
 
-  const handleAskAI = useCallback((subjectId, hasDocument = false, subjectName = '') => {
+  const handleAskAI = useCallback((subjectId, hasDocument = false, subjectName = '', section = null) => {
     try { Analytics.chatStart(subjectId, subjectName, 'openai/gpt-oss-20b'); } catch {}
     const params = new URLSearchParams({ subject: subjectId });
     if (hasDocument) params.set('document_id', subjectId);
+    if (section) params.set('section', section);
     navigate(`/chat?${params.toString()}`);
   }, [navigate]);
 

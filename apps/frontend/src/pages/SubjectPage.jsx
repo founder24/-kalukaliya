@@ -230,7 +230,7 @@ function BlogView({ subject, subjectId }) {
   );
 }
 
-function LegacyAccordion({ subject, subjectId, chapters }) {
+function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null }) {
   const [topicSummaries, setTopicSummaries] = useState({});
   const [loadingTopics, setLoadingTopics] = useState({});
   const [chunks, setChunks] = useState({});
@@ -361,7 +361,7 @@ function LegacyAccordion({ subject, subjectId, chapters }) {
                 )}
 
                 <div className="mt-3 flex items-center gap-2">
-                  <Link to={`/chat?subject=${subjectId}&chapter=${chapter.id}`}>
+                  <Link to={`/chat?subject=${subjectId}&chapter=${chapter.id}${sectionKey ? `&section=${sectionKey}` : ''}`}>
                     <Button size="sm" className="text-xs bg-primary hover:bg-primary/90 text-primary-foreground">
                       <Sparkles size={12} className="mr-1" /> Ask AI about this chapter
                     </Button>
@@ -382,6 +382,22 @@ export default function SubjectPage() {
   const { data: subject, isLoading: subjectLoading, isError: subjectError, refetch: refetchSubject } = useSubject(subjectId);
   const { data: chapters = [], isLoading: chaptersLoading } = useChapters(subjectId);
   const loading = subjectLoading || chaptersLoading;
+
+  const subjectSections = useMemo(() => {
+    const notesChs = chapters.filter(ch => !ch.content_type || (ch.content_type !== 'qa' && ch.content_type !== 'question_paper'));
+    const qaChs = chapters.filter(ch => ch.content_type === 'qa');
+    const pyqChs = chapters.filter(ch => ch.content_type === 'question_paper');
+    return [
+      { key: 'notes', label: 'Notes', chapters: notesChs, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
+      { key: 'qa', label: 'Q&A', chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
+      { key: 'question_paper', label: 'Question Paper', chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
+    ].filter(s => s.chapters.length > 0);
+  }, [chapters]);
+
+  const [activeSection, setActiveSection] = useState(null);
+  const activeSectionKey = activeSection ?? subjectSections[0]?.key ?? null;
+  const activeSecObj = subjectSections.find(s => s.key === activeSectionKey);
+  const filteredChapters = activeSecObj ? activeSecObj.chapters : chapters;
 
 
   if (subjectError && !subjectLoading) return (
@@ -512,7 +528,7 @@ export default function SubjectPage() {
                 </div>
               </div>
             </div>
-            <Link to={`/chat?subject=${subjectId}`} className="flex-shrink-0">
+            <Link to={`/chat?subject=${subjectId}${activeSectionKey ? `&section=${activeSectionKey}` : ''}`} className="flex-shrink-0">
               <Button className="bg-primary hover:bg-primary/90 text-primary-foreground w-full sm:w-auto min-h-[44px]">Ask AI</Button>
             </Link>
           </div>
@@ -527,8 +543,36 @@ export default function SubjectPage() {
           )}
         </div>
 
-        {/* Chapters */}
-        <LegacyAccordion subject={subject} subjectId={subjectId} chapters={chapters} />
+        {/* Section tabs — only shown when 2+ sections have content */}
+        {subjectSections.length > 1 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {subjectSections.map(sec => (
+              <button
+                key={sec.key}
+                onClick={() => setActiveSection(sec.key)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+                style={activeSectionKey === sec.key
+                  ? { background: sec.bg, color: sec.accent, border: `1.5px solid ${sec.border}` }
+                  : { background: 'transparent', color: 'hsl(var(--muted-foreground))', border: '1.5px solid rgba(139,92,246,0.12)' }
+                }
+              >
+                <span>{sec.label}</span>
+                <span
+                  className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
+                  style={{
+                    background: activeSectionKey === sec.key ? `${sec.accent}20` : 'rgba(139,92,246,0.07)',
+                    color: activeSectionKey === sec.key ? sec.accent : 'hsl(var(--muted-foreground))',
+                  }}
+                >
+                  {sec.chapters.length}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Chapters accordion — filtered by active section */}
+        <LegacyAccordion subject={subject} subjectId={subjectId} chapters={filteredChapters} sectionKey={activeSectionKey} />
       </div>
     </AppLayout>
   );

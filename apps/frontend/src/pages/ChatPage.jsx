@@ -42,10 +42,11 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
-  const convId     = searchParams.get('id');
-  const subjectId  = searchParams.get('subject');
-  const documentId = searchParams.get('document_id');
-  const chapterId  = searchParams.get('chapter');
+  const convId      = searchParams.get('id');
+  const subjectId   = searchParams.get('subject');
+  const documentId  = searchParams.get('document_id');
+  const chapterId   = searchParams.get('chapter');
+  const sourceSection = searchParams.get('section') || null;
 
   // Seed card_context from the originating page's react-router
   // Link state (Task #409). Currently PersonalizedCmsPage uses this
@@ -246,6 +247,7 @@ export default function ChatPage() {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete('chapter');
+      next.delete('section');
       return next;
     }, { replace: true });
   }, [setSearchParams]);
@@ -257,8 +259,9 @@ export default function ChatPage() {
       activeChapter,
       user,
       seedContext: seedCardContext,
+      sourceSection,
     }),
-    [subjectId, subject, scopedChapters, activeChapter, user, seedCardContext],
+    [subjectId, subject, scopedChapters, activeChapter, user, seedCardContext, sourceSection],
   );
 
   const effectiveLimit = credits.limit ?? user?.credits_limit ?? null;
@@ -930,6 +933,7 @@ export default function ChatPage() {
           isAnon={!user}
           activeChapter={activeChapter}
           onDismissChapter={onDismissChapter}
+          sourceSection={sourceSection}
           responseLang={responseLang}
         />
       </div>

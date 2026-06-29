@@ -254,10 +254,12 @@ async def get_library_bundle(
                             "slug": ch.slug,
                             "subject_id": subj_id,
                             "order": ch.chapter_number,
+                            "content_type": ch.content_type or "notes",
                             "topic_count": len(ch.published_topics),
                             "notes_generated": ch.notes_generated
                             or bool(ch.content_en or ch.content_as),
                             "has_assamese": bool(ch.content_as),
+                            "has_qa": bool(ch.qa_text_en or ch.qa_text_as),
                             "status": ch.status,
                         }
                         chapter_list.append(ch_data)
