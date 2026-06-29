@@ -643,6 +643,32 @@ async def chat_stream(
                 history = await ChatService.load_conversation_history(request.session_id)
                 source_card = await ChatService.build_source_card(None, [], [], "none", "generic")
 
+                # Fast-path: GreetingRAG canned response — avoids LLM entirely,
+                # fixes empty-response bug and drops TTFB to ~0 ms for greetings.
+                from app.services.ai.greeting_rag import greeting_rag as _greeting_rag
+                _canned = _greeting_rag.fast_match(sanitized_message, detected_lang)
+                if _canned:
+                    logger.info(
+                        "greeting_rag_canned_hit_stream",
+                        extra={"user_id": user_id, "query": sanitized_message[:30]},
+                    )
+
+                    async def _canned_event_stream():
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        if source_card is not None and source_card.source_type != "llm_only":
+                            yield f"data: {json.dumps(source_card.to_sse_dict())}\n\n"
+                        yield f"data: {json.dumps({'content': _canned, 'done': False})}\n\n"
+                        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': target_model, 'lang': detected_lang, 'route_trace': {'decision': 'greeting_rag', 'lang': detected_lang, 'fallback': False, 'model': 'greeting_rag', 'confidence_tier': 'generic', 'topic_score': 0.0, 'web_used': False, 'rag_path': 'none', 'rag_chunks': 0}})}\n\n"
+
+                    return StreamingResponse(
+                        _canned_event_stream(),
+                        media_type="text/event-stream",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "X-Accel-Buffering": "no",
+                        },
+                    )
+
             else:
                 # ── Phase 1: embed + topic match + conversation history in parallel.
                 # Web search is intentionally NOT started here — it fires only when

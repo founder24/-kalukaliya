@@ -208,12 +208,12 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         style={{ background: 'rgba(139,92,246,0.03)', border: '1px solid rgba(139,92,246,0.08)' }}
       >
         {/* Section tab pills */}
-        <div className="flex items-center gap-1 px-2.5 py-1.5" style={{ borderBottom: '1px solid rgba(139,92,246,0.06)' }}>
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 overflow-x-auto scrollbar-none" style={{ borderBottom: '1px solid rgba(139,92,246,0.06)' }}>
           {SECTIONS.map(sec => (
             <button
               key={sec.key}
               onClick={() => { setExpandedSection(sec.key); setShowAllInSection(false); }}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide transition-all"
+              className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap"
               style={sec.key === activeSection
                 ? { background: sec.bg, color: sec.accent, border: `1px solid ${sec.accent}40` }
                 : { background: 'transparent', color: 'hsl(var(--muted-foreground))', border: '1px solid rgba(139,92,246,0.10)' }
@@ -331,7 +331,11 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         </Link>
 
         <button
-          onClick={() => onAskAI(sub.id, hasDocument, sub.name, activeSection)}
+          onClick={() => {
+            const activeSec = SECTIONS.find(s => s.key === activeSection);
+            const firstChapterId = activeSec?.chapters?.[0]?.id || null;
+            onAskAI(sub.id, hasDocument, sub.name, activeSection, firstChapterId);
+          }}
           aria-label={`Ask AI about ${sub.name}`}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold text-white transition-all duration-200 hover:opacity-90 active:scale-95"
           style={{
