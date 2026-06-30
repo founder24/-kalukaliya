@@ -305,11 +305,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       updatePayload.rag_text_as = contentForm.rag_text_as || '';
       if (contentForm.qa_text_en !== undefined) updatePayload.qa_text_en = contentForm.qa_text_en || '';
       if (contentForm.qa_text_as !== undefined) updatePayload.qa_text_as = contentForm.qa_text_as || '';
-<<<<<<< HEAD
-      updatePayload.pyq_pdf_url = contentForm.pyq_pdf_url || '';
-=======
       if (contentForm.pyq_pdf_url !== undefined) updatePayload.pyq_pdf_url = contentForm.pyq_pdf_url || '';
->>>>>>> 31b8e4a9 (Add syllabus navigation and question paper PDF uploads)
       if (!force) updatePayload.version = contentForm.version ?? 0;
       const res = await axios.patch(`${API}/admin/content/chapters/${editTarget.id}`, updatePayload, authHeaders(adminToken));
       const newVersion = res.data?.version ?? (contentForm.version + 1);
