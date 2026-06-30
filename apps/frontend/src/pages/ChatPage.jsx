@@ -316,6 +316,7 @@ export default function ChatPage() {
       message: text, conversation_id: conversationId,
       subject_id: subjectId || null, subject_name: subject?.name || null,
       chapter_id: chapterId || null, chapter_name: activeChapter?.title || null,
+      source_type: sourceSection || null,
       board_id: user?.board_id || null, board_name: user?.board_name || null,
       class_id: user?.class_id || null, class_name: user?.class_name || null,
       stream_name: user?.stream_name || null, model,

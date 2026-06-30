@@ -63,9 +63,11 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
   }, [queryClient, sub.boardSlug, sub.classSlug, sub.slug]);
 
   const SECTIONS = useMemo(() => {
-    const notesChs = chapters.filter(ch => !ch.content_type || (ch.content_type !== 'qa' && ch.content_type !== 'question_paper'));
-    const qaChs = chapters.filter(ch => ch.content_type === 'qa');
-    const pyqChs = chapters.filter(ch => ch.content_type === 'question_paper');
+    const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
+    const PYQ_TYPES = new Set(['question_paper', 'pyq']);
+    const notesChs = chapters.filter(ch => !ch.content_type || (!QA_TYPES.has(ch.content_type) && !PYQ_TYPES.has(ch.content_type)));
+    const qaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type));
+    const pyqChs = chapters.filter(ch => PYQ_TYPES.has(ch.content_type));
     return [
       { key: 'notes', label: isAs ? 'টোকা' : 'Notes', chapters: notesChs, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)' },
       { key: 'qa', label: isAs ? 'প্ৰশ্ন' : 'Questions', chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)' },

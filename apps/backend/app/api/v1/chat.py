@@ -62,6 +62,11 @@ class ChatRequest(BaseModel):
     chapter_id: Optional[str] = None
     chapter_name: Optional[str] = None
     subject_id: Optional[str] = None
+    # section / source_type — tells the backend which content section the user
+    # was viewing when they opened Ask AI.  Frontend sends the short section key
+    # ('notes', 'qa', 'question_paper'); the validator normalises it to the
+    # canonical snake_case value used in MongoDB and Vectorize metadata.
+    source_type: Optional[str] = None
     # Student profile — forwarded from the user's saved board/class in the frontend.
     # Used to personalise the system prompt without requiring auth lookup.
     board_name: Optional[str] = None
@@ -74,9 +79,14 @@ class ChatRequest(BaseModel):
         The frontend sends conversation_id but the backend field is session_id.
         Without this coalescion session_id is always None, breaking multi-turn
         history and session linking.
+        Also normalises source_type: frontend short keys ('qa', 'question_paper')
+        are mapped to canonical snake_case values used by MongoDB and Vectorize.
         """
         if self.session_id is None and self.conversation_id is not None:
             self.session_id = self.conversation_id
+        if self.source_type is not None:
+            from app.services.rag.source_types import normalize_source_type
+            self.source_type = normalize_source_type(self.source_type)
         return self
 
     @field_validator("message")
@@ -699,6 +709,19 @@ async def chat_stream(
 
                 match_score = topic_match.get("score", 0.0) if topic_match else 0.0
 
+                # ── Card-context retrieval filters ────────────────────────────────────
+                # Built from the frontend's URL params (?subject=, ?chapter=, ?section=).
+                # Used only in the LOW-confidence and NONE (card-context fallback) paths
+                # where topic matching has insufficient signal.  The HIGH/MID paths use
+                # the topic_match chapter_id directly (more precise than the URL param).
+                _card_filters: dict = {}
+                if request.subject_id:
+                    _card_filters["subject_id"] = request.subject_id
+                if request.chapter_id:
+                    _card_filters["chapter_id"] = request.chapter_id
+                if request.source_type:
+                    _card_filters["source_type"] = request.source_type
+
                 # ── Phase 2: confidence-gated retrieval ──────────────────────────────
                 if match_score >= CONFIDENCE_HIGH:
                     # HIGH (≥ 0.80): strong match → MongoDB fast path only, web skipped.
@@ -725,6 +748,7 @@ async def chat_stream(
                             sanitized_message,
                             user_tier,
                             lang=detected_lang,
+                            filters=_card_filters if _card_filters else None,
                             embedding=query_embedding,
                         )
 
@@ -761,6 +785,7 @@ async def chat_stream(
                             sanitized_message,
                             user_tier,
                             lang=detected_lang,
+                            filters=_card_filters if _card_filters else None,
                             embedding=query_embedding,
                         ),
                         ChatService.retrieve_web_context(
