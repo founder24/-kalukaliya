@@ -1,0 +1,37 @@
+The architecture is now in a good state for controlled retirement of the legacy retrieval path. The code-side audit is effectively closed, and the remaining work is operational verification plus one final feature-flag decision. Cloudflare Vectorize metadata filtering still depends on metadata indexes, and programmatic route state should continue to be preserved through navigation so Ask AI keeps using the active chapter section.
+
+What is fixed
+Frontend now sends source_type in the chat payload.
+
+ChatRequest normalizes aliases at the API boundary.
+
+Retrieval receives the same _card_filters in both high- and low-confidence paths.
+
+SubjectCard no longer sends important_questions into Notes by mistake.
+
+ChapterPage Ask AI now uses the active tab (contentMode) instead of the chapter’s stored type.
+
+Vectorize key conversion is handled before query time, and the retrieval filters are aligned to the canonical lesson identity.
+
+What is intentionally left on
+RAG_LEGACY_FALLBACK_ENABLED = true remains enabled for now.
+
+The legacy rag_chunks fallback still exists, but it is gated.
+
+Dev-only CF_ACCOUNT_ID parity differences are documented and expected.
+
+The system still accepts both current canonical values and normalized legacy aliases at the boundary.
+
+What to verify before disabling legacy fallback
+All 6 Vectorize metadata indexes exist and health reports ok.
+
+The index was created on a metadata-filtering-capable setup, since legacy indexes cannot be migrated to support metadata filtering.
+
+All chapters have been reindexed on v2 so retrieval no longer depends on rag_chunks.
+
+The RAG_LEGACY_FALLBACK_ENABLED env var is actually read by Cloud Run at startup and can be flipped with gcloud run services update.
+
+The operational runbook clearly documents the rollback path if a v2 retrieval regression appears.
+
+Final decision
+At this point, the safe recommendation is: keep legacy fallback on until v2 reindex is complete and Vectorize health is confirmed, then disable it and watch retrieval logs for a short verification window. Because Vectorize filtering applies to the filtered set before topK, removing the fallback too early would risk exposing stale or broader retrieval behavior if any metadata index or reindex step is incomplete
