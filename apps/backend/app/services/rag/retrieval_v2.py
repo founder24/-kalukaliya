@@ -97,6 +97,14 @@ async def retrieve_v2(
             _log(t0, "vectorize", lang, len(vz_chunks))
             return vz_chunks, "vectorize"
 
+    if not settings.RAG_LEGACY_FALLBACK_ENABLED:
+        logger.info(
+            "retrieve_v2: legacy fallback is disabled (RAG_LEGACY_FALLBACK_ENABLED=false); "
+            "returning empty — ensure all chapters are reindexed on v2 before disabling."
+        )
+        _log(t0, "empty", lang, 0)
+        return [], "empty"
+
     legacy_chunks, legacy_path = await _legacy_path(
         query_embedding, lang=lang, filters=filters, limit=limit
     )

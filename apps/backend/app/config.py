@@ -186,6 +186,14 @@ class Settings(BaseSettings):
     MAX_CONTEXT_DOCS: int = 5
     STREAM_CHUNK_SIZE: int = 128
 
+    # --- RAG feature flags ---
+    # Set RAG_LEGACY_FALLBACK_ENABLED=false once all chapters are fully reindexed
+    # on the v2 pipeline (chunks collection + Vectorize). Until then this acts as
+    # a safety net for content not yet migrated to v2.
+    # When disabled, retrieve_v2 returns ("empty") instead of falling through to
+    # the rag_chunks Atlas $vectorSearch path — eliminates stale retrieval risk.
+    RAG_LEGACY_FALLBACK_ENABLED: bool = True
+
     # --- Startup validation errors (populated by validate_production_secrets) ---
     startup_errors: list = Field(default_factory=list)
 

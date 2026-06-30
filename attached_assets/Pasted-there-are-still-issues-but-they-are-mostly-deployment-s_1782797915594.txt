@@ -1,0 +1,55 @@
+there are still issues, but they are mostly deployment-side or consistency issues, not a new major code-logic problem. Your architecture is strong, and the main audited bug was the ChapterPage Ask AI section mismatch; the remaining risks are about missing indexes, secret registration, and a few structural cleanup items. Cloudflare Vectorize metadata filtering requires indexed metadata fields, and React Router’s programmatic navigation is the correct way to preserve active chapter/section state.
+
+What looks correct
+source_type is being sent from the frontend.
+
+ChatRequest normalizes source aliases at the boundary.
+
+Both retrieval paths receive the same _card_filters.
+
+SubjectCard no longer misclassifies important_questions into Notes.
+
+Vectorize snake_case to camelCase conversion is in place.
+
+The Ask AI chapter link now uses the active tab (contentMode) instead of stored chapter type.
+
+Real issues still visible
+1) Vectorize metadata indexes
+If the metadata indexes for sourceType, chapterId, subjectId, medium, topicId, and chunkType are missing, filtered retrieval can silently degrade into broad search. This is the highest-priority production check.
+
+2) JWT_SECRET in Secret Manager
+You noted that JWT_SECRET is currently not_found in GCP Secret Manager. That means the system may be falling back to env vars, which is fragile for deployment consistency.
+
+3) EDGE_SHARED_SECRET not in Secret Manager
+If this secret is missing, the edge trust contract can fall back to plain JWT verification instead of the HMAC trust path. That does not necessarily break the system, but it weakens the intended architecture.
+
+4) Legacy rag_chunks fallback still active
+That is okay as a temporary compatibility layer, but once all chapters are reindexed on v2, it should be removed to avoid stale retrieval paths.
+
+5) Missing dev/runtime parity
+CF_ACCOUNT_ID not being present in development means some edge-side Worker AI warmup paths can be skipped. That is a dev environment issue, but it can hide bugs until production.
+
+Content model notes
+Your content model section is mostly sound, but the key rule is that content_type should drive editor selection, while retrieval should rely on canonical normalized sourceType and source-specific retrieval text fields. In other words, UI display type and retrieval source type are related but not identical responsibilities.
+
+Bottom line
+There is no major new architecture flaw in what you posted. The remaining issues are mostly:
+
+missing Vectorize metadata indexes,
+
+missing or not-yet-registered secrets,
+
+legacy fallback cleanup,
+
+and environment parity checks.
+
+Priority order
+Verify and create all Vectorize metadata indexes.
+
+Ensure JWT_SECRET and EDGE_SHARED_SECRET exist in Secret Manager.
+
+Keep the rag_chunks fallback only until v2 reindex is complete.
+
+Verify dev/prod parity for Cloudflare and GCP secrets.
+
+Keep using active tab state for Ask AI routing.
