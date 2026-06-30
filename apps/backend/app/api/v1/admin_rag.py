@@ -934,14 +934,94 @@ async def rag_stats(request: Request):
 
 @router.get("/rag/vectorize/info")
 async def vectorize_info(request: Request):
-    """Return raw Cloudflare Vectorize index metadata."""
+    """
+    Return Cloudflare Vectorize index metadata + metadata-index health check.
+
+    Health check compares live metadata indexes against the required set for
+    Syrabit's filtered-retrieval pipeline:
+      subjectId, chapterId, topicId, medium, sourceType, chunkType
+
+    Response includes:
+      index_info        — raw CF index descriptor (dimensions, metric, vector count)
+      metadata_indexes  — list of {propertyName, indexType} from CF
+      health            — {status, required, present, missing, extra, summary}
+
+    status values:
+      ok          — all required indexes present
+      degraded    — one or more required indexes missing (filtered retrieval broken for those fields)
+      unconfigured — could not reach CF API (credentials or network issue)
+    """
+    import asyncio as _asyncio
+    from app.services.vectorize.client import vectorize_client
+
+    # Required metadata indexes for the Syrabit retrieval pipeline
+    REQUIRED_INDEXES: list[str] = [
+        "subjectId",
+        "chapterId",
+        "topicId",
+        "medium",
+        "sourceType",
+        "chunkType",
+    ]
+
+    index_info: dict = {}
+    metadata_indexes: list[dict] = []
+    info_error: str | None = None
 
     try:
-        from app.services.vectorize.client import vectorize_client
-        info = await vectorize_client.get_index_info()
-        return info
+        index_info, metadata_indexes = await _asyncio.gather(
+            vectorize_client.get_index_info(),
+            vectorize_client.get_metadata_indexes(),
+        )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Vectorize API error: {e}")
+        info_error = str(e)
+        # Still try to get metadata indexes separately if index_info failed
+        try:
+            metadata_indexes = await vectorize_client.get_metadata_indexes()
+        except Exception:
+            pass
+
+    # Build health check
+    present_names: set[str] = {
+        idx.get("propertyName", "") for idx in metadata_indexes if idx.get("propertyName")
+    }
+    required_set = set(REQUIRED_INDEXES)
+    missing = sorted(required_set - present_names)
+    extra = sorted(present_names - required_set)
+    present = sorted(present_names & required_set)
+
+    if info_error and not present_names:
+        health_status = "unconfigured"
+        summary = f"Could not reach Vectorize API: {info_error}"
+    elif missing:
+        health_status = "degraded"
+        summary = (
+            f"{len(present)}/{len(REQUIRED_INDEXES)} required indexes present — "
+            f"filtered retrieval BROKEN for: {', '.join(missing)}"
+        )
+    else:
+        health_status = "ok"
+        summary = f"All {len(REQUIRED_INDEXES)} required metadata indexes are present."
+
+    health = {
+        "status": health_status,
+        "required": REQUIRED_INDEXES,
+        "present": present,
+        "missing": missing,
+        "extra": extra,
+        "summary": summary,
+    }
+
+    response: dict = {
+        "health": health,
+        "metadata_indexes": metadata_indexes,
+    }
+    if index_info:
+        response["index_info"] = index_info
+    if info_error:
+        response["index_info_error"] = info_error
+
+    return response
 
 
 # ── Content nodes ──────────────────────────────────────────────────────────────

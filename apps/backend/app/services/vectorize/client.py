@@ -218,6 +218,39 @@ class VectorizeClient:
             raise RuntimeError(f"Vectorize index info failed: {body.get('errors')}")
         return body.get("result", {})
 
+    async def get_metadata_indexes(self) -> list[dict]:
+        """
+        List all metadata indexes configured on this Vectorize index.
+
+        CF endpoint: GET .../metadata-index/list
+        Returns a list of dicts: [{propertyName: str, indexType: str}, ...]
+
+        Silently returns [] if the API call fails (e.g. index not yet configured),
+        so callers can safely compare against REQUIRED_INDEXES without crashing.
+        """
+        self._check_configured()
+        try:
+            resp = await self._http.get(
+                f"{self._base}/metadata-index/list",
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            if not body.get("success"):
+                logger.warning(
+                    f"Vectorize metadata-index/list returned success=false: "
+                    f"{body.get('errors')}"
+                )
+                return []
+            result = body.get("result", {})
+            # API may return {"metadataIndexes": [...]} or a bare list
+            if isinstance(result, list):
+                return result
+            return result.get("metadataIndexes", [])
+        except Exception as exc:
+            logger.warning(f"Vectorize get_metadata_indexes failed: {exc}")
+            return []
+
     async def close(self) -> None:
         await self._http.aclose()
 
