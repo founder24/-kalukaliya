@@ -1,0 +1,64 @@
+# 1) Basic repo / branch sanity
+git status
+git branch -vv
+git remote -v
+
+# 2) Confirm current env is loaded
+env | sort | grep -E 'RAG_LEGACY_FALLBACK_ENABLED|JWT_SECRET|EDGE_SHARED_SECRET|BACKEND_URL|CF_ACCOUNT_ID'
+
+# 3) Check backend starts cleanly
+python -m compileall .
+pytest -q
+
+# 4) Confirm the RAG fallback flag is wired
+grep -R "RAG_LEGACY_FALLBACK_ENABLED" -n .
+grep -R "_legacy_path" -n .
+grep -R "rag_chunks" -n .
+
+# 5) Confirm source normalization and filter conversion still exist
+grep -R "normalize_source_type" -n .
+grep -R "snake_to_vectorize_filter" -n .
+grep -R "sourceType" -n .
+
+# 6) Confirm ChapterPage Ask AI uses active tab
+grep -R "contentMode" -n frontend src .
+grep -R "chapter.content_type" -n frontend src .
+
+# 7) Confirm Vectorize index health endpoint exists in code
+grep -R "vectorize/info" -n .
+grep -R "metadata-index" -n .
+grep -R "create-metadata-index" -n .
+
+# 8) Confirm all six Vectorize fields are present in code paths
+grep -R "subjectId" -n .
+grep -R "chapterId" -n .
+grep -R "topicId" -n .
+grep -R "medium" -n .
+grep -R "sourceType" -n .
+grep -R "chunkType" -n .
+
+# 9) Confirm reindex endpoints exist
+grep -R "reindex/chapters" -n .
+grep -R "reindex/subject" -n .
+grep -R "reindex/chapter" -n .
+
+# 10) Confirm legacy fallback is still enabled right now
+grep -R "RAG_LEGACY_FALLBACK_ENABLED" -n config.py backend app .
+
+# 11) Confirm Cloud Run deploy docs include secrets update
+grep -R -- "--update-secrets" -n .
+grep -R "JWT_SECRET" -n cloudbuild.yaml .
+grep -R "EDGE_SHARED_SECRET" -n cloudbuild.yaml .
+
+# 12) Confirm Vectorize metadata index creation script exists
+ls -la scripts/
+test -f scripts/setup-vectorize-indexes.sh && echo "index script exists"
+
+# 13) Optional: run the index setup script if you have shell access to the Cloudflare environment
+# bash scripts/setup-vectorize-indexes.sh
+
+# 14) Optional: run a production health check from backend if reachable
+# curl -s -H "Cookie: admin_session=..." https://api.syrabit.ai/api/v1/admin/rag/vectorize/info | jq '.health'
+
+# 15) Optional: verify no stale legacy-only paths remain after reindex
+grep -R "rag_chunks" -n . | cat

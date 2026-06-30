@@ -290,15 +290,10 @@ export default function ChapterPage() {
       : null,
   );
   const articleRef = useRef(null);
-<<<<<<< HEAD
-  const _tabParam = searchParams.get('tab');
-  const [contentMode, setContentMode] = useState(
-    ['notes', 'qa'].includes(_tabParam) ? _tabParam : 'notes',
-  );
-=======
   const _initTab = searchParams.get('tab');
-  const [contentMode, setContentMode] = useState(['notes', 'qa', 'pyq'].includes(_initTab) ? _initTab : 'notes');
->>>>>>> 31b8e4a9 (Add syllabus navigation and question paper PDF uploads)
+  const [contentMode, setContentMode] = useState(
+    ['notes', 'qa', 'pyq'].includes(_initTab) ? _initTab : 'notes',
+  );
   const [activeId, setActiveId] = useState('');
   const [relatedChapterTopics, setRelatedChapterTopics] = useState([]);
   // Task #914 Step 3 — published topics with `definition_status=ok`
