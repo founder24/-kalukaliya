@@ -36,3 +36,9 @@ id = "Qhw70fDBJdwPFLJCydWcq"
 uri = "file://FULLSTACK_ARCHITECTURE.md"
 type = "text"
 title = "Syrabit — Full-Stack End-to-End Architecture"
+
+[[outputs]]
+id = "ll3J5kDYQj-yRvVy02QSb"
+uri = "file://docs/architecture-audit.md"
+type = "text"
+title = "Syrabit — Fullstack Architecture Audit"

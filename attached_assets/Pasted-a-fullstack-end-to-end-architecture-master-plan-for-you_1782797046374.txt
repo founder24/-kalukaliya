@@ -1,0 +1,619 @@
+a fullstack end-to-end architecture master plan for your developer handoff. It covers GitHub repo flow, Cloudflare Pages, Edge Worker, Cloud Run, MongoDB, Cloud Build, secrets, workflows, retrieval logic, topic canonical mapping, deployment, and audit commands. It is written as a structured operating document so your developer can take over without guessing. Cloudflare Pages is the frontend hosting layer, the Edge Worker is the API gate and control plane, Cloud Run is the backend application runtime, and Vectorize filtering depends on indexed metadata fields created before vectors are inserted.
+
+1) System roles
+Cloudflare Pages
+Hosts the React + Vite frontend for the live domain.
+
+Serves all public UI routes like /, /library, /chat, /history, /profile, /signup, /login.
+
+Receives rebuilds from GitHub deploys and publish hooks.
+
+Can host bot-friendly prerendered/static pages and edge-side behavior where needed.
+
+Cloudflare Edge Worker
+Single API edge entry point for api.syrabit.ai.
+
+Handles JWT verification, rate limiting, CORS, bot detection, and request signing.
+
+Proxies validated requests to Cloud Run.
+
+Can handle lightweight edge tasks like OCR/TTS/ISR cache if configured.
+
+Protects Cloud Run from direct public access by enforcing signatures and origin control.
+
+Cloud Run backend
+Runs the FastAPI application on Google Cloud Run.
+
+Owns auth, chat, content, admin, RAG, publish, reindex, analytics, and business logic.
+
+Reads secrets from GCP Secret Manager.
+
+Connects to MongoDB Atlas for application data.
+
+Calls Cloudflare Vectorize and GCS as needed.
+
+MongoDB Atlas
+Primary data store for users, content, conversations, logs, jobs, quotas, feedback, and profiles.
+
+Stores canonical content records, history, and operational state.
+
+Is the source of truth for user/app data and administrative records.
+
+Cloudflare Vectorize
+Stores embeddings for RAG retrieval.
+
+Uses metadata filtering on indexed metadata fields.
+
+Requires metadata indexes before filtered query support works.
+
+Filtering is applied first, then topK is selected from the filtered set.
+
+GCS
+Stores published content artifacts, static JSON, sitemap assets, and delivery payloads.
+
+Used by build/rebuild flows for delivery and prerender generation.
+
+GitHub + Cloud Build
+GitHub is the repo source of truth.
+
+Cloud Build is the deployment automation for backend and infra.
+
+GitHub Actions can trigger build validation, Cloud Build, and deploy workflows.
+
+Cloud Build deploys Cloud Run and updates secrets references.
+
+2) Live domain routing
+Public domain
+syrabit.ai → Cloudflare Pages frontend.
+
+API domain
+api.syrabit.ai → Cloudflare Edge Worker → Cloud Run backend.
+
+Request path
+User hits Pages frontend.
+
+Frontend calls Edge API domain for all /api/*.
+
+Worker validates and signs the request.
+
+Cloud Run handles backend logic.
+
+Backend returns data to Worker.
+
+Worker forwards response to browser.
+
+3) Repo structure
+A clean monorepo or split-repo can work, but the logic should remain separated:
+
+frontend/ for React + Vite.
+
+backend/ for FastAPI.
+
+edge/ for Cloudflare Worker.
+
+infra/ for Cloud Build, deploy scripts, and secrets mapping.
+
+docs/ for architecture, audit, and runbooks.
+
+Recommended ownership:
+
+Frontend team owns routing, UI state, Ask AI source context, and library views.
+
+Backend team owns auth, content, retrieval, jobs, and persistence.
+
+Edge team owns request control, rate limiting, bot handling, and signing.
+
+DevOps owns build, deploy, and secrets.
+
+4) Canonical topic mapping
+This is the updated canonical mapping model that all layers should obey.
+
+Canonical identity rule
+One chapter/topic identity is created once.
+
+The same identity is used in library, notes, chat, embeddings, and admin.
+
+UI labels may localize, but canonical IDs must not change.
+
+Recommended canonical fields
+board_id
+
+class_id
+
+stream_id
+
+subject_id
+
+chapter_id
+
+topic_id
+
+source_type
+
+lang
+
+medium
+
+Canonical source types
+Use one normalized source enum across app logic:
+
+notes
+
+important_questions
+
+pyq
+
+definition
+
+mcqs
+
+Legacy aliases should normalize at the boundary:
+
+qa → important_questions
+
+question_paper → pyq
+
+book_pdf → notes if that is your chosen compatibility mapping.
+
+Canonical language mapping
+en → english
+
+as → assamese
+
+Retrieval mapping rule
+Mongo/Atlas can use snake_case.
+
+Vectorize must receive camelCase metadata filters.
+
+The conversion helper must run before every Vectorize query.
+
+5) User signup and profile flow
+Signup sequence
+User chooses board → class → stream.
+
+Values are saved to the profile.
+
+User is redirected to the matching content library.
+
+Content cards are filtered to the selected profile.
+
+Profile later updates should adjust defaults everywhere.
+
+Profile persisted fields
+board
+
+class
+
+stream
+
+language
+
+user preferences
+
+subscription / quota state
+
+Business effect
+After signup, the homepage and library should show aligned content cards.
+
+The profile page should reflect the same selections.
+
+Ask AI should inherit the selected context when possible.
+
+6) Library and content architecture
+Library page sections
+Notes.
+
+Questions & Answers.
+
+Question Paper.
+
+Chapter page behavior
+Render the currently selected content tab.
+
+Keep syllabus visible and linkable.
+
+Show Ask AI for the current tab.
+
+Preserve active tab in the URL.
+
+Important rule
+The Ask AI button must use the active tab state, not the stored chapter content type. That prevents the wrong retrieval section from being used.
+
+Content card model
+Top part: chapter/subject metadata.
+
+Middle part: Notes, Q&A, PYQ tabs.
+
+Bottom part: Ask AI action.
+
+Optional source chip above the chat input.
+
+7) Chat workflow
+Ask AI request flow
+User clicks Ask AI from a chapter or section.
+
+Frontend passes chapter_id, subject_id, source_type, lang, and source_name.
+
+Chat request schema normalizes source type.
+
+Backend resolves retrieval filters.
+
+RAG retrieves from the right source section.
+
+LLM answers in the selected language.
+
+Conversation is stored to history.
+
+Retrieval precedence
+Fast path: direct lookup if a high-confidence canonical match exists.
+
+Vector path: filtered Vectorize retrieval.
+
+Web fallback: only if confidence is low enough and your policy allows it.
+
+Chat persistence
+Save user query, model response, source card, timestamps, and conversation linkage.
+
+History page should reconstruct the exact request source.
+
+8) RAG and embeddings
+Ingestion flow
+Normalize source type.
+
+Chunk content.
+
+Attach metadata.
+
+Generate embeddings.
+
+Store in MongoDB and Vectorize.
+
+Ensure indexes exist for all filtered fields.
+
+Metadata fields to index in Vectorize
+subjectId
+
+chapterId
+
+sourceType
+
+medium
+
+chunkType
+
+Chunking rule
+Use the same canonical lesson identity for:
+
+notes page routing,
+
+embedding generation,
+
+vector metadata,
+
+Ask AI source context,
+
+retrieval filtering.
+
+Retrieval filter rule
+Build filters from the request source card.
+
+Convert snake_case to Vectorize camelCase.
+
+Query only indexed fields.
+
+Apply filter first, then topK.
+
+9) Edge Worker responsibilities
+Edge must do
+Verify JWT.
+
+Rate limit anonymous and authenticated usage.
+
+Enforce CORS.
+
+Add request signatures.
+
+Protect Cloud Run from direct public use.
+
+Optionally handle bot detection and static cache logic.
+
+Edge should not do
+Host business logic.
+
+Own the data model.
+
+Duplicate backend auth decisions.
+
+Maintain parallel truth for content state.
+
+Edge request contract
+Browser → Edge → Cloud Run.
+
+Edge adds trust headers.
+
+Backend verifies them.
+
+Worker is the only accepted public gateway for API traffic.
+
+10) Cloud Run backend responsibilities
+Backend must own
+auth.
+
+chat.
+
+content CRUD.
+
+admin APIs.
+
+publish jobs.
+
+reindex jobs.
+
+analytics.
+
+profile updates.
+
+conversation history.
+
+quota enforcement.
+
+retrieval orchestration.
+
+Startup requirements
+Load MongoDB connection.
+
+Load secrets.
+
+Warm topic embeddings.
+
+Initialize RAG/routing helpers.
+
+Verify external integrations.
+
+Backend should expose
+health endpoint.
+
+auth endpoints.
+
+content endpoints.
+
+admin endpoints.
+
+chat endpoints.
+
+publish/reindex endpoints.
+
+11) Secrets map by layer
+Backend / Cloud Run secrets
+MONGODB_URI — MongoDB Atlas connection.
+
+JWT_SECRET — user auth tokens.
+
+ADMIN_JWT_SECRET — admin tokens.
+
+RESET_TOKEN_SECRET — password reset.
+
+RAZORPAY_KEY_ID
+
+RAZORPAY_KEY_SECRET
+
+RAZORPAY_WEBHOOK_SECRET
+
+RESEND_API_KEY
+
+POSTHOG_API_KEY
+
+INDEXNOW_API_KEY
+
+EDGE_SHARED_SECRET
+
+CF_PAGES_DEPLOY_HOOK
+
+CF_WORKER_AI_TOKEN
+
+CF_API_TOKEN
+
+GCS_CONTENT_BUCKET
+
+GOOGLE_APPLICATION_CREDENTIALS_JSON or equivalent runtime GCP auth blob.
+
+Edge Worker secrets
+JWT_SECRET
+
+EDGE_SHARED_SECRET
+
+BACKEND_URL
+
+CF_WORKER_AI_TOKEN
+
+GOOGLE_SA_KEY or OIDC signing credential for Cloud Run auth.
+
+Cloud Build / GitHub secrets
+GCP_SA_KEY
+
+CLOUDFLARE_API_TOKEN
+
+CLOUDFLARE_ACCOUNT_ID
+
+Any secret IDs passed into gcloud run deploy --update-secrets.
+
+Secret rules
+One canonical name per secret.
+
+No mixing of build identity and runtime identity.
+
+Admin and user JWT secrets must remain separate.
+
+Cloudflare token names should be standardized across docs and CI.
+
+12) Publish and reindex pipeline
+Publish pipeline
+Admin edits content.
+
+Save to MongoDB.
+
+Validate content.
+
+Write delivery JSON to GCS.
+
+Trigger Cloudflare Pages rebuild if needed.
+
+Update sitemap/SEO assets.
+
+Optionally notify search engines.
+
+Reindex pipeline
+Admin edits retrieval content.
+
+Save to MongoDB.
+
+Chunk RAG source.
+
+Generate embeddings.
+
+Upsert into Vectorize.
+
+Ensure metadata indexes are present.
+
+Rule
+Save = data.
+
+Publish = delivery.
+
+Reindex = retrieval.
+
+13) Authentication model
+User auth
+JWT-based.
+
+Session/refresh strategy.
+
+Protected routes require validation.
+
+Admin auth
+Separate secret and separate claims.
+
+Cookie-first browser session.
+
+Bearer fallback only where explicitly allowed.
+
+Anonymous usage
+IP-based tracking for non-logged-in users.
+
+Monthly or hourly rate limits.
+
+Show clear limit messaging on exhaustion.
+
+Audit requirements
+Login and logout events.
+
+Session expiry handling.
+
+Rate-limit events.
+
+Admin action logs.
+
+14) Admin panel scope
+Admin areas
+Dashboard.
+
+Conversations.
+
+Content editor.
+
+RAG editor.
+
+Publish job tracker.
+
+Reindex tracker.
+
+User management.
+
+Logs.
+
+Analytics.
+
+Settings.
+
+Admin UX rules
+Loading/empty/error states everywhere.
+
+Save is not publish.
+
+Publish is not reindex.
+
+Admin and user auth never share browser storage.
+
+15) Audit and validation commands for Replit
+Here is a practical audit checklist the developer can run in shell or as internal commands:
+
+Git and repo state
+bash
+git status
+git branch -vv
+git log --oneline -n 10
+git remote -v
+Frontend sanity
+bash
+npm run build
+npm run lint
+Backend sanity
+bash
+pytest -q
+python -m app.health
+Environment checks
+bash
+env | sort
+Search for old logic
+bash
+grep -R "qa\|question_paper\|book_pdf\|important_questions\|pyq" -n .
+grep -R "sourceType\|chapterId\|subjectId" -n .
+grep -R "snake_to_vectorize_filter\|normalize_source_type" -n .
+Vectorize and metadata audit
+bash
+wrangler vectorize list-metadata-indexes <INDEX_NAME>
+Deployment dry checks
+bash
+cloudbuild --config cloudbuild.yaml
+Conflict and merge audit
+bash
+git fetch origin
+git status
+git pull --rebase origin main
+16) Must-not-miss logic checklist
+Canonical topic/chapter key used everywhere.
+
+Source type normalized at every boundary.
+
+Tab state preserved in URL.
+
+Ask AI uses active tab, not stored chapter default.
+
+Retrieval gets chapter, subject, source type, and language together.
+
+Vectorize filters are camelCase.
+
+Metadata indexes exist before filtered querying.
+
+Publish and reindex are separated.
+
+Admin auth is isolated.
+
+Cloud Run is not directly public.
+
+Edge is the trust gate.
+
+Pages is the frontend host.
+
+Secrets are layer-specific and consistent.
+
+17) What your developer should understand first
+Source of truth hierarchy: MongoDB for app data, GCS for delivery artifacts, Vectorize for retrieval, Cloud Run for business logic, Pages for UI, Edge Worker for API control.
+
+Identity flow: board/class/stream → subject → chapter/topic → source section.
+
+Ask AI flow: UI tab → source card → chat request → retrieval filter → LLM answer.
+
+Deploy flow: GitHub → Cloud Build → Cloud Run / Edge / Pages.
+
+Security flow: secrets per layer, edge verifies, backend trusts only signed requests.
