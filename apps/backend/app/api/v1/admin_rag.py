@@ -1024,6 +1024,69 @@ async def vectorize_info(request: Request):
     return response
 
 
+# ── V2 reindex coverage ────────────────────────────────────────────────────────
+
+@router.get("/rag/coverage")
+async def rag_coverage(request: Request):
+    """
+    Chapter v2 reindex coverage report.
+
+    Queries the `chapters` collection (total count) and the `chunks` collection
+    (distinct chapter_id values) to determine what fraction of chapters have been
+    ingested into the v2 pipeline.  Also surfaces the current value of
+    RAG_LEGACY_FALLBACK_ENABLED so the UI can show a unified go/no-go checklist.
+
+    Response shape:
+      total_chapters        — total chapter documents in DB
+      indexed_chapters      — chapters with ≥1 v2 chunk
+      coverage_pct          — float 0-100
+      unindexed_chapter_ids — up to 50 chapter IDs that have no v2 chunks
+      flag_enabled          — current RAG_LEGACY_FALLBACK_ENABLED value
+      ready_to_disable      — true when coverage_pct == 100 (all chapters indexed)
+    """
+    from app.db.mongo import get_mongo_client
+    from app.config import settings as _s
+
+    client = get_mongo_client()
+    db = client[_s.MONGODB_DB_NAME]
+
+    total_chapters: int = 0
+    indexed_chapters: int = 0
+    unindexed_chapter_ids: list[str] = []
+    indexed_ids_set: set[str] = set()
+
+    try:
+        total_chapters = await db["chapters"].count_documents({})
+    except Exception as e:
+        logger.warning(f"rag_coverage: chapter count failed: {e}")
+
+    try:
+        raw_indexed = await db["chunks"].distinct("chapter_id")
+        indexed_ids_set = {str(cid) for cid in raw_indexed if cid}
+        indexed_chapters = len(indexed_ids_set)
+    except Exception as e:
+        logger.warning(f"rag_coverage: chunks distinct query failed: {e}")
+
+    try:
+        all_raw_ids = await db["chapters"].distinct("_id")
+        all_str_ids = {str(cid) for cid in all_raw_ids}
+        unindexed_chapter_ids = sorted(all_str_ids - indexed_ids_set)[:50]
+    except Exception as e:
+        logger.warning(f"rag_coverage: unindexed chapter lookup failed: {e}")
+
+    coverage_pct = round(indexed_chapters / total_chapters * 100, 1) if total_chapters > 0 else 0.0
+    flag_enabled = _s.RAG_LEGACY_FALLBACK_ENABLED
+
+    return {
+        "total_chapters": total_chapters,
+        "indexed_chapters": indexed_chapters,
+        "coverage_pct": coverage_pct,
+        "unindexed_chapter_ids": unindexed_chapter_ids,
+        "flag_enabled": flag_enabled,
+        "ready_to_disable": coverage_pct >= 100.0,
+    }
+
+
 # ── Content nodes ──────────────────────────────────────────────────────────────
 
 @router.get("/rag/content-nodes")

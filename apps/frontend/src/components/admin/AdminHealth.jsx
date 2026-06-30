@@ -10,6 +10,7 @@ import PrerenderTab from './health/PrerenderTab';
 import AsmTab from './health/AsmTab';
 import WorkersAiTab from './health/WorkersAiTab';
 import InfraTab from './health/InfraTab';
+import RagTab from './health/RagTab';
 
 export default function AdminHealth({ adminToken, onNavigate }) {
   const [health, setHealth] = useState(null);
@@ -1214,6 +1215,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
             { id: 'prerender',  label: 'Prerender Refresh' },
             { id: 'asm',        label: 'Sarvam Purity' },
             { id: 'workers-ai', label: 'Workers AI Fallback' },
+            { id: 'rag',        label: 'RAG / Vectorize' },
           ].map(t => (
             <button key={t.id} onClick={() => setHealthTab(t.id)}
               className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
@@ -1282,6 +1284,9 @@ export default function AdminHealth({ adminToken, onNavigate }) {
             embedBurst={embedBurst} embedCooldownDisplay={embedCooldownDisplay}
             metricsMeta={metricsMeta}
           />
+        )}
+        {healthTab === 'rag' && (
+          <RagTab adminToken={adminToken} />
         )}
         {healthTab === 'infra' && (
           <InfraTab
