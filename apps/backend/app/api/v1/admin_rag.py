@@ -580,6 +580,179 @@ async def reindex_subject_chapters(
     }
 
 
+# ── All-subjects reindex ──────────────────────────────────────────────────────
+
+async def _run_all_subjects_reindex(
+    subject_ids: list[str],
+    source_type: str,
+    parallelism: int,
+    job_id: str,
+    dry_run: bool,
+) -> None:
+    """
+    Background task: run per-subject reindex sequentially across every subject.
+
+    Each subject is fully reindexed before the next one starts (subjects are
+    sequential; chapters within a subject use the existing semaphore-bounded
+    concurrency from _run_bulk_chapter_reindex).  The parent GenerationJob
+    (job_id) is updated with cumulative progress so the caller can poll it.
+    """
+    import asyncio as _asyncio
+    from app.models.content import Chapter as _Chapter
+    from app.models.rag import GenerationJob as _Job
+
+    total_processed = 0
+
+    try:
+        job = await _Job.get(job_id)
+        if job:
+            await job.update({
+                "$set": {
+                    "status": "running",
+                    "started_at": _now(),
+                    "updated_at": _now(),
+                }
+            })
+    except Exception:
+        pass
+
+    for subject_id in subject_ids:
+        try:
+            chapters = (
+                await _Chapter.find({"subject_id": subject_id})
+                .sort([("chapter_number", 1)])
+                .to_list()
+            )
+            eligible = [ch for ch in chapters if ch.content_en or ch.content_as]
+            if not eligible:
+                continue
+
+            # Create a child job for per-subject progress tracking
+            from app.models.rag import GenerationJob as _Job2
+            child_job = _Job2(
+                job_type="bulk_reindex_subject",
+                subject_id=subject_id,
+                status="pending",
+                total_chunks=len(eligible),
+            )
+            await child_job.insert()
+
+            # Run synchronously inside this background task
+            await _run_bulk_chapter_reindex(
+                subject_id=subject_id,
+                chapters=eligible,
+                source_type=source_type,
+                parallelism=parallelism,
+                job_id=str(child_job.id),
+                dry_run=dry_run,
+            )
+            total_processed += len(eligible)
+
+            # Update parent job progress after each subject completes
+            parent = await _Job.get(job_id)
+            if parent and parent.total_chunks:
+                pct = min(100, round(total_processed / parent.total_chunks * 100))
+                await parent.update({
+                    "$set": {
+                        "processed_chunks": total_processed,
+                        "progress": pct,
+                        "updated_at": _now(),
+                    }
+                })
+        except Exception as exc:
+            logger.error(f"[reindex-all] subject={subject_id} error: {exc}")
+
+    # Finalize parent job
+    try:
+        parent = await _Job.get(job_id)
+        if parent:
+            await parent.update({
+                "$set": {
+                    "status": "done" if not dry_run else "dry_run",
+                    "processed_chunks": total_processed,
+                    "progress": 100,
+                    "finished_at": _now(),
+                    "updated_at": _now(),
+                }
+            })
+    except Exception as exc:
+        logger.error(f"[reindex-all] finalize failed: {exc}")
+
+
+@router.post("/rag/reindex/all-subjects")
+async def reindex_all_subjects(
+    req: BulkReindexRequest,
+    request: Request,
+):
+    """
+    One-shot trigger: reindex ALL chapters across ALL subjects onto v2 pipeline.
+
+    Discovers every distinct subject_id from the chapters collection, then runs
+    subject-level reindexing sequentially in a background task.  Returns a single
+    parent job_id you can poll at /admin/rag/jobs/{job_id}.
+
+    This is the primary lever to go from 0% → 100% v2 coverage so the legacy
+    RAG_LEGACY_FALLBACK_ENABLED flag can be safely disabled.
+    """
+    import asyncio as _asyncio
+    from app.models.content import Chapter as _Chapter
+    from app.models.rag import GenerationJob
+    from app.db.mongo import get_mongo_client
+    from app.config import settings as _s
+
+    client = get_mongo_client()
+    db = client[_s.MONGODB_DB_NAME]
+
+    raw_sids = await db["chapters"].distinct("subject_id")
+    subject_ids = [str(s) for s in raw_sids if s]
+
+    if not subject_ids:
+        return {"status": "skipped", "message": "No subjects found in chapters collection."}
+
+    all_chapters = await _Chapter.find({}).to_list()
+    eligible = [ch for ch in all_chapters if ch.content_en or ch.content_as]
+
+    parallelism = max(1, min(req.parallelism, 10))
+
+    job = GenerationJob(
+        job_type="reindex_all_subjects",
+        status="pending",
+        total_chunks=len(eligible),
+    )
+    await job.insert()
+    job_id = str(job.id)
+
+    _asyncio.create_task(
+        _run_all_subjects_reindex(
+            subject_ids=subject_ids,
+            source_type=req.source_type,
+            parallelism=parallelism,
+            job_id=job_id,
+            dry_run=req.dry_run,
+        )
+    )
+
+    logger.info(
+        f"[reindex-all] queued all-subjects: {len(subject_ids)} subjects, "
+        f"{len(eligible)} eligible chapters, parallelism={parallelism}, job={job_id}"
+    )
+
+    return {
+        "job_id": job_id,
+        "subjects": len(subject_ids),
+        "chapters_eligible": len(eligible),
+        "parallelism": parallelism,
+        "source_type": req.source_type,
+        "dry_run": req.dry_run,
+        "status": "queued",
+        "poll_url": f"/api/v1/admin/rag/jobs/{job_id}",
+        "message": (
+            f"Reindexing {len(eligible)} chapters across {len(subject_ids)} subjects. "
+            f"Poll /admin/rag/jobs/{job_id} for progress."
+        ),
+    }
+
+
 # ── Single chapter re-index from DB content ───────────────────────────────────
 
 @router.post("/rag/reindex/chapter/{chapter_id}")

@@ -1,6 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
-import { RefreshCw, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Terminal } from 'lucide-react';
+import {
+  RefreshCw, CheckCircle, XCircle, AlertTriangle,
+  ChevronDown, ChevronUp, Terminal, Play, Loader2,
+} from 'lucide-react';
 import { API_BASE } from '@/utils/api';
 import { adminHeaders } from './shared';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
@@ -59,6 +62,40 @@ function ChecklistRow({ done, label, sub }) {
   );
 }
 
+function JobStatusBar({ job }) {
+  if (!job) return null;
+  const pct = job.progress ?? (job.total_chunks > 0 ? Math.round(job.processed_chunks / job.total_chunks * 100) : 0);
+  const done = job.status === 'done' || job.status === 'dry_run';
+  const running = job.status === 'running' || job.status === 'pending';
+  const color = done ? 'bg-emerald-500' : running ? 'bg-violet-500' : 'bg-amber-400';
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="font-medium text-gray-700">
+          {running && <Loader2 size={10} className="inline mr-1 animate-spin" />}
+          Job <code className="bg-gray-200 px-1 rounded font-mono">{job.job_id?.slice(-8)}</code>
+          {' — '}
+          <span className={`font-semibold ${done ? 'text-emerald-600' : running ? 'text-violet-600' : 'text-amber-600'}`}>
+            {job.status}
+          </span>
+        </span>
+        <span className="font-mono text-gray-500">{pct}%</span>
+      </div>
+      <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${color} ${running && pct < 100 ? 'animate-pulse' : ''}`}
+          style={{ width: `${Math.max(4, pct)}%` }}
+        />
+      </div>
+      <div className="flex items-center justify-between text-[10px] text-gray-400">
+        <span>{job.processed_chunks ?? 0} / {job.total_chunks ?? '?'} chapters</span>
+        {job.elapsed_s != null && <span>{job.elapsed_s}s elapsed</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function RagTab({ adminToken }) {
   const [coverageData, setCoverageData] = useState(null);
   const [coverageLoading, setCoverageLoading] = useState(false);
@@ -66,6 +103,11 @@ export default function RagTab({ adminToken }) {
   const [vectorizeLoading, setVectorizeLoading] = useState(false);
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const [unindexedOpen, setUnindexedOpen] = useState(false);
+
+  // Bulk reindex state
+  const [reindexTriggering, setReindexTriggering] = useState(false);
+  const [reindexJob, setReindexJob] = useState(null);
+  const pollRef = useRef(null);
 
   const loadCoverage = useCallback(() => {
     setCoverageLoading(true);
@@ -87,6 +129,52 @@ export default function RagTab({ adminToken }) {
       .finally(() => setVectorizeLoading(false));
   }, [adminToken]);
 
+  const pollJob = useCallback((jobId) => {
+    axios.get(`${API_BASE}/admin/rag/jobs/${jobId}`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => {
+        setReindexJob(r.data);
+        const done = r.data.status === 'done' || r.data.status === 'dry_run' || r.data.status === 'failed';
+        if (done) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          // Refresh coverage after reindex completes
+          loadCoverage();
+        }
+      })
+      .catch(() => {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      });
+  }, [adminToken, loadCoverage]);
+
+  const triggerReindexAll = useCallback(() => {
+    setReindexTriggering(true);
+    axios.post(
+      `${API_BASE}/admin/rag/reindex/all-subjects`,
+      { source_type: 'notes', parallelism: 3, dry_run: false },
+      { headers: adminHeaders(adminToken), withCredentials: true },
+    )
+      .then((r) => {
+        const jobId = r.data.job_id;
+        setReindexJob({ job_id: jobId, status: 'pending', progress: 0, total_chunks: r.data.chapters_eligible, processed_chunks: 0 });
+        // Start polling every 6s
+        pollRef.current = setInterval(() => pollJob(jobId), 6000);
+        // Immediate first poll
+        setTimeout(() => pollJob(jobId), 1500);
+      })
+      .catch(() => {
+        // noop — user sees no job card
+      })
+      .finally(() => setReindexTriggering(false));
+  }, [adminToken, pollJob]);
+
+  // Cleanup poller on unmount
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
   useEffect(() => {
     loadCoverage();
     loadVectorize();
@@ -98,14 +186,17 @@ export default function RagTab({ adminToken }) {
 
   const coverage = coverageData?.coverage_pct ?? null;
   const flagEnabled = coverageData?.flag_enabled;
-  const readyToDisable = coverageData?.ready_to_disable === true;
 
   const indexesOk = indexStatus === 'ok';
   const coverageOk = coverage !== null && coverage >= 100.0;
   const allChecksPassed = indexesOk && coverageOk;
 
+  const reindexRunning = reindexJob &&
+    (reindexJob.status === 'running' || reindexJob.status === 'pending');
+
   return (
     <div className="space-y-4">
+
       {/* ── Vectorize Index Health ─────────────────────────────────────────── */}
       <SectionErrorBoundary name="Vectorize Index Health">
         <div className="rounded-2xl border border-gray-200 bg-white p-4">
@@ -123,11 +214,8 @@ export default function RagTab({ adminToken }) {
                 </span>
               )}
             </div>
-            <button
-              onClick={loadVectorize}
-              disabled={vectorizeLoading}
-              className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-40"
-            >
+            <button onClick={loadVectorize} disabled={vectorizeLoading}
+              className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-40">
               <RefreshCw size={13} className={vectorizeLoading ? 'animate-spin' : ''} />
             </button>
           </div>
@@ -163,7 +251,7 @@ export default function RagTab({ adminToken }) {
               )}
               {vectorizeData?.index_info_error && (
                 <p className="text-[11px] text-amber-600 mt-2 flex items-center gap-1">
-                  <AlertTriangle size={11} /> CF API unreachable in dev — expected (no CF_ACCOUNT_ID)
+                  <AlertTriangle size={11} /> CF API unreachable in dev — expected (no CF_ACCOUNT_ID). Verify from production.
                 </p>
               )}
             </>
@@ -176,11 +264,8 @@ export default function RagTab({ adminToken }) {
         <div className="rounded-2xl border border-gray-200 bg-white p-4">
           <div className="flex items-center justify-between mb-3">
             <p className="text-sm font-semibold text-gray-800">Chapter V2 Reindex Coverage</p>
-            <button
-              onClick={loadCoverage}
-              disabled={coverageLoading}
-              className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-40"
-            >
+            <button onClick={loadCoverage} disabled={coverageLoading}
+              className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-40">
               <RefreshCw size={13} className={coverageLoading ? 'animate-spin' : ''} />
             </button>
           </div>
@@ -198,7 +283,7 @@ export default function RagTab({ adminToken }) {
                     className={`h-full rounded-full transition-all duration-500 ${
                       coverageOk ? 'bg-emerald-500' : coverage >= 80 ? 'bg-amber-400' : 'bg-red-400'
                     }`}
-                    style={{ width: `${Math.min(coverage, 100)}%` }}
+                    style={{ width: `${Math.min(Math.max(coverage, 0), 100)}%` }}
                   />
                 </div>
                 <span className={`text-sm font-bold font-mono ${
@@ -212,10 +297,8 @@ export default function RagTab({ adminToken }) {
               </p>
               {!coverageOk && coverageData.unindexed_chapter_ids?.length > 0 && (
                 <div className="mt-2">
-                  <button
-                    onClick={() => setUnindexedOpen((v) => !v)}
-                    className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
-                  >
+                  <button onClick={() => setUnindexedOpen((v) => !v)}
+                    className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 transition-colors">
                     {unindexedOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
                     {coverageData.unindexed_chapter_ids.length} unindexed chapter IDs
                   </button>
@@ -234,6 +317,51 @@ export default function RagTab({ adminToken }) {
           )}
         </div>
       </SectionErrorBoundary>
+
+      {/* ── Bulk Reindex Trigger ──────────────────────────────────────────── */}
+      {!coverageOk && (
+        <SectionErrorBoundary name="Bulk Reindex">
+          <div className="rounded-2xl border border-violet-200 bg-violet-50/40 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-800 mb-0.5">Bulk Reindex — All Chapters</p>
+                <p className="text-[11px] text-gray-500">
+                  Runs <code className="bg-violet-100 px-1 rounded">ingest_chapter_v2</code> on all{' '}
+                  {coverageData ? `${coverageData.total_chapters - coverageData.indexed_chapters} unindexed` : ''} chapters
+                  across every subject. Subjects are processed sequentially (3 chapters in parallel within each).
+                </p>
+              </div>
+              <button
+                onClick={triggerReindexAll}
+                disabled={reindexTriggering || reindexRunning}
+                className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-600 text-white hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {(reindexTriggering || reindexRunning)
+                  ? <Loader2 size={12} className="animate-spin" />
+                  : <Play size={12} />}
+                {reindexTriggering ? 'Queuing…' : reindexRunning ? 'Running…' : 'Reindex All'}
+              </button>
+            </div>
+
+            {reindexJob && (
+              <div className="mt-3">
+                <JobStatusBar job={reindexJob} />
+                {reindexJob.status === 'done' && (
+                  <p className="text-[11px] text-emerald-600 mt-2 flex items-center gap-1">
+                    <CheckCircle size={11} /> Reindex complete — coverage refreshed above.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {!reindexJob && !reindexTriggering && (
+              <p className="text-[10px] text-gray-400 mt-2">
+                Estimated time: ~2–5 min / 100 chapters depending on CF Workers AI throughput.
+              </p>
+            )}
+          </div>
+        </SectionErrorBoundary>
+      )}
 
       {/* ── Flag Status + Disable Checklist ──────────────────────────────── */}
       <SectionErrorBoundary name="Flag Status">
@@ -261,17 +389,17 @@ export default function RagTab({ adminToken }) {
             <ChecklistRow
               done={indexesOk}
               label="All 6 Vectorize metadata indexes present"
-              sub={indexesOk ? undefined : `Missing: ${vHealth?.missing?.join(', ') || 'unknown — check CF creds'}`}
+              sub={indexesOk ? undefined : `Missing: ${vHealth?.missing?.join(', ') || 'unknown — verify from production'}`}
             />
             <ChecklistRow
               done={coverageOk}
               label="All chapters reindexed on v2 (coverage = 100%)"
-              sub={!coverageOk && coverage !== null ? `Current: ${coverage}% — run bulk reindex for remaining chapters` : undefined}
+              sub={!coverageOk && coverage !== null ? `Current: ${coverage}% — use Reindex All above` : undefined}
             />
             <ChecklistRow
               done={!flagEnabled && flagEnabled !== undefined}
               label="Flag disabled on Cloud Run (RAG_LEGACY_FALLBACK_ENABLED=false)"
-              sub={flagEnabled ? 'Use the command below to disable it' : undefined}
+              sub={flagEnabled ? 'Use the command below once the checklist is complete' : undefined}
             />
           </div>
 
@@ -300,10 +428,8 @@ export default function RagTab({ adminToken }) {
       {/* ── Rollback Runbook ─────────────────────────────────────────────── */}
       <SectionErrorBoundary name="Rollback Runbook">
         <div className="rounded-2xl border border-gray-200 bg-white">
-          <button
-            onClick={() => setRollbackOpen((v) => !v)}
-            className="w-full flex items-center justify-between px-4 py-3 text-left"
-          >
+          <button onClick={() => setRollbackOpen((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left">
             <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
               <Terminal size={14} className="text-gray-400" />
               Rollback Runbook
@@ -314,14 +440,14 @@ export default function RagTab({ adminToken }) {
           {rollbackOpen && (
             <div className="px-4 pb-4 space-y-3 border-t border-gray-100">
               <p className="text-xs text-gray-500 pt-3">
-                If a retrieval regression is detected after disabling the fallback (e.g. empty answers,
-                "no context found" errors, or a drop in chat satisfaction scores), re-enable it immediately:
+                If retrieval regresses after disabling the fallback (empty answers, "no context found" errors,
+                or a drop in chat satisfaction), re-enable immediately:
               </p>
               <CodeBlock code={ROLLBACK_CMD} />
               <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 space-y-1.5 text-[11px] text-gray-600">
                 <p className="font-semibold text-gray-700">Post-rollback steps</p>
-                <p>1. Check retrieval logs: filter on <code className="bg-gray-200 px-1 rounded">path_used=empty</code> — that's the failure signal.</p>
-                <p>2. Identify which chapters are producing empty results (look for <code className="bg-gray-200 px-1 rounded">chapterId</code> in the log context).</p>
+                <p>1. Filter Cloud Logging on <code className="bg-gray-200 px-1 rounded">rag_path=empty</code> — that's the failure signal.</p>
+                <p>2. Identify which chapters produce empty results (look for <code className="bg-gray-200 px-1 rounded">chapterId</code> in log context).</p>
                 <p>3. Trigger a targeted reindex: <code className="bg-gray-200 px-1 rounded">POST /admin/rag/reindex/chapter/{'<id>'}</code>.</p>
                 <p>4. Verify coverage reaches 100%, then attempt to disable the flag again.</p>
               </div>
