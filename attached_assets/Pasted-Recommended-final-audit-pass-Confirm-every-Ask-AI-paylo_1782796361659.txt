@@ -1,0 +1,24 @@
+Recommended final audit pass
+Confirm every Ask AI payload includes source_type.
+Confirm ChatRequest normalizes source_type on ingest.
+Confirm SubjectCard uses alias sets, not only qa/question_paper.
+Confirm low-confidence and high-confidence retrieval paths both receive the same _card_filters.
+Confirm Vectorize metadata indexes exist for sourceType, chapterId, and any other filtered fields. The 7 important logic gaps
+source_type not sent from frontend to API.
+Ask AI could open from Q&A or PYQ tabs, but the backend had no structured source section to filter on.developers.cloudflare+1
+FRONTEND_SECTION_TO_SOURCE_TYPE mapping existed but was never called.
+The normalization logic was defined but not wired into the request pipeline.reactrouter+1
+SubjectCard section key mismatch.
+notesChs catch-all could misclassify important_questions into Notes instead of Q&A.developers.cloudflare
+Topic/chapter ID chain drift.
+If the same canonical ID is not used across notes, embeddings, URL, and retrieval metadata, Ask AI can ground on the wrong lesson.developers.cloudflare+1
+Language/medium mismatch.
+English and Assamese need to map consistently across UI, content, and retrieval.reactrouter
+Vectorize filter key conversion boundary.
+A query can look right in code but still fail if snake_case is sent to Vectorize instead of camelCase.developers.cloudflare+1
+Metadata index dependency.
+Filtered retrieval will not behave correctly unless the relevant Vectorize metadata indexes already exist.developers.cloudflare+2
+What this means in practical terms
+Your architecture was not “mostly wrong”; it was mostly right with a few high-impact missing wires. In systems like this, a small wiring bug can have a large effect because it changes which chunks are even eligible for retrieval, not just how they are ranked.developers.cloudflare+1
+Bottom line
+So the answer is: about 7 important logic gaps were missing or needed audit-level correction, and 3 of them were the most critical because they directly affected Ask AI section grounding and chapter-scoped retrieval. The remaining items were mostly consistency and boundary issues that could still cause subtle wrong-answer behavior.developers.cloudflare+2
