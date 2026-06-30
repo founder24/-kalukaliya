@@ -131,6 +131,11 @@ class ChapterRagUpdate(BaseModel):
     # Q&A section retrieval-ready text
     qa_rag_text_en: Optional[str] = None
     qa_rag_text_as: Optional[str] = None
+    # Explicit Vectorize sourceType tag.  Accepts both frontend section keys
+    # ('notes', 'qa', 'question_paper') and canonical internal values
+    # ('important_questions', 'pyq').  When omitted the handler falls back to
+    # the chapter's stored content_type, then to "notes".
+    source_type: Optional[str] = None
 
 
 class TopicCreate(BaseModel):
@@ -591,6 +596,10 @@ async def update_chapter_rag(request: Request, chapter_id: str, body: ChapterRag
         ingest_en = chapter.rag_text_en or chapter.content_en
         ingest_as = chapter.rag_text_as or chapter.content_as
 
+        # Resolve canonical source_type: explicit body field > chapter.content_type > "notes"
+        from app.services.rag.source_types import normalize_source_type as _norm_st
+        resolved_source_type = _norm_st(body.source_type or chapter.content_type or "notes")
+
         if ingest_en or ingest_as:
             job = GenerationJob(
                 job_type="reindex_chapter",
@@ -602,7 +611,7 @@ async def update_chapter_rag(request: Request, chapter_id: str, body: ChapterRag
             await job.insert()
             job_id = str(job.id)
 
-            async def _background_reindex(_job_id=job_id, _en=ingest_en, _as=ingest_as):
+            async def _background_reindex(_job_id=job_id, _en=ingest_en, _as=ingest_as, _st=resolved_source_type):
                 from app.models.rag import GenerationJob as _Job
                 _job = await _Job.get(_job_id)
                 try:
@@ -613,7 +622,7 @@ async def update_chapter_rag(request: Request, chapter_id: str, body: ChapterRag
                         content_en=_en,
                         content_as=_as,
                         metadata={"subject_id": str(chapter.subject_id)},
-                        source_type="notes",
+                        source_type=_st,
                     )
                     fresh = await Chapter.get(PydanticObjectId(chapter_id))
                     if fresh:
@@ -636,6 +645,7 @@ async def update_chapter_rag(request: Request, chapter_id: str, body: ChapterRag
         "ok": True,
         "rag_updated_at": chapter.rag_updated_at.isoformat(),
         "job_id": job_id,
+        "source_type": resolved_source_type if ingest_en or ingest_as else None,
         "message": "RAG text saved. Background reindex started — rag_indexed_at will update on completion.",
     }
 
@@ -1502,6 +1512,11 @@ class _AgentChapterIn(BaseModel):
     title: str
     chapter_number: int
     topics: list[_AgentTopicIn] = []
+    # Section tag — accepts frontend keys ('notes', 'qa', 'question_paper') or
+    # canonical internal values ('important_questions', 'pyq').  Stored as
+    # content_type on the Chapter doc so retrieval and section tab filtering
+    # use the same identity.  Defaults to 'notes' when omitted.
+    content_type: Optional[str] = None
 
 
 class AgentIngestRequest(BaseModel):
@@ -1551,6 +1566,12 @@ async def ingest_from_agent(request: Request, body: AgentIngestRequest):
             for t in ch_input.topics
         ]
 
+        from app.services.rag.source_types import FRONTEND_SECTION_TO_SOURCE_TYPE
+        # Normalise the incoming content_type to a canonical value so the stored
+        # field matches what retrieval and section tab filtering expect.
+        raw_ct = (ch_input.content_type or "notes").lower().strip()
+        canonical_ct = FRONTEND_SECTION_TO_SOURCE_TYPE.get(raw_ct, raw_ct)
+
         chapter = Chapter(
             title=ch_input.title,
             slug=slug,
@@ -1558,6 +1579,7 @@ async def ingest_from_agent(request: Request, body: AgentIngestRequest):
             chapter_number=ch_input.chapter_number,
             published_topics=topics,
             status="draft",
+            content_type=canonical_ct,
         )
         await chapter.insert()
         created.append({
@@ -1565,6 +1587,7 @@ async def ingest_from_agent(request: Request, body: AgentIngestRequest):
             "title": chapter.title,
             "slug": slug,
             "topics": len(topics),
+            "content_type": canonical_ct,
         })
 
     generation_queued = False
