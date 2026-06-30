@@ -960,6 +960,7 @@ async def chat_stream(
                 latency_ms=latency_ms,
                 context_chunks=context_chunks,
                 detected_lang=detected_lang,
+                source_card=source_card,
             )
         )
         task.add_done_callback(_log_task_exception)

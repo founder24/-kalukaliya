@@ -117,6 +117,7 @@ class ChapterUpdate(BaseModel):
     # Q&A section student-facing text
     qa_text_en: Optional[str] = None
     qa_text_as: Optional[str] = None
+    title_as: Optional[str] = None       # Assamese chapter title
     order: Optional[int] = None
     topics: Optional[list[str]] = None
     pyq_pdf_url: Optional[str] = None   # public URL to Question Paper PDF
@@ -478,6 +479,8 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate,
     changes: dict = {}
     if body.title is not None and body.title != chapter.title:
         changes["title"] = {"before": chapter.title, "after": body.title}
+    if body.title_as is not None and body.title_as != chapter.title_as:
+        changes["title_as"] = {"before": chapter.title_as, "after": body.title_as}
     if body.status is not None and body.status != chapter.status:
         changes["status"] = {"before": chapter.status, "after": body.status}
     if body.content is not None:
@@ -495,6 +498,8 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate,
         chapter.title = body.title
         if not body.slug:
             chapter.slug = _slugify(body.title)
+    if body.title_as is not None:
+        chapter.title_as = body.title_as
     if body.slug is not None:
         chapter.slug = body.slug
     if body.status is not None:

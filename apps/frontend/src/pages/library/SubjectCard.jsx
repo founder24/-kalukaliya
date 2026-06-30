@@ -73,9 +73,18 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     ];
   }, [chapters, isAs]);
 
-  const [expandedSection, setExpandedSection] = useState('notes');
+  const _lsKey = `syrabit_section_${sub.id}`;
+  const [expandedSection, setExpandedSection] = useState(() => {
+    try { return localStorage.getItem(_lsKey) || 'notes'; } catch { return 'notes'; }
+  });
   const activeSection = expandedSection ?? 'notes';
   const [showAllInSection, setShowAllInSection] = useState(false);
+
+  const handleSectionChange = (key) => {
+    setExpandedSection(key);
+    setShowAllInSection(false);
+    try { localStorage.setItem(_lsKey, key); } catch {}
+  };
 
   return (
     <div
@@ -212,7 +221,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           {SECTIONS.map(sec => (
             <button
               key={sec.key}
-              onClick={() => { setExpandedSection(sec.key); setShowAllInSection(false); }}
+              onClick={() => handleSectionChange(sec.key)}
               className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap"
               style={sec.key === activeSection
                 ? { background: sec.bg, color: sec.accent, border: `1px solid ${sec.accent}40` }

@@ -714,12 +714,36 @@ class ChatService:
         latency_ms: int,
         context_chunks: list[dict],
         detected_lang: str = "unknown",
+        source_card=None,
     ) -> None:
         """Persist chat to MongoDB. Designed to be called via asyncio.create_task."""
         rag_sources = ChatService._serialize_messages([
             {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
             for c in context_chunks
         ])
+        # Persist source card context so history page can reconstruct grounding.
+        source_ctx: dict = {}
+        if source_card is not None:
+            try:
+                d = source_card.to_sse_dict()
+                source_ctx = {
+                    "source_type": d.get("source_type"),
+                    "confidence_tier": d.get("confidence_tier"),
+                    "rag_path": d.get("rag_path"),
+                    "match_score": d.get("match_score"),
+                    "rag_subject_id": d.get("rag_subject_id"),
+                    "rag_subject_name": d.get("rag_subject_name"),
+                    "rag_subject_slug": d.get("rag_subject_slug"),
+                    "rag_chapter_name": d.get("rag_chapter_name"),
+                    "rag_chapter_slug": d.get("rag_chapter_slug"),
+                    "ctx_board_name": d.get("ctx_board_name"),
+                    "ctx_class_name": d.get("ctx_class_name"),
+                    "ctx_stream_name": d.get("ctx_stream_name"),
+                }
+                # Remove None values to keep message docs clean.
+                source_ctx = {k: v for k, v in source_ctx.items() if v is not None}
+            except Exception:
+                pass
         # Ensure session_id is never None — Chat.session_id is typed as str
         # and Pydantic v2 refuses None even when a default_factory is set.
         resolved_session_id = session_id or str(uuid.uuid4())
@@ -745,6 +769,7 @@ class ChatService:
                 model_used=target_model,
                 latency_ms=latency_ms,
                 rag_sources=rag_sources,
+                source_ctx=source_ctx,
             )
             await chat_doc.save()
 
@@ -769,6 +794,7 @@ class ChatService:
                     model_used=target_model,
                     latency_ms=latency_ms,
                     rag_sources=rag_sources,
+                    source_ctx=source_ctx,
                 )
                 await chat_doc.save()
 

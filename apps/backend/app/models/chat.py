@@ -51,6 +51,7 @@ class Chat(Document):
         model_used: Optional[str] = None,
         latency_ms: Optional[int] = None,
         rag_sources: Optional[List[dict]] = None,
+        source_ctx: Optional[dict] = None,
     ):
         """Add a message to the chat"""
         message = {
@@ -60,6 +61,7 @@ class Chat(Document):
             "model_used": model_used,
             "latency_ms": latency_ms,
             "rag_sources": rag_sources or [],
+            "source_ctx": source_ctx or {},
             "feedback": {"thumbs_up": None},
         }
         self.messages.append(message)
