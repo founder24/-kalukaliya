@@ -55,6 +55,7 @@ from app.api.v1 import (
     admin_vertex,
     admin_indexnow_admin,
     admin_seo_advanced,
+    admin_pyq,
     seo,
     indexnow,
     content,
@@ -489,6 +490,7 @@ def create_app() -> FastAPI:
         admin_db_health.router, prefix="/api/v1/admin", tags=["Admin DB Health"]
     )
     app.include_router(admin_rag.router, prefix="/api/v1/admin", tags=["Admin RAG"])
+    app.include_router(admin_pyq.router, prefix="/api/v1/admin", tags=["Admin PYQ"])
     app.include_router(admin_cron.router, prefix="/api/v1/admin", tags=["Admin Cron"])
     app.include_router(admin_billing.router, prefix="/api/v1/admin", tags=["Admin Billing"])
     app.include_router(admin_ga4.router, prefix="/api/v1/admin", tags=["Admin GA4"])

@@ -166,8 +166,8 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       toast.success(`File attached (${res.data.text_extracted} chars extracted)`);
       refreshChapters(selSubject);
       if (chapterId) loadChapterStats(chapterId);
-      const freshChapter = await axios.get(`${API}/admin/content/chapters/${selSubject}`, authHeaders(adminToken));
-      const updated = (freshChapter.data || []).find(c => c.id === chapterId);
+      const freshChapter = await axios.get(`${API}/admin/content/chapters?subject_id=${selSubject}`, authHeaders(adminToken));
+      const updated = (freshChapter.data?.chapters || freshChapter.data || []).find(c => c.id === chapterId);
       if (updated) setContentForm(f => ({ ...f, content: updated.content || f.content }));
     } catch (e) { toast.error(e.response?.data?.detail || 'File upload failed'); }
     finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
@@ -219,10 +219,10 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
 
   const refreshChapters = (subjectId) => {
     setChaptersLoading(true);
-    axios.get(`${API}/admin/content/chapters/${subjectId}`, authHeaders(adminToken))
+    axios.get(`${API}/admin/content/chapters?subject_id=${subjectId}`, authHeaders(adminToken))
       .then(r => {
-        setChapters(r.data || []);
-        axios.get(`${API}/admin/content/chapters/${subjectId}/coverage`, authHeaders(adminToken))
+        setChapters(r.data?.chapters || r.data || []);
+        axios.get(`${API}/admin/content/subject/${subjectId}/coverage`, authHeaders(adminToken))
           .then(covRes => { const covMap = {}; (covRes.data?.chapters || []).forEach(c => { covMap[c.chapter_id] = c.coverage_score; }); setChapters(prev => prev.map(ch => ({ ...ch, coverage_score: covMap[ch.id] ?? ch.coverage_score ?? null }))); })
           .catch(() => {});
       })
@@ -405,8 +405,8 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       const res = await axios.post(`${API}/admin/content/chapters/${chapterId}/generate-notes`, {}, authHeaders(adminToken));
       const generated = res.data?.content;
       if (generated) {
-        const freshChapters = await axios.get(`${API}/admin/content/chapters/${selSubject}`, authHeaders(adminToken));
-        const freshChapter = (freshChapters.data || []).find(c => c.id === chapterId);
+        const freshChapters = await axios.get(`${API}/admin/content/chapters?subject_id=${selSubject}`, authHeaders(adminToken));
+        const freshChapter = (freshChapters.data?.chapters || freshChapters.data || []).find(c => c.id === chapterId);
         setChapters(prev => prev.map(ch => ch.id === chapterId ? { ...ch, content: generated, content_as: freshChapter?.content_as || ch.content_as || '', content_type: 'notes', notes_generated: true, _word_count: res.data?.word_count } : ch));
         const asMsg = res.data?.content_as_words ? ` + ${res.data.content_as_words} অসমীয়া words` : '';
         if (!silent) toast.success(`Notes generated for "${chapterTitle}"${res.data?.word_count ? ` — ${res.data.word_count.toLocaleString()} words${asMsg}` : ''}`);

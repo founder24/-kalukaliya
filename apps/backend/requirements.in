@@ -29,3 +29,4 @@ resend
 sentry-sdk
 tenacity
 uvicorn
+pypdf

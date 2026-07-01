@@ -7,11 +7,12 @@ Layer 3: AI generation, Publishing, FAQ
 
 import re
 import logging
+import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Optional
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 from app.api.v1.admin import require_admin_session, csrf_guard
@@ -401,9 +402,29 @@ async def list_chapters(
                 "slug": ch.slug,
                 "subject_id": str(ch.subject_id),
                 "chapter_number": ch.chapter_number,
+                "order": ch.chapter_number,
                 "status": ch.status,
+                "content_type": ch.content_type,
                 "word_count": ch.word_count,
+                "notes_generated": ch.notes_generated,
+                "version": ch.version,
+                # Content fields — needed by the edit form
+                "content": ch.content_en,
+                "content_en": ch.content_en,
+                "content_as": ch.content_as,
+                "rag_text_en": ch.rag_text_en,
+                "rag_text_as": ch.rag_text_as,
+                "qa_text_en": getattr(ch, "qa_text_en", None),
+                "qa_text_as": getattr(ch, "qa_text_as", None),
+                "qa_rag_text_en": ch.qa_rag_text_en,
+                "qa_rag_text_as": ch.qa_rag_text_as,
+                "pyq_pdf_url": ch.pyq_pdf_url,
+                "description": getattr(ch, "description", None),
+                "topics": [t.title for t in ch.published_topics],
+                "meta_description": ch.meta_description,
+                "keywords": ch.keywords,
                 "created_at": ch.created_at.isoformat(),
+                "updated_at": ch.updated_at.isoformat(),
                 "content_saved_at": ch.content_saved_at.isoformat() if ch.content_saved_at else None,
                 "rag_updated_at": ch.rag_updated_at.isoformat() if ch.rag_updated_at else None,
                 "rag_indexed_at": ch.rag_indexed_at.isoformat() if ch.rag_indexed_at else None,
@@ -1904,3 +1925,319 @@ async def content_coverage():
                          "english_coverage_pct": 0, "assamese_coverage_pct": 0},
             "source": "unavailable",
         }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MISSING ENDPOINTS — admin panel editor helpers
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class BulkStatusRequest(BaseModel):
+    scope: str  # "subjects" or "chapters"
+    ids: list[str]
+    status: str
+
+
+@router.get("/content/subject/{subject_id}/chapter-cards")
+async def get_chapter_cards(request: Request, subject_id: str):
+    """Batch chapter stats for a subject — used by the admin chapter-list cards."""
+    try:
+        sid = PydanticObjectId(subject_id)
+    except Exception:
+        sid = subject_id
+    chapters = await Chapter.find({"subject_id": sid}).to_list(length=500)
+    cards = []
+    for ch in chapters:
+        content = ch.content_en or ""
+        rag = ch.rag_text_en or ""
+        cards.append({
+            "chapter_id": str(ch.id),
+            "notes_generated": ch.notes_generated or bool(content),
+            "pyq_count": 0,
+            "mark_wise_counts": {},
+            "flashcard_count": 0,
+            "blog_count": 0,
+            "seo_topic_count": len(ch.published_topics),
+            "linked_topics": [t.topic_slug for t in ch.published_topics],
+            "word_count": ch.word_count or (len(content.split()) if content else 0),
+            "has_rag": bool(rag),
+            "has_assamese": bool(ch.content_as),
+            "rag_updated_at": ch.rag_updated_at.isoformat() if ch.rag_updated_at else None,
+            "rag_indexed_at": ch.rag_indexed_at.isoformat() if ch.rag_indexed_at else None,
+        })
+    return {"cards": cards}
+
+
+@router.get("/content/chapters/{chapter_id}/stats")
+async def get_chapter_stats(request: Request, chapter_id: str):
+    """Individual chapter stats — content length, RAG coverage, topic count."""
+    try:
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    content = chapter.content_en or ""
+    rag = chapter.rag_text_en or ""
+    return {
+        "chapter_id": chapter_id,
+        "content_length": len(content),
+        "rag_length": len(rag),
+        "chunk_count": max(1, len(rag.split()) // 150) if rag else 0,
+        "notes_generated": chapter.notes_generated or bool(content),
+        "has_assamese": bool(chapter.content_as),
+        "word_count": chapter.word_count or len(content.split()),
+        "pyq_count": 0,
+        "flashcard_count": 0,
+        "seo_topic_count": len(chapter.published_topics),
+        "linked_topics": [{"title": t.title, "slug": t.topic_slug} for t in chapter.published_topics],
+    }
+
+
+@router.get("/content/subject/{subject_id}/coverage")
+async def get_subject_coverage(request: Request, subject_id: str):
+    """Per-subject chapter coverage scores (en/as/rag/topics)."""
+    try:
+        sid = PydanticObjectId(subject_id)
+    except Exception:
+        sid = subject_id
+    chapters = await Chapter.find({"subject_id": sid}).to_list(length=500)
+    coverage = []
+    for ch in chapters:
+        score = 0
+        if ch.content_en: score += 40
+        if ch.content_as: score += 20
+        if ch.rag_text_en: score += 20
+        if ch.published_topics: score += 20
+        coverage.append({
+            "chapter_id": str(ch.id),
+            "coverage_score": score,
+            "has_english": bool(ch.content_en),
+            "has_assamese": bool(ch.content_as),
+            "has_rag": bool(ch.rag_text_en),
+            "topics_count": len(ch.published_topics),
+        })
+    return {"chapters": coverage, "total": len(coverage)}
+
+
+@router.post("/content/bulk-status")
+async def bulk_status_update(
+    request: Request,
+    body: BulkStatusRequest,
+    _admin: dict = Depends(require_admin_session),
+):
+    """Bulk update status for chapters or subjects."""
+    from app.db.mongo import get_mongo_client as _gcm
+    from app.config import settings as _s
+    client = _gcm()
+    db = client[_s.MONGODB_DB_NAME]
+    ids: list = []
+    for id_str in body.ids:
+        try:
+            ids.append(PydanticObjectId(id_str))
+        except Exception:
+            ids.append(id_str)
+    collection = "chapters" if body.scope == "chapters" else "subjects"
+    result = await db[collection].update_many(
+        {"_id": {"$in": ids}},
+        {"$set": {"status": body.status, "updated_at": datetime.now(timezone.utc)}},
+    )
+    return {"modified": result.modified_count, "scope": body.scope, "status": body.status}
+
+
+@router.post("/content/upload-image")
+async def upload_image(
+    request: Request,
+    file: UploadFile = File(...),
+    _admin: dict = Depends(require_admin_session),
+):
+    """Upload an image to GCS and return its public URL (falls back to data URL in dev)."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10 MB)")
+    fname = file.filename or "upload.jpg"
+    ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "jpg"
+    blob_name = (
+        f"admin-uploads/{datetime.now(timezone.utc).strftime('%Y/%m/%d')}"
+        f"/{_uuid.uuid4().hex}.{ext}"
+    )
+    try:
+        from app.services.content.gcs_store import gcs_content_store
+        bucket = gcs_content_store._get_bucket()
+        blob = bucket.blob(blob_name)
+        blob.upload_from_string(data, content_type=file.content_type)
+        blob.make_public()
+        return {"url": blob.public_url, "filename": blob_name}
+    except Exception as exc:
+        logger.warning(f"GCS image upload failed: {exc} — returning data URL fallback")
+    import base64 as _b64
+    b64 = _b64.b64encode(data).decode()
+    return {"url": f"data:{file.content_type};base64,{b64}", "filename": blob_name}
+
+
+@router.post("/content/chapters/{chapter_id}/attach-file")
+async def attach_file(
+    request: Request,
+    chapter_id: str,
+    file: UploadFile = File(...),
+    _admin: dict = Depends(require_admin_session),
+):
+    """Extract text from a PDF/TXT/MD and append it to the chapter's RAG text field."""
+    try:
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    text = ""
+    if ext in ("txt", "md"):
+        text = data.decode("utf-8", errors="replace")
+    elif ext == "pdf":
+        try:
+            import pypdf
+            from io import BytesIO
+            reader = pypdf.PdfReader(BytesIO(data))
+            pages = [page.extract_text() or "" for page in reader.pages]
+            text = "\n\n".join(pages)
+        except ImportError:
+            raise HTTPException(status_code=500, detail="pypdf not installed — cannot extract PDF text")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"PDF extraction failed: {exc}")
+    else:
+        raise HTTPException(status_code=400, detail="Only pdf, txt, md files are supported")
+    text = text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="No text could be extracted from the file")
+    existing = chapter.rag_text_en or ""
+    chapter.rag_text_en = (existing + "\n\n" + text).strip() if existing else text
+    chapter.rag_updated_at = datetime.now(timezone.utc)
+    chapter.updated_at = datetime.now(timezone.utc)
+    await chapter.save()
+    return {"text_extracted": len(text), "appended_to": "rag_text_en"}
+
+
+@router.post("/content/chapters/{chapter_id}/translate")
+async def translate_chapter(
+    request: Request,
+    chapter_id: str,
+    body: dict = Body({}),
+    _admin: dict = Depends(require_admin_session),
+):
+    """Translate chapter English content to Assamese via Sarvam AI."""
+    try:
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    source_field = body.get("field", "content_en")
+    source_text = (
+        (chapter.content_en or "")
+        if source_field == "content_en"
+        else (chapter.rag_text_en or "")
+    )
+    if not source_text.strip():
+        raise HTTPException(status_code=400, detail="No English content to translate")
+    try:
+        from app.services.content.translator import ContentTranslator
+        translator = ContentTranslator()
+        translated = await translator.translate_text(source_text, context=chapter.title)
+        if source_field == "content_en":
+            chapter.content_as = translated
+        else:
+            chapter.rag_text_as = translated
+        chapter.updated_at = datetime.now(timezone.utc)
+        await chapter.save()
+        return {
+            "translated_text": translated,
+            "word_count": len(translated.split()),
+            "field": source_field,
+        }
+    except Exception as exc:
+        logger.error(f"Chapter translation error {chapter_id}: {exc}")
+        raise HTTPException(status_code=500, detail=f"Translation failed: {exc}")
+
+
+@router.post("/studio/parse")
+async def studio_parse(
+    request: Request,
+    body: dict = Body({}),
+    _admin: dict = Depends(require_admin_session),
+):
+    """Use Sarvam AI to structure raw text into labelled Markdown sections."""
+    raw_text = (body.get("raw_text") or "").strip()
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="raw_text required")
+    subject = body.get("subject", "")
+    chapter_title = body.get("chapter", "")
+    system_prompt = (
+        "You are an expert educational content editor. "
+        "Structure the provided raw text into clear sections with headings. "
+        "Return ONLY valid JSON — a JSON array where each element has "
+        '"title" (a short section heading) and "content" (the section body as markdown). '
+        "No explanation, no code fences, just the JSON array."
+    )
+    user_msg = (
+        f"Subject: {subject}\nChapter: {chapter_title}\n\n"
+        f"Raw content to structure:\n\n{raw_text[:6000]}"
+    )
+    try:
+        from app.services.ai.router import generate_response
+        import json as _json
+        response = await generate_response(system_prompt, user_msg, model="sarvam-30b")
+        text = response.strip()
+        if "```json" in text:
+            text = text.split("```json", 1)[1].split("```", 1)[0].strip()
+        elif "```" in text:
+            text = text.split("```", 1)[1].split("```", 1)[0].strip()
+        blocks = _json.loads(text)
+        if not isinstance(blocks, list):
+            blocks = []
+        return {"blocks": blocks}
+    except Exception as exc:
+        logger.error(f"Studio parse error: {exc}")
+        raise HTTPException(status_code=500, detail="AI parsing failed")
+
+
+@router.post("/content/subject/{subject_id}/format-notes")
+async def format_subject_notes(
+    request: Request,
+    subject_id: str,
+    _admin: dict = Depends(require_admin_session),
+):
+    """AI-format all chapter notes for a subject in place."""
+    try:
+        sid = PydanticObjectId(subject_id)
+    except Exception:
+        sid = subject_id
+    chapters = await Chapter.find({"subject_id": sid}).to_list(length=500)
+    with_content = [ch for ch in chapters if ch.content_en and len(ch.content_en.strip()) > 50]
+    if not with_content:
+        return {"chapters_formatted": 0, "total_with_content": 0, "message": "No chapters with content"}
+    from app.services.ai.router import generate_response
+    system_prompt = (
+        "You are a markdown formatter for educational content. "
+        "Add proper markdown headings (##, ###), bullet points, and consistent spacing. "
+        "Do NOT add new information. Return ONLY the reformatted markdown."
+    )
+    formatted = 0
+    for ch in with_content:
+        try:
+            result = await generate_response(system_prompt, ch.content_en[:3000], model="sarvam-30b")
+            ch.content_en = result.strip()
+            ch.updated_at = datetime.now(timezone.utc)
+            await ch.save()
+            formatted += 1
+        except Exception as exc:
+            logger.warning(f"format-notes skipped {ch.id}: {exc}")
+    return {
+        "chapters_formatted": formatted,
+        "total_with_content": len(with_content),
+        "message": f"Formatted {formatted} of {len(with_content)} chapters",
+    }
