@@ -1213,3 +1213,52 @@ export const adminLogsDownloadExport = async (token,
   setTimeout(() => window.URL.revokeObjectURL(url), 1000);
   return filename;
 };
+
+// ── Documents / Library ───────────────────────────────────────────────────────
+
+// Admin
+export const adminGetDocuments = (token, params = {}) =>
+  axios.get(`${API_BASE}/admin/documents`, { headers: adminHeaders(token), withCredentials: true, params });
+
+export const adminGetDocument = (token, id) =>
+  axios.get(`${API_BASE}/admin/documents/${id}`, { headers: adminHeaders(token), withCredentials: true });
+
+export const adminCreateDocument = (token, data) =>
+  axios.post(`${API_BASE}/admin/documents`, data, { headers: adminHeaders(token), withCredentials: true });
+
+export const adminUpdateDocument = (token, id, data) =>
+  axios.put(`${API_BASE}/admin/documents/${id}`, data, { headers: adminHeaders(token), withCredentials: true });
+
+export const adminDeleteDocument = (token, id) =>
+  axios.delete(`${API_BASE}/admin/documents/${id}`, { headers: adminHeaders(token), withCredentials: true });
+
+export const adminGetDocumentCategories = (token) =>
+  axios.get(`${API_BASE}/admin/documents/categories/list`, { headers: adminHeaders(token), withCredentials: true });
+
+export const adminUploadDocumentPdf = (token, file) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return axios.post(`${API_BASE}/admin/documents/upload-pdf`, fd, {
+    headers: { ...adminHeaders(token), 'Content-Type': 'multipart/form-data' },
+    withCredentials: true,
+  });
+};
+
+export const adminUploadDocumentCover = (token, file) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return axios.post(`${API_BASE}/admin/documents/upload-cover`, fd, {
+    headers: { ...adminHeaders(token), 'Content-Type': 'multipart/form-data' },
+    withCredentials: true,
+  });
+};
+
+// Public
+export const publicGetDocuments = (params = {}) =>
+  axios.get(`${API_BASE}/documents`, { params });
+
+export const publicGetDocument = (id) =>
+  axios.get(`${API_BASE}/documents/${id}`);
+
+export const publicGetDocumentCategories = () =>
+  axios.get(`${API_BASE}/documents/categories`);

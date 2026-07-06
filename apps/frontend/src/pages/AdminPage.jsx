@@ -5,7 +5,7 @@ import {
   MessageSquare, TrendingUp, Bell, Settings, HeartPulse, LogOut,
   ChevronLeft, ChevronRight, Loader2, Globe,
   Crown, Cpu, Activity, ShieldAlert, Cloud,
-  ExternalLink, Gauge, Bug,
+  ExternalLink, Gauge, Bug, FileText,
 } from 'lucide-react';
 import axios from 'axios';
 import { adminVerify, adminLogout, adminGetSettings, adminGetUnacknowledgedAlertCount, API_BASE } from '@/utils/api';
@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
 
+const AdminDocuments       = lazy(() => import('@/components/admin/AdminDocuments'));
 const AdminDashboard       = lazy(() => import('@/components/admin/AdminDashboard'));
 const AdminRoadmap         = lazy(() => import('@/components/admin/AdminRoadmap'));
 const AdminContentHub      = lazy(() => import('@/components/admin/AdminContentHub'));
@@ -39,6 +40,7 @@ import { SyraProvider, useSyraContext } from '@/components/admin/syra/SyraContex
 const SECTIONS = [
   { id: 'dashboard',     icon: LayoutDashboard, label: 'Dashboard',         group: 'main'       },
   { id: 'contenthub',    icon: BookOpen,        label: 'Content Editor',    group: 'main'       },
+  { id: 'documents',     icon: FileText,        label: 'Documents',         group: 'main'       },
   { id: 'seomanager',    icon: Globe,           label: 'SEO Manager',       group: 'main'       },
   { id: 'users',         icon: Users,           label: 'Users',             group: 'audience'   },
   { id: 'conversations', icon: MessageSquare,   label: 'Conversations',     group: 'audience'   },
@@ -66,6 +68,7 @@ const GROUPS = ['main', 'audience', 'operations', 'system'];
 const SECTION_COMPONENTS = {
   dashboard:     AdminDashboard,
   contenthub:    AdminContentHub,
+  documents:     AdminDocuments,
   seomanager:    AdminSeoManager,
   users:         AdminUsers,
   conversations: AdminConversations,

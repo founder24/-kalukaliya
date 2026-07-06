@@ -29,6 +29,7 @@ from app.models.rag import (
     PublishJob,
 )
 from app.models.ai_usage_log import AiUsageLog
+from app.models.document import LibraryDocument
 from app.db.migrations.runner import check_and_apply_migrations
 import logging
 
@@ -95,6 +96,7 @@ async def init_mongo() -> None:
                     PublishJob,
                     AiUsageLog,
                     ContentAuditLog,
+                    LibraryDocument,
                 ],
             )
 

@@ -56,6 +56,8 @@ from app.api.v1 import (
     admin_indexnow_admin,
     admin_seo_advanced,
     admin_pyq,
+    admin_documents,
+    public_documents,
     seo,
     indexnow,
     content,
@@ -500,6 +502,8 @@ def create_app() -> FastAPI:
     app.include_router(admin_vertex.router, prefix="/api/v1/admin", tags=["Admin Vertex"])
     app.include_router(admin_indexnow_admin.router, prefix="/api/v1/admin", tags=["Admin IndexNow"])
     app.include_router(admin_seo_advanced.router, prefix="/api/v1/admin", tags=["Admin SEO Advanced"])
+    app.include_router(admin_documents.router, prefix="/api/v1/admin", tags=["Admin Documents"])
+    app.include_router(public_documents.router, prefix="/api/v1", tags=["Documents"])
 
     # CORS middleware — added last so it becomes the outermost layer and
     # handles OPTIONS preflight before any other middleware runs.
