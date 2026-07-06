@@ -294,7 +294,7 @@ export function AppRoutes() {
 
       {/* ── Public content routes (no auth) ── */}
       <Route path="/library"           element={<LibraryPage />} />
-      <Route path="/documents"         element={<DocumentsPage />} />
+      <Route path="/documents"         element={<AuthGuard><DocumentsPage /></AuthGuard>} />
       {/* /browser is an alias for /library — marketing/PageSpeed URL.
           Both routes render the same component so neither produces a
           404, and prerender-library.mjs writes static HTML for both. */}

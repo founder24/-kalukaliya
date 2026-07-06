@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { BookOpen, MessageSquare, Clock, User, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
+import { BookOpen, FileText, MessageSquare, Clock, User, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
@@ -8,10 +8,11 @@ import { LogoFull, LogoMark } from '@/components/Logo';
 import { pageImports } from '@/utils/pageImports';
 
 const NAV_ITEMS = [
-  { to: '/library', icon: BookOpen,      label: 'Browser',  preloadKey: 'library' },
-  { to: '/chat',    icon: MessageSquare, label: 'Chat',     preloadKey: 'chat' },
-  { to: '/history', icon: Clock,         label: 'History',  preloadKey: 'history' },
-  { to: '/profile', icon: User,          label: 'Profile',  preloadKey: 'profile' },
+  { to: '/library',   icon: BookOpen,      label: 'Browser',   preloadKey: 'library' },
+  { to: '/chat',      icon: MessageSquare, label: 'Chat',      preloadKey: 'chat' },
+  { to: '/documents', icon: FileText,      label: 'Documents', preloadKey: 'documents' },
+  { to: '/history',   icon: Clock,         label: 'History',   preloadKey: 'history' },
+  { to: '/profile',   icon: User,          label: 'Profile',   preloadKey: 'profile' },
 ];
 
 export const Sidebar = () => {

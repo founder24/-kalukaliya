@@ -35,4 +35,5 @@ class LibraryDocument(Document):
             "status",
             "category",
             "created_at",
+            "updated_at",
         ]

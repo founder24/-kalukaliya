@@ -1,16 +1,22 @@
 """Public API for the Documents/Library feature — read-only, published docs only."""
 from __future__ import annotations
 
+import logging
+from datetime import timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from app.api.v1.auth import get_current_user
 from app.config import settings
+from app.models.user import User
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Documents"])
 
 
 @router.get("/documents")
 async def list_published_documents(
+    _user: User = Depends(get_current_user),
     q: Optional[str] = Query(None, description="Search by title"),
     category: Optional[str] = Query(None),
     sort: str = Query("newest", description="newest | oldest | title_asc | title_desc"),
@@ -63,7 +69,9 @@ async def list_published_documents(
 
 
 @router.get("/documents/categories")
-async def list_document_categories():
+async def list_document_categories(
+    _user: User = Depends(get_current_user),
+):
     """Return distinct categories that have at least one published document."""
     from app.db.mongo import get_mongo_client
 
@@ -73,8 +81,57 @@ async def list_document_categories():
     return {"categories": sorted(c for c in cats if c)}
 
 
+@router.get("/documents/{doc_id}/download")
+async def get_document_download_url(
+    doc_id: str,
+    _user: User = Depends(get_current_user),
+):
+    """Return a short-lived signed URL for downloading a published document PDF."""
+    from bson import ObjectId
+    from app.db.mongo import get_mongo_client
+
+    client = get_mongo_client()
+    col = client[settings.MONGODB_DB_NAME]["library_documents"]
+
+    try:
+        oid = ObjectId(doc_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    doc = await col.find_one({"_id": oid, "status": "published"})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    pdf_url: str = doc.get("pdf_url", "")
+    filename: str = doc.get("pdf_filename", "document.pdf")
+
+    # Try to generate a short-lived signed URL (requires GCS SA credentials).
+    if "documents/pdf/" in pdf_url:
+        try:
+            from app.services.content.gcs_store import gcs_content_store
+            bucket = gcs_content_store._get_bucket()
+            # Extract blob_name: everything from "documents/pdf/" onwards
+            idx = pdf_url.index("documents/pdf/")
+            blob_name = pdf_url[idx:]
+            blob = bucket.blob(blob_name)
+            signed_url = blob.generate_signed_url(
+                expiration=timedelta(minutes=15),
+                method="GET",
+                version="v4",
+            )
+            return {"download_url": signed_url, "filename": filename, "expires_in": 900}
+        except Exception as exc:
+            logger.warning(f"Signed URL generation failed for doc {doc_id}: {exc}")
+
+    # Fallback: return stored URL (dev mode or if GCS signing unavailable)
+    return {"download_url": pdf_url, "filename": filename, "expires_in": None}
+
+
 @router.get("/documents/{doc_id}")
-async def get_published_document(doc_id: str):
+async def get_published_document(
+    doc_id: str,
+    _user: User = Depends(get_current_user),
+):
     """Return a single published document by ID."""
     from bson import ObjectId
     from app.db.mongo import get_mongo_client

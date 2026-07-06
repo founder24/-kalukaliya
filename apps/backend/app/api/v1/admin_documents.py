@@ -63,8 +63,8 @@ def _doc_to_dict(doc: LibraryDocument) -> dict:
         "pdf_size_bytes": doc.pdf_size_bytes,
         "cover_url": doc.cover_url,
         "created_by": doc.created_by,
-        "created_at": doc.created_at.isoformat(),
-        "updated_at": doc.updated_at.isoformat(),
+        "created_at": doc.created_at.isoformat() if doc.created_at else None,
+        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
     }
 
 
@@ -114,9 +114,10 @@ async def upload_pdf(
         bucket = gcs_content_store._get_bucket()
         blob = bucket.blob(blob_name)
         blob.upload_from_string(data, content_type="application/pdf")
-        blob.make_public()
+        # Keep blobs private — access is via signed URLs generated at download time.
+        gcs_url = f"https://storage.googleapis.com/{bucket.name}/{blob_name}"
         return {
-            "url": blob.public_url,
+            "url": gcs_url,
             "filename": fname,
             "size_bytes": len(data),
             "blob_name": blob_name,

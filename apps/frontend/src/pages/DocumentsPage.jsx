@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { FileText, Download, ExternalLink, Search, ChevronLeft, ChevronRight, BookOpen, Filter, X } from 'lucide-react';
-import { publicGetDocuments, publicGetDocumentCategories } from '@/utils/api';
+import { FileText, Download, ExternalLink, Search, ChevronLeft, ChevronRight, BookOpen, Filter, X, Loader2 } from 'lucide-react';
+import { publicGetDocuments, publicGetDocumentCategories, publicGetDocumentDownloadUrl } from '@/utils/api';
 
 const PAGE_SIZE = 12;
 
@@ -17,6 +17,31 @@ function formatDate(iso) {
 }
 
 function DocumentCard({ doc }) {
+  const [downloading, setDownloading] = useState(false);
+
+  const handleOpen = async (mode) => {
+    setDownloading(true);
+    try {
+      const res = await publicGetDocumentDownloadUrl(doc.id);
+      const { download_url, filename } = res.data;
+      if (mode === 'view') {
+        window.open(download_url, '_blank', 'noopener,noreferrer');
+      } else {
+        // Trigger download
+        const a = document.createElement('a');
+        a.href = download_url;
+        a.download = filename || doc.pdf_filename || 'document.pdf';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } catch {
+      // Silently ignore — auth errors redirect via AuthGuard already
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="group bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden flex flex-col">
       {/* Cover image or placeholder */}
@@ -56,21 +81,21 @@ function DocumentCard({ doc }) {
 
         {/* Actions */}
         <div className="flex gap-2 mt-1">
-          <a
-            href={doc.pdf_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold bg-violet-600 text-white hover:bg-violet-700 transition-colors"
+          <button
+            onClick={() => handleOpen('view')}
+            disabled={downloading}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-60 transition-colors"
           >
-            <ExternalLink size={13} /> View PDF
-          </a>
-          <a
-            href={doc.pdf_url}
-            download={doc.pdf_filename}
-            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+            {downloading ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
+            View PDF
+          </button>
+          <button
+            onClick={() => handleOpen('download')}
+            disabled={downloading}
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-60 transition-colors"
           >
             <Download size={13} />
-          </a>
+          </button>
         </div>
       </div>
     </div>

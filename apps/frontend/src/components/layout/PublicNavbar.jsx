@@ -33,6 +33,7 @@ export const PublicNavbar = () => {
 
   const navLinks = [
     { label: 'Library',      href: '/library',      internal: true  },
+    { label: 'Documents',    href: '/documents',    internal: true  },
     { label: 'Curriculum',   href: '/curriculum',   internal: true  },
     { label: 'Chat',         href: '/chat',         internal: true  },
     { label: 'Exam Routine', href: '/exam-routine', internal: true  },

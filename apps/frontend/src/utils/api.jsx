@@ -1253,12 +1253,15 @@ export const adminUploadDocumentCover = (token, file) => {
   });
 };
 
-// Public
+// Public (all require auth — user must be logged in to access documents)
 export const publicGetDocuments = (params = {}) =>
-  axios.get(`${API_BASE}/documents`, { params });
+  axios.get(`${API_BASE}/documents`, { params, ...authConfig() });
 
 export const publicGetDocument = (id) =>
-  axios.get(`${API_BASE}/documents/${id}`);
+  axios.get(`${API_BASE}/documents/${id}`, authConfig());
 
 export const publicGetDocumentCategories = () =>
-  axios.get(`${API_BASE}/documents/categories`);
+  axios.get(`${API_BASE}/documents/categories`, authConfig());
+
+export const publicGetDocumentDownloadUrl = (id) =>
+  axios.get(`${API_BASE}/documents/${id}/download`, authConfig());
