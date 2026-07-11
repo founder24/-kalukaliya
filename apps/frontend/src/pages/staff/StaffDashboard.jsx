@@ -861,6 +861,12 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
   const [reindexingIds, setReindexingIds] = useState({}); // { [chapterId]: true }
   const [reindexingAll, setReindexingAll] = useState(false);
   const [reindexAllProgress, setReindexAllProgress] = useState({ done: 0, total: 0 });
+  // Chapters that failed in the last "Reindex all stale" run — kept as full
+  // objects so the retry handler knows which scopes to target.
+  const [failedReindexChapters, setFailedReindexChapters] = useState([]);
+
+  // Clear failed list whenever the staff switches to a different subject.
+  useEffect(() => { setFailedReindexChapters([]); }, [subject?.id]);
 
   const handleRowReindex = async (ch, e) => {
     e.stopPropagation();
@@ -889,7 +895,7 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
     if (stale.length === 0) return;
     setReindexingAll(true);
     setReindexAllProgress({ done: 0, total: stale.length });
-    const failedTitles = [];
+    const failedChapters = [];
     try {
       for (let i = 0; i < stale.length; i++) {
         const ch = stale[i];
@@ -900,17 +906,58 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
           ch.qa_rag_stale    ? onReindexChapter(ch.id, 'qa',    ch.title) : true,
           ch.pyq_rag_stale   ? onReindexChapter(ch.id, 'pyq',   ch.title) : true,
         ]);
-        if (results.some(r => r === false)) failedTitles.push(ch.title || `Chapter ${i + 1}`);
+        if (results.some(r => r === false)) failedChapters.push(ch);
         setReindexAllProgress({ done: i + 1, total: stale.length });
       }
-      const succeeded = stale.length - failedTitles.length;
-      if (failedTitles.length === 0) {
+      const failedCount = failedChapters.length;
+      const succeeded = stale.length - failedCount;
+      setFailedReindexChapters(failedChapters);
+      if (failedCount === 0) {
         toast.success(`Reindexed ${stale.length} chapter${stale.length > 1 ? 's' : ''}`);
       } else if (succeeded === 0) {
         toast.error(`All ${stale.length} chapters failed to reindex`);
       } else {
-        const names = failedTitles.slice(0, 3).join(', ') + (failedTitles.length > 3 ? ` +${failedTitles.length - 3} more` : '');
-        toast.warning(`Reindexed ${succeeded}/${stale.length} chapters — ${failedTitles.length} failed: ${names}`);
+        const names = failedChapters.slice(0, 3).map(c => c.title || 'Untitled').join(', ') + (failedCount > 3 ? ` +${failedCount - 3} more` : '');
+        toast.warning(`Reindexed ${succeeded}/${stale.length} chapters — ${failedCount} failed: ${names}`);
+      }
+    } finally {
+      setReindexingAll(false);
+      setReindexAllProgress({ done: 0, total: 0 });
+    }
+  };
+
+  const handleRetryFailed = async () => {
+    if (reindexingAll || failedReindexChapters.length === 0) return;
+    const toRetry = failedReindexChapters;
+    setReindexingAll(true);
+    setReindexAllProgress({ done: 0, total: toRetry.length });
+    const stillFailed = [];
+    try {
+      for (let i = 0; i < toRetry.length; i++) {
+        const ch = toRetry[i];
+        const hasSpecific = ch.notes_rag_stale || ch.qa_rag_stale || ch.pyq_rag_stale;
+        const results = await Promise.all(
+          hasSpecific
+            ? [
+                ch.notes_rag_stale ? onReindexChapter(ch.id, 'notes', ch.title) : true,
+                ch.qa_rag_stale    ? onReindexChapter(ch.id, 'qa',    ch.title) : true,
+                ch.pyq_rag_stale   ? onReindexChapter(ch.id, 'pyq',   ch.title) : true,
+              ]
+            : [onReindexChapter(ch.id, 'all', ch.title)]
+        );
+        if (results.some(r => r === false)) stillFailed.push(ch);
+        setReindexAllProgress({ done: i + 1, total: toRetry.length });
+      }
+      const failedCount = stillFailed.length;
+      const succeeded = toRetry.length - failedCount;
+      setFailedReindexChapters(stillFailed);
+      if (failedCount === 0) {
+        toast.success(`Retry succeeded — all ${toRetry.length} chapter${toRetry.length > 1 ? 's' : ''} reindexed`);
+      } else if (succeeded === 0) {
+        toast.error(`Retry failed — all ${toRetry.length} chapters still failing`);
+      } else {
+        const names = stillFailed.slice(0, 3).map(c => c.title || 'Untitled').join(', ') + (failedCount > 3 ? ` +${failedCount - 3} more` : '');
+        toast.warning(`Retry: ${succeeded}/${toRetry.length} succeeded — ${failedCount} still failed: ${names}`);
       }
     } finally {
       setReindexingAll(false);
@@ -992,6 +1039,17 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
                         : 'Reindexing…')
                     : 'Reindex all stale'}
                 </button>
+                {failedReindexChapters.length > 0 && (
+                  <button
+                    onClick={handleRetryFailed}
+                    disabled={reindexingAll}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-200 transition-colors disabled:opacity-50"
+                    title={`Retry the ${failedReindexChapters.length} chapter${failedReindexChapters.length > 1 ? 's' : ''} that failed`}
+                  >
+                    <IndexIcon />
+                    Retry failed ({failedReindexChapters.length})
+                  </button>
+                )}
               </span>
             )}
           </div>
