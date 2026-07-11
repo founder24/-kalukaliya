@@ -1,0 +1,20 @@
+gcloud run services update syrabit-backend \
+  --region=asia-south1 \
+  --project=blissful-acumen-495019-t6 \
+  --update-env-vars=RESTART_AT=$(date +%s)
+Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Deploying...failed                                                                                                                                                         
+Deployment failed                                                                                                                                                          
+ERROR: (gcloud.run.services.update) PERMISSION_DENIED: This API method requires billing to be enabled. Please enable billing on project #blissful-acumen-495019-t6 by visiting https://console.developers.google.com/billing/enable?project=blissful-acumen-495019-t6 then retry. If you enabled billing for this project recently, wait a few minutes for the action to propagate to our systems and retry. This command is authenticated as founder@syrabit.ai which is the active account specified by the [core/account] property.
+This API method requires billing to be enabled. Please enable billing on project #blissful-acumen-495019-t6 by visiting https://console.developers.google.com/billing/enable?project=blissful-acumen-495019-t6 then retry. If you enabled billing for this project recently, wait a few minutes for the action to propagate to our systems and retry.
+Google developers console billing
+https://console.developers.google.com/billing/enable?project=blissful-acumen-495019-t6
+- '@type': type.googleapis.com/google.rpc.ErrorInfo
+  domain: googleapis.com
+  metadata:
+    consoleUrl: https://console.developers.google.com/billing/enable?project=blissful-acumen-495019-t6
+    consumer: projects/blissful-acumen-495019-t6
+    containerInfo: blissful-acumen-495019-t6
+    service: run.googleapis.com
+  reason: BILLING_DISABLED
+founder@cloudshell:~ (blissful-acumen-495019-t6)$ 
