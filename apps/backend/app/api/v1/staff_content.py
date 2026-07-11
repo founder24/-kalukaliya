@@ -100,6 +100,34 @@ async def staff_list_classes(
     ]
 
 
+# ── Streams (Courses) ─────────────────────────────────────────────────────────
+
+@router.get("/content/streams")
+async def staff_list_streams(
+    request: Request,
+    _staff: User = Depends(require_staff_user),
+):
+    """
+    Return all streams (courses) with their class_id and resolved board_id.
+    Board → Class → Stream is the full ancestry needed for cascaded filtering.
+    """
+    streams = await Stream.find_all().to_list(length=2000)
+    classes = await Class.find_all().to_list(length=500)
+    classes_map = {str(c.id): c for c in classes}
+
+    result = []
+    for s in streams:
+        cls = classes_map.get(str(s.class_id)) if s.class_id else None
+        result.append({
+            "id":       str(s.id),
+            "name":     s.name,
+            "status":   s.status,
+            "class_id": str(s.class_id) if s.class_id else None,
+            "board_id": str(cls.board_id) if cls else None,
+        })
+    return result
+
+
 # ── Subjects ──────────────────────────────────────────────────────────────────
 
 @router.get("/content/subjects")
@@ -125,12 +153,13 @@ async def staff_list_subjects(
         stream = streams_map.get(str(s.stream_id)) if s.stream_id else None
         cls    = classes_map.get(str(stream.class_id)) if (stream and stream.class_id) else None
         result.append({
-            "id":        str(s.id),
-            "name":      s.name,
-            "status":    s.status,
-            "stream_id": str(s.stream_id) if s.stream_id else None,
-            "class_id":  str(cls.id)        if cls        else None,
-            "board_id":  str(cls.board_id)  if cls        else None,
+            "id":          str(s.id),
+            "name":        s.name,
+            "status":      s.status,
+            "stream_id":   str(s.stream_id)   if s.stream_id else None,
+            "stream_name": stream.name         if stream      else None,
+            "class_id":    str(cls.id)         if cls         else None,
+            "board_id":    str(cls.board_id)   if cls         else None,
         })
     return result
 

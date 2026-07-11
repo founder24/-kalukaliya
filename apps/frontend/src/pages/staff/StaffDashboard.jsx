@@ -532,22 +532,49 @@ function ChaptersView({ subject, chapters, loadingChapters, onBack, onEditChapte
 
 // ── Subjects view ─────────────────────────────────────────────────────────────
 
-function SubjectsView({ subjects, boards, classes, loading, onSelectSubject }) {
-  const [search, setSearch] = useState('');
-  const [filterBoard, setFilterBoard] = useState('');
-  const [filterClass, setFilterClass] = useState('');
+function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSubject }) {
+  const [search,       setSearch]       = useState('');
+  const [filterBoard,  setFilterBoard]  = useState('');
+  const [filterClass,  setFilterClass]  = useState('');
+  const [filterStream, setFilterStream] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
 
+  // Cascade: classes visible under the selected board
+  const visibleClasses = filterBoard
+    ? classes.filter(c => c.board_id === filterBoard)
+    : classes;
+
+  // Cascade: streams visible under selected board+class
+  const visibleStreams = streams.filter(s => {
+    if (filterClass)  return s.class_id === filterClass;
+    if (filterBoard)  return s.board_id  === filterBoard;
+    return true;
+  });
+
+  // Reset child selections when parent changes
+  const handleBoardChange = (val) => {
+    setFilterBoard(val);
+    setFilterClass('');
+    setFilterStream('');
+  };
+  const handleClassChange = (val) => {
+    setFilterClass(val);
+    setFilterStream('');
+  };
+
   const filtered = subjects.filter(s => {
-    const matchSearch = !search || s.name?.toLowerCase().includes(search.toLowerCase());
-    const matchBoard  = !filterBoard  || s.board_id  === filterBoard;
-    const matchClass  = !filterClass  || s.class_id  === filterClass;
-    const matchStatus = !filterStatus || s.status    === filterStatus;
-    return matchSearch && matchBoard && matchClass && matchStatus;
+    const matchSearch = !search       || s.name?.toLowerCase().includes(search.toLowerCase());
+    const matchBoard  = !filterBoard  || s.board_id   === filterBoard;
+    const matchClass  = !filterClass  || s.class_id   === filterClass;
+    const matchStream = !filterStream || s.stream_id  === filterStream;
+    const matchStatus = !filterStatus || s.status     === filterStatus;
+    return matchSearch && matchBoard && matchClass && matchStream && matchStatus;
   });
 
   const published = subjects.filter(s => s.status === 'published').length;
   const drafted   = subjects.filter(s => s.status === 'draft').length;
+
+  const selectCls = 'px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400';
 
   return (
     <div className="h-full flex flex-col">
@@ -556,18 +583,31 @@ function SubjectsView({ subjects, boards, classes, loading, onSelectSubject }) {
         <p className="text-xs text-gray-400 mt-0.5">{subjects.length} total · {published} published · {drafted} drafts</p>
       </div>
 
+      {/* Filter bar — Board → Class → Course → Status */}
       <div className="px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0">
         <div className="flex flex-wrap gap-2">
-          <input type="search" placeholder="Search subjects…" value={search} onChange={e => setSearch(e.target.value)} className="flex-1 min-w-[140px] px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
-          <select value={filterBoard} onChange={e => setFilterBoard(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+          <input
+            type="search" placeholder="Search subjects…" value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="flex-1 min-w-[140px] px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+          />
+          {/* Board */}
+          <select value={filterBoard} onChange={e => handleBoardChange(e.target.value)} className={selectCls}>
             <option value="">All Boards</option>
             {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
-          <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+          {/* Class — cascades from Board */}
+          <select value={filterClass} onChange={e => handleClassChange(e.target.value)} className={selectCls}>
             <option value="">All Classes</option>
-            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {visibleClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+          {/* Course/Stream — cascades from Board+Class */}
+          <select value={filterStream} onChange={e => setFilterStream(e.target.value)} className={selectCls}>
+            <option value="">All Courses</option>
+            {visibleStreams.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          {/* Status */}
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={selectCls}>
             <option value="">All Status</option>
             <option value="published">Published</option>
             <option value="draft">Draft</option>
@@ -587,7 +627,13 @@ function SubjectsView({ subjects, boards, classes, loading, onSelectSubject }) {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filtered.map(subj => (
-              <SubjectCard key={subj.id} subject={subj} boards={boards} classes={classes} onClick={() => onSelectSubject(subj)} />
+              <SubjectCard
+                key={subj.id}
+                subject={subj}
+                boards={boards}
+                classes={classes}
+                onClick={() => onSelectSubject(subj)}
+              />
             ))}
           </div>
         )}
@@ -599,6 +645,8 @@ function SubjectsView({ subjects, boards, classes, loading, onSelectSubject }) {
 function SubjectCard({ subject, boards, classes, onClick }) {
   const board = boards.find(b => b.id === subject.board_id);
   const cls   = classes.find(c => c.id === subject.class_id);
+  // stream_name is resolved server-side and returned on the subject object
+  const courseName = subject.stream_name || null;
   return (
     <button onClick={onClick} className="text-left p-4 bg-white rounded-2xl border border-gray-100 hover:border-violet-200 hover:shadow-md transition-all group">
       <div className="flex items-start justify-between gap-2 mb-2">
@@ -606,9 +654,13 @@ function SubjectCard({ subject, boards, classes, onClick }) {
         <StatusBadge status={subject.status} />
       </div>
       <div className="font-semibold text-gray-900 text-sm leading-snug group-hover:text-violet-700 transition-colors line-clamp-2 mb-2">{subject.name}</div>
-      <div className="flex items-center gap-2 flex-wrap">
-        {board && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-100">{board.name}</span>}
-        {cls   && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-100">{cls.name}</span>}
+      {/* Hierarchy breadcrumb: Board → Class → Course */}
+      <div className="flex items-center gap-1 flex-wrap text-[10px] text-gray-400">
+        {board && <span className="px-1.5 py-0.5 rounded bg-gray-50 border border-gray-100">{board.name}</span>}
+        {(board && (cls || courseName)) && <span className="text-gray-300">›</span>}
+        {cls   && <span className="px-1.5 py-0.5 rounded bg-gray-50 border border-gray-100">{cls.name}</span>}
+        {(cls && courseName) && <span className="text-gray-300">›</span>}
+        {courseName && <span className="px-1.5 py-0.5 rounded bg-violet-50 border border-violet-100 text-violet-500">{courseName}</span>}
       </div>
     </button>
   );
@@ -625,6 +677,7 @@ export default function StaffDashboard() {
 
   const [boards,   setBoards]   = useState([]);
   const [classes,  setClasses]  = useState([]);
+  const [streams,  setStreams]  = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [loading,  setLoading]  = useState(true);
 
@@ -636,13 +689,15 @@ export default function StaffDashboard() {
   useEffect(() => {
     (async () => {
       try {
-        const [br, cl, su] = await Promise.all([
+        const [br, cl, st, su] = await Promise.all([
           api().get('/staff/content/boards'),
           api().get('/staff/content/classes'),
+          api().get('/staff/content/streams'),
           api().get('/staff/content/subjects'),
         ]);
         setBoards(br.data);
         setClasses(cl.data);
+        setStreams(st.data);
         setSubjects(su.data);
       } catch {
         toast.error('Failed to load content. Please refresh.');
@@ -723,7 +778,7 @@ export default function StaffDashboard() {
 
         <main className="flex-1 overflow-hidden">
           {view === 'subjects' && (
-            <SubjectsView subjects={subjects} boards={boards} classes={classes} loading={loading} onSelectSubject={selectSubject} />
+            <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} onSelectSubject={selectSubject} />
           )}
           {view === 'chapters' && selectedSubject && (
             <ChaptersView subject={selectedSubject} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} />
