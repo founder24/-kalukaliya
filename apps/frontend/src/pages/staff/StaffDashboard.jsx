@@ -868,11 +868,14 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
 
   // Content coverage stats
   const stats = {
-    total:      chapters.length,
-    contentEN:  chapters.filter(c => c.has_content_en).length,
-    contentAS:  chapters.filter(c => c.has_content_as).length,
-    rag:        chapters.filter(c => c.has_rag_en).length,
-    qa:         chapters.filter(c => c.has_qa_en).length,
+    total:       chapters.length,
+    contentEN:   chapters.filter(c => c.has_content_en).length,
+    contentAS:   chapters.filter(c => c.has_content_as).length,
+    rag:         chapters.filter(c => c.has_rag_en).length,
+    qa:          chapters.filter(c => c.has_qa_en).length,
+    ragSections: chapters.filter(c => c.has_rag_sections).length,
+    qaSections:  chapters.filter(c => c.has_qa_rag_sections).length,
+    pyqPdf:      chapters.filter(c => c.has_pyq_pdf).length,
   };
 
   return (
@@ -902,11 +905,14 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
 
         {/* Coverage mini-bar */}
         {stats.total > 0 && (
-          <div className="mt-3 ml-11 flex items-center gap-4 text-[10px] text-gray-400">
+          <div className="mt-3 ml-11 flex items-center gap-4 text-[10px] text-gray-400 flex-wrap">
             <span><span className="text-emerald-600 font-semibold">{stats.contentEN}</span>/{stats.total} Content EN</span>
             <span><span className="text-blue-500 font-semibold">{stats.contentAS}</span>/{stats.total} Content AS</span>
             <span><span className="text-violet-500 font-semibold">{stats.rag}</span>/{stats.total} RAG</span>
             <span><span className="text-amber-500 font-semibold">{stats.qa}</span>/{stats.total} Q&A</span>
+            <span><span className="text-teal-500 font-semibold">{stats.ragSections}</span>/{stats.total} RAG Sections</span>
+            <span><span className="text-indigo-500 font-semibold">{stats.qaSections}</span>/{stats.total} Q&A Sections</span>
+            <span><span className="text-rose-500 font-semibold">{stats.pyqPdf}</span>/{stats.total} PYQ PDF</span>
           </div>
         )}
       </div>
@@ -958,15 +964,19 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
                       {hasUnpublishedEdit && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold border border-amber-200">Unsaved</span>}
                     </div>
                     <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      {/* Content dots: EN content, AS content, Notes EN, Q&A EN, Q&A AS, RAG EN, RAG AS */}
-                      <div className="flex items-center gap-1" title="Content EN · Content AS · Notes EN · Q&A EN · Q&A AS · RAG EN · RAG AS">
-                        <Dot filled={ch.has_content_en} label="Content EN" />
-                        <Dot filled={ch.has_content_as} label="Content AS" />
-                        <Dot filled={ch.has_notes_en}   label="Notes EN" />
-                        <Dot filled={ch.has_qa_en}      label="Q&A EN" />
-                        <Dot filled={ch.has_qa_as}      label="Q&A AS" />
-                        <Dot filled={ch.has_rag_en}     label="RAG EN" />
-                        <Dot filled={ch.has_rag_as}     label="RAG AS" />
+                      {/* Content dots: EN content, AS content, Notes EN, Q&A EN, Q&A AS, RAG EN, RAG AS, RAG Sections, Q&A Sections, PYQ PDF */}
+                      <div className="flex items-center gap-1" title="Content EN · Content AS · Notes EN · Q&A EN · Q&A AS · RAG EN · RAG AS · RAG Sections · Q&A Sections · PYQ PDF">
+                        <Dot filled={ch.has_content_en}      label="Content EN" />
+                        <Dot filled={ch.has_content_as}      label="Content AS" />
+                        <Dot filled={ch.has_notes_en}        label="Notes EN" />
+                        <Dot filled={ch.has_qa_en}           label="Q&A EN" />
+                        <Dot filled={ch.has_qa_as}           label="Q&A AS" />
+                        <Dot filled={ch.has_rag_en}          label="RAG EN" />
+                        <Dot filled={ch.has_rag_as}          label="RAG AS" />
+                        <span className="w-px h-2.5 bg-gray-200 mx-0.5" />
+                        <Dot filled={ch.has_rag_sections}    label="RAG Sections" />
+                        <Dot filled={ch.has_qa_rag_sections} label="Q&A RAG Sections" />
+                        <Dot filled={ch.has_pyq_pdf}         label="PYQ PDF" />
                       </div>
                       {ch.word_count > 0 && <span className="text-[10px] text-gray-400">{ch.word_count.toLocaleString()} words</span>}
                     </div>
