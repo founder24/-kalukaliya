@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>https://syrabit.ai/sitemap-static.xml</loc>
+    <lastmod>2025-01-15</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://syrabit.ai/sitemap-subjects.xml</loc>
+    <lastmod>2025-01-15</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://syrabit.ai/sitemap-chapters.xml</loc>
+    <lastmod>2025-01-15</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://syrabit.ai/sitemap-topics.xml</loc>
+    <lastmod>2025-01-15</lastmod>
+  </sitemap>
+</sitemapindex>

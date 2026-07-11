@@ -1,0 +1,1 @@
+const e={zero:{label:"Zero document access",color:"text-slate-400",icon:"🔒"},limited:{label:"Limited document access",color:"text-violet-400",icon:"📄"},full:{label:"Full document access",color:"text-emerald-400",icon:"📚"}};export{e as D};

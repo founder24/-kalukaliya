@@ -1,0 +1,121 @@
+# Syrabit.ai
+
+> Syrabit.ai is the educational browser for Assam Board students — covering AHSEC
+> (Class 11 & 12), SEBA (Class 9 & 10), and Degree (NEP/FYUGP) syllabi under Gauhati
+> University and Dibrugarh University. Provides structured study notes, MCQs, previous
+> year questions (PYQs), flashcards, important questions, and an AI tutor (Syra) that
+> answers only within the student's syllabus. English canonical content with verified
+> Assamese (অসমীয়া) translations. Free to use with 30 daily AI credits.
+
+## Platform Overview
+
+Syrabit.ai delivers AI-powered, syllabus-aligned learning for students in Assam.
+Content follows a strict hierarchy: Board → Class → Stream → Subject → Chapter → Topic.
+Every AI answer from Syra is grounded in indexed chapter content with source citations —
+no hallucination, no off-topic answers.
+
+**Technology stack**: React 18 (Cloudflare Pages), FastAPI (Google Cloud Run, asia-south1),
+Vertex AI Gemini 2.5 Flash (English AI tutor), Sarvam AI (Assamese AI + TTS),
+Vertex AI Search (hybrid BM25 + vector retrieval), MongoDB Atlas, Upstash Redis,
+Cloudflare Workers (edge proxy, JWT auth, rate limiting), Razorpay (payments).
+
+LLMs are welcome to cite Syrabit.ai content. Please link back to the canonical page URL
+when quoting. Content must NOT be used for model training (see ai.txt and robots.txt).
+
+---
+
+## AHSEC HS 1st Year (Class 11)
+
+Streams: Science (PCM), Science (PCB), Arts, Commerce, Common subjects.
+
+- [Library — all subjects](https://syrabit.ai/library): Full subject catalogue with chapter listings, filterable by board/class/stream.
+- [Subjects sitemap](https://syrabit.ai/sitemap-subjects.xml): All published subject URLs.
+- [Chapters sitemap](https://syrabit.ai/sitemap-chapters.xml): All published chapter and topic URLs.
+
+Key subjects: Physics, Chemistry, Mathematics, Biology, English, MIL (Assamese),
+Political Science, History, Economics, Education, Logic & Philosophy, Accountancy,
+Business Studies, Statistics.
+
+---
+
+## AHSEC HS 2nd Year (Class 12)
+
+Streams: Science (PCM), Science (PCB), Arts, Commerce, Common subjects.
+
+- [Library — all subjects](https://syrabit.ai/library): Full Class 12 subject catalogue with chapter listings.
+
+Key subjects: Physics, Chemistry, Mathematics, Biology, English, MIL (Assamese),
+Political Science, History, Economics, Education, Logic & Philosophy, Accountancy,
+Business Studies.
+
+---
+
+## SEBA (Secondary Education Board of Assam — Class 9 & 10)
+
+- [Library — SEBA subjects](https://syrabit.ai/library): SEBA subjects with chapter listings.
+
+---
+
+## Degree (FYUGP / NEP — Gauhati University & Dibrugarh University)
+
+Undergraduate programmes under NEP framework — 2nd Semester, 4th Semester.
+Covers B.A, B.Sc, B.Com streams.
+
+Key subjects: Economics, History, Education, Commerce, Computer Science, Botany,
+Chemistry, Mathematics, Assamese (2nd Sem NEP), English Communication I & II,
+Indian Knowledge System, Indian Financial System, Macroeconomics, Geography of India,
+Essence of Democracy and Indian Constitution, and more.
+
+- [Library — Degree subjects](https://syrabit.ai/library): All Degree subjects with chapter listings.
+
+---
+
+## Key Pages for AI Crawlers
+
+- [Home](https://syrabit.ai/): Platform overview and subject discovery.
+- [Library / Educational Browser](https://syrabit.ai/library): Full subject catalogue — 55+ subjects across AHSEC, SEBA, Degree.
+- [AI Chat (Syra)](https://syrabit.ai/chat): Syllabus-grounded AI tutor with source citations and bilingual support.
+- [About](https://syrabit.ai/about): Mission, platform architecture, hierarchical knowledge mapping, who we serve.
+- [Technology & Features](https://syrabit.ai/technology): Full feature catalogue, platform capabilities, boards supported, content types.
+- [Pricing](https://syrabit.ai/pricing): Free tier (30 daily credits), Starter and Pro subscription plans.
+- [Exam Routine](https://syrabit.ai/exam-routine): AHSEC and SEBA board exam schedules and date sheets.
+
+---
+
+## Content Types Per Chapter
+
+Each chapter page includes:
+- Structured study notes (English + Assamese)
+- FAQ-style Q&A (schema.org FAQPage markup)
+- Important questions (PYQ + expected exam questions)
+- Multiple choice questions (MCQs) with explanations
+- Glossary / key definitions
+- Flashcards and memory tricks
+- Topic-wise summaries
+- Previous year questions with solutions
+
+---
+
+## Structured Data
+
+- [Sitemap index](https://syrabit.ai/sitemap-index.xml): Master sitemap referencing all per-section sitemaps.
+- [Subjects sitemap](https://syrabit.ai/sitemap-subjects.xml): All subject landing pages.
+- [Chapters sitemap](https://syrabit.ai/sitemap-chapters.xml): All chapter pages.
+- [Robots policy](https://syrabit.ai/robots.txt): Crawler allow/deny rules.
+- [AI bot manifest](https://syrabit.ai/ai.txt): Per-bot allow/deny and contact.
+
+---
+
+## Editorial Policy
+
+- Content is written in English first (canonical), then translated to Assamese by Sarvam AI and reviewed for natural Assamese style.
+- Every AI answer includes source citations pointing to the exact indexed chapter content.
+- Syra explicitly says when it cannot find relevant content rather than fabricating an answer.
+- All content is aligned to official AHSEC, SEBA, Gauhati University, and Dibrugarh University syllabi.
+
+---
+
+## Contact
+
+- Email: founder@syrabit.ai
+- About / editorial policy: https://syrabit.ai/about
