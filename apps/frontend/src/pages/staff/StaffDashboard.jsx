@@ -889,17 +889,29 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
     if (stale.length === 0) return;
     setReindexingAll(true);
     setReindexAllProgress({ done: 0, total: stale.length });
+    const failedTitles = [];
     try {
       for (let i = 0; i < stale.length; i++) {
         const ch = stale[i];
         // Call only the specific stale scopes — avoids a backend 422 for
         // chapters where one scope is stale but has no indexable content yet.
-        if (ch.notes_rag_stale) await onReindexChapter(ch.id, 'notes', ch.title);
-        if (ch.qa_rag_stale)    await onReindexChapter(ch.id, 'qa',    ch.title);
-        if (ch.pyq_rag_stale)   await onReindexChapter(ch.id, 'pyq',   ch.title);
+        const results = await Promise.all([
+          ch.notes_rag_stale ? onReindexChapter(ch.id, 'notes', ch.title) : true,
+          ch.qa_rag_stale    ? onReindexChapter(ch.id, 'qa',    ch.title) : true,
+          ch.pyq_rag_stale   ? onReindexChapter(ch.id, 'pyq',   ch.title) : true,
+        ]);
+        if (results.some(r => r === false)) failedTitles.push(ch.title || `Chapter ${i + 1}`);
         setReindexAllProgress({ done: i + 1, total: stale.length });
       }
-      toast.success(`Reindexed ${stale.length} chapter${stale.length > 1 ? 's' : ''}`);
+      const succeeded = stale.length - failedTitles.length;
+      if (failedTitles.length === 0) {
+        toast.success(`Reindexed ${stale.length} chapter${stale.length > 1 ? 's' : ''}`);
+      } else if (succeeded === 0) {
+        toast.error(`All ${stale.length} chapters failed to reindex`);
+      } else {
+        const names = failedTitles.slice(0, 3).join(', ') + (failedTitles.length > 3 ? ` +${failedTitles.length - 3} more` : '');
+        toast.warning(`Reindexed ${succeeded}/${stale.length} chapters — ${failedTitles.length} failed: ${names}`);
+      }
     } finally {
       setReindexingAll(false);
       setReindexAllProgress({ done: 0, total: 0 });
@@ -1309,6 +1321,7 @@ export default function StaffDashboard() {
     }));
     try {
       await api().post(`/staff/content/chapter/${chapterId}/reindex?scope=${scope}`);
+      return true;
     } catch (err) {
       const detail = err?.response?.data?.detail || 'Reindex failed';
       toast.error(chapterTitle ? `${chapterTitle}: ${detail}` : detail);
@@ -1319,6 +1332,7 @@ export default function StaffDashboard() {
           setChapters(res.data);
         } catch { /* ignore */ }
       }
+      return false;
     }
   }, [selectedSubject]);
 
