@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     CF_VECTORIZE_API_TOKEN: Optional[str] = None
     # Workers AI token (current Cloud Run env var name; also used for embeddings)
     CF_WORKER_AI_TOKEN: Optional[str] = None
+    # Replit secret name — mapped to CF_API_TOKEN + CF_WORKER_AI_TOKEN by the
+    # root validator below. Declared here so Pydantic reads it from env vars.
+    CLOUDFLARE_API_TOKEN: Optional[str] = None
 
     # --- MongoDB Search Cache ---
     SEARCH_CACHE_ENABLED: bool = True
