@@ -1,10 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { API_BASE } from '@/utils/api';
+import { getToken } from '@/hooks/useTokenManager';
 import axios from 'axios';
 import { toast } from 'sonner';
 
-const api = () => axios.create({ baseURL: API_BASE, withCredentials: true });
+const api = () => {
+  const token = getToken();
+  return axios.create({
+    baseURL: API_BASE,
+    withCredentials: true,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+};
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 
