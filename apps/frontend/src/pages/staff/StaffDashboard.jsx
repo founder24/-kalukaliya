@@ -854,10 +854,38 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
 
 // ── Chapters view ─────────────────────────────────────────────────────────────
 
-function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBack, onEditChapter }) {
+function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBack, onEditChapter, onReindexChapter }) {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [reindexingIds, setReindexingIds] = useState({}); // { [chapterId]: true }
+  const [reindexingAll, setReindexingAll] = useState(false);
+
+  const handleRowReindex = async (ch, e) => {
+    e.stopPropagation();
+    if (reindexingIds[ch.id]) return;
+    setReindexingIds(prev => ({ ...prev, [ch.id]: true }));
+    try {
+      await onReindexChapter(ch.id, 'all');
+    } finally {
+      setReindexingIds(prev => { const n = { ...prev }; delete n[ch.id]; return n; });
+    }
+  };
+
+  const handleReindexAllStale = async () => {
+    if (reindexingAll) return;
+    const stale = chapters.filter(c => c.notes_rag_stale || c.qa_rag_stale || c.pyq_rag_stale);
+    if (stale.length === 0) return;
+    setReindexingAll(true);
+    try {
+      for (const ch of stale) {
+        await onReindexChapter(ch.id, 'all');
+      }
+      toast.success(`Reindex dispatched for ${stale.length} chapter${stale.length > 1 ? 's' : ''}`);
+    } finally {
+      setReindexingAll(false);
+    }
+  };
 
   const filtered = chapters.filter(c => {
     const matchSearch = !search       || c.title?.toLowerCase().includes(search.toLowerCase());
@@ -915,9 +943,20 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
             <span><span className="text-indigo-500 font-semibold">{stats.qaSections}</span>/{stats.total} Q&A Sections</span>
             <span><span className="text-rose-500 font-semibold">{stats.pyqPdf}</span>/{stats.total} PYQ PDF</span>
             {stats.staleRag > 0 && (
-              <span title="Chapters with RAG content updated but not yet reindexed">
-                <span className="text-amber-500 font-semibold">{stats.staleRag}</span>
-                <span className="text-amber-400"> stale RAG</span>
+              <span className="flex items-center gap-1.5">
+                <span title="Chapters with RAG content updated but not yet reindexed">
+                  <span className="text-amber-500 font-semibold">{stats.staleRag}</span>
+                  <span className="text-amber-400"> stale RAG</span>
+                </span>
+                <button
+                  onClick={handleReindexAllStale}
+                  disabled={reindexingAll}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200 transition-colors disabled:opacity-50"
+                  title="Reindex all stale chapters"
+                >
+                  {reindexingAll ? <Spinner size={3} /> : <IndexIcon />}
+                  {reindexingAll ? 'Reindexing…' : 'Reindex all stale'}
+                </button>
               </span>
             )}
           </div>
@@ -972,12 +1011,23 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
                       )}
                       {hasUnpublishedEdit && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold border border-amber-200">Unsaved</span>}
                       {anyRagStale && (
-                        <span
-                          title={`RAG stale — needs reindex: ${staleScopes}`}
-                          className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 font-semibold border border-amber-200"
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
-                          Stale RAG
+                        <span className="inline-flex items-center gap-1">
+                          <span
+                            title={`RAG stale — needs reindex: ${staleScopes}`}
+                            className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 font-semibold border border-amber-200"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
+                            Stale RAG
+                          </span>
+                          <button
+                            onClick={(e) => handleRowReindex(ch, e)}
+                            disabled={!!reindexingIds[ch.id]}
+                            className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-white font-semibold transition-colors disabled:opacity-50"
+                            title="Reindex this chapter's RAG"
+                          >
+                            {reindexingIds[ch.id] ? <Spinner size={3} /> : <IndexIcon />}
+                            {reindexingIds[ch.id] ? 'Indexing…' : 'Reindex'}
+                          </button>
                         </span>
                       )}
                     </div>
@@ -1224,6 +1274,27 @@ export default function StaffDashboard() {
     toast.success('Saved');
   }, [selectedSubject]);
 
+  const handleReindexChapter = useCallback(async (chapterId, scope = 'all') => {
+    // Optimistic: clear stale flags immediately so the badge disappears
+    setChapters(prev => prev.map(ch =>
+      ch.id === chapterId
+        ? { ...ch, notes_rag_stale: false, qa_rag_stale: false, pyq_rag_stale: false }
+        : ch
+    ));
+    try {
+      await api().post(`/staff/content/chapter/${chapterId}/reindex?scope=${scope}`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Reindex failed');
+      // Revert optimistic update by re-fetching
+      if (selectedSubject) {
+        try {
+          const res = await api().get(`/staff/content/chapters/${selectedSubject.id}`);
+          setChapters(res.data);
+        } catch { /* ignore */ }
+      }
+    }
+  }, [selectedSubject]);
+
   const handleViewChange = (v) => {
     setView(v);
     setSidebarOpen(false);
@@ -1270,7 +1341,7 @@ export default function StaffDashboard() {
             <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} onSelectSubject={selectSubject} />
           )}
           {view === 'chapters' && selectedSubject && (
-            <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} />
+            <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} onReindexChapter={handleReindexChapter} />
           )}
         </main>
       </div>
