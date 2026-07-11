@@ -107,11 +107,13 @@ vi.mock('@/components/study/HighlightSavePopover', () => ({ HighlightSavePopover
 vi.mock('@/components/study/ReadAloudButton',      () => ({ ReadAloudButton: () => null }));
 vi.mock('@/components/study/QuizModal',            () => ({ QuizModal: () => null }));
 vi.mock('@/components/ReviewPrompt',               () => ({ requestReviewPrompt: vi.fn() }));
-vi.mock('@/components/chapter/RelatedTopicsNav',   () => ({ default: () => null }));
+vi.mock('@/components/chapter/RelatedTopicsNav',   () => ({ default: vi.fn(() => null) }));
 
 // ─── import component (after all mocks are registered) ──────────────────────
 
 import ChapterPage from './ChapterPage';
+import RelatedTopicsNav from '@/components/chapter/RelatedTopicsNav';
+import { findSiblingChapters } from '@/utils/siblingChapter';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -290,5 +292,75 @@ describe('ChapterPage — ?tab= URL sharing', () => {
     expect(screen.getByTestId('notes-content')).toBeTruthy();
     expect(screen.queryByTestId('topic-answer-cards')).toBeNull();
     expect(screen.queryByTestId('pyq-viewer')).toBeNull();
+  });
+});
+
+describe('ChapterPage — sibling links preserve ?tab=', () => {
+  it('forwards the active ?tab= to prev/next sibling chapter hrefs', async () => {
+    // Return real prev/next siblings from the mock
+    vi.mocked(findSiblingChapters).mockReturnValue({
+      prev: { slug: 'chapter-1', title: 'Chapter One' },
+      next: { slug: 'chapter-3', title: 'Chapter Three' },
+    });
+
+    // Override RelatedTopicsNav to render the hrefs into the DOM
+    vi.mocked(RelatedTopicsNav).mockImplementation(({ prevChapter, nextChapter }) => (
+      <>
+        {prevChapter && (
+          <a data-testid="sibling-prev" href={prevChapter.href}>{prevChapter.title}</a>
+        )}
+        {nextChapter && (
+          <a data-testid="sibling-next" href={nextChapter.href}>{nextChapter.title}</a>
+        )}
+      </>
+    ));
+
+    const chapter = makeChapter();
+    seedPreload(chapter);
+    mockSearchParams = new URLSearchParams('tab=qa');
+
+    await act(async () => {
+      render(<ChapterPage />);
+    });
+
+    const prevHref = screen.getByTestId('sibling-prev').getAttribute('href');
+    const nextHref = screen.getByTestId('sibling-next').getAttribute('href');
+
+    expect(prevHref).toContain('chapter-1');
+    expect(prevHref).toContain('tab=qa');
+    expect(nextHref).toContain('chapter-3');
+    expect(nextHref).toContain('tab=qa');
+  });
+
+  it('omits ?tab= from sibling hrefs when no tab param is in the URL', async () => {
+    vi.mocked(findSiblingChapters).mockReturnValue({
+      prev: { slug: 'chapter-1', title: 'Chapter One' },
+      next: { slug: 'chapter-3', title: 'Chapter Three' },
+    });
+
+    vi.mocked(RelatedTopicsNav).mockImplementation(({ prevChapter, nextChapter }) => (
+      <>
+        {prevChapter && (
+          <a data-testid="sibling-prev" href={prevChapter.href}>{prevChapter.title}</a>
+        )}
+        {nextChapter && (
+          <a data-testid="sibling-next" href={nextChapter.href}>{nextChapter.title}</a>
+        )}
+      </>
+    ));
+
+    const chapter = makeChapter();
+    seedPreload(chapter);
+    // mockSearchParams is empty — no tab param
+
+    await act(async () => {
+      render(<ChapterPage />);
+    });
+
+    const prevHref = screen.getByTestId('sibling-prev').getAttribute('href');
+    const nextHref = screen.getByTestId('sibling-next').getAttribute('href');
+
+    expect(prevHref).not.toContain('tab=');
+    expect(nextHref).not.toContain('tab=');
   });
 });

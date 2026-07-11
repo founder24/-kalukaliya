@@ -1437,8 +1437,15 @@ export default function ChapterPage() {
                 data?.chapter_id,
                 chapterSlug,
               );
-              const prevLink = prev ? { title: prev.title || prev.slug, path: `${basePath}/${prev.slug}` } : null;
-              const nextLink = next ? { title: next.title || next.slug, path: `${basePath}/${next.slug}` } : null;
+              // Preserve the active ?tab= in sibling links so cross-chapter
+              // navigation keeps the user on the same tab (e.g. Q&A → Q&A).
+              // We forward whatever is in the URL directly; the data-load
+              // useEffect on the destination chapter handles the graceful
+              // fallback if that tab has no content there.
+              const _currentTab = searchParams.get('tab');
+              const _tabSuffix = _currentTab ? `?tab=${_currentTab}` : '';
+              const prevLink = prev ? { title: prev.title || prev.slug, path: `${basePath}/${prev.slug}${_tabSuffix}` } : null;
+              const nextLink = next ? { title: next.title || next.slug, path: `${basePath}/${next.slug}${_tabSuffix}` } : null;
               const seedRelated = relatedChapterTopics || [];
               const siblings = siblingsAsRelated(subjChapters, data?.chapter_id, chapterSlug, basePath, 8);
               const related = (() => {
