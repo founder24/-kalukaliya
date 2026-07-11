@@ -224,6 +224,26 @@ describe('ChapterPage — ?tab= URL sharing', () => {
     expect(screen.queryByTestId('notes-content')).toBeNull();
   });
 
+  it('renders a non-blank empty state with a View Notes button when ?tab=qa but no Q&A content', async () => {
+    // published_topics is empty (default in makeChapter)
+    const chapter = makeChapter();
+    seedPreload(chapter);
+    mockSearchParams = new URLSearchParams('tab=qa');
+
+    await act(async () => {
+      render(<ChapterPage />);
+    });
+
+    // The Q&A container must render (not blank)
+    expect(screen.getByTestId('topic-answer-cards')).toBeTruthy();
+
+    // The empty state block must be visible
+    expect(screen.getByTestId('qa-empty-state')).toBeTruthy();
+
+    // A "View Notes" escape hatch must be present
+    expect(screen.getByTestId('qa-empty-view-notes')).toBeTruthy();
+  });
+
   it('shows the PYQ viewer when ?tab=pyq and pyq_pdf_url is present', async () => {
     const chapter = makeChapter({ pyq_pdf_url: 'https://example.com/paper.pdf' });
     seedPreload(chapter);

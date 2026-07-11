@@ -1346,9 +1346,18 @@ export default function ChapterPage() {
                       );
                     })
                   ) : (
-                    <p className="text-xs text-muted-foreground py-8 text-center">
-                      {contentLang === 'as' ? 'এই অধ্যায়ৰ বাবে Q&A উপলব্ধ নহয়।' : 'No Q&A available for this chapter yet.'}
-                    </p>
+                    <div className="py-10 text-center space-y-3" data-testid="qa-empty-state">
+                      <p className="text-xs text-muted-foreground">
+                        {contentLang === 'as' ? 'এই অধ্যায়ৰ বাবে Q&A উপলব্ধ নহয়।' : 'No Q&A available for this chapter yet.'}
+                      </p>
+                      <button
+                        data-testid="qa-empty-view-notes"
+                        onClick={() => switchTab('notes')}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-100 transition-colors"
+                      >
+                        {contentLang === 'as' ? 'নোটছ চাওক' : 'View Notes'}
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
