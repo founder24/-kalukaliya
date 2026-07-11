@@ -8,10 +8,12 @@ export default function AdminFeedback({ adminToken }) {
   const [feedback, setFeedback] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all');
 
   const load = async () => {
     setLoading(true);
+    setError(null);
     try {
       const [fbRes, stRes] = await Promise.all([
         adminGetChatFeedback(adminToken),
@@ -21,6 +23,7 @@ export default function AdminFeedback({ adminToken }) {
       setStats(stRes?.data && typeof stRes.data === 'object' ? stRes.data : null);
     } catch (e) {
       console.error('Failed to load feedback', e);
+      setError(e?.response?.data?.detail || 'Failed to load feedback. Click Refresh to try again.');
     } finally {
       setLoading(false);
     }
@@ -82,6 +85,10 @@ export default function AdminFeedback({ adminToken }) {
         {loading ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
             <Loader2 size={24} className="animate-spin" style={{ color: '#7c3aed' }} />
+          </div>
+        ) : error ? (
+          <div style={{ textAlign: 'center', padding: 32, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, color: '#b91c1c', fontSize: 13 }}>
+            ⚠ {error}
           </div>
         ) : filtered.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af', fontSize: 14 }}>No feedback yet</div>

@@ -177,10 +177,12 @@ export default function useSeoManager(adminToken) {
 
   const startPolling = useCallback((jobId) => {
     if (pollRef.current) clearInterval(pollRef.current);
+    let errCount = 0;
     pollRef.current = setInterval(async () => {
       try {
         const res = await adminSeoJobStatus(adminToken, jobId);
         const job = res.data;
+        errCount = 0;
         setActiveJob(job);
         if (job.status === 'done' || job.status === 'error') {
           clearInterval(pollRef.current);
@@ -189,8 +191,13 @@ export default function useSeoManager(adminToken) {
           if (insights) loadInsights();
         }
       } catch {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
+        // Tolerate up to 4 consecutive network failures before stopping.
+        errCount += 1;
+        if (errCount >= 4) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          toast.error('Lost connection to SEO job — check the pipeline tab.');
+        }
       }
     }, 2000);
   }, [adminToken, load, insights, loadInsights]);
@@ -199,10 +206,12 @@ export default function useSeoManager(adminToken) {
 
   const pollSubjectJob = useCallback((subjectId, jobId) => {
     if (subjectPollsRef.current[subjectId]) clearInterval(subjectPollsRef.current[subjectId]);
+    let errCount = 0;
     subjectPollsRef.current[subjectId] = setInterval(async () => {
       try {
         const res = await adminSeoJobStatus(adminToken, jobId);
         const job = res.data;
+        errCount = 0;
         setSubjectJobs(prev => ({ ...prev, [subjectId]: job }));
         if (job.status === 'done' || job.status === 'error') {
           clearInterval(subjectPollsRef.current[subjectId]);
@@ -211,8 +220,12 @@ export default function useSeoManager(adminToken) {
           load();
         }
       } catch {
-        clearInterval(subjectPollsRef.current[subjectId]);
-        delete subjectPollsRef.current[subjectId];
+        // Tolerate up to 4 consecutive failures before stopping subject poll.
+        errCount += 1;
+        if (errCount >= 4) {
+          clearInterval(subjectPollsRef.current[subjectId]);
+          delete subjectPollsRef.current[subjectId];
+        }
       }
     }, 2500);
   }, [adminToken, loadCoverage, load]);

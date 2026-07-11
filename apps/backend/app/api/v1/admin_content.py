@@ -2072,6 +2072,14 @@ async def upload_image(
         return {"url": blob.public_url, "filename": blob_name}
     except Exception as exc:
         logger.warning(f"GCS image upload failed: {exc} — returning data URL fallback")
+    # Only allow base64 fallback for small images (< 512 KB). Larger images
+    # stored as base64 in MongoDB documents can exceed the 16 MB BSON limit
+    # and corrupt chapter documents silently.
+    if len(data) > 512 * 1024:
+        raise HTTPException(
+            status_code=503,
+            detail="GCS is not configured and the image is too large for inline storage (max 512 KB without GCS). Configure GOOGLE_APPLICATION_CREDENTIALS_JSON to enable full image upload."
+        )
     import base64 as _b64
     b64 = _b64.b64encode(data).decode()
     return {"url": f"data:{file.content_type};base64,{b64}", "filename": blob_name}
@@ -2115,11 +2123,17 @@ async def attach_file(
     if not text:
         raise HTTPException(status_code=400, detail="No text could be extracted from the file")
     existing = chapter.rag_text_en or ""
+    # Dedup guard: if a significant leading portion of this text already
+    # exists in the RAG field (same file uploaded twice), skip the append
+    # to avoid ballooning the document with duplicate content.
+    fingerprint = text[:200].strip()
+    if fingerprint and fingerprint in existing:
+        return {"text_extracted": len(text), "appended_to": "rag_text_en", "skipped": True, "reason": "duplicate_content"}
     chapter.rag_text_en = (existing + "\n\n" + text).strip() if existing else text
     chapter.rag_updated_at = datetime.now(timezone.utc)
     chapter.updated_at = datetime.now(timezone.utc)
     await chapter.save()
-    return {"text_extracted": len(text), "appended_to": "rag_text_en"}
+    return {"text_extracted": len(text), "appended_to": "rag_text_en", "skipped": False}
 
 
 @router.post("/content/chapters/{chapter_id}/translate")
@@ -2196,6 +2210,8 @@ async def studio_parse(
             text = text.split("```json", 1)[1].split("```", 1)[0].strip()
         elif "```" in text:
             text = text.split("```", 1)[1].split("```", 1)[0].strip()
+        if not text:
+            raise ValueError("AI returned an empty response")
         blocks = _json.loads(text)
         if not isinstance(blocks, list):
             blocks = []

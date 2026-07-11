@@ -68,18 +68,25 @@ function PublishJobCard({ jobId, adminToken, onComplete }) {
   const [collapsed, setCollapsed] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const pollingRef = useRef(null);
+  const errorCountRef = useRef(0);
   const headers = { withCredentials: true };
 
   const poll = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE}/admin/content/publish-jobs/${jobId}`, headers);
+      errorCountRef.current = 0;
       setJob(res.data);
       if (res.data?.status === 'done' || res.data?.status === 'failed') {
         clearInterval(pollingRef.current);
         if (res.data?.status === 'done' && onComplete) onComplete(jobId);
       }
     } catch {
-      clearInterval(pollingRef.current);
+      // Allow up to 4 consecutive errors before giving up — prevents a
+      // transient network blip from killing the job tracker permanently.
+      errorCountRef.current += 1;
+      if (errorCountRef.current >= 4) {
+        clearInterval(pollingRef.current);
+      }
     }
   }, [jobId]);
 
