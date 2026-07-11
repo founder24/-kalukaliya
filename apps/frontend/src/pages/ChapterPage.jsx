@@ -604,6 +604,18 @@ export default function ChapterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.chapter_id]);
 
+  // Sync the active tab into the URL (?tab=notes|qa|pyq) without adding a
+  // new history entry so that shared / bookmarked URLs open on the same tab
+  // and Back/Forward navigation honours the tab as expected.
+  const switchTab = useCallback((id) => {
+    setContentMode(id);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', id);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   const isQuestionPaper = data?.content_type === 'question_paper' || data?.content_type === 'pyq';
   const hasAssamese = isQuestionPaper ? false : (data?.has_assamese || false);
   const displayContent = useMemo(() => {
