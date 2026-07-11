@@ -224,11 +224,34 @@ steps:
         fi
 
         # INDEXNOW_INTERNAL_SECRET — internal cron auth for IndexNow (optional)
-        if gcloud secrets describe indexnow-internal-secret --project="$$PROJECT" >/dev/null 2>&1; then
-          UPDATES="$${UPDATES:+$$UPDATES,}INDEXNOW_INTERNAL_SECRET=indexnow-internal-secret:latest"
+        if gcloud secrets describe indexnow-internal-secret --project="$PROJECT" >/dev/null 2>&1; then
+          UPDATES="${UPDATES:+$UPDATES,}INDEXNOW_INTERNAL_SECRET=indexnow-internal-secret:latest"
           echo "  ✓ indexnow-internal-secret"
         else
           echo "  ⚠ indexnow-internal-secret not in SM — IndexNow cron auth disabled"
+        fi
+
+        # CF_R2_PUBLIC_URL — public base URL for R2 objects so PYQ files load without auth.
+        # Must be the r2.dev subdomain or a custom domain with public access enabled.
+        #
+        # ONE-TIME SETUP (Cloudflare dashboard):
+        #   1. Go to R2 → syrabit-assets → Settings → Public Access
+        #   2. Enable "R2.dev subdomain" (gives https://pub-<hash>.r2.dev) OR
+        #      add a custom domain (e.g. https://assets.syrabit.ai) and set that.
+        #   3. Then store that base URL in Secret Manager:
+        #      echo -n 'https://pub-XXXXXXXXXXXX.r2.dev' | \
+        #        gcloud secrets create CF_R2_PUBLIC_URL \
+        #          --replication-policy=automatic --data-file=- \
+        #          --project=blissful-acumen-495019-t6
+        #   Or update an existing secret:
+        #      echo -n 'https://pub-XXXXXXXXXXXX.r2.dev' | \
+        #        gcloud secrets versions add CF_R2_PUBLIC_URL --data-file=- \
+        #          --project=blissful-acumen-495019-t6
+        if gcloud secrets describe CF_R2_PUBLIC_URL --project="$PROJECT" >/dev/null 2>&1; then
+          UPDATES="${UPDATES:+$UPDATES,}CF_R2_PUBLIC_URL=CF_R2_PUBLIC_URL:latest"
+          echo "  ✓ CF_R2_PUBLIC_URL"
+        else
+          echo "  ⚠ CF_R2_PUBLIC_URL not in SM — PYQ uploads will return unauthenticated CF API URLs (broken for students)"
         fi
 
         if [ -n "$$UPDATES" ]; then
