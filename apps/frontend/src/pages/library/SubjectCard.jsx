@@ -66,27 +66,25 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
     const notesChs = chapters.filter(ch => !ch.content_type || !QA_TYPES.has(ch.content_type));
     const qaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type));
-    // Collect all page images from pyq_papers across every chapter (flat list)
-    const pyqPages = [];
+    // Group pyq_papers by chapter — [{id, title, pages:[]}]
+    const pyqGroups = [];
     for (const ch of chapters) {
       if (ch.pyq_papers?.length > 0) {
-        const chLabel = (isAs && ch.title_as) ? ch.title_as : ch.title;
-        ch.pyq_papers.forEach((p, idx) => {
-          pyqPages.push({
+        pyqGroups.push({
+          id: ch.id,
+          title: (isAs && ch.title_as) ? ch.title_as : ch.title,
+          pages: ch.pyq_papers.map((p, idx) => ({
             _key: p.id || `${ch.id}-${idx}`,
-            chapterTitle: chLabel,
             url: p.url,
-            title: p.title || '',
-            year: p.year,
             pageNum: idx + 1,
-          });
+          })),
         });
       }
     }
     return [
-      { key: 'notes', label: isAs ? 'টোকা' : 'Notes', chapters: notesChs, pyqPages: null, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)' },
-      { key: 'qa', label: isAs ? 'প্ৰশ্ন' : 'Questions', chapters: qaChs, pyqPages: null, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
-      { key: 'question_paper', label: isAs ? 'পিৱাইকিউ' : 'PYQs', chapters: [], pyqPages, accent: '#d97706', bg: 'rgba(217,119,6,0.08)' },
+      { key: 'notes',          label: isAs ? 'টোকা' : 'Notes',     chapters: notesChs, pyqGroups: null,  accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)' },
+      { key: 'qa',             label: isAs ? 'প্ৰশ্ন' : 'Questions', chapters: qaChs,    pyqGroups: null,  accent: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
+      { key: 'question_paper', label: isAs ? 'পিৱাইকিউ' : 'PYQs',   chapters: [],       pyqGroups,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)' },
     ];
   }, [chapters, isAs]);
 
@@ -96,6 +94,8 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
   });
   const activeSection = expandedSection ?? 'notes';
   const [showAllInSection, setShowAllInSection] = useState(false);
+  // Which PYQ chapter row is expanded (by chapter id)
+  const [expandedPyqId, setExpandedPyqId] = useState(null);
 
   const handleSectionChange = (key) => {
     setExpandedSection(key);
@@ -246,64 +246,98 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
               }
             >
               {sec.label}
-              {(() => { const n = sec.pyqPages ? sec.pyqPages.length : sec.chapters.length; return n > 0 ? <span className="ml-0.5 font-semibold" style={{ opacity: 0.7 }}>{n}</span> : null; })()}
+              {(() => { const n = sec.pyqGroups ? sec.pyqGroups.length : sec.chapters.length; return n > 0 ? <span className="ml-0.5 font-semibold" style={{ opacity: 0.7 }}>{n}</span> : null; })()}
             </button>
           ))}
         </div>
 
         {/* Active section content */}
         {SECTIONS.filter(s => s.key === activeSection).map(section => {
-          // ── PYQ section — image gallery ────────────────────────────────
+          // ── PYQ section — chapter cards each holding page images ─────
           if (section.key === 'question_paper') {
-            const pages = section.pyqPages || [];
-            if (pages.length === 0) {
+            const groups = section.pyqGroups || [];
+            if (groups.length === 0) {
               return (
                 <div key="question_paper" className="px-3 py-4 text-center text-[11px]" style={{ color: 'hsl(var(--muted-foreground))' }}>
                   {isAs ? 'পিৱাইকিউ সোনকালে আহিব' : 'PYQs coming soon'}
                 </div>
               );
             }
-            const visPages = showAllInSection ? pages : pages.slice(0, 4);
-            const moreCount = showAllInSection ? 0 : pages.length - 4;
+            const visGroups = showAllInSection ? groups : groups.slice(0, 3);
+            const moreCount = showAllInSection ? 0 : groups.length - 3;
             return (
               <div key="question_paper">
-                <div className="grid grid-cols-2 gap-1.5 p-2">
-                  {visPages.map((page, i) => (
-                    <a
-                      key={page._key}
-                      href={page.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="relative block rounded-lg overflow-hidden group"
-                      style={{ background: 'rgba(217,119,6,0.04)', border: '1px solid rgba(217,119,6,0.12)' }}
-                    >
-                      <img
-                        src={page.url}
-                        alt={`pg ${i + 1}`}
-                        className="w-full object-cover"
-                        style={{ height: 100 }}
-                        loading="lazy"
-                      />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors" />
-                      <div
-                        className="absolute bottom-0 inset-x-0 px-1.5 py-1 flex items-center justify-between"
-                        style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.55), transparent)' }}
+                {visGroups.map((grp, i) => {
+                  const isOpen = expandedPyqId === grp.id;
+                  return (
+                    <div key={grp.id} style={{ borderBottom: i < visGroups.length - 1 ? '1px solid rgba(217,119,6,0.07)' : 'none' }}>
+                      {/* Chapter row — same style as Notes/QA rows */}
+                      <button
+                        onClick={() => setExpandedPyqId(isOpen ? null : grp.id)}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-xs transition-all hover:bg-amber-50/40 text-left"
                       >
-                        <span className="text-[9px] font-bold text-white/90 truncate">
-                          {page.chapterTitle}
+                        <span
+                          className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0"
+                          style={{ background: section.bg, color: section.accent }}
+                        >
+                          {i + 1}
                         </span>
-                        <span className="text-[9px] text-white/60 shrink-0 ml-1">p{page.pageNum}</span>
-                      </div>
-                    </a>
-                  ))}
-                </div>
+                        <span className="flex-1 font-medium truncate" style={{ color: section.accent }}>
+                          {grp.title}
+                        </span>
+                        <span className="text-[9px] shrink-0 mr-0.5" style={{ color: `${section.accent}80` }}>
+                          {grp.pages.length}pg
+                        </span>
+                        <ChevronDown
+                          size={11}
+                          className="shrink-0 transition-transform duration-200"
+                          style={{ color: section.accent, transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                        />
+                      </button>
+
+                      {/* Expanded: 2-col image grid */}
+                      {isOpen && (
+                        <div
+                          className="grid grid-cols-2 gap-1.5 px-2 pb-2"
+                          style={{ background: 'rgba(217,119,6,0.03)' }}
+                        >
+                          {grp.pages.map(page => (
+                            <a
+                              key={page._key}
+                              href={page.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="relative block rounded-lg overflow-hidden group"
+                              style={{ border: '1px solid rgba(217,119,6,0.14)' }}
+                            >
+                              <img
+                                src={page.url}
+                                alt={`pg ${page.pageNum}`}
+                                className="w-full object-cover"
+                                style={{ height: 110 }}
+                                loading="lazy"
+                              />
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors" />
+                              <span
+                                className="absolute top-1 left-1 text-[9px] font-bold text-white px-1 py-0.5 rounded"
+                                style={{ background: 'rgba(0,0,0,0.45)' }}
+                              >
+                                p{page.pageNum}
+                              </span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
                 {moreCount > 0 && (
                   <button
                     onClick={() => setShowAllInSection(true)}
                     className="flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-medium transition-colors w-full"
-                    style={{ borderTop: '1px solid rgba(217,119,6,0.08)', color: section.accent }}
+                    style={{ borderTop: '1px solid rgba(217,119,6,0.07)', color: section.accent }}
                   >
-                    +{moreCount} {isAs ? 'আৰু' : 'more pages'}
+                    +{moreCount} {isAs ? 'আৰু' : 'more'}
                     <ChevronDown size={11} />
                   </button>
                 )}
