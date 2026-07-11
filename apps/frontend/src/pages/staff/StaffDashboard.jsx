@@ -896,19 +896,42 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
 
 // ── Chapters view ─────────────────────────────────────────────────────────────
 
-function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBack, onEditChapter, onReindexChapter }) {
+function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBack, onEditChapter, onReindexChapter, onChapterCreated }) {
+  const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400';
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
-  const [reindexingIds, setReindexingIds] = useState({}); // { [chapterId]: true }
+  const [reindexingIds, setReindexingIds] = useState({});
   const [reindexingAll, setReindexingAll] = useState(false);
   const [reindexAllProgress, setReindexAllProgress] = useState({ done: 0, total: 0 });
-  // Chapters that failed in the last "Reindex all stale" run — kept as full
-  // objects so the retry handler knows which scopes to target.
   const [failedReindexChapters, setFailedReindexChapters] = useState([]);
+  const [showNewChapterForm, setShowNewChapterForm] = useState(false);
+  const [newChapterForm, setNewChapterForm] = useState({ title: '', chapter_number: '', content_type: 'notes', status: 'draft' });
+  const [creatingChapter, setCreatingChapter] = useState(false);
 
   // Mode switcher: 'chapters' shows chapter list, 'pyqs' shows question paper manager
   const [mode, setMode] = useState('chapters');
+
+  const handleCreateChapter = async () => {
+    if (!newChapterForm.title.trim()) { toast.error('Title is required'); return; }
+    setCreatingChapter(true);
+    try {
+      const payload = {
+        ...newChapterForm,
+        subject_id: subject.id,
+        chapter_number: newChapterForm.chapter_number ? parseInt(newChapterForm.chapter_number) : undefined,
+      };
+      const res = await api().post('/staff/content/chapters', payload);
+      onChapterCreated?.(res.data);
+      setNewChapterForm({ title: '', chapter_number: '', content_type: 'notes', status: 'draft' });
+      setShowNewChapterForm(false);
+      toast.success('Chapter created');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Create failed');
+    } finally {
+      setCreatingChapter(false);
+    }
+  };
 
   // Clear failed list whenever the staff switches to a different subject.
   useEffect(() => { setFailedReindexChapters([]); }, [subject?.id]);
@@ -1123,7 +1146,7 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
 
       {/* ── Chapters mode ─────────────────────────────────────────────────── */}
       {mode === 'chapters' && (<>
-      <div className="flex gap-2 px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0 flex-wrap">
+      <div className="flex gap-2 px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0 flex-wrap items-center">
         <input type="search" placeholder="Search chapters…" value={search} onChange={e => setSearch(e.target.value)} className="flex-1 min-w-[140px] px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
           <option value="">All Status</option>
@@ -1141,14 +1164,85 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
           <option value="solution">Solution</option>
           <option value="reference">Reference</option>
         </select>
+        <button
+          onClick={() => setShowNewChapterForm(v => !v)}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold transition-colors flex-shrink-0 ${showNewChapterForm ? 'bg-gray-100 text-gray-600' : 'bg-violet-600 hover:bg-violet-700 text-white'}`}
+        >
+          {showNewChapterForm ? '✕' : '+ Chapter'}
+        </button>
       </div>
+
+      {/* ── New chapter inline form ── */}
+      {showNewChapterForm && (
+        <div className="px-4 sm:px-6 py-4 border-b border-violet-100 bg-violet-50/40 flex-shrink-0 space-y-3">
+          <h3 className="text-sm font-bold text-violet-700">New Chapter</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Chapter Title *</label>
+              <input
+                className={inputCls}
+                placeholder="e.g. Electric Charges and Fields"
+                value={newChapterForm.title}
+                onChange={e => setNewChapterForm(f => ({...f, title: e.target.value}))}
+                autoFocus
+                onKeyDown={e => e.key === 'Enter' && handleCreateChapter()}
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Chapter No. (auto if blank)</label>
+              <input
+                type="number"
+                min="1"
+                className={inputCls}
+                placeholder={`auto (${chapters.length + 1})`}
+                value={newChapterForm.chapter_number}
+                onChange={e => setNewChapterForm(f => ({...f, chapter_number: e.target.value}))}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Type</label>
+              <select className={`${inputCls} bg-white`} value={newChapterForm.content_type} onChange={e => setNewChapterForm(f => ({...f, content_type: e.target.value}))}>
+                <option value="notes">Notes</option>
+                <option value="qa">Q&A</option>
+                <option value="formula">Formula</option>
+                <option value="summary">Summary</option>
+                <option value="solution">Solution</option>
+                <option value="reference">Reference</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Status</label>
+              <select className={`${inputCls} bg-white`} value={newChapterForm.status} onChange={e => setNewChapterForm(f => ({...f, status: e.target.value}))}>
+                <option value="draft">Draft</option>
+                <option value="published">Published</option>
+                <option value="planned">Planned</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleCreateChapter}
+              disabled={creatingChapter}
+              className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
+            >
+              {creatingChapter ? <Spinner size={3} /> : null}
+              {creatingChapter ? 'Creating…' : 'Create chapter'}
+            </button>
+            <button onClick={() => setShowNewChapterForm(false)} className="px-4 py-2 rounded-xl text-sm font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
         {loadingChapters ? (
           <div className="flex justify-center py-16"><Spinner /></div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-16 text-gray-400 text-sm">
-            {chapters.length === 0 ? 'No chapters in this subject.' : 'No chapters match the filter.'}
+            {chapters.length === 0 ? 'No chapters yet — click "+ Chapter" to add the first one.' : 'No chapters match the filter.'}
           </div>
         ) : (
           <div className="space-y-2">
@@ -1579,12 +1673,32 @@ function SubjectPYQsView({ subjectId }) {
 
 // ── Subjects view ─────────────────────────────────────────────────────────────
 
-function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSubject }) {
+function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSubject, onSubjectCreated }) {
+  const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400';
   const [search,       setSearch]       = useState('');
   const [filterBoard,  setFilterBoard]  = useState('');
   const [filterClass,  setFilterClass]  = useState('');
   const [filterStream, setFilterStream] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [showNewForm,  setShowNewForm]  = useState(false);
+  const [newForm,      setNewForm]      = useState({ name: '', stream_id: '', status: 'draft', description: '' });
+  const [creating,     setCreating]     = useState(false);
+
+  const handleCreateSubject = async () => {
+    if (!newForm.name.trim()) { toast.error('Name is required'); return; }
+    setCreating(true);
+    try {
+      const res = await api().post('/staff/content/subjects', newForm);
+      onSubjectCreated?.(res.data);
+      setNewForm({ name: '', stream_id: '', status: 'draft', description: '' });
+      setShowNewForm(false);
+      toast.success('Subject created');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Create failed');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   // Cascade: classes visible under the selected board
   const visibleClasses = filterBoard
@@ -1625,10 +1739,85 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-4 sm:px-6 py-4 border-b border-gray-100 bg-white flex-shrink-0">
-        <h1 className="text-lg font-bold text-gray-900">Subjects</h1>
-        <p className="text-xs text-gray-400 mt-0.5">{subjects.length} total · {published} published · {drafted} drafts</p>
+      <div className="px-4 sm:px-6 py-4 border-b border-gray-100 bg-white flex-shrink-0 flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-bold text-gray-900">Subjects</h1>
+          <p className="text-xs text-gray-400 mt-0.5">{subjects.length} total · {published} published · {drafted} drafts</p>
+        </div>
+        <button
+          onClick={() => setShowNewForm(v => !v)}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold transition-colors ${showNewForm ? 'bg-gray-100 text-gray-600' : 'bg-violet-600 hover:bg-violet-700 text-white'}`}
+        >
+          {showNewForm ? '✕ Cancel' : '+ New Subject'}
+        </button>
       </div>
+
+      {/* ── New subject inline form ── */}
+      {showNewForm && (
+        <div className="px-4 sm:px-6 py-4 border-b border-violet-100 bg-violet-50/40 flex-shrink-0 space-y-3">
+          <h3 className="text-sm font-bold text-violet-700">New Subject</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Subject Name *</label>
+              <input
+                className={inputCls}
+                placeholder="e.g. Physics"
+                value={newForm.name}
+                onChange={e => setNewForm(f => ({...f, name: e.target.value}))}
+                autoFocus
+                onKeyDown={e => e.key === 'Enter' && handleCreateSubject()}
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Course / Stream</label>
+              <select
+                className={`${inputCls} bg-white`}
+                value={newForm.stream_id}
+                onChange={e => setNewForm(f => ({...f, stream_id: e.target.value}))}
+              >
+                <option value="">— select course —</option>
+                {streams.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Status</label>
+              <select
+                className={`${inputCls} bg-white`}
+                value={newForm.status}
+                onChange={e => setNewForm(f => ({...f, status: e.target.value}))}
+              >
+                <option value="draft">Draft</option>
+                <option value="published">Published</option>
+                <option value="planned">Planned</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Description</label>
+              <input
+                className={inputCls}
+                placeholder="Short description (optional)"
+                value={newForm.description}
+                onChange={e => setNewForm(f => ({...f, description: e.target.value}))}
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleCreateSubject}
+              disabled={creating}
+              className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
+            >
+              {creating ? <Spinner size={3} /> : null}
+              {creating ? 'Creating…' : 'Create subject'}
+            </button>
+            <button onClick={() => setShowNewForm(false)} className="px-4 py-2 rounded-xl text-sm font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Filter bar — Board → Class → Course → Status */}
       <div className="px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0">
@@ -1815,6 +2004,17 @@ export default function StaffDashboard() {
     }
   }, [selectedSubject]);
 
+  const handleSubjectCreated = useCallback((newSubj) => {
+    setSubjects(prev => [...prev, newSubj]);
+  }, []);
+
+  const handleChapterCreated = useCallback((newCh) => {
+    setChapters(prev => {
+      const inserted = [...prev, newCh];
+      return inserted.sort((a, b) => (a.chapter_number ?? 0) - (b.chapter_number ?? 0));
+    });
+  }, []);
+
   const handleViewChange = (v) => {
     setView(v);
     setSidebarOpen(false);
@@ -1858,10 +2058,10 @@ export default function StaffDashboard() {
 
         <main className="flex-1 overflow-hidden">
           {view === 'subjects' && (
-            <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} onSelectSubject={selectSubject} />
+            <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} onSelectSubject={selectSubject} onSubjectCreated={handleSubjectCreated} />
           )}
           {view === 'chapters' && selectedSubject && (
-            <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} onReindexChapter={handleReindexChapter} />
+            <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} onReindexChapter={handleReindexChapter} onChapterCreated={handleChapterCreated} />
           )}
         </main>
       </div>

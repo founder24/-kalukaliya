@@ -165,6 +165,57 @@ async def staff_list_subjects(
     return result
 
 
+@router.post("/content/subjects")
+async def staff_create_subject(
+    body: dict = Body(default={}),
+    _staff: User = Depends(require_staff_user),
+):
+    """Create a new subject."""
+    import re
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name is required")
+
+    slug = re.sub(r"[\s_-]+", "-", re.sub(r"[^\w\s-]", "", name.lower())).strip("-")
+
+    stream_id_str = (body.get("stream_id") or "").strip()
+    stream = None
+    if stream_id_str:
+        try:
+            stream = await Stream.get(PydanticObjectId(stream_id_str))
+        except Exception:
+            pass
+
+    subj = Subject(
+        name=name,
+        slug=slug,
+        stream_id=PydanticObjectId(stream_id_str) if stream_id_str else None,
+        status=body.get("status", "draft"),
+        description=(body.get("description") or "").strip() or None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    await subj.insert()
+
+    cls = None
+    if stream and stream.class_id:
+        try:
+            cls = await Class.get(PydanticObjectId(str(stream.class_id)))
+        except Exception:
+            pass
+
+    asyncio.create_task(_purge_library_bundle_cache())
+    return {
+        "id":          str(subj.id),
+        "name":        subj.name,
+        "status":      subj.status,
+        "stream_id":   str(subj.stream_id) if subj.stream_id else None,
+        "stream_name": stream.name         if stream         else None,
+        "class_id":    str(cls.id)         if cls            else None,
+        "board_id":    str(cls.board_id)   if cls            else None,
+    }
+
+
 # ── Chapters ──────────────────────────────────────────────────────────────────
 
 @router.get("/content/chapters/{subject_id}")
@@ -230,6 +281,76 @@ async def staff_list_chapters(
         }
         for ch in chapters
     ]
+
+
+@router.post("/content/chapters")
+async def staff_create_chapter(
+    body: dict = Body(default={}),
+    _staff: User = Depends(require_staff_user),
+):
+    """Create a new chapter under a subject."""
+    import re
+    title = (body.get("title") or "").strip()
+    subject_id_str = (body.get("subject_id") or "").strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title is required")
+    if not subject_id_str:
+        raise HTTPException(status_code=422, detail="subject_id is required")
+
+    try:
+        subject_oid = PydanticObjectId(subject_id_str)
+    except Exception:
+        raise HTTPException(status_code=422, detail="Invalid subject_id")
+
+    # Auto-assign chapter_number if not provided
+    chapter_number = body.get("chapter_number")
+    if not chapter_number:
+        existing = await Chapter.find({"subject_id": subject_oid}).to_list(length=500)
+        chapter_number = (max((ch.chapter_number for ch in existing), default=0) + 1) if existing else 1
+
+    slug = re.sub(r"[\s_-]+", "-", re.sub(r"[^\w\s-]", "", title.lower())).strip("-")
+
+    chapter = Chapter(
+        title=title,
+        subject_id=subject_oid,
+        slug=slug,
+        chapter_number=int(chapter_number),
+        content_type=body.get("content_type", "notes"),
+        status=body.get("status", "draft"),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    await chapter.insert()
+    asyncio.create_task(_purge_library_bundle_cache())
+
+    return {
+        "id":               str(chapter.id),
+        "title":            chapter.title,
+        "title_as":         None,
+        "status":           chapter.status,
+        "content_type":     chapter.content_type,
+        "chapter_number":   chapter.chapter_number,
+        "has_content_en":       False,
+        "has_content_as":       False,
+        "has_notes_en":         False,
+        "has_qa_en":            False,
+        "has_qa_as":            False,
+        "has_rag_en":           False,
+        "has_rag_as":           False,
+        "has_rag_sections":     False,
+        "has_qa_rag_sections":  False,
+        "has_pyq_pdf":          False,
+        "has_pyq_papers":       False,
+        "pyq_papers_count":     0,
+        "word_count":           None,
+        "content_saved_at":     None,
+        "rag_updated_at":       None,
+        "rag_indexed_at":       None,
+        "published_at":         None,
+        "notes_rag_stale":      False,
+        "qa_rag_stale":         False,
+        "pyq_rag_stale":        False,
+    }
 
 
 @router.get("/content/chapter/{chapter_id}")
