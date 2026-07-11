@@ -64,6 +64,7 @@ from app.api.v1 import (
     public_content,
     changelog,
     payments,
+    staff_content,
 )
 from app.api.webhooks import razorpay
 
@@ -504,6 +505,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_seo_advanced.router, prefix="/api/v1/admin", tags=["Admin SEO Advanced"])
     app.include_router(admin_documents.router, prefix="/api/v1/admin", tags=["Admin Documents"])
     app.include_router(public_documents.router, prefix="/api/v1", tags=["Documents"])
+    app.include_router(staff_content.router, prefix="/api/v1", tags=["Staff"])
 
     # CORS middleware — added last so it becomes the outermost layer and
     # handles OPTIONS preflight before any other middleware runs.

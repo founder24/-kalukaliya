@@ -197,6 +197,7 @@ const BOT_RENDER_SKIP_PREFIXES = [
   "/signup",
   "/profile",
   "/admin",
+  "/staff",
   "/auth",
   "/api",
   "/cms",
