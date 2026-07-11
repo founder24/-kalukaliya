@@ -1,0 +1,66 @@
+gcloud workstations clusters delete cluster-mpw78b4n \
+  --region=us-central1 \
+  --project=blissful-acumen-495019-t6
+You are about to delete cluster [cluster-mpw78b4n]
+
+Do you want to continue (Y/n)?  Y
+
+Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Delete request issued for: [cluster-mpw78b4n]
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working..Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working..Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...workingRegional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working..Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...workingRegional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+..working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+
+
+
+
+
+
+
+
+
+
+
+
+
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809810777-6565d961e4414-050c6003-58bf981d] to complete...done.                                          
+Deleted cluster [cluster-mpw78b4n].
+founder@cloudshell:~ (blissful-acumen-495019-t6)$ 
+
+
+
+
+
+
+
+
+
+
