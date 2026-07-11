@@ -2,19 +2,63 @@
 Staff content API — authenticated with regular user JWT (role=staff|admin).
 Provides subject/chapter navigation and full chapter content + RAG editing.
 """
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 from app.api.v1.auth import get_current_user
+from app.config import settings
 from app.models.content import Board, Chapter, Class, Stream, Subject
 from app.models.user import User
 
 import logging
 logger = logging.getLogger(__name__)
+
+
+# ── CF cache purge helper ─────────────────────────────────────────────────────
+
+async def _purge_library_bundle_cache() -> None:
+    """
+    Fire-and-forget purge of the CF CDN cache for all library-bundle variants.
+    Requires CF_ZONE_ID and CF_API_TOKEN in settings; silently skips if absent.
+    """
+    zone_id = getattr(settings, "CF_ZONE_ID", None)
+    api_token = getattr(settings, "CF_API_TOKEN", None)
+    if not zone_id or not api_token:
+        return
+    urls = [
+        "https://api.syrabit.ai/api/v1/content/library-bundle",
+        "https://api.syrabit.ai/api/v1/content/library-bundle?slim=1",
+        "https://api.syrabit.ai/api/v1/public_content/library-bundle",
+        "https://api.syrabit.ai/api/v1/public_content/library-bundle?slim=1",
+        # Worker-proxied paths (no /v1/ prefix)
+        "https://api.syrabit.ai/api/content/library-bundle",
+        "https://api.syrabit.ai/api/content/library-bundle?slim=1",
+    ]
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.post(
+                f"https://api.cloudflare.com/client/v4/zones/{zone_id}/purge_cache",
+                headers={
+                    "Authorization": f"Bearer {api_token}",
+                    "Content-Type": "application/json",
+                },
+                json={"files": urls},
+            )
+            if resp.status_code == 200:
+                logger.info("staff_content: CF library-bundle cache purged")
+            else:
+                logger.warning(
+                    "staff_content: CF cache purge returned %s — %s",
+                    resp.status_code, resp.text[:200],
+                )
+    except Exception as exc:
+        logger.warning("staff_content: CF cache purge failed: %s", exc)
 
 router = APIRouter(prefix="/staff", tags=["Staff"])
 
@@ -188,6 +232,7 @@ class ChapterEditBody(BaseModel):
     rag_text_as:      Optional[str] = None
     qa_rag_text_en:   Optional[str] = None
     qa_rag_text_as:   Optional[str] = None
+    pyq_rag_text:     Optional[str] = None
 
 
 _CONTENT_FIELDS = frozenset({
@@ -195,7 +240,7 @@ _CONTENT_FIELDS = frozenset({
     "qa_text_en", "qa_text_as",
 })
 _RAG_FIELDS = frozenset({
-    "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as",
+    "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as", "pyq_rag_text",
 })
 
 
@@ -221,7 +266,7 @@ async def staff_update_chapter(
         "meta_description", "keywords",
         "content_en", "content_as", "notes_en", "notes_as",
         "qa_text_en", "qa_text_as",
-        "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as",
+        "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as", "pyq_rag_text",
     )
     for field in all_fields:
         val = getattr(body, field, None)
@@ -238,10 +283,17 @@ async def staff_update_chapter(
 
     if content_changed:
         chapter.content_saved_at = now
+        # Recompute word_count so library page chapter cards stay in sync
+        content_en = chapter.content_en or ""
+        chapter.word_count = len(content_en.split()) if content_en.strip() else 0
     if rag_changed:
         chapter.rag_updated_at = now
     chapter.updated_at = now
     await chapter.save()
+
+    # Bust CDN cache so library page reflects the change immediately
+    asyncio.create_task(_purge_library_bundle_cache())
+
     return {"ok": True}
 
 
