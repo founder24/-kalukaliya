@@ -1,0 +1,24 @@
+C
+founder@cloudshell:~ (blissful-acumen-495019-t6)$ # 2. Delete the config
+gcloud workstations configs delete config-mpxlti9k \
+  --cluster=cluster-mpw78b4n \
+  --region=us-central1 \
+  --project=blissful-acumen-495019-t6
+You are about to delete config [config-mpxlti9k]
+
+Do you want to continue (Y/n)?  Y    
+
+Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Delete request issued for: [config-mpxlti9k]
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809658294-6565d8d078fb4-3c3b07bd-9ff4cce4] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809658294-6565d8d078fb4-3c3b07bd-9ff4cce4] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809658294-6565d8d078fb4-3c3b07bd-9ff4cce4] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809658294-6565d8d078fb4-3c3b07bd-9ff4cce4] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809658294-6565d8d078fb4-3c3b07bd-9ff4cce4] to complete...working..Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809658294-6565d8d078fb4-3c3b07bd-9ff4cce4] to complete...workingRegional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809658294-6565d8d078fb4-3c3b07bd-9ff4cce4] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809658294-6565d8d078fb4-3c3b07bd-9ff4cce4] to complete...working..Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809658294-6565d8d078fb4-3c3b07bd-9ff4cce4] to complete...workingRegional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809658294-6565d8d078fb4-3c3b07bd-9ff4cce4] to complete...done.                                          
+Deleted config [config-mpxlti9k].
+founder@cloudshell:~ (blissful-acumen-495019-t6)$ 
