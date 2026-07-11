@@ -1265,6 +1265,7 @@ export default function ChapterPage() {
                 {[
                   { id: 'notes', label: contentLang === 'as' ? 'নোটছ' : 'Notes', icon: FileText },
                   { id: 'qa', label: contentLang === 'as' ? 'প্ৰশ্নোত্তৰ' : 'Questions', icon: HelpCircle },
+                  ...(data?.pyq_pdf_url ? [{ id: 'pyq', label: contentLang === 'as' ? 'প্ৰশ্নকাকত' : 'Question Paper', icon: FileText }] : []),
                 ].map(({ id, label, icon: Icon }) => (
                   <button
                     key={id}
@@ -1321,6 +1322,49 @@ export default function ChapterPage() {
                   )}
                 </div>
               )}
+              {/* PYQ mode — uploaded question paper PDF or image */}
+              {!isQuestionPaper && contentMode === 'pyq' && data?.pyq_pdf_url && (() => {
+                const url = data.pyq_pdf_url;
+                const isImage = /\.(jpe?g|png|webp|gif|tiff?)(\?|$)/i.test(url);
+                return isImage ? (
+                  <div className="text-center py-2">
+                    <img
+                      src={url}
+                      alt={contentLang === 'as' ? `${data.title || ''} প্ৰশ্নকাকত` : `${data.title || ''} Question Paper`}
+                      className="max-w-full mx-auto rounded-lg border border-border/40 shadow-sm"
+                      style={{ maxHeight: '80vh', objectFit: 'contain' }}
+                    />
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block mt-3 text-xs text-violet-600 hover:underline"
+                    >
+                      {contentLang === 'as' ? 'নতুন টেবত খোলক' : 'Open in new tab'}
+                    </a>
+                  </div>
+                ) : (
+                  <div className="w-full">
+                    <iframe
+                      src={url}
+                      title={contentLang === 'as' ? `${data.title || ''} প্ৰশ্নকাকত` : `${data.title || ''} Question Paper`}
+                      className="w-full rounded-lg border border-border/40"
+                      style={{ height: '80vh', minHeight: '500px' }}
+                      allow="fullscreen"
+                    />
+                    <div className="text-center mt-2">
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-violet-600 hover:underline"
+                      >
+                        {contentLang === 'as' ? 'নতুন টেবত খোলক' : 'Open in new tab ↗'}
+                      </a>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Topical-mapping graph — related topic links at bottom */}

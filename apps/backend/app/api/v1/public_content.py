@@ -838,6 +838,7 @@ async def _resolve_chapter_by_slug(
         "updated_at": chapter_doc.updated_at.isoformat()
         if chapter_doc.updated_at
         else None,
+        "pyq_pdf_url": chapter_doc.pyq_pdf_url or None,
     }
 
 
