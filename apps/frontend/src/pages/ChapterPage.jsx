@@ -591,6 +591,19 @@ export default function ChapterPage() {
     return () => { cancelled = true; };
   }, [data?.chapter_id]);
 
+  // Reset content tab when the chapter changes so students never see a blank
+  // content area after cross-chapter navigation. If the URL already carries a
+  // valid ?tab= param (e.g. a shared link), honour it; otherwise fall back to
+  // 'notes'. Keyed on chapter_id so it only fires on actual chapter changes,
+  // not on unrelated re-renders.
+  useEffect(() => {
+    if (!data?.chapter_id) return;
+    const tabParam = searchParams.get('tab');
+    const validTab = ['notes', 'qa', 'pyq'].includes(tabParam) ? tabParam : 'notes';
+    setContentMode(validTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.chapter_id]);
+
   const isQuestionPaper = data?.content_type === 'question_paper' || data?.content_type === 'pyq';
   const hasAssamese = isQuestionPaper ? false : (data?.has_assamese || false);
   const displayContent = useMemo(() => {
