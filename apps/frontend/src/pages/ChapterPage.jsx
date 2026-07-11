@@ -599,7 +599,12 @@ export default function ChapterPage() {
   useEffect(() => {
     if (!data?.chapter_id) return;
     const tabParam = searchParams.get('tab');
-    const validTab = ['notes', 'qa', 'pyq'].includes(tabParam) ? tabParam : 'notes';
+    let validTab = ['notes', 'qa', 'pyq'].includes(tabParam) ? tabParam : 'notes';
+    // If a ?tab=pyq URL was shared but this chapter has no Question Paper,
+    // silently fall back to Notes so the user never sees a blank content area.
+    // We use setContentMode directly (not switchTab) so the URL param is NOT
+    // rewritten — it stays stale until the user manually switches tabs.
+    if (validTab === 'pyq' && !data?.pyq_pdf_url) validTab = 'notes';
     setContentMode(validTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.chapter_id]);
