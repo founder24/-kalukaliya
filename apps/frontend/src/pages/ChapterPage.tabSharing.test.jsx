@@ -83,8 +83,9 @@ vi.mock('@/utils/analytics', () => ({
   },
 }));
 
+let mockContentLang = 'en';
 vi.mock('@/context/LanguageContext', () => ({
-  useContentLang: () => ({ contentLang: 'en', switchLang: vi.fn() }),
+  useContentLang: () => ({ contentLang: mockContentLang, switchLang: vi.fn() }),
 }));
 
 vi.mock('@/components/ui/StickyToc',            () => ({ default: () => null }));
@@ -164,6 +165,7 @@ beforeEach(() => {
   mockSearchParams = new URLSearchParams();
   mockSetSearchParams.mockReset();
   mockApiGet.mockResolvedValue({ data: {} });
+  mockContentLang = 'en'; // reset to English before each test
 });
 
 afterEach(() => {
@@ -242,6 +244,25 @@ describe('ChapterPage — ?tab= URL sharing', () => {
 
     // A "View Notes" escape hatch must be present
     expect(screen.getByTestId('qa-empty-view-notes')).toBeTruthy();
+  });
+
+  it('renders the View Notes button with the Assamese label when contentLang is as', async () => {
+    mockContentLang = 'as';
+    const chapter = makeChapter();
+    seedPreload(chapter);
+    mockSearchParams = new URLSearchParams('tab=qa');
+
+    await act(async () => {
+      render(<ChapterPage />);
+    });
+
+    // The empty state must render
+    expect(screen.getByTestId('qa-empty-state')).toBeTruthy();
+
+    // The button must carry the Assamese label, not the English one
+    const btn = screen.getByTestId('qa-empty-view-notes');
+    expect(btn.textContent).toBe('নোটছ চাওক');
+    expect(btn.textContent).not.toBe('View Notes');
   });
 
   it('shows the PYQ viewer when ?tab=pyq and pyq_pdf_url is present', async () => {
