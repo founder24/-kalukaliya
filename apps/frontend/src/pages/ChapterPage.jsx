@@ -1322,24 +1322,39 @@ export default function ChapterPage() {
                   )}
                 </div>
               )}
-              <div data-testid="pyq-viewer">
               {/* PYQ mode — uploaded question paper PDF or image */}
-              {!isQuestionPaper && contentMode === 'pyq' && data?.pyq_pdf_url && (() => {
-                const url = data.pyq_pdf_url;
-                const isImage = /\.(jpe?g|png|webp|gif|tiff?)(\?|$)/i.test(url);
-                return isImage ? (
-                  <div className="text-center py-2">
-                    <img
-                      src={url}
-                      alt={contentLang === 'as' ? `${data.title || ''} প্ৰশ্নকাকত` : `${data.title || ''} Question Paper`}
-                      className="max-w-full mx-auto rounded-lg border border-border/40 shadow-sm"
-                      style={{ maxHeight: '80vh', objectFit: 'contain' }}
+              {!isQuestionPaper && contentMode === 'pyq' && data?.pyq_pdf_url && (
+                <div data-testid="pyq-viewer">
+                  {/\.(jpe?g|png|webp|gif|tiff?)(\?|$)/i.test(data.pyq_pdf_url) ? (
+                    <div className="text-center py-2">
+                      <img
+                        src={data.pyq_pdf_url}
+                        alt={contentLang === 'as' ? `${data.title || ''} প্ৰশ্নকাকত` : `${data.title || ''} Question Paper`}
+                        className="max-w-full mx-auto rounded-xl border border-gray-200 shadow-sm"
+                        style={{ maxHeight: '80vh', objectFit: 'contain' }}
+                      />
+                    </div>
+                  ) : (
+                    <iframe
+                      src={data.pyq_pdf_url}
+                      title={contentLang === 'as' ? `${data.title || ''} প্ৰশ্নকাকত` : `${data.title || ''} Question Paper`}
+                      className="w-full rounded-xl border border-gray-200"
+                      style={{ height: '80vh', minHeight: '500px' }}
+                      allow="fullscreen"
                     />
+                  )}
+                  <div className="mt-3 text-center">
                     <a
-                      href={url}
+                      href={data.pyq_pdf_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-block mt-3 text-xs text-violet-600 hover:underline"
+                      className="text-xs text-violet-600 hover:underline"
+                    >
+                      {contentLang === 'as' ? 'নতুন টেবত খোলক ↗' : 'Open in new tab ↗'}
+                    </a>
+                  </div>
+                </div>
+              )}
                     >
                       {contentLang === 'as' ? 'নতুন টেবত খোলক' : 'Open in new tab'}
                     </a>
