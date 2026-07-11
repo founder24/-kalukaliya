@@ -1,0 +1,50 @@
+Hi Google for Startups Cloud Program Team,
+Thank you for the follow-up. I'm writing to request a manual review and address the verification issue.
+Syrabit.ai is a fully live production EdTech platform — pages appear blank to automated crawlers because it is a React single-page application (SPA) that requires JavaScript to render. A human reviewer opening any link below in a standard browser will see the full content.
+────────────────────────────────────────
+ABOUT THE COMPANY
+────────────────────────────────────────
+• Company name: Syrabit.ai
+• Domain: syrabit.ai (matches application domain exactly)
+• Founded: 2026
+• Founder: Dipak Rai
+• Contact: founder@syrabit.ai
+Product: AI-powered educational browser for students in Assam, India preparing for AHSEC (Class 11–12), SEBA (Class 9–10), and university degree exams (B.A, B.Com, B.Sc under Gauhati University and Dibrugarh University).
+────────────────────────────────────────
+PROOF OF LIVE PRODUCT
+────────────────────────────────────────
+All links render correctly in a browser:
+• https://syrabit.ai/about — company overview, mission, founder, architecture
+• https://syrabit.ai/technology — full feature list (159 features) and tech stack
+• https://syrabit.ai/library — 109 live subjects browsable without login
+• https://syrabit.ai/pricing — active subscription plans (Free / Starter ₹99 / Pro ₹999)
+Platform stats:
+• 109 published subjects across AHSEC, SEBA and Degree syllabi
+• 163 published chapters with notes, MCQs, PYQs, and AI-generated study guides
+• Active paying users with live Razorpay payment processing (UPI, cards, international)
+• Bilingual platform: English and Assamese (অসমীয়া)
+────────────────────────────────────────
+EXISTING GOOGLE CLOUD USAGE
+────────────────────────────────────────
+Syrabit.ai is already a committed Google Cloud customer:
+• Google Cloud Run (asia-south1) — production backend serving all API traffic
+• Vertex AI Gemini 2.5 Flash — primary LLM powering the AI study assistant
+• Vertex AI Search — hybrid BM25 + vector retrieval for syllabus-grounded answers
+• Google OAuth — authentication provider for all student sign-ins
+• Google Cloud Build — CI/CD pipeline for every production deployment
+• Artifact Registry — Docker image storage for backend containers
+The $2,000 credit would go directly toward scaling these existing Google Cloud services as student adoption grows across Assam.
+────────────────────────────────────────
+STARTUP PROGRAM CREDITS ALREADY AWARDED
+────────────────────────────────────────
+Syrabit.ai has been independently verified and awarded startup credits by:
+• Cloudflare for Startups — Workers, Pages, R2 storage, KV, AI gateway, and Bot Management (serving the entire frontend and edge layer)
+• MongoDB Atlas for Startups — production database cluster credits (all chapter content, user data, and vector search indexes)
+These two programs have independently validated Syrabit.ai as a qualifying technology startup.
+────────────────────────────────────────
+ALIGNMENT WITH INDIA GOVERNMENT INITIATIVES
+────────────────────────────────────────
+Syrabit.ai directly supports:
+• National Education Policy (NEP) 2020 — AI-assisted access to curriculum content for rural and semi-urban students in Assam
+• Digital India — PWA with offline access for students in limited-connectivity areas
+• Startup India / DPIIT ecosystem — early-stage EdTech serving Northeast India's underserved academic market
