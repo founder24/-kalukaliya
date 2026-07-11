@@ -818,11 +818,15 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                     label="PYQ"
                   />
                   <div className="bg-violet-50 border border-violet-100 rounded-xl px-4 py-2.5 text-xs text-violet-700">
-                    <strong>RAG layer</strong> — the full question paper as plain text. When a student asks "give me the question paper" in chat, the AI retrieves and delivers this text verbatim. Not shown to students as a formatted document.
+                    <strong>RAG layer</strong> — the question paper as plain text for AI retrieval. English text feeds the English chat model; Assamese text feeds the Assamese chat model. Not shown to students as a formatted document.
                   </div>
                   <div>
-                    <FieldLabel chars={form?.pyq_rag_text?.length || 0}>PYQ plain text (for AI retrieval)</FieldLabel>
-                    <BigTextarea value={form?.pyq_rag_text || ''} onChange={set('pyq_rag_text')} placeholder="Paste the full question paper text here — all questions, options, and answers…" rows={18} mono />
+                    <FieldLabel chars={form?.pyq_rag_text?.length || 0}>English — PYQ plain text (for English AI chat)</FieldLabel>
+                    <BigTextarea value={form?.pyq_rag_text || ''} onChange={set('pyq_rag_text')} placeholder="Paste the full English question paper text here — all questions, options, and answers…" rows={14} mono />
+                  </div>
+                  <div>
+                    <FieldLabel chars={form?.pyq_rag_text_as?.length || 0}>Assamese — PYQ plain text (for Assamese AI chat)</FieldLabel>
+                    <BigTextarea value={form?.pyq_rag_text_as || ''} onChange={set('pyq_rag_text_as')} placeholder="অসমীয়া প্ৰশ্নকাকতৰ সম্পূৰ্ণ পাঠ এইখিনিত পেষ্ট কৰক — সকলো প্ৰশ্ন, বিকল্প আৰু উত্তৰ সহ…" rows={14} mono />
                   </div>
                 </div>
               )}

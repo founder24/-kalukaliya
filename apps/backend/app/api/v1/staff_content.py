@@ -269,6 +269,7 @@ async def staff_get_chapter(
         "qa_rag_text_en":   chapter.qa_rag_text_en  or "",
         "qa_rag_text_as":   chapter.qa_rag_text_as  or "",
         "pyq_rag_text":     chapter.pyq_rag_text    or "",
+        "pyq_rag_text_as":  chapter.pyq_rag_text_as or "",
         # Structured RAG section fields
         "rag_sections_en":    chapter.rag_sections_en    or [],
         "rag_sections_as":    chapter.rag_sections_as    or [],
@@ -315,7 +316,8 @@ class ChapterEditBody(BaseModel):
     rag_text_as:      Optional[str] = None
     qa_rag_text_en:   Optional[str] = None
     qa_rag_text_as:   Optional[str] = None
-    pyq_rag_text:     Optional[str] = None
+    pyq_rag_text:     Optional[str] = None      # PYQ RAG, English
+    pyq_rag_text_as:  Optional[str] = None      # PYQ RAG, Assamese
     # Structured RAG section fields
     rag_sections_en:    Optional[list[dict]] = None
     rag_sections_as:    Optional[list[dict]] = None
@@ -328,13 +330,16 @@ _CONTENT_FIELDS = frozenset({
     "qa_text_en", "qa_text_as",
 })
 _RAG_FIELDS = frozenset({
-    "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as", "pyq_rag_text",
+    "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as",
+    "pyq_rag_text", "pyq_rag_text_as",
 })
 # These blob fields are fallbacks for the Notes RAG layer — edits must also stamp
 # notes_rag_updated_at so the per-section stale indicator fires correctly.
 _NOTES_RAG_BLOB_FIELDS = frozenset({"rag_text_en", "rag_text_as"})
 # Same for Q&A RAG blob fallbacks.
 _QA_RAG_BLOB_FIELDS    = frozenset({"qa_rag_text_en", "qa_rag_text_as"})
+# PYQ RAG blob fields — both EN and AS stamp pyq_rag_updated_at.
+_PYQ_RAG_BLOB_FIELDS   = frozenset({"pyq_rag_text", "pyq_rag_text_as"})
 _NOTES_RAG_SECTION_FIELDS = frozenset({"rag_sections_en", "rag_sections_as"})
 _QA_RAG_SECTION_FIELDS    = frozenset({"qa_rag_sections_en", "qa_rag_sections_as"})
 
@@ -361,7 +366,8 @@ async def staff_update_chapter(
         "status", "content_type", "meta_description", "keywords",
         "content_en", "content_as", "notes_en", "notes_as",
         "qa_text_en", "qa_text_as",
-        "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as", "pyq_rag_text",
+        "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as",
+        "pyq_rag_text", "pyq_rag_text_as",
     )
     notes_sections_changed = qa_sections_changed = pyq_rag_changed = False
     notes_blob_changed = qa_blob_changed = False
@@ -375,7 +381,7 @@ async def staff_update_chapter(
                 content_changed = True
             elif field in _RAG_FIELDS:
                 rag_changed = True
-                if field == "pyq_rag_text":
+                if field in _PYQ_RAG_BLOB_FIELDS:
                     pyq_rag_changed = True
                 # Fallback blob edits must also stamp per-scope stale timestamps
                 # so the Notes / Q&A RAG sub-tab stale indicators fire correctly.
@@ -465,7 +471,7 @@ async def staff_reindex_chapter(
         elif s == "qa":
             has = bool(chapter.qa_rag_sections_en or chapter.qa_rag_sections_as or chapter.qa_rag_text_en or chapter.qa_rag_text_as)
         else:  # pyq
-            has = bool(chapter.pyq_rag_text)
+            has = bool(chapter.pyq_rag_text or chapter.pyq_rag_text_as)
         if has:
             runnable.append(s)
 
@@ -519,8 +525,8 @@ async def staff_reindex_chapter(
                 else:  # pyq
                     await ingest_chapter_v2(
                         chapter_id=ch_id,
-                        content_en=fresh.pyq_rag_text or None,
-                        content_as=None,
+                        content_en=fresh.pyq_rag_text    or None,
+                        content_as=fresh.pyq_rag_text_as or None,
                         metadata=meta,
                         source_type="pyq",
                     )
@@ -639,7 +645,7 @@ async def staff_upload_pyq(
 
 # ── File attach (RAG) ─────────────────────────────────────────────────────────
 
-_ALLOWED_RAG_FIELDS = {"rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as", "pyq_rag_text"}
+_ALLOWED_RAG_FIELDS = {"rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as", "pyq_rag_text", "pyq_rag_text_as"}
 
 
 @router.post("/content/chapter/{chapter_id}/attach-file")

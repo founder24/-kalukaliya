@@ -1269,7 +1269,7 @@ export default function ChapterPage() {
                 ].map(({ id, label, icon: Icon }) => (
                   <button
                     key={id}
-                    onClick={() => setContentMode(id)}
+                    onClick={() => switchTab(id)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
                       contentMode === id
                         ? 'text-white bg-violet-600 shadow-sm'
@@ -1322,6 +1322,7 @@ export default function ChapterPage() {
                   )}
                 </div>
               )}
+              <div data-testid="pyq-viewer">
               {/* PYQ mode — uploaded question paper PDF or image */}
               {!isQuestionPaper && contentMode === 'pyq' && data?.pyq_pdf_url && (() => {
                 const url = data.pyq_pdf_url;
@@ -1365,7 +1366,7 @@ export default function ChapterPage() {
                   </div>
                 );
               })()}
-            </div>
+              </div>            </div>
 
             {/* Topical-mapping graph — related topic links at bottom */}
             <ChapterTopicGraph

@@ -97,8 +97,9 @@ class Chapter(Document):
     # Q&A section — retrieval-ready Q&A (plain text, expanded)
     qa_rag_text_en: Optional[str] = None       # retrieval-only: expanded Q&A, English
     qa_rag_text_as: Optional[str] = None       # retrieval-only: expanded Q&A, Assamese
-    pyq_pdf_url: Optional[str] = None          # URL to PYQ PDF (user-facing)
-    pyq_rag_text: Optional[str] = None         # extracted text from PYQ PDF (retrieval-only)
+    pyq_pdf_url: Optional[str] = None          # URL to PYQ PDF/image (user-facing, language-agnostic)
+    pyq_rag_text: Optional[str] = None         # PYQ RAG plain text, English (staff-entered, retrieval-only)
+    pyq_rag_text_as: Optional[str] = None      # PYQ RAG plain text, Assamese (staff-entered, retrieval-only)
     # Structured RAG section fields — dual-layer editor (Task #5)
     rag_sections_en: list[dict] = Field(default_factory=list)     # [{title, content}] — Notes RAG, English
     rag_sections_as: list[dict] = Field(default_factory=list)     # [{title, content}] — Notes RAG, Assamese

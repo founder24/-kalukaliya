@@ -819,6 +819,7 @@ async def _resolve_chapter_by_slug(
         "content_as": content_as,
         "content_type": "chapter",
         "has_assamese": has_assamese,
+        "pyq_pdf_url": chapter_doc.pyq_pdf_url or "",
         "meta_description": chapter_doc.meta_description or "",
         "word_count": chapter_doc.word_count or len(content_en.split())
         if content_en
