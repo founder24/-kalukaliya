@@ -9,7 +9,7 @@ from typing import Optional
 
 import httpx
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 from app.api.v1.auth import get_current_user
@@ -266,6 +266,7 @@ async def staff_get_chapter(
         "keywords":         chapter.keywords,
         "notes_generated":  chapter.notes_generated,
         "pyq_pdf_url":      chapter.pyq_pdf_url or "",
+        "pyq_papers":       chapter.pyq_papers or [],
         # Content fields
         "content_en":       chapter.content_en      or "",
         "content_as":       chapter.content_as      or "",
