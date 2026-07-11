@@ -1,0 +1,15 @@
+ummary: Our investigation confirms zero expenditure for Gemini API and Gemini Enterprise Agent Platform (Vertex AI) over the last 30 days. Total account spend is instead driven by Cloud Workstations and infrastructure services within project blissful-acumen-495019-t6.
+Analysis of Gemini and Vertex AI Expenditures
+Data Scope and Period The analysis was conducted for the period of 2026-06-11 to 2026-07-11 (30 days), targeting Gemini API (Service ID: AEFD-7695-64FA) and Gemini Enterprise Agent Platform (Vertex AI) (Service ID: C7E2-9256-1C43).
+Findings for Gemini and Vertex AI Despite repeated queries across multiple dimensions including genai_model_name, genai_logical_product, and genai_serving_method, no usage or costs were identified for these services within the specified timeframe. Both token-based and non-token-based billing records returned zero results.
+Verification of Account Billing Activity To ensure data integrity, the broader billing account (ID: 01DFC6-7642B0-389E23) was audited. The account recorded a gross subtotal of 10347.13 INR and total credits of -13703.66 INR. This activity confirms that the billing systems are active, but the spend is originating from services outside of the GenAI portfolio.
+Primary Cost Drivers in Project 'blissful-acumen-495019-t6' The total account expenditure of 10347.13 INR is 100% concentrated in 'My First Project' (ID: blissful-acumen-495019-t6). The top contributors to this project's spend are:
+Cloud Workstations (SKU ID: 4528-FDD0-A2A0): 6277.68 INR (60.67% of total)
+Container Registry Vulnerability Scanning (SKU ID: 82AF-DE7A-51D0): 1683.88 INR
+Compute Engine (SKU ID: 6F81-5844-456A): 1527.53 INR
+Networking (SKU ID: E505-1604-58F8): 313.88 INR
+Cloud Run (SKU ID: 152E-C115-5142): 256.19 INR
+Conclusion There are no primary expenditure contributors for Gemini API or Gemini Enterprise Agent Platform (Vertex AI) in the last 30 days. Current billing activity is entirely infrastructure-driven.
+Thanks for your feedback.
+Ask Gemini about your AI costs…
+Gemini can make mistakes. Double-check res
