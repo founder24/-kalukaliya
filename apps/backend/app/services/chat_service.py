@@ -45,6 +45,35 @@ CONFIDENCE_HIGH = 0.80
 CONFIDENCE_MID = 0.65   # mirrors MATCH_THRESHOLD in topic_matcher
 CONFIDENCE_LOW = 0.50
 
+# Pattern for detecting syllabus / chapter-list queries.
+# These bypass the confidence gate entirely: the backend fetches the chapter
+# list for the matched subject from MongoDB and returns it as structured context.
+SYLLABUS_QUERY_PATTERN = re.compile(
+    r"("
+    # ── English ──────────────────────────────────────────────────────────────
+    r"syllabus|chapter\s*list|list\s*(of\s*)?chapters?|all\s*chapters?|"
+    r"chapter\s*names?|topics?\s*list|what\s*chapters?|"
+    r"how\s*many\s*chapters?|which\s*chapters?|"
+    r"show\s*(me\s*)?(the\s*)?(syllabus|chapters?|topics?)|"
+    r"chapters?\s*in\s*(this|the)?\s*(subject|book|course)|"
+    r"(full\s*)?syllabus\s*(of|for)?|"
+    # ── Assamese ─────────────────────────────────────────────────────────────
+    r"পাঠ্যক্ৰম|অধ্যায়\s*সমূহ|সকলো\s*অধ্যায়|অধ্যায়ৰ\s*তালিকা|"
+    r"কোনকেইটা\s*অধ্যায়|কিমান\s*অধ্যায়|বিষয়সূচী"
+    r")",
+    re.IGNORECASE,
+)
+
+# Pattern for detecting question-paper queries (supplements source_type=="pyq").
+QP_QUERY_PATTERN = re.compile(
+    r"("
+    r"question\s*paper|past\s*year|previous\s*year|pyq|exam\s*paper|"
+    r"model\s*paper|sample\s*paper|board\s*exam\s*question|"
+    r"প্ৰশ্নকাকত|আগৰ\s*বছৰৰ\s*প্ৰশ্ন|পূৰ্বৰ\s*প্ৰশ্নকাকত"
+    r")",
+    re.IGNORECASE,
+)
+
 # Pattern for detecting generic/greeting queries that should skip RAG.
 # Covers typos with repeated chars (hii, heyy, heyyy, helloo), common
 # English affirmatives / farewells, and Assamese script greetings.
@@ -77,6 +106,152 @@ GENERIC_QUERY_PATTERN = re.compile(
 
 class ChatService:
     """Encapsulates all chat business logic: RAG, LLM routing, persistence."""
+
+    # ------------------------------------------------------------------
+    # Intent detection helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def is_syllabus_query(message: str) -> bool:
+        """Return True when the student is asking for a chapter/syllabus list.
+
+        These queries bypass the normal confidence gate: the backend fetches the
+        full chapter list for the matched subject from MongoDB and returns it as
+        structured context, skipping Vectorize and web search entirely.
+        """
+        return bool(SYLLABUS_QUERY_PATTERN.search(message.strip()))
+
+    @staticmethod
+    def is_qp_query(message: str) -> bool:
+        """Return True when the student is explicitly asking for a question paper.
+
+        Combined with source_type=="pyq" (set when the student opens chat from
+        the QP tab), this routes to the pyq_rag_text fast-path.
+        """
+        return bool(QP_QUERY_PATTERN.search(message.strip()))
+
+    @staticmethod
+    async def fetch_syllabus_context(
+        subject_id: Optional[str] = None,
+        subject_slug: Optional[str] = None,
+        lang: str = "en",
+    ) -> "tuple[list[dict], Optional[str], Optional[str], int]":
+        """Fetch all published chapters for a subject and build a syllabus context block.
+
+        Subject resolution priority: subject_id → subject_slug.
+        Returns (chunks, subject_name, subject_slug, chapter_count).
+        chunks[0]["content"] is a numbered Markdown chapter list.
+        """
+        try:
+            from app.models.content import Chapter, Subject
+
+            # ── Resolve Subject document ─────────────────────────────────────
+            subject = None
+            if subject_id:
+                try:
+                    from beanie import PydanticObjectId
+                    subject = await Subject.get(PydanticObjectId(subject_id))
+                except Exception:
+                    subject = await Subject.find_one({"_id": subject_id})
+            if not subject and subject_slug:
+                subject = await Subject.find_one({"slug": subject_slug})
+
+            if not subject and not subject_id:
+                logger.debug("fetch_syllabus_context: no subject resolved")
+                return [], None, None, 0
+
+            # Build the query value: chapters store subject_id as PydanticObjectId,
+            # so we must pass an ObjectId — a plain str("6a19…") never matches.
+            from beanie import PydanticObjectId as _PIO
+            _raw_id = str(subject.id) if subject else subject_id
+            try:
+                query_id: object = _PIO(_raw_id)
+            except Exception:
+                query_id = _raw_id  # keep as-is for legacy string IDs ("s13" etc.)
+
+            # ── Fetch published chapters ──────────────────────────────────────
+            chapters = (
+                await Chapter.find({"subject_id": query_id, "status": "published"})
+                .to_list(length=300)
+            )
+            if not chapters:
+                # Fall back without status filter (dev / draft content)
+                chapters = await Chapter.find({"subject_id": query_id}).to_list(length=300)
+
+            _resolved_slug = subject.slug if subject else subject_slug
+            if not chapters:
+                return [], subject.name if subject else None, _resolved_slug, 0
+
+            # ── Build numbered chapter list ───────────────────────────────────
+            lines: list[str] = []
+            for i, ch in enumerate(chapters, 1):
+                title = (ch.title_as if lang == "as" and getattr(ch, "title_as", None) else ch.title) or ch.title
+                desc = getattr(ch, "meta_description", None) or ""
+                if desc:
+                    lines.append(f"{i}. **{title}** — {desc}")
+                else:
+                    lines.append(f"{i}. **{title}**")
+
+            syllabus_text = "\n".join(lines)
+            subject_name = subject.name if subject else None
+            resolved_slug = _resolved_slug
+
+            chunk = {
+                "id": "syllabus_intent_0",
+                "title": f"Syllabus — {subject_name or 'Subject'}",
+                "content": syllabus_text,
+                "score": 1.0,
+                "reranker_score": 1.0,
+                "url": f"/{resolved_slug}" if resolved_slug else "/",
+                "hierarchy": "",
+                "source": "syllabus_intent",
+            }
+            logger.info(
+                f"fetch_syllabus_context: subject={subject_name!r} chapters={len(chapters)}"
+            )
+            return [chunk], subject_name, resolved_slug, len(chapters)
+
+        except Exception as e:
+            logger.warning(f"fetch_syllabus_context error: {e}")
+            return [], None, None, 0
+
+    @staticmethod
+    async def fetch_qp_context(
+        chapter_id: str,
+        lang: str = "en",
+    ) -> "tuple[Optional[str], bool]":
+        """Fetch PYQ RAG text directly from the chapter document.
+
+        Returns (pyq_text, has_pdf).
+        pyq_text is None when no RAG text exists (PDF-only upload).
+        has_pdf is True when pyq_pdf_url is set.
+        """
+        try:
+            from app.models.content import Chapter
+            from beanie import PydanticObjectId
+
+            chapter = None
+            try:
+                chapter = await Chapter.get(PydanticObjectId(chapter_id))
+            except Exception:
+                chapter = await Chapter.find_one({"_id": chapter_id})
+
+            if not chapter:
+                return None, False
+
+            # Prefer language-specific RAG text, fall back to English
+            pyq_text: Optional[str] = None
+            if lang == "as" and getattr(chapter, "pyq_rag_text_as", None):
+                pyq_text = chapter.pyq_rag_text_as
+            if not pyq_text and getattr(chapter, "pyq_rag_text", None):
+                pyq_text = chapter.pyq_rag_text
+
+            has_pdf = bool(getattr(chapter, "pyq_pdf_url", None))
+            return pyq_text, has_pdf
+
+        except Exception as e:
+            logger.warning(f"fetch_qp_context error: {e}")
+            return None, False
 
     # ------------------------------------------------------------------
     # Generic query detection
@@ -217,7 +392,7 @@ class ChatService:
         """
         from app.models.source_card import SourceCard
 
-        if rag_path in ("fast", "mongodb"):
+        if rag_path in ("fast", "mongodb", "syllabus_intent", "qp_direct"):
             source_type = "rag_chapter"
         elif rag_path == "vectorize":
             source_type = "rag_vectorize"

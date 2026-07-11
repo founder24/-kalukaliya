@@ -626,6 +626,57 @@ async def chat_stream(
     tracer = get_tracer()
 
     is_generic = ChatService.is_generic_query(sanitized_message)
+    is_syllabus = not is_generic and ChatService.is_syllabus_query(sanitized_message)
+    is_qp = not is_generic and (
+        request.source_type == "pyq"
+        or ChatService.is_qp_query(sanitized_message)
+    )
+
+    # QP pre-fetch ── when the student has a chapter context, load pyq_rag_text
+    # now so we can short-circuit with a canned redirect (before building the
+    # event_stream generator) when staff uploaded only a PDF with no RAG text.
+    _qp_pyq_text: Optional[str] = None
+    if is_qp and request.chapter_id:
+        _qp_pyq_text, _has_pyq_pdf = await ChatService.fetch_qp_context(
+            request.chapter_id, detected_lang
+        )
+        if not _qp_pyq_text and _has_pyq_pdf:
+            # PDF-only upload: staff uploaded a file but entered no RAG text.
+            # Redirect the student to the chapter page QP tab where they can
+            # open the PDF directly.  When neither text nor PDF exists, fall
+            # through to the normal retrieval pipeline instead of surfacing a
+            # misleading "PDF available" message.
+            if detected_lang == "as":
+                _redir_msg = (
+                    "এই অধ্যায়ৰ বাবে প্ৰশ্নকাকত PDF হিচাপে আপলোড কৰা হৈছে। "
+                    "সম্পূৰ্ণ প্ৰশ্নকাকত চাবলৈ অধ্যায় পৃষ্ঠাৰ **প্ৰশ্নকাকত** টেব খোলক।"
+                )
+            else:
+                _redir_msg = (
+                    "The question paper for this chapter is available as a PDF. "
+                    "Open the **Question Paper** tab on the chapter page to view or download it."
+                )
+
+            async def _qp_redirect_stream(_msg=_redir_msg):
+                _lat = int((time.time() - start_time) * 1000)
+                yield f"data: {json.dumps({'content': _msg, 'done': False})}\n\n"
+                _done_evt = {
+                    "content": "", "done": True, "event": "syrabit_done",
+                    "latency_ms": _lat, "model": target_model, "lang": detected_lang,
+                    "route_trace": {
+                        "decision": "qp_redirect", "lang": detected_lang,
+                        "fallback": False, "model": "canned",
+                        "confidence_tier": "high", "topic_score": 0.0,
+                        "web_used": False, "rag_path": "qp_direct", "rag_chunks": 0,
+                    },
+                }
+                yield f"data: {json.dumps(_done_evt)}\n\n"
+
+            return StreamingResponse(
+                _qp_redirect_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
     # Retrieval state — set by the confidence-gated block below.
     context_chunks: list[dict] = []
@@ -722,128 +773,209 @@ async def chat_stream(
                 if request.source_type:
                     _card_filters["source_type"] = request.source_type
 
-                # ── Phase 2: confidence-gated retrieval ──────────────────────────────
-                if match_score >= CONFIDENCE_HIGH:
-                    # HIGH (≥ 0.80): strong match → MongoDB fast path only, web skipped.
-                    # Saves ~5s of DuckDuckGo latency on on-curriculum queries.
-                    confidence_tier = "high"
-                    logger.info(
-                        "confidence_high",
-                        extra={
-                            "user_id": user_id,
-                            "score": round(match_score, 3),
-                            "topic": topic_match.get("topic_title"),
-                        },
-                    )
-                    context_chunks = await ChatService.retrieve_context_from_chapter(
-                        chapter_id=topic_match.get("chapter_id"),
-                        chapter_title=topic_match.get("chapter_title", ""),
-                        detected_lang=detected_lang,
-                    )
-                    rag_path = "mongodb" if context_chunks else "none"
-                    if not context_chunks:
-                        # Chapter has no stored content — fall through to v2.
-                        # Reuse the pre-computed embedding to avoid a second CF call.
-                        context_chunks, rag_path = await ChatService.retrieve_context(
-                            sanitized_message,
-                            user_tier,
+                # ── Phase 2: intent routing + confidence-gated retrieval ────────────
+                #
+                # Priority order:
+                #   1. Syllabus intent  — fetch chapter list for matched subject
+                #   2. QP intent        — inject pyq_rag_text as direct context
+                #   3. Normal gate      — HIGH/MID/LOW/NONE confidence tiers
+                #
+                # Syllabus and QP intents short-circuit the confidence gate entirely;
+                # they build their own source_card and set source_card to non-None so
+                # the fallback build_source_card call at the end is skipped.
+
+                # ── 2a. Syllabus intent ───────────────────────────────────────────────
+                if is_syllabus:
+                    _subj_id = request.subject_id
+                    _subj_slug = topic_match.get("subject_slug") if topic_match else None
+                    syl_chunks, syl_name, syl_slug, syl_count = (
+                        await ChatService.fetch_syllabus_context(
+                            subject_id=_subj_id,
+                            subject_slug=_subj_slug,
                             lang=detected_lang,
-                            filters=_card_filters if _card_filters else None,
-                            embedding=query_embedding,
                         )
+                    )
+                    if syl_chunks:
+                        context_chunks = syl_chunks
+                        rag_path = "syllabus_intent"
+                        confidence_tier = "high"
+                        match_score = 1.0
+                        web_chunks = []
+                        logger.info(
+                            "syllabus_intent_hit",
+                            extra={
+                                "user_id": user_id,
+                                "subject": syl_name,
+                                "chapters": syl_count,
+                            },
+                        )
+                        from app.models.source_card import SourceCard as _SC
+                        source_card = _SC(
+                            subject_name=syl_name,
+                            subject_slug=syl_slug,
+                            source_type="rag_chapter",
+                            rag_path="syllabus_intent",
+                            confidence_tier="high",
+                            match_score=1.0,
+                            rag_chunks=syl_count,
+                        )
+                    # else: subject not resolved — fall through to normal gate
 
-                elif match_score >= CONFIDENCE_MID:
-                    # MID (0.65–0.80): good match → MongoDB fast path ONLY.
-                    # Score is strong enough; web adds noise and 200-400ms latency.
-                    confidence_tier = "mid"
-                    logger.info(
-                        "confidence_mid",
-                        extra={
-                            "user_id": user_id,
-                            "score": round(match_score, 3),
-                            "topic": topic_match.get("topic_title"),
-                        },
-                    )
-                    context_chunks = await ChatService.retrieve_context_from_chapter(
-                        chapter_id=topic_match.get("chapter_id"),
-                        chapter_title=topic_match.get("chapter_title", ""),
-                        detected_lang=detected_lang,
-                    )
+                # ── 2b. QP intent with RAG text available ────────────────────────────
+                if source_card is None and is_qp and _qp_pyq_text:
+                    context_chunks = [
+                        {
+                            "id": "pyq_direct_0",
+                            "title": f"Question Paper — {request.chapter_name or 'Chapter'}",
+                            "content": _qp_pyq_text,
+                            "score": 1.0,
+                            "reranker_score": 1.0,
+                            "url": f"/{request.chapter_id}" if request.chapter_id else "/",
+                            "hierarchy": "",
+                            "source": "qp_direct",
+                        }
+                    ]
+                    rag_path = "qp_direct"
+                    confidence_tier = "high"
+                    match_score = 1.0
                     web_chunks = []
-                    rag_path = "mongodb" if context_chunks else "none"
-
-                elif match_score >= CONFIDENCE_LOW:
-                    # LOW (0.50–0.65): weak match → full v2 pipeline + web as scaffold.
-                    # Pre-computed embedding is passed through so v2 skips re-embedding.
-                    confidence_tier = "low"
                     logger.info(
-                        "confidence_low",
-                        extra={"user_id": user_id, "score": round(match_score, 3)},
+                        "qp_direct_hit",
+                        extra={"user_id": user_id, "chapter_id": request.chapter_id},
                     )
-                    v2_result, web_result = await asyncio.gather(
-                        ChatService.retrieve_context(
-                            sanitized_message,
-                            user_tier,
-                            lang=detected_lang,
-                            filters=_card_filters if _card_filters else None,
-                            embedding=query_embedding,
-                        ),
-                        ChatService.retrieve_web_context(
-                            sanitized_message, lang=detected_lang
-                        ),
-                        return_exceptions=True,
+                    from app.models.source_card import SourceCard as _SC
+                    source_card = _SC(
+                        chapter_name=request.chapter_name,
+                        source_type="rag_chapter",
+                        rag_path="qp_direct",
+                        confidence_tier="high",
+                        match_score=1.0,
+                        rag_chunks=1,
                     )
-                    if isinstance(v2_result, Exception):
-                        logger.warning(f"retrieve_context failed: {v2_result}")
-                        context_chunks, rag_path = [], "empty"
-                    else:
-                        context_chunks, rag_path = v2_result
-                    web_chunks = web_result if not isinstance(web_result, Exception) else []
 
-                else:
-                    # NONE (< 0.50): no usable topic signal.
-                    # If the frontend provided an explicit chapter_id (card context),
-                    # use it for fast-path RAG before falling back to web-only.
-                    confidence_tier = "none"
-                    logger.info(
-                        "no_topic_match_stream",
-                        extra={"user_id": user_id, "query": sanitized_message[:30]},
-                    )
-                    if request.chapter_id:
+                # ── 2c. Normal confidence-gated retrieval ────────────────────────────
+                if source_card is None:
+                    if match_score >= CONFIDENCE_HIGH:
+                        # HIGH (≥ 0.80): strong match → MongoDB fast path only, web skipped.
+                        # Saves ~5s of DuckDuckGo latency on on-curriculum queries.
+                        confidence_tier = "high"
+                        logger.info(
+                            "confidence_high",
+                            extra={
+                                "user_id": user_id,
+                                "score": round(match_score, 3),
+                                "topic": topic_match.get("topic_title"),
+                            },
+                        )
                         context_chunks = await ChatService.retrieve_context_from_chapter(
-                            chapter_id=request.chapter_id,
-                            chapter_title=request.chapter_name or "",
+                            chapter_id=topic_match.get("chapter_id"),
+                            chapter_title=topic_match.get("chapter_title", ""),
                             detected_lang=detected_lang,
                         )
                         rag_path = "mongodb" if context_chunks else "none"
+                        if not context_chunks:
+                            # Chapter has no stored content — fall through to v2.
+                            # Reuse the pre-computed embedding to avoid a second CF call.
+                            context_chunks, rag_path = await ChatService.retrieve_context(
+                                sanitized_message,
+                                user_tier,
+                                lang=detected_lang,
+                                filters=_card_filters if _card_filters else None,
+                                embedding=query_embedding,
+                            )
+
+                    elif match_score >= CONFIDENCE_MID:
+                        # MID (0.65–0.80): good match → MongoDB fast path ONLY.
+                        # Score is strong enough; web adds noise and 200-400ms latency.
+                        confidence_tier = "mid"
                         logger.info(
-                            "card_context_rag_fallback",
+                            "confidence_mid",
                             extra={
                                 "user_id": user_id,
-                                "chapter_id": request.chapter_id,
-                                "chunks": len(context_chunks),
+                                "score": round(match_score, 3),
+                                "topic": topic_match.get("topic_title"),
                             },
                         )
-                    if not context_chunks:
-                        web_chunks = await ChatService.retrieve_web_context(
-                            sanitized_message, lang=detected_lang
+                        context_chunks = await ChatService.retrieve_context_from_chapter(
+                            chapter_id=topic_match.get("chapter_id"),
+                            chapter_title=topic_match.get("chapter_title", ""),
+                            detected_lang=detected_lang,
                         )
-                        rag_path = "web" if web_chunks else "none"
+                        web_chunks = []
+                        rag_path = "mongodb" if context_chunks else "none"
 
-                if not context_chunks and not web_chunks:
-                    logger.warning(
-                        "rag_and_web_empty",
-                        extra={"user_id": user_id, "query": sanitized_message[:50]},
-                    )
-                elif not context_chunks:
-                    logger.info(
-                        "rag_empty_using_web_fallback_stream",
-                        extra={"user_id": user_id, "web_chunks": len(web_chunks)},
-                    )
+                    elif match_score >= CONFIDENCE_LOW:
+                        # LOW (0.50–0.65): weak match → full v2 pipeline + web as scaffold.
+                        # Pre-computed embedding is passed through so v2 skips re-embedding.
+                        confidence_tier = "low"
+                        logger.info(
+                            "confidence_low",
+                            extra={"user_id": user_id, "score": round(match_score, 3)},
+                        )
+                        v2_result, web_result = await asyncio.gather(
+                            ChatService.retrieve_context(
+                                sanitized_message,
+                                user_tier,
+                                lang=detected_lang,
+                                filters=_card_filters if _card_filters else None,
+                                embedding=query_embedding,
+                            ),
+                            ChatService.retrieve_web_context(
+                                sanitized_message, lang=detected_lang
+                            ),
+                            return_exceptions=True,
+                        )
+                        if isinstance(v2_result, Exception):
+                            logger.warning(f"retrieve_context failed: {v2_result}")
+                            context_chunks, rag_path = [], "empty"
+                        else:
+                            context_chunks, rag_path = v2_result
+                        web_chunks = web_result if not isinstance(web_result, Exception) else []
 
-                source_card = await ChatService.build_source_card(
-                    topic_match, context_chunks, web_chunks, rag_path, confidence_tier
-                )
+                    else:
+                        # NONE (< 0.50): no usable topic signal.
+                        # If the frontend provided an explicit chapter_id (card context),
+                        # use it for fast-path RAG before falling back to web-only.
+                        confidence_tier = "none"
+                        logger.info(
+                            "no_topic_match_stream",
+                            extra={"user_id": user_id, "query": sanitized_message[:30]},
+                        )
+                        if request.chapter_id:
+                            context_chunks = await ChatService.retrieve_context_from_chapter(
+                                chapter_id=request.chapter_id,
+                                chapter_title=request.chapter_name or "",
+                                detected_lang=detected_lang,
+                            )
+                            rag_path = "mongodb" if context_chunks else "none"
+                            logger.info(
+                                "card_context_rag_fallback",
+                                extra={
+                                    "user_id": user_id,
+                                    "chapter_id": request.chapter_id,
+                                    "chunks": len(context_chunks),
+                                },
+                            )
+                        if not context_chunks:
+                            web_chunks = await ChatService.retrieve_web_context(
+                                sanitized_message, lang=detected_lang
+                            )
+                            rag_path = "web" if web_chunks else "none"
+
+                    if not context_chunks and not web_chunks:
+                        logger.warning(
+                            "rag_and_web_empty",
+                            extra={"user_id": user_id, "query": sanitized_message[:50]},
+                        )
+                    elif not context_chunks:
+                        logger.info(
+                            "rag_empty_using_web_fallback_stream",
+                            extra={"user_id": user_id, "web_chunks": len(web_chunks)},
+                        )
+
+                    source_card = await ChatService.build_source_card(
+                        topic_match, context_chunks, web_chunks, rag_path, confidence_tier
+                    )
 
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
