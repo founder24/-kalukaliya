@@ -394,13 +394,22 @@ export default function SubjectPage() {
   const loading = subjectLoading || chaptersLoading;
 
   const subjectSections = useMemo(() => {
-    const notesChs = chapters.filter(ch => !ch.content_type || (ch.content_type !== 'qa' && ch.content_type !== 'question_paper'));
-    const qaChs = chapters.filter(ch => ch.content_type === 'qa');
-    const pyqChs = chapters.filter(ch => ch.content_type === 'question_paper');
+    const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
+    const notesChs = chapters.filter(ch => !ch.content_type || !QA_TYPES.has(ch.content_type));
+    const qaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type));
+    // Flatten all pyq_papers images across every chapter
+    const pyqPages = [];
+    for (const ch of chapters) {
+      if (ch.pyq_papers?.length > 0) {
+        ch.pyq_papers.forEach((p, idx) => {
+          pyqPages.push({ _key: p.id || `${ch.id}-${idx}`, chapterTitle: ch.title, url: p.url, pageNum: idx + 1 });
+        });
+      }
+    }
     return [
-      { key: 'notes', label: 'Notes', chapters: notesChs, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
-      { key: 'qa', label: 'Questions', chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
-      { key: 'question_paper', label: 'PYQs', chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
+      { key: 'notes',           label: 'Notes',     chapters: notesChs, pyqPages: null,  accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
+      { key: 'qa',              label: 'Questions',  chapters: qaChs,    pyqPages: null,  accent: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' },
+      { key: 'question_paper',  label: 'PYQs',       chapters: [],       pyqPages,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.25)' },
     ];
   }, [chapters]);
 
@@ -567,7 +576,7 @@ export default function SubjectPage() {
                 }
               >
                 <span>{sec.label}</span>
-                {sec.chapters.length > 0 && (
+                {(() => { const n = sec.pyqPages ? sec.pyqPages.length : sec.chapters.length; return n > 0 ? (
                   <span
                     className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
                     style={{
@@ -575,16 +584,59 @@ export default function SubjectPage() {
                       color: activeSectionKey === sec.key ? sec.accent : 'hsl(var(--muted-foreground))',
                     }}
                   >
-                    {sec.chapters.length}
+                    {n}
                   </span>
-                )}
+                ) : null; })()}
               </button>
             ))}
           </div>
         )}
 
-        {/* Chapters accordion — filtered by active section */}
-        <LegacyAccordion subject={subject} subjectId={subjectId} chapters={filteredChapters} sectionKey={activeSectionKey} />
+        {/* PYQ section — image gallery of uploaded page scans */}
+        {activeSectionKey === 'question_paper' ? (
+          (() => {
+            const pages = activeSecObj?.pyqPages || [];
+            if (pages.length === 0) return (
+              <div className="text-center py-12 space-y-3" style={{ color: '#999' }}>
+                <FileText size={32} className="mx-auto opacity-20" />
+                <p className="text-sm">PYQs will be added here once available.</p>
+              </div>
+            );
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {pages.map((page, i) => (
+                  <a
+                    key={page._key}
+                    href={page.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="relative block rounded-xl overflow-hidden group"
+                    style={{ border: '1px solid rgba(217,119,6,0.15)', background: 'rgba(217,119,6,0.03)' }}
+                  >
+                    <img
+                      src={page.url}
+                      alt={`Page ${page.pageNum}`}
+                      className="w-full object-cover"
+                      style={{ height: 140 }}
+                      loading="lazy"
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors" />
+                    <div
+                      className="absolute bottom-0 inset-x-0 px-2 py-1.5 flex items-end justify-between"
+                      style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.6), transparent)' }}
+                    >
+                      <span className="text-[10px] font-medium text-white/80 truncate leading-tight">{page.chapterTitle}</span>
+                      <span className="text-[10px] text-white/50 shrink-0 ml-1">p{page.pageNum}</span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            );
+          })()
+        ) : (
+          /* Chapters accordion — filtered by active section */
+          <LegacyAccordion subject={subject} subjectId={subjectId} chapters={filteredChapters} sectionKey={activeSectionKey} />
+        )}
 
         {/* Full Syllabus — always visible, all chapters, Notes/Q&A deep links (SEO/GEO crawlable) */}
         {chapters.length > 0 && subject?.slug && (

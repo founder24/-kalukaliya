@@ -263,6 +263,15 @@ async def get_library_bundle(
                             "has_assamese": bool(ch.notes_as or ch.content_as),
                             "has_qa": bool(ch.qa_text_en or ch.qa_text_as),
                             "status": ch.status,
+                            "pyq_papers": [
+                                {
+                                    "id":  p.get("id", ""),
+                                    "title": p.get("title", ""),
+                                    "year": p.get("year"),
+                                    "url": p.get("url", ""),
+                                }
+                                for p in (ch.pyq_papers or [])
+                            ],
                         }
                         chapter_list.append(ch_data)
 

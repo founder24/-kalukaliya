@@ -657,6 +657,97 @@ async def staff_upload_pyq(
     return {"ok": True, "pyq_pdf_url": public_url, "key": key}
 
 
+# ── Multi-image PYQ papers ────────────────────────────────────────────────────
+
+_ALLOWED_IMAGE_TYPES = frozenset({
+    "image/jpeg", "image/png", "image/webp", "image/gif",
+})
+_IMAGE_EXT_MAP = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg",
+    "png": "image/png", "webp": "image/webp", "gif": "image/gif",
+}
+
+
+@router.post("/content/chapter/{chapter_id}/pyq-papers")
+async def staff_add_pyq_paper(
+    chapter_id: str,
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    year: Optional[int] = Form(None),
+    _staff: User = Depends(require_staff_user),
+):
+    """
+    Upload a single page image and append it to the chapter's pyq_papers list.
+    Only image files are accepted (no PDF). Call once per page in page order.
+    """
+    from uuid import uuid4
+
+    try:
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    except Exception:
+        chapter = None
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 20 MB)")
+
+    filename = file.filename or "page.jpg"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg"
+    ct = file.content_type or mimetypes.guess_type(filename)[0] or "image/jpeg"
+    ct = _IMAGE_EXT_MAP.get(ext, ct)
+    if ct not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Only image files are accepted (JPG, PNG, WEBP)")
+
+    paper_id = str(uuid4())
+    key = f"pyq/{chapter_id}/papers/{paper_id}.{ext}"
+    public_url = await _upload_to_r2(data, key, ct)
+
+    paper = {
+        "id": paper_id,
+        "title": (title or "").strip(),
+        "year": year,
+        "url": public_url,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    papers = list(chapter.pyq_papers or [])
+    papers.append(paper)
+    chapter.pyq_papers = papers
+    chapter.updated_at = datetime.now(timezone.utc)
+    await chapter.save()
+
+    asyncio.create_task(_purge_library_bundle_cache())
+    logger.info("staff_content: added pyq paper %s to chapter %s", paper_id, chapter_id)
+
+    return {"ok": True, "paper": paper, "pyq_papers": papers}
+
+
+@router.delete("/content/chapter/{chapter_id}/pyq-papers/{paper_id}")
+async def staff_remove_pyq_paper(
+    chapter_id: str,
+    paper_id: str,
+    _staff: User = Depends(require_staff_user),
+):
+    """Remove a page image from the chapter's pyq_papers list."""
+    try:
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    except Exception:
+        chapter = None
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    papers = [p for p in (chapter.pyq_papers or []) if p.get("id") != paper_id]
+    chapter.pyq_papers = papers
+    chapter.updated_at = datetime.now(timezone.utc)
+    await chapter.save()
+
+    asyncio.create_task(_purge_library_bundle_cache())
+
+    return {"ok": True, "pyq_papers": papers}
+
+
 # ── File attach (RAG) ─────────────────────────────────────────────────────────
 
 _ALLOWED_RAG_FIELDS = {"rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as", "pyq_rag_text", "pyq_rag_text_as"}

@@ -321,37 +321,106 @@ function QaCard({ section, index, total, onChange, onDelete, onMove }) {
 
 // ── PYQ upload area ───────────────────────────────────────────────────────────
 
-function PyqUploadArea({ pyqPdfUrl, uploading, onPickFile }) {
-  const isPdf  = pyqPdfUrl?.toLowerCase().includes('.pdf');
-  const isImg  = pyqPdfUrl && !isPdf;
+// ── Multi-image PYQ pages editor ─────────────────────────────────────────────
+
+function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
+  const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const fileRef = useRef(null);
+
+  const handlePickFile = () => {
+    if (!fileRef.current) return;
+    fileRef.current.value = '';
+    fileRef.current.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setUploading(true);
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await api().post(
+          `/staff/content/chapter/${chapterId}/pyq-papers`,
+          fd,
+          { headers: { 'Content-Type': 'multipart/form-data' } },
+        );
+        onPapersChange(res.data.pyq_papers);
+        toast.success('Page added');
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || 'Upload failed');
+      } finally {
+        setUploading(false);
+        if (fileRef.current) fileRef.current.value = '';
+      }
+    };
+    fileRef.current.click();
+  };
+
+  const handleDelete = async (paperId) => {
+    setDeletingId(paperId);
+    try {
+      const res = await api().delete(
+        `/staff/content/chapter/${chapterId}/pyq-papers/${paperId}`,
+      );
+      onPapersChange(res.data.pyq_papers);
+      toast.success('Page removed');
+    } catch {
+      toast.error('Remove failed');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="space-y-3">
-      {pyqPdfUrl ? (
-        <>
-          <div className="text-xs text-gray-500 flex items-center gap-2">
-            <span className="text-emerald-600 font-semibold">✓ File uploaded</span>
-            <a href={pyqPdfUrl} target="_blank" rel="noreferrer" className="text-violet-600 hover:underline truncate max-w-xs">{pyqPdfUrl.split('/').pop()}</a>
-          </div>
-          {isPdf && (
-            <iframe src={pyqPdfUrl} className="w-full rounded-xl border border-gray-200" style={{ height: 420 }} title="PYQ PDF preview" />
-          )}
-          {isImg && (
-            <img src={pyqPdfUrl} alt="PYQ" className="w-full rounded-xl border border-gray-200 object-contain max-h-96" />
-          )}
-          <button onClick={onPickFile} disabled={uploading}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-50">
-            {uploading ? <Spinner size={3} /> : <AttachIcon />}
-            {uploading ? 'Uploading…' : 'Change file'}
-          </button>
-        </>
-      ) : (
-        <button onClick={onPickFile} disabled={uploading}
-          className="w-full flex flex-col items-center justify-center gap-2 px-4 py-10 border-2 border-dashed border-gray-200 rounded-xl text-gray-400 hover:border-violet-300 hover:text-violet-500 transition-colors disabled:opacity-50">
-          {uploading ? <Spinner size={6} /> : <UploadIcon />}
-          <span className="text-sm font-medium">{uploading ? 'Uploading…' : 'Click to upload PDF or image'}</span>
-          <span className="text-xs opacity-60">PDF, JPG, PNG, WEBP — max 25 MB</span>
-        </button>
+      <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.webp" className="hidden" />
+
+      {/* Page grid */}
+      {papers.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {papers.map((paper, i) => (
+            <div key={paper.id} className="relative bg-white border border-gray-200 rounded-xl overflow-hidden group">
+              <img
+                src={paper.url}
+                alt={`Page ${i + 1}`}
+                className="w-full object-cover"
+                style={{ height: 160 }}
+              />
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+              <div className="absolute top-1.5 left-1.5 bg-black/50 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+                pg {i + 1}
+              </div>
+              <button
+                onClick={() => handleDelete(paper.id)}
+                disabled={deletingId === paper.id}
+                className="absolute top-1.5 right-1.5 bg-red-500 hover:bg-red-600 text-white rounded-md px-1.5 py-0.5 text-[10px] font-semibold transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+              >
+                {deletingId === paper.id ? '…' : 'Remove'}
+              </button>
+              <a
+                href={paper.url}
+                target="_blank"
+                rel="noreferrer"
+                className="absolute bottom-1.5 right-1.5 bg-black/50 hover:bg-black/70 text-white text-[9px] px-1.5 py-0.5 rounded-md transition-colors opacity-0 group-hover:opacity-100"
+              >
+                View
+              </a>
+            </div>
+          ))}
+        </div>
       )}
+
+      {/* Upload next page */}
+      <button
+        onClick={handlePickFile}
+        disabled={uploading}
+        className="w-full flex items-center justify-center gap-2 px-4 py-4 border-2 border-dashed border-amber-200 rounded-xl text-amber-500 hover:border-amber-400 hover:bg-amber-50/50 transition-colors text-sm font-medium disabled:opacity-50"
+      >
+        {uploading ? <Spinner size={4} /> : <UploadIcon />}
+        {uploading ? 'Uploading…' : papers.length > 0 ? `Add page ${papers.length + 1}` : 'Add first page'}
+      </button>
+      <p className="text-[11px] text-gray-400 text-center">
+        Images only (JPG, PNG, WEBP) · max 20 MB per page · upload in page order
+      </p>
     </div>
   );
 }
@@ -365,8 +434,7 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
   const [reindexing,setReindexing]= useState({});  // { notes: bool, qa: bool, pyq: bool }
   const [tab,       setTab]       = useState('info');
   const [subTab,    setSubTab]    = useState({ notes: 'content', questions: 'content', pyq: 'content' });
-  const [pyqUploading, setPyqUploading] = useState(false);
-  const pyqFileRef = useRef(null);
+  // pyqUploading / pyqFileRef removed — managed inside PyqPapersEditor
 
   // Load full chapter content on open
   useEffect(() => {
@@ -414,29 +482,6 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
     } finally { setReindexing(r => ({ ...r, [scope]: false })); }
   };
 
-  const handleUploadPyq = async () => {
-    if (!pyqFileRef.current) return;
-    pyqFileRef.current.onchange = async () => {
-      const file = pyqFileRef.current?.files?.[0];
-      if (!file) return;
-      setPyqUploading(true);
-      try {
-        const fd = new FormData();
-        fd.append('file', file);
-        const res = await api().post(`/staff/content/chapter/${chapterId}/upload-pyq`, fd, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-        setForm(f => ({ ...f, pyq_pdf_url: res.data.pyq_pdf_url }));
-        toast.success('PYQ file uploaded');
-      } catch (err) {
-        toast.error(err?.response?.data?.detail || 'Upload failed');
-      } finally {
-        setPyqUploading(false);
-        if (pyqFileRef.current) pyqFileRef.current.value = '';
-      }
-    };
-    pyqFileRef.current.click();
-  };
 
   // ── Section helpers ──────────────────────────────────────────────────────
 
@@ -566,7 +611,6 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                   <select value={form?.content_type || 'notes'} onChange={set('content_type')} className={`${inputCls} bg-white`}>
                     <option value="notes">Notes</option>
                     <option value="qa">Q&amp;A</option>
-                    <option value="question_paper">Question Paper</option>
                     <option value="formula">Formula</option>
                     <option value="summary">Summary</option>
                     <option value="solution">Solution</option>
@@ -591,7 +635,6 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                     ['notes_as',          'Notes AS'],
                     ['qa_text_en',        'Q&A EN'],
                     ['qa_text_as',        'Q&A AS'],
-                    ['pyq_pdf_url',       'PYQ file'],
                     ['pyq_rag_text',      'PYQ RAG'],
                     ['rag_text_en',       'RAG EN'],
                     ['rag_text_as',       'RAG AS'],
@@ -791,18 +834,17 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
           {/* ── PYQ TAB ── */}
           {tab === 'pyq' && (
             <div>
-              <input ref={pyqFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif" className="hidden" />
               <SubTabs value={subTab.pyq} onChange={v => setSubTabFor('pyq', v)} staleRag={pyqRagStale} />
 
               {subTab.pyq === 'content' && (
                 <div className="space-y-3">
-                  <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 text-xs text-blue-700">
-                    <strong>Content layer</strong> — the PDF or image shown inline to students on the library page PYQ tab. Stored in Cloudflare R2.
+                  <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-2.5 text-xs text-amber-700">
+                    <strong>Question Paper pages</strong> — upload one image per page, in order. Students see these as a scrollable gallery in the PYQs section.
                   </div>
-                  <PyqUploadArea
-                    pyqPdfUrl={form?.pyq_pdf_url}
-                    uploading={pyqUploading}
-                    onPickFile={handleUploadPyq}
+                  <PyqPapersEditor
+                    chapterId={chapterId}
+                    papers={form?.pyq_papers || []}
+                    onPapersChange={papers => setForm(f => ({ ...f, pyq_papers: papers }))}
                   />
                 </div>
               )}
