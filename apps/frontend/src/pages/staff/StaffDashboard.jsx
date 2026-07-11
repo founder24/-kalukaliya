@@ -867,7 +867,17 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
     if (reindexingIds[ch.id]) return;
     setReindexingIds(prev => ({ ...prev, [ch.id]: true }));
     try {
-      await onReindexChapter(ch.id, 'all');
+      // Reindex only the scopes that are actually stale to avoid a 422 on
+      // scopes that have no content yet. Fall back to 'all' if flags are
+      // somehow absent (e.g. legacy chapter with only rag_updated_at set).
+      const hasSpecific = ch.notes_rag_stale || ch.qa_rag_stale || ch.pyq_rag_stale;
+      if (hasSpecific) {
+        if (ch.notes_rag_stale) await onReindexChapter(ch.id, 'notes', ch.title);
+        if (ch.qa_rag_stale)    await onReindexChapter(ch.id, 'qa',    ch.title);
+        if (ch.pyq_rag_stale)   await onReindexChapter(ch.id, 'pyq',   ch.title);
+      } else {
+        await onReindexChapter(ch.id, 'all', ch.title);
+      }
     } finally {
       setReindexingIds(prev => { const n = { ...prev }; delete n[ch.id]; return n; });
     }
@@ -881,7 +891,12 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
     setReindexAllProgress({ done: 0, total: stale.length });
     try {
       for (let i = 0; i < stale.length; i++) {
-        await onReindexChapter(stale[i].id, 'all');
+        const ch = stale[i];
+        // Call only the specific stale scopes — avoids a backend 422 for
+        // chapters where one scope is stale but has no indexable content yet.
+        if (ch.notes_rag_stale) await onReindexChapter(ch.id, 'notes', ch.title);
+        if (ch.qa_rag_stale)    await onReindexChapter(ch.id, 'qa',    ch.title);
+        if (ch.pyq_rag_stale)   await onReindexChapter(ch.id, 'pyq',   ch.title);
         setReindexAllProgress({ done: i + 1, total: stale.length });
       }
       toast.success(`Reindexed ${stale.length} chapter${stale.length > 1 ? 's' : ''}`);
@@ -1282,17 +1297,21 @@ export default function StaffDashboard() {
     toast.success('Saved');
   }, [selectedSubject]);
 
-  const handleReindexChapter = useCallback(async (chapterId, scope = 'all') => {
-    // Optimistic: clear stale flags immediately so the badge disappears
-    setChapters(prev => prev.map(ch =>
-      ch.id === chapterId
-        ? { ...ch, notes_rag_stale: false, qa_rag_stale: false, pyq_rag_stale: false }
-        : ch
-    ));
+  const handleReindexChapter = useCallback(async (chapterId, scope = 'all', chapterTitle = null) => {
+    // Optimistic: clear only the stale flag(s) relevant to this scope
+    setChapters(prev => prev.map(ch => {
+      if (ch.id !== chapterId) return ch;
+      if (scope === 'all')   return { ...ch, notes_rag_stale: false, qa_rag_stale: false, pyq_rag_stale: false };
+      if (scope === 'notes') return { ...ch, notes_rag_stale: false };
+      if (scope === 'qa')    return { ...ch, qa_rag_stale: false };
+      if (scope === 'pyq')   return { ...ch, pyq_rag_stale: false };
+      return ch;
+    }));
     try {
       await api().post(`/staff/content/chapter/${chapterId}/reindex?scope=${scope}`);
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Reindex failed');
+      const detail = err?.response?.data?.detail || 'Reindex failed';
+      toast.error(chapterTitle ? `${chapterTitle}: ${detail}` : detail);
       // Revert optimistic update by re-fetching
       if (selectedSubject) {
         try {
