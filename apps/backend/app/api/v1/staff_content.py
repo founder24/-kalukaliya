@@ -9,7 +9,7 @@ from typing import Optional
 
 import httpx
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 from app.api.v1.auth import get_current_user
@@ -747,6 +747,194 @@ async def staff_remove_pyq_paper(
 
     asyncio.create_task(_purge_library_bundle_cache())
 
+    return {"ok": True, "pyq_papers": papers}
+
+
+# ── Subject-level PYQ papers ──────────────────────────────────────────────────
+
+@router.get("/content/subject/{subject_id}/pyq-papers")
+async def staff_list_subject_pyq_papers(
+    subject_id: str,
+    _staff: User = Depends(require_staff_user),
+):
+    """List all question papers for a subject."""
+    try:
+        subj = await Subject.get(PydanticObjectId(subject_id))
+    except Exception:
+        subj = None
+    if not subj:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    return {"pyq_papers": subj.pyq_papers or []}
+
+
+@router.post("/content/subject/{subject_id}/pyq-papers")
+async def staff_create_subject_pyq_paper(
+    subject_id: str,
+    body: dict = Body(default={}),
+    _staff: User = Depends(require_staff_user),
+):
+    """Create a new question paper entry (metadata only — upload pages separately)."""
+    from uuid import uuid4
+    try:
+        subj = await Subject.get(PydanticObjectId(subject_id))
+    except Exception:
+        subj = None
+    if not subj:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    if not body.get("name", "").strip():
+        raise HTTPException(status_code=422, detail="name is required")
+
+    paper = {
+        "id":          str(uuid4()),
+        "name":        body["name"].strip(),
+        "class_name":  (body.get("class_name") or "").strip(),
+        "year":        body.get("year"),
+        "description": (body.get("description") or "").strip(),
+        "pages":       [],
+        "created_at":  datetime.now(timezone.utc).isoformat(),
+    }
+    papers = list(subj.pyq_papers or [])
+    papers.append(paper)
+    subj.pyq_papers = papers
+    subj.updated_at = datetime.now(timezone.utc)
+    await subj.save()
+    asyncio.create_task(_purge_library_bundle_cache())
+    return {"ok": True, "paper": paper, "pyq_papers": papers}
+
+
+@router.patch("/content/subject/{subject_id}/pyq-papers/{paper_id}")
+async def staff_update_subject_pyq_paper(
+    subject_id: str,
+    paper_id: str,
+    body: dict = Body(default={}),
+    _staff: User = Depends(require_staff_user),
+):
+    """Update question paper metadata (name, class_name, year, description)."""
+    try:
+        subj = await Subject.get(PydanticObjectId(subject_id))
+    except Exception:
+        subj = None
+    if not subj:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    papers = list(subj.pyq_papers or [])
+    found = False
+    for p in papers:
+        if p.get("id") == paper_id:
+            if "name" in body:        p["name"]        = (body["name"] or "").strip()
+            if "class_name" in body:  p["class_name"]  = (body["class_name"] or "").strip()
+            if "year" in body:        p["year"]         = body["year"]
+            if "description" in body: p["description"]  = (body["description"] or "").strip()
+            found = True
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    subj.pyq_papers = papers
+    subj.updated_at = datetime.now(timezone.utc)
+    await subj.save()
+    asyncio.create_task(_purge_library_bundle_cache())
+    return {"ok": True, "pyq_papers": papers}
+
+
+@router.delete("/content/subject/{subject_id}/pyq-papers/{paper_id}")
+async def staff_delete_subject_pyq_paper(
+    subject_id: str,
+    paper_id: str,
+    _staff: User = Depends(require_staff_user),
+):
+    """Delete a question paper and all its page images."""
+    try:
+        subj = await Subject.get(PydanticObjectId(subject_id))
+    except Exception:
+        subj = None
+    if not subj:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    papers = [p for p in (subj.pyq_papers or []) if p.get("id") != paper_id]
+    subj.pyq_papers = papers
+    subj.updated_at = datetime.now(timezone.utc)
+    await subj.save()
+    asyncio.create_task(_purge_library_bundle_cache())
+    return {"ok": True, "pyq_papers": papers}
+
+
+@router.post("/content/subject/{subject_id}/pyq-papers/{paper_id}/pages")
+async def staff_add_subject_pyq_page(
+    subject_id: str,
+    paper_id: str,
+    file: UploadFile = File(...),
+    _staff: User = Depends(require_staff_user),
+):
+    """Upload a single page image to a question paper."""
+    from uuid import uuid4
+    try:
+        subj = await Subject.get(PydanticObjectId(subject_id))
+    except Exception:
+        subj = None
+    if not subj:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 20 MB)")
+
+    filename = file.filename or "page.jpg"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg"
+    ct  = _IMAGE_EXT_MAP.get(ext, file.content_type or "image/jpeg")
+    if ct not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Images only (JPG, PNG, WEBP)")
+
+    page_id = str(uuid4())
+    key     = f"pyq/subjects/{subject_id}/{paper_id}/{page_id}.{ext}"
+    url     = await _upload_to_r2(data, key, ct)
+    page    = {"id": page_id, "url": url, "uploaded_at": datetime.now(timezone.utc).isoformat()}
+
+    papers = list(subj.pyq_papers or [])
+    paper_found = False
+    for p in papers:
+        if p.get("id") == paper_id:
+            pgs = list(p.get("pages") or [])
+            pgs.append(page)
+            p["pages"] = pgs
+            paper_found = True
+            break
+    if not paper_found:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    subj.pyq_papers = papers
+    subj.updated_at = datetime.now(timezone.utc)
+    await subj.save()
+    asyncio.create_task(_purge_library_bundle_cache())
+    return {"ok": True, "page": page, "pyq_papers": papers}
+
+
+@router.delete("/content/subject/{subject_id}/pyq-papers/{paper_id}/pages/{page_id}")
+async def staff_remove_subject_pyq_page(
+    subject_id: str,
+    paper_id: str,
+    page_id: str,
+    _staff: User = Depends(require_staff_user),
+):
+    """Remove a page image from a question paper."""
+    try:
+        subj = await Subject.get(PydanticObjectId(subject_id))
+    except Exception:
+        subj = None
+    if not subj:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    papers = list(subj.pyq_papers or [])
+    for p in papers:
+        if p.get("id") == paper_id:
+            p["pages"] = [pg for pg in (p.get("pages") or []) if pg.get("id") != page_id]
+            break
+
+    subj.pyq_papers = papers
+    subj.updated_at = datetime.now(timezone.utc)
+    await subj.save()
+    asyncio.create_task(_purge_library_bundle_cache())
     return {"ok": True, "pyq_papers": papers}
 
 

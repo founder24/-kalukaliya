@@ -907,32 +907,8 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
   // objects so the retry handler knows which scopes to target.
   const [failedReindexChapters, setFailedReindexChapters] = useState([]);
 
-  // ── PYQ panel ────────────────────────────────────────────────────────────────
-  const [showPyqPanel, setShowPyqPanel] = useState(false);
-  const [pyqPanelChId, setPyqPanelChId] = useState(null);
-  const [pyqPanelPapers, setPyqPanelPapers] = useState([]);
-  const [pyqPanelLoading, setPyqPanelLoading] = useState(false);
-
-  const handleOpenPyqPanel = () => {
-    setShowPyqPanel(v => !v);
-    setPyqPanelChId(null);
-    setPyqPanelPapers([]);
-  };
-
-  const handleSelectPyqChapter = async (ch) => {
-    if (pyqPanelChId === ch.id) return; // already open
-    setPyqPanelChId(ch.id);
-    setPyqPanelPapers([]);
-    setPyqPanelLoading(true);
-    try {
-      const res = await api().get(`/staff/content/chapter/${ch.id}`);
-      setPyqPanelPapers(res.data.pyq_papers || []);
-    } catch {
-      toast.error('Could not load chapter PYQ data');
-    } finally {
-      setPyqPanelLoading(false);
-    }
-  };
+  // Mode switcher: 'chapters' shows chapter list, 'pyqs' shows question paper manager
+  const [mode, setMode] = useState('chapters');
 
   // Clear failed list whenever the staff switches to a different subject.
   useEffect(() => { setFailedReindexChapters([]); }, [subject?.id]);
@@ -1088,14 +1064,7 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
             <span><span className="text-amber-500 font-semibold">{stats.qa}</span>/{stats.total} Q&A</span>
             <span><span className="text-teal-500 font-semibold">{stats.ragSections}</span>/{stats.total} RAG Sections</span>
             <span><span className="text-indigo-500 font-semibold">{stats.qaSections}</span>/{stats.total} Q&A Sections</span>
-            <button
-              onClick={handleOpenPyqPanel}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-md transition-colors ${showPyqPanel ? 'bg-amber-100 text-amber-700 border border-amber-300' : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50'}`}
-              title="Manage PYQ page images for any chapter"
-            >
-              <span className="font-semibold" style={{ color: showPyqPanel ? undefined : '#f59e0b' }}>{stats.pyqPapers}</span>
-              /{stats.total} PYQ Papers
-            </button>
+            <span><span className="text-amber-500 font-semibold">{stats.pyqPapers}</span>/{stats.total} PYQ Papers</span>
             {stats.staleRag > 0 && (
               <span className="flex items-center gap-1.5">
                 <span title="Chapters with RAG content updated but not yet reindexed">
@@ -1130,83 +1099,30 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
             )}
           </div>
         )}
+
+        {/* ── Mode switcher ── */}
+        <div className="mt-3 ml-11 flex items-center gap-1.5">
+          {[
+            { key: 'chapters', label: 'Notes & Questions', accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.3)' },
+            { key: 'pyqs',     label: 'PYQs',              accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.3)'  },
+          ].map(m => (
+            <button
+              key={m.key}
+              onClick={() => setMode(m.key)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide transition-all"
+              style={mode === m.key
+                ? { background: m.bg, color: m.accent, border: `1.5px solid ${m.border}` }
+                : { background: 'transparent', color: 'hsl(var(--muted-foreground, #6b7280))', border: '1.5px solid rgba(0,0,0,0.08)' }
+              }
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* ── PYQ Panel ─────────────────────────────────────────────────────── */}
-      {showPyqPanel && (
-        <div className="border-b border-amber-100 bg-amber-50/40 flex-shrink-0" style={{ maxHeight: 360 }}>
-          {/* Panel header */}
-          <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 border-b border-amber-100">
-            <span className="text-xs font-bold text-amber-700 uppercase tracking-wide">
-              PYQ Papers — select a chapter to manage its pages
-            </span>
-            <button
-              onClick={() => setShowPyqPanel(false)}
-              className="w-6 h-6 flex items-center justify-center rounded-full text-amber-400 hover:bg-amber-100 hover:text-amber-700 transition-colors text-base leading-none"
-            >
-              ✕
-            </button>
-          </div>
-
-          {/* Two-column body */}
-          <div className="flex" style={{ height: 310 }}>
-            {/* Left — chapter picker */}
-            <div className="w-64 flex-shrink-0 overflow-y-auto border-r border-amber-100">
-              {chapters.map((ch, idx) => {
-                const isSelected = pyqPanelChId === ch.id;
-                return (
-                  <button
-                    key={ch.id}
-                    onClick={() => handleSelectPyqChapter(ch)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors text-xs"
-                    style={{
-                      borderBottom: '1px solid rgba(245,158,11,0.08)',
-                      background: isSelected ? 'rgba(245,158,11,0.12)' : 'transparent',
-                      color: isSelected ? '#b45309' : '#374151',
-                    }}
-                  >
-                    <span
-                      className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0"
-                      style={{ background: isSelected ? 'rgba(245,158,11,0.25)' : 'rgba(0,0,0,0.05)', color: isSelected ? '#b45309' : '#9ca3af' }}
-                    >
-                      {ch.chapter_number ?? idx + 1}
-                    </span>
-                    <span className="flex-1 truncate font-medium">{ch.title}</span>
-                    {ch.pyq_papers_count > 0 && (
-                      <span className="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded-full bg-amber-200 text-amber-700">
-                        {ch.pyq_papers_count}pg
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Right — editor */}
-            <div className="flex-1 overflow-y-auto px-4 py-3">
-              {!pyqPanelChId ? (
-                <div className="h-full flex flex-col items-center justify-center gap-2 text-amber-300">
-                  <span className="text-3xl">📄</span>
-                  <span className="text-xs text-amber-400">Pick a chapter on the left</span>
-                </div>
-              ) : pyqPanelLoading ? (
-                <div className="h-full flex items-center justify-center"><Spinner /></div>
-              ) : (
-                <PyqPapersEditor
-                  chapterId={pyqPanelChId}
-                  papers={pyqPanelPapers}
-                  onPapersChange={(papers) => {
-                    setPyqPanelPapers(papers);
-                    // Reflect new count on the chapter row without a full reload
-                    // (parent will refetch chapters on next navigation anyway)
-                  }}
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* ── Chapters mode ─────────────────────────────────────────────────── */}
+      {mode === 'chapters' && (<>
       <div className="flex gap-2 px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0 flex-wrap">
         <input type="search" placeholder="Search chapters…" value={search} onChange={e => setSearch(e.target.value)} className="flex-1 min-w-[140px] px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
@@ -1302,6 +1218,361 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
           </div>
         )}
       </div>
+      </>)}
+
+      {/* ── PYQs mode ──────────────────────────────────────────────────────── */}
+      {mode === 'pyqs' && <SubjectPYQsView subjectId={subject.id} />}
+    </div>
+  );
+}
+
+// ── SubjectPYQsView ───────────────────────────────────────────────────────────
+
+function SubjectPYQsView({ subjectId }) {
+  const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-400';
+  const [papers,       setPapers]       = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [showNewForm,  setShowNewForm]  = useState(false);
+  const [newForm,      setNewForm]      = useState({ name: '', class_name: '', year: new Date().getFullYear(), description: '' });
+  const [creating,     setCreating]     = useState(false);
+  const [expandedId,   setExpandedId]   = useState(null);
+  const [editingId,    setEditingId]    = useState(null);
+  const [editForm,     setEditForm]     = useState({});
+  const [saving,       setSaving]       = useState(false);
+  const [deletingId,   setDeletingId]   = useState(null);
+  const [uploadingFor, setUploadingFor] = useState(null);
+  const [removingPage, setRemovingPage] = useState(null);
+  const fileRef = useRef(null);
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    api().get(`/staff/content/subject/${subjectId}/pyq-papers`)
+      .then(r => { if (mounted) { setPapers(r.data.pyq_papers || []); setLoading(false); } })
+      .catch(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
+  }, [subjectId]);
+
+  const handleCreate = async () => {
+    if (!newForm.name.trim()) { toast.error('Name is required'); return; }
+    setCreating(true);
+    try {
+      const res = await api().post(`/staff/content/subject/${subjectId}/pyq-papers`, newForm);
+      setPapers(res.data.pyq_papers);
+      setShowNewForm(false);
+      setNewForm({ name: '', class_name: '', year: new Date().getFullYear(), description: '' });
+      setExpandedId(res.data.paper.id);
+      toast.success('Question paper created');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Create failed');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleSaveEdit = async (paperId) => {
+    setSaving(true);
+    try {
+      const res = await api().patch(`/staff/content/subject/${subjectId}/pyq-papers/${paperId}`, editForm);
+      setPapers(res.data.pyq_papers);
+      setEditingId(null);
+      toast.success('Saved');
+    } catch { toast.error('Save failed'); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (paperId) => {
+    setDeletingId(paperId);
+    try {
+      const res = await api().delete(`/staff/content/subject/${subjectId}/pyq-papers/${paperId}`);
+      setPapers(res.data.pyq_papers);
+      if (expandedId === paperId) setExpandedId(null);
+      toast.success('Deleted');
+    } catch { toast.error('Delete failed'); }
+    finally { setDeletingId(null); }
+  };
+
+  const handleUploadPage = (paperId) => {
+    if (!fileRef.current) return;
+    fileRef.current.value = '';
+    fileRef.current.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setUploadingFor(paperId);
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await api().post(
+          `/staff/content/subject/${subjectId}/pyq-papers/${paperId}/pages`,
+          fd, { headers: { 'Content-Type': 'multipart/form-data' } }
+        );
+        setPapers(res.data.pyq_papers);
+        toast.success('Page added');
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || 'Upload failed');
+      } finally {
+        setUploadingFor(null);
+        if (fileRef.current) fileRef.current.value = '';
+      }
+    };
+    fileRef.current.click();
+  };
+
+  const handleRemovePage = async (paperId, pageId) => {
+    setRemovingPage(pageId);
+    try {
+      const res = await api().delete(
+        `/staff/content/subject/${subjectId}/pyq-papers/${paperId}/pages/${pageId}`
+      );
+      setPapers(res.data.pyq_papers);
+      toast.success('Page removed');
+    } catch { toast.error('Remove failed'); }
+    finally { setRemovingPage(null); }
+  };
+
+  if (loading) return <div className="flex justify-center py-16"><Spinner /></div>;
+
+  return (
+    <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
+      <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.webp" className="hidden" />
+
+      {/* ── New paper form ── */}
+      {showNewForm ? (
+        <div className="mb-4 bg-white rounded-xl border border-amber-200 p-4 space-y-3">
+          <h3 className="text-sm font-bold text-amber-700">New Question Paper</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Paper / Chapter Name *</label>
+              <input
+                className={inputCls}
+                placeholder="e.g. Chapter 1 — Electric Charges and Fields"
+                value={newForm.name}
+                onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Class / Course</label>
+              <input
+                className={inputCls}
+                placeholder="e.g. HS 2nd Year"
+                value={newForm.class_name}
+                onChange={e => setNewForm(f => ({ ...f, class_name: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Exam Year</label>
+            <input
+              type="number"
+              className={`${inputCls} max-w-[160px]`}
+              placeholder="e.g. 2023"
+              value={newForm.year || ''}
+              onChange={e => setNewForm(f => ({ ...f, year: e.target.value ? parseInt(e.target.value) : null }))}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">
+              Description <span className="normal-case font-normal text-gray-400">(for SEO / GEO / AEO)</span>
+            </label>
+            <textarea
+              className={`${inputCls} resize-none`}
+              rows={3}
+              placeholder="Describe this paper for search engines and AI answers. e.g. AHSEC HS 2nd Year Physics Chapter 1 PYQ 2023 — Electric Charges and Fields with solutions."
+              value={newForm.description}
+              onChange={e => setNewForm(f => ({ ...f, description: e.target.value }))}
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleCreate}
+              disabled={creating}
+              className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-colors disabled:opacity-50"
+            >
+              {creating ? <Spinner size={3} /> : null}
+              {creating ? 'Creating…' : 'Create paper'}
+            </button>
+            <button
+              onClick={() => setShowNewForm(false)}
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setShowNewForm(true)}
+          className="mb-4 w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-amber-200 rounded-xl text-sm font-semibold text-amber-500 hover:border-amber-400 hover:bg-amber-50/50 transition-colors"
+        >
+          + New question paper
+        </button>
+      )}
+
+      {/* ── Papers list ── */}
+      {papers.length === 0 && !showNewForm ? (
+        <div className="text-center py-16 text-gray-400 text-sm">
+          No question papers yet — click the button above to add the first one.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {papers.map((paper, idx) => {
+            const isExpanded = expandedId === paper.id;
+            const isEditing  = editingId  === paper.id;
+            const pages      = paper.pages || [];
+
+            return (
+              <div key={paper.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                {/* ── Row header ── */}
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <span className="w-7 h-7 rounded-lg bg-amber-50 border border-amber-100 flex items-center justify-center text-xs font-bold text-amber-600 shrink-0">
+                    {idx + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-gray-900">{paper.name}</span>
+                      {paper.year && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold border border-amber-200">
+                          {paper.year}
+                        </span>
+                      )}
+                      {paper.class_name && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium border border-blue-100">
+                          {paper.class_name}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-gray-400">
+                        {pages.length} page{pages.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    {paper.description && !isExpanded && (
+                      <p className="text-[11px] text-gray-400 truncate mt-0.5">{paper.description}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => {
+                        if (isEditing) { setEditingId(null); return; }
+                        setEditingId(paper.id);
+                        setEditForm({ name: paper.name, class_name: paper.class_name || '', year: paper.year, description: paper.description || '' });
+                      }}
+                      className="px-2 py-1 rounded-lg text-[11px] font-semibold text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                    >
+                      {isEditing ? 'Close' : 'Edit'}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(paper.id)}
+                      disabled={!!deletingId}
+                      className="px-2 py-1 rounded-lg text-[11px] font-semibold text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-40"
+                    >
+                      {deletingId === paper.id ? '…' : 'Del'}
+                    </button>
+                    <button
+                      onClick={() => setExpandedId(isExpanded ? null : paper.id)}
+                      className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
+                      title={isExpanded ? 'Collapse' : 'View / upload pages'}
+                    >
+                      <ArrowDownIcon style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.18s' }} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── Edit metadata form ── */}
+                {isEditing && (
+                  <div className="px-4 pb-3 border-t border-gray-100 bg-gray-50 space-y-2 pt-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-gray-400 mb-1 uppercase tracking-wide">Name</label>
+                        <input className={inputCls} value={editForm.name} onChange={e => setEditForm(f => ({...f, name: e.target.value}))} />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-gray-400 mb-1 uppercase tracking-wide">Class / Course</label>
+                        <input className={inputCls} value={editForm.class_name} onChange={e => setEditForm(f => ({...f, class_name: e.target.value}))} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-400 mb-1 uppercase tracking-wide">Year</label>
+                      <input
+                        type="number"
+                        className={`${inputCls} max-w-[160px]`}
+                        value={editForm.year || ''}
+                        onChange={e => setEditForm(f => ({...f, year: e.target.value ? parseInt(e.target.value) : null}))}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-400 mb-1 uppercase tracking-wide">
+                        Description <span className="normal-case font-normal">(SEO / GEO / AEO)</span>
+                      </label>
+                      <textarea
+                        className={`${inputCls} resize-none`}
+                        rows={2}
+                        value={editForm.description}
+                        onChange={e => setEditForm(f => ({...f, description: e.target.value}))}
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleSaveEdit(paper.id)}
+                        disabled={saving}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                      >
+                        {saving ? <Spinner size={3} /> : null}
+                        {saving ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        onClick={() => setEditingId(null)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Pages grid ── */}
+                {isExpanded && (
+                  <div className="border-t border-gray-100 bg-gray-50 p-3 space-y-2">
+                    {pages.length > 0 && (
+                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                        {pages.map((pg, pi) => (
+                          <div key={pg.id} className="relative group rounded-lg overflow-hidden border border-gray-200 bg-white">
+                            <img
+                              src={pg.url}
+                              alt={`Page ${pi + 1}`}
+                              className="w-full object-cover"
+                              style={{ height: 88 }}
+                              loading="lazy"
+                            />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors" />
+                            <span className="absolute top-0.5 left-0.5 text-[8px] font-bold text-white bg-black/40 px-1 py-0.5 rounded leading-none">
+                              p{pi + 1}
+                            </span>
+                            <button
+                              onClick={() => handleRemovePage(paper.id, pg.id)}
+                              disabled={removingPage === pg.id}
+                              className="absolute top-0.5 right-0.5 bg-red-500 text-white text-[9px] font-bold px-1 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity leading-none disabled:opacity-50"
+                            >
+                              {removingPage === pg.id ? '…' : '✕'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => handleUploadPage(paper.id)}
+                      disabled={uploadingFor === paper.id}
+                      className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-amber-200 rounded-xl text-xs font-semibold text-amber-500 hover:border-amber-400 hover:bg-amber-50/60 transition-colors disabled:opacity-50"
+                    >
+                      {uploadingFor === paper.id ? <Spinner size={3} /> : <UploadIcon />}
+                      {uploadingFor === paper.id ? 'Uploading…' : `Add page ${pages.length + 1}`}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

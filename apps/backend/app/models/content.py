@@ -60,6 +60,8 @@ class Subject(Document):
     thumbnail_url: Optional[str] = None
     has_document: bool = False
     seo_stats: Optional[dict] = None
+    # Subject-level question papers: [{id, name, class_name, year, description, pages:[{id,url}]}]
+    pyq_papers: list[dict] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

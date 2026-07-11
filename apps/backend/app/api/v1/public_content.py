@@ -300,6 +300,20 @@ async def get_library_bundle(
                         "chapter_count": chapter_count,
                         "notes_count": notes_count,
                         "notes_pct": notes_pct,
+                        "pyq_papers": [
+                            {
+                                "id":          p.get("id", ""),
+                                "name":        p.get("name", ""),
+                                "class_name":  p.get("class_name", ""),
+                                "year":        p.get("year"),
+                                "description": p.get("description", ""),
+                                "pages": [
+                                    {"id": pg.get("id", ""), "url": pg.get("url", "")}
+                                    for pg in (p.get("pages") or [])
+                                ],
+                            }
+                            for p in (subj.pyq_papers or [])
+                        ],
                     }
                     if not is_slim:
                         subj_data["chapters"] = chapter_list

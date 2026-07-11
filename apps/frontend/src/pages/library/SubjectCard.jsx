@@ -66,27 +66,25 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
     const notesChs = chapters.filter(ch => !ch.content_type || !QA_TYPES.has(ch.content_type));
     const qaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type));
-    // Group pyq_papers by chapter — [{id, title, pages:[]}]
-    const pyqGroups = [];
-    for (const ch of chapters) {
-      if (ch.pyq_papers?.length > 0) {
-        pyqGroups.push({
-          id: ch.id,
-          title: (isAs && ch.title_as) ? ch.title_as : ch.title,
-          pages: ch.pyq_papers.map((p, idx) => ({
-            _key: p.id || `${ch.id}-${idx}`,
-            url: p.url,
-            pageNum: idx + 1,
-          })),
-        });
-      }
-    }
+    // Subject-level PYQ papers — [{id, title, class_name, year, description, pages:[]}]
+    const pyqGroups = (sub.pyq_papers || []).map((p, pi) => ({
+      id:          p.id || `pyq-${pi}`,
+      title:       p.name || `Paper ${pi + 1}`,
+      class_name:  p.class_name || '',
+      year:        p.year || null,
+      description: p.description || '',
+      pages: (p.pages || []).map((pg, idx) => ({
+        _key:    pg.id || `${p.id}-${idx}`,
+        url:     pg.url,
+        pageNum: idx + 1,
+      })),
+    }));
     return [
       { key: 'notes',          label: isAs ? 'টোকা' : 'Notes',     chapters: notesChs, pyqGroups: null,  accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)' },
       { key: 'qa',             label: isAs ? 'প্ৰশ্ন' : 'Questions', chapters: qaChs,    pyqGroups: null,  accent: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
       { key: 'question_paper', label: isAs ? 'পিৱাইকিউ' : 'PYQs',   chapters: [],       pyqGroups,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)' },
     ];
-  }, [chapters, isAs]);
+  }, [chapters, sub.pyq_papers, isAs]);
 
   const _lsKey = `syrabit_section_${sub.id}`;
   const [expandedSection, setExpandedSection] = useState(() => {
