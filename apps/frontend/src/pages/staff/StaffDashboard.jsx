@@ -166,14 +166,13 @@ function ChangePasswordModal({ onClose }) {
   );
 }
 
-// ── Chapter editor — full content + RAG tabs ──────────────────────────────────
+// ── Chapter editor — dual-layer Notes / Questions / PYQ ──────────────────────
 
 const EDITOR_TABS = [
-  { id: 'info',       label: 'Info' },
-  { id: 'content_en', label: 'Content (EN)' },
-  { id: 'content_as', label: 'Content (AS)' },
-  { id: 'qa',         label: 'Q&A' },
-  { id: 'rag',        label: 'RAG' },
+  { id: 'info',      label: 'Info' },
+  { id: 'notes',     label: 'Notes' },
+  { id: 'questions', label: 'Questions' },
+  { id: 'pyq',       label: 'PYQ' },
 ];
 
 function FieldLabel({ children, chars }) {
@@ -198,14 +197,176 @@ function BigTextarea({ value, onChange, placeholder, rows = 14, mono = false }) 
   );
 }
 
+// ── Sub-tab bar (Content / RAG) ───────────────────────────────────────────────
+
+function SubTabs({ value, onChange, staleRag }) {
+  return (
+    <div className="flex gap-1.5 mb-4">
+      {['content', 'rag'].map(id => (
+        <button
+          key={id}
+          onClick={() => onChange(id)}
+          className={`relative px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+            value === id
+              ? 'bg-violet-100 text-violet-700'
+              : 'bg-gray-100 text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          {id === 'content' ? 'Content' : 'RAG'}
+          {id === 'rag' && staleRag && (
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400" title="RAG updated but not reindexed" />
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Reindex banner helper ─────────────────────────────────────────────────────
+
+function ReindexBanner({ isStale, indexedAt, updatedAt, onReindex, loading, label }) {
+  return isStale ? (
+    <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4">
+      <div className="text-xs text-amber-700">
+        <strong>RAG updated but not reindexed.</strong> The AI won't use the latest {label} until you reindex.
+        {updatedAt && <span className="ml-1 opacity-70">Edited {new Date(updatedAt).toLocaleString()}</span>}
+      </div>
+      <button onClick={onReindex} disabled={loading}
+        className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white transition-colors disabled:opacity-50">
+        {loading ? <Spinner size={3} /> : <IndexIcon />}
+        {loading ? 'Indexing…' : 'Reindex now'}
+      </button>
+    </div>
+  ) : (
+    <div className="flex items-center justify-between gap-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 mb-4">
+      <div className="text-xs text-blue-700">
+        Plain-text the AI uses for retrieval — not shown to students. After editing, press Reindex to push to Vectorize.
+        {indexedAt && <span className="ml-1 opacity-70">· Last indexed {new Date(indexedAt).toLocaleString()}</span>}
+      </div>
+      <button onClick={onReindex} disabled={loading}
+        className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50">
+        {loading ? <Spinner size={3} /> : <IndexIcon />}
+        {loading ? 'Indexing…' : 'Reindex'}
+      </button>
+    </div>
+  );
+}
+
+// ── Notes RAG section card ────────────────────────────────────────────────────
+
+function NotesSectionCard({ section, index, total, onChange, onDelete, onMove }) {
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-bold text-gray-300 w-5 text-center select-none">{index + 1}</span>
+        <input
+          type="text"
+          value={section.title || ''}
+          onChange={e => onChange('title', e.target.value)}
+          placeholder="Section title…"
+          className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-violet-400"
+        />
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          <button onClick={() => onMove(-1)} disabled={index === 0} className="p-1.5 rounded text-gray-300 hover:text-gray-600 disabled:opacity-0 transition-colors" title="Move up"><ArrowUpIcon /></button>
+          <button onClick={() => onMove(1)} disabled={index === total - 1} className="p-1.5 rounded text-gray-300 hover:text-gray-600 disabled:opacity-0 transition-colors" title="Move down"><ArrowDownIcon /></button>
+          <button onClick={onDelete} className="p-1.5 rounded text-gray-300 hover:text-red-500 transition-colors" title="Delete section"><TrashIcon /></button>
+        </div>
+      </div>
+      <textarea
+        value={section.content || ''}
+        onChange={e => onChange('content', e.target.value)}
+        placeholder="Section content (plain text, no Markdown formatting)…"
+        rows={4}
+        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-violet-400 resize-y"
+      />
+    </div>
+  );
+}
+
+// ── Q&A RAG section card ──────────────────────────────────────────────────────
+
+function QaCard({ section, index, total, onChange, onDelete, onMove }) {
+  const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-400';
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-bold text-gray-300 w-5 text-center select-none">Q{index + 1}</span>
+        <input type="text" value={section.section || ''} onChange={e => onChange('section', e.target.value)}
+          placeholder="Section / topic name (optional)…"
+          className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-violet-400" />
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          <button onClick={() => onMove(-1)} disabled={index === 0} className="p-1.5 rounded text-gray-300 hover:text-gray-600 disabled:opacity-0 transition-colors" title="Move up"><ArrowUpIcon /></button>
+          <button onClick={() => onMove(1)} disabled={index === total - 1} className="p-1.5 rounded text-gray-300 hover:text-gray-600 disabled:opacity-0 transition-colors" title="Move down"><ArrowDownIcon /></button>
+          <button onClick={onDelete} className="p-1.5 rounded text-gray-300 hover:text-red-500 transition-colors" title="Delete"><TrashIcon /></button>
+        </div>
+      </div>
+      <div>
+        <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Question</label>
+        <textarea value={section.question || ''} onChange={e => onChange('question', e.target.value)}
+          placeholder="Question text…" rows={2} className={`${inputCls} resize-none`} />
+      </div>
+      <div>
+        <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Answer</label>
+        <textarea value={section.answer || ''} onChange={e => onChange('answer', e.target.value)}
+          placeholder="Answer text…" rows={2} className={`${inputCls} resize-none`} />
+      </div>
+      <div>
+        <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Solution / explanation (optional)</label>
+        <textarea value={section.solution || ''} onChange={e => onChange('solution', e.target.value)}
+          placeholder="Detailed explanation or solution…" rows={2} className={`${inputCls} resize-none`} />
+      </div>
+    </div>
+  );
+}
+
+// ── PYQ upload area ───────────────────────────────────────────────────────────
+
+function PyqUploadArea({ pyqPdfUrl, uploading, onPickFile }) {
+  const isPdf  = pyqPdfUrl?.toLowerCase().includes('.pdf');
+  const isImg  = pyqPdfUrl && !isPdf;
+  return (
+    <div className="space-y-3">
+      {pyqPdfUrl ? (
+        <>
+          <div className="text-xs text-gray-500 flex items-center gap-2">
+            <span className="text-emerald-600 font-semibold">✓ File uploaded</span>
+            <a href={pyqPdfUrl} target="_blank" rel="noreferrer" className="text-violet-600 hover:underline truncate max-w-xs">{pyqPdfUrl.split('/').pop()}</a>
+          </div>
+          {isPdf && (
+            <iframe src={pyqPdfUrl} className="w-full rounded-xl border border-gray-200" style={{ height: 420 }} title="PYQ PDF preview" />
+          )}
+          {isImg && (
+            <img src={pyqPdfUrl} alt="PYQ" className="w-full rounded-xl border border-gray-200 object-contain max-h-96" />
+          )}
+          <button onClick={onPickFile} disabled={uploading}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-50">
+            {uploading ? <Spinner size={3} /> : <AttachIcon />}
+            {uploading ? 'Uploading…' : 'Change file'}
+          </button>
+        </>
+      ) : (
+        <button onClick={onPickFile} disabled={uploading}
+          className="w-full flex flex-col items-center justify-center gap-2 px-4 py-10 border-2 border-dashed border-gray-200 rounded-xl text-gray-400 hover:border-violet-300 hover:text-violet-500 transition-colors disabled:opacity-50">
+          {uploading ? <Spinner size={6} /> : <UploadIcon />}
+          <span className="text-sm font-medium">{uploading ? 'Uploading…' : 'Click to upload PDF or image'}</span>
+          <span className="text-xs opacity-60">PDF, JPG, PNG, WEBP — max 25 MB</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Chapter editor ────────────────────────────────────────────────────────────
+
 function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSaved }) {
   const [form,      setForm]      = useState(null);
   const [loading,   setLoading]   = useState(true);
   const [saving,    setSaving]    = useState(false);
-  const [reindexing,setReindexing]= useState(false);
+  const [reindexing,setReindexing]= useState({});  // { notes: bool, qa: bool, pyq: bool }
   const [tab,       setTab]       = useState('info');
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef(null);
+  const [subTab,    setSubTab]    = useState({ notes: 'content', questions: 'content', pyq: 'content' });
+  const [pyqUploading, setPyqUploading] = useState(false);
+  const pyqFileRef = useRef(null);
 
   // Load full chapter content on open
   useEffect(() => {
@@ -227,6 +388,8 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
   const set    = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
   const setNum = (field) => (e) => setForm(f => ({ ...f, [field]: parseInt(e.target.value, 10) || 0 }));
 
+  const setSubTabFor = (mainTab, val) => setSubTab(s => ({ ...s, [mainTab]: val }));
+
   const handleSave = async () => {
     if (!form) return;
     setSaving(true);
@@ -239,43 +402,72 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
     } finally { setSaving(false); }
   };
 
-  const handleReindex = async () => {
-    setReindexing(true);
+  const handleReindex = async (scope) => {
+    setReindexing(r => ({ ...r, [scope]: true }));
     try {
-      await api().post(`/staff/content/chapter/${chapterId}/reindex`);
-      toast.success('RAG reindex started — check back in a moment');
-      // Refresh form to get updated rag_indexed_at / rag_stale
+      await api().post(`/staff/content/chapter/${chapterId}/reindex?scope=${scope}`);
+      toast.success(`Reindex started (${scope})`);
       const updated = await api().get(`/staff/content/chapter/${chapterId}`);
       setForm(updated.data);
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Reindex failed');
-    } finally { setReindexing(false); }
+    } finally { setReindexing(r => ({ ...r, [scope]: false })); }
   };
 
-  const handleAttachFile = async (field) => {
-    if (!fileRef.current) return;
-    const file = fileRef.current.files[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await api().post(`/staff/content/chapter/${chapterId}/attach-file?field=${field}`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      fileRef.current.value = '';
-      if (res.data?.skipped) {
-        toast.info('File already attached — no duplicate content added');
-      } else {
-        const extracted = res.data?.text_extracted ?? 0;
-        toast.success(`Extracted ${extracted.toLocaleString()} chars and appended to ${field}`);
-        const updated = await api().get(`/staff/content/chapter/${chapterId}`);
-        setForm(updated.data);
+  const handleUploadPyq = async () => {
+    if (!pyqFileRef.current) return;
+    pyqFileRef.current.onchange = async () => {
+      const file = pyqFileRef.current?.files?.[0];
+      if (!file) return;
+      setPyqUploading(true);
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await api().post(`/staff/content/chapter/${chapterId}/upload-pyq`, fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        setForm(f => ({ ...f, pyq_pdf_url: res.data.pyq_pdf_url }));
+        toast.success('PYQ file uploaded');
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || 'Upload failed');
+      } finally {
+        setPyqUploading(false);
+        if (pyqFileRef.current) pyqFileRef.current.value = '';
       }
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || 'File attach failed');
-    } finally { setUploading(false); }
+    };
+    pyqFileRef.current.click();
   };
+
+  // ── Section helpers ──────────────────────────────────────────────────────
+
+  const addSection = (fieldKey, blank) => setForm(f => ({
+    ...f, [fieldKey]: [...(f[fieldKey] || []), blank],
+  }));
+
+  const updateSection = (fieldKey, idx, key, val) => setForm(f => {
+    const arr = [...(f[fieldKey] || [])];
+    arr[idx] = { ...arr[idx], [key]: val };
+    return { ...f, [fieldKey]: arr };
+  });
+
+  const deleteSection = (fieldKey, idx) => setForm(f => {
+    const arr = [...(f[fieldKey] || [])];
+    arr.splice(idx, 1);
+    return { ...f, [fieldKey]: arr };
+  });
+
+  const moveSection = (fieldKey, idx, dir) => setForm(f => {
+    const arr = [...(f[fieldKey] || [])];
+    const t = idx + dir;
+    if (t < 0 || t >= arr.length) return f;
+    [arr[idx], arr[t]] = [arr[t], arr[idx]];
+    return { ...f, [fieldKey]: arr };
+  });
+
+  // ── Lang picker for section lists ────────────────────────────────────────
+
+  const [notesLang, setNotesLang] = useState('en');
+  const [qaLang,    setQaLang]    = useState('en');
 
   const inputCls = 'w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400';
 
@@ -287,7 +479,14 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
     </div>
   );
 
-  const ragIsStale = form?.rag_stale;
+  // Stale flags derived from form
+  const notesRagStale = form?.notes_rag_stale;
+  const qaRagStale    = form?.qa_rag_stale;
+  const pyqRagStale   = form?.pyq_rag_stale;
+
+  // Notes RAG section key based on selected lang
+  const notesSecKey = notesLang === 'en' ? 'rag_sections_en' : 'rag_sections_as';
+  const qaSecKey    = qaLang    === 'en' ? 'qa_rag_sections_en' : 'qa_rag_sections_as';
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center" style={{ background: 'rgba(0,0,0,0.55)' }} onMouseDown={e => e.target === e.currentTarget && onClose()}>
@@ -296,14 +495,10 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0 bg-white">
           <div className="min-w-0">
-            {/* Board › Class › Course › Subject hierarchy */}
             <div className="flex items-center gap-1 flex-wrap text-[10px] text-gray-400 mb-0.5">
-              {subjectContext?.board  && <span>{subjectContext.board}</span>}
-              {subjectContext?.board  && <span className="text-gray-300">›</span>}
-              {subjectContext?.cls    && <span>{subjectContext.cls}</span>}
-              {subjectContext?.cls    && <span className="text-gray-300">›</span>}
-              {subjectContext?.course && <span className="text-violet-400">{subjectContext.course}</span>}
-              {subjectContext?.course && <span className="text-gray-300">›</span>}
+              {subjectContext?.board  && <><span>{subjectContext.board}</span><span className="text-gray-300">›</span></>}
+              {subjectContext?.cls    && <><span>{subjectContext.cls}</span><span className="text-gray-300">›</span></>}
+              {subjectContext?.course && <><span className="text-violet-400">{subjectContext.course}</span><span className="text-gray-300">›</span></>}
               <span>{subjectName}</span>
             </div>
             <h2 className="text-sm font-bold text-gray-900 truncate">Ch. {form?.chapter_number} · {form?.title}</h2>
@@ -314,19 +509,16 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Main tabs */}
         <div className="flex gap-1 px-4 pt-2 pb-0 border-b border-gray-100 flex-shrink-0 bg-white overflow-x-auto">
           {EDITOR_TABS.map(t => {
-            const isRagTab = t.id === 'rag';
+            const hasStale = (t.id === 'notes' && notesRagStale) || (t.id === 'questions' && qaRagStale) || (t.id === 'pyq' && pyqRagStale);
             return (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`relative px-3 py-2 text-xs font-semibold rounded-t-lg transition-colors whitespace-nowrap border-b-2 ${tab === t.id ? 'border-violet-500 text-violet-700 bg-violet-50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
-              >
+              <button key={t.id} onClick={() => setTab(t.id)}
+                className={`relative px-3 py-2 text-xs font-semibold rounded-t-lg transition-colors whitespace-nowrap border-b-2 ${tab === t.id ? 'border-violet-500 text-violet-700 bg-violet-50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
                 {t.label}
-                {isRagTab && ragIsStale && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400" title="RAG text updated but not yet reindexed" />
+                {hasStale && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400" title="RAG updated but not reindexed" />
                 )}
               </button>
             );
@@ -334,11 +526,11 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
+        <div className="flex-1 overflow-y-auto px-5 py-5">
 
           {/* ── INFO TAB ── */}
           {tab === 'info' && (
-            <>
+            <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <FieldLabel>Title (English)</FieldLabel>
@@ -349,7 +541,6 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                   <input type="text" value={form?.title_as || ''} onChange={set('title_as')} className={inputCls} placeholder="অধ্যায়ৰ শিৰোনাম" />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div>
                   <FieldLabel>Chapter #</FieldLabel>
@@ -360,7 +551,6 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                   <input type="text" value={form?.slug || ''} onChange={set('slug')} className={inputCls} placeholder="chapter-slug" />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <FieldLabel>Status</FieldLabel>
@@ -384,7 +574,6 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                   </select>
                 </div>
               </div>
-
               <div>
                 <FieldLabel>Meta description</FieldLabel>
                 <textarea value={form?.meta_description || ''} onChange={set('meta_description')} rows={2} className={`${inputCls} resize-none`} placeholder="SEO meta description (max 160 chars)" />
@@ -393,151 +582,251 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                 <FieldLabel>Keywords</FieldLabel>
                 <input type="text" value={form?.keywords || ''} onChange={set('keywords')} className={inputCls} placeholder="comma, separated, keywords" />
               </div>
-
               {/* Content presence summary */}
               <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
                 <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Content presence</div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                   {[
-                    ['content_en', 'Content EN'], ['content_as', 'Content AS'],
-                    ['notes_en',   'Notes EN'],   ['notes_as',   'Notes AS'],
-                    ['qa_text_en', 'Q&A EN'],     ['qa_text_as', 'Q&A AS'],
-                    ['rag_text_en','RAG EN'],      ['rag_text_as','RAG AS'],
-                    ['qa_rag_text_en','Q&A RAG EN'],['pyq_rag_text','PYQ RAG'],
+                    ['notes_en',          'Notes EN'],
+                    ['notes_as',          'Notes AS'],
+                    ['qa_text_en',        'Q&A EN'],
+                    ['qa_text_as',        'Q&A AS'],
+                    ['pyq_pdf_url',       'PYQ file'],
+                    ['pyq_rag_text',      'PYQ RAG'],
+                    ['rag_text_en',       'RAG EN'],
+                    ['rag_text_as',       'RAG AS'],
                   ].map(([field, label]) => (
                     <div key={field} className="flex items-center gap-1.5">
-                      <Dot filled={!!(form?.[field]?.trim())} label={label} />
-                      <span className={form?.[field]?.trim() ? 'text-gray-700' : 'text-gray-400'}>{label}</span>
+                      <Dot filled={!!(field === 'rag_sections_en' || field === 'qa_rag_sections_en'
+                        ? (form?.[field]?.length > 0)
+                        : form?.[field]?.trim?.()
+                      )} label={label} />
+                      <span className={form?.[field] ? 'text-gray-700' : 'text-gray-400'}>{label}</span>
                     </div>
                   ))}
                 </div>
-                {/* RAG sync status row */}
-                <div className="mt-3 pt-2.5 border-t border-gray-100 flex items-center gap-3 flex-wrap text-[11px]">
-                  <span className="text-gray-400 font-semibold uppercase tracking-wide">RAG sync</span>
-                  {form?.rag_indexed_at
-                    ? <span className={`flex items-center gap-1 ${ragIsStale ? 'text-amber-600' : 'text-emerald-600'}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${ragIsStale ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-                        {ragIsStale ? 'Stale' : 'Indexed'} · {new Date(form.rag_indexed_at).toLocaleDateString()}
-                      </span>
-                    : <span className="text-gray-400">Not indexed yet</span>
-                  }
-                  {form?.rag_updated_at && (
-                    <span className="text-gray-400">Last edit {new Date(form.rag_updated_at).toLocaleDateString()}</span>
-                  )}
+                {/* Per-section RAG sync summary */}
+                <div className="mt-3 pt-2.5 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                  {[
+                    { label: 'Notes RAG', stale: notesRagStale, at: form?.notes_rag_indexed_at },
+                    { label: 'Q&A RAG',   stale: qaRagStale,    at: form?.qa_rag_indexed_at },
+                    { label: 'PYQ RAG',   stale: pyqRagStale,   at: form?.pyq_rag_indexed_at },
+                  ].map(({ label, stale, at }) => (
+                    <div key={label} className="flex items-center gap-1.5">
+                      <span className="text-gray-400 font-semibold">{label}</span>
+                      {at
+                        ? <span className={`flex items-center gap-1 ${stale ? 'text-amber-600' : 'text-emerald-600'}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${stale ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                            {stale ? 'Stale' : 'Indexed'}
+                          </span>
+                        : <span className="text-gray-400">—</span>
+                      }
+                    </div>
+                  ))}
                 </div>
               </div>
-            </>
+            </div>
           )}
 
-          {/* ── CONTENT EN TAB ── */}
-          {tab === 'content_en' && (
-            <>
-              <div>
-                <FieldLabel chars={form?.content_en?.length || 0}>Content — English (HTML / Markdown)</FieldLabel>
-                <BigTextarea value={form?.content_en || ''} onChange={set('content_en')} placeholder="Chapter content in English…" mono />
-              </div>
-              <div>
-                <FieldLabel chars={form?.notes_en?.length || 0}>Structured Notes — English (Markdown)</FieldLabel>
-                <BigTextarea value={form?.notes_en || ''} onChange={set('notes_en')} placeholder="AI-structured study notes in English…" rows={10} mono />
-              </div>
-            </>
-          )}
+          {/* ── NOTES TAB ── */}
+          {tab === 'notes' && (
+            <div>
+              <SubTabs value={subTab.notes} onChange={v => setSubTabFor('notes', v)} staleRag={notesRagStale} />
 
-          {/* ── CONTENT AS TAB ── */}
-          {tab === 'content_as' && (
-            <>
-              <div>
-                <FieldLabel chars={form?.content_as?.length || 0}>Content — Assamese</FieldLabel>
-                <BigTextarea value={form?.content_as || ''} onChange={set('content_as')} placeholder="অসমীয়া ভাষাত অধ্যায়ৰ বিষয়বস্তু…" rows={14} />
-              </div>
-              <div>
-                <FieldLabel chars={form?.notes_as?.length || 0}>Structured Notes — Assamese (Markdown)</FieldLabel>
-                <BigTextarea value={form?.notes_as || ''} onChange={set('notes_as')} placeholder="অসমীয়া ভাষাত গঠনমূলক টোকা…" rows={10} />
-              </div>
-            </>
-          )}
-
-          {/* ── Q&A TAB (was missing entirely) ── */}
-          {tab === 'qa' && (
-            <>
-              <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 text-xs text-emerald-700">
-                <strong>Q&amp;A content</strong> is the structured question-and-answer bank for this chapter. Use markdown for formatting. These fields power the Q&amp;A section shown to students. The <em>Q&amp;A RAG</em> fields (for AI retrieval) are on the RAG tab.
-              </div>
-              <div>
-                <FieldLabel chars={form?.qa_text_en?.length || 0}>Q&amp;A — English</FieldLabel>
-                <BigTextarea value={form?.qa_text_en || ''} onChange={set('qa_text_en')} placeholder={'## Q1. What is…\n**Answer:** …\n\n## Q2. …'} rows={16} mono />
-              </div>
-              <div>
-                <FieldLabel chars={form?.qa_text_as?.length || 0}>Q&amp;A — Assamese</FieldLabel>
-                <BigTextarea value={form?.qa_text_as || ''} onChange={set('qa_text_as')} placeholder="অসমীয়া ভাষাত প্ৰশ্ন-উত্তৰ…" rows={14} />
-              </div>
-            </>
-          )}
-
-          {/* ── RAG TAB ── */}
-          {tab === 'rag' && (
-            <>
-              <input ref={fileRef} type="file" accept=".pdf,.txt,.md" className="hidden" />
-
-              {/* Sync status banner */}
-              {ragIsStale ? (
-                <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                  <div className="text-xs text-amber-700">
-                    <strong>RAG text has been edited but not reindexed.</strong> The AI won't use the latest content until you reindex.
-                    {form?.rag_updated_at && <span className="ml-1 opacity-70">Edited {new Date(form.rag_updated_at).toLocaleString()}</span>}
+              {subTab.notes === 'content' && (
+                <div className="space-y-4">
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 text-xs text-blue-700">
+                    <strong>Content layer</strong> — the study notes students read on the library page. Use Markdown.
                   </div>
-                  <button
-                    onClick={handleReindex}
-                    disabled={reindexing}
-                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white transition-colors disabled:opacity-50"
-                  >
-                    {reindexing ? <Spinner size={3} /> : <IndexIcon />}
-                    {reindexing ? 'Indexing…' : 'Reindex now'}
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between gap-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
-                  <div className="text-xs text-blue-700">
-                    <strong>RAG fields</strong> — plain-text the AI uses for retrieval. Paste full unformatted textbook content or attach a PDF to auto-extract. After editing, click Reindex to push to Vectorize.
-                    {form?.rag_indexed_at && <span className="ml-1 opacity-70">· Last indexed {new Date(form.rag_indexed_at).toLocaleString()}</span>}
+                  <div>
+                    <FieldLabel chars={form?.notes_en?.length || 0}>Notes — English (Markdown)</FieldLabel>
+                    <BigTextarea value={form?.notes_en || ''} onChange={set('notes_en')} placeholder="## Introduction\n\nStudy notes in English…" rows={16} mono />
                   </div>
-                  <button
-                    onClick={handleReindex}
-                    disabled={reindexing}
-                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
-                  >
-                    {reindexing ? <Spinner size={3} /> : <IndexIcon />}
-                    {reindexing ? 'Indexing…' : 'Reindex'}
-                  </button>
+                  <div>
+                    <FieldLabel chars={form?.notes_as?.length || 0}>Notes — Assamese (Markdown)</FieldLabel>
+                    <BigTextarea value={form?.notes_as || ''} onChange={set('notes_as')} placeholder="## পৰিচয়\n\nঅসমীয়া ভাষাত টোকা…" rows={12} />
+                  </div>
                 </div>
               )}
 
-              {[
-                { field: 'rag_text_en',    label: 'RAG Text — English',        placeholder: 'Full plain-text chapter content for AI retrieval (English)…' },
-                { field: 'rag_text_as',    label: 'RAG Text — Assamese',       placeholder: 'সম্পূৰ্ণ সাদা-পাঠ্য অধ্যায়ৰ বিষয়বস্তু (অসমীয়া)…' },
-                { field: 'qa_rag_text_en', label: 'Q&A RAG — English',         placeholder: 'Expanded Q&A pairs for AI retrieval (English)…' },
-                { field: 'qa_rag_text_as', label: 'Q&A RAG — Assamese',        placeholder: 'বিস্তাৰিত প্ৰশ্ন-উত্তৰ (অসমীয়া)…' },
-                { field: 'pyq_rag_text',   label: 'PYQ Text (extracted PDF)',  placeholder: 'Text extracted from PYQ PDF…' },
-              ].map(({ field, label, placeholder }) => (
-                <div key={field}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <FieldLabel chars={form?.[field]?.length || 0}>{label}</FieldLabel>
-                    <button
-                      onClick={() => {
-                        fileRef.current.onchange = () => handleAttachFile(field);
-                        fileRef.current.click();
-                      }}
-                      disabled={uploading}
-                      className="ml-3 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 transition-colors disabled:opacity-50 flex-shrink-0"
-                    >
-                      {uploading ? <Spinner size={3} /> : <AttachIcon />}
-                      Attach file
-                    </button>
+              {subTab.notes === 'rag' && (
+                <div className="space-y-3">
+                  <ReindexBanner
+                    isStale={notesRagStale}
+                    indexedAt={form?.notes_rag_indexed_at}
+                    updatedAt={form?.notes_rag_updated_at}
+                    onReindex={() => handleReindex('notes')}
+                    loading={reindexing.notes}
+                    label="notes"
+                  />
+                  <div className="bg-violet-50 border border-violet-100 rounded-xl px-4 py-2.5 text-xs text-violet-700">
+                    <strong>RAG layer</strong> — topic sections the AI uses for retrieval. Each section becomes its own vector chunk. Not shown to students.
                   </div>
-                  <BigTextarea value={form?.[field] || ''} onChange={set(field)} placeholder={placeholder} rows={8} mono />
+
+                  {/* Lang toggle */}
+                  <div className="flex gap-1">
+                    {['en', 'as'].map(l => (
+                      <button key={l} onClick={() => setNotesLang(l)}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${notesLang === l ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-500 hover:text-gray-700'}`}>
+                        {l === 'en' ? 'English' : 'Assamese'}
+                        {' '}
+                        <span className="opacity-60">({(form?.[l === 'en' ? 'rag_sections_en' : 'rag_sections_as'] || []).length})</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Section cards */}
+                  <div className="space-y-2.5">
+                    {(form?.[notesSecKey] || []).map((sec, idx) => (
+                      <NotesSectionCard
+                        key={idx}
+                        section={sec}
+                        index={idx}
+                        total={(form?.[notesSecKey] || []).length}
+                        onChange={(key, val) => updateSection(notesSecKey, idx, key, val)}
+                        onDelete={() => deleteSection(notesSecKey, idx)}
+                        onMove={(dir) => moveSection(notesSecKey, idx, dir)}
+                      />
+                    ))}
+                  </div>
+
+                  <button onClick={() => addSection(notesSecKey, { title: '', content: '' })}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 transition-colors">
+                    <PlusIcon />+ Add section
+                  </button>
+
+                  {/* Legacy blob fallback */}
+                  <details className="mt-2">
+                    <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none">Legacy RAG text blob (fallback)</summary>
+                    <div className="mt-2 space-y-2">
+                      <BigTextarea value={form?.rag_text_en || ''} onChange={set('rag_text_en')} placeholder="Full plain-text content for AI retrieval (English)…" rows={6} mono />
+                      <BigTextarea value={form?.rag_text_as || ''} onChange={set('rag_text_as')} placeholder="সম্পূৰ্ণ সাদা-পাঠ্য বিষয়বস্তু (অসমীয়া)…" rows={6} />
+                    </div>
+                  </details>
                 </div>
-              ))}
-            </>
+              )}
+            </div>
+          )}
+
+          {/* ── QUESTIONS TAB ── */}
+          {tab === 'questions' && (
+            <div>
+              <SubTabs value={subTab.questions} onChange={v => setSubTabFor('questions', v)} staleRag={qaRagStale} />
+
+              {subTab.questions === 'content' && (
+                <div className="space-y-4">
+                  <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2.5 text-xs text-emerald-700">
+                    <strong>Content layer</strong> — the Q&amp;A bank shown to students on the library page. Use Markdown.
+                  </div>
+                  <div>
+                    <FieldLabel chars={form?.qa_text_en?.length || 0}>Q&amp;A — English (Markdown)</FieldLabel>
+                    <BigTextarea value={form?.qa_text_en || ''} onChange={set('qa_text_en')} placeholder={'## Q1. What is…\n**Answer:** …\n\n## Q2. …'} rows={16} mono />
+                  </div>
+                  <div>
+                    <FieldLabel chars={form?.qa_text_as?.length || 0}>Q&amp;A — Assamese (Markdown)</FieldLabel>
+                    <BigTextarea value={form?.qa_text_as || ''} onChange={set('qa_text_as')} placeholder="অসমীয়া ভাষাত প্ৰশ্ন-উত্তৰ…" rows={12} />
+                  </div>
+                </div>
+              )}
+
+              {subTab.questions === 'rag' && (
+                <div className="space-y-3">
+                  <ReindexBanner
+                    isStale={qaRagStale}
+                    indexedAt={form?.qa_rag_indexed_at}
+                    updatedAt={form?.qa_rag_updated_at}
+                    onReindex={() => handleReindex('qa')}
+                    loading={reindexing.qa}
+                    label="Q&A"
+                  />
+                  <div className="bg-violet-50 border border-violet-100 rounded-xl px-4 py-2.5 text-xs text-violet-700">
+                    <strong>RAG layer</strong> — Q&amp;A cards the AI uses when a student asks a question. Each card becomes its own vector chunk. Not shown to students.
+                  </div>
+
+                  {/* Lang toggle */}
+                  <div className="flex gap-1">
+                    {['en', 'as'].map(l => (
+                      <button key={l} onClick={() => setQaLang(l)}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${qaLang === l ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-500 hover:text-gray-700'}`}>
+                        {l === 'en' ? 'English' : 'Assamese'}
+                        {' '}
+                        <span className="opacity-60">({(form?.[l === 'en' ? 'qa_rag_sections_en' : 'qa_rag_sections_as'] || []).length})</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Q&A cards */}
+                  <div className="space-y-2.5">
+                    {(form?.[qaSecKey] || []).map((sec, idx) => (
+                      <QaCard
+                        key={idx}
+                        section={sec}
+                        index={idx}
+                        total={(form?.[qaSecKey] || []).length}
+                        onChange={(key, val) => updateSection(qaSecKey, idx, key, val)}
+                        onDelete={() => deleteSection(qaSecKey, idx)}
+                        onMove={(dir) => moveSection(qaSecKey, idx, dir)}
+                      />
+                    ))}
+                  </div>
+
+                  <button onClick={() => addSection(qaSecKey, { section: '', question: '', answer: '', solution: '' })}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 transition-colors">
+                    <PlusIcon />+ Add question
+                  </button>
+
+                  {/* Legacy blob fallback */}
+                  <details className="mt-2">
+                    <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none">Legacy Q&amp;A RAG text blob (fallback)</summary>
+                    <div className="mt-2 space-y-2">
+                      <BigTextarea value={form?.qa_rag_text_en || ''} onChange={set('qa_rag_text_en')} placeholder="Expanded Q&A pairs for AI retrieval (English)…" rows={6} mono />
+                      <BigTextarea value={form?.qa_rag_text_as || ''} onChange={set('qa_rag_text_as')} placeholder="বিস্তাৰিত প্ৰশ্ন-উত্তৰ (অসমীয়া)…" rows={6} />
+                    </div>
+                  </details>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── PYQ TAB ── */}
+          {tab === 'pyq' && (
+            <div>
+              <input ref={pyqFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif" className="hidden" />
+              <SubTabs value={subTab.pyq} onChange={v => setSubTabFor('pyq', v)} staleRag={pyqRagStale} />
+
+              {subTab.pyq === 'content' && (
+                <div className="space-y-3">
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 text-xs text-blue-700">
+                    <strong>Content layer</strong> — the PDF or image shown inline to students on the library page PYQ tab. Stored in Cloudflare R2.
+                  </div>
+                  <PyqUploadArea
+                    pyqPdfUrl={form?.pyq_pdf_url}
+                    uploading={pyqUploading}
+                    onPickFile={handleUploadPyq}
+                  />
+                </div>
+              )}
+
+              {subTab.pyq === 'rag' && (
+                <div className="space-y-3">
+                  <ReindexBanner
+                    isStale={pyqRagStale}
+                    indexedAt={form?.pyq_rag_indexed_at}
+                    updatedAt={form?.pyq_rag_updated_at}
+                    onReindex={() => handleReindex('pyq')}
+                    loading={reindexing.pyq}
+                    label="PYQ"
+                  />
+                  <div className="bg-violet-50 border border-violet-100 rounded-xl px-4 py-2.5 text-xs text-violet-700">
+                    <strong>RAG layer</strong> — the full question paper as plain text. When a student asks "give me the question paper" in chat, the AI retrieves and delivers this text verbatim. Not shown to students as a formatted document.
+                  </div>
+                  <div>
+                    <FieldLabel chars={form?.pyq_rag_text?.length || 0}>PYQ plain text (for AI retrieval)</FieldLabel>
+                    <BigTextarea value={form?.pyq_rag_text || ''} onChange={set('pyq_rag_text')} placeholder="Paste the full question paper text here — all questions, options, and answers…" rows={18} mono />
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -1002,4 +1291,19 @@ function AttachIcon() {
 }
 function IndexIcon() {
   return <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>;
+}
+function PlusIcon() {
+  return <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>;
+}
+function TrashIcon() {
+  return <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>;
+}
+function ArrowUpIcon() {
+  return <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" /></svg>;
+}
+function ArrowDownIcon() {
+  return <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>;
+}
+function UploadIcon() {
+  return <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>;
 }

@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     # Note (HF-110): CF_R2_BUCKET default matches wrangler.toml binding name.
     CF_R2_ACCESS_KEY: Optional[str] = None
     CF_R2_SECRET_KEY: Optional[str] = None
+    # Public base URL for R2 objects (custom domain or r2.dev subdomain).
+    # Set to e.g. https://assets.syrabit.ai in production.
+    CF_R2_PUBLIC_URL: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
     # CF_AI_MODEL: primary model for English chat + OCR + TTS via CF Workers AI REST API.
     # AWQ quantized variant is faster and available across all CF Workers AI regions.

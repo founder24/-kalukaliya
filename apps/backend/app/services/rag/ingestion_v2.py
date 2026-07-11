@@ -125,6 +125,58 @@ async def _delete_existing_chunks(document_id: str) -> tuple[int, list[str]]:
         return 0, []
 
 
+async def _purge_legacy_chunk_id(chapter_id: str, medium: str) -> list[str]:
+    """
+    Delete chunks stored under the pre-scope-isolation document_id format
+    ``<chapter_id>_<medium>`` (no source_type component).
+
+    Called as a compatibility step whenever we reindex under the new
+    ``<chapter_id>_<source_type>_<medium>`` scheme so that old vectors don't
+    continue to surface in retrieval alongside the freshly-written scoped chunks.
+
+    Returns the vector_ids that should also be deleted from Cloudflare Vectorize.
+    """
+    legacy_id = f"{chapter_id}_{medium}"
+    _, vids = await _delete_existing_chunks(legacy_id)
+    if vids:
+        logger.debug(
+            "_purge_legacy_chunk_id: removed %d legacy vectors for doc_id=%s",
+            len(vids), legacy_id,
+        )
+    return vids
+
+
+async def _delete_chunks_by_prefix(doc_id_prefix: str) -> tuple[int, list[str]]:
+    """
+    Delete ALL chunk documents whose document_id starts with the given prefix.
+
+    Used before a structured-sections reindex to purge stale sections whose
+    index no longer exists (e.g. staff deleted trailing sections). Without this,
+    old higher-index section vectors persist in Vectorize and can still be
+    retrieved by the AI.
+
+    Returns (deleted_count, vector_ids).
+    """
+    try:
+        from app.db.mongo import get_mongo_client
+        from app.config import settings as _s
+        import re as _re
+        col = get_mongo_client()[_s.MONGODB_DB_NAME]["chunks"]
+        # Match any document_id that starts with the prefix (exact prefix or prefix + "_")
+        pattern = _re.compile(r"^" + _re.escape(doc_id_prefix))
+        docs = await col.find(
+            {"document_id": {"$regex": pattern}}, {"_id": 1, "vector_id": 1}
+        ).to_list(length=None)
+        if not docs:
+            return 0, []
+        vector_ids = [d["vector_id"] for d in docs if d.get("vector_id")]
+        result = await col.delete_many({"document_id": {"$regex": pattern}})
+        return result.deleted_count, vector_ids
+    except Exception as e:
+        logger.warning(f"Failed to delete chunks by prefix={doc_id_prefix}: {e}")
+        return 0, []
+
+
 async def _update_job(job_id: Optional[str], **fields) -> None:
     if not job_id:
         return
@@ -359,6 +411,139 @@ async def ingest_document(
     }
 
 
+async def ingest_sections(
+    chapter_id: str,
+    sections: list[dict],
+    medium: str,
+    subject_id: str,
+    source_type: str,
+    chunk_type: str,
+    metadata: Optional[dict] = None,
+    job_id: Optional[str] = None,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Ingest a list of structured RAG sections as individual chunks.
+
+    For notes sections: each dict is {title, content}.
+    For Q&A sections:  each dict is {section, question, answer, solution}.
+
+    Each section gets its own document_id so it can be purged independently.
+    The parent document_id namespace is <chapter_id>_<medium>_section_<idx>.
+    """
+    meta = metadata or {}
+    errors: list[str] = []
+    total: dict = {"chunks_total": 0, "chunks_embedded": 0, "mongo_inserted": 0, "vectorize_upserted": 0, "chunk_ids": []}
+
+    # Build text per section
+    section_texts: list[str] = []
+    for s in sections:
+        if source_type in ("notes", "definition"):
+            title   = s.get("title", "").strip()
+            content = s.get("content", "").strip()
+            text    = f"{title}\n{content}".strip() if title else content
+        else:  # qa / important_questions / pyq
+            parts = []
+            if s.get("section"):  parts.append(f"Section: {s['section']}")
+            if s.get("question"): parts.append(f"Q: {s['question']}")
+            if s.get("answer"):   parts.append(f"A: {s['answer']}")
+            if s.get("solution"): parts.append(f"Solution: {s['solution']}")
+            text = "\n".join(parts)
+        section_texts.append(text.strip())
+
+    # Pre-pass: purge ALL existing section chunks for this scope+medium so that
+    # if staff deleted trailing sections the old higher-index vectors are removed
+    # before we write the current section list.
+    prefix = f"{chapter_id}_{source_type}_{medium}_sec_"
+    pre_deleted, pre_vids = await _delete_chunks_by_prefix(prefix)
+    # Compatibility purge: also remove legacy-format blob vectors stored as
+    # <chapter_id>_<medium> (pre-scope-isolation) so they don't surface alongside
+    # the freshly-written scoped sections in retrieval.
+    legacy_vids = await _purge_legacy_chunk_id(chapter_id, medium)
+    all_pre_vids = pre_vids + legacy_vids
+    if all_pre_vids and not dry_run:
+        try:
+            from app.services.vectorize.client import vectorize_client
+            await vectorize_client.delete(all_pre_vids)
+            logger.debug(
+                "ingest_sections: pre-purged %d stale+legacy vectors (prefix=%s)",
+                len(all_pre_vids), prefix,
+            )
+        except Exception as e:
+            logger.warning(f"ingest_sections: pre-purge vectorize delete failed: {e}")
+
+    for idx, text in enumerate(section_texts):
+        if not text:
+            continue
+        # Include source_type in the document ID so notes/qa/pyq sections never
+        # collide with each other even when chapter_id + medium + idx are identical.
+        doc_id = f"{chapter_id}_{source_type}_{medium}_sec_{idx}"
+        # Individual doc purge is now a no-op (already cleared by prefix purge above),
+        # but we keep the call for safety in case this function is called concurrently.
+        deleted, old_vids = await _delete_existing_chunks(doc_id)
+        if old_vids and not dry_run:
+            try:
+                from app.services.vectorize.client import vectorize_client
+                await vectorize_client.delete(old_vids)
+            except Exception as e:
+                logger.warning(f"Section stale vector delete failed: {e}")
+
+        # Embed and write this section as a single chunk (no further splitting for short sections)
+        cleaned = clean_text(text)
+        if not cleaned:
+            continue
+        lang   = detect_language(cleaned)
+        # Use a minimal chunk list — one entry per section
+        chunks = [{"text": cleaned, "token_count": max(1, len(cleaned) // 4), "chunk_index": 0}]
+        try:
+            embeddings = await embed_batch_chunked([cleaned], batch_size=1)
+        except Exception as exc:
+            errors.append(f"Section {idx} embed failed: {exc}")
+            continue
+
+        now = _now()
+        cid = _chunk_id(doc_id, 0)
+        doc = {
+            "_id": cid,
+            "document_id": doc_id,
+            "subject_id": subject_id,
+            "chapter_id": chapter_id,
+            "topic_id": meta.get("topic_id"),
+            "medium": medium,
+            "source_type": source_type,
+            "chunk_type": chunk_type,
+            "chunk_text": cleaned,
+            "chunk_index": idx,
+            "token_count": chunks[0]["token_count"],
+            "vector_id": cid,
+            "embedding_model": "cf/baai/bge-m3",
+            "embedding_dim": 1024,
+            "language": lang,
+            "created_at": now,
+            "updated_at": now,
+        }
+        total["chunks_total"] += 1
+        total["chunk_ids"].append(cid)
+
+        if not dry_run:
+            inserted = await _upsert_to_mongo([doc])
+            total["mongo_inserted"] += inserted
+            total["chunks_embedded"] += 1
+            try:
+                from app.services.vectorize.client import vectorize_client
+                result = await vectorize_client.upsert([{
+                    "id": cid,
+                    "values": embeddings[0],
+                    "metadata": _vectorize_metadata(doc),
+                }])
+                total["vectorize_upserted"] += result.get("count", 0)
+            except Exception as exc:
+                errors.append(f"Section {idx} vectorize failed: {exc}")
+
+    total["errors"] = errors
+    return total
+
+
 async def ingest_chapter_v2(
     chapter_id: str,
     content_en: Optional[str] = None,
@@ -367,21 +552,31 @@ async def ingest_chapter_v2(
     source_type: str = "notes",
     job_id: Optional[str] = None,
     dry_run: bool = False,
+    sections_en: Optional[list[dict]] = None,
+    sections_as: Optional[list[dict]] = None,
+    section_chunk_type: str = "topic_section",
 ) -> dict:
     """
     Convenience wrapper: ingest both EN and AS content for a chapter.
+
+    When sections_en / sections_as are provided and non-empty, each section is
+    ingested as a separate chunk (structured dual-layer mode).  The blob
+    content_en / content_as path is used as fallback when sections are absent.
 
     Creates ephemeral document IDs (<chapter_id>_en / <chapter_id>_as) so
     existing chunks can be purged cleanly on re-index.
 
     Args:
         chapter_id: Chapter identifier.
-        content_en: English text (markdown OK).
-        content_as: Assamese text.
+        content_en: English text blob (markdown OK) — used when sections_en is empty.
+        content_as: Assamese text blob — used when sections_as is empty.
         metadata: Must include subject_id; optionally topic_id, board, etc.
-        source_type: Chunking strategy (notes/definition/pyq/mcq).
+        source_type: Chunking strategy (notes/definition/pyq/mcq/important_questions).
         job_id: GenerationJob._id for progress tracking.
         dry_run: Skip writes.
+        sections_en: Structured section list for English (overrides blob when non-empty).
+        sections_as: Structured section list for Assamese (overrides blob when non-empty).
+        section_chunk_type: chunk_type tag written to each section chunk (topic_section / qa_pair).
 
     Returns:
         {"en": result, "as": result}
@@ -396,13 +591,20 @@ async def ingest_chapter_v2(
             "errors": [], "chunk_ids": [],
         }
 
-    async def _run(text: str, medium: str):
-        doc_id = f"{chapter_id}_{medium}"
+    async def _run_blob(text: str, medium: str):
+        # Include source_type so notes/qa/pyq blobs use separate document namespaces
+        # and reindexing one scope cannot delete vectors from another scope.
+        doc_id = f"{chapter_id}_{source_type}_{medium}"
         deleted, old_vids = await _delete_existing_chunks(doc_id)
-        if old_vids and not dry_run:
+        # Compatibility purge: also remove any legacy-format vectors stored as
+        # <chapter_id>_<medium> (pre-scope-isolation) so they don't surface
+        # alongside the freshly-written scoped chunks in retrieval.
+        legacy_vids = await _purge_legacy_chunk_id(chapter_id, medium)
+        all_stale_vids = old_vids + legacy_vids
+        if all_stale_vids and not dry_run:
             try:
                 from app.services.vectorize.client import vectorize_client
-                await vectorize_client.delete(old_vids)
+                await vectorize_client.delete(all_stale_vids)
             except Exception as e:
                 logger.warning(f"Stale vector delete failed: {e}")
         return await ingest_document_text(
@@ -417,8 +619,34 @@ async def ingest_chapter_v2(
             dry_run=dry_run,
         )
 
-    en_task = _run(content_en, "english") if content_en else _noop()
-    as_task = _run(content_as, "assamese") if content_as else _noop()
+    async def _run_sections(secs: list[dict], medium: str):
+        return await ingest_sections(
+            chapter_id=chapter_id,
+            sections=secs,
+            medium=medium,
+            subject_id=subject_id,
+            source_type=source_type,
+            chunk_type=section_chunk_type,
+            metadata=meta,
+            job_id=job_id,
+            dry_run=dry_run,
+        )
+
+    # EN path
+    if sections_en:
+        en_task = _run_sections(sections_en, "english")
+    elif content_en:
+        en_task = _run_blob(content_en, "english")
+    else:
+        en_task = _noop()
+
+    # AS path
+    if sections_as:
+        as_task = _run_sections(sections_as, "assamese")
+    elif content_as:
+        as_task = _run_blob(content_as, "assamese")
+    else:
+        as_task = _noop()
 
     en_result, as_result = await asyncio.gather(en_task, as_task, return_exceptions=True)
 

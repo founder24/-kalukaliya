@@ -3,6 +3,7 @@ Staff content API — authenticated with regular user JWT (role=staff|admin).
 Provides subject/chapter navigation and full chapter content + RAG editing.
 """
 import asyncio
+import mimetypes
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -233,12 +234,15 @@ async def staff_get_chapter(
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
-    rag_stale = bool(
-        chapter.rag_updated_at and (
-            not chapter.rag_indexed_at or
-            chapter.rag_updated_at > chapter.rag_indexed_at
-        )
-    )
+    def _is_stale(updated_at, indexed_at):
+        return bool(updated_at and (not indexed_at or updated_at > indexed_at))
+
+    rag_stale        = _is_stale(chapter.rag_updated_at,       chapter.rag_indexed_at)
+    notes_rag_stale  = _is_stale(chapter.notes_rag_updated_at, chapter.notes_rag_indexed_at)
+    qa_rag_stale     = _is_stale(chapter.qa_rag_updated_at,    chapter.qa_rag_indexed_at)
+    pyq_rag_stale    = _is_stale(chapter.pyq_rag_updated_at,   chapter.pyq_rag_indexed_at)
+
+    def _ts(dt): return dt.isoformat() if dt else None
 
     return {
         "id":              str(chapter.id),
@@ -251,6 +255,7 @@ async def staff_get_chapter(
         "meta_description": chapter.meta_description,
         "keywords":         chapter.keywords,
         "notes_generated":  chapter.notes_generated,
+        "pyq_pdf_url":      chapter.pyq_pdf_url or "",
         # Content fields
         "content_en":       chapter.content_en      or "",
         "content_as":       chapter.content_as      or "",
@@ -258,19 +263,34 @@ async def staff_get_chapter(
         "notes_as":         chapter.notes_as        or "",
         "qa_text_en":       chapter.qa_text_en      or "",
         "qa_text_as":       chapter.qa_text_as      or "",
-        # RAG fields
+        # RAG blob fields (legacy / fallback)
         "rag_text_en":      chapter.rag_text_en     or "",
         "rag_text_as":      chapter.rag_text_as     or "",
         "qa_rag_text_en":   chapter.qa_rag_text_en  or "",
         "qa_rag_text_as":   chapter.qa_rag_text_as  or "",
         "pyq_rag_text":     chapter.pyq_rag_text    or "",
+        # Structured RAG section fields
+        "rag_sections_en":    chapter.rag_sections_en    or [],
+        "rag_sections_as":    chapter.rag_sections_as    or [],
+        "qa_rag_sections_en": chapter.qa_rag_sections_en or [],
+        "qa_rag_sections_as": chapter.qa_rag_sections_as or [],
         # Timestamps + RAG sync status
-        "content_saved_at": chapter.content_saved_at.isoformat() if chapter.content_saved_at else None,
-        "rag_updated_at":   chapter.rag_updated_at.isoformat()   if chapter.rag_updated_at   else None,
-        "rag_indexed_at":   chapter.rag_indexed_at.isoformat()   if chapter.rag_indexed_at   else None,
-        "rag_stale":        rag_stale,
-        "published_at":     chapter.published_at.isoformat()     if chapter.published_at     else None,
-        "updated_at":       chapter.updated_at.isoformat()       if chapter.updated_at       else None,
+        "content_saved_at":      _ts(chapter.content_saved_at),
+        "rag_updated_at":        _ts(chapter.rag_updated_at),
+        "rag_indexed_at":        _ts(chapter.rag_indexed_at),
+        "rag_stale":             rag_stale,
+        "notes_rag_updated_at":  _ts(chapter.notes_rag_updated_at),
+        "notes_rag_indexed_at":  _ts(chapter.notes_rag_indexed_at),
+        "notes_rag_stale":       notes_rag_stale,
+        "qa_rag_updated_at":     _ts(chapter.qa_rag_updated_at),
+        "qa_rag_indexed_at":     _ts(chapter.qa_rag_indexed_at),
+        "qa_rag_stale":          qa_rag_stale,
+        "pyq_rag_updated_at":    _ts(chapter.pyq_rag_updated_at),
+        "pyq_rag_indexed_at":    _ts(chapter.pyq_rag_indexed_at),
+        "pyq_rag_stale":         pyq_rag_stale,
+        "published_at":          _ts(chapter.published_at),
+        "updated_at":            _ts(chapter.updated_at),
+        "word_count":            chapter.word_count,
     }
 
 
@@ -290,12 +310,17 @@ class ChapterEditBody(BaseModel):
     notes_as:         Optional[str] = None
     qa_text_en:       Optional[str] = None
     qa_text_as:       Optional[str] = None
-    # RAG
+    # RAG blob fields (legacy / fallback)
     rag_text_en:      Optional[str] = None
     rag_text_as:      Optional[str] = None
     qa_rag_text_en:   Optional[str] = None
     qa_rag_text_as:   Optional[str] = None
     pyq_rag_text:     Optional[str] = None
+    # Structured RAG section fields
+    rag_sections_en:    Optional[list[dict]] = None
+    rag_sections_as:    Optional[list[dict]] = None
+    qa_rag_sections_en: Optional[list[dict]] = None
+    qa_rag_sections_as: Optional[list[dict]] = None
 
 
 _CONTENT_FIELDS = frozenset({
@@ -305,6 +330,13 @@ _CONTENT_FIELDS = frozenset({
 _RAG_FIELDS = frozenset({
     "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as", "pyq_rag_text",
 })
+# These blob fields are fallbacks for the Notes RAG layer — edits must also stamp
+# notes_rag_updated_at so the per-section stale indicator fires correctly.
+_NOTES_RAG_BLOB_FIELDS = frozenset({"rag_text_en", "rag_text_as"})
+# Same for Q&A RAG blob fallbacks.
+_QA_RAG_BLOB_FIELDS    = frozenset({"qa_rag_text_en", "qa_rag_text_as"})
+_NOTES_RAG_SECTION_FIELDS = frozenset({"rag_sections_en", "rag_sections_as"})
+_QA_RAG_SECTION_FIELDS    = frozenset({"qa_rag_sections_en", "qa_rag_sections_as"})
 
 
 @router.patch("/content/chapter/{chapter_id}")
@@ -324,14 +356,17 @@ async def staff_update_chapter(
     now = datetime.now(timezone.utc)
     changed = content_changed = rag_changed = False
 
-    all_fields = (
+    scalar_fields = (
         "title", "title_as", "slug", "chapter_number",
         "status", "content_type", "meta_description", "keywords",
         "content_en", "content_as", "notes_en", "notes_as",
         "qa_text_en", "qa_text_as",
         "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as", "pyq_rag_text",
     )
-    for field in all_fields:
+    notes_sections_changed = qa_sections_changed = pyq_rag_changed = False
+    notes_blob_changed = qa_blob_changed = False
+
+    for field in scalar_fields:
         val = getattr(body, field, None)
         if val is not None:
             setattr(chapter, field, val)
@@ -340,6 +375,28 @@ async def staff_update_chapter(
                 content_changed = True
             elif field in _RAG_FIELDS:
                 rag_changed = True
+                if field == "pyq_rag_text":
+                    pyq_rag_changed = True
+                # Fallback blob edits must also stamp per-scope stale timestamps
+                # so the Notes / Q&A RAG sub-tab stale indicators fire correctly.
+                if field in _NOTES_RAG_BLOB_FIELDS:
+                    notes_blob_changed = True
+                if field in _QA_RAG_BLOB_FIELDS:
+                    qa_blob_changed = True
+
+    # List fields — only update when explicitly provided (not None)
+    for field in ("rag_sections_en", "rag_sections_as"):
+        val = getattr(body, field, None)
+        if val is not None:
+            setattr(chapter, field, val)
+            changed = True
+            notes_sections_changed = True
+    for field in ("qa_rag_sections_en", "qa_rag_sections_as"):
+        val = getattr(body, field, None)
+        if val is not None:
+            setattr(chapter, field, val)
+            changed = True
+            qa_sections_changed = True
 
     if not changed:
         return {"ok": True, "message": "No changes"}
@@ -353,6 +410,14 @@ async def staff_update_chapter(
         chapter.notes_generated = bool(chapter.notes_en and chapter.notes_en.strip())
     if rag_changed:
         chapter.rag_updated_at = now
+    # Per-scope stale tracking: blob fallbacks and structured sections both stamp
+    # their respective per-scope timestamp so the sub-tab stale indicator fires.
+    if notes_sections_changed or notes_blob_changed:
+        chapter.notes_rag_updated_at = now
+    if qa_sections_changed or qa_blob_changed:
+        chapter.qa_rag_updated_at = now
+    if pyq_rag_changed:
+        chapter.pyq_rag_updated_at = now
     chapter.updated_at = now
     await chapter.save()
 
@@ -368,12 +433,174 @@ async def staff_update_chapter(
 async def staff_reindex_chapter(
     request: Request,
     chapter_id: str,
+    scope: str = Query(default="notes", description="notes | qa | pyq | all"),
     _staff: User = Depends(require_staff_user),
 ):
     """
-    Trigger a Vectorize RAG reindex for a chapter — same pipeline as admin.
-    Runs in a background task; returns immediately with the chapter's current
-    rag_updated_at so the frontend can update the stale indicator optimistically.
+    Trigger a Vectorize RAG reindex for a chapter.
+
+    scope=notes  — reindex Notes sections (rag_sections_en/as, fallback rag_text_en/as)
+    scope=qa     — reindex Q&A sections (qa_rag_sections_en/as, fallback qa_rag_text_en/as)
+    scope=pyq    — reindex PYQ text (pyq_rag_text as a single question_paper chunk)
+    scope=all    — reindex all three scopes sequentially
+
+    Runs in a background task; returns immediately.
+    """
+    if scope not in ("notes", "qa", "pyq", "all"):
+        raise HTTPException(status_code=400, detail="scope must be notes | qa | pyq | all")
+
+    try:
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    except Exception:
+        chapter = None
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    # Pre-flight: check there is something to index for the requested scope(s)
+    scopes_to_run = ["notes", "qa", "pyq"] if scope == "all" else [scope]
+    runnable = []
+    for s in scopes_to_run:
+        if s == "notes":
+            has = bool(chapter.rag_sections_en or chapter.rag_sections_as or chapter.rag_text_en or chapter.rag_text_as)
+        elif s == "qa":
+            has = bool(chapter.qa_rag_sections_en or chapter.qa_rag_sections_as or chapter.qa_rag_text_en or chapter.qa_rag_text_as)
+        else:  # pyq
+            has = bool(chapter.pyq_rag_text)
+        if has:
+            runnable.append(s)
+
+    if not runnable:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No RAG content to index for scope '{scope}'. Add content first."
+        )
+
+    async def _do_reindex(ch_id: str, ch_scopes: list[str]):
+        try:
+            from app.services.rag.ingestion_v2 import ingest_chapter_v2
+            fresh = await Chapter.get(PydanticObjectId(ch_id))
+            if not fresh:
+                return
+            meta = {"subject_id": str(fresh.subject_id)}
+            now = datetime.now(timezone.utc)
+
+            for s in ch_scopes:
+                if s == "notes":
+                    await ingest_chapter_v2(
+                        chapter_id=ch_id,
+                        content_en=fresh.rag_text_en or None,
+                        content_as=fresh.rag_text_as or None,
+                        metadata=meta,
+                        source_type="notes",
+                        sections_en=fresh.rag_sections_en or None,
+                        sections_as=fresh.rag_sections_as or None,
+                        section_chunk_type="topic_section",
+                    )
+                    fresh2 = await Chapter.get(PydanticObjectId(ch_id))
+                    if fresh2:
+                        fresh2.notes_rag_indexed_at = now
+                        fresh2.rag_indexed_at = now  # keep legacy in sync
+                        await fresh2.save()
+                elif s == "qa":
+                    await ingest_chapter_v2(
+                        chapter_id=ch_id,
+                        content_en=fresh.qa_rag_text_en or None,
+                        content_as=fresh.qa_rag_text_as or None,
+                        metadata=meta,
+                        source_type="important_questions",
+                        sections_en=fresh.qa_rag_sections_en or None,
+                        sections_as=fresh.qa_rag_sections_as or None,
+                        section_chunk_type="qa_pair",
+                    )
+                    fresh2 = await Chapter.get(PydanticObjectId(ch_id))
+                    if fresh2:
+                        fresh2.qa_rag_indexed_at = now
+                        await fresh2.save()
+                else:  # pyq
+                    await ingest_chapter_v2(
+                        chapter_id=ch_id,
+                        content_en=fresh.pyq_rag_text or None,
+                        content_as=None,
+                        metadata=meta,
+                        source_type="pyq",
+                    )
+                    fresh2 = await Chapter.get(PydanticObjectId(ch_id))
+                    if fresh2:
+                        fresh2.pyq_rag_indexed_at = now
+                        await fresh2.save()
+
+            logger.info("staff_content: reindex complete scope=%s chapter=%s", ch_scopes, ch_id)
+        except Exception as exc:
+            logger.error("staff_content: reindex failed scope=%s chapter=%s: %s", ch_scopes, ch_id, exc)
+
+    asyncio.create_task(_do_reindex(chapter_id, runnable))
+
+    return {
+        "ok": True,
+        "message": f"RAG reindex started for scope(s): {', '.join(runnable)}",
+        "scopes": runnable,
+    }
+
+
+# ── R2 PYQ file upload ────────────────────────────────────────────────────────
+
+_ALLOWED_PYQ_CONTENT_TYPES = {
+    "application/pdf", "image/jpeg", "image/png",
+    "image/webp", "image/gif", "image/tiff",
+}
+
+async def _upload_to_r2(data: bytes, key: str, content_type: str) -> str:
+    """
+    Upload bytes to Cloudflare R2 via the CF REST API.
+    Returns the public URL for the object.
+    Raises HTTPException on failure.
+    """
+    account_id  = getattr(settings, "CF_ACCOUNT_ID",      None) or getattr(settings, "CLOUDFLARE_ACCOUNT_ID", None)
+    api_token   = getattr(settings, "CF_API_TOKEN",        None)
+    bucket      = getattr(settings, "CF_R2_BUCKET",        "syrabit-assets")
+    public_url  = getattr(settings, "CF_R2_PUBLIC_URL",    None)
+
+    if not account_id or not api_token:
+        raise HTTPException(
+            status_code=503,
+            detail="R2 upload unavailable — CF_ACCOUNT_ID or CF_API_TOKEN not configured"
+        )
+
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/r2/buckets/{bucket}/objects/{key}"
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.put(
+                url,
+                content=data,
+                headers={
+                    "Authorization": f"Bearer {api_token}",
+                    "Content-Type": content_type,
+                },
+            )
+        if resp.status_code not in (200, 201):
+            logger.error("R2 upload failed: %s %s", resp.status_code, resp.text[:300])
+            raise HTTPException(status_code=502, detail=f"R2 upload failed: HTTP {resp.status_code}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"R2 upload error: {exc}")
+
+    if public_url:
+        return f"{public_url.rstrip('/')}/{key}"
+    # Fallback: use CF API download URL
+    return f"https://api.cloudflare.com/client/v4/accounts/{account_id}/r2/buckets/{bucket}/objects/{key}"
+
+
+@router.post("/content/chapter/{chapter_id}/upload-pyq")
+async def staff_upload_pyq(
+    request: Request,
+    chapter_id: str,
+    file: UploadFile = File(...),
+    _staff: User = Depends(require_staff_user),
+):
+    """
+    Upload a PYQ PDF or image to Cloudflare R2, store the public URL as
+    pyq_pdf_url on the chapter, and return it for immediate inline preview.
     """
     try:
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
@@ -382,36 +609,32 @@ async def staff_reindex_chapter(
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
-    if not chapter.rag_text_en and not chapter.rag_text_as:
-        raise HTTPException(
-            status_code=422,
-            detail="No RAG text to index — add content to RAG Text (EN or AS) first."
-        )
+    data = await file.read()
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 25 MB)")
 
-    async def _do_reindex():
-        try:
-            from app.services.rag.ingestion_v2 import ingest_chapter_v2
-            await ingest_chapter_v2(
-                chapter_id=chapter_id,
-                content_en=chapter.rag_text_en or None,
-                content_as=chapter.rag_text_as or None,
-                source_type="notes",
-            )
-            fresh = await Chapter.get(PydanticObjectId(chapter_id))
-            if fresh:
-                fresh.rag_indexed_at = datetime.now(timezone.utc)
-                await fresh.save()
-                logger.info("staff_content: reindex complete for chapter %s", chapter_id)
-        except Exception as exc:
-            logger.error("staff_content: reindex failed for chapter %s: %s", chapter_id, exc)
+    filename  = file.filename or "upload"
+    ext       = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    ct        = file.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
-    asyncio.create_task(_do_reindex())
+    if ct not in _ALLOWED_PYQ_CONTENT_TYPES:
+        # Be lenient: check extension too
+        ext_ct_map = {"pdf": "application/pdf", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                      "png": "image/png", "webp": "image/webp", "gif": "image/gif", "tiff": "image/tiff"}
+        ct = ext_ct_map.get(ext, ct)
+        if ct not in _ALLOWED_PYQ_CONTENT_TYPES:
+            raise HTTPException(status_code=400, detail="Only PDF and image files are allowed for PYQ upload")
 
-    return {
-        "ok": True,
-        "message": "RAG reindex started",
-        "rag_updated_at": chapter.rag_updated_at.isoformat() if chapter.rag_updated_at else None,
-    }
+    key        = f"pyq/{chapter_id}/{filename}"
+    public_url = await _upload_to_r2(data, key, ct)
+
+    chapter.pyq_pdf_url = public_url
+    chapter.updated_at  = datetime.now(timezone.utc)
+    await chapter.save()
+
+    asyncio.create_task(_purge_library_bundle_cache())
+
+    return {"ok": True, "pyq_pdf_url": public_url, "key": key}
 
 
 # ── File attach (RAG) ─────────────────────────────────────────────────────────

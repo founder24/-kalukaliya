@@ -99,6 +99,11 @@ class Chapter(Document):
     qa_rag_text_as: Optional[str] = None       # retrieval-only: expanded Q&A, Assamese
     pyq_pdf_url: Optional[str] = None          # URL to PYQ PDF (user-facing)
     pyq_rag_text: Optional[str] = None         # extracted text from PYQ PDF (retrieval-only)
+    # Structured RAG section fields — dual-layer editor (Task #5)
+    rag_sections_en: list[dict] = Field(default_factory=list)     # [{title, content}] — Notes RAG, English
+    rag_sections_as: list[dict] = Field(default_factory=list)     # [{title, content}] — Notes RAG, Assamese
+    qa_rag_sections_en: list[dict] = Field(default_factory=list)  # [{section, question, answer, solution}] — Q&A RAG, English
+    qa_rag_sections_as: list[dict] = Field(default_factory=list)  # [{section, question, answer, solution}] — Q&A RAG, Assamese
     meta_description: Optional[str] = None
     keywords: Optional[str] = None
     word_count: Optional[int] = None
@@ -109,6 +114,13 @@ class Chapter(Document):
     content_saved_at: Optional[datetime] = None   # stamped on every student-content PATCH save
     rag_updated_at: Optional[datetime] = None     # stamped when rag_text_en/as changes
     rag_indexed_at: Optional[datetime] = None     # stamped after successful Vectorize reindex
+    # Per-section RAG timestamps — dual-layer editor
+    notes_rag_updated_at: Optional[datetime] = None   # stamped when rag_sections_en/as are saved
+    notes_rag_indexed_at: Optional[datetime] = None   # stamped after Notes sections reindex
+    qa_rag_updated_at: Optional[datetime] = None      # stamped when qa_rag_sections_en/as are saved
+    qa_rag_indexed_at: Optional[datetime] = None      # stamped after Q&A sections reindex
+    pyq_rag_updated_at: Optional[datetime] = None     # stamped when pyq_rag_text is saved
+    pyq_rag_indexed_at: Optional[datetime] = None     # stamped after PYQ reindex
     published_at: Optional[datetime] = None       # stamped when chapter is published
     version: int = 0                              # optimistic locking counter
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
