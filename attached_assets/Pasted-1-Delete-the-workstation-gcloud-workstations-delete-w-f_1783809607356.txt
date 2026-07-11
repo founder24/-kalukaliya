@@ -1,0 +1,21 @@
+1. Delete the workstation
+gcloud workstations delete w-founder-mpxm3iiw \
+  --cluster=cluster-mpw78b4n \
+  --config=config-mpxlti9k \
+  --region=us-central1 \
+  --project=blissful-acumen-495019-t6
+You are about to delete workstation [w-founder-mpxm3iiw]
+
+Do you want to continue (Y/n)?  Y    
+
+Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Delete request issued for: [w-founder-mpxm3iiw]
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809562939-6565d875890cc-bc117ae4-83ee8cef] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809562939-6565d875890cc-bc117ae4-83ee8cef] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809562939-6565d875890cc-bc117ae4-83ee8cef] to complete...working..Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809562939-6565d875890cc-bc117ae4-83ee8cef] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809562939-6565d875890cc-bc117ae4-83ee8cef] to complete...working.Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809562939-6565d875890cc-bc117ae4-83ee8cef] to complete...working...Regional Access Boundary HTTP request failed after retries: response_data={'error': {'code': 404, 'message': 'Not found; Gaia id not found for email founder@syrabit.ai', 'status': 'NOT_FOUND'}}, retryable_error=False
+Waiting for operation [projects/blissful-acumen-495019-t6/locations/us-central1/operations/operation-1783809562939-6565d875890cc-bc117ae4-83ee8cef] to complete...done.                                          
+Deleted workstation [w-founder-mpxm3iiw].
+founder@cloudshell:~ (blissful-acumen-495019-t6)$ 
