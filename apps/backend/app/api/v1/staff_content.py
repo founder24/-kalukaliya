@@ -216,6 +216,8 @@ async def staff_list_chapters(
             "has_rag_sections":     bool(ch.rag_sections_en or ch.rag_sections_as),
             "has_qa_rag_sections":  bool(ch.qa_rag_sections_en or ch.qa_rag_sections_as),
             "has_pyq_pdf":          bool(ch.pyq_pdf_url),
+            "has_pyq_papers":       bool(ch.pyq_papers),
+            "pyq_papers_count":     len(ch.pyq_papers) if ch.pyq_papers else 0,
             "word_count":      ch.word_count,
             "content_saved_at": ch.content_saved_at.isoformat() if ch.content_saved_at else None,
             "rag_updated_at":   ch.rag_updated_at.isoformat()   if ch.rag_updated_at   else None,

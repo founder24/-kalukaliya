@@ -907,6 +907,33 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
   // objects so the retry handler knows which scopes to target.
   const [failedReindexChapters, setFailedReindexChapters] = useState([]);
 
+  // ── PYQ panel ────────────────────────────────────────────────────────────────
+  const [showPyqPanel, setShowPyqPanel] = useState(false);
+  const [pyqPanelChId, setPyqPanelChId] = useState(null);
+  const [pyqPanelPapers, setPyqPanelPapers] = useState([]);
+  const [pyqPanelLoading, setPyqPanelLoading] = useState(false);
+
+  const handleOpenPyqPanel = () => {
+    setShowPyqPanel(v => !v);
+    setPyqPanelChId(null);
+    setPyqPanelPapers([]);
+  };
+
+  const handleSelectPyqChapter = async (ch) => {
+    if (pyqPanelChId === ch.id) return; // already open
+    setPyqPanelChId(ch.id);
+    setPyqPanelPapers([]);
+    setPyqPanelLoading(true);
+    try {
+      const res = await api().get(`/staff/content/chapter/${ch.id}`);
+      setPyqPanelPapers(res.data.pyq_papers || []);
+    } catch {
+      toast.error('Could not load chapter PYQ data');
+    } finally {
+      setPyqPanelLoading(false);
+    }
+  };
+
   // Clear failed list whenever the staff switches to a different subject.
   useEffect(() => { setFailedReindexChapters([]); }, [subject?.id]);
 
@@ -1023,7 +1050,7 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
     qa:          chapters.filter(c => c.has_qa_en).length,
     ragSections: chapters.filter(c => c.has_rag_sections).length,
     qaSections:  chapters.filter(c => c.has_qa_rag_sections).length,
-    pyqPdf:      chapters.filter(c => c.has_pyq_pdf).length,
+    pyqPapers:   chapters.filter(c => c.has_pyq_papers).length,
     staleRag:    chapters.filter(c => c.notes_rag_stale || c.qa_rag_stale || c.pyq_rag_stale).length,
   };
 
@@ -1061,7 +1088,14 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
             <span><span className="text-amber-500 font-semibold">{stats.qa}</span>/{stats.total} Q&A</span>
             <span><span className="text-teal-500 font-semibold">{stats.ragSections}</span>/{stats.total} RAG Sections</span>
             <span><span className="text-indigo-500 font-semibold">{stats.qaSections}</span>/{stats.total} Q&A Sections</span>
-            <span><span className="text-rose-500 font-semibold">{stats.pyqPdf}</span>/{stats.total} PYQ PDF</span>
+            <button
+              onClick={handleOpenPyqPanel}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-md transition-colors ${showPyqPanel ? 'bg-amber-100 text-amber-700 border border-amber-300' : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50'}`}
+              title="Manage PYQ page images for any chapter"
+            >
+              <span className="font-semibold" style={{ color: showPyqPanel ? undefined : '#f59e0b' }}>{stats.pyqPapers}</span>
+              /{stats.total} PYQ Papers
+            </button>
             {stats.staleRag > 0 && (
               <span className="flex items-center gap-1.5">
                 <span title="Chapters with RAG content updated but not yet reindexed">
@@ -1098,6 +1132,81 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
         )}
       </div>
 
+      {/* ── PYQ Panel ─────────────────────────────────────────────────────── */}
+      {showPyqPanel && (
+        <div className="border-b border-amber-100 bg-amber-50/40 flex-shrink-0" style={{ maxHeight: 360 }}>
+          {/* Panel header */}
+          <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 border-b border-amber-100">
+            <span className="text-xs font-bold text-amber-700 uppercase tracking-wide">
+              PYQ Papers — select a chapter to manage its pages
+            </span>
+            <button
+              onClick={() => setShowPyqPanel(false)}
+              className="w-6 h-6 flex items-center justify-center rounded-full text-amber-400 hover:bg-amber-100 hover:text-amber-700 transition-colors text-base leading-none"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Two-column body */}
+          <div className="flex" style={{ height: 310 }}>
+            {/* Left — chapter picker */}
+            <div className="w-64 flex-shrink-0 overflow-y-auto border-r border-amber-100">
+              {chapters.map((ch, idx) => {
+                const isSelected = pyqPanelChId === ch.id;
+                return (
+                  <button
+                    key={ch.id}
+                    onClick={() => handleSelectPyqChapter(ch)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors text-xs"
+                    style={{
+                      borderBottom: '1px solid rgba(245,158,11,0.08)',
+                      background: isSelected ? 'rgba(245,158,11,0.12)' : 'transparent',
+                      color: isSelected ? '#b45309' : '#374151',
+                    }}
+                  >
+                    <span
+                      className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0"
+                      style={{ background: isSelected ? 'rgba(245,158,11,0.25)' : 'rgba(0,0,0,0.05)', color: isSelected ? '#b45309' : '#9ca3af' }}
+                    >
+                      {ch.chapter_number ?? idx + 1}
+                    </span>
+                    <span className="flex-1 truncate font-medium">{ch.title}</span>
+                    {ch.pyq_papers_count > 0 && (
+                      <span className="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded-full bg-amber-200 text-amber-700">
+                        {ch.pyq_papers_count}pg
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Right — editor */}
+            <div className="flex-1 overflow-y-auto px-4 py-3">
+              {!pyqPanelChId ? (
+                <div className="h-full flex flex-col items-center justify-center gap-2 text-amber-300">
+                  <span className="text-3xl">📄</span>
+                  <span className="text-xs text-amber-400">Pick a chapter on the left</span>
+                </div>
+              ) : pyqPanelLoading ? (
+                <div className="h-full flex items-center justify-center"><Spinner /></div>
+              ) : (
+                <PyqPapersEditor
+                  chapterId={pyqPanelChId}
+                  papers={pyqPanelPapers}
+                  onPapersChange={(papers) => {
+                    setPyqPanelPapers(papers);
+                    // Reflect new count on the chapter row without a full reload
+                    // (parent will refetch chapters on next navigation anyway)
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex gap-2 px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0 flex-wrap">
         <input type="search" placeholder="Search chapters…" value={search} onChange={e => setSearch(e.target.value)} className="flex-1 min-w-[140px] px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
@@ -1111,7 +1220,6 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
           <option value="">All Types</option>
           <option value="notes">Notes</option>
           <option value="qa">Q&A</option>
-          <option value="question_paper">Question Paper</option>
           <option value="formula">Formula</option>
           <option value="summary">Summary</option>
           <option value="solution">Solution</option>
