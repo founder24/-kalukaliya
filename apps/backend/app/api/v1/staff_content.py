@@ -172,11 +172,28 @@ async def staff_list_chapters(
     subject_id: str,
     _staff: User = Depends(require_staff_user),
 ):
+    # subject_id arrives as a plain hex string; MongoDB stores it as BSON ObjectId.
+    # Try ObjectId first (the common case), fall back to raw string for legacy IDs.
+    try:
+        subject_oid = PydanticObjectId(subject_id)
+        query_val: object = subject_oid
+    except Exception:
+        query_val = subject_id
+
     chapters = (
-        await Chapter.find({"subject_id": subject_id})
+        await Chapter.find({"subject_id": query_val})
         .sort("chapter_number")
         .to_list(length=500)
     )
+
+    # If the ObjectId query returned nothing, retry with the raw string
+    # (covers chapters created with legacy short IDs like 's13')
+    if not chapters and query_val != subject_id:
+        chapters = (
+            await Chapter.find({"subject_id": subject_id})
+            .sort("chapter_number")
+            .to_list(length=500)
+        )
     return [
         {
             "id":              str(ch.id),
