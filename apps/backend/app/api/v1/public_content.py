@@ -238,7 +238,8 @@ async def get_library_bundle(
                     notes_count = sum(
                         1
                         for ch in subj_chapters
-                        if ch.notes_generated or ch.content_en or ch.content_as
+                        if ch.notes_generated or ch.notes_en or ch.content_en
+                        or ch.notes_as or ch.content_as
                     )
                     chapter_count = len(subj_chapters)
                     notes_pct = (
@@ -257,8 +258,9 @@ async def get_library_bundle(
                             "content_type": ch.content_type or "notes",
                             "topic_count": len(ch.published_topics),
                             "notes_generated": ch.notes_generated
-                            or bool(ch.content_en or ch.content_as),
-                            "has_assamese": bool(ch.content_as),
+                            or bool(ch.notes_en or ch.content_en
+                                    or ch.notes_as or ch.content_as),
+                            "has_assamese": bool(ch.notes_as or ch.content_as),
                             "has_qa": bool(ch.qa_text_en or ch.qa_text_as),
                             "status": ch.status,
                         }
@@ -354,7 +356,8 @@ async def get_library_bundle(
         notes_count = sum(
             1
             for ch in subj_chapters
-            if ch.notes_generated or ch.content_en or ch.content_as
+            if ch.notes_generated or ch.notes_en or ch.content_en
+            or ch.notes_as or ch.content_as
         )
         chapter_count = len(subj_chapters)
         notes_pct = int(notes_count / chapter_count * 100) if chapter_count else 0
@@ -370,8 +373,9 @@ async def get_library_bundle(
                 "order": ch.chapter_number,
                 "topic_count": len(ch.published_topics),
                 "notes_generated": ch.notes_generated
-                or bool(ch.content_en or ch.content_as),
-                "has_assamese": bool(ch.content_as),
+                or bool(ch.notes_en or ch.content_en
+                        or ch.notes_as or ch.content_as),
+                "has_assamese": bool(ch.notes_as or ch.content_as),
                 "status": ch.status,
             }
             chapter_list.append(ch_data)
@@ -554,8 +558,10 @@ async def get_chapters_by_subject(
             "title_as": ch.title_as,
             "slug": ch.slug or _slugify(ch.title),
             "chapter_number": ch.chapter_number,
-            "notes_generated": ch.notes_generated,
-            "has_assamese": bool(ch.content_as),
+            "notes_generated": ch.notes_generated
+                or bool(ch.notes_en or ch.content_en
+                        or ch.notes_as or ch.content_as),
+            "has_assamese": bool(ch.notes_as or ch.content_as),
         }
         for ch in chapters
     ]
@@ -772,9 +778,11 @@ async def _resolve_chapter_by_slug(
     if chapter_doc.published_topics:
         topic_title = chapter_doc.published_topics[0].title
 
-    # Build content (frontend expects "content" key for English)
-    content_en = chapter_doc.content_en or ""
-    content_as = chapter_doc.content_as or ""
+    # Build content (frontend expects "content" key for English).
+    # notes_en/as is the staff-edited structured study notes layer; fall back to
+    # the legacy generated content_en/as for chapters not yet edited by staff.
+    content_en = chapter_doc.notes_en or chapter_doc.content_en or ""
+    content_as = chapter_doc.notes_as or chapter_doc.content_as or ""
     has_assamese = bool(content_as)
 
     # Compute prev/next chapters for navigation
@@ -831,6 +839,7 @@ async def _resolve_chapter_by_slug(
         if chapter_doc.published_topics
         else [],
         "faq_jsonld": chapter_doc.faq_jsonld or [],
+        "faq_entries": chapter_doc.faq_jsonld or [],   # alias expected by ChapterPage preload
         "prev_chapter": prev_chapter,
         "next_chapter": next_chapter,
         "generated_at": chapter_doc.created_at.isoformat()

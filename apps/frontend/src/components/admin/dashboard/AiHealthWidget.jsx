@@ -94,8 +94,8 @@ export default function AiHealthWidget(props) {
 
         {data?.cf_connected === false && (
           <CloudflareAnalyticsBanner
-            adminToken={adminToken}
-            onRecheck={() => load(true)}
+            adminToken={p.adminToken}
+            onRecheck={() => p.load(true)}
             className="mb-3"
           />
         )}

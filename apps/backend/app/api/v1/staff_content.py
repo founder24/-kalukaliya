@@ -419,9 +419,10 @@ async def staff_update_chapter(
 
     if content_changed:
         chapter.content_saved_at = now
-        # Recompute word_count so library page chapter cards stay in sync
-        content_en = chapter.content_en or ""
-        chapter.word_count = len(content_en.split()) if content_en.strip() else 0
+        # Recompute word_count — prefer notes_en (staff-edited layer) over
+        # legacy content_en so the library page card count stays in sync.
+        _wc_src = chapter.notes_en or chapter.content_en or ""
+        chapter.word_count = len(_wc_src.split()) if _wc_src.strip() else 0
         # notes_generated tracks whether structured notes exist
         chapter.notes_generated = bool(chapter.notes_en and chapter.notes_en.strip())
     if rag_changed:

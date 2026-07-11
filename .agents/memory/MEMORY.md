@@ -33,3 +33,4 @@
 - [Syrabit user route aliases](syrabit-user-route-aliases.md) — Frontend uses /user/profile, /user/account, /user/memories; backend must expose these as aliases to /users/me
 - [Admin panel audit findings](admin-panel-audit.md) — AWS-Native section removed (no backend); URL routing via useSearchParams; AdminShellDebug overlay (Ctrl+Shift+D)
 - [Admin panel silent-failure fixes](admin-panel-silent-failures.md) — 4 silent-blank bugs fixed: dashboard skeleton on first load, conversations error banner, logs table loading row, chapters loading spinner
+- [Staff E2E audit](staff-e2e-audit.md) — notes_en→public API pipeline fix; ChapterPage JSX rebase bug; AdminContentEditor subjects unwrap; syrabit_prod DB name; bcrypt .digest() vs .hexdigest()

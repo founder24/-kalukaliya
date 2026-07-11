@@ -1394,33 +1394,7 @@ export default function ChapterPage() {
                   </div>
                 </div>
               )}
-                    >
-                      {contentLang === 'as' ? 'নতুন টেবত খোলক' : 'Open in new tab'}
-                    </a>
-                  </div>
-                ) : (
-                  <div className="w-full">
-                    <iframe
-                      src={url}
-                      title={contentLang === 'as' ? `${data.title || ''} প্ৰশ্নকাকত` : `${data.title || ''} Question Paper`}
-                      className="w-full rounded-lg border border-border/40"
-                      style={{ height: '80vh', minHeight: '500px' }}
-                      allow="fullscreen"
-                    />
-                    <div className="text-center mt-2">
-                      <a
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-violet-600 hover:underline"
-                      >
-                        {contentLang === 'as' ? 'নতুন টেবত খোলক' : 'Open in new tab ↗'}
-                      </a>
-                    </div>
-                  </div>
-                );
-              })()}
-              </div>            </div>
+            </div>
 
             {/* Topical-mapping graph — related topic links at bottom */}
             <ChapterTopicGraph

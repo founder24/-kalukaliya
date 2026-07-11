@@ -195,7 +195,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
         axios.get(`${API}/admin/content/streams`, cfg),
         axios.get(`${API}/admin/content/subjects`, cfg),
       ]);
-      setBoards(b.data || []); setClasses(c.data || []); setStreams(s.data || []); setSubjects(sub.data || []);
+      setBoards(b.data?.boards || b.data || []); setClasses(c.data?.classes || c.data || []); setStreams(s.data?.streams || s.data || []); setSubjects(sub.data?.subjects || sub.data || []);
     } catch { toast.error('Failed to load content data'); }
     finally { setDataLoaded(true); }
   }, [adminToken]);
