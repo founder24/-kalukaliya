@@ -601,10 +601,12 @@ async def _upload_to_r2(data: bytes, key: str, content_type: str) -> str:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"R2 upload error: {exc}")
 
-    if public_url:
-        return f"{public_url.rstrip('/')}/{key}"
-    # Fallback: use CF API download URL
-    return f"https://api.cloudflare.com/client/v4/accounts/{account_id}/r2/buckets/{bucket}/objects/{key}"
+    if not public_url:
+        raise HTTPException(
+            status_code=503,
+            detail="CF_R2_PUBLIC_URL is not configured — cannot produce a public URL for the uploaded file"
+        )
+    return f"{public_url.rstrip('/')}/{key}"
 
 
 @router.post("/content/chapter/{chapter_id}/upload-pyq")
