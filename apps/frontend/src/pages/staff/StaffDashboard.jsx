@@ -876,6 +876,7 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
     ragSections: chapters.filter(c => c.has_rag_sections).length,
     qaSections:  chapters.filter(c => c.has_qa_rag_sections).length,
     pyqPdf:      chapters.filter(c => c.has_pyq_pdf).length,
+    staleRag:    chapters.filter(c => c.notes_rag_stale || c.qa_rag_stale || c.pyq_rag_stale).length,
   };
 
   return (
@@ -913,6 +914,12 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
             <span><span className="text-teal-500 font-semibold">{stats.ragSections}</span>/{stats.total} RAG Sections</span>
             <span><span className="text-indigo-500 font-semibold">{stats.qaSections}</span>/{stats.total} Q&A Sections</span>
             <span><span className="text-rose-500 font-semibold">{stats.pyqPdf}</span>/{stats.total} PYQ PDF</span>
+            {stats.staleRag > 0 && (
+              <span title="Chapters with RAG content updated but not yet reindexed">
+                <span className="text-amber-500 font-semibold">{stats.staleRag}</span>
+                <span className="text-amber-400"> stale RAG</span>
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -949,6 +956,8 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
           <div className="space-y-2">
             {filtered.map((ch, idx) => {
               const hasUnpublishedEdit = !!(ch.content_saved_at && ch.published_at && new Date(ch.content_saved_at) > new Date(ch.published_at));
+              const anyRagStale = ch.notes_rag_stale || ch.qa_rag_stale || ch.pyq_rag_stale;
+              const staleScopes = [ch.notes_rag_stale && 'Notes', ch.qa_rag_stale && 'Q&A', ch.pyq_rag_stale && 'PYQ'].filter(Boolean).join(', ');
               return (
                 <div key={ch.id} className="flex items-center gap-3 p-3.5 bg-white rounded-xl border hover:border-violet-200 hover:shadow-sm transition-all"
                   style={{ borderColor: hasUnpublishedEdit ? 'rgba(245,158,11,0.4)' : '#e5e7eb' }}>
@@ -962,6 +971,15 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium border border-blue-100">{ch.content_type}</span>
                       )}
                       {hasUnpublishedEdit && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold border border-amber-200">Unsaved</span>}
+                      {anyRagStale && (
+                        <span
+                          title={`RAG stale — needs reindex: ${staleScopes}`}
+                          className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 font-semibold border border-amber-200"
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
+                          Stale RAG
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                       {/* Content dots: EN content, AS content, Notes EN, Q&A EN, Q&A AS, RAG EN, RAG AS, RAG Sections, Q&A Sections, PYQ PDF */}

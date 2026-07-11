@@ -195,6 +195,9 @@ async def staff_list_chapters(
             .sort("chapter_number")
             .to_list(length=500)
         )
+    def _is_stale(updated_at, indexed_at):
+        return bool(updated_at and (not indexed_at or updated_at > indexed_at))
+
     return [
         {
             "id":              str(ch.id),
@@ -218,6 +221,10 @@ async def staff_list_chapters(
             "rag_updated_at":   ch.rag_updated_at.isoformat()   if ch.rag_updated_at   else None,
             "rag_indexed_at":   ch.rag_indexed_at.isoformat()   if ch.rag_indexed_at   else None,
             "published_at":     ch.published_at.isoformat()     if ch.published_at     else None,
+            # Per-scope stale flags: true when RAG content has been updated since last index
+            "notes_rag_stale":  _is_stale(ch.notes_rag_updated_at, ch.notes_rag_indexed_at),
+            "qa_rag_stale":     _is_stale(ch.qa_rag_updated_at,    ch.qa_rag_indexed_at),
+            "pyq_rag_stale":    _is_stale(ch.pyq_rag_updated_at,   ch.pyq_rag_indexed_at),
         }
         for ch in chapters
     ]
