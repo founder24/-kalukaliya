@@ -860,6 +860,7 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
   const [filterType, setFilterType] = useState('');
   const [reindexingIds, setReindexingIds] = useState({}); // { [chapterId]: true }
   const [reindexingAll, setReindexingAll] = useState(false);
+  const [reindexAllProgress, setReindexAllProgress] = useState({ done: 0, total: 0 });
 
   const handleRowReindex = async (ch, e) => {
     e.stopPropagation();
@@ -877,13 +878,16 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
     const stale = chapters.filter(c => c.notes_rag_stale || c.qa_rag_stale || c.pyq_rag_stale);
     if (stale.length === 0) return;
     setReindexingAll(true);
+    setReindexAllProgress({ done: 0, total: stale.length });
     try {
-      for (const ch of stale) {
-        await onReindexChapter(ch.id, 'all');
+      for (let i = 0; i < stale.length; i++) {
+        await onReindexChapter(stale[i].id, 'all');
+        setReindexAllProgress({ done: i + 1, total: stale.length });
       }
-      toast.success(`Reindex dispatched for ${stale.length} chapter${stale.length > 1 ? 's' : ''}`);
+      toast.success(`Reindexed ${stale.length} chapter${stale.length > 1 ? 's' : ''}`);
     } finally {
       setReindexingAll(false);
+      setReindexAllProgress({ done: 0, total: 0 });
     }
   };
 
@@ -955,7 +959,11 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
                   title="Reindex all stale chapters"
                 >
                   {reindexingAll ? <Spinner size={3} /> : <IndexIcon />}
-                  {reindexingAll ? 'Reindexing…' : 'Reindex all stale'}
+                  {reindexingAll
+                    ? (reindexAllProgress.total > 0
+                        ? `${reindexAllProgress.done} / ${reindexAllProgress.total} reindexed`
+                        : 'Reindexing…')
+                    : 'Reindex all stale'}
                 </button>
               </span>
             )}
