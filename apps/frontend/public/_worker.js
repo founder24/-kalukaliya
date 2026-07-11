@@ -356,8 +356,20 @@ export default {
       //    200s here as a hit — anything else falls through to the
       //    backend bot-render path so we don't accidentally serve
       //    JSON, images, or redirects as the canonical HTML.
+      //
+      //    CF Pages stores prerendered pages as /path/index.html and
+      //    serves them at /path/ (with trailing slash). A bot hitting
+      //    /path (no slash, e.g. after following the / → /library 301)
+      //    gets a 308 from ASSETS — the worker then saw non-200 and
+      //    fell through to botRender, which 503'd for data-driven pages
+      //    like /library. Normalize the URL to include a trailing slash
+      //    for extension-less paths so the prerendered snapshot is found.
       try {
-        const assetResp = await env.ASSETS.fetch(request);
+        const assetFetchUrl = (
+          !url.pathname.endsWith("/") &&
+          !url.pathname.match(/\.[a-z0-9]{1,10}$/i)
+        ) ? new URL(url.pathname + "/", url.origin) : url;
+        const assetResp = await env.ASSETS.fetch(new Request(assetFetchUrl, request));
         if (assetResp.status === 200) {
           const ct = assetResp.headers.get("content-type") || "";
           if (ct.includes("text/html") || ct.includes("application/xhtml")) {

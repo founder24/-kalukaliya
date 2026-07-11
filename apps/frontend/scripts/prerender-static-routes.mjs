@@ -138,6 +138,18 @@ const ROUTES = [
     ogImageAlt: "Technology Behind Syrabit.ai — RAG, AI Tutors & Speed",
   },
   {
+    // /exam-routine was getting the SPA shell (homepage title) served to
+    // Googlebot because no prerendered snapshot existed — ASSETS fell
+    // back to the catch-all index.html. That made Google rank exam-routine
+    // as the site's primary page instead of /library. This stub gives the
+    // route its own head metadata so crawlers see the correct page identity.
+    path: "/exam-routine",
+    title: "AHSEC & SEBA Exam Routine 2026 — Timetable & Countdown | Syrabit.ai",
+    description:
+      "Complete AHSEC Higher Secondary and SEBA board exam timetable 2026. Date-wise schedule with countdown timers for Science, Arts and Commerce streams. Updated for Assam board students.",
+    ogImageAlt: "AHSEC & SEBA Exam Routine 2026 — Syrabit.ai",
+  },
+  {
     // Task #499: auth-gated user shell — must ship its own canonical
     // even though it's noindex,follow, so the Lighthouse canonical
     // SEO audit passes (today it fails because the SPA fallback for
