@@ -269,10 +269,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                   const isOpen = expandedPyqId === grp.id;
                   return (
                     <div key={grp.id} style={{ borderBottom: i < visGroups.length - 1 ? '1px solid rgba(217,119,6,0.07)' : 'none' }}>
-                      {/* Chapter row — same style as Notes/QA rows */}
+                      {/* Paper row — click to expand images */}
                       <button
-                        onClick={() => setExpandedPyqId(isOpen ? null : grp.id)}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-xs transition-all hover:bg-amber-50/40 text-left"
+                        onClick={(e) => { e.stopPropagation(); setExpandedPyqId(isOpen ? null : grp.id); }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-xs transition-all hover:bg-amber-50/60 active:bg-amber-100/60 text-left cursor-pointer"
                       >
                         <span
                           className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0"
@@ -280,10 +280,17 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                         >
                           {i + 1}
                         </span>
-                        <span className="flex-1 font-medium truncate" style={{ color: section.accent }}>
-                          {grp.title}
-                        </span>
-                        <span className="text-[9px] shrink-0 mr-0.5" style={{ color: `${section.accent}80` }}>
+                        <div className="flex-1 min-w-0">
+                          <span className="font-semibold block truncate" style={{ color: section.accent }}>
+                            {grp.title}
+                          </span>
+                          {(grp.year || grp.class_name) && (
+                            <span className="text-[9px] block mt-0.5" style={{ color: `${section.accent}80` }}>
+                              {[grp.year, grp.class_name].filter(Boolean).join(' · ')}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[9px] shrink-0 mr-0.5 font-medium" style={{ color: `${section.accent}70` }}>
                           {grp.pages.length}pg
                         </span>
                         <ChevronDown
@@ -295,35 +302,40 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
 
                       {/* Expanded: 2-col image grid */}
                       {isOpen && (
-                        <div
-                          className="grid grid-cols-2 gap-1.5 px-2 pb-2"
-                          style={{ background: 'rgba(217,119,6,0.03)' }}
-                        >
-                          {grp.pages.map(page => (
-                            <a
-                              key={page._key}
-                              href={page.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="relative block rounded-lg overflow-hidden group"
-                              style={{ border: '1px solid rgba(217,119,6,0.14)' }}
-                            >
-                              <img
-                                src={page.url}
-                                alt={`pg ${page.pageNum}`}
-                                className="w-full object-cover"
-                                style={{ height: 110 }}
-                                loading="lazy"
-                              />
-                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors" />
-                              <span
-                                className="absolute top-1 left-1 text-[9px] font-bold text-white px-1 py-0.5 rounded"
-                                style={{ background: 'rgba(0,0,0,0.45)' }}
-                              >
-                                p{page.pageNum}
-                              </span>
-                            </a>
-                          ))}
+                        <div style={{ background: 'rgba(217,119,6,0.03)' }}>
+                          {grp.pages.length === 0 ? (
+                            <p className="text-center text-[10px] py-3 px-2" style={{ color: `${section.accent}60` }}>
+                              No pages uploaded yet.
+                            </p>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-1.5 px-2 pb-2">
+                              {grp.pages.map(page => (
+                                <a
+                                  key={page._key}
+                                  href={page.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="relative block rounded-lg overflow-hidden group"
+                                  style={{ border: '1px solid rgba(217,119,6,0.14)' }}
+                                >
+                                  <img
+                                    src={page.url}
+                                    alt={`pg ${page.pageNum}`}
+                                    className="w-full object-cover"
+                                    style={{ height: 110 }}
+                                    loading="lazy"
+                                  />
+                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors" />
+                                  <span
+                                    className="absolute top-1 left-1 text-[9px] font-bold text-white px-1 py-0.5 rounded"
+                                    style={{ background: 'rgba(0,0,0,0.45)' }}
+                                  >
+                                    p{page.pageNum}
+                                  </span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

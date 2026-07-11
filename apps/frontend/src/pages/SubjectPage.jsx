@@ -397,23 +397,28 @@ export default function SubjectPage() {
     const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
     const notesChs = chapters.filter(ch => !ch.content_type || !QA_TYPES.has(ch.content_type));
     const qaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type));
-    // Flatten all pyq_papers images across every chapter
-    const pyqPages = [];
-    for (const ch of chapters) {
-      if (ch.pyq_papers?.length > 0) {
-        ch.pyq_papers.forEach((p, idx) => {
-          pyqPages.push({ _key: p.id || `${ch.id}-${idx}`, chapterTitle: ch.title, url: p.url, pageNum: idx + 1 });
-        });
-      }
-    }
+    // Subject-level PYQ papers — [{id, name, class_name, year, description, pages}]
+    const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => ({
+      id:          p.id || `pyq-${pi}`,
+      title:       p.name || `Paper ${pi + 1}`,
+      class_name:  p.class_name || '',
+      year:        p.year || null,
+      description: p.description || '',
+      pages: (p.pages || []).map((pg, idx) => ({
+        _key:    pg.id || `${p.id}-${idx}`,
+        url:     pg.url,
+        pageNum: idx + 1,
+      })),
+    }));
     return [
-      { key: 'notes',           label: 'Notes',     chapters: notesChs, pyqPages: null,  accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
-      { key: 'qa',              label: 'Questions',  chapters: qaChs,    pyqPages: null,  accent: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' },
-      { key: 'question_paper',  label: 'PYQs',       chapters: [],       pyqPages,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.25)' },
+      { key: 'notes',           label: 'Notes',      chapters: notesChs, pyqGroups: null,  accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
+      { key: 'qa',              label: 'Questions',  chapters: qaChs,    pyqGroups: null,  accent: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' },
+      { key: 'question_paper',  label: 'PYQs',       chapters: [],       pyqGroups,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.25)' },
     ];
-  }, [chapters]);
+  }, [chapters, subject?.pyq_papers]);
 
   const [activeSection, setActiveSection] = useState('notes');
+  const [expandedPyqId, setExpandedPyqId] = useState(null);
   const activeSectionKey = activeSection ?? 'notes';
   const activeSecObj = subjectSections.find(s => s.key === activeSectionKey);
   const filteredChapters = activeSecObj ? activeSecObj.chapters : chapters;
@@ -592,44 +597,97 @@ export default function SubjectPage() {
           </div>
         )}
 
-        {/* PYQ section — image gallery of uploaded page scans */}
+        {/* PYQ section — expandable paper cards with page image grids */}
         {activeSectionKey === 'question_paper' ? (
           (() => {
-            const pages = activeSecObj?.pyqPages || [];
-            if (pages.length === 0) return (
+            const groups = activeSecObj?.pyqGroups || [];
+            if (groups.length === 0) return (
               <div className="text-center py-12 space-y-3" style={{ color: '#999' }}>
                 <FileText size={32} className="mx-auto opacity-20" />
                 <p className="text-sm">PYQs will be added here once available.</p>
               </div>
             );
             return (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                {pages.map((page, i) => (
-                  <a
-                    key={page._key}
-                    href={page.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="relative block rounded-xl overflow-hidden group"
-                    style={{ border: '1px solid rgba(217,119,6,0.15)', background: 'rgba(217,119,6,0.03)' }}
-                  >
-                    <img
-                      src={page.url}
-                      alt={`Page ${page.pageNum}`}
-                      className="w-full object-cover"
-                      style={{ height: 140 }}
-                      loading="lazy"
-                    />
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors" />
+              <div className="space-y-3">
+                {groups.map((grp, i) => {
+                  const isOpen = expandedPyqId === grp.id;
+                  return (
                     <div
-                      className="absolute bottom-0 inset-x-0 px-2 py-1.5 flex items-end justify-between"
-                      style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.6), transparent)' }}
+                      key={grp.id}
+                      className="rounded-xl overflow-hidden"
+                      style={{ border: '1px solid rgba(217,119,6,0.20)', background: 'rgba(217,119,6,0.02)' }}
                     >
-                      <span className="text-[10px] font-medium text-white/80 truncate leading-tight">{page.chapterTitle}</span>
-                      <span className="text-[10px] text-white/50 shrink-0 ml-1">p{page.pageNum}</span>
+                      {/* Paper header row — click to expand */}
+                      <button
+                        onClick={() => setExpandedPyqId(isOpen ? null : grp.id)}
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-amber-50/50 transition-colors text-left"
+                      >
+                        <span
+                          className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold shrink-0"
+                          style={{ background: 'rgba(217,119,6,0.10)', color: '#d97706' }}
+                        >
+                          {i + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-sm truncate" style={{ color: '#92400e' }}>{grp.title}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            {grp.year && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(217,119,6,0.12)', color: '#b45309' }}>
+                                {grp.year}
+                              </span>
+                            )}
+                            {grp.class_name && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded text-amber-700/70">
+                                {grp.class_name}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-amber-700/50">{grp.pages.length} pages</span>
+                          </div>
+                        </div>
+                        <ChevronDown
+                          size={15}
+                          className="shrink-0 transition-transform duration-200"
+                          style={{ color: '#d97706', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                        />
+                      </button>
+
+                      {/* Expanded: image grid */}
+                      {isOpen && (
+                        <div className="px-3 pb-3">
+                          {grp.pages.length === 0 ? (
+                            <p className="text-center text-xs py-4" style={{ color: '#d97706', opacity: 0.5 }}>No pages uploaded yet.</p>
+                          ) : (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                              {grp.pages.map(page => (
+                                <a
+                                  key={page._key}
+                                  href={page.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="relative block rounded-lg overflow-hidden group"
+                                  style={{ border: '1px solid rgba(217,119,6,0.15)' }}
+                                >
+                                  <img
+                                    src={page.url}
+                                    alt={`Page ${page.pageNum}`}
+                                    className="w-full object-cover"
+                                    style={{ height: 130 }}
+                                    loading="lazy"
+                                  />
+                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                                  <span
+                                    className="absolute top-1 left-1 text-[9px] font-bold text-white px-1 py-0.5 rounded"
+                                    style={{ background: 'rgba(0,0,0,0.45)' }}
+                                  >p{page.pageNum}</span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </a>
-                ))}
+                  );
+                })}
               </div>
             );
           })()

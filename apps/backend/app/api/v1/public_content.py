@@ -542,6 +542,20 @@ async def resolve_subject(
             "stream_name": stream_doc.name if stream_doc else "",
             "stream_slug": _slugify(stream_doc.name) if stream_doc else "",
             "chapter_count": chapter_count,
+            "pyq_papers": [
+                {
+                    "id":          p.get("id", ""),
+                    "name":        p.get("name", ""),
+                    "class_name":  p.get("class_name", ""),
+                    "year":        p.get("year"),
+                    "description": p.get("description", ""),
+                    "pages": [
+                        {"id": pg.get("id", ""), "url": pg.get("url", "")}
+                        for pg in (p.get("pages") or [])
+                    ],
+                }
+                for p in (subject_doc.pyq_papers or [])
+            ],
         }
     except HTTPException:
         raise
@@ -550,6 +564,47 @@ async def resolve_subject(
             raise HTTPException(status_code=503, detail="Content store not ready, please retry")
         logger.error(f"resolve_subject({board}/{class_slug}/{subject_slug}) failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to resolve subject")
+
+
+@router.get("/subjects/{subject_id}")
+async def get_subject_by_id(
+    subject_id: str,
+    response: Response,
+):
+    """Return a single subject document including pyq_papers. Used by SubjectPage."""
+    response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
+    try:
+        subj = await Subject.get(PydanticObjectId(subject_id))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid subject_id")
+    if not subj:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    return {
+        "id":          str(subj.id),
+        "name":        subj.name,
+        "slug":        subj.slug,
+        "description": subj.description,
+        "tags":        subj.tags or [],
+        "icon":        subj.icon,
+        "gradient":    subj.gradient,
+        "thumbnailUrl": subj.thumbnail_url,
+        "has_document": subj.has_document,
+        "status":      subj.status,
+        "pyq_papers": [
+            {
+                "id":          p.get("id", ""),
+                "name":        p.get("name", ""),
+                "class_name":  p.get("class_name", ""),
+                "year":        p.get("year"),
+                "description": p.get("description", ""),
+                "pages": [
+                    {"id": pg.get("id", ""), "url": pg.get("url", "")}
+                    for pg in (p.get("pages") or [])
+                ],
+            }
+            for p in (subj.pyq_papers or [])
+        ],
+    }
 
 
 @router.get("/chapters/{subject_id}")
