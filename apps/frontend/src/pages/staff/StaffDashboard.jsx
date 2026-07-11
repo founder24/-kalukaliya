@@ -172,6 +172,7 @@ const EDITOR_TABS = [
   { id: 'info',       label: 'Info' },
   { id: 'content_en', label: 'Content (EN)' },
   { id: 'content_as', label: 'Content (AS)' },
+  { id: 'qa',         label: 'Q&A' },
   { id: 'rag',        label: 'RAG' },
 ];
 
@@ -197,11 +198,12 @@ function BigTextarea({ value, onChange, placeholder, rows = 14, mono = false }) 
   );
 }
 
-function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
-  const [form, setForm] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState('info');
+function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSaved }) {
+  const [form,      setForm]      = useState(null);
+  const [loading,   setLoading]   = useState(true);
+  const [saving,    setSaving]    = useState(false);
+  const [reindexing,setReindexing]= useState(false);
+  const [tab,       setTab]       = useState('info');
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
 
@@ -222,7 +224,8 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
     return () => { cancelled = true; };
   }, [chapterId]);
 
-  const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
+  const set    = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
+  const setNum = (field) => (e) => setForm(f => ({ ...f, [field]: parseInt(e.target.value, 10) || 0 }));
 
   const handleSave = async () => {
     if (!form) return;
@@ -234,6 +237,19 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Save failed');
     } finally { setSaving(false); }
+  };
+
+  const handleReindex = async () => {
+    setReindexing(true);
+    try {
+      await api().post(`/staff/content/chapter/${chapterId}/reindex`);
+      toast.success('RAG reindex started — check back in a moment');
+      // Refresh form to get updated rag_indexed_at / rag_stale
+      const updated = await api().get(`/staff/content/chapter/${chapterId}`);
+      setForm(updated.data);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Reindex failed');
+    } finally { setReindexing(false); }
   };
 
   const handleAttachFile = async (field) => {
@@ -253,7 +269,6 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
       } else {
         const extracted = res.data?.text_extracted ?? 0;
         toast.success(`Extracted ${extracted.toLocaleString()} chars and appended to ${field}`);
-        // Reload the field value so the textarea reflects the new text
         const updated = await api().get(`/staff/content/chapter/${chapterId}`);
         setForm(updated.data);
       }
@@ -261,6 +276,8 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
       toast.error(err?.response?.data?.detail || 'File attach failed');
     } finally { setUploading(false); }
   };
+
+  const inputCls = 'w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400';
 
   if (loading) return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
@@ -270,6 +287,8 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
     </div>
   );
 
+  const ragIsStale = form?.rag_stale;
+
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center" style={{ background: 'rgba(0,0,0,0.55)' }} onMouseDown={e => e.target === e.currentTarget && onClose()}>
       <div className="bg-white w-full max-w-4xl flex flex-col overflow-hidden sm:my-4 sm:rounded-2xl shadow-2xl">
@@ -277,7 +296,16 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0 bg-white">
           <div className="min-w-0">
-            <div className="text-xs text-gray-400 mb-0.5">{subjectName}</div>
+            {/* Board › Class › Course › Subject hierarchy */}
+            <div className="flex items-center gap-1 flex-wrap text-[10px] text-gray-400 mb-0.5">
+              {subjectContext?.board  && <span>{subjectContext.board}</span>}
+              {subjectContext?.board  && <span className="text-gray-300">›</span>}
+              {subjectContext?.cls    && <span>{subjectContext.cls}</span>}
+              {subjectContext?.cls    && <span className="text-gray-300">›</span>}
+              {subjectContext?.course && <span className="text-violet-400">{subjectContext.course}</span>}
+              {subjectContext?.course && <span className="text-gray-300">›</span>}
+              <span>{subjectName}</span>
+            </div>
             <h2 className="text-sm font-bold text-gray-900 truncate">Ch. {form?.chapter_number} · {form?.title}</h2>
           </div>
           <div className="flex items-center gap-2 ml-4 flex-shrink-0">
@@ -288,34 +316,55 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
 
         {/* Tabs */}
         <div className="flex gap-1 px-4 pt-2 pb-0 border-b border-gray-100 flex-shrink-0 bg-white overflow-x-auto">
-          {EDITOR_TABS.map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`px-3 py-2 text-xs font-semibold rounded-t-lg transition-colors whitespace-nowrap border-b-2 ${tab === t.id ? 'border-violet-500 text-violet-700 bg-violet-50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
-            >{t.label}</button>
-          ))}
+          {EDITOR_TABS.map(t => {
+            const isRagTab = t.id === 'rag';
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`relative px-3 py-2 text-xs font-semibold rounded-t-lg transition-colors whitespace-nowrap border-b-2 ${tab === t.id ? 'border-violet-500 text-violet-700 bg-violet-50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+              >
+                {t.label}
+                {isRagTab && ragIsStale && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400" title="RAG text updated but not yet reindexed" />
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
 
+          {/* ── INFO TAB ── */}
           {tab === 'info' && (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <FieldLabel>Title (English)</FieldLabel>
-                  <input type="text" value={form?.title || ''} onChange={set('title')} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="Chapter title" />
+                  <input type="text" value={form?.title || ''} onChange={set('title')} className={inputCls} placeholder="Chapter title" />
                 </div>
                 <div>
                   <FieldLabel>Title (Assamese)</FieldLabel>
-                  <input type="text" value={form?.title_as || ''} onChange={set('title_as')} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="অধ্যায়ৰ শিৰোনাম" />
+                  <input type="text" value={form?.title_as || ''} onChange={set('title_as')} className={inputCls} placeholder="অধ্যায়ৰ শিৰোনাম" />
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <FieldLabel>Chapter #</FieldLabel>
+                  <input type="number" min="0" value={form?.chapter_number ?? ''} onChange={setNum('chapter_number')} className={inputCls} placeholder="1" />
+                </div>
+                <div className="sm:col-span-3">
+                  <FieldLabel>Slug (URL identifier)</FieldLabel>
+                  <input type="text" value={form?.slug || ''} onChange={set('slug')} className={inputCls} placeholder="chapter-slug" />
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <FieldLabel>Status</FieldLabel>
-                  <select value={form?.status || 'draft'} onChange={set('status')} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+                  <select value={form?.status || 'draft'} onChange={set('status')} className={`${inputCls} bg-white`}>
                     <option value="planned">Planned</option>
                     <option value="draft">Draft</option>
                     <option value="published">Published</option>
@@ -324,9 +373,9 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
                 </div>
                 <div>
                   <FieldLabel>Content type</FieldLabel>
-                  <select value={form?.content_type || 'notes'} onChange={set('content_type')} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+                  <select value={form?.content_type || 'notes'} onChange={set('content_type')} className={`${inputCls} bg-white`}>
                     <option value="notes">Notes</option>
-                    <option value="qa">Q&A</option>
+                    <option value="qa">Q&amp;A</option>
                     <option value="question_paper">Question Paper</option>
                     <option value="formula">Formula</option>
                     <option value="summary">Summary</option>
@@ -335,23 +384,26 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
                   </select>
                 </div>
               </div>
+
               <div>
                 <FieldLabel>Meta description</FieldLabel>
-                <textarea value={form?.meta_description || ''} onChange={set('meta_description')} rows={2} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none" placeholder="SEO meta description (max 160 chars)" />
+                <textarea value={form?.meta_description || ''} onChange={set('meta_description')} rows={2} className={`${inputCls} resize-none`} placeholder="SEO meta description (max 160 chars)" />
               </div>
               <div>
                 <FieldLabel>Keywords</FieldLabel>
-                <input type="text" value={form?.keywords || ''} onChange={set('keywords')} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" placeholder="comma, separated, keywords" />
+                <input type="text" value={form?.keywords || ''} onChange={set('keywords')} className={inputCls} placeholder="comma, separated, keywords" />
               </div>
+
               {/* Content presence summary */}
               <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
                 <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Content presence</div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-gray-600">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                   {[
                     ['content_en', 'Content EN'], ['content_as', 'Content AS'],
-                    ['notes_en', 'Notes EN'], ['notes_as', 'Notes AS'],
-                    ['qa_text_en', 'Q&A EN'], ['qa_text_as', 'Q&A AS'],
-                    ['rag_text_en', 'RAG EN'], ['rag_text_as', 'RAG AS'],
+                    ['notes_en',   'Notes EN'],   ['notes_as',   'Notes AS'],
+                    ['qa_text_en', 'Q&A EN'],     ['qa_text_as', 'Q&A AS'],
+                    ['rag_text_en','RAG EN'],      ['rag_text_as','RAG AS'],
+                    ['qa_rag_text_en','Q&A RAG EN'],['pyq_rag_text','PYQ RAG'],
                   ].map(([field, label]) => (
                     <div key={field} className="flex items-center gap-1.5">
                       <Dot filled={!!(form?.[field]?.trim())} label={label} />
@@ -359,14 +411,29 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
                     </div>
                   ))}
                 </div>
+                {/* RAG sync status row */}
+                <div className="mt-3 pt-2.5 border-t border-gray-100 flex items-center gap-3 flex-wrap text-[11px]">
+                  <span className="text-gray-400 font-semibold uppercase tracking-wide">RAG sync</span>
+                  {form?.rag_indexed_at
+                    ? <span className={`flex items-center gap-1 ${ragIsStale ? 'text-amber-600' : 'text-emerald-600'}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${ragIsStale ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                        {ragIsStale ? 'Stale' : 'Indexed'} · {new Date(form.rag_indexed_at).toLocaleDateString()}
+                      </span>
+                    : <span className="text-gray-400">Not indexed yet</span>
+                  }
+                  {form?.rag_updated_at && (
+                    <span className="text-gray-400">Last edit {new Date(form.rag_updated_at).toLocaleDateString()}</span>
+                  )}
+                </div>
               </div>
             </>
           )}
 
+          {/* ── CONTENT EN TAB ── */}
           {tab === 'content_en' && (
             <>
               <div>
-                <FieldLabel chars={form?.content_en?.length || 0}>Content — English (HTML/Markdown)</FieldLabel>
+                <FieldLabel chars={form?.content_en?.length || 0}>Content — English (HTML / Markdown)</FieldLabel>
                 <BigTextarea value={form?.content_en || ''} onChange={set('content_en')} placeholder="Chapter content in English…" mono />
               </div>
               <div>
@@ -376,6 +443,7 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
             </>
           )}
 
+          {/* ── CONTENT AS TAB ── */}
           {tab === 'content_as' && (
             <>
               <div>
@@ -389,14 +457,60 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
             </>
           )}
 
+          {/* ── Q&A TAB (was missing entirely) ── */}
+          {tab === 'qa' && (
+            <>
+              <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 text-xs text-emerald-700">
+                <strong>Q&amp;A content</strong> is the structured question-and-answer bank for this chapter. Use markdown for formatting. These fields power the Q&amp;A section shown to students. The <em>Q&amp;A RAG</em> fields (for AI retrieval) are on the RAG tab.
+              </div>
+              <div>
+                <FieldLabel chars={form?.qa_text_en?.length || 0}>Q&amp;A — English</FieldLabel>
+                <BigTextarea value={form?.qa_text_en || ''} onChange={set('qa_text_en')} placeholder={'## Q1. What is…\n**Answer:** …\n\n## Q2. …'} rows={16} mono />
+              </div>
+              <div>
+                <FieldLabel chars={form?.qa_text_as?.length || 0}>Q&amp;A — Assamese</FieldLabel>
+                <BigTextarea value={form?.qa_text_as || ''} onChange={set('qa_text_as')} placeholder="অসমীয়া ভাষাত প্ৰশ্ন-উত্তৰ…" rows={14} />
+              </div>
+            </>
+          )}
+
+          {/* ── RAG TAB ── */}
           {tab === 'rag' && (
             <>
-              {/* Hidden file input shared by all RAG attach buttons */}
               <input ref={fileRef} type="file" accept=".pdf,.txt,.md" className="hidden" />
 
-              <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-xs text-blue-700">
-                <strong>RAG fields</strong> are the plain-text extraction the AI uses for retrieval. They should be full, unformatted text from the textbook or source PDF — not markdown. Paste directly or attach a file to auto-extract.
-              </div>
+              {/* Sync status banner */}
+              {ragIsStale ? (
+                <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                  <div className="text-xs text-amber-700">
+                    <strong>RAG text has been edited but not reindexed.</strong> The AI won't use the latest content until you reindex.
+                    {form?.rag_updated_at && <span className="ml-1 opacity-70">Edited {new Date(form.rag_updated_at).toLocaleString()}</span>}
+                  </div>
+                  <button
+                    onClick={handleReindex}
+                    disabled={reindexing}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white transition-colors disabled:opacity-50"
+                  >
+                    {reindexing ? <Spinner size={3} /> : <IndexIcon />}
+                    {reindexing ? 'Indexing…' : 'Reindex now'}
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
+                  <div className="text-xs text-blue-700">
+                    <strong>RAG fields</strong> — plain-text the AI uses for retrieval. Paste full unformatted textbook content or attach a PDF to auto-extract. After editing, click Reindex to push to Vectorize.
+                    {form?.rag_indexed_at && <span className="ml-1 opacity-70">· Last indexed {new Date(form.rag_indexed_at).toLocaleString()}</span>}
+                  </div>
+                  <button
+                    onClick={handleReindex}
+                    disabled={reindexing}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
+                  >
+                    {reindexing ? <Spinner size={3} /> : <IndexIcon />}
+                    {reindexing ? 'Indexing…' : 'Reindex'}
+                  </button>
+                </div>
+              )}
 
               {[
                 { field: 'rag_text_en',    label: 'RAG Text — English',        placeholder: 'Full plain-text chapter content for AI retrieval (English)…' },
@@ -429,9 +543,9 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-gray-100 flex-shrink-0 bg-gray-50">
-          <div className="text-[11px] text-gray-400">
-            {form?.content_saved_at && <>Saved {new Date(form.content_saved_at).toLocaleString()}</>}
-            {form?.rag_updated_at && tab === 'rag' && <> · RAG {new Date(form.rag_updated_at).toLocaleString()}</>}
+          <div className="text-[11px] text-gray-400 space-x-2">
+            {form?.content_saved_at && <span>Saved {new Date(form.content_saved_at).toLocaleString()}</span>}
+            {form?.word_count > 0 && <span>· {form.word_count.toLocaleString()} words</span>}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors">Cancel</button>
@@ -447,38 +561,81 @@ function ChapterEditor({ chapterId, subjectName, onClose, onSaved }) {
 
 // ── Chapters view ─────────────────────────────────────────────────────────────
 
-function ChaptersView({ subject, chapters, loadingChapters, onBack, onEditChapter }) {
+function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBack, onEditChapter }) {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterType, setFilterType] = useState('');
 
   const filtered = chapters.filter(c => {
-    const matchSearch = !search || c.title?.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = !search       || c.title?.toLowerCase().includes(search.toLowerCase());
     const matchStatus = !filterStatus || c.status === filterStatus;
-    return matchSearch && matchStatus;
+    const matchType   = !filterType   || c.content_type === filterType;
+    return matchSearch && matchStatus && matchType;
   });
+
+  // Content coverage stats
+  const stats = {
+    total:      chapters.length,
+    contentEN:  chapters.filter(c => c.has_content_en).length,
+    contentAS:  chapters.filter(c => c.has_content_as).length,
+    rag:        chapters.filter(c => c.has_rag_en).length,
+    qa:         chapters.filter(c => c.has_qa_en).length,
+  };
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center gap-3 px-4 sm:px-6 py-4 border-b border-gray-100 bg-white flex-shrink-0">
-        <button onClick={onBack} className="p-2 rounded-xl text-gray-500 hover:bg-gray-100 transition-colors"><BackIcon /></button>
-        <div className="min-w-0">
-          <div className="text-xs text-gray-400">Chapters</div>
-          <h1 className="text-base font-bold text-gray-900 truncate">{subject.name}</h1>
+      {/* Header with full hierarchy breadcrumb */}
+      <div className="px-4 sm:px-6 py-4 border-b border-gray-100 bg-white flex-shrink-0">
+        <div className="flex items-start gap-3">
+          <button onClick={onBack} className="mt-0.5 p-2 rounded-xl text-gray-500 hover:bg-gray-100 transition-colors flex-shrink-0"><BackIcon /></button>
+          <div className="min-w-0 flex-1">
+            {/* Board → Class → Course → Subject breadcrumb */}
+            <div className="flex items-center gap-1 flex-wrap text-[10px] text-gray-400 mb-0.5">
+              {subjectContext?.board  && <span>{subjectContext.board}</span>}
+              {subjectContext?.board  && <span className="text-gray-300">›</span>}
+              {subjectContext?.cls    && <span>{subjectContext.cls}</span>}
+              {subjectContext?.cls    && <span className="text-gray-300">›</span>}
+              {subjectContext?.course && <span className="text-violet-500 font-medium">{subjectContext.course}</span>}
+              {subjectContext?.course && <span className="text-gray-300">›</span>}
+              <span className="text-gray-500 font-medium">{subject.name}</span>
+            </div>
+            <h1 className="text-base font-bold text-gray-900">Chapters</h1>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <StatusBadge status={subject.status} />
+            <span className="text-xs text-gray-400">{stats.total} ch.</span>
+          </div>
         </div>
-        <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-          <StatusBadge status={subject.status} />
-          <span className="text-xs text-gray-400">{chapters.length} ch.</span>
-        </div>
+
+        {/* Coverage mini-bar */}
+        {stats.total > 0 && (
+          <div className="mt-3 ml-11 flex items-center gap-4 text-[10px] text-gray-400">
+            <span><span className="text-emerald-600 font-semibold">{stats.contentEN}</span>/{stats.total} Content EN</span>
+            <span><span className="text-blue-500 font-semibold">{stats.contentAS}</span>/{stats.total} Content AS</span>
+            <span><span className="text-violet-500 font-semibold">{stats.rag}</span>/{stats.total} RAG</span>
+            <span><span className="text-amber-500 font-semibold">{stats.qa}</span>/{stats.total} Q&A</span>
+          </div>
+        )}
       </div>
 
-      <div className="flex gap-2 px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0">
-        <input type="search" placeholder="Search chapters…" value={search} onChange={e => setSearch(e.target.value)} className="flex-1 min-w-0 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+      <div className="flex gap-2 px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0 flex-wrap">
+        <input type="search" placeholder="Search chapters…" value={search} onChange={e => setSearch(e.target.value)} className="flex-1 min-w-[140px] px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
-          <option value="">All</option>
+          <option value="">All Status</option>
           <option value="published">Published</option>
           <option value="draft">Draft</option>
           <option value="planned">Planned</option>
           <option value="archived">Archived</option>
+        </select>
+        <select value={filterType} onChange={e => setFilterType(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+          <option value="">All Types</option>
+          <option value="notes">Notes</option>
+          <option value="qa">Q&A</option>
+          <option value="question_paper">Question Paper</option>
+          <option value="formula">Formula</option>
+          <option value="summary">Summary</option>
+          <option value="solution">Solution</option>
+          <option value="reference">Reference</option>
         </select>
       </div>
 
@@ -502,16 +659,21 @@ function ChaptersView({ subject, chapters, loadingChapters, onBack, onEditChapte
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-gray-900 truncate">{ch.title}</span>
+                      {ch.content_type && ch.content_type !== 'notes' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium border border-blue-100">{ch.content_type}</span>
+                      )}
                       {hasUnpublishedEdit && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold border border-amber-200">Unsaved</span>}
                     </div>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      {/* Content dots: EN content, AS content, Notes EN, Q&A EN, Q&A AS, RAG EN, RAG AS */}
+                      <div className="flex items-center gap-1" title="Content EN · Content AS · Notes EN · Q&A EN · Q&A AS · RAG EN · RAG AS">
                         <Dot filled={ch.has_content_en} label="Content EN" />
                         <Dot filled={ch.has_content_as} label="Content AS" />
-                        <Dot filled={ch.has_rag_en} label="RAG EN" />
-                        <Dot filled={ch.has_rag_as} label="RAG AS" />
-                        <Dot filled={ch.has_notes_en} label="Notes EN" />
-                        <Dot filled={ch.has_qa_en} label="Q&A EN" />
+                        <Dot filled={ch.has_notes_en}   label="Notes EN" />
+                        <Dot filled={ch.has_qa_en}      label="Q&A EN" />
+                        <Dot filled={ch.has_qa_as}      label="Q&A AS" />
+                        <Dot filled={ch.has_rag_en}     label="RAG EN" />
+                        <Dot filled={ch.has_rag_as}     label="RAG AS" />
                       </div>
                       {ch.word_count > 0 && <span className="text-[10px] text-gray-400">{ch.word_count.toLocaleString()} words</span>}
                     </div>
@@ -682,6 +844,7 @@ export default function StaffDashboard() {
   const [loading,  setLoading]  = useState(true);
 
   const [selectedSubject, setSelectedSubject] = useState(null);
+  const [subjectContext,  setSubjectContext]  = useState(null); // { board, cls, course }
   const [chapters,        setChapters]        = useState([]);
   const [loadingChapters, setLoadingChapters] = useState(false);
   const [editingChapterId, setEditingChapterId] = useState(null);
@@ -712,6 +875,11 @@ export default function StaffDashboard() {
     setChapters([]);
     setView('chapters');
     setLoadingChapters(true);
+    // Resolve Board → Class → Course names for breadcrumb context
+    const board  = boards.find(b => b.id === subj.board_id);
+    const cls    = classes.find(c => c.id === subj.class_id);
+    const course = subj.stream_name || streams.find(s => s.id === subj.stream_id)?.name || null;
+    setSubjectContext({ board: board?.name, cls: cls?.name, course });
     try {
       const res = await api().get(`/staff/content/chapters/${subj.id}`);
       setChapters(res.data);
@@ -720,7 +888,7 @@ export default function StaffDashboard() {
     } finally {
       setLoadingChapters(false);
     }
-  }, []);
+  }, [boards, classes, streams]);
 
   // Refresh chapter list after save to reflect updated indicators
   const handleChapterSaved = useCallback(async (updatedData) => {
@@ -781,7 +949,7 @@ export default function StaffDashboard() {
             <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} onSelectSubject={selectSubject} />
           )}
           {view === 'chapters' && selectedSubject && (
-            <ChaptersView subject={selectedSubject} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} />
+            <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} />
           )}
         </main>
       </div>
@@ -791,6 +959,7 @@ export default function StaffDashboard() {
         <ChapterEditor
           chapterId={editingChapterId}
           subjectName={selectedSubject?.name || ''}
+          subjectContext={subjectContext}
           onClose={() => setEditingChapterId(null)}
           onSaved={handleChapterSaved}
         />
@@ -830,4 +999,7 @@ function EditIcon() {
 }
 function AttachIcon() {
   return <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>;
+}
+function IndexIcon() {
+  return <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>;
 }

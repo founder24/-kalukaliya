@@ -187,12 +187,15 @@ async def staff_list_chapters(
             "chapter_number":  ch.chapter_number,
             "has_content_en":  bool(ch.content_en),
             "has_content_as":  bool(ch.content_as),
-            "has_rag_en":      bool(ch.rag_text_en),
-            "has_rag_as":      bool(ch.rag_text_as),
             "has_notes_en":    bool(ch.notes_en),
             "has_qa_en":       bool(ch.qa_text_en),
+            "has_qa_as":       bool(ch.qa_text_as),
+            "has_rag_en":      bool(ch.rag_text_en),
+            "has_rag_as":      bool(ch.rag_text_as),
             "word_count":      ch.word_count,
             "content_saved_at": ch.content_saved_at.isoformat() if ch.content_saved_at else None,
+            "rag_updated_at":   ch.rag_updated_at.isoformat()   if ch.rag_updated_at   else None,
+            "rag_indexed_at":   ch.rag_indexed_at.isoformat()   if ch.rag_indexed_at   else None,
             "published_at":     ch.published_at.isoformat()     if ch.published_at     else None,
         }
         for ch in chapters
@@ -212,15 +215,25 @@ async def staff_get_chapter(
         chapter = None
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
+
+    rag_stale = bool(
+        chapter.rag_updated_at and (
+            not chapter.rag_indexed_at or
+            chapter.rag_updated_at > chapter.rag_indexed_at
+        )
+    )
+
     return {
         "id":              str(chapter.id),
         "title":           chapter.title,
         "title_as":        chapter.title_as,
+        "slug":            chapter.slug or "",
         "status":          chapter.status,
         "content_type":    chapter.content_type,
         "chapter_number":  chapter.chapter_number,
         "meta_description": chapter.meta_description,
         "keywords":         chapter.keywords,
+        "notes_generated":  chapter.notes_generated,
         # Content fields
         "content_en":       chapter.content_en      or "",
         "content_as":       chapter.content_as      or "",
@@ -234,9 +247,11 @@ async def staff_get_chapter(
         "qa_rag_text_en":   chapter.qa_rag_text_en  or "",
         "qa_rag_text_as":   chapter.qa_rag_text_as  or "",
         "pyq_rag_text":     chapter.pyq_rag_text    or "",
-        # Timestamps
+        # Timestamps + RAG sync status
         "content_saved_at": chapter.content_saved_at.isoformat() if chapter.content_saved_at else None,
         "rag_updated_at":   chapter.rag_updated_at.isoformat()   if chapter.rag_updated_at   else None,
+        "rag_indexed_at":   chapter.rag_indexed_at.isoformat()   if chapter.rag_indexed_at   else None,
+        "rag_stale":        rag_stale,
         "published_at":     chapter.published_at.isoformat()     if chapter.published_at     else None,
         "updated_at":       chapter.updated_at.isoformat()       if chapter.updated_at       else None,
     }
@@ -245,6 +260,8 @@ async def staff_get_chapter(
 class ChapterEditBody(BaseModel):
     title:            Optional[str] = None
     title_as:         Optional[str] = None
+    slug:             Optional[str] = None
+    chapter_number:   Optional[int] = None
     status:           Optional[str] = None
     content_type:     Optional[str] = None
     meta_description: Optional[str] = None
@@ -291,8 +308,8 @@ async def staff_update_chapter(
     changed = content_changed = rag_changed = False
 
     all_fields = (
-        "title", "title_as", "status", "content_type",
-        "meta_description", "keywords",
+        "title", "title_as", "slug", "chapter_number",
+        "status", "content_type", "meta_description", "keywords",
         "content_en", "content_as", "notes_en", "notes_as",
         "qa_text_en", "qa_text_as",
         "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as", "pyq_rag_text",
@@ -315,6 +332,8 @@ async def staff_update_chapter(
         # Recompute word_count so library page chapter cards stay in sync
         content_en = chapter.content_en or ""
         chapter.word_count = len(content_en.split()) if content_en.strip() else 0
+        # notes_generated tracks whether structured notes exist
+        chapter.notes_generated = bool(chapter.notes_en and chapter.notes_en.strip())
     if rag_changed:
         chapter.rag_updated_at = now
     chapter.updated_at = now
@@ -324,6 +343,58 @@ async def staff_update_chapter(
     asyncio.create_task(_purge_library_bundle_cache())
 
     return {"ok": True}
+
+
+# ── RAG reindex ───────────────────────────────────────────────────────────────
+
+@router.post("/content/chapter/{chapter_id}/reindex")
+async def staff_reindex_chapter(
+    request: Request,
+    chapter_id: str,
+    _staff: User = Depends(require_staff_user),
+):
+    """
+    Trigger a Vectorize RAG reindex for a chapter — same pipeline as admin.
+    Runs in a background task; returns immediately with the chapter's current
+    rag_updated_at so the frontend can update the stale indicator optimistically.
+    """
+    try:
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    except Exception:
+        chapter = None
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    if not chapter.rag_text_en and not chapter.rag_text_as:
+        raise HTTPException(
+            status_code=422,
+            detail="No RAG text to index — add content to RAG Text (EN or AS) first."
+        )
+
+    async def _do_reindex():
+        try:
+            from app.services.rag.ingestion_v2 import ingest_chapter_v2
+            await ingest_chapter_v2(
+                chapter_id=chapter_id,
+                content_en=chapter.rag_text_en or None,
+                content_as=chapter.rag_text_as or None,
+                source_type="notes",
+            )
+            fresh = await Chapter.get(PydanticObjectId(chapter_id))
+            if fresh:
+                fresh.rag_indexed_at = datetime.now(timezone.utc)
+                await fresh.save()
+                logger.info("staff_content: reindex complete for chapter %s", chapter_id)
+        except Exception as exc:
+            logger.error("staff_content: reindex failed for chapter %s: %s", chapter_id, exc)
+
+    asyncio.create_task(_do_reindex())
+
+    return {
+        "ok": True,
+        "message": "RAG reindex started",
+        "rag_updated_at": chapter.rag_updated_at.isoformat() if chapter.rag_updated_at else None,
+    }
 
 
 # ── File attach (RAG) ─────────────────────────────────────────────────────────
