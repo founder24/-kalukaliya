@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import {
-  BookOpen, ChevronRight, ChevronDown, Home, Sparkles,
+  BookOpen, ChevronRight, ChevronDown, ExternalLink, Home, Sparkles,
   Layers, ArrowLeft, Search, FileText, HelpCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -396,37 +396,70 @@ export default function SubjectLandingPage() {
                       className="rounded-2xl overflow-hidden"
                       style={{ border: '1px solid rgba(217,119,6,0.20)', background: 'rgba(217,119,6,0.02)' }}
                     >
-                      <button
-                        onClick={() => setExpandedPyqId(isOpen ? null : grp.id)}
-                        className="w-full flex items-center gap-3 px-5 py-4 hover:bg-amber-50/50 transition-colors text-left"
-                      >
-                        <span
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
-                          style={{ background: 'rgba(217,119,6,0.10)', color: '#d97706' }}
+                      {grp.pages.length === 1 ? (
+                        /* Single page — open directly */
+                        <a
+                          href={grp.pages[0].url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-3 px-5 py-4 hover:bg-amber-50/70 transition-colors"
                         >
-                          {i + 1}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <h2 className="text-sm font-semibold truncate" style={{ color: '#92400e' }}>{grp.title}</h2>
-                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                            {grp.year && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(217,119,6,0.12)', color: '#b45309' }}>
-                                {grp.year}
-                              </span>
-                            )}
-                            {grp.class_name && (
-                              <span className="text-[10px] text-amber-700/60">{grp.class_name}</span>
-                            )}
-                            <span className="text-[10px] text-amber-700/40">{grp.pages.length} pages</span>
+                          <span
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
+                            style={{ background: 'rgba(217,119,6,0.10)', color: '#d97706' }}
+                          >
+                            {i + 1}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <h2 className="text-sm font-semibold truncate" style={{ color: '#92400e' }}>{grp.title}</h2>
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              {grp.year && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(217,119,6,0.12)', color: '#b45309' }}>
+                                  {grp.year}
+                                </span>
+                              )}
+                              {grp.class_name && (
+                                <span className="text-[10px] text-amber-700/60">{grp.class_name}</span>
+                              )}
+                              <span className="text-[10px] text-amber-700/40">1 page</span>
+                            </div>
                           </div>
-                        </div>
-                        <ChevronDown
-                          size={16}
-                          className="shrink-0 transition-transform duration-200"
-                          style={{ color: '#d97706', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
-                        />
-                      </button>
-                      {isOpen && (
+                          <ExternalLink size={14} className="shrink-0" style={{ color: '#d97706' }} />
+                        </a>
+                      ) : (
+                        /* Multiple pages — expand accordion */
+                        <button
+                          onClick={() => setExpandedPyqId(isOpen ? null : grp.id)}
+                          className="w-full flex items-center gap-3 px-5 py-4 hover:bg-amber-50/50 transition-colors text-left"
+                        >
+                          <span
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
+                            style={{ background: 'rgba(217,119,6,0.10)', color: '#d97706' }}
+                          >
+                            {i + 1}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <h2 className="text-sm font-semibold truncate" style={{ color: '#92400e' }}>{grp.title}</h2>
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              {grp.year && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(217,119,6,0.12)', color: '#b45309' }}>
+                                  {grp.year}
+                                </span>
+                              )}
+                              {grp.class_name && (
+                                <span className="text-[10px] text-amber-700/60">{grp.class_name}</span>
+                              )}
+                              <span className="text-[10px] text-amber-700/40">{grp.pages.length} pages</span>
+                            </div>
+                          </div>
+                          <ChevronDown
+                            size={16}
+                            className="shrink-0 transition-transform duration-200"
+                            style={{ color: '#d97706', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                          />
+                        </button>
+                      )}
+                      {grp.pages.length !== 1 && isOpen && (
                         <div className="px-4 pb-4" style={{ background: 'rgba(217,119,6,0.02)' }}>
                           {grp.pages.length === 0 ? (
                             <p className="text-center text-xs py-4 text-amber-700/40">No pages uploaded yet.</p>
