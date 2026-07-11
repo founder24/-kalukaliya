@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import {
-  BookOpen, ChevronRight, Home, Sparkles,
+  BookOpen, ChevronRight, ChevronDown, Home, Sparkles,
   Layers, ArrowLeft, Search, FileText, HelpCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -30,17 +30,30 @@ export default function SubjectLandingPage() {
     : null;
 
   const [activeSection, setActiveSection] = useState('notes');
+  const [expandedPyqId, setExpandedPyqId] = useState(null);
 
   const SECTIONS = useMemo(() => {
     const notesChs = chapters.filter(ch => !ch.content_type || (ch.content_type !== 'qa' && ch.content_type !== 'question_paper'));
     const qaChs = chapters.filter(ch => ch.content_type === 'qa');
-    const pyqChs = chapters.filter(ch => ch.content_type === 'question_paper');
+    // Subject-level PYQ papers — read from subject.pyq_papers (not chapters)
+    const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => ({
+      id:          p.id || `pyq-${pi}`,
+      title:       p.name || `Paper ${pi + 1}`,
+      class_name:  p.class_name || '',
+      year:        p.year || null,
+      description: p.description || '',
+      pages: (p.pages || []).map((pg, idx) => ({
+        _key: pg.id || `${p.id}-${idx}`,
+        url:  pg.url,
+        pageNum: idx + 1,
+      })),
+    }));
     return [
-      { key: 'notes', label: 'Notes', icon: BookOpen, chapters: notesChs, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
-      { key: 'qa', label: 'Questions', icon: HelpCircle, chapters: qaChs, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
-      { key: 'question_paper', label: 'PYQs', icon: FileText, chapters: pyqChs, accent: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
+      { key: 'notes',          label: 'Notes',     icon: BookOpen,   chapters: notesChs, pyqGroups: null,   accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
+      { key: 'qa',             label: 'Questions', icon: HelpCircle, chapters: qaChs,    pyqGroups: null,   accent: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' },
+      { key: 'question_paper', label: 'PYQs',      icon: FileText,   chapters: [],       pyqGroups,         accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.25)' },
     ];
-  }, [chapters]);
+  }, [chapters, subject?.pyq_papers]);
 
   const activeSectionChapters = useMemo(() => {
     const sec = SECTIONS.find(s => s.key === activeSection);
@@ -345,7 +358,7 @@ export default function SubjectLandingPage() {
                 >
                   <Icon size={14} />
                   <span>{sec.label}</span>
-                  {sec.chapters.length > 0 && (
+                  {(() => { const n = sec.pyqGroups ? sec.pyqGroups.length : sec.chapters.length; return n > 0 ? (
                     <span
                       className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
                       style={{
@@ -353,9 +366,9 @@ export default function SubjectLandingPage() {
                         color: isActive ? sec.accent : 'hsl(var(--muted-foreground))',
                       }}
                     >
-                      {sec.chapters.length}
+                      {n}
                     </span>
-                  )}
+                  ) : null; })()}
                 </button>
               );
             })}
@@ -363,19 +376,102 @@ export default function SubjectLandingPage() {
         )}
 
         <div className="space-y-3">
-          {filteredChapters.length === 0 ? (
+          {/* ── PYQ section — subject-level paper cards ─────────────────── */}
+          {activeSection === 'question_paper' ? (() => {
+            const activeSec = SECTIONS.find(s => s.key === 'question_paper');
+            const groups = activeSec?.pyqGroups || [];
+            if (groups.length === 0) return (
+              <div className="text-center py-12">
+                <FileText size={32} className="mx-auto mb-3 text-muted-foreground/40" />
+                <p className="text-muted-foreground text-sm">PYQs will be added here once available</p>
+              </div>
+            );
+            return (
+              <div className="space-y-3">
+                {groups.map((grp, i) => {
+                  const isOpen = expandedPyqId === grp.id;
+                  return (
+                    <div
+                      key={grp.id}
+                      className="rounded-2xl overflow-hidden"
+                      style={{ border: '1px solid rgba(217,119,6,0.20)', background: 'rgba(217,119,6,0.02)' }}
+                    >
+                      <button
+                        onClick={() => setExpandedPyqId(isOpen ? null : grp.id)}
+                        className="w-full flex items-center gap-3 px-5 py-4 hover:bg-amber-50/50 transition-colors text-left"
+                      >
+                        <span
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
+                          style={{ background: 'rgba(217,119,6,0.10)', color: '#d97706' }}
+                        >
+                          {i + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <h2 className="text-sm font-semibold truncate" style={{ color: '#92400e' }}>{grp.title}</h2>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            {grp.year && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(217,119,6,0.12)', color: '#b45309' }}>
+                                {grp.year}
+                              </span>
+                            )}
+                            {grp.class_name && (
+                              <span className="text-[10px] text-amber-700/60">{grp.class_name}</span>
+                            )}
+                            <span className="text-[10px] text-amber-700/40">{grp.pages.length} pages</span>
+                          </div>
+                        </div>
+                        <ChevronDown
+                          size={16}
+                          className="shrink-0 transition-transform duration-200"
+                          style={{ color: '#d97706', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                        />
+                      </button>
+                      {isOpen && (
+                        <div className="px-4 pb-4" style={{ background: 'rgba(217,119,6,0.02)' }}>
+                          {grp.pages.length === 0 ? (
+                            <p className="text-center text-xs py-4 text-amber-700/40">No pages uploaded yet.</p>
+                          ) : (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                              {grp.pages.map(page => (
+                                <a
+                                  key={page._key}
+                                  href={page.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="relative block rounded-xl overflow-hidden group"
+                                  style={{ border: '1px solid rgba(217,119,6,0.15)' }}
+                                >
+                                  <img
+                                    src={page.url}
+                                    alt={`Page ${page.pageNum}`}
+                                    className="w-full object-cover"
+                                    style={{ height: 130 }}
+                                    loading="lazy"
+                                  />
+                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                                  <span
+                                    className="absolute top-1 left-1 text-[9px] font-bold text-white px-1 py-0.5 rounded"
+                                    style={{ background: 'rgba(0,0,0,0.45)' }}
+                                  >p{page.pageNum}</span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })() : (
+          /* ── Notes / Q&A sections — chapter chapter list ────────────── */
+          filteredChapters.length === 0 ? (
             <div className="text-center py-12">
               {activeSection === 'qa' && <HelpCircle size={32} className="mx-auto mb-3 text-muted-foreground/40" />}
-              {activeSection === 'question_paper' && <FileText size={32} className="mx-auto mb-3 text-muted-foreground/40" />}
               {activeSection === 'notes' && <BookOpen size={32} className="mx-auto mb-3 text-muted-foreground/40" />}
               <p className="text-muted-foreground text-sm">
-                {searchQuery
-                  ? 'No chapters match your search'
-                  : activeSection === 'qa'
-                    ? 'Questions coming soon for this subject'
-                    : activeSection === 'question_paper'
-                      ? 'PYQs will be added here once available'
-                      : 'No chapters available yet'}
+                {searchQuery ? 'No chapters match your search' : activeSection === 'qa' ? 'Questions coming soon for this subject' : 'No chapters available yet'}
               </p>
             </div>
           ) : (
@@ -429,6 +525,7 @@ export default function SubjectLandingPage() {
 
               return [card];
             })
+          )
           )}
         </div>
 
