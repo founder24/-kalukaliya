@@ -10,7 +10,6 @@ import { pageImports } from '@/utils/pageImports';
 const NAV_ITEMS = [
   { to: '/library',   icon: BookOpen,      label: 'Browser',   preloadKey: 'library' },
   { to: '/chat',      icon: MessageSquare, label: 'Chat',      preloadKey: 'chat' },
-  { to: '/documents', icon: FileText,      label: 'Documents', preloadKey: 'documents' },
   { to: '/history',   icon: Clock,         label: 'History',   preloadKey: 'history' },
   { to: '/profile',   icon: User,          label: 'Profile',   preloadKey: 'profile' },
 ];

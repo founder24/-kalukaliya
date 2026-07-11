@@ -111,7 +111,6 @@ const AboutPage              = lazy(() => import("@/pages/AboutPage"));
 const TechnologyPage         = lazy(() => import("@/pages/TechnologyPage"));
 const BrowsePage             = lazy(() => import("@/pages/BrowsePage"));
 const BrowserPage            = lazy(() => import("@/pages/BrowserPage"));
-const DocumentsPage          = lazy(() => import("@/pages/DocumentsPage"));
 const NotebookPage           = lazy(() => import("@/pages/NotebookPage"));
 const FlashcardsPage         = lazy(() => import("@/pages/FlashcardsPage"));
 const GuardianPage           = lazy(() => import("@/pages/GuardianPage"));
@@ -294,7 +293,6 @@ export function AppRoutes() {
 
       {/* ── Public content routes (no auth) ── */}
       <Route path="/library"           element={<LibraryPage />} />
-      <Route path="/documents"         element={<AuthGuard><DocumentsPage /></AuthGuard>} />
       {/* /browser is an alias for /library — marketing/PageSpeed URL.
           Both routes render the same component so neither produces a
           404, and prerender-library.mjs writes static HTML for both. */}
