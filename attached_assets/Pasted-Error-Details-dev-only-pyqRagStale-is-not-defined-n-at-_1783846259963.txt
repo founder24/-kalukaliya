@@ -1,0 +1,21 @@
+Error Details (dev only)
+pyqRagStale is not defined\n
+    at ChapterEditor (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/src/pages/staff/StaffDashboard.jsx?t=1783846122340:1018:26)
+    at div
+    at StaffDashboard (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/src/pages/staff/StaffDashboard.jsx?t=1783846122340:4260:28)
+    at StaffGuard (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/src/components/StaffGuard.jsx:20:30)
+    at RenderedRoute (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/node_modules/.vite/deps/react-router-dom.js?v=cfe1ded1:6604:26)
+    at Routes (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/node_modules/.vite/deps/react-router-dom.js?v=cfe1ded1:7529:3)
+    at AppRoutes
+    at Suspense
+    at Router (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/node_modules/.vite/deps/react-router-dom.js?v=cfe1ded1:7468:13)
+    at BrowserRouter (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/node_modules/.vite/deps/react-router-dom.js?v=cfe1ded1:10744:3)
+    at LanguageProvider (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/src/context/LanguageContext.jsx:21:36)
+    at AuthProvider (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/src/context/AuthContext.jsx:39:32)
+    at QueryClientProvider (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/node_modules/.vite/deps/@tanstack_react-query.js?v=cfe1ded1:3170:3)
+    at ErrorBoundary (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/src/components/ErrorBoundary.jsx:23:5)
+    at _HelmetProvider (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/node_modules/.vite/deps/react-helmet-async.js?v=cfe1ded1:627:5)
+    at AppShell (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/src/App.jsx?t=1783846122340:867:28)
+    at App (https://9fd6671c-52cc-483a-9dd4-9feb4d19290a-00-3utu6s0ffpuho.pike.replit.dev/src/App.jsx?t=1783846122340:942:3)
+Refresh
+Go 
