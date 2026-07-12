@@ -4,7 +4,6 @@ export const pageImports = {
   history:   () => import("@/pages/HistoryPage"),
   profile:   () => import("@/pages/ProfilePage"),
   chapter:   () => import("@/pages/ChapterPage"),
-  documents: () => import("@/pages/DocumentsPage"),
 };
 
 function warmApiCache(paths) {

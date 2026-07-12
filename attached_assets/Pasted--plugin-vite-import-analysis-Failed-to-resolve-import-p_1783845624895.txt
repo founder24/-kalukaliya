@@ -1,0 +1,19 @@
+[plugin:vite:import-analysis] Failed to resolve import "@/pages/DocumentsPage" from "src/utils/pageImports.js". Does the file exist?
+/home/runner/workspace/apps/frontend/src/utils/pageImports.js:7:26
+5  |    profile:   () => import("@/pages/ProfilePage"),
+6  |    chapter:   () => import("@/pages/ChapterPage"),
+7  |    documents: () => import("@/pages/DocumentsPage"),
+   |                            ^
+8  |  };
+9  |
+    at TransformPluginContext._formatLog (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@22.19.19_jiti@1.21.7/node_modules/vite/dist/node/chunks/config.js:29019:43)
+    at TransformPluginContext.error (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@22.19.19_jiti@1.21.7/node_modules/vite/dist/node/chunks/config.js:29016:14)
+    at normalizeUrl (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@22.19.19_jiti@1.21.7/node_modules/vite/dist/node/chunks/config.js:27139:18)
+    at async file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@22.19.19_jiti@1.21.7/node_modules/vite/dist/node/chunks/config.js:27197:32
+    at async Promise.all (index 5)
+    at async TransformPluginContext.transform (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@22.19.19_jiti@1.21.7/node_modules/vite/dist/node/chunks/config.js:27165:4)
+    at async EnvironmentPluginContainer.transform (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@22.19.19_jiti@1.21.7/node_modules/vite/dist/node/chunks/config.js:28817:14)
+    at async loadAndTransform (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@22.19.19_jiti@1.21.7/node_modules/vite/dist/node/chunks/config.js:22686:26)
+    at async viteTransformMiddleware (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@22.19.19_jiti@1.21.7/node_modules/vite/dist/node/chunks/config.js:24562:20)
+Click outside, press Esc key, or fix the code to dismiss.
+You can also disable this overlay by setting server.hmr.overlay to false in vite.config.js.
