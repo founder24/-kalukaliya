@@ -4,6 +4,7 @@ Provides subject/chapter navigation and full chapter content + RAG editing.
 """
 import asyncio
 import mimetypes
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -725,10 +726,45 @@ async def staff_reindex_chapter(
         except Exception as exc:
             logger.error("staff_content: reindex failed scope=%s chapter=%s: %s", ch_scopes, ch_id, exc)
 
-    asyncio.create_task(_do_reindex(chapter_id, runnable))
+    job_id = uuid.uuid4().hex[:12]
+
+    async def _do_reindex_tracked(ch_id: str, ch_scopes: list[str], jid: str):
+        from app.db.mongo import get_mongo_client
+        db = await get_mongo_client()
+        jobs_col = db["reindex_jobs"]
+        await jobs_col.insert_one({
+            "_id": jid,
+            "chapter_id": ch_id,
+            "scopes": ch_scopes,
+            "status": "running",
+            "results": {},
+            "started_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
+        })
+        succeeded: list[str] = []
+        failed: list[str] = []
+        try:
+            await _do_reindex(ch_id, ch_scopes)
+            succeeded = list(ch_scopes)
+        except Exception as exc:
+            failed = list(ch_scopes)
+            logger.error("staff_content: tracked reindex failed job=%s: %s", jid, exc)
+        finally:
+            status = "failed" if failed and not succeeded else ("partial" if failed else "done")
+            await jobs_col.update_one(
+                {"_id": jid},
+                {"$set": {
+                    "status": status,
+                    "results": {"succeeded": succeeded, "failed": failed},
+                    "updated_at": datetime.now(timezone.utc),
+                }},
+            )
+
+    asyncio.create_task(_do_reindex_tracked(chapter_id, runnable, job_id))
 
     return {
         "ok": True,
+        "job_id": job_id,
         "message": f"RAG reindex started for scope(s): {', '.join(runnable)}",
         "scopes": runnable,
     }

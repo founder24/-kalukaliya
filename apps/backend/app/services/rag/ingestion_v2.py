@@ -361,11 +361,13 @@ async def ingest_document(
     text = content_override
     if not text:
         if doc.file_url:
-            raise NotImplementedError(
-                "PDF text extraction not yet implemented. "
-                "Pass content_override with pre-extracted text, or use "
-                "ingest_document_text() directly."
+            logger.warning(
+                f"ingest_document: doc={document_id} has file_url but no content_override — "
+                "PDF/image extraction is not used; pass content_override with pre-extracted text "
+                "or call ingest_document_text() directly. Skipping."
             )
+            await doc.update({"$set": {"status": "error", "updated_at": _now()}})
+            return {"document_id": document_id, "status": "skipped", "errors": ["No text content — pass content_override"]}
         return {"document_id": document_id, "status": "error", "errors": ["No text content available"]}
 
     try:

@@ -186,9 +186,13 @@ async def _extract_text_from_pyq(doc: dict) -> str:
     is_pdf = doc.get("is_pdf", False)
     is_image = doc.get("is_image", False)
 
-    # Images: OCR not implemented — skip silently
+    # Images: OCR is not used — return empty string so the document is
+    # stored as image-only and staff can still attach it as a PDF reference.
     if is_image:
-        raise NotImplementedError("OCR for images is not yet supported")
+        logger.info(
+            f"Image-based PYQ {doc.get('_id')} — no OCR configured; stored as image reference only"
+        )
+        return ""
 
     if not is_pdf:
         # For text PYQs the text_content field should already be set
@@ -204,8 +208,6 @@ async def _extract_text_from_pyq(doc: dict) -> str:
         reader = pypdf.PdfReader(BytesIO(r.content))
         pages = [p.extract_text() or "" for p in reader.pages]
         return "\n\n".join(pages).strip()
-    except NotImplementedError:
-        raise
     except Exception as exc:
         logger.warning(f"PYQ text extraction failed for {doc.get('_id')}: {exc}")
         return ""
@@ -236,13 +238,6 @@ async def process_one_pyq(request: Request, body: ProcessPyqRequest):
             }},
         )
         return {"status": "ok", "question_count": q_count}
-    except NotImplementedError as nie:
-        # Image OCR not yet implemented — leave status as-is, return informative message
-        await col.update_one(
-            {"_id": body.pyq_id},
-            {"$set": {"processing_status": "uploaded", "updated_at": datetime.now(timezone.utc)}},
-        )
-        raise HTTPException(status_code=501, detail=str(nie))
     except Exception as exc:
         await col.update_one(
             {"_id": body.pyq_id},
@@ -281,12 +276,6 @@ async def batch_process_pyqs(request: Request, body: BatchProcessRequest):
                 }},
             )
             succeeded += 1
-        except NotImplementedError:
-            # Image OCR not supported — leave status unchanged (uploaded)
-            await col.update_one(
-                {"_id": pyq_id},
-                {"$set": {"processing_status": "uploaded", "updated_at": datetime.now(timezone.utc)}},
-            )
         except Exception as exc:
             logger.warning(f"Batch process failed for {pyq_id}: {exc}")
             await col.update_one(

@@ -195,7 +195,41 @@ async def chat(
                         user.last_reset_date = now
 
             # Using return_exceptions=True so one failure does not cancel others
-            skip_rag = ChatService.is_generic_query(sanitized_message)
+            is_generic = ChatService.is_generic_query(sanitized_message)
+            skip_rag = is_generic
+            is_syllabus = not is_generic and ChatService.is_syllabus_query(sanitized_message)
+            is_qp = not is_generic and (
+                getattr(request, "source_type", None) == "pyq"
+                or ChatService.is_qp_query(sanitized_message)
+            )
+
+            # QP pre-fetch — short-circuit when chapter has PDF-only (no RAG text).
+            # Must happen before the gather so we can return early without a full retrieval round-trip.
+            _qp_pyq_text: Optional[str] = None
+            if is_qp and getattr(request, "chapter_id", None):
+                try:
+                    _qp_pyq_text, _qp_has_pdf = await ChatService.fetch_qp_context(
+                        request.chapter_id, detected_lang
+                    )
+                    if not _qp_pyq_text and _qp_has_pdf:
+                        if detected_lang == "as":
+                            _redir = (
+                                "এই অধ্যায়ৰ বাবে প্ৰশ্নকাকত PDF হিচাপে আপলোড কৰা হৈছে। "
+                                "সম্পূৰ্ণ প্ৰশ্নকাকত চাবলৈ অধ্যায় পৃষ্ঠাৰ **প্ৰশ্নকাকত** টেব খোলক।"
+                            )
+                        else:
+                            _redir = (
+                                "The question paper for this chapter is available as a PDF. "
+                                "Open the **Question Paper** tab on the chapter page to view or download it."
+                            )
+                        return ChatResponse(
+                            response=_redir,
+                            model_used="canned",
+                            latency_ms=int((time.time() - start_time) * 1000),
+                            sources=[],
+                        )
+                except Exception as _qp_err:
+                    logger.warning(f"QP pre-fetch failed: {_qp_err}")
 
             async def _maybe_retrieve():
                 """
@@ -258,6 +292,7 @@ async def chat(
                 _maybe_retrieve(),
                 ChatService.load_conversation_history(request.session_id),
                 check_rate_limit(user_id, user_tier, client_ip, request=http_request),
+                ChatService.load_last_source_ctx(request.session_id),
                 return_exceptions=True,
             )
 
@@ -286,6 +321,34 @@ async def chat(
             if isinstance(results[1], Exception):
                 logger.error(f"History load failed: {results[1]}")
 
+            # Inherit chapter/subject/board context from the previous turn.
+            # When a student follows up ("explain more") the frontend sends session_id
+            # but no card context — fill in blanks from last assistant message's source_ctx.
+            _last_ctx: dict = (
+                results[3]
+                if len(results) > 3 and isinstance(results[3], dict)
+                else {}
+            )
+            if _last_ctx:
+                _inherit_pairs = [
+                    ("chapter_id",   "chapter_id"),
+                    ("chapter_name", "rag_chapter_name"),
+                    ("subject_id",   "rag_subject_id"),
+                    ("board_name",   "rag_board_name"),
+                    ("class_name",   "rag_class_name"),
+                ]
+                _patched = {
+                    f: _last_ctx[k]
+                    for f, k in _inherit_pairs
+                    if not getattr(request, f, None) and _last_ctx.get(k)
+                }
+                if _patched:
+                    request = request.model_copy(update=_patched)
+                    logger.info(
+                        "card_ctx_inherited",
+                        extra={"user_id": user_id, "inherited_fields": list(_patched.keys())},
+                    )
+
             if isinstance(results[2], Exception):
                 logger.warning(
                     f"Rate limit check failed: {results[2]} - allowing request"
@@ -308,6 +371,23 @@ async def chat(
                         "Retry-After": "3600",
                     },
                 )
+
+            # GreetingRAG fast-path — bypass cache + LLM for known greetings/meta queries.
+            # Mirrors streaming endpoint; drops TTFB to ~0 ms for "hi", "what can you do?" etc.
+            if is_generic:
+                from app.services.ai.greeting_rag import greeting_rag as _greeting_rag
+                _canned = _greeting_rag.fast_match(sanitized_message, detected_lang)
+                if _canned:
+                    logger.info(
+                        "greeting_rag_canned_hit",
+                        extra={"user_id": user_id, "query": sanitized_message[:30]},
+                    )
+                    return ChatResponse(
+                        response=_canned,
+                        model_used="greeting_rag",
+                        latency_ms=int((time.time() - start_time) * 1000),
+                        sources=[],
+                    )
 
             # 2b. Check response cache after rate limit enforcement.
             # NOTE: Cache key is hash(message:lang:user_tier) so free and pro
@@ -350,6 +430,51 @@ async def chat(
                         "rag_empty_using_web_fallback",
                         extra={"user_id": user_id, "web_chunks": len(web_chunks)},
                     )
+
+            # 2d. Syllabus intent override — mirrors streaming path.
+            # Fires when the query is about listing chapters/topics for a subject.
+            if is_syllabus and not context_chunks:
+                try:
+                    syl_chunks, syl_name, _syl_slug, syl_count = (
+                        await ChatService.fetch_syllabus_context(
+                            subject_id=getattr(request, "subject_id", None),
+                            subject_slug=None,
+                            lang=detected_lang,
+                        )
+                    )
+                    if syl_chunks:
+                        context_chunks = syl_chunks
+                        web_chunks = []
+                        match_score = 1.0
+                        confidence_tier = "high"
+                        logger.info(
+                            "syllabus_intent_hit",
+                            extra={"user_id": user_id, "subject": syl_name, "chapters": syl_count},
+                        )
+                except Exception as _syl_err:
+                    logger.warning(f"Syllabus intent fetch failed: {_syl_err}")
+
+            # 2e. QP intent override — inject pyq_rag_text as direct context.
+            if is_qp and _qp_pyq_text and not context_chunks:
+                context_chunks = [
+                    {
+                        "id": "pyq_direct_0",
+                        "title": f"Question Paper — {getattr(request, 'chapter_name', None) or 'Chapter'}",
+                        "content": _qp_pyq_text,
+                        "score": 1.0,
+                        "reranker_score": 1.0,
+                        "url": f"/{request.chapter_id}" if getattr(request, "chapter_id", None) else "/",
+                        "hierarchy": "",
+                        "source": "qp_direct",
+                    }
+                ]
+                web_chunks = []
+                match_score = 1.0
+                confidence_tier = "high"
+                logger.info(
+                    "qp_direct_hit",
+                    extra={"user_id": user_id, "chapter_id": getattr(request, "chapter_id", None)},
+                )
 
             # 3. Build system prompt with weighted RAG 50% / Web 20% / LLM 30%
             # Non-streaming path: topic_match is local to _maybe_retrieve() so
