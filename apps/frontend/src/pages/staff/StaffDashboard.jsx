@@ -374,52 +374,77 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
     <div className="space-y-3">
       <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.webp" className="hidden" />
 
-      {/* Page grid */}
+      {/* Seamless page strip — no gaps, portrait A4 ratio */}
       {papers.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <div className="rounded-xl overflow-hidden border border-gray-200 bg-white">
           {papers.map((paper, i) => (
-            <div key={paper.id} className="relative bg-white border border-gray-200 rounded-xl overflow-hidden group">
+            <div
+              key={paper.id}
+              className="relative group"
+              style={{ borderTop: i === 0 ? 'none' : '0px' }}
+            >
               <img
                 src={paper.url}
                 alt={`Page ${i + 1}`}
-                className="w-full object-cover"
-                style={{ height: 160 }}
+                className="w-full block object-contain"
+                style={{ display: 'block' }}
               />
-              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-              <div className="absolute top-1.5 left-1.5 bg-black/50 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+              {/* Hover overlay */}
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
+              {/* Page number badge */}
+              <div className="absolute top-2 left-2 bg-black/50 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md select-none">
                 pg {i + 1}
               </div>
-              <button
-                onClick={() => handleDelete(paper.id)}
-                disabled={deletingId === paper.id}
-                className="absolute top-1.5 right-1.5 bg-red-500 hover:bg-red-600 text-white rounded-md px-1.5 py-0.5 text-[10px] font-semibold transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
-              >
-                {deletingId === paper.id ? '…' : 'Remove'}
-              </button>
-              <a
-                href={paper.url}
-                target="_blank"
-                rel="noreferrer"
-                className="absolute bottom-1.5 right-1.5 bg-black/50 hover:bg-black/70 text-white text-[9px] px-1.5 py-0.5 rounded-md transition-colors opacity-0 group-hover:opacity-100"
-              >
-                View
-              </a>
+              {/* Actions — visible on hover */}
+              <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <a
+                  href={paper.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="bg-black/50 hover:bg-black/70 text-white text-[9px] px-1.5 py-0.5 rounded-md transition-colors"
+                >
+                  View
+                </a>
+                <button
+                  onClick={() => handleDelete(paper.id)}
+                  disabled={deletingId === paper.id}
+                  className="bg-red-500 hover:bg-red-600 text-white rounded-md px-1.5 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-50"
+                >
+                  {deletingId === paper.id ? '…' : 'Remove'}
+                </button>
+              </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Upload next page */}
+      {/* Upload zone — portrait A4 ratio when empty, compact strip when pages exist */}
       <button
         onClick={handlePickFile}
         disabled={uploading}
-        className="w-full flex items-center justify-center gap-2 px-4 py-4 border-2 border-dashed border-amber-200 rounded-xl text-amber-500 hover:border-amber-400 hover:bg-amber-50/50 transition-colors text-sm font-medium disabled:opacity-50"
+        className="w-full border-2 border-dashed border-amber-200 rounded-xl text-amber-500 hover:border-amber-400 hover:bg-amber-50/50 transition-colors disabled:opacity-50 flex flex-col items-center justify-center gap-2"
+        style={papers.length === 0 ? { aspectRatio: '210/297', maxHeight: '70vh' } : { padding: '14px' }}
       >
-        {uploading ? <Spinner size={4} /> : <UploadIcon />}
-        {uploading ? 'Uploading…' : papers.length > 0 ? `Add page ${papers.length + 1}` : 'Add first page'}
+        {uploading ? (
+          <>
+            <Spinner size={4} />
+            <span className="text-sm font-medium">Uploading…</span>
+          </>
+        ) : papers.length === 0 ? (
+          <>
+            <UploadIcon />
+            <span className="text-sm font-medium">Add first page</span>
+            <span className="text-xs text-amber-400">Portrait A4 · JPG, PNG, WEBP</span>
+          </>
+        ) : (
+          <span className="flex items-center gap-2 text-sm font-medium">
+            <UploadIcon />
+            Add page {papers.length + 1}
+          </span>
+        )}
       </button>
       <p className="text-[11px] text-gray-400 text-center">
-        Images only (JPG, PNG, WEBP) · max 20 MB per page · upload in page order
+        Upload in page order · max 20 MB per page
       </p>
     </div>
   );
