@@ -371,7 +371,20 @@ function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null }) {
                 )}
 
                 <div className="mt-3 flex items-center gap-2">
-                  <Link to={`/chat?subject=${subjectId}&chapter=${chapter.id}${sectionKey ? `&section=${sectionKey}` : ''}`}>
+                  <Link
+                    to={`/chat?subject=${subjectId}&chapter=${chapter.id}${sectionKey ? `&section=${sectionKey}` : ''}`}
+                    state={{
+                      chatContext: {
+                        chapterId: chapter.id,
+                        subjectId,
+                        sourceTitle: chapter.title || '',
+                        sourceSubtitle: subject?.name || '',
+                        contentMode: sectionKey || 'notes',
+                        chapterTitle: chapter.title || '',
+                        subjectName: subject?.name || '',
+                      },
+                    }}
+                  >
                     <Button size="sm" className="text-xs bg-primary hover:bg-primary/90 text-primary-foreground">
                       <Sparkles size={12} className="mr-1" /> Ask AI about this chapter
                     </Button>
@@ -552,7 +565,19 @@ export default function SubjectPage() {
                 </div>
               </div>
             </div>
-            <Link to={`/chat?subject=${subjectId}${activeSectionKey ? `&section=${activeSectionKey}` : ''}`} className="flex-shrink-0">
+            <Link
+              to={`/chat?subject=${subjectId}${activeSectionKey ? `&section=${activeSectionKey}` : ''}`}
+              state={{
+                chatContext: {
+                  subjectId,
+                  sourceTitle: subject?.name || '',
+                  sourceSubtitle: [subject?.board_name, subject?.class_name].filter(Boolean).join(' · '),
+                  contentMode: activeSectionKey || null,
+                  subjectName: subject?.name || '',
+                },
+              }}
+              className="flex-shrink-0"
+            >
               <Button className="bg-primary hover:bg-primary/90 text-primary-foreground w-full sm:w-auto min-h-[44px]">Ask AI</Button>
             </Link>
           </div>

@@ -7,7 +7,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { buildCardContext } from '@/utils/cardContext';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Sparkles, X as XIcon } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useContentLang } from '@/context/LanguageContext';
 import { getConversation, getAnonConversation, getSubject, getChapters, API_BASE, apiClient, getAnonId } from '@/utils/api';
@@ -60,6 +60,14 @@ export default function ChatPage() {
       ? location.state.seedCardContext
       : '')
   );
+
+  // Context passed from Ask AI buttons — carries chapter/subject info so the
+  // chat page can show a "Answering from: …" banner and generate relevant prompts.
+  const [chatContext] = useState(() => {
+    const ctx = location.state?.chatContext;
+    return (ctx && ctx.sourceTitle) ? ctx : null;
+  });
+  const [chatContextDismissed, setChatContextDismissed] = useState(false);
 
   const [messages, setMessages]           = useState([]);
   const [input, setInput]                 = useState('');
@@ -737,19 +745,38 @@ export default function ChatPage() {
   }, [responseLang, switchLang]);
 
   const defaultPrompts = (() => {
-    if (subject) {
+    // Chapter-specific prompts when opened from an Ask AI button with chapter context
+    const chTitle = chatContext?.chapterTitle || (chatContext && !chatContext.chapterId ? null : chatContext?.sourceTitle) || '';
+    if (chTitle && chatContext?.chapterId) {
       return contentLang === 'as'
         ? [
-            `${subject.name}ৰ মূল ধাৰণাবোৰ বুজাই দিয়ক`,
-            `পৰীক্ষাৰ বাবে ${subject.name}ৰ আটাইতকৈ গুৰুত্বপূৰ্ণ বিষয়বোৰ কি?`,
-            `${subject.name}ৰ এটা সমাধান কৰা উদাহৰণ দিয়ক`,
-            `${subject.name}ত ছাত্ৰ-ছাত্ৰীয়ে কৰা সাধাৰণ ভুলবোৰ কি?`,
+            `${chTitle} চমুকৈ বুজাই দিয়ক`,
+            `${chTitle}ৰ পৰীক্ষাৰ বাবে গুৰুত্বপূৰ্ণ প্ৰশ্নবোৰ কি?`,
+            `${chTitle}ৰ মূল ধাৰণাবোৰৰ তালিকা দিয়ক`,
+            `${chTitle}ৰ পৰা এটা সমাধান কৰা উদাহৰণ দেখুৱাওক`,
           ]
         : [
-            `Explain the key concepts of ${subject.name}`,
-            `What are the most important topics in ${subject.name} for exams?`,
-            `Give me a solved example from ${subject.name}`,
-            `What are common mistakes students make in ${subject.name}?`,
+            `Summarize ${chTitle} in key points`,
+            `What are the most important exam questions from ${chTitle}?`,
+            `Explain the main concepts of ${chTitle}`,
+            `Give me a solved example from ${chTitle}`,
+          ];
+    }
+    // Subject-level prompts (Ask AI from subject page or library card)
+    const sName = chatContext?.subjectName || subject?.name || '';
+    if (sName) {
+      return contentLang === 'as'
+        ? [
+            `${sName}ৰ মূল ধাৰণাবোৰ বুজাই দিয়ক`,
+            `পৰীক্ষাৰ বাবে ${sName}ৰ আটাইতকৈ গুৰুত্বপূৰ্ণ বিষয়বোৰ কি?`,
+            `${sName}ৰ এটা সমাধান কৰা উদাহৰণ দিয়ক`,
+            `${sName}ত ছাত্ৰ-ছাত্ৰীয়ে কৰা সাধাৰণ ভুলবোৰ কি?`,
+          ]
+        : [
+            `Explain the key concepts of ${sName}`,
+            `What are the most important topics in ${sName} for exams?`,
+            `Give me a solved example from ${sName}`,
+            `What are common mistakes students make in ${sName}?`,
           ];
     }
     return contentLang === 'as'
@@ -839,6 +866,33 @@ export default function ChatPage() {
                 Upgrade →
               </button>
             )}
+          </div>
+        )}
+        {/* Context banner — shown when user arrived via an Ask AI button with chapter/subject context */}
+        {chatContext && !chatContextDismissed && (
+          <div
+            className="flex items-center justify-between px-4 py-2 text-xs flex-shrink-0"
+            style={{ background: 'rgba(124,58,237,0.06)', borderBottom: '1px solid rgba(124,58,237,0.12)' }}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <Sparkles size={12} className="text-violet-500 shrink-0" aria-hidden="true" />
+              <div className="min-w-0">
+                <span className="font-medium text-violet-700 dark:text-violet-400 truncate">
+                  {chatContext.chapterId ? 'Answering from:' : 'Topic:'}{' '}
+                  {chatContext.sourceTitle}
+                </span>
+                {chatContext.sourceSubtitle && (
+                  <span className="text-muted-foreground ml-1.5">· {chatContext.sourceSubtitle}</span>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={() => setChatContextDismissed(true)}
+              className="shrink-0 ml-2 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear context"
+            >
+              <XIcon size={12} />
+            </button>
           </div>
         )}
         <div className="flex-1 overflow-y-auto min-h-0 pb-[calc(7rem+64px+env(safe-area-inset-bottom,0px))] md:pb-32" onClick={() => setShowModelMenu(false)} role="log" aria-label="Chat messages" aria-live="polite">

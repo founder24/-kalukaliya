@@ -1,0 +1,69 @@
+Yes — this is a strong UX pattern, and you can implement it cleanly. The right design is: when the user taps **Ask AI** from a chapter card or chapter page, the chat screen should open with a visible **context chip / popup header** showing the source title, and the backend should use that context to prioritize retrieval from that chapter’s RAG data first. `useNavigate` supports passing route state during programmatic navigation, and MongoDB Vector Search supports semantic retrieval with metadata filtering, which fits this pattern well. [reactrouter](https://reactrouter.com/api/hooks/useNavigate)
+
+## Desired behavior
+- User taps **Ask AI** on a content card or chapter page.
+- Chat page opens.
+- A header appears at the top showing:
+  - chapter title, or
+  - content card title, or
+  - both subject and chapter.
+- The model first retrieves context from that exact chapter/page.
+- If needed, it can expand to subject-level or global RAG afterward. [mongodb](https://www.mongodb.com/docs/vector-search/query/aggregation-stages/vector-search-stage/)
+
+## UX structure
+Use a small sticky banner at the top of chat, similar to a WhatsApp reply preview:
+- Title: `Answering from: Chapter 5 — Photosynthesis`
+- Subtitle: `AHSEC · Biology · Notes`
+- Optional close icon to clear the context.
+- Optional “change source” action if the user wants a different chapter.  
+
+This makes the user understand that the answer is grounded in the selected content, not a generic chat. [reactrouter](https://reactrouter.com/api/hooks/useNavigate)
+
+## Implementation flow
+1. On the Ask AI button click, navigate to chat with route state:
+   - chapter id
+   - chapter title
+   - card title
+   - subject id
+   - content mode
+2. Chat page reads that state and renders the context banner.
+3. Backend receives the same identifiers in the chat request.
+4. Retrieval first queries the exact chapter metadata using MongoDB Vector Search.
+5. If no strong result is found, it expands to broader subject-level context.
+6. The UI keeps the context visible until the user clears it or switches source. [mongodb](https://www.mongodb.com/docs/vector-search/)
+
+## Retrieval priority
+Use this order:
+1. **Exact chapter/page RAG**
+2. **Exact subject RAG**
+3. **Nearby syllabus context**
+4. **General fallback**
+
+That gives the model a clear “start here” signal while still preserving fallback quality. MongoDB Vector Search supports filtering and semantic ranking, so this can be done by adding chapter/subject metadata constraints before the vector search query. [mongodb](https://www.mongodb.com/docs/vector-search/query/aggregation-stages/vector-search-stage/)
+
+## Recommended data passed on click
+When Ask AI is clicked, pass:
+- `sourceType`
+- `subjectId`
+- `chapterId`
+- `topicId` if available
+- `contentMode`
+- `sourceTitle`
+- `sourceSubtitle`
+- `sourceUrl` if needed
+
+Then the chat API can log and reuse the same source context for retrieval and telemetry. [mongodb](https://www.mongodb.com/docs/vector-search/)
+
+## Why this is good
+- Feels familiar, like a reply context in chat apps.
+- Reduces confusion about what the AI is answering from.
+- Improves grounding and retrieval accuracy.
+- Makes the Ask AI feature feel chapter-aware instead of generic. [mongodb](https://www.mongodb.com/docs/vector-search/query/aggregation-stages/vector-search-stage/)
+
+## Suggested wording for the popup
+- `Answering from Chapter 3: Cell Structure`
+- `Using Notes from Chapter 3`
+- `Ask AI about this chapter`
+- `Source locked to this content`
+
+If you want, I can turn this into a **developer implementation spec** with frontend state, route params, backend request shape, and retrieval logic.

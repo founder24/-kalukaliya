@@ -1237,6 +1237,17 @@ export default function ChapterPage() {
           <div className="flex items-center gap-2 mt-4 flex-wrap">
             <Link
               to={`/chat?subject=${data?.subject_id || subjectSlug}&chapter=${data?.chapter_id || ''}&section=${contentMode}`}
+              state={{
+                chatContext: {
+                  chapterId: data?.chapter_id || '',
+                  subjectId: data?.subject_id || subjectSlug,
+                  sourceTitle: data?.chapter_title || data?.topic_title || '',
+                  sourceSubtitle: [data?.board_name, data?.subject_name].filter(Boolean).join(' · '),
+                  contentMode,
+                  chapterTitle: data?.chapter_title || data?.topic_title || '',
+                  subjectName: data?.subject_name || '',
+                },
+              }}
               onClick={() => Analytics.chapterAskAi(subjectSlug, data?.topic_title || data?.chapter_title || chapterSlug)}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-all hover:opacity-90 active:scale-95"
               style={{ background: 'linear-gradient(135deg, #7c3aed, #8b5cf6)', boxShadow: '0 2px 10px rgba(139,92,246,0.20)' }}

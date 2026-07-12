@@ -326,6 +326,14 @@ export default function SubjectLandingPage() {
 
         <Link
           to={`/chat?subject=${subject.id || subject._id || ''}`}
+          state={{
+            chatContext: {
+              subjectId: subject.id || subject._id,
+              sourceTitle: subjectName || '',
+              contentMode: null,
+              subjectName,
+            },
+          }}
           className="flex items-center gap-3 mb-6 px-4 sm:px-5 py-3.5 rounded-2xl transition-all hover:border-violet-500/30"
           style={{
             background: 'linear-gradient(135deg, rgba(124,58,237,0.06), rgba(139,92,246,0.03))',
@@ -547,6 +555,17 @@ export default function SubjectLandingPage() {
                     <div className="border-t border-border/30 px-5 py-2">
                       <Link
                         to={`/chat?subject=${subject.id || subject._id || ''}&chapter=${ch.id}`}
+                        state={{
+                          chatContext: {
+                            chapterId: ch.id,
+                            subjectId: subject.id || subject._id,
+                            sourceTitle: ch.title || '',
+                            sourceSubtitle: subjectName || '',
+                            contentMode: 'notes',
+                            chapterTitle: ch.title || '',
+                            subjectName,
+                          },
+                        }}
                         className="flex items-center gap-1.5 text-xs text-violet-600 hover:text-violet-700 transition-colors"
                       >
                         <Sparkles size={11} /> Ask AI about this chapter

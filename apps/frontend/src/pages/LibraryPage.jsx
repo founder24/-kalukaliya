@@ -284,7 +284,13 @@ export default function LibraryPage() {
     if (hasDocument) params.set('document_id', subjectId);
     if (section) params.set('section', section);
     if (chapterId) params.set('chapter', chapterId);
-    navigate(`/chat?${params.toString()}`);
+    const chatContext = {
+      subjectId,
+      subjectName,
+      sourceTitle: subjectName || '',
+      contentMode: section || null,
+    };
+    navigate(`/chat?${params.toString()}`, { state: { chatContext } });
   }, [navigate]);
 
   const handleResetFilters = useCallback(() => { setSearchQuery(''); setActiveFilter('all'); }, []);
