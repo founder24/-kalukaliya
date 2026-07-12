@@ -213,6 +213,12 @@ async def _vectorize_path(
             cf_filter["topicId"] = {"$eq": filters["topic_id"]}
         if filters.get("source_type"):
             cf_filter["sourceType"] = {"$eq": filters["source_type"]}
+        # board_id / class_id prevent cross-curriculum leakage when same chapter
+        # title exists in multiple boards (e.g. AHSEC vs SEBA vs CBSE).
+        if filters.get("board_id"):
+            cf_filter["boardId"] = {"$eq": filters["board_id"]}
+        if filters.get("class_id"):
+            cf_filter["classId"] = {"$eq": filters["class_id"]}
 
         matches = await asyncio.wait_for(
             vectorize_client.query(

@@ -71,6 +71,9 @@ class ChatRequest(BaseModel):
     # Used to personalise the system prompt without requiring auth lookup.
     board_name: Optional[str] = None
     class_name: Optional[str] = None
+    # IDs are used as Vectorize metadata filters to prevent cross-board content leakage.
+    board_id: Optional[str] = None
+    class_id: Optional[str] = None
 
     @model_validator(mode="after")
     def coalesce_conversation_id(self) -> "ChatRequest":
@@ -345,9 +348,12 @@ async def chat(
                     )
 
             # 3. Build system prompt with weighted RAG 50% / Web 20% / LLM 30%
+            # Non-streaming path: topic_match is local to _maybe_retrieve() so
+            # we pass chapter context from the request card fields only.
             system_prompt = ChatService.build_system_prompt(
                 detected_lang, context_chunks, web_chunks=web_chunks,
-                user_board=request.board_name, user_class=request.class_name,
+                user_board=request.board_name,  user_class=request.class_name,
+                chapter_name=request.chapter_name,
             )
 
             # Include multi-turn conversation history
@@ -367,10 +373,12 @@ async def chat(
                 sanitized_message
             )
             if total_tokens > max_context - 1000:  # Leave room for response
-                # Trim history to fit
+                # Trim history but keep curriculum context
                 if history:
                     system_prompt = ChatService.build_system_prompt(
-                        detected_lang, context_chunks
+                        detected_lang, context_chunks,
+                        user_board=request.board_name,  user_class=request.class_name,
+                        chapter_name=request.chapter_name,
                     )
 
             # 4. Call LLM (with Sarvam -> Vertex AI fallback)
@@ -765,6 +773,8 @@ async def chat_stream(
                 # Used only in the LOW-confidence and NONE (card-context fallback) paths
                 # where topic matching has insufficient signal.  The HIGH/MID paths use
                 # the topic_match chapter_id directly (more precise than the URL param).
+                # board_id / class_id are also passed to prevent cross-board leakage in
+                # Vectorize queries when a subject name exists in multiple curricula.
                 _card_filters: dict = {}
                 if request.subject_id:
                     _card_filters["subject_id"] = request.subject_id
@@ -772,6 +782,10 @@ async def chat_stream(
                     _card_filters["chapter_id"] = request.chapter_id
                 if request.source_type:
                     _card_filters["source_type"] = request.source_type
+                if request.board_id:
+                    _card_filters["board_id"] = request.board_id
+                if request.class_id:
+                    _card_filters["class_id"] = request.class_id
 
                 # ── Phase 2: intent routing + confidence-gated retrieval ────────────
                 #
@@ -976,6 +990,16 @@ async def chat_stream(
                     source_card = await ChatService.build_source_card(
                         topic_match, context_chunks, web_chunks, rag_path, confidence_tier
                     )
+                    # Enrich source card with request metadata for fields the
+                    # topic_match couldn't populate (board/class from user profile,
+                    # chapter from card context when topic_match fired for a different ch).
+                    if source_card:
+                        if not source_card.board_name and request.board_name:
+                            source_card.board_name = request.board_name
+                        if not source_card.class_level and request.class_name:
+                            source_card.class_level = request.class_name
+                        if not source_card.chapter_name and request.chapter_name:
+                            source_card.chapter_name = request.chapter_name
 
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
@@ -995,10 +1019,16 @@ async def chat_stream(
         source_card = await ChatService.build_source_card(None, [], [], "none", "error")
 
     # -- Build system prompt with weighted RAG 50% / Web 20% / LLM 30% --
+    # Derive curriculum fields: subject from source_card (resolved via topic_match),
+    # topic from topic_match, chapter from card context.
+    _sc_subject = source_card.subject_name if source_card else None
+    _tm_topic   = topic_match.get("topic_title") if topic_match else None
     system_prompt = ChatService.build_system_prompt(
         detected_lang, context_chunks,
         web_chunks=web_chunks if not is_generic else [],
-        user_board=request.board_name, user_class=request.class_name,
+        user_board=request.board_name,   user_class=request.class_name,
+        subject_name=_sc_subject,        chapter_name=request.chapter_name,
+        topic_name=_tm_topic,
     )
 
     # Include multi-turn conversation history
@@ -1015,10 +1045,13 @@ async def chat_stream(
     )
     total_tokens = estimate_tokens(system_prompt) + estimate_tokens(sanitized_message)
     if total_tokens > max_context - 1000:  # Leave room for response
-        # Trim history to fit
+        # Trim history but keep curriculum context
         if history:
             system_prompt = ChatService.build_system_prompt(
-                detected_lang, context_chunks
+                detected_lang, context_chunks,
+                user_board=request.board_name,   user_class=request.class_name,
+                subject_name=_sc_subject,        chapter_name=request.chapter_name,
+                topic_name=_tm_topic,
             )
 
     # -- Stream generator with Sarvam->Vertex fallback --

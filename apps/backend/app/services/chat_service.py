@@ -182,15 +182,25 @@ class ChatService:
             if not chapters:
                 return [], subject.name if subject else None, _resolved_slug, 0
 
-            # ── Build numbered chapter list ───────────────────────────────────
+            # ── Build numbered chapter list with topics ───────────────────────
             lines: list[str] = []
             for i, ch in enumerate(chapters, 1):
                 title = (ch.title_as if lang == "as" and getattr(ch, "title_as", None) else ch.title) or ch.title
                 desc = getattr(ch, "meta_description", None) or ""
+                # Include published topic titles so syllabus queries like
+                # "what topics are in chapter 3?" return topic-level detail.
+                raw_topics = getattr(ch, "published_topics", None) or []
+                topic_titles = [
+                    getattr(t, "title", None) for t in raw_topics
+                    if getattr(t, "title", None)
+                ]
                 if desc:
-                    lines.append(f"{i}. **{title}** — {desc}")
+                    line = f"{i}. **{title}** — {desc}"
                 else:
-                    lines.append(f"{i}. **{title}**")
+                    line = f"{i}. **{title}**"
+                if topic_titles:
+                    line += "\n   Topics: " + ", ".join(topic_titles)
+                lines.append(line)
 
             syllabus_text = "\n".join(lines)
             subject_name = subject.name if subject else None
@@ -634,6 +644,9 @@ class ChatService:
         web_chunks: list[dict] | None = None,
         user_board: str | None = None,
         user_class: str | None = None,
+        subject_name: str | None = None,
+        chapter_name: str | None = None,
+        topic_name: str | None = None,
     ) -> str:
         """
         Build weighted system prompt.
@@ -725,14 +738,34 @@ class ChatService:
                 "উদ্ধৃতি: পাঠ্যক্ৰম তথ্যৰ বাবে [C1], [C2]… আৰু ৱেব তথ্যৰ বাবে [W1], [W2]… ইনলাইনত লিখক।"
             )
 
-        # ── Student profile context (board / class) ──────────────────────────
-        if user_board or user_class:
-            profile_ctx = " · ".join(filter(None, [user_board, user_class]))
-            base += (
-                f"\nSTUDENT PROFILE: This student is from {profile_ctx}. "
-                "Tailor all syllabus references, examples, and board-specific content accordingly. "
-                "Prioritise chapters and exam patterns relevant to their board and class."
-            )
+        # ── Full curriculum context (board → class → subject → chapter → topic) ─
+        # Build a hierarchy string from whatever is available so the LLM knows
+        # exactly where in the syllabus the student is. Even partial context
+        # (board + class only) dramatically improves answer alignment.
+        curriculum_parts: list[str] = []
+        if user_board:   curriculum_parts.append(f"Board: {user_board}")
+        if user_class:   curriculum_parts.append(f"Class: {user_class}")
+        if subject_name: curriculum_parts.append(f"Subject: {subject_name}")
+        if chapter_name: curriculum_parts.append(f"Chapter: {chapter_name}")
+        if topic_name:   curriculum_parts.append(f"Topic: {topic_name}")
+
+        if curriculum_parts:
+            ctx_str = " | ".join(curriculum_parts)
+            if detected_lang == "en":
+                base += (
+                    f"\nCURRICULUM CONTEXT: {ctx_str}. "
+                    "Scope every answer to this exact curriculum position. "
+                    "Reference board-specific exam patterns, marks weightage, and "
+                    "topic-level details that apply here. "
+                    "Do not drift to other chapters, boards, or classes unless explicitly asked."
+                )
+            else:
+                base += (
+                    f"\nপাঠ্যক্ৰম প্ৰসংগ: {ctx_str}। "
+                    "প্ৰতিটো উত্তৰ এই পাঠ্যক্ৰমৰ অৱস্থানত সীমাবদ্ধ কৰক। "
+                    "পৰীক্ষাৰ আৰ্হি, নম্বৰৰ বিভাজন আৰু বিষয়-স্তৰৰ বিৱৰণ উল্লেখ কৰক। "
+                    "স্পষ্টভাৱে সোধা নহলে অন্য অধ্যায় বা বৰ্ডলৈ নাযাব।"
+                )
 
         # ── No context at all ───────────────────────────────────────────────
         if not has_rag and not has_web:
