@@ -105,12 +105,24 @@ class TopicMatcher:
         self._last_load = 0
         self._load_failed = False
 
-    async def match_topic(self, query_embedding: list[float]) -> Optional[dict]:
+    async def match_topic(
+        self,
+        query_embedding: list[float],
+        board_slug: Optional[str] = None,
+        class_level: Optional[str] = None,
+    ) -> Optional[dict]:
         """
         Find the best matching topic for a query embedding.
 
         Args:
             query_embedding: 1024-dim embedding vector (CF bge-m3) for the user query.
+            board_slug: When provided, restrict scoring to topics from this board
+                        (e.g. "ahsec", "seba", "cbse"). Prevents cross-board leakage
+                        where an AHSEC chapter scores higher than a SEBA one on the
+                        same topic name. Falls back to full corpus if no topics exist
+                        for the given board/class combination.
+            class_level: When provided, further restrict to this class level
+                         (e.g. "Class 12", "Class 10").
 
         Returns:
             Dict with topic metadata and score if best match >= threshold, else None.
@@ -125,19 +137,42 @@ class TopicMatcher:
         if not self._embeddings or self._vectors is None or self._vectors.size == 0:
             return None
 
-        # Vectorized cosine similarity against all stored embeddings
+        # ── Board/class scoping ───────────────────────────────────────────────
+        # Pre-filter the candidate set to topics belonging to the student's
+        # board and class so a higher-scoring AHSEC embedding never beats a
+        # perfectly relevant SEBA one for a SEBA student.
+        if board_slug or class_level:
+            scoped_indices = [
+                i for i, emb in enumerate(self._embeddings)
+                if (not board_slug or emb.get("board_slug", "").lower() == board_slug.lower())
+                and (not class_level or emb.get("class_level", "").lower() == class_level.lower())
+            ]
+            if scoped_indices:
+                use_embeddings = [self._embeddings[i] for i in scoped_indices]
+                use_vectors = self._vectors[np.array(scoped_indices)]
+            else:
+                # No topics for this board/class yet — graceful fallback to full corpus
+                logger.debug(
+                    f"match_topic: no topics for board_slug={board_slug!r} "
+                    f"class_level={class_level!r} — using full corpus"
+                )
+                use_embeddings = self._embeddings
+                use_vectors = self._vectors
+        else:
+            use_embeddings = self._embeddings
+            use_vectors = self._vectors
+
+        # ── Vectorized cosine similarity ──────────────────────────────────────
         query_vec = np.array(query_embedding, dtype=np.float32)
         query_norm = np.linalg.norm(query_vec)
         if query_norm == 0:
             return None
 
-        # Compute dot products with all vectors at once
-        norms = np.linalg.norm(self._vectors, axis=1)
-        # Avoid division by zero
+        norms = np.linalg.norm(use_vectors, axis=1)
         valid_mask = norms > 0
-        similarities = np.zeros(len(self._embeddings), dtype=np.float32)
+        similarities = np.zeros(len(use_embeddings), dtype=np.float32)
         if valid_mask.any():
-            similarities[valid_mask] = np.dot(self._vectors[valid_mask], query_vec) / (
+            similarities[valid_mask] = np.dot(use_vectors[valid_mask], query_vec) / (
                 norms[valid_mask] * query_norm
             )
 
@@ -145,7 +180,7 @@ class TopicMatcher:
         best_score = float(similarities[best_idx])
 
         if best_score >= MATCH_THRESHOLD:
-            result = dict(self._embeddings[best_idx])
+            result = dict(use_embeddings[best_idx])
             result["score"] = best_score
             return result
 

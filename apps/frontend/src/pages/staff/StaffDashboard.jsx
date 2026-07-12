@@ -741,6 +741,18 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                     ))}
                   </div>
 
+                  {/* Empty RAG sections warning */}
+                  {(form?.[notesSecKey] || []).length === 0 && (form?.notes_en?.length || 0) > 50 && (
+                    <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800">
+                      <span className="text-amber-500 text-sm leading-4">⚠</span>
+                      <span>
+                        <strong>0 RAG sections</strong> — the AI will fall back to raw notes which may contain
+                        markdown symbols and headers that reduce answer quality.
+                        Add at least one section to enable clean, targeted retrieval.
+                      </span>
+                    </div>
+                  )}
+
                   {/* Section cards */}
                   <div className="space-y-2.5">
                     {(form?.[notesSecKey] || []).map((sec, idx) => (
@@ -820,6 +832,17 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                       </button>
                     ))}
                   </div>
+
+                  {/* Empty RAG sections warning */}
+                  {(form?.[qaSecKey] || []).length === 0 && (form?.qa_text_en?.length || 0) > 50 && (
+                    <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800">
+                      <span className="text-amber-500 text-sm leading-4">⚠</span>
+                      <span>
+                        <strong>0 Q&amp;A RAG sections</strong> — the AI will fall back to the raw Q&amp;A blob which degrades retrieval precision.
+                        Add individual Q&amp;A cards above so each question becomes its own clean vector chunk.
+                      </span>
+                    </div>
+                  )}
 
                   {/* Q&A cards */}
                   <div className="space-y-2.5">

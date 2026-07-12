@@ -217,7 +217,11 @@ async def chat(
                     )
                     return ([], 0.0)
 
-                topic_match, query_embedding = await ChatService.check_topic_match_with_embedding(sanitized_message)
+                topic_match, query_embedding = await ChatService.check_topic_match_with_embedding(
+                    sanitized_message,
+                    board_slug=request.board_name.lower() if request.board_name else None,
+                    class_level=request.class_name,
+                )
                 match_score = topic_match.get("score", 0.0) if topic_match else 0.0
 
                 if not topic_match or match_score < CONFIDENCE_LOW:
@@ -744,7 +748,11 @@ async def chat_stream(
                 # topic match confidence is MID or below, eliminating wasted DuckDuckGo
                 # calls on strong on-curriculum queries.
                 phase1_results = await asyncio.gather(
-                    ChatService.check_topic_match_with_embedding(sanitized_message),
+                    ChatService.check_topic_match_with_embedding(
+                        sanitized_message,
+                        board_slug=request.board_name.lower() if request.board_name else None,
+                        class_level=request.class_name,
+                    ),
                     ChatService.load_conversation_history(request.session_id),
                     return_exceptions=True,
                 )
@@ -767,6 +775,28 @@ async def chat_stream(
                     history = history_result or ""
 
                 match_score = topic_match.get("score", 0.0) if topic_match else 0.0
+
+                # ── Embedding-based syllabus gate ─────────────────────────────
+                # Catches study-plan / overview queries the regex misses
+                # ("what should I study?", "cover the whole syllabus").
+                # Reuses query_embedding already computed above — zero extra API cost.
+                if not is_syllabus and query_embedding is not None:
+                    from app.services.chat_service import syllabus_intent_matcher
+                    try:
+                        _embed_syl = await asyncio.wait_for(
+                            syllabus_intent_matcher.is_syllabus_intent(query_embedding),
+                            timeout=0.5,
+                        )
+                        if _embed_syl:
+                            is_syllabus = True
+                            logger.info(
+                                "syllabus_embed_gate_hit",
+                                extra={"user_id": user_id, "query": sanitized_message[:40]},
+                            )
+                    except asyncio.TimeoutError:
+                        pass
+                    except Exception as _e:
+                        logger.debug(f"syllabus_embed_gate error: {_e}")
 
                 # ── Card-context retrieval filters ────────────────────────────────────
                 # Built from the frontend's URL params (?subject=, ?chapter=, ?section=).

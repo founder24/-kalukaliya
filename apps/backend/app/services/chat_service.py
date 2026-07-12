@@ -18,6 +18,8 @@ import re
 import uuid
 from typing import AsyncGenerator, Optional
 
+import numpy as np
+
 from app.config import settings
 from app.core.token_budget import truncate_chunks_to_budget
 from app.db.redis import get_redis
@@ -50,19 +52,116 @@ CONFIDENCE_LOW = 0.50
 # list for the matched subject from MongoDB and returns it as structured context.
 SYLLABUS_QUERY_PATTERN = re.compile(
     r"("
-    # ── English ──────────────────────────────────────────────────────────────
+    # ── Explicit chapter / topic listing ─────────────────────────────────────
     r"syllabus|chapter\s*list|list\s*(of\s*)?chapters?|all\s*chapters?|"
     r"chapter\s*names?|topics?\s*list|what\s*chapters?|"
     r"how\s*many\s*chapters?|which\s*chapters?|"
     r"show\s*(me\s*)?(the\s*)?(syllabus|chapters?|topics?)|"
     r"chapters?\s*in\s*(this|the)?\s*(subject|book|course)|"
     r"(full\s*)?syllabus\s*(of|for)?|"
+    # ── Exam prep / study planning ────────────────────────────────────────────
+    r"what\s+(should|do)\s+i\s+study|what\s+to\s+study|how\s+to\s+prepare|"
+    r"exam\s+prep(aration)?|study\s+plan|"
+    r"what\s+(topics?|chapters?)\s+(should|do)\s+i\s+(prepare|study|cover|revise)|"
+    r"cover\s+(the\s+)?(whole|entire|full|complete)\s+syllabus|"
+    r"(whole|entire|full|complete)\s+syllabus|"
+    r"overview\s+of\s+(the\s+)?(subject|course)|"
+    r"(give\s+(me\s+)?(a\s+)?)?(complete|full)\s+overview|"
+    r"important\s+(topics?|chapters?)\s+for\s+(exam|board)|"
+    r"what\s+is\s+important\s+in\s+(this|the)\s+(subject|chapter)|"
     # ── Assamese ─────────────────────────────────────────────────────────────
     r"পাঠ্যক্ৰম|অধ্যায়\s*সমূহ|সকলো\s*অধ্যায়|অধ্যায়ৰ\s*তালিকা|"
-    r"কোনকেইটা\s*অধ্যায়|কিমান\s*অধ্যায়|বিষয়সূচী"
+    r"কোনকেইটা\s*অধ্যায়|কিমান\s*অধ্যায়|বিষয়সূচী|"
+    r"কি\s*পঢ়িব|কেনেকৈ\s*প্ৰস্তুতি|পৰীক্ষাৰ\s*প্ৰস্তুতি"
     r")",
     re.IGNORECASE,
 )
+
+
+class SyllabusIntentMatcher:
+    """Embedding-based syllabus intent detector.
+
+    Catches natural-language study-plan / overview queries the regex misses:
+      - "what should I study for the exam?"
+      - "cover the whole syllabus"
+      - "give me a complete overview of the subject"
+
+    Reuses the query embedding already computed for topic matching — zero extra
+    API cost.  Seeds are embedded lazily on first use (startup warmup is not
+    required; the first real request pays the one-time ~1 s embed cost).
+    """
+
+    _SEED_PHRASES = [
+        "what should I study for the exam",
+        "cover the whole syllabus",
+        "give me an overview of the subject",
+        "what topics should I prepare for exams",
+        "study plan for this subject",
+        "what are all the topics in this subject",
+        "complete course overview",
+        "exam preparation guide for this subject",
+        "important chapters for board exam",
+        # Assamese seeds
+        "পৰীক্ষাৰ বাবে কি পঢ়িব",
+        "বিষয়টোৰ সম্পূৰ্ণ পাঠ্যক্ৰম",
+        "কি পঢ়া উচিত পৰীক্ষাৰ আগতে",
+    ]
+
+    # Cosine threshold: lower than topic_matcher (0.65) because syllabus phrasing
+    # varies more than topic names; 0.70 keeps false positives low.
+    THRESHOLD = 0.70
+
+    def __init__(self) -> None:
+        self._seed_vectors: Optional[np.ndarray] = None
+        self._init_lock = asyncio.Lock()
+
+    async def _warm_seeds(self) -> None:
+        if self._seed_vectors is not None:
+            return
+        async with self._init_lock:
+            if self._seed_vectors is not None:
+                return
+            try:
+                from app.services.ai.embedder import generate_embedding_vector
+
+                vecs = []
+                for phrase in self._SEED_PHRASES:
+                    v = await asyncio.wait_for(
+                        generate_embedding_vector(phrase), timeout=2.0
+                    )
+                    vecs.append(v)
+                self._seed_vectors = np.array(vecs, dtype=np.float32)
+                logger.info(
+                    f"SyllabusIntentMatcher: warmed {len(vecs)} seed phrases"
+                )
+            except Exception as e:
+                logger.warning(f"SyllabusIntentMatcher warmup failed: {e}")
+                # Mark as attempted with empty array so we don't retry forever
+                self._seed_vectors = np.zeros((0, 1), dtype=np.float32)
+
+    async def is_syllabus_intent(self, query_embedding: list[float]) -> bool:
+        """Return True when query embedding is within THRESHOLD of any seed phrase."""
+        await self._warm_seeds()
+        if self._seed_vectors is None or self._seed_vectors.size == 0:
+            return False
+        q = np.array(query_embedding, dtype=np.float32)
+        q_norm = np.linalg.norm(q)
+        if q_norm == 0:
+            return False
+        seed_norms = np.linalg.norm(self._seed_vectors, axis=1)
+        valid = seed_norms > 0
+        sims = np.zeros(len(self._seed_vectors), dtype=np.float32)
+        if valid.any():
+            sims[valid] = (
+                np.dot(self._seed_vectors[valid], q) / (seed_norms[valid] * q_norm)
+            )
+        best = float(np.max(sims)) if sims.size > 0 else 0.0
+        logger.debug(f"SyllabusIntentMatcher: best_sim={best:.3f}")
+        return best >= self.THRESHOLD
+
+
+# Singleton — warmed lazily, reuses topic-match embedding so zero extra API cost.
+syllabus_intent_matcher = SyllabusIntentMatcher()
 
 # Pattern for detecting question-paper queries (supplements source_type=="pyq").
 QP_QUERY_PATTERN = re.compile(
@@ -357,6 +456,8 @@ class ChatService:
     @staticmethod
     async def check_topic_match_with_embedding(
         query: str,
+        board_slug: Optional[str] = None,
+        class_level: Optional[str] = None,
     ) -> tuple[Optional[dict], Optional[list[float]]]:
         """
         Generate an embedding for the user query and check against TopicMatcher.
@@ -365,6 +466,11 @@ class ChatService:
         embedding in downstream retrieval without a second CF API call.
         match_dict is None when no topic clears the threshold.
         embedding_vector is None only on hard embedding failure.
+
+        board_slug / class_level scope the TopicMatcher to the student's board
+        and class so a higher-scoring cross-board chapter never wins over the
+        correct one (e.g. AHSEC Class 11 chapter beating a SEBA Class 10 chapter
+        on the same topic name).
         """
         try:
             from app.services.ai.embedder import generate_embedding_vector
@@ -373,7 +479,11 @@ class ChatService:
             query_embedding = await asyncio.wait_for(
                 generate_embedding_vector(query), timeout=1.0
             )
-            match = await topic_matcher.match_topic(query_embedding)
+            match = await topic_matcher.match_topic(
+                query_embedding,
+                board_slug=board_slug,
+                class_level=class_level,
+            )
             return match, query_embedding
         except asyncio.TimeoutError:
             logger.warning("Topic match embedding call timed out (1.0s) — falling back to web")
