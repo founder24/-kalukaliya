@@ -616,26 +616,70 @@ async def staff_reindex_chapter(
             detail=f"No RAG content to index for scope '{scope}'. Add content first."
         )
 
+    def _flatten_notes_sections(sections: list[dict]) -> str:
+        """Flatten [{title, content}] notes sections into plain text."""
+        parts = []
+        for sec in (sections or []):
+            title = sec.get("title", "").strip()
+            content = sec.get("content", "").strip()
+            if title:
+                parts.append(f"## {title}")
+            if content:
+                parts.append(content)
+        return "\n\n".join(parts)
+
+    def _flatten_qa_sections(sections: list[dict]) -> str:
+        """Flatten [{section, question, answer, solution}] QA sections into plain text."""
+        parts = []
+        for sec in (sections or []):
+            section = sec.get("section", "").strip()
+            question = sec.get("question", "").strip()
+            answer = sec.get("answer", "").strip()
+            solution = sec.get("solution", "").strip()
+            if section:
+                parts.append(f"Section: {section}")
+            if question:
+                parts.append(f"Q: {question}")
+            if answer:
+                parts.append(f"A: {answer}")
+            if solution:
+                parts.append(f"Solution: {solution}")
+            if any([section, question, answer, solution]):
+                parts.append("")  # blank line between entries
+        return "\n".join(parts).strip()
+
     async def _do_reindex(ch_id: str, ch_scopes: list[str]):
         try:
-            from app.services.rag.ingestion_v2 import ingest_chapter_v2
+            from app.services.rag.ingestion import ingest_chapter
             fresh = await Chapter.get(PydanticObjectId(ch_id))
             if not fresh:
                 return
-            meta = {"subject_id": str(fresh.subject_id)}
+            meta = {
+                "subject_id": str(fresh.subject_id),
+                "chapter_id": ch_id,
+                "chapter_slug": fresh.slug or "",
+            }
             now = datetime.now(timezone.utc)
 
             for s in ch_scopes:
                 if s == "notes":
-                    await ingest_chapter_v2(
+                    # Prefer structured sections; fall back to rag_text blob
+                    en_text = (
+                        _flatten_notes_sections(fresh.rag_sections_en)
+                        if fresh.rag_sections_en
+                        else (fresh.rag_text_en or None)
+                    )
+                    as_text = (
+                        _flatten_notes_sections(fresh.rag_sections_as)
+                        if fresh.rag_sections_as
+                        else (fresh.rag_text_as or None)
+                    )
+                    await ingest_chapter(
                         chapter_id=ch_id,
-                        content_en=fresh.rag_text_en or None,
-                        content_as=fresh.rag_text_as or None,
-                        metadata=meta,
+                        content_en=en_text or None,
+                        content_as=as_text or None,
+                        metadata={**meta, "source_type": "notes"},
                         source_type="notes",
-                        sections_en=fresh.rag_sections_en or None,
-                        sections_as=fresh.rag_sections_as or None,
-                        section_chunk_type="topic_section",
                     )
                     fresh2 = await Chapter.get(PydanticObjectId(ch_id))
                     if fresh2:
@@ -643,26 +687,33 @@ async def staff_reindex_chapter(
                         fresh2.rag_indexed_at = now  # keep legacy in sync
                         await fresh2.save()
                 elif s == "qa":
-                    await ingest_chapter_v2(
+                    en_text = (
+                        _flatten_qa_sections(fresh.qa_rag_sections_en)
+                        if fresh.qa_rag_sections_en
+                        else (fresh.qa_rag_text_en or None)
+                    )
+                    as_text = (
+                        _flatten_qa_sections(fresh.qa_rag_sections_as)
+                        if fresh.qa_rag_sections_as
+                        else (fresh.qa_rag_text_as or None)
+                    )
+                    await ingest_chapter(
                         chapter_id=ch_id,
-                        content_en=fresh.qa_rag_text_en or None,
-                        content_as=fresh.qa_rag_text_as or None,
-                        metadata=meta,
+                        content_en=en_text or None,
+                        content_as=as_text or None,
+                        metadata={**meta, "source_type": "important_questions"},
                         source_type="important_questions",
-                        sections_en=fresh.qa_rag_sections_en or None,
-                        sections_as=fresh.qa_rag_sections_as or None,
-                        section_chunk_type="qa_pair",
                     )
                     fresh2 = await Chapter.get(PydanticObjectId(ch_id))
                     if fresh2:
                         fresh2.qa_rag_indexed_at = now
                         await fresh2.save()
                 else:  # pyq
-                    await ingest_chapter_v2(
+                    await ingest_chapter(
                         chapter_id=ch_id,
-                        content_en=fresh.pyq_rag_text    or None,
+                        content_en=fresh.pyq_rag_text or None,
                         content_as=fresh.pyq_rag_text_as or None,
-                        metadata=meta,
+                        metadata={**meta, "source_type": "pyq"},
                         source_type="pyq",
                     )
                     fresh2 = await Chapter.get(PydanticObjectId(ch_id))
