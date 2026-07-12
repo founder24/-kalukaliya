@@ -166,13 +166,12 @@ function ChangePasswordModal({ onClose }) {
   );
 }
 
-// ── Chapter editor — dual-layer Notes / Questions / PYQ ──────────────────────
+// ── Chapter editor — dual-layer Notes / Questions ────────────────────────────
 
 const EDITOR_TABS = [
   { id: 'info',      label: 'Info' },
   { id: 'notes',     label: 'Notes' },
   { id: 'questions', label: 'Questions' },
-  { id: 'pyq',       label: 'PYQ' },
 ];
 
 function FieldLabel({ children, chars }) {
@@ -456,9 +455,9 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
   const [form,      setForm]      = useState(null);
   const [loading,   setLoading]   = useState(true);
   const [saving,    setSaving]    = useState(false);
-  const [reindexing,setReindexing]= useState({});  // { notes: bool, qa: bool, pyq: bool }
+  const [reindexing,setReindexing]= useState({});  // { notes: bool, qa: bool }
   const [tab,       setTab]       = useState('info');
-  const [subTab,    setSubTab]    = useState({ notes: 'content', questions: 'content', pyq: 'content' });
+  const [subTab,    setSubTab]    = useState({ notes: 'content', questions: 'content' });
   // pyqUploading / pyqFileRef removed — managed inside PyqPapersEditor
 
   // Load full chapter content on open
@@ -552,7 +551,6 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
   // Stale flags derived from form
   const notesRagStale = form?.notes_rag_stale;
   const qaRagStale    = form?.qa_rag_stale;
-  const pyqRagStale   = form?.pyq_rag_stale;
 
   // Notes RAG section key based on selected lang
   const notesSecKey = notesLang === 'en' ? 'rag_sections_en' : 'rag_sections_as';
@@ -582,7 +580,7 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
         {/* Main tabs */}
         <div className="flex gap-1 px-4 pt-2 pb-0 border-b border-gray-100 flex-shrink-0 bg-white overflow-x-auto">
           {EDITOR_TABS.map(t => {
-            const hasStale = (t.id === 'notes' && notesRagStale) || (t.id === 'questions' && qaRagStale) || (t.id === 'pyq' && pyqRagStale);
+            const hasStale = (t.id === 'notes' && notesRagStale) || (t.id === 'questions' && qaRagStale);
             return (
               <button key={t.id} onClick={() => setTab(t.id)}
                 className={`relative px-3 py-2 text-xs font-semibold rounded-t-lg transition-colors whitespace-nowrap border-b-2 ${tab === t.id ? 'border-violet-500 text-violet-700 bg-violet-50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
@@ -856,49 +854,6 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
             </div>
           )}
 
-          {/* ── PYQ TAB ── */}
-          {tab === 'pyq' && (
-            <div>
-              <SubTabs value={subTab.pyq} onChange={v => setSubTabFor('pyq', v)} staleRag={pyqRagStale} />
-
-              {subTab.pyq === 'content' && (
-                <div className="space-y-3">
-                  <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-2.5 text-xs text-amber-700">
-                    <strong>Question Paper pages</strong> — upload one image per page, in order. Students see these as a scrollable gallery in the PYQs section.
-                  </div>
-                  <PyqPapersEditor
-                    chapterId={chapterId}
-                    papers={form?.pyq_papers || []}
-                    onPapersChange={papers => setForm(f => ({ ...f, pyq_papers: papers }))}
-                  />
-                </div>
-              )}
-
-              {subTab.pyq === 'rag' && (
-                <div className="space-y-3">
-                  <ReindexBanner
-                    isStale={pyqRagStale}
-                    indexedAt={form?.pyq_rag_indexed_at}
-                    updatedAt={form?.pyq_rag_updated_at}
-                    onReindex={() => handleReindex('pyq')}
-                    loading={reindexing.pyq}
-                    label="PYQ"
-                  />
-                  <div className="bg-violet-50 border border-violet-100 rounded-xl px-4 py-2.5 text-xs text-violet-700">
-                    <strong>RAG layer</strong> — the question paper as plain text for AI retrieval. English text feeds the English chat model; Assamese text feeds the Assamese chat model. Not shown to students as a formatted document.
-                  </div>
-                  <div>
-                    <FieldLabel chars={form?.pyq_rag_text?.length || 0}>English — PYQ plain text (for English AI chat)</FieldLabel>
-                    <BigTextarea value={form?.pyq_rag_text || ''} onChange={set('pyq_rag_text')} placeholder="Paste the full English question paper text here — all questions, options, and answers…" rows={14} mono />
-                  </div>
-                  <div>
-                    <FieldLabel chars={form?.pyq_rag_text_as?.length || 0}>Assamese — PYQ plain text (for Assamese AI chat)</FieldLabel>
-                    <BigTextarea value={form?.pyq_rag_text_as || ''} onChange={set('pyq_rag_text_as')} placeholder="অসমীয়া প্ৰশ্নকাকতৰ সম্পূৰ্ণ পাঠ এইখিনিত পেষ্ট কৰক — সকলো প্ৰশ্ন, বিকল্প আৰু উত্তৰ সহ…" rows={14} mono />
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Footer */}
