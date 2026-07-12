@@ -754,11 +754,17 @@ async def chat_stream(
                         class_level=request.class_name,
                     ),
                     ChatService.load_conversation_history(request.session_id),
+                    # Load last source_ctx in parallel — zero extra round-trip cost.
+                    # Used to inherit curriculum context (chapter/subject/board/class)
+                    # on follow-up turns ("explain more") where the frontend sends
+                    # no card context.
+                    ChatService.load_last_source_ctx(request.session_id),
                     return_exceptions=True,
                 )
 
-                match_result = phase1_results[0]
-                history_result = phase1_results[1]
+                match_result    = phase1_results[0]
+                history_result  = phase1_results[1]
+                last_ctx_result = phase1_results[2]
 
                 if isinstance(match_result, Exception):
                     logger.warning(f"topic_match_with_embedding failed: {match_result}")
@@ -773,6 +779,40 @@ async def chat_stream(
                     history = ""
                 else:
                     history = history_result or ""
+
+                _inherited_ctx: dict = (
+                    last_ctx_result
+                    if isinstance(last_ctx_result, dict)
+                    else {}
+                )
+
+                # ── Inherit missing card context from previous turn ────────────
+                # When a student follows up ("explain more", "give an example")
+                # the frontend sends session_id but no card context. Fill in the
+                # blanks from the last assistant message's stored source_ctx so
+                # retrieval, topic filtering, and system prompt stay scoped to
+                # the same chapter/subject/board that turn 1 resolved.
+                if _inherited_ctx:
+                    _inherit_pairs = [
+                        ("chapter_id",   "chapter_id"),       # raw MongoDB ID stored in source_ctx
+                        ("chapter_name", "rag_chapter_name"),
+                        ("subject_id",   "rag_subject_id"),
+                        ("board_name",   "rag_board_name"),
+                        ("class_name",   "rag_class_name"),
+                    ]
+                    _patched: dict = {}
+                    for field, ctx_key in _inherit_pairs:
+                        if not getattr(request, field, None) and _inherited_ctx.get(ctx_key):
+                            _patched[field] = _inherited_ctx[ctx_key]
+                    if _patched:
+                        request = request.model_copy(update=_patched)
+                        logger.info(
+                            "card_ctx_inherited",
+                            extra={
+                                "user_id": user_id,
+                                "inherited_fields": list(_patched.keys()),
+                            },
+                        )
 
                 match_score = topic_match.get("score", 0.0) if topic_match else 0.0
 
@@ -1020,9 +1060,10 @@ async def chat_stream(
                     source_card = await ChatService.build_source_card(
                         topic_match, context_chunks, web_chunks, rag_path, confidence_tier
                     )
-                    # Enrich source card with request metadata for fields the
-                    # topic_match couldn't populate (board/class from user profile,
-                    # chapter from card context when topic_match fired for a different ch).
+                    # ── Enrich source card with request / inherited metadata ───
+                    # topic_match populates subject/chapter/board when it fires;
+                    # for MongoDB fast-path and card-context fallback paths these
+                    # fields are empty — fill them from the effective request.
                     if source_card:
                         if not source_card.board_name and request.board_name:
                             source_card.board_name = request.board_name
@@ -1030,6 +1071,25 @@ async def chat_stream(
                             source_card.class_level = request.class_name
                         if not source_card.chapter_name and request.chapter_name:
                             source_card.chapter_name = request.chapter_name
+                        # Subject name — resolve from DB when fast path returns
+                        # chunks with no topic_match (no subject slug available).
+                        if not source_card.subject_name and request.subject_id:
+                            try:
+                                from app.models.content import Subject
+                                from beanie import PydanticObjectId as _PIO
+                                _s = None
+                                try:
+                                    _s = await Subject.get(_PIO(request.subject_id))
+                                except Exception:
+                                    _s = await Subject.find_one(
+                                        {"_id": request.subject_id}
+                                    )
+                                if _s:
+                                    source_card.subject_name = _s.name
+                                    source_card.subject_id   = request.subject_id
+                                    source_card.subject_slug = getattr(_s, "slug", None)
+                            except Exception as _se:
+                                logger.debug(f"source_card subject lookup: {_se}")
 
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
@@ -1181,6 +1241,9 @@ async def chat_stream(
                 context_chunks=context_chunks,
                 detected_lang=detected_lang,
                 source_card=source_card,
+                # Raw IDs stored for multi-turn curriculum context inheritance
+                chapter_id=request.chapter_id,
+                subject_id=request.subject_id,
             )
         )
         task.add_done_callback(_log_task_exception)

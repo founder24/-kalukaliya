@@ -1033,13 +1033,17 @@ class ChatService:
         context_chunks: list[dict],
         detected_lang: str = "unknown",
         source_card=None,
+        chapter_id: Optional[str] = None,   # stored for multi-turn context inheritance
+        subject_id: Optional[str] = None,   # stored for multi-turn context inheritance
     ) -> None:
         """Persist chat to MongoDB. Designed to be called via asyncio.create_task."""
         rag_sources = ChatService._serialize_messages([
             {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
             for c in context_chunks
         ])
-        # Persist source card context so history page can reconstruct grounding.
+        # Persist source card context so history page can reconstruct grounding
+        # and so subsequent turns can inherit curriculum context (chapter / subject /
+        # board / class) even when the frontend doesn't re-send card context.
         source_ctx: dict = {}
         if source_card is not None:
             try:
@@ -1047,16 +1051,21 @@ class ChatService:
                 source_ctx = {
                     "source_type": d.get("source_type"),
                     "confidence_tier": d.get("confidence_tier"),
-                    "rag_path": d.get("rag_path"),
+                    # to_sse_dict() emits "rag_source" not "rag_path"
+                    "rag_path": d.get("rag_source"),
                     "match_score": d.get("match_score"),
                     "rag_subject_id": d.get("rag_subject_id"),
                     "rag_subject_name": d.get("rag_subject_name"),
                     "rag_subject_slug": d.get("rag_subject_slug"),
                     "rag_chapter_name": d.get("rag_chapter_name"),
                     "rag_chapter_slug": d.get("rag_chapter_slug"),
-                    "ctx_board_name": d.get("ctx_board_name"),
-                    "ctx_class_name": d.get("ctx_class_name"),
-                    "ctx_stream_name": d.get("ctx_stream_name"),
+                    "rag_topic_name": d.get("rag_topic_name"),
+                    # to_sse_dict() emits rag_board_name / rag_class_name, not ctx_*
+                    "rag_board_name": d.get("rag_board_name"),
+                    "rag_class_name": d.get("rag_class_name"),
+                    # Raw IDs for multi-turn curriculum context inheritance
+                    "chapter_id": chapter_id,
+                    "subject_id": subject_id,
                 }
                 # Remove None values to keep message docs clean.
                 source_ctx = {k: v for k, v in source_ctx.items() if v is not None}
@@ -1142,6 +1151,36 @@ class ChatService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    async def load_last_source_ctx(session_id: Optional[str]) -> dict:
+        """Return the source_ctx from the most recent assistant message in a session.
+
+        Used to inherit curriculum context (chapter_id, subject_id, board, class)
+        across turns when the frontend doesn't re-send card context on follow-up
+        messages like "explain more", "give an example", "continue".
+        Returns {} on any error or if no prior context exists.
+        """
+        if not session_id:
+            return {}
+        try:
+            from app.models.chat import Chat
+
+            last_doc = await Chat.find_one(
+                {"session_id": session_id},
+                sort=[("created_at", -1)],
+            )
+            if not last_doc or not last_doc.messages:
+                return {}
+            # Walk backwards to find last assistant message with source_ctx
+            for msg in reversed(last_doc.messages):
+                if msg.get("role") == "assistant":
+                    ctx = msg.get("source_ctx")
+                    if ctx:
+                        return ctx
+            return {}
+        except Exception:
+            return {}
+
+    @staticmethod
     async def load_conversation_history(
         session_id: Optional[str], max_turns: int = 5
     ) -> str:
@@ -1150,6 +1189,12 @@ class ChatService:
 
         Aggregates across all Chat documents for a session_id, sorts by
         created_at, flattens messages, and returns the last N turns.
+
+        A PRIOR CONTEXT preamble is prepended when the last assistant message
+        has stored curriculum metadata (board, class, subject, chapter, topic)
+        so the LLM knows which part of the syllabus the conversation is about
+        even on follow-up turns where the frontend sends no card context.
+
         Results are cached in Redis with a 30-minute TTL.
         """
         if not session_id:
@@ -1185,6 +1230,36 @@ class ChatService:
             if not all_messages:
                 return ""
 
+            # ── PRIOR CONTEXT preamble ────────────────────────────────────────
+            # Extract the most recent assistant source_ctx so the LLM knows
+            # exactly what chapter/subject was being discussed in earlier turns.
+            last_source_ctx: dict = {}
+            for msg in reversed(all_messages):
+                if msg.get("role") == "assistant" and msg.get("source_ctx"):
+                    last_source_ctx = msg["source_ctx"]
+                    break
+
+            ctx_parts: list[str] = []
+            if last_source_ctx.get("rag_board_name"):
+                ctx_parts.append(f"Board: {last_source_ctx['rag_board_name']}")
+            if last_source_ctx.get("rag_class_name"):
+                ctx_parts.append(f"Class: {last_source_ctx['rag_class_name']}")
+            if last_source_ctx.get("rag_subject_name"):
+                ctx_parts.append(f"Subject: {last_source_ctx['rag_subject_name']}")
+            if last_source_ctx.get("rag_chapter_name"):
+                ctx_parts.append(f"Chapter: {last_source_ctx['rag_chapter_name']}")
+            if last_source_ctx.get("rag_topic_name"):
+                ctx_parts.append(f"Topic: {last_source_ctx['rag_topic_name']}")
+
+            preamble = ""
+            if ctx_parts:
+                preamble = (
+                    "PRIOR CONTEXT (curriculum discussed in previous turns): "
+                    + " | ".join(ctx_parts)
+                    + "\n\n"
+                )
+
+            # ── Message turns ─────────────────────────────────────────────────
             # Take last N turns (user + assistant pairs)
             recent = all_messages[-(max_turns * 2) :]
             history_lines = []
@@ -1193,8 +1268,8 @@ class ChatService:
                 content = msg.get("content", "")[:500]  # Truncate long messages
                 history_lines.append(f"{role.capitalize()}: {content}")
 
-            # Cap total history to ~2000 chars
-            history = "\n".join(history_lines)
+            # Cap total history to ~2000 chars (preamble + turns)
+            history = preamble + "\n".join(history_lines)
             if len(history) > 2000:
                 history = history[-2000:]
 
