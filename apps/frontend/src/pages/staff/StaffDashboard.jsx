@@ -1684,7 +1684,7 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
   const [filterStream, setFilterStream] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [showNewForm,  setShowNewForm]  = useState(false);
-  const [newForm,      setNewForm]      = useState({ name: '', stream_id: '', status: 'draft', description: '' });
+  const [newForm,      setNewForm]      = useState({ name: '', board_id: '', class_id: '', stream_id: '', status: 'draft', description: '' });
   const [creating,     setCreating]     = useState(false);
 
   const handleCreateSubject = async () => {
@@ -1693,7 +1693,7 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
     try {
       const res = await api().post('/staff/content/subjects', newForm);
       onSubjectCreated?.(res.data);
-      setNewForm({ name: '', stream_id: '', status: 'draft', description: '' });
+      setNewForm({ name: '', board_id: '', class_id: '', stream_id: '', status: 'draft', description: '' });
       setShowNewForm(false);
       toast.success('Subject created');
     } catch (err) {
@@ -1703,15 +1703,25 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
     }
   };
 
-  // Cascade: classes visible under the selected board
+  // Cascade: classes visible under the selected board (filter bar)
   const visibleClasses = filterBoard
     ? classes.filter(c => c.board_id === filterBoard)
     : classes;
 
-  // Cascade: streams visible under selected board+class
+  // Cascade: streams visible under selected board+class (filter bar)
   const visibleStreams = streams.filter(s => {
     if (filterClass)  return s.class_id === filterClass;
     if (filterBoard)  return s.board_id  === filterBoard;
+    return true;
+  });
+
+  // Cascade for new-subject form (independent from the filter bar)
+  const formClasses = newForm.board_id
+    ? classes.filter(c => c.board_id === newForm.board_id)
+    : classes;
+  const formStreams = streams.filter(s => {
+    if (newForm.class_id)  return s.class_id === newForm.class_id;
+    if (newForm.board_id)  return s.board_id  === newForm.board_id;
     return true;
   });
 
@@ -1759,6 +1769,7 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
       {showNewForm && (
         <div className="px-4 sm:px-6 py-4 border-b border-violet-100 bg-violet-50/40 flex-shrink-0 space-y-3">
           <h3 className="text-sm font-bold text-violet-700">New Subject</h3>
+          {/* Row 1: Subject Name + Board */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Subject Name *</label>
@@ -1772,17 +1783,45 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
               />
             </div>
             <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Board</label>
+              <select
+                className={`${inputCls} bg-white`}
+                value={newForm.board_id}
+                onChange={e => setNewForm(f => ({...f, board_id: e.target.value, class_id: '', stream_id: ''}))}
+              >
+                <option value="">— select board —</option>
+                {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+          </div>
+          {/* Row 2: Class + Course/Stream (both cascade from Board) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Class</label>
+              <select
+                className={`${inputCls} bg-white`}
+                value={newForm.class_id}
+                onChange={e => setNewForm(f => ({...f, class_id: e.target.value, stream_id: ''}))}
+                disabled={!newForm.board_id}
+              >
+                <option value="">— select class —</option>
+                {formClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
               <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Course / Stream</label>
               <select
                 className={`${inputCls} bg-white`}
                 value={newForm.stream_id}
                 onChange={e => setNewForm(f => ({...f, stream_id: e.target.value}))}
+                disabled={!newForm.class_id && !newForm.board_id}
               >
                 <option value="">— select course —</option>
-                {streams.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {formStreams.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
           </div>
+          {/* Row 3: Status + Description */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Status</label>
