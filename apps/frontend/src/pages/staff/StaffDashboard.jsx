@@ -880,14 +880,14 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-gray-100 flex-shrink-0 bg-gray-50">
-          <div className="text-[11px] text-gray-400 space-x-2">
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 sm:py-4 border-t border-gray-100 flex-shrink-0 bg-gray-50">
+          <div className="hidden sm:block text-[11px] text-gray-400 space-x-2">
             {form?.content_saved_at && <span>Saved {new Date(form.content_saved_at).toLocaleString()}</span>}
             {form?.word_count > 0 && <span>· {form.word_count.toLocaleString()} words</span>}
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors">Cancel</button>
-            <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-60" style={{ background: 'hsl(var(--primary))' }}>
+          <div className="flex items-center gap-2 ml-auto sm:ml-0">
+            <button onClick={onClose} className="px-3 sm:px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors">Cancel</button>
+            <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-60" style={{ background: 'hsl(var(--primary))' }}>
               {saving && <Spinner size={4} />}{saving ? 'Saving…' : 'Save Chapter'}
             </button>
           </div>
@@ -1083,7 +1083,7 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
 
         {/* Coverage mini-bar */}
         {stats.total > 0 && (
-          <div className="mt-3 ml-11 flex items-center gap-4 text-[10px] text-gray-400 flex-wrap">
+          <div className="mt-3 sm:ml-11 flex items-center gap-4 text-[10px] text-gray-400 flex-wrap">
             <span><span className="text-emerald-600 font-semibold">{stats.contentEN}</span>/{stats.total} Content EN</span>
             <span><span className="text-blue-500 font-semibold">{stats.contentAS}</span>/{stats.total} Content AS</span>
             <span><span className="text-violet-500 font-semibold">{stats.rag}</span>/{stats.total} RAG</span>
@@ -1127,7 +1127,7 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
         )}
 
         {/* ── Mode switcher ── */}
-        <div className="mt-3 ml-11 flex items-center gap-1.5">
+        <div className="mt-3 sm:ml-11 flex items-center gap-1.5">
           {[
             { key: 'chapters', label: 'Notes & Questions', accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.3)' },
             { key: 'pyqs',     label: 'PYQs',              accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.3)'  },
@@ -1149,30 +1149,34 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
 
       {/* ── Chapters mode ─────────────────────────────────────────────────── */}
       {mode === 'chapters' && (<>
-      <div className="flex gap-2 px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0 flex-wrap items-center">
-        <input type="search" placeholder="Search chapters…" value={search} onChange={e => setSearch(e.target.value)} className="flex-1 min-w-[140px] px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
-          <option value="">All Status</option>
-          <option value="published">Published</option>
-          <option value="draft">Draft</option>
-          <option value="planned">Planned</option>
-          <option value="archived">Archived</option>
-        </select>
-        <select value={filterType} onChange={e => setFilterType(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
-          <option value="">All Types</option>
-          <option value="notes">Notes</option>
-          <option value="qa">Q&A</option>
-          <option value="formula">Formula</option>
-          <option value="summary">Summary</option>
-          <option value="solution">Solution</option>
-          <option value="reference">Reference</option>
-        </select>
-        <button
-          onClick={() => setShowNewChapterForm(v => !v)}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold transition-colors flex-shrink-0 ${showNewChapterForm ? 'bg-gray-100 text-gray-600' : 'bg-violet-600 hover:bg-violet-700 text-white'}`}
-        >
-          {showNewChapterForm ? '✕' : '+ Chapter'}
-        </button>
+      <div className="px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0 space-y-2">
+        <div className="flex gap-2 items-center">
+          <input type="search" placeholder="Search chapters…" value={search} onChange={e => setSearch(e.target.value)} className="flex-1 min-w-0 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+          <button
+            onClick={() => setShowNewChapterForm(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold transition-colors flex-shrink-0 ${showNewChapterForm ? 'bg-gray-100 text-gray-600' : 'bg-violet-600 hover:bg-violet-700 text-white'}`}
+          >
+            {showNewChapterForm ? '✕' : '+ Chapter'}
+          </button>
+        </div>
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="w-full sm:w-auto px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+            <option value="">All Status</option>
+            <option value="published">Published</option>
+            <option value="draft">Draft</option>
+            <option value="planned">Planned</option>
+            <option value="archived">Archived</option>
+          </select>
+          <select value={filterType} onChange={e => setFilterType(e.target.value)} className="w-full sm:w-auto px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+            <option value="">All Types</option>
+            <option value="notes">Notes</option>
+            <option value="qa">Q&A</option>
+            <option value="formula">Formula</option>
+            <option value="summary">Summary</option>
+            <option value="solution">Solution</option>
+            <option value="reference">Reference</option>
+          </select>
+        </div>
       </div>
 
       {/* ── New chapter inline form ── */}
@@ -1267,20 +1271,22 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
               const anyRagStale = ch.notes_rag_stale || ch.qa_rag_stale || ch.pyq_rag_stale;
               const staleScopes = [ch.notes_rag_stale && 'Notes', ch.qa_rag_stale && 'Q&A', ch.pyq_rag_stale && 'PYQ'].filter(Boolean).join(', ');
               return (
-                <div key={ch.id} className="flex items-center gap-3 p-3.5 bg-white rounded-xl border hover:border-violet-200 hover:shadow-sm transition-all"
+                <div key={ch.id} className="flex items-start gap-3 p-3.5 bg-white rounded-xl border hover:border-violet-200 hover:shadow-sm transition-all"
                   style={{ borderColor: hasUnpublishedEdit ? 'rgba(245,158,11,0.4)' : '#e5e7eb' }}>
-                  <div className="w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center text-xs font-bold text-gray-400 flex-shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center text-xs font-bold text-gray-400 flex-shrink-0 mt-0.5">
                     {ch.chapter_number ?? idx + 1}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-gray-900 truncate">{ch.title}</span>
+                      {/* Status badge moved here so it wraps with title instead of eating horizontal space */}
+                      <StatusBadge status={ch.status} />
                       {ch.content_type && ch.content_type !== 'notes' && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium border border-blue-100">{ch.content_type}</span>
                       )}
                       {hasUnpublishedEdit && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold border border-amber-200">Unsaved</span>}
                       {anyRagStale && (
-                        <span className="inline-flex items-center gap-1">
+                        <span className="inline-flex items-center gap-1 flex-wrap">
                           <span
                             title={`RAG stale — needs reindex: ${staleScopes}`}
                             className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 font-semibold border border-amber-200"
@@ -1318,9 +1324,9 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
                       {ch.word_count > 0 && <span className="text-[10px] text-gray-400">{ch.word_count.toLocaleString()} words</span>}
                     </div>
                   </div>
-                  <StatusBadge status={ch.status} />
-                  <button onClick={() => onEditChapter(ch.id)} className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 transition-colors">
-                    <EditIcon /><span>Edit</span>
+                  {/* Edit: icon-only on mobile, icon+text on sm+ — saves ~30px on narrow screens */}
+                  <button onClick={() => onEditChapter(ch.id)} className="flex-shrink-0 flex items-center gap-1 px-2.5 py-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 transition-colors mt-0.5 min-h-[36px] min-w-[36px] justify-center">
+                    <EditIcon /><span className="hidden sm:inline">Edit</span>
                   </button>
                 </div>
               );
@@ -1875,30 +1881,30 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
       )}
 
       {/* Filter bar — Board → Class → Course → Status */}
-      <div className="px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0">
-        <div className="flex flex-wrap gap-2">
-          <input
-            type="search" placeholder="Search subjects…" value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="flex-1 min-w-[140px] px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
-          />
+      <div className="px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex-shrink-0 space-y-2">
+        <input
+          type="search" placeholder="Search subjects…" value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+        />
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
           {/* Board */}
-          <select value={filterBoard} onChange={e => handleBoardChange(e.target.value)} className={selectCls}>
+          <select value={filterBoard} onChange={e => handleBoardChange(e.target.value)} className={`${selectCls} w-full sm:w-auto`}>
             <option value="">All Boards</option>
             {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
           {/* Class — cascades from Board */}
-          <select value={filterClass} onChange={e => handleClassChange(e.target.value)} className={selectCls}>
+          <select value={filterClass} onChange={e => handleClassChange(e.target.value)} className={`${selectCls} w-full sm:w-auto`}>
             <option value="">All Classes</option>
             {visibleClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           {/* Course/Stream — cascades from Board+Class */}
-          <select value={filterStream} onChange={e => setFilterStream(e.target.value)} className={selectCls}>
+          <select value={filterStream} onChange={e => setFilterStream(e.target.value)} className={`${selectCls} w-full sm:w-auto`}>
             <option value="">All Courses</option>
             {visibleStreams.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           {/* Status */}
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={selectCls}>
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={`${selectCls} w-full sm:w-auto`}>
             <option value="">All Status</option>
             <option value="published">Published</option>
             <option value="draft">Draft</option>

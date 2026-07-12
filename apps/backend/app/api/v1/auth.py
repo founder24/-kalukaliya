@@ -39,7 +39,7 @@ async def _mongo_is_blacklisted(token_hash: str) -> bool:
         )
         return doc is not None
     except Exception as e:
-        logger.error(f"_mongo_is_blacklisted failed: {e}")
+        logger.warning(f"_mongo_is_blacklisted check skipped: {e}")
         return False
 
 
