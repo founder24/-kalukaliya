@@ -2043,7 +2043,9 @@ export default function StaffDashboard() {
       return ch;
     }));
     try {
-      await api().post(`/staff/content/chapter/${chapterId}/reindex?scope=${scope}`);
+      const res = await api().post(`/staff/content/chapter/${chapterId}/reindex?scope=${scope}`);
+      const jobId = res?.data?.job_id;
+      if (jobId) toast.success(`Reindex started — job ${jobId}`, { duration: 4000 });
       return true;
     } catch (err) {
       const detail = err?.response?.data?.detail || 'Reindex failed';

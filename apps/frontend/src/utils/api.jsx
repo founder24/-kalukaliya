@@ -998,11 +998,17 @@ const adminContentVersionHistory = (token, chapterId) =>
 export const postChatFeedback = (data) =>
   axios.post(`${API_BASE}/chat/feedback`, data, { headers: anonHeaders(), withCredentials: true });
 
-export const adminGetChatFeedback = (token, limit = 100, offset = 0) =>
-  axios.get(`${API_BASE}/chat/feedback?limit=${limit}&offset=${offset}`, { headers: adminHeaders(token), withCredentials: true });
+export const adminGetChatFeedback = (token, limit = 100, offset = 0, filter = null) =>
+  axios.get(`${API_BASE}/chat/feedback${filter ? `?limit=${limit}&offset=${offset}&filter=${filter}` : `?limit=${limit}&offset=${offset}`}`, { headers: adminHeaders(token), withCredentials: true });
 
 export const adminGetFeedbackStats = (token) =>
   axios.get(`${API_BASE}/chat/feedback/stats`, { headers: adminHeaders(token), withCredentials: true });
+
+export const adminPatchFeedback = (token, feedbackId, action) =>
+  axios.patch(`${API_BASE}/chat/feedback/${feedbackId}`, { action }, { headers: adminHeaders(token), withCredentials: true });
+
+export const adminTriggerLogsCronPull = (token) =>
+  axios.post(`${API_BASE}/admin/logs/cron/trigger`, {}, { headers: adminHeaders(token), withCredentials: true });
 
 export const adminPurgeAllCache = (token) =>
   axios.post(`${API_BASE}/admin/cache/purge-all`, {}, { headers: adminHeaders(token), withCredentials: true });

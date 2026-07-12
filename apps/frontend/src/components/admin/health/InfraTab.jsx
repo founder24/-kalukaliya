@@ -567,6 +567,11 @@ export default function InfraTab({ adminToken, onNavigate, health, loading, deps
           slackMissingAlertState={slackWebhookMissingAlertStates['UNIFIED_LOGS_CF_PULL_SLACK_WEBHOOK']}
           slackMissingAlertHistory={slackWebhookMissingAlertHistories['UNIFIED_LOGS_CF_PULL_SLACK_WEBHOOK']}
           onSnoozeSlackMissing={snoozeSlackWebhookMissing}
+          onTrigger={async () => {
+            const { adminTriggerLogsCronPull } = await import('@/utils/api');
+            await adminTriggerLogsCronPull(adminToken);
+            loadUnifiedLogsCfPullCronHealth();
+          }}
         />
         </SectionErrorBoundary>
 

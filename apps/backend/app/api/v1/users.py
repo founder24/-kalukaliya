@@ -400,18 +400,11 @@ async def get_credits(
         }
 
     anon_id = resolve_anon_id(request)
+    # Anonymous usage is tracked server-side via the MongoDB rate-limit collection.
+    # Redis was previously used here but has been removed; anonymous credits_used
+    # is always returned as 0 (showing full allowance) since per-request rate
+    # enforcement still applies at the API level via check_rate_limit().
     credits_used = 0
-    try:
-        from app.db.redis import get_redis
-
-        redis = get_redis()
-        month_key = time.strftime("%Y-%m", time.gmtime())
-        redis_key = f"rate:{anon_id}:{month_key}"
-        val = await redis.get(redis_key)
-        credits_used = max(0, int(val or 0))
-    except Exception:
-        pass
-
     credits_remaining = max(0, MONTHLY_LIMIT_FREE - credits_used)
     return {
         "credits_remaining": credits_remaining,

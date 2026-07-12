@@ -24,6 +24,9 @@ class ChatFeedback(Document):
     latency_ms: Optional[int] = None
     query_text: Optional[str] = None  # First 100 chars for debugging
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    # Admin triage fields
+    archived: bool = False
+    read: bool = False
 
     class Settings:
         name = "chat_feedback"

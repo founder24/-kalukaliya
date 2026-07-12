@@ -368,28 +368,15 @@ async def get_current_user(
         if token_type != "access":
             raise HTTPException(status_code=401, detail="Invalid token type")
 
-        # Check if token has been blacklisted (logout)
+        # Check if token has been blacklisted (logout) — MongoDB-only path
         try:
-            from app.db.redis import get_redis
-
-            redis = get_redis()
             token_hash = hashlib.sha256(token.encode()).hexdigest()
-            blacklisted = await redis.get(f"blacklisted_token:{token_hash}")
-            if blacklisted:
+            if await _mongo_is_blacklisted(token_hash):
                 raise HTTPException(status_code=401, detail="Token has been revoked")
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Redis unavailable for token blacklist check: {e}")
-            # MongoDB fallback: check token_blacklist collection
-            try:
-                token_hash_fb = hashlib.sha256(token.encode()).hexdigest()
-                if await _mongo_is_blacklisted(token_hash_fb):
-                    raise HTTPException(status_code=401, detail="Token has been revoked")
-            except HTTPException:
-                raise
-            except Exception as mongo_err:
-                logger.error(f"MongoDB blacklist fallback also failed: {mongo_err}")
+            logger.warning(f"MongoDB blacklist check failed (fail-open for non-payment): {e}")
             # Fail-closed for payment/subscription endpoints
             req_path = str(request.url.path) if request else ""
             if req_path.startswith("/api/v1/payments/") or req_path.startswith(
@@ -399,7 +386,6 @@ async def get_current_user(
                     status_code=503,
                     detail="Token validation service unavailable for payment operations",
                 )
-            # Fail-open for non-payment paths: JWT is still cryptographically valid
 
         user = await User.get(user_id)
         if not user:
@@ -484,14 +470,10 @@ async def get_current_user_optional(
         if not user_id or token_type != "access":
             return None
 
-        # Check token blacklist
+        # Check token blacklist — MongoDB-only, fail-open
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         try:
-            from app.db.redis import get_redis
-
-            redis = get_redis()
-            is_blacklisted = await redis.get(f"blacklisted_token:{token_hash}")
-            if is_blacklisted:
+            if await _mongo_is_blacklisted(token_hash):
                 return None  # treat as anonymous
         except Exception:
             pass  # fail-open acceptable for optional auth
@@ -887,11 +869,8 @@ async def logout(
     token = user_jwt_header or credentials.credentials
 
     # Decode the access token to get its expiry (get_current_user already
-    # validated it, so this should not fail; any exception here is a config
-    # problem, not a Redis problem — raise 500, not 503).
+    # validated it, so this should not fail — raise 500 on any error).
     try:
-        from app.db.redis import get_redis
-
         payload = _decode_token_with_fallback(token)
     except HTTPException:
         raise
@@ -904,49 +883,18 @@ async def logout(
     now = int(datetime.now(timezone.utc).timestamp())
     ttl = max(exp - now, 0)
 
-    # Blacklist the access token in Redis.  Fail-open: if Redis is temporarily
-    # unavailable the token expires naturally (max TTL = access token lifetime,
-    # typically 15 min).  We log a warning so the ops team can investigate.
-    try:
-        redis = get_redis()
-
-        if ttl > 0:
-            await redis.set(f"blacklisted_token:{token_hash}", "1", ex=ttl)
-
-        # Revoke the refresh token (best-effort; client may not supply one)
-        if body.refresh_token:
-            try:
-                refresh_payload = jwt.decode(
-                    body.refresh_token,
-                    key,
-                    algorithms=[algorithm],
-                )
-                jti = refresh_payload.get("jti")
-                if jti:
-                    refresh_exp = refresh_payload.get("exp", 0)
-                    refresh_ttl = max(refresh_exp - now, 0)
-                    if refresh_ttl > 0:
-                        await redis.set(f"revoked_refresh:{jti}", "1", ex=refresh_ttl)
-            except InvalidTokenError:
-                pass  # Invalid refresh token — ignore
-    except Exception as e:
-        # Redis unavailable — write to MongoDB token_blacklist as fallback.
-        logger.warning(
-            f"Token blacklisting: Redis failed ({type(e).__name__}: {e}), "
-            "falling back to MongoDB.",
-            exc_info=False,
-        )
-        if ttl > 0:
-            try:
-                await _mongo_blacklist_write(
-                    token_hash,
-                    datetime.now(timezone.utc).replace(microsecond=0)
-                    + timedelta(seconds=ttl),
-                )
-            except Exception as mongo_err:
-                logger.error(
-                    f"MongoDB blacklist write also failed: {type(mongo_err).__name__}: {mongo_err}",
-                    exc_info=True,
-                )
+    # Blacklist the access token — MongoDB-only path (Redis has been removed).
+    if ttl > 0:
+        try:
+            await _mongo_blacklist_write(
+                token_hash,
+                datetime.now(timezone.utc).replace(microsecond=0)
+                + timedelta(seconds=ttl),
+            )
+        except Exception as mongo_err:
+            logger.error(
+                f"MongoDB blacklist write failed: {type(mongo_err).__name__}: {mongo_err}",
+                exc_info=True,
+            )
 
     return MessageResponse(message="Logged out successfully")

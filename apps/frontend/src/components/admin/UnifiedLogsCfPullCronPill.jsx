@@ -1,5 +1,5 @@
-import React from 'react';
-import { ExternalLink } from 'lucide-react';
+import React, { useState } from 'react';
+import { ExternalLink, Play, Loader2 } from 'lucide-react';
 import CronHealthPill from './CronHealthPill';
 import { captionLine, joinCaptionParts } from './cronCaptionHelpers';
 
@@ -96,27 +96,54 @@ const renderSubText = ({ data, status, isFailed, ageLabel: fmt }) => {
   return joinCaptionParts([primary, suffix, leaseSuffix]);
 };
 
-const renderExtraActions = ({ data }) => {
-  // Optional deep-link to the JSON status endpoint — same shape as
-  // the cf-waf-drift / edge-proxy-deploy "Last run" deep-link, but
-  // this one opens the live JSON snapshot of the lock doc so admins
-  // can read the cursor + lease without leaving the browser. We
-  // only render it when the backend has supplied a statusUrl
-  // (always true on the real endpoint, but omitted on partial
-  // fixtures used by the snapshot tests).
-  const statusUrl = data?.statusUrl;
-  if (!statusUrl) return null;
+function TriggerButton({ onTrigger }) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const handleClick = async (e) => {
+    e.stopPropagation();
+    setBusy(true);
+    try {
+      await onTrigger();
+      setDone(true);
+      setTimeout(() => setDone(false), 3000);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <a
-      href={statusUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-[11px] text-violet-600 hover:text-violet-700 inline-flex items-center gap-1"
-      data-testid="unified-logs-cf-pull-cron-status-link"
-      title="Open the JSON status snapshot for the CF pull lock"
+    <button
+      onClick={handleClick}
+      disabled={busy}
+      data-testid="unified-logs-cf-pull-cron-trigger"
+      title="Force-trigger the next CF log pull cycle"
+      className="text-[11px] text-violet-600 hover:text-violet-700 inline-flex items-center gap-1 disabled:opacity-50"
     >
-      Status JSON <ExternalLink size={11} />
-    </a>
+      {busy ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+      {done ? 'Triggered' : 'Run now'}
+    </button>
+  );
+}
+
+// renderExtraActions is called by CronHealthPill as renderExtraActions(ctx)
+// We build it as a factory that closes over onTrigger so the signature stays compatible.
+const makeRenderExtraActions = (onTrigger) => ({ data }) => {
+  const statusUrl = data?.statusUrl;
+  return (
+    <div className="inline-flex items-center gap-2">
+      {onTrigger && <TriggerButton onTrigger={onTrigger} />}
+      {statusUrl && (
+        <a
+          href={statusUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[11px] text-violet-600 hover:text-violet-700 inline-flex items-center gap-1"
+          data-testid="unified-logs-cf-pull-cron-status-link"
+          title="Open the JSON status snapshot for the CF pull lock"
+        >
+          Status JSON <ExternalLink size={11} />
+        </a>
+      )}
+    </div>
   );
 };
 
@@ -148,6 +175,9 @@ export default function UnifiedLogsCfPullCronPill({
   // dashboard's "Snooze 7d" button can mute the missing-webhook nag
   // for ``UNIFIED_LOGS_CF_PULL_SLACK_WEBHOOK`` directly from this pill.
   onSnoozeSlackMissing,
+  // Optional: called when the admin clicks "Run now". Receives no args;
+  // should call the backend trigger endpoint and then refresh status.
+  onTrigger,
 }) {
   // The "Runs" link target falls back to the data's ``statusUrl``
   // (the only stable URL this cron exposes) before settling on the
@@ -165,7 +195,7 @@ export default function UnifiedLogsCfPullCronPill({
       headerTextByStatus={HEADER_TEXT_BY_STATUS}
       pillLabelByStatus={PILL_LABEL_BY_STATUS}
       renderSubText={renderSubText}
-      renderExtraActions={renderExtraActions}
+      renderExtraActions={makeRenderExtraActions(onTrigger)}
       alertState={alertState}
       alertHistory={alertHistory}
       onLoadAlertHistory={onLoadAlertHistory}

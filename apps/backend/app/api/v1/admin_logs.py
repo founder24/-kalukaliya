@@ -205,6 +205,38 @@ async def logs_rotate_token():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/logs/cron/trigger")
+async def logs_cron_trigger():
+    """
+    Force-trigger the next CF log pull cycle by resetting the job_lock's
+    last_run_at so the background cron considers it overdue immediately.
+    Useful when the pull has gone silent and you want it to retry without
+    waiting for the next scheduled interval.
+    """
+    try:
+        db = _db()
+        result = await db.job_locks.update_one(
+            {"_id": "unified_logs_cf_pull_lock"},
+            {
+                "$set": {
+                    "last_run_at": datetime.now(timezone.utc) - timedelta(hours=2),
+                    "force_trigger": True,
+                    "force_triggered_at": datetime.now(timezone.utc),
+                }
+            },
+            upsert=True,
+        )
+        return {
+            "ok": True,
+            "matched": result.matched_count,
+            "message": "CF log pull lock reset — next cron cycle will run immediately",
+        }
+    except Exception as e:
+        logger.error(f"Logs cron trigger error: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/logs/trace/{correlation_id}")
 async def logs_trace(correlation_id: str):
     """Retrieve all log entries sharing a correlation/request ID."""
