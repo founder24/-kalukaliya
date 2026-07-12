@@ -650,7 +650,7 @@ async def staff_reindex_chapter(
 
     async def _do_reindex(ch_id: str, ch_scopes: list[str]):
         try:
-            from app.services.rag.ingestion import ingest_chapter
+            from app.services.rag.ingestion_v2 import ingest_chapter_v2
             fresh = await Chapter.get(PydanticObjectId(ch_id))
             if not fresh:
                 return
@@ -674,7 +674,7 @@ async def staff_reindex_chapter(
                         if fresh.rag_sections_as
                         else (fresh.rag_text_as or None)
                     )
-                    await ingest_chapter(
+                    await ingest_chapter_v2(
                         chapter_id=ch_id,
                         content_en=en_text or None,
                         content_as=as_text or None,
@@ -697,7 +697,7 @@ async def staff_reindex_chapter(
                         if fresh.qa_rag_sections_as
                         else (fresh.qa_rag_text_as or None)
                     )
-                    await ingest_chapter(
+                    await ingest_chapter_v2(
                         chapter_id=ch_id,
                         content_en=en_text or None,
                         content_as=as_text or None,
@@ -709,7 +709,7 @@ async def staff_reindex_chapter(
                         fresh2.qa_rag_indexed_at = now
                         await fresh2.save()
                 else:  # pyq
-                    await ingest_chapter(
+                    await ingest_chapter_v2(
                         chapter_id=ch_id,
                         content_en=fresh.pyq_rag_text or None,
                         content_as=fresh.pyq_rag_text_as or None,
