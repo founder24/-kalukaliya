@@ -676,7 +676,7 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                   {[
                     { label: 'Notes RAG', stale: notesRagStale, at: form?.notes_rag_indexed_at },
                     { label: 'Q&A RAG',   stale: qaRagStale,    at: form?.qa_rag_indexed_at },
-                    { label: 'PYQ RAG',   stale: pyqRagStale,   at: form?.pyq_rag_indexed_at },
+                    { label: 'PYQ RAG',   stale: form?.pyq_rag_stale,   at: form?.pyq_rag_indexed_at },
                   ].map(({ label, stale, at }) => (
                     <div key={label} className="flex items-center gap-1.5">
                       <span className="text-gray-400 font-semibold">{label}</span>
