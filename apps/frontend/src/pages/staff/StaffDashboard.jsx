@@ -909,7 +909,7 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
   const [reindexAllProgress, setReindexAllProgress] = useState({ done: 0, total: 0 });
   const [failedReindexChapters, setFailedReindexChapters] = useState([]);
   const [showNewChapterForm, setShowNewChapterForm] = useState(false);
-  const [newChapterForm, setNewChapterForm] = useState({ title: '', chapter_number: '', content_type: 'notes', status: 'draft' });
+  const [newChapterForm, setNewChapterForm] = useState({ title: '', chapter_number: '', content_type: 'notes', status: 'draft', description: '' });
   const [creatingChapter, setCreatingChapter] = useState(false);
 
   // Mode switcher: 'chapters' shows chapter list, 'pyqs' shows question paper manager
@@ -926,7 +926,7 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
       };
       const res = await api().post('/staff/content/chapters', payload);
       onChapterCreated?.(res.data);
-      setNewChapterForm({ title: '', chapter_number: '', content_type: 'notes', status: 'draft' });
+      setNewChapterForm({ title: '', chapter_number: '', content_type: 'notes', status: 'draft', description: '' });
       setShowNewChapterForm(false);
       toast.success('Chapter created');
     } catch (err) {
@@ -1223,6 +1223,19 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
                 <option value="planned">Planned</option>
               </select>
             </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">
+              Description
+              <span className="ml-1 normal-case font-normal text-gray-400">(topics, keywords — used for embeddings &amp; SEO)</span>
+            </label>
+            <textarea
+              className={`${inputCls} resize-none`}
+              rows={3}
+              placeholder="List all topics covered in this chapter, e.g. Electric charge, Coulomb's law, Electric field, Gauss's theorem… Also include SEO/GEO/AEO keywords."
+              value={newChapterForm.description}
+              onChange={e => setNewChapterForm(f => ({...f, description: e.target.value}))}
+            />
           </div>
           <div className="flex gap-2">
             <button
