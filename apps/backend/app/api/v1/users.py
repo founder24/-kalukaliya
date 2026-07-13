@@ -70,9 +70,9 @@ async def get_current_user_profile(user: User = Depends(get_current_user)):
         plan=user.subscription_tier,
         monthly_message_count=user.monthly_message_count,
         preferred_language=user.preferred_language,
-        onboarding_done=getattr(user, "onboarding_done", False),
-        ads_opt_out=getattr(user, "ads_opt_out", False),
-        saved_subjects=getattr(user, "saved_subjects", []) or [],
+        onboarding_done=user.onboarding_done,
+        ads_opt_out=user.ads_opt_out,
+        saved_subjects=user.saved_subjects or [],
     )
 
 
@@ -132,9 +132,9 @@ async def get_profile_alias(user: User = Depends(get_current_user)):
         plan=user.subscription_tier,
         monthly_message_count=user.monthly_message_count,
         preferred_language=user.preferred_language,
-        onboarding_done=getattr(user, "onboarding_done", False),
-        ads_opt_out=getattr(user, "ads_opt_out", False),
-        saved_subjects=getattr(user, "saved_subjects", []) or [],
+        onboarding_done=user.onboarding_done,
+        ads_opt_out=user.ads_opt_out,
+        saved_subjects=user.saved_subjects or [],
     )
 
 
@@ -340,10 +340,10 @@ async def get_user_stats(user: User = Depends(get_current_user)):
     except Exception:
         conversations = 0
 
-    credits_used = getattr(user, "credits_used", 0) or 0
-    total_tokens = getattr(user, "total_tokens_used", 0) or 0
+    credits_used = user.credits_used or 0
+    total_tokens = user.total_tokens_used or 0
 
-    saved_subjects_count = len(getattr(user, "saved_subjects", []) or [])
+    saved_subjects_count = len(user.saved_subjects or [])
 
     return {
         "conversations": conversations,

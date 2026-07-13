@@ -54,6 +54,26 @@ class User(Document):
     voice_enabled: bool = True
     theme: str = "light"
     saved_subjects: List[str] = Field(default_factory=list)
+    phone: Optional[str] = None
+
+    # Onboarding & preferences
+    # NOTE: these fields are written via $set patches but must be declared here
+    # so Beanie (Pydantic v2) does not silently drop them on document load.
+    onboarding_done: bool = False
+    ads_opt_out: bool = False
+    grade: Optional[str] = None
+    board: Optional[str] = None        # legacy free-text board name
+    stream: Optional[str] = None       # legacy free-text stream name
+    board_id: Optional[str] = None
+    board_name: Optional[str] = None
+    class_id: Optional[str] = None
+    class_name: Optional[str] = None
+    stream_id: Optional[str] = None
+    stream_name: Optional[str] = None
+
+    # Usage (written by billing/AI pipelines, read by stats endpoint)
+    credits_used: int = 0
+    total_tokens_used: int = 0
 
     # Metadata
     ip_address_first_seen: Optional[str] = None
