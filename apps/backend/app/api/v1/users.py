@@ -362,7 +362,7 @@ async def toggle_saved_subject(
     Frontend calls POST /api/v1/user/saved-subjects/{subjectId} (optimistic mutation).
     Returns the updated list so the frontend can sync on settled.
     """
-    current: List[str] = getattr(user, "saved_subjects", []) or []
+    current: List[str] = user.saved_subjects or []
     if subject_id in current:
         updated = [s for s in current if s != subject_id]
         action = "removed"
@@ -387,8 +387,8 @@ async def get_credits(
     MONTHLY_LIMIT_FREE = 30
 
     if user:
-        tier = getattr(user, "subscription_tier", "free") or "free"
-        credits_used = getattr(user, "monthly_message_count", 0) or 0
+        tier = user.subscription_tier or "free"
+        credits_used = user.monthly_message_count or 0
         tier_limits = {"free": MONTHLY_LIMIT_FREE, "pro": 999999, "premium": 999999}
         monthly_limit = tier_limits.get(tier, MONTHLY_LIMIT_FREE)
         credits_remaining = max(0, monthly_limit - credits_used)

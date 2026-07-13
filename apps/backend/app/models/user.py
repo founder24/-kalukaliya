@@ -75,6 +75,16 @@ class User(Document):
     credits_used: int = 0
     total_tokens_used: int = 0
 
+    # Account deletion (GDPR/DPDP soft-delete flow)
+    # NOTE: written via $set/$unset in users.py; must be declared so Beanie
+    # (Pydantic v2) does not silently drop them when loading the document.
+    deletion_requested: bool = False
+    deletion_scheduled_at: Optional[datetime] = None
+
+    # Per-user quiz quota override set by admin (admin_users.py)
+    # Shape: {"daily": int, "custom": bool} — None means use platform default.
+    quiz_quota: Optional[dict] = None
+
     # Metadata
     ip_address_first_seen: Optional[str] = None
     user_agent_first_seen: Optional[str] = None

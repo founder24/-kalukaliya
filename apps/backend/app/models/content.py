@@ -82,6 +82,9 @@ class Chapter(Document):
     title: str
     title_as: Optional[str] = None
     slug: str
+    # Assamese URL slug — read via getattr in the AS chapter resolver; must be
+    # declared so Beanie (Pydantic v2) does not silently drop it on load.
+    slug_as: Optional[str] = None
     subject_id: FlexId
     chapter_number: int
     status: str = "draft"
