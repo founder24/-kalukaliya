@@ -54,3 +54,9 @@ id = "GDXsV67YSa9Vztd-I3eup"
 uri = "file://attached_assets/SyrabitAI_BlockDiagram_IdeaHackathon6.pdf"
 type = "pdf"
 title = "SyrabitAI_BlockDiagram_IdeaHackathon6.pdf — Upload this to the form"
+
+[[outputs]]
+id = "_ccwOzXZabv0GBNqykRp7"
+uri = "file://attached_assets/Syrabit_Technical_Block_Diagram.pptx"
+type = "slides"
+title = "Syrabit_Technical_Block_Diagram.pptx — Upload-ready for Field 10"
