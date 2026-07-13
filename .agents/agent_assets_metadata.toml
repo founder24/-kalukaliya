@@ -77,4 +77,16 @@ title = "Slide 2 — Technical Processing Brief"
 id = "MN5H2qjv4950tzKZDw9Dc"
 uri = "file://attached_assets/Syrabit_Technical_Block_Diagram.pdf"
 type = "pdf"
-title = "Syrabit_Technical_Block_Diagram.pdf — Field 10 upload"
+title = "Syrabit_Technical_Block_Diagram.pdf — Ready to upload (261 KB)"
+
+[[outputs]]
+id = "5FCnKiDvenF56cbVLLOFE"
+uri = "file://attached_assets/simple_slide1.png"
+type = "image"
+title = "Slide 1 — How a student's question gets answered"
+
+[[outputs]]
+id = "zvJ-eRRxTF3i2zEddC9Da"
+uri = "file://attached_assets/simple_slide2.png"
+type = "image"
+title = "Slide 2 — What happens step by step + what sets it apart"

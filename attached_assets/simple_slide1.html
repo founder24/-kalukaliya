@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #F8F9FF;
+  width: 1600px;
+  height: 900px;
+  overflow: hidden;
+  color: #1A1D2E;
+}
+
+/* ── Header ── */
+.header {
+  background: #1A1D2E;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 40px;
+}
+.header .brand { font-size: 22px; font-weight: 800; color: #fff; letter-spacing: 1px; }
+.header .brand span { color: #6366F1; }
+.header .subtitle { font-size: 12px; color: #94A3B8; letter-spacing: 2px; text-transform: uppercase; }
+
+/* ── Main 3-column layout ── */
+.body { display: flex; height: 836px; }
+
+/* ── LEFT: What's in the library ── */
+.left {
+  width: 280px;
+  background: #1A1D2E;
+  padding: 28px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.left .sec-title {
+  font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: #64748B; margin-bottom: 6px;
+}
+.hier-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #252A40;
+  border-radius: 10px;
+  padding: 10px 14px;
+  border-left: 4px solid;
+}
+.hier-item .icon { font-size: 20px; }
+.hier-item .label { font-size: 13px; font-weight: 700; color: #E2E8F0; }
+.hier-item .desc { font-size: 10px; color: #64748B; margin-top: 1px; }
+
+.arrow-down {
+  text-align: center;
+  color: #374151;
+  font-size: 18px;
+  margin: 2px 0;
+}
+
+/* ── CENTER: The flow ── */
+.center {
+  flex: 1;
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.center .sec-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: #94A3B8; margin-bottom: 18px;
+}
+
+.flow-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 0;
+}
+.flow-step {
+  background: #fff;
+  border: 2px solid;
+  border-radius: 14px;
+  padding: 14px 16px;
+  width: 152px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+}
+.flow-step .num {
+  font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+.flow-step .name {
+  font-size: 13px; font-weight: 800; color: #1A1D2E; line-height: 1.2;
+}
+.flow-step .detail {
+  font-size: 9.5px; color: #64748B; margin-top: 4px; line-height: 1.4;
+}
+
+.arrow-right {
+  font-size: 22px; color: #CBD5E1; margin: 0 6px; flex-shrink: 0;
+}
+
+/* result box */
+.result-box {
+  background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-top: 20px;
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.result-box .rb-icon { font-size: 36px; }
+.result-box .rb-title { font-size: 16px; font-weight: 800; color: #fff; }
+.result-box .rb-sub { font-size: 11px; color: #C4B5FD; margin-top: 4px; line-height: 1.5; }
+
+/* memory box */
+.memory-box {
+  background: #F0FDF4;
+  border: 2px solid #86EFAC;
+  border-radius: 14px;
+  padding: 14px 18px;
+  margin-top: 14px;
+  display: flex; align-items: center; gap: 14px;
+}
+.memory-box .mb-icon { font-size: 28px; }
+.memory-box .mb-title { font-size: 13px; font-weight: 800; color: #15803D; }
+.memory-box .mb-sub { font-size: 10px; color: #4ADE80; margin-top: 2px; }
+
+/* ── RIGHT: Key features ── */
+.right {
+  width: 380px;
+  background: #fff;
+  border-left: 1px solid #E2E8F0;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.right .sec-title {
+  font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: #94A3B8; margin-bottom: 6px;
+}
+.feat-card {
+  border-radius: 12px;
+  padding: 12px 14px;
+  border-left: 4px solid;
+}
+.feat-card .ft { font-size: 12px; font-weight: 800; margin-bottom: 3px; }
+.feat-card .fd { font-size: 10px; color: #475569; line-height: 1.4; }
+
+/* Tech strip at the very bottom of right col */
+.tech-strip {
+  margin-top: auto;
+  background: #1A1D2E;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.tech-strip .ts-title { font-size: 9px; font-weight: 700; letter-spacing: 1.5px; color: #64748B; text-transform: uppercase; margin-bottom: 8px; }
+.tech-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.tb { background: #252A40; border-radius: 6px; padding: 4px 8px; font-size: 9px; color: #94A3B8; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="brand">syra<span>bit</span>.ai</div>
+  <div class="subtitle">System Architecture &nbsp;·&nbsp; Slide 1 of 2</div>
+</div>
+
+<div class="body">
+
+  <!-- LEFT: CONTENT LIBRARY -->
+  <div class="left">
+    <div class="sec-title">📚 Content Library</div>
+
+    <div class="hier-item" style="border-color:#6366F1;">
+      <div class="icon">📋</div>
+      <div><div class="label">Board</div><div class="desc">SEBA · AHSEC · CBSE</div></div>
+    </div>
+    <div class="arrow-down">↓</div>
+    <div class="hier-item" style="border-color:#3B82F6;">
+      <div class="icon">🏫</div>
+      <div><div class="label">Class</div><div class="desc">Grade 9 · 10 · 11 · 12</div></div>
+    </div>
+    <div class="arrow-down">↓</div>
+    <div class="hier-item" style="border-color:#06B6D4;">
+      <div class="icon">🌊</div>
+      <div><div class="label">Stream</div><div class="desc">Science · Arts · Commerce</div></div>
+    </div>
+    <div class="arrow-down">↓</div>
+    <div class="hier-item" style="border-color:#10B981;">
+      <div class="icon">📚</div>
+      <div><div class="label">Subject</div><div class="desc">Physics · Maths · Bio…</div></div>
+    </div>
+    <div class="arrow-down">↓</div>
+    <div class="hier-item" style="border-color:#F59E0B;">
+      <div class="icon">📖</div>
+      <div><div class="label">Chapter</div><div class="desc">Chapter 1 … Chapter N</div></div>
+    </div>
+    <div class="arrow-down">↓</div>
+    <div class="hier-item" style="border-color:#EC4899;">
+      <div class="icon">🔬</div>
+      <div><div class="label">Topic</div><div class="desc">Granular topic units</div></div>
+    </div>
+    <div class="arrow-down">↓</div>
+    <div class="hier-item" style="border-color:#8B5CF6;">
+      <div class="icon">📄</div>
+      <div><div class="label">Content</div><div class="desc">Notes · Q&A · PYQ · Voice</div></div>
+    </div>
+  </div>
+
+  <!-- CENTER: QUERY FLOW -->
+  <div class="center">
+    <div class="sec-title">⚡ How a student's question gets answered</div>
+
+    <!-- Row 1 -->
+    <div class="flow-row">
+      <div class="flow-step" style="border-color:#6366F1;">
+        <div class="num" style="color:#6366F1;">Step 1</div>
+        <div class="name">Student asks a question</div>
+        <div class="detail">Text or voice · English or Assamese</div>
+      </div>
+      <div class="arrow-right">→</div>
+      <div class="flow-step" style="border-color:#3B82F6;">
+        <div class="num" style="color:#3B82F6;">Step 2</div>
+        <div class="name">Detect language</div>
+        <div class="detail">Is it English or Assamese? (Hindi coming soon)</div>
+      </div>
+      <div class="arrow-right">→</div>
+      <div class="flow-step" style="border-color:#06B6D4;">
+        <div class="num" style="color:#06B6D4;">Step 3</div>
+        <div class="name">Find the right topic</div>
+        <div class="detail">Matches question to 197 curriculum topics using AI similarity</div>
+      </div>
+      <div class="arrow-right">→</div>
+      <div class="flow-step" style="border-color:#10B981;">
+        <div class="num" style="color:#10B981;">Step 4</div>
+        <div class="name">Fetch relevant content</div>
+        <div class="detail">Retrieves exact chapters/notes from the Knowledge Base</div>
+      </div>
+      <div class="arrow-right">→</div>
+      <div class="flow-step" style="border-color:#F59E0B;">
+        <div class="num" style="color:#F59E0B;">Step 5</div>
+        <div class="name">Generate the answer</div>
+        <div class="detail">AI writes a clear explanation using retrieved content only</div>
+      </div>
+      <div class="arrow-right">→</div>
+      <div class="flow-step" style="border-color:#8B5CF6;">
+        <div class="num" style="color:#8B5CF6;">Step 6</div>
+        <div class="name">Deliver to student</div>
+        <div class="detail">Streamed text + optional voice playback</div>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div class="result-box" style="margin-top:22px;">
+      <div class="rb-icon">🎓</div>
+      <div>
+        <div class="rb-title">The student gets a curriculum-accurate, bilingual answer — instantly</div>
+        <div class="rb-sub">
+          Scoped exactly to their board · class · subject · chapter &nbsp;·&nbsp;
+          In English or Assamese &nbsp;·&nbsp; Streamed in real-time &nbsp;·&nbsp; Voice available
+        </div>
+      </div>
+    </div>
+
+    <!-- Memory -->
+    <div class="memory-box">
+      <div class="mb-icon">🧠</div>
+      <div>
+        <div class="mb-title">Student Memory — the system remembers what each student has studied, their weak areas, and past doubts</div>
+        <div class="mb-sub">Every answer gets better over time · Works across all sessions · No two students get identical responses</div>
+      </div>
+    </div>
+
+    <!-- Content pipeline note -->
+    <div style="margin-top:14px; background:#FFF7ED; border:2px solid #FED7AA; border-radius:12px; padding:12px 16px; display:flex; align-items:center; gap:14px;">
+      <div style="font-size:24px;">👩‍💼</div>
+      <div>
+        <div style="font-size:12px; font-weight:800; color:#C2410C;">Staff Content Pipeline — Human-reviewed before it goes live</div>
+        <div style="font-size:10px; color:#92400E; margin-top:2px;">Upload → Split into chunks → Translate to Assamese → AI-index → Staff review → Publish · No AI content goes live without human approval</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: KEY FEATURES -->
+  <div class="right">
+    <div class="sec-title">✨ What makes it different</div>
+
+    <div class="feat-card" style="background:#EEF2FF; border-color:#6366F1;">
+      <div class="ft" style="color:#4338CA;">🌐 Bilingual — English + Assamese</div>
+      <div class="fd">One platform, two languages. Expanding to Hindi for national reach. No separate apps or databases needed.</div>
+    </div>
+
+    <div class="feat-card" style="background:#F0FDF4; border-color:#10B981;">
+      <div class="ft" style="color:#065F46;">🎯 Syllabus-locked answers</div>
+      <div class="fd">The AI only answers from the student's own board, class, and chapter. It cannot hallucinate from outside content.</div>
+    </div>
+
+    <div class="feat-card" style="background:#FFF7ED; border-color:#F59E0B;">
+      <div class="ft" style="color:#92400E;">🧠 Remembers each student</div>
+      <div class="fd">Tracks topics studied, weak areas, and past questions across every session — like a personal tutor with memory.</div>
+    </div>
+
+    <div class="feat-card" style="background:#FDF4FF; border-color:#8B5CF6;">
+      <div class="ft" style="color:#5B21B6;">🎓 Covers School + Degree (NEP 2020)</div>
+      <div class="fd">SEBA Class 9–10 · AHSEC Class 11–12 · Expanding to undergraduate degree programmes under NEP 2020.</div>
+    </div>
+
+    <div class="feat-card" style="background:#F0F9FF; border-color:#3B82F6;">
+      <div class="ft" style="color:#1D4ED8;">✅ Staff-verified content only</div>
+      <div class="fd">Every note and Q&A is reviewed by a human before being made available — ensures quality and accuracy.</div>
+    </div>
+
+    <div class="feat-card" style="background:#FFF1F2; border-color:#EC4899;">
+      <div class="ft" style="color:#9D174D;">⚡ Works fast even on slow internet</div>
+      <div class="fd">Processing happens at the network edge — not on a central server — so latency is minimal even in rural areas.</div>
+    </div>
+
+    <!-- Tech strip -->
+    <div class="tech-strip">
+      <div class="ts-title">Technology</div>
+      <div class="tech-badges">
+        <div class="tb">Cloudflare Workers</div>
+        <div class="tb">Gemini 2.5 Flash</div>
+        <div class="tb">Sarvam 30B Indic</div>
+        <div class="tb">BGE-M3 Embeddings</div>
+        <div class="tb">MongoDB Atlas</div>
+        <div class="tb">Vector Search</div>
+        <div class="tb">FastAPI</div>
+        <div class="tb">Sarvam TTS</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
