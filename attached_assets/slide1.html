@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: 'Calibri', 'Segoe UI', sans-serif;
+  background: #0A0E1A;
+  width: 1600px;
+  height: 900px;
+  overflow: hidden;
+  color: #C8D0E8;
+  position: relative;
+}
+
+/* Header */
+.hdr {
+  position: absolute; top:0; left:0; right:0; height:56px;
+  background:#1E2947;
+  display:flex; align-items:center; padding: 0 24px;
+  font-size:13px; font-weight:700; letter-spacing:1.5px; color:#C8D0E8;
+}
+.slide-num {
+  position:absolute; right:24px; font-size:11px; color:#6B7DB3; font-weight:400;
+}
+
+/* Footer */
+.ftr {
+  position:absolute; bottom:0; left:0; right:0; height:26px;
+  background:#1E2947;
+  display:flex; align-items:center; padding:0 24px;
+  font-size:8px; color:#6B7DB3;
+}
+
+/* Boxes */
+.box {
+  position:absolute;
+  border-radius:10px;
+  display:flex; flex-direction:column; justify-content:center;
+  padding:6px 10px;
+}
+.box .title { font-weight:700; font-size:12px; color:#fff; line-height:1.2; }
+.box .sub   { font-size:9.5px; color:#C8D0E8; margin-top:2px; line-height:1.3; opacity:.85; }
+
+.section-label {
+  position:absolute;
+  font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase;
+}
+
+/* arrows */
+svg.arrows { position:absolute; top:0; left:0; width:1600px; height:900px; pointer-events:none; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="hdr">
+  BILINGUAL AI EDUCATIONAL PLATFORM &nbsp;·&nbsp; SYSTEM ARCHITECTURE BLOCK DIAGRAM
+  <span class="slide-num">SLIDE 1 / 2</span>
+</div>
+
+<!-- Footer -->
+<div class="ftr">Slide 1 of 2 &nbsp;·&nbsp; AI-Powered Bilingual Educational Platform &nbsp;·&nbsp; System Architecture &nbsp;·&nbsp; MSME IdeaHackathon 6.0</div>
+
+<!-- ═══ LEFT: CONTENT HIERARCHY ═══ -->
+<div class="section-label" style="top:68px; left:20px; color:#4F46E5;">CONTENT HIERARCHY  (Library Module)</div>
+
+<!-- BOARD -->
+<div class="box" style="top:84px; left:14px; width:194px; height:48px; background:#1E1B4B; border:1.5px solid #4F46E5;">
+  <div class="title">📋 BOARD</div>
+  <div class="sub">SEBA · AHSEC · CBSE</div>
+</div>
+<!-- CLASS -->
+<div class="box" style="top:144px; left:14px; width:194px; height:48px; background:#1E3A5F; border:1.5px solid #3B82F6;">
+  <div class="title">🏫 CLASS</div>
+  <div class="sub">Grade 9 / 10 / 11 / 12</div>
+</div>
+<!-- STREAM -->
+<div class="box" style="top:204px; left:14px; width:194px; height:48px; background:#0C2D35; border:1.5px solid #06B6D4;">
+  <div class="title">🌊 STREAM</div>
+  <div class="sub">Science · Arts · Commerce</div>
+</div>
+<!-- SUBJECT -->
+<div class="box" style="top:264px; left:14px; width:194px; height:48px; background:#0A2018; border:1.5px solid #10B981;">
+  <div class="title">📚 SUBJECT</div>
+  <div class="sub">Physics · Chem · Math · Bio…</div>
+</div>
+<!-- CHAPTER -->
+<div class="box" style="top:324px; left:14px; width:194px; height:48px; background:#201500; border:1.5px solid #F59E0B;">
+  <div class="title">📖 CHAPTER</div>
+  <div class="sub">Chapter 1 … Chapter N</div>
+</div>
+<!-- TOPIC -->
+<div class="box" style="top:384px; left:14px; width:194px; height:48px; background:#240A18; border:1.5px solid #EC4899;">
+  <div class="title">🔬 TOPIC</div>
+  <div class="sub">Topic Units (Granular)</div>
+</div>
+<!-- CONTENT TYPES -->
+<div class="box" style="top:444px; left:14px; width:194px; height:62px; background:#120B2A; border:1.5px solid #8B5CF6;">
+  <div class="title" style="color:#A78BFA;">CONTENT TYPES</div>
+  <div class="sub">Notes (EN/AS) · Q&amp;A (EN/AS)<br>PYQ Papers · Voice Output</div>
+</div>
+
+<!-- ═══ PIPELINE SECTION LABEL ═══ -->
+<div class="section-label" style="top:68px; left:240px; color:#06B6D4;">QUERY PROCESSING PIPELINE</div>
+
+<!-- ═══ PIPELINE BOXES ═══ -->
+<!-- 7 boxes, each 178px wide, spaced with 8px gap, starting at x=236 -->
+<!-- Box 1: INPUT INTERFACE -->
+<div class="box" style="top:84px; left:236px; width:178px; height:86px; background:#1E1B4B; border:1.5px solid #4F46E5;">
+  <div class="title">💬 INPUT<br>INTERFACE</div>
+  <div class="sub">Text / Voice input<br>EN or AS</div>
+</div>
+<!-- Box 2: LANGUAGE DETECTOR -->
+<div class="box" style="top:84px; left:424px; width:178px; height:86px; background:#1E3A5F; border:1.5px solid #3B82F6;">
+  <div class="title">🌐 LANGUAGE<br>DETECTOR</div>
+  <div class="sub">Script analysis<br>+ LID model</div>
+</div>
+<!-- Box 3: QUERY EMBEDDER -->
+<div class="box" style="top:84px; left:612px; width:178px; height:86px; background:#0C2D35; border:1.5px solid #06B6D4;">
+  <div class="title">⚡ QUERY<br>EMBEDDER</div>
+  <div class="sub">BGE-M3 1024-dim<br>multilingual</div>
+</div>
+<!-- Box 4: TOPIC MATCHER -->
+<div class="box" style="top:84px; left:800px; width:178px; height:86px; background:#0A2018; border:1.5px solid #10B981;">
+  <div class="title">🎯 TOPIC<br>MATCHER</div>
+  <div class="sub">Cosine similarity<br>197 embeddings</div>
+</div>
+<!-- Box 5: RAG RETRIEVAL -->
+<div class="box" style="top:84px; left:988px; width:178px; height:86px; background:#201500; border:1.5px solid #F59E0B;">
+  <div class="title">🔍 RAG<br>RETRIEVAL</div>
+  <div class="sub">Top-K chunks<br>Vector DB lookup</div>
+</div>
+<!-- Box 6: LLM GENERATOR -->
+<div class="box" style="top:84px; left:1176px; width:178px; height:86px; background:#240A18; border:1.5px solid #EC4899;">
+  <div class="title">🧠 LLM<br>GENERATOR</div>
+  <div class="sub">Gemini Flash / Sarvam 30B<br>lang-aware</div>
+</div>
+<!-- Box 7: RESPONSE OUTPUT -->
+<div class="box" style="top:84px; left:1364px; width:220px; height:86px; background:#1A0840; border:1.5px solid #8B5CF6;">
+  <div class="title">🔊 RESPONSE<br>OUTPUT</div>
+  <div class="sub">Streamed text<br>+ TTS voice</div>
+</div>
+
+<!-- PARAM BOXES under each pipeline stage -->
+<div class="box" style="top:182px; left:236px; width:178px; height:60px; background:#0C111E; border:1px solid #1E2A4A; border-radius:8px;">
+  <div class="title" style="font-size:9px;color:#6B7DB3;">Input params</div>
+  <div class="sub" style="font-family:monospace;font-size:9px;">lang={en|as}<br>modality={text|voice}</div>
+</div>
+<div class="box" style="top:182px; left:424px; width:178px; height:60px; background:#0C111E; border:1px solid #1E2A4A; border-radius:8px;">
+  <div class="title" style="font-size:9px;color:#6B7DB3;">Detection output</div>
+  <div class="sub" style="font-family:monospace;font-size:9px;">lang_code<br>confidence_score</div>
+</div>
+<div class="box" style="top:182px; left:612px; width:178px; height:60px; background:#0C111E; border:1px solid #1E2A4A; border-radius:8px;">
+  <div class="title" style="font-size:9px;color:#6B7DB3;">Embedding output</div>
+  <div class="sub" style="font-family:monospace;font-size:9px;">vector[1024]<br>query_repr</div>
+</div>
+<div class="box" style="top:182px; left:800px; width:178px; height:60px; background:#0C111E; border:1px solid #1E2A4A; border-radius:8px;">
+  <div class="title" style="font-size:9px;color:#6B7DB3;">Matcher output</div>
+  <div class="sub" style="font-family:monospace;font-size:9px;">topic_id<br>similarity_score</div>
+</div>
+<div class="box" style="top:182px; left:988px; width:178px; height:60px; background:#0C111E; border:1px solid #1E2A4A; border-radius:8px;">
+  <div class="title" style="font-size:9px;color:#6B7DB3;">Retrieval params</div>
+  <div class="sub" style="font-family:monospace;font-size:9px;">top_k=5<br>chunks + metadata</div>
+</div>
+<div class="box" style="top:182px; left:1176px; width:178px; height:60px; background:#0C111E; border:1px solid #1E2A4A; border-radius:8px;">
+  <div class="title" style="font-size:9px;color:#6B7DB3;">Generator params</div>
+  <div class="sub" style="font-family:monospace;font-size:9px;">max_tokens=800<br>temp=0.3</div>
+</div>
+<div class="box" style="top:182px; left:1364px; width:220px; height:60px; background:#0C111E; border:1px solid #1E2A4A; border-radius:8px;">
+  <div class="title" style="font-size:9px;color:#6B7DB3;">Output params</div>
+  <div class="sub" style="font-family:monospace;font-size:9px;">format=SSE<br>voice={sarvam-tts}</div>
+</div>
+
+<!-- MEMORY MODULE -->
+<div class="box" style="top:260px; left:236px; width:646px; height:68px; background:#120B2A; border:1.5px solid #8B5CF6;">
+  <div class="title" style="color:#A78BFA;">🧠 PERSISTENT STUDENT MEMORY MODULE</div>
+  <div class="sub">Stores: topics_studied[], weak_areas[], doubt_history[], session_count &nbsp;·&nbsp; Read on every query &nbsp;·&nbsp; Written after every session</div>
+</div>
+
+<!-- KNOWLEDGE BASE -->
+<div class="box" style="top:260px; left:898px; width:686px; height:68px; background:#051810; border:1.5px solid #10B981;">
+  <div class="title" style="color:#6EE7B7;">📡 KNOWLEDGE BASE &nbsp;(Vector Store + Document DB)</div>
+  <div class="sub">Indexed: chapter_notes, qa_pairs, pyq_text &nbsp;·&nbsp; Languages: EN + AS &nbsp;·&nbsp; Embeddings: BGE-M3 1024-dim &nbsp;·&nbsp; HNSW index</div>
+</div>
+
+<!-- CONTENT INGESTION PIPELINE label -->
+<div class="section-label" style="top:344px; left:240px; color:#F59E0B;">CONTENT INGESTION PIPELINE  (Staff Module → Knowledge Base)</div>
+
+<!-- Ingestion boxes: 6 stages -->
+<div class="box" style="top:360px; left:236px; width:196px; height:58px; background:#181000; border:1.5px solid #F59E0B;">
+  <div class="title" style="font-size:11px;">RAW CONTENT INGEST</div>
+  <div class="sub">PDF · Markdown · Manual entry</div>
+</div>
+<div class="box" style="top:360px; left:444px; width:196px; height:58px; background:#181000; border:1.5px solid #F59E0B;">
+  <div class="title" style="font-size:11px;">PARSER / CHUNKER</div>
+  <div class="sub">Section split, clean HTML→text</div>
+</div>
+<div class="box" style="top:360px; left:652px; width:196px; height:58px; background:#181000; border:1.5px solid #F59E0B;">
+  <div class="title" style="font-size:11px;">BILINGUAL TRANSLATOR</div>
+  <div class="sub">EN→AS pipeline via Sarvam</div>
+</div>
+<div class="box" style="top:360px; left:860px; width:196px; height:58px; background:#181000; border:1.5px solid #F59E0B;">
+  <div class="title" style="font-size:11px;">EMBED + INDEX</div>
+  <div class="sub">BGE-M3 encode, Vectorize write</div>
+</div>
+<div class="box" style="top:360px; left:1068px; width:196px; height:58px; background:#181000; border:1.5px solid #F59E0B;">
+  <div class="title" style="font-size:11px;">STAFF QC REVIEW</div>
+  <div class="sub">Human QC, version control</div>
+</div>
+<div class="box" style="top:360px; left:1276px; width:308px; height:58px; background:#051810; border:1.5px solid #10B981;">
+  <div class="title" style="font-size:11px;color:#6EE7B7;">✅ LIVE IN KNOWLEDGE BASE</div>
+  <div class="sub">Immediately available in RAG</div>
+</div>
+
+<!-- CURRICULUM RESOLVER label -->
+<div class="section-label" style="top:434px; left:240px; color:#06B6D4;">CURRICULUM RESOLVER  —  Automatic back-mapping on each query</div>
+
+<!-- Resolver boxes -->
+<div class="box" style="top:450px; left:236px; width:170px; height:52px; background:#240A18; border:1.5px solid #EC4899; border-radius:8px;">
+  <div class="title" style="text-align:center;font-size:11px;">TOPIC ID</div>
+</div>
+<div class="box" style="top:450px; left:420px; width:170px; height:52px; background:#201500; border:1.5px solid #F59E0B; border-radius:8px;">
+  <div class="title" style="text-align:center;font-size:11px;">CHAPTER</div>
+</div>
+<div class="box" style="top:450px; left:604px; width:170px; height:52px; background:#0A2018; border:1.5px solid #10B981; border-radius:8px;">
+  <div class="title" style="text-align:center;font-size:11px;">SUBJECT</div>
+</div>
+<div class="box" style="top:450px; left:788px; width:170px; height:52px; background:#0C2D35; border:1.5px solid #06B6D4; border-radius:8px;">
+  <div class="title" style="text-align:center;font-size:11px;">STREAM</div>
+</div>
+<div class="box" style="top:450px; left:972px; width:170px; height:52px; background:#1E3A5F; border:1.5px solid #3B82F6; border-radius:8px;">
+  <div class="title" style="text-align:center;font-size:11px;">CLASS</div>
+</div>
+<div class="box" style="top:450px; left:1156px; width:170px; height:52px; background:#1E1B4B; border:1.5px solid #4F46E5; border-radius:8px;">
+  <div class="title" style="text-align:center;font-size:11px;">BOARD</div>
+</div>
+<div class="box" style="top:450px; left:1340px; width:244px; height:52px; background:#1A0840; border:1.5px solid #8B5CF6; border-radius:8px;">
+  <div class="title" style="text-align:center;font-size:11px;color:#C4B5FD;">✅ ANSWER DELIVERED</div>
+</div>
+
+<!-- TECH STACK label -->
+<div class="section-label" style="top:518px; left:20px; color:#6B7DB3;">TECHNOLOGY STACK</div>
+
+<!-- Tech stack badges -->
+<style>
+.tech { position:absolute; background:#0C111E; border:1px solid #1E2A4A; border-radius:8px; padding:5px 10px; font-size:9.5px; }
+.tech .tl { font-weight:700; color:#6B7DB3; font-size:9px; }
+.tech .tv { color:#C8D0E8; font-size:10px; }
+</style>
+
+<div class="tech" style="top:534px; left:14px; width:183px;">
+  <div class="tl">Edge Runtime</div>
+  <div class="tv">Cloudflare Workers</div>
+</div>
+<div class="tech" style="top:534px; left:203px; width:183px;">
+  <div class="tl">Vector DB</div>
+  <div class="tv">Vectorize (HNSW)</div>
+</div>
+<div class="tech" style="top:534px; left:392px; width:183px;">
+  <div class="tl">Embed Model</div>
+  <div class="tv">BGE-M3  1024-dim</div>
+</div>
+<div class="tech" style="top:534px; left:581px; width:183px;">
+  <div class="tl">LLM (EN)</div>
+  <div class="tv">Gemini 2.5 Flash</div>
+</div>
+<div class="tech" style="top:534px; left:770px; width:183px;">
+  <div class="tl">LLM (Indic/AS)</div>
+  <div class="tv">Sarvam 30B Indic</div>
+</div>
+<div class="tech" style="top:534px; left:959px; width:183px;">
+  <div class="tl">TTS</div>
+  <div class="tv">Sarvam TTS  EN+AS</div>
+</div>
+<div class="tech" style="top:534px; left:1148px; width:183px;">
+  <div class="tl">Document DB</div>
+  <div class="tv">MongoDB Atlas</div>
+</div>
+<div class="tech" style="top:534px; left:1337px; width:247px;">
+  <div class="tl">Auth / API</div>
+  <div class="tv">FastAPI · JWT RS256 · HTTPS</div>
+</div>
+
+<!-- Big legend row at bottom -->
+<div style="position:absolute; bottom:32px; left:14px; display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+  <span style="font-size:8.5px; font-weight:700; color:#4b5563; text-transform:uppercase; letter-spacing:1px;">LEGEND:</span>
+  <span style="display:flex;align-items:center;gap:5px;"><span style="width:12px;height:12px;border-radius:3px;background:#1E1B4B;border:1.5px solid #4F46E5;display:inline-block;"></span><span style="font-size:8.5px;color:#6B7080;">Board</span></span>
+  <span style="display:flex;align-items:center;gap:5px;"><span style="width:12px;height:12px;border-radius:3px;background:#1E3A5F;border:1.5px solid #3B82F6;display:inline-block;"></span><span style="font-size:8.5px;color:#6B7080;">Class</span></span>
+  <span style="display:flex;align-items:center;gap:5px;"><span style="width:12px;height:12px;border-radius:3px;background:#0C2D35;border:1.5px solid #06B6D4;display:inline-block;"></span><span style="font-size:8.5px;color:#6B7080;">Stream</span></span>
+  <span style="display:flex;align-items:center;gap:5px;"><span style="width:12px;height:12px;border-radius:3px;background:#0A2018;border:1.5px solid #10B981;display:inline-block;"></span><span style="font-size:8.5px;color:#6B7080;">Subject</span></span>
+  <span style="display:flex;align-items:center;gap:5px;"><span style="width:12px;height:12px;border-radius:3px;background:#201500;border:1.5px solid #F59E0B;display:inline-block;"></span><span style="font-size:8.5px;color:#6B7080;">Chapter / Ingestion</span></span>
+  <span style="display:flex;align-items:center;gap:5px;"><span style="width:12px;height:12px;border-radius:3px;background:#240A18;border:1.5px solid #EC4899;display:inline-block;"></span><span style="font-size:8.5px;color:#6B7080;">Topic</span></span>
+  <span style="display:flex;align-items:center;gap:5px;"><span style="width:12px;height:12px;border-radius:3px;background:#1A0840;border:1.5px solid #8B5CF6;display:inline-block;"></span><span style="font-size:8.5px;color:#6B7080;">Memory / Output</span></span>
+  <span style="display:flex;align-items:center;gap:5px;"><span style="width:12px;height:12px;border-radius:3px;background:#051810;border:1.5px solid #10B981;display:inline-block;"></span><span style="font-size:8.5px;color:#6B7080;">Knowledge Base</span></span>
+</div>
+
+<!-- SVG Arrows -->
+<svg class="arrows" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#4B5563"/>
+    </marker>
+    <marker id="ai" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#4F46E5"/>
+    </marker>
+    <marker id="ab" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#3B82F6"/>
+    </marker>
+    <marker id="ac" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#06B6D4"/>
+    </marker>
+    <marker id="ag" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#10B981"/>
+    </marker>
+    <marker id="aa" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#F59E0B"/>
+    </marker>
+    <marker id="ap" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#EC4899"/>
+    </marker>
+    <marker id="av" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#8B5CF6"/>
+    </marker>
+  </defs>
+
+  <!-- Hierarchy vertical connectors -->
+  <line x1="111" y1="132" x2="111" y2="144" stroke="#4F46E5" stroke-width="2" marker-end="url(#ai)"/>
+  <line x1="111" y1="192" x2="111" y2="204" stroke="#3B82F6" stroke-width="2" marker-end="url(#ab)"/>
+  <line x1="111" y1="252" x2="111" y2="264" stroke="#06B6D4" stroke-width="2" marker-end="url(#ac)"/>
+  <line x1="111" y1="312" x2="111" y2="324" stroke="#10B981" stroke-width="2" marker-end="url(#ag)"/>
+  <line x1="111" y1="372" x2="111" y2="384" stroke="#F59E0B" stroke-width="2" marker-end="url(#aa)"/>
+  <line x1="111" y1="432" x2="111" y2="444" stroke="#EC4899" stroke-width="2" marker-end="url(#ap)"/>
+
+  <!-- Pipeline horizontal arrows -->
+  <line x1="414" y1="127" x2="424" y2="127" stroke="#3B82F6" stroke-width="2" marker-end="url(#ab)"/>
+  <line x1="602" y1="127" x2="612" y2="127" stroke="#06B6D4" stroke-width="2" marker-end="url(#ac)"/>
+  <line x1="790" y1="127" x2="800" y2="127" stroke="#10B981" stroke-width="2" marker-end="url(#ag)"/>
+  <line x1="978" y1="127" x2="988" y2="127" stroke="#F59E0B" stroke-width="2" marker-end="url(#aa)"/>
+  <line x1="1166" y1="127" x2="1176" y2="127" stroke="#EC4899" stroke-width="2" marker-end="url(#ap)"/>
+  <line x1="1354" y1="127" x2="1364" y2="127" stroke="#8B5CF6" stroke-width="2" marker-end="url(#av)"/>
+
+  <!-- Hierarchy → pipeline arrow -->
+  <line x1="208" y1="292" x2="236" y2="127" stroke="#4F46E5" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#ai)"/>
+
+  <!-- Pipeline → memory arrow -->
+  <line x1="559" y1="170" x2="559" y2="260" stroke="#8B5CF6" stroke-width="1.5" marker-end="url(#av)"/>
+
+  <!-- RAG → knowledge base arrow -->
+  <line x1="1076" y1="170" x2="1076" y2="260" stroke="#10B981" stroke-width="1.5" marker-end="url(#ag)"/>
+
+  <!-- Ingestion arrows -->
+  <line x1="432" y1="389" x2="444" y2="389" stroke="#F59E0B" stroke-width="2" marker-end="url(#aa)"/>
+  <line x1="640" y1="389" x2="652" y2="389" stroke="#F59E0B" stroke-width="2" marker-end="url(#aa)"/>
+  <line x1="848" y1="389" x2="860" y2="389" stroke="#F59E0B" stroke-width="2" marker-end="url(#aa)"/>
+  <line x1="1056" y1="389" x2="1068" y2="389" stroke="#F59E0B" stroke-width="2" marker-end="url(#aa)"/>
+  <line x1="1264" y1="389" x2="1276" y2="389" stroke="#10B981" stroke-width="2" marker-end="url(#ag)"/>
+
+  <!-- Resolver arrows -->
+  <line x1="406" y1="476" x2="420" y2="476" stroke="#F59E0B" stroke-width="2" marker-end="url(#aa)"/>
+  <line x1="590" y1="476" x2="604" y2="476" stroke="#10B981" stroke-width="2" marker-end="url(#ag)"/>
+  <line x1="774" y1="476" x2="788" y2="476" stroke="#06B6D4" stroke-width="2" marker-end="url(#ac)"/>
+  <line x1="958" y1="476" x2="972" y2="476" stroke="#3B82F6" stroke-width="2" marker-end="url(#ab)"/>
+  <line x1="1142" y1="476" x2="1156" y2="476" stroke="#4F46E5" stroke-width="2" marker-end="url(#ai)"/>
+  <line x1="1326" y1="476" x2="1340" y2="476" stroke="#8B5CF6" stroke-width="2" marker-end="url(#av)"/>
+</svg>
+
+</body>
+</html>

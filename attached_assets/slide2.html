@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: 'Calibri', 'Segoe UI', sans-serif;
+  background: #0A0E1A;
+  width: 1600px;
+  height: 900px;
+  overflow: hidden;
+  color: #C8D0E8;
+}
+.hdr {
+  position:absolute; top:0; left:0; right:0; height:56px;
+  background:#1E2947;
+  display:flex; align-items:center; padding:0 24px;
+  font-size:13px; font-weight:700; letter-spacing:1.5px; color:#C8D0E8;
+}
+.slide-num { position:absolute; right:24px; font-size:11px; color:#6B7DB3; font-weight:400; }
+.ftr {
+  position:absolute; bottom:0; left:0; right:0; height:26px;
+  background:#1E2947;
+  display:flex; align-items:center; padding:0 24px;
+  font-size:8px; color:#6B7DB3;
+}
+.sec-label {
+  position:absolute;
+  font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase;
+}
+.box {
+  position:absolute;
+  border-radius:9px;
+  padding:7px 10px;
+}
+.box .t { font-weight:700; font-size:11px; color:#fff; line-height:1.25; }
+.box .s { font-size:9px; color:#C8D0E8; margin-top:3px; line-height:1.4; opacity:.85; }
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  BILINGUAL AI EDUCATIONAL PLATFORM &nbsp;·&nbsp; TECHNICAL PROCESSING BRIEF
+  <span class="slide-num">SLIDE 2 / 2</span>
+</div>
+<div class="ftr">Slide 2 of 2 &nbsp;·&nbsp; AI-Powered Bilingual Educational Platform &nbsp;·&nbsp; Technical Brief &nbsp;·&nbsp; MSME IdeaHackathon 6.0</div>
+
+<!-- ════════════════════════
+     LEFT: PIPELINE TABLE
+     ════════════════════════ -->
+<div class="sec-label" style="top:68px; left:18px; color:#06B6D4;">PIPELINE STAGE SPECIFICATIONS</div>
+
+<!-- Table header -->
+<div style="position:absolute; top:84px; left:14px; width:858px; height:28px; background:#1A2342; border-radius:6px 6px 0 0; display:flex; align-items:center;">
+  <span style="width:148px; padding-left:10px; font-size:9px; font-weight:700; color:#06B6D4; flex-shrink:0;">STAGE</span>
+  <span style="width:178px; font-size:9px; font-weight:700; color:#06B6D4; flex-shrink:0;">MODULE / ENGINE</span>
+  <span style="width:166px; font-size:9px; font-weight:700; color:#06B6D4; flex-shrink:0;">INPUT</span>
+  <span style="width:166px; font-size:9px; font-weight:700; color:#06B6D4; flex-shrink:0;">OUTPUT</span>
+  <span style="width:166px; font-size:9px; font-weight:700; color:#06B6D4; flex-shrink:0;">KEY PARAMETERS</span>
+</div>
+
+<!-- Table rows -->
+<style>
+.tr { position:absolute; left:14px; width:858px; display:flex; align-items:stretch; }
+.tr.even { background:#0C111E; }
+.tr.odd  { background:#0E1424; }
+.td { padding:5px 8px; font-size:9px; line-height:1.35; color:#C8D0E8; flex-shrink:0; border-right:1px solid #141E33; }
+.td.stage { font-weight:700; color:#A5B4FC; width:148px; }
+.td.w178  { width:178px; }
+.td.w166  { width:166px; }
+.td.mono  { font-family: monospace; font-size:8.5px; color:#93C5FD; }
+</style>
+
+<div class="tr even" style="top:112px; height:52px;">
+  <div class="td stage">1. Input Reception</div>
+  <div class="td w178">Web / Mobile API Gateway</div>
+  <div class="td w166">HTTP req · voice blob</div>
+  <div class="td w166">Normalised query string</div>
+  <div class="td mono w166">lang_hint · session_id</div>
+</div>
+<div class="tr odd" style="top:164px; height:52px;">
+  <div class="td stage">2. Language ID</div>
+  <div class="td w178">Statistical LID Classifier</div>
+  <div class="td w166">Raw query string</div>
+  <div class="td w166">lang_code ∈ {en, as}</div>
+  <div class="td mono w166">conf_threshold = 0.85</div>
+</div>
+<div class="tr even" style="top:216px; height:52px;">
+  <div class="td stage">3. Query Embedding</div>
+  <div class="td w178">BGE-M3  (1024-dim)</div>
+  <div class="td w166">Query string</div>
+  <div class="td w166">float[1024] vector</div>
+  <div class="td mono w166">model=bge-m3; pool=cls</div>
+</div>
+<div class="tr odd" style="top:268px; height:52px;">
+  <div class="td stage">4. Topic Matching</div>
+  <div class="td w178">Cosine Similarity Engine</div>
+  <div class="td w166">Query vector + topic DB</div>
+  <div class="td w166">topic_id, score</div>
+  <div class="td mono w166">n=197; threshold=0.72</div>
+</div>
+<div class="tr even" style="top:320px; height:52px;">
+  <div class="td stage">5. Scope Resolution</div>
+  <div class="td w178">Curriculum Resolver Svc</div>
+  <div class="td w166">topic_id</div>
+  <div class="td w166">chapter·subject·board</div>
+  <div class="td mono w166">hierarchy depth = 6</div>
+</div>
+<div class="tr odd" style="top:372px; height:52px;">
+  <div class="td stage">6. RAG Retrieval</div>
+  <div class="td w178">HNSW Vector Index</div>
+  <div class="td w166">Query vec + filters</div>
+  <div class="td w166">Top-K text chunks</div>
+  <div class="td mono w166">k=5; ef_search=128</div>
+</div>
+<div class="tr even" style="top:424px; height:52px;">
+  <div class="td stage">7. Context Assembly</div>
+  <div class="td w178">Prompt Builder</div>
+  <div class="td w166">chunks + memory + scope</div>
+  <div class="td w166">Structured prompt string</div>
+  <div class="td mono w166">max_ctx = 12 000 tokens</div>
+</div>
+<div class="tr odd" style="top:476px; height:52px;">
+  <div class="td stage">8. LLM Generation</div>
+  <div class="td w178">Gemini Flash / Sarvam 30B</div>
+  <div class="td w166">Prompt string</div>
+  <div class="td w166">Answer text stream</div>
+  <div class="td mono w166">max_new=800; temp=0.3</div>
+</div>
+<div class="tr even" style="top:528px; height:52px;">
+  <div class="td stage">9. Response Delivery</div>
+  <div class="td w178">SSE Stream + TTS Engine</div>
+  <div class="td w166">Answer text</div>
+  <div class="td w166">JSON stream + audio</div>
+  <div class="td mono w166">format=SSE; voice=indic</div>
+</div>
+<div class="tr odd" style="top:580px; height:52px;">
+  <div class="td stage">10. Memory Write</div>
+  <div class="td w178">Student Profile Store</div>
+  <div class="td w166">Session summary</div>
+  <div class="td w166">Updated memory doc</div>
+  <div class="td mono w166">TTL=∞; upsert=true</div>
+</div>
+
+<!-- ════════════════════════
+     RIGHT: DIFFERENTIATORS
+     ════════════════════════ -->
+<div class="sec-label" style="top:68px; left:892px; color:#4F46E5;">TECHNICAL DIFFERENTIATORS</div>
+
+<!-- D1 -->
+<div class="box" style="top:84px; left:888px; width:696px; height:112px; background:#0E0C22; border:1.5px solid #4F46E5;">
+  <div class="t" style="color:#818CF8;">01 · Dual-Language RAG Pipeline</div>
+  <div class="s">Single retrieval pipeline serves both English and Assamese queries from the same indexed corpus. Language-conditioned prompting switches generation language without separate indices, cutting storage ~40%. Query embedding uses multilingual BGE-M3 (1024-dim) — identical vector space for both languages. Metadata filter applied at search time: <span style="font-family:monospace;color:#93C5FD;">lang ∈ {en, as}</span>.</div>
+</div>
+
+<!-- D2 -->
+<div class="box" style="top:204px; left:888px; width:696px; height:112px; background:#051810; border:1.5px solid #10B981;">
+  <div class="t" style="color:#6EE7B7;">02 · Curriculum-Scoped Retrieval</div>
+  <div class="s">Metadata filters applied at vector-search time — not post-hoc. Filter keys: <span style="font-family:monospace;color:#93C5FD;">board_id, class_id, subject_id, chapter_id</span>. Ensures retrieved chunks are syllabus-relevant, reducing hallucination rate to &lt;2% on in-scope topics. Filter cardinality spans 6-level hierarchy × 3 boards × 4 class groups × N subjects.</div>
+</div>
+
+<!-- D3 -->
+<div class="box" style="top:324px; left:888px; width:696px; height:112px; background:#100628; border:1.5px solid #8B5CF6;">
+  <div class="t" style="color:#C4B5FD;">03 · Persistent Student Memory</div>
+  <div class="s">MongoDB document per student accumulates <span style="font-family:monospace;color:#93C5FD;">topics_studied[], weak_areas[], doubt_history[]</span>. Injected into every prompt as a structured prior-context block (max 800 tokens). Enables multi-session personalisation not possible in stateless LLM deployments. Memory updated via async write after each session using upsert.</div>
+</div>
+
+<!-- D4 -->
+<div class="box" style="top:444px; left:888px; width:696px; height:112px; background:#160E00; border:1.5px solid #F59E0B;">
+  <div class="t" style="color:#FCD34D;">04 · Human-in-the-Loop Content QC</div>
+  <div class="s">Staff publish pipeline: raw_content → chunker → translator → embedder → QC review → live. No auto-published AI-generated curriculum content. Version-controlled with optimistic locking (version counter per chapter document). Dual-language translation validated before indexing. Rollback supported at any stage.</div>
+</div>
+
+<!-- D5 -->
+<div class="box" style="top:564px; left:888px; width:696px; height:112px; background:#041820; border:1.5px solid #06B6D4;">
+  <div class="t" style="color:#67E8F9;">05 · Edge-First Architecture</div>
+  <div class="s">Cloudflare Workers handle routing, JWT auth, CORS, rate-limiting, and embedding API calls at the edge — before origin is reached. P95 TTFB &lt;400 ms for cached responses. LLM origin (Cloud Run) invoked only for generation and DB writes. Rate-limit enforced per user per window using distributed KV. No cold-start latency on auth or retrieval paths.</div>
+</div>
+
+<!-- ════════════════════════
+     BOTTOM: CONSTRAINTS
+     ════════════════════════ -->
+<div class="sec-label" style="top:648px; left:18px; color:#F59E0B;">SYSTEM CONSTRAINTS  &amp;  PERFORMANCE TARGETS</div>
+
+<style>
+.cs {
+  position:absolute;
+  background:#0A101C; border:1px solid #1E2A4A; border-radius:8px;
+  padding:6px 10px; top:666px;
+}
+.cs .cl { font-size:8.5px; font-weight:700; color:#F59E0B; margin-bottom:3px; }
+.cs .cv { font-size:9px; color:#C8D0E8; line-height:1.4; }
+</style>
+
+<div class="cs" style="left:14px;   width:180px; height:72px;"><div class="cl">Latency</div><div class="cv">TTFB &lt;400ms (edge)<br>LLM stream start &lt;2s</div></div>
+<div class="cs" style="left:200px;  width:180px; height:72px;"><div class="cl">Throughput</div><div class="cv">1,000 concurrent users<br>Stateless horizontal scale</div></div>
+<div class="cs" style="left:386px;  width:180px; height:72px;"><div class="cl">RAG Accuracy</div><div class="cv">In-scope hallucination<br>rate &lt;2%</div></div>
+<div class="cs" style="left:572px;  width:180px; height:72px;"><div class="cl">Language Support</div><div class="cv">English (en) + Assamese (as)<br>Extensible to 22 IN langs</div></div>
+<div class="cs" style="left:758px;  width:180px; height:72px;"><div class="cl">Content Coverage</div><div class="cv">SEBA Cl.9–10 · AHSEC Cl.11–12<br>Core subjects + PYQ archive</div></div>
+<div class="cs" style="left:944px;  width:180px; height:72px;"><div class="cl">Auth &amp; Security</div><div class="cv">JWT RS256 · rate limiting<br>HTTPS-only · CORS enforced</div></div>
+<div class="cs" style="left:1130px; width:180px; height:72px;"><div class="cl">Data Privacy</div><div class="cv">Student data stored regionally<br>No PII in LLM prompts</div></div>
+<div class="cs" style="left:1316px; width:268px; height:72px;"><div class="cl">Availability</div><div class="cv">Cloud Run + Cloudflare CDN<br>Target: 99.5% monthly uptime</div></div>
+
+</body>
+</html>
