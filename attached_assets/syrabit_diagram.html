@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Syrabit.ai — Architecture & Innovation Diagram</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #0a0e1a;
+    color: #e8eaf6;
+    width: 1200px;
+    padding: 40px;
+  }
+
+  /* ── Header ── */
+  .header {
+    text-align: center;
+    margin-bottom: 40px;
+    padding: 32px 40px;
+    background: linear-gradient(135deg, #1a1f3a 0%, #0f1729 100%);
+    border-radius: 20px;
+    border: 1px solid #2a3060;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.15) 0%, transparent 70%);
+  }
+  .header-badge {
+    display: inline-block;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6);
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 5px 16px;
+    border-radius: 100px;
+    margin-bottom: 16px;
+  }
+  .header h1 {
+    font-size: 36px;
+    font-weight: 900;
+    background: linear-gradient(90deg, #a5b4fc, #818cf8, #c4b5fd);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.2;
+    margin-bottom: 8px;
+  }
+  .header p {
+    font-size: 14px;
+    color: #6b7db3;
+    font-weight: 500;
+  }
+
+  /* ── Section labels ── */
+  .section {
+    margin-bottom: 32px;
+  }
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: #6366f1;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, #2a3060, transparent);
+  }
+
+  /* ── Card base ── */
+  .card {
+    background: #111827;
+    border: 1px solid #1e2a4a;
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  /* ════════════════════════════
+     SECTION 1: SYLLABUS HIERARCHY
+     ════════════════════════════ */
+  .hierarchy-wrapper {
+    background: #0d1322;
+    border: 1px solid #1e2a4a;
+    border-radius: 16px;
+    padding: 28px;
+  }
+  .hier-row {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 0;
+  }
+  .hier-level {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+  .hier-box {
+    border-radius: 12px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+    position: relative;
+    min-width: 100px;
+  }
+  .hier-connector-h {
+    width: 28px;
+    height: 2px;
+    flex-shrink: 0;
+  }
+  .hier-connector-v {
+    width: 2px;
+    height: 14px;
+    margin: 0 auto;
+  }
+  .hier-children {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .hier-child-row {
+    display: flex;
+    align-items: center;
+    gap: 0;
+  }
+
+  /* colors per level */
+  .lv1 { background: linear-gradient(135deg,#312e81,#1e1b4b); border: 1.5px solid #4f46e5; color: #c7d2fe; }
+  .lv2 { background: linear-gradient(135deg,#1e3a5f,#0f2244); border: 1.5px solid #3b82f6; color: #bfdbfe; }
+  .lv3 { background: linear-gradient(135deg,#14404a,#0a2030); border: 1.5px solid #06b6d4; color: #a5f3fc; }
+  .lv4 { background: linear-gradient(135deg,#14402a,#0a2018); border: 1.5px solid #10b981; color: #a7f3d0; }
+  .lv5 { background: linear-gradient(135deg,#3d2a10,#241808); border: 1.5px solid #f59e0b; color: #fde68a; }
+  .lv6 { background: linear-gradient(135deg,#3d1028,#240a18); border: 1.5px solid #ec4899; color: #fbcfe8; }
+
+  .conn-indigo  { background: #4f46e5; }
+  .conn-blue    { background: #3b82f6; }
+  .conn-cyan    { background: #06b6d4; }
+  .conn-green   { background: #10b981; }
+  .conn-amber   { background: #f59e0b; }
+  .conn-pink    { background: #ec4899; }
+
+  /* content type pills */
+  .content-types {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .ct-pill {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 100px;
+  }
+  .ct-notes { background: #1e3a5f; color: #93c5fd; border: 1px solid #3b82f6; }
+  .ct-qa    { background: #14402a; color: #6ee7b7; border: 1px solid #10b981; }
+  .ct-pyq   { background: #3d1028; color: #f9a8d4; border: 1px solid #ec4899; }
+  .ct-voice { background: #2e1065; color: #c4b5fd; border: 1px solid #8b5cf6; }
+
+  /* full tree layout */
+  .tree-container {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    padding: 10px 0;
+  }
+  .tree-branch {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .subtree {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 8px;
+  }
+  .subtree:last-child { margin-bottom: 0; }
+  .v-line-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  /* ════════════════════════════
+     SECTION 2: CHAT PIPELINE
+     ════════════════════════════ */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    overflow-x: auto;
+    padding: 8px 0;
+  }
+  .pipe-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .pipe-box {
+    border-radius: 12px;
+    padding: 14px 16px;
+    width: 130px;
+    position: relative;
+  }
+  .pipe-icon {
+    font-size: 22px;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .pipe-label {
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 3px;
+    line-height: 1.2;
+  }
+  .pipe-sub {
+    font-size: 9.5px;
+    font-weight: 400;
+    opacity: 0.7;
+    line-height: 1.3;
+  }
+  .pipe-arrow {
+    width: 32px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #374151;
+    font-size: 18px;
+    margin-top: -10px;
+  }
+
+  .p1 { background: linear-gradient(135deg,#1e1b4b,#0f0c2e); border: 1.5px solid #4f46e5; color: #a5b4fc; }
+  .p2 { background: linear-gradient(135deg,#1e3a5f,#0f2244); border: 1.5px solid #3b82f6; color: #93c5fd; }
+  .p3 { background: linear-gradient(135deg,#0c2d35,#051a20); border: 1.5px solid #06b6d4; color: #67e8f9; }
+  .p4 { background: linear-gradient(135deg,#14402a,#0a2018); border: 1.5px solid #10b981; color: #6ee7b7; }
+  .p5 { background: linear-gradient(135deg,#3d2200,#201200); border: 1.5px solid #f59e0b; color: #fcd34d; }
+  .p6 { background: linear-gradient(135deg,#3d1028,#240a18); border: 1.5px solid #ec4899; color: #f9a8d4; }
+  .p7 { background: linear-gradient(135deg,#2e1065,#1a0840); border: 1.5px solid #8b5cf6; color: #c4b5fd; }
+
+  .arrow-indigo { color: #4f46e5; }
+  .arrow-blue   { color: #3b82f6; }
+  .arrow-cyan   { color: #06b6d4; }
+  .arrow-green  { color: #10b981; }
+  .arrow-amber  { color: #f59e0b; }
+  .arrow-pink   { color: #ec4899; }
+  .arrow-purple { color: #8b5cf6; }
+
+  /* mapping labels under pipeline */
+  .mapping-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+  }
+  .map-chip {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 100px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .map-arrow { font-size: 12px; color: #374151; align-self: center; margin-top: 2px; }
+
+  /* ════════════════════════════
+     SECTION 3: VS ChatGPT
+     ════════════════════════════ */
+  .vs-grid {
+    display: grid;
+    grid-template-columns: 220px 1fr 1fr;
+    gap: 2px;
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .vs-header {
+    padding: 14px 18px;
+    font-size: 12px;
+    font-weight: 800;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .vs-h-feature { background: #111827; color: #4b5563; }
+  .vs-h-syrabit { background: linear-gradient(135deg,#1e1b4b,#312e81); color: #a5b4fc; border-bottom: 2px solid #4f46e5; }
+  .vs-h-chatgpt { background: #1a1a1a; color: #6b7280; border-bottom: 2px solid #374151; }
+
+  .vs-cell {
+    padding: 12px 18px;
+    font-size: 12px;
+    line-height: 1.4;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .vs-feature { background: #0f1520; color: #6b7280; font-weight: 600; font-size: 11.5px; border-right: 1px solid #1e2a4a; }
+  .vs-yes  { background: #0a1a12; color: #4ade80; }
+  .vs-no   { background: #130a0a; color: #f87171; }
+  .vs-icon { font-size: 14px; flex-shrink: 0; }
+
+  /* ════════════════════════════
+     SECTION 4: PILLARS
+     ════════════════════════════ */
+  .pillars {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  .pillar {
+    border-radius: 14px;
+    padding: 20px 16px;
+    text-align: center;
+    border: 1.5px solid;
+  }
+  .pillar-icon { font-size: 28px; margin-bottom: 10px; display: block; }
+  .pillar-title { font-size: 12px; font-weight: 800; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .pillar-desc { font-size: 11px; opacity: 0.75; line-height: 1.5; }
+
+  .pillar-1 { background: linear-gradient(135deg,#1e1b4b22,#1e1b4b11); border-color: #4f46e5; color: #a5b4fc; }
+  .pillar-2 { background: linear-gradient(135deg,#14402a22,#14402a11); border-color: #10b981; color: #6ee7b7; }
+  .pillar-3 { background: linear-gradient(135deg,#3d220022,#3d220011); border-color: #f59e0b; color: #fcd34d; }
+  .pillar-4 { background: linear-gradient(135deg,#3d102822,#3d102811); border-color: #ec4899; color: #f9a8d4; }
+
+  /* ── Tech stack strip ── */
+  .tech-strip {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+  }
+  .tech-badge {
+    background: #0f1520;
+    border: 1px solid #1e2a4a;
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b7db3;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tech-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── Footer ── */
+  .footer {
+    text-align: center;
+    margin-top: 32px;
+    padding: 18px;
+    background: #0d1322;
+    border-radius: 12px;
+    border: 1px solid #1e2a4a;
+    font-size: 11px;
+    color: #374151;
+  }
+  .footer span { color: #4f46e5; font-weight: 600; }
+
+  /* ── two-col layout ── */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  /* Hierarchy tree visual */
+  .tree {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+  }
+
+  .level-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .tree-node {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 4px 0;
+  }
+
+  .h-conn { height: 2px; width: 24px; flex-shrink: 0; }
+  .v-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-left: 2px solid;
+    margin-left: 0;
+    padding-left: 0;
+  }
+  .v-branch {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    position: relative;
+    padding: 5px 0;
+  }
+  .v-branch-line {
+    width: 24px;
+    height: 2px;
+    flex-shrink: 0;
+  }
+
+  .label-small {
+    font-size: 9px;
+    font-weight: 600;
+    opacity: 0.6;
+    margin-top: 3px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<div class="header">
+  <div class="header-badge">MSME IdeaHackathon 6.0 — Architecture & Innovation Brief</div>
+  <h1>Syrabit.ai — Platform Architecture & What Makes It Novel</h1>
+  <p>AI-Powered Bilingual Learning Assistant for SEBA & AHSEC Students · Northeast India's First Curriculum-Grounded EdTech AI</p>
+</div>
+
+<!-- ═══ SECTION 1: SYLLABUS HIERARCHY ═══ -->
+<div class="section">
+  <div class="section-title">01 — Syllabus Hierarchy in Library Page</div>
+  <div class="hierarchy-wrapper">
+    <div style="display:flex; align-items:flex-start; gap:0; overflow-x:auto;">
+
+      <!-- BOARD -->
+      <div style="display:flex;flex-direction:column;align-items:center;gap:0;">
+        <div class="hier-box lv1" style="min-width:110px;">
+          📋 Board
+          <div class="label-small">SEBA · AHSEC · CBSE</div>
+        </div>
+      </div>
+
+      <!-- connector -->
+      <div style="display:flex;flex-direction:column;justify-content:center;height:100%;padding-top:16px;">
+        <div class="h-conn conn-indigo"></div>
+      </div>
+
+      <!-- CLASS branch -->
+      <div style="border-left:2px solid #4f46e5;padding-left:0;display:flex;flex-direction:column;gap:0;">
+        <!-- Class 9 -->
+        <div style="display:flex;align-items:center;gap:0;padding:6px 0;">
+          <div class="v-branch-line conn-indigo"></div>
+          <div class="hier-box lv2" style="min-width:90px;">🏫 Class 9</div>
+          <div class="h-conn conn-blue"></div>
+          <!-- Stream -->
+          <div style="border-left:2px solid #3b82f6;padding-left:0;display:flex;flex-direction:column;gap:0;">
+            <div style="display:flex;align-items:center;gap:0;padding:5px 0;">
+              <div class="v-branch-line conn-blue"></div>
+              <div class="hier-box lv3" style="min-width:90px;">🌊 Science</div>
+              <div class="h-conn conn-cyan"></div>
+              <div style="border-left:2px solid #06b6d4;padding-left:0;display:flex;flex-direction:column;gap:0;">
+                <div style="display:flex;align-items:center;gap:0;padding:5px 0;">
+                  <div class="v-branch-line conn-cyan"></div>
+                  <div class="hier-box lv4" style="min-width:105px;">📚 Physics
+                    <div class="label-small">Subject</div>
+                  </div>
+                  <div class="h-conn conn-green"></div>
+                  <div style="border-left:2px solid #10b981;padding-left:0;display:flex;flex-direction:column;gap:0;">
+                    <div style="display:flex;align-items:center;gap:0;padding:5px 0;">
+                      <div class="v-branch-line conn-green"></div>
+                      <div class="hier-box lv5" style="min-width:115px;">📖 Chapter 1
+                        <div class="label-small">Motion</div>
+                      </div>
+                      <div class="h-conn conn-amber"></div>
+                      <div style="border-left:2px solid #f59e0b;padding-left:0;display:flex;flex-direction:column;gap:0;">
+                        <div style="display:flex;align-items:center;gap:0;padding:5px 0;">
+                          <div class="v-branch-line conn-amber"></div>
+                          <div class="hier-box lv6" style="min-width:110px;">🔬 Topic 1
+                            <div class="label-small">Displacement</div>
+                          </div>
+                          <div class="h-conn conn-pink"></div>
+                          <div style="display:flex;flex-direction:column;gap:6px;justify-content:center;">
+                            <div class="ct-pill ct-notes">📝 Notes EN/AS</div>
+                            <div class="ct-pill ct-qa">❓ Q&amp;A EN/AS</div>
+                            <div class="ct-pill ct-pyq">📄 PYQ Papers</div>
+                            <div class="ct-pill ct-voice">🎙️ Voice Answer</div>
+                          </div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:0;padding:5px 0;">
+                          <div class="v-branch-line conn-amber"></div>
+                          <div class="hier-box lv6" style="min-width:110px;">🔬 Topic 2
+                            <div class="label-small">Velocity</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:0;padding:5px 0;">
+                      <div class="v-branch-line conn-green"></div>
+                      <div class="hier-box lv5" style="min-width:115px;">📖 Chapter 2
+                        <div class="label-small">Force & Laws</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:0;padding:5px 0;">
+                  <div class="v-branch-line conn-cyan"></div>
+                  <div class="hier-box lv4" style="min-width:105px;">🧪 Chemistry
+                    <div class="label-small">Subject</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:0;padding:5px 0;">
+              <div class="v-branch-line conn-blue"></div>
+              <div class="hier-box lv3" style="min-width:90px;">🎨 Arts</div>
+            </div>
+          </div>
+        </div>
+        <!-- Class 10 -->
+        <div style="display:flex;align-items:center;gap:0;padding:6px 0;">
+          <div class="v-branch-line conn-indigo"></div>
+          <div class="hier-box lv2" style="min-width:90px;">🏫 Class 10</div>
+        </div>
+        <!-- Class 11/12 -->
+        <div style="display:flex;align-items:center;gap:0;padding:6px 0;">
+          <div class="v-branch-line conn-indigo"></div>
+          <div class="hier-box lv2" style="min-width:90px;">🏫 Class 11–12</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Legend -->
+    <div style="display:flex;gap:16px;margin-top:24px;flex-wrap:wrap;align-items:center;">
+      <div style="font-size:10px;font-weight:700;color:#4b5563;text-transform:uppercase;letter-spacing:1px;">Legend:</div>
+      <div style="display:flex;align-items:center;gap:6px;"><div style="width:14px;height:14px;border-radius:4px;background:#312e81;border:1.5px solid #4f46e5;"></div><span style="font-size:10px;color:#6b7280;">Board</span></div>
+      <div style="display:flex;align-items:center;gap:6px;"><div style="width:14px;height:14px;border-radius:4px;background:#1e3a5f;border:1.5px solid #3b82f6;"></div><span style="font-size:10px;color:#6b7280;">Class</span></div>
+      <div style="display:flex;align-items:center;gap:6px;"><div style="width:14px;height:14px;border-radius:4px;background:#14404a;border:1.5px solid #06b6d4;"></div><span style="font-size:10px;color:#6b7280;">Stream</span></div>
+      <div style="display:flex;align-items:center;gap:6px;"><div style="width:14px;height:14px;border-radius:4px;background:#14402a;border:1.5px solid #10b981;"></div><span style="font-size:10px;color:#6b7280;">Subject</span></div>
+      <div style="display:flex;align-items:center;gap:6px;"><div style="width:14px;height:14px;border-radius:4px;background:#3d2a10;border:1.5px solid #f59e0b;"></div><span style="font-size:10px;color:#6b7280;">Chapter</span></div>
+      <div style="display:flex;align-items:center;gap:6px;"><div style="width:14px;height:14px;border-radius:4px;background:#3d1028;border:1.5px solid #ec4899;"></div><span style="font-size:10px;color:#6b7280;">Topic</span></div>
+      <div style="display:flex;align-items:center;gap:6px;"><div style="width:14px;height:14px;border-radius:4px;background:#1e1b4b;border:1.5px solid #8b5cf6;"></div><span style="font-size:10px;color:#6b7280;">Content (Notes/Q&A/PYQ/Voice)</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SECTION 2: CHAT PIPELINE ═══ -->
+<div class="section">
+  <div class="section-title">02 — Chat Page · Question → Answer Pipeline (Full Mapping)</div>
+  <div class="card" style="padding:28px;">
+
+    <!-- Pipeline flow -->
+    <div class="pipeline" style="gap:0;justify-content:space-between;">
+
+      <div class="pipe-step">
+        <div class="pipe-box p1">
+          <span class="pipe-icon">💬</span>
+          <div class="pipe-label">Student Query</div>
+          <div class="pipe-sub">English or Assamese text or voice input</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow arrow-blue">→</div>
+
+      <div class="pipe-step">
+        <div class="pipe-box p2">
+          <span class="pipe-icon">🌐</span>
+          <div class="pipe-label">Language Detection</div>
+          <div class="pipe-sub">Sarvam AI · EN / AS auto-detect</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow arrow-cyan">→</div>
+
+      <div class="pipe-step">
+        <div class="pipe-box p3">
+          <span class="pipe-icon">🎯</span>
+          <div class="pipe-label">Topic Matcher</div>
+          <div class="pipe-sub">Cosine similarity on 197 topic embeddings (bge-m3)</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow arrow-green">→</div>
+
+      <div class="pipe-step">
+        <div class="pipe-box p4">
+          <span class="pipe-icon">🔍</span>
+          <div class="pipe-label">RAG Retrieval</div>
+          <div class="pipe-sub">Cloudflare Vectorize · top-K chunks from textbook</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow arrow-amber">→</div>
+
+      <div class="pipe-step">
+        <div class="pipe-box p5">
+          <span class="pipe-icon">🧠</span>
+          <div class="pipe-label">LLM Generation</div>
+          <div class="pipe-sub">Gemini 2.5 Flash (EN) · Sarvam 30B (AS)</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow arrow-pink">→</div>
+
+      <div class="pipe-step">
+        <div class="pipe-box p6">
+          <span class="pipe-icon">📖</span>
+          <div class="pipe-label">Source Citation</div>
+          <div class="pipe-sub">Chapter · subject · board card shown to student</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow arrow-purple">→</div>
+
+      <div class="pipe-step">
+        <div class="pipe-box p7">
+          <span class="pipe-icon">🔊</span>
+          <div class="pipe-label">Answer + Voice</div>
+          <div class="pipe-sub">Streamed text + Sarvam TTS in student's language</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Mapping row -->
+    <div style="margin-top:24px;padding:16px 20px;background:#0a0e1a;border-radius:12px;border:1px solid #1e2a4a;">
+      <div style="font-size:10px;font-weight:700;color:#4b5563;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">Question → Curriculum Mapping (Resolved Automatically)</div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <div class="map-chip" style="background:#1e1b4b;color:#a5b4fc;border:1px solid #4f46e5;">❓ User Question</div>
+        <div class="map-arrow">→</div>
+        <div class="map-chip" style="background:#3d1028;color:#f9a8d4;border:1px solid #ec4899;">🔬 Topic Identified</div>
+        <div class="map-arrow">→</div>
+        <div class="map-chip" style="background:#3d2a10;color:#fde68a;border:1px solid #f59e0b;">📖 Chapter Resolved</div>
+        <div class="map-arrow">→</div>
+        <div class="map-chip" style="background:#14402a;color:#a7f3d0;border:1px solid #10b981;">📚 Subject Mapped</div>
+        <div class="map-arrow">→</div>
+        <div class="map-chip" style="background:#0c2d35;color:#a5f3fc;border:1px solid #06b6d4;">🌊 Stream (Sci/Arts)</div>
+        <div class="map-arrow">→</div>
+        <div class="map-chip" style="background:#1e3a5f;color:#bfdbfe;border:1px solid #3b82f6;">🏫 Class (9/10/11/12)</div>
+        <div class="map-arrow">→</div>
+        <div class="map-chip" style="background:#312e81;color:#c7d2fe;border:1px solid #4f46e5;">📋 Board (SEBA/AHSEC)</div>
+        <div class="map-arrow">→</div>
+        <div class="map-chip" style="background:#2e1065;color:#c4b5fd;border:1px solid #8b5cf6;">✅ Curriculum-Exact Answer</div>
+      </div>
+    </div>
+
+    <!-- Memory layer note -->
+    <div style="margin-top:12px;padding:14px 20px;background:#0a0e1a;border-radius:12px;border:1px dashed #2a3060;display:flex;align-items:center;gap:12px;">
+      <span style="font-size:20px;">🧠</span>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#6366f1;margin-bottom:3px;">Long-Term Memory Layer (unique to Syrabit)</div>
+        <div style="font-size:11px;color:#4b5563;line-height:1.5;">Every conversation is stored per-student. Future queries are answered with awareness of what the student has already studied, their weak topics, and past doubts — creating a personalised tutor that improves over time.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SECTION 3: SYRABIT VS CHATGPT ═══ -->
+<div class="section">
+  <div class="section-title">03 — Why Syrabit vs. Generic AI (ChatGPT / Gemini / Byju's)</div>
+  <div class="vs-grid">
+
+    <!-- Headers -->
+    <div class="vs-header vs-h-feature">Feature</div>
+    <div class="vs-header vs-h-syrabit">🟣 Syrabit.ai</div>
+    <div class="vs-header vs-h-chatgpt">⬜ ChatGPT / Generic AI</div>
+
+    <!-- Rows -->
+    <div class="vs-cell vs-feature">Assamese language support</div>
+    <div class="vs-cell vs-yes"><span class="vs-icon">✅</span> Native Assamese text + voice via Sarvam AI — first in class</div>
+    <div class="vs-cell vs-no"><span class="vs-icon">❌</span> English-primary; Assamese responses are poor, unverified</div>
+
+    <div class="vs-cell vs-feature">Curriculum grounding (SEBA / AHSEC)</div>
+    <div class="vs-cell vs-yes"><span class="vs-icon">✅</span> RAG over actual SEBA/AHSEC textbook content — zero hallucination on syllabus</div>
+    <div class="vs-cell vs-no"><span class="vs-icon">❌</span> General knowledge only; no awareness of Assam board curriculum</div>
+
+    <div class="vs-cell vs-feature">Syllabus-mapped answers</div>
+    <div class="vs-cell vs-yes"><span class="vs-icon">✅</span> Every answer traceable to Board → Class → Subject → Chapter → Topic</div>
+    <div class="vs-cell vs-no"><span class="vs-icon">❌</span> No curriculum mapping; answers may cover wrong syllabus or board</div>
+
+    <div class="vs-cell vs-feature">Source citation per answer</div>
+    <div class="vs-cell vs-yes"><span class="vs-icon">✅</span> Source card shows exact chapter & section used to generate answer</div>
+    <div class="vs-cell vs-no"><span class="vs-icon">❌</span> No citations; student cannot verify accuracy</div>
+
+    <div class="vs-cell vs-feature">Student memory & personalisation</div>
+    <div class="vs-cell vs-yes"><span class="vs-icon">✅</span> Persistent per-student memory: weak topics, study history, past doubts</div>
+    <div class="vs-cell vs-no"><span class="vs-icon">❌</span> Stateless — forgets everything between sessions</div>
+
+    <div class="vs-cell vs-feature">Previous Year Questions (PYQ)</div>
+    <div class="vs-cell vs-yes"><span class="vs-icon">✅</span> Structured PYQ database with solutions, searchable in chat</div>
+    <div class="vs-cell vs-no"><span class="vs-icon">❌</span> No exam-specific PYQ; training data cut-off, often outdated</div>
+
+    <div class="vs-cell vs-feature">Voice answer in Assamese</div>
+    <div class="vs-cell vs-yes"><span class="vs-icon">✅</span> Sarvam TTS reads answers aloud in Assamese — accessibility for rural students</div>
+    <div class="vs-cell vs-no"><span class="vs-icon">❌</span> No Assamese TTS available</div>
+
+    <div class="vs-cell vs-feature">Cost for students</div>
+    <div class="vs-cell vs-yes"><span class="vs-icon">✅</span> ₹99–₹299/month (vs. ₹3,000+ coaching) — designed for affordability</div>
+    <div class="vs-cell vs-no"><span class="vs-icon">❌</span> ChatGPT Plus = $20/month; no India pricing; coaching still needed</div>
+
+    <div class="vs-cell vs-feature">Designed for Assam / Northeast India</div>
+    <div class="vs-cell vs-yes"><span class="vs-icon">✅</span> Built ground-up for SEBA/AHSEC; Assamese culture & language native</div>
+    <div class="vs-cell vs-no"><span class="vs-icon">❌</span> Built for global or Hindi-belt market; Northeast India is an afterthought</div>
+
+    <div class="vs-cell vs-feature">Staff / content moderation layer</div>
+    <div class="vs-cell vs-yes"><span class="vs-icon">✅</span> Human-in-the-loop staff panel for curriculum quality control and content publishing</div>
+    <div class="vs-cell vs-no"><span class="vs-icon">❌</span> Fully automated; no subject-matter expert review of education content</div>
+
+  </div>
+</div>
+
+<!-- ═══ SECTION 4: INNOVATION PILLARS ═══ -->
+<div class="section">
+  <div class="section-title">04 — Four Innovation Pillars That Define Syrabit</div>
+  <div class="pillars">
+
+    <div class="pillar pillar-1">
+      <span class="pillar-icon">🗣️</span>
+      <div class="pillar-title">Vernacular AI</div>
+      <div class="pillar-desc">First AI tutor to speak, read, and reason in Assamese. Sarvam AI multilingual models power both chat and voice — the 40+ lakh Assamese-medium students finally have an AI in their language.</div>
+    </div>
+
+    <div class="pillar pillar-2">
+      <span class="pillar-icon">📡</span>
+      <div class="pillar-title">Curriculum RAG</div>
+      <div class="pillar-desc">Retrieval-Augmented Generation over verified SEBA/AHSEC textbook content. Answers are pulled from the actual book, not hallucinated — every response is curriculum-exact and exam-safe.</div>
+    </div>
+
+    <div class="pillar pillar-3">
+      <span class="pillar-icon">🧠</span>
+      <div class="pillar-title">Student Memory</div>
+      <div class="pillar-desc">Long-term per-student memory tracks every studied topic, weak area, and past doubt. The tutor gets smarter about each student over time — no competitor offers this for Indian students.</div>
+    </div>
+
+    <div class="pillar pillar-4">
+      <span class="pillar-icon">🏗️</span>
+      <div class="pillar-title">Full Content Stack</div>
+      <div class="pillar-desc">Notes + Q&A + Previous Year Papers in one bilingual platform with human staff quality control. Eliminates the need for multiple apps, books, and coaching centres.</div>
+    </div>
+
+  </div>
+
+  <!-- Tech stack -->
+  <div class="tech-strip">
+    <div style="font-size:10px;font-weight:700;color:#4b5563;text-transform:uppercase;letter-spacing:1.5px;align-self:center;">Technology:</div>
+    <div class="tech-badge"><div class="tech-dot" style="background:#4f46e5;"></div>Cloudflare Workers (Edge AI)</div>
+    <div class="tech-badge"><div class="tech-dot" style="background:#3b82f6;"></div>Cloudflare Vectorize (RAG)</div>
+    <div class="tech-badge"><div class="tech-dot" style="background:#10b981;"></div>Gemini 2.5 Flash (LLM)</div>
+    <div class="tech-badge"><div class="tech-dot" style="background:#8b5cf6;"></div>Sarvam AI (Indic Language)</div>
+    <div class="tech-badge"><div class="tech-dot" style="background:#f59e0b;"></div>MongoDB Atlas (Database)</div>
+    <div class="tech-badge"><div class="tech-dot" style="background:#06b6d4;"></div>FastAPI + React (Fullstack)</div>
+    <div class="tech-badge"><div class="tech-dot" style="background:#ec4899;"></div>BGE-M3 Embeddings (Multilingual)</div>
+    <div class="tech-badge"><div class="tech-dot" style="background:#ef4444;"></div>Google Cloud Run (Deployment)</div>
+  </div>
+</div>
+
+<!-- ═══ FOOTER ═══ -->
+<div class="footer">
+  <span>syrabit.ai</span> · AI-Powered Bilingual Learning Assistant for Northeast India ·
+  MSME IdeaHackathon 6.0 · Sector: Education & Services ·
+  Serving SEBA, AHSEC & CBSE students in English and Assamese
+</div>
+
+</body>
+</html>

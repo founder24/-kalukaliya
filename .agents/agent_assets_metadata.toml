@@ -42,3 +42,15 @@ id = "ll3J5kDYQj-yRvVy02QSb"
 uri = "file://docs/architecture-audit.md"
 type = "text"
 title = "Syrabit — Fullstack Architecture Audit"
+
+[[outputs]]
+id = "esyWHDUy7C2EVs9-J4d9O"
+uri = "file://attached_assets/syrabit_diagram_hq.png"
+type = "image"
+title = "Syrabit.ai — Architecture & Innovation Diagram (PNG)"
+
+[[outputs]]
+id = "GDXsV67YSa9Vztd-I3eup"
+uri = "file://attached_assets/SyrabitAI_BlockDiagram_IdeaHackathon6.pdf"
+type = "pdf"
+title = "SyrabitAI_BlockDiagram_IdeaHackathon6.pdf — Upload this to the form"
