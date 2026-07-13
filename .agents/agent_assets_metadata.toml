@@ -72,3 +72,9 @@ id = "pffcAGq-gH48feBBLHzJI"
 uri = "file://attached_assets/slide2.png"
 type = "image"
 title = "Slide 2 — Technical Processing Brief"
+
+[[outputs]]
+id = "MN5H2qjv4950tzKZDw9Dc"
+uri = "file://attached_assets/Syrabit_Technical_Block_Diagram.pdf"
+type = "pdf"
+title = "Syrabit_Technical_Block_Diagram.pdf — Field 10 upload"
