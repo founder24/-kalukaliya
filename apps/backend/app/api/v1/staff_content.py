@@ -189,6 +189,7 @@ async def staff_create_subject(
 
     subj = Subject(
         name=name,
+        name_as=(body.get("name_as") or "").strip() or None,
         slug=slug,
         stream_id=PydanticObjectId(stream_id_str) if stream_id_str else None,
         status=body.get("status", "draft"),
@@ -209,6 +210,7 @@ async def staff_create_subject(
     return {
         "id":          str(subj.id),
         "name":        subj.name,
+        "name_as":     subj.name_as,
         "status":      subj.status,
         "stream_id":   str(subj.stream_id) if subj.stream_id else None,
         "stream_name": stream.name         if stream         else None,
@@ -386,8 +388,9 @@ async def staff_get_chapter(
         "status":          chapter.status,
         "content_type":    chapter.content_type,
         "chapter_number":  chapter.chapter_number,
-        "meta_description": chapter.meta_description,
-        "keywords":         chapter.keywords,
+        "meta_description":    chapter.meta_description,
+        "meta_description_as": chapter.meta_description_as,
+        "keywords":            chapter.keywords,
         "notes_generated":  chapter.notes_generated,
         "pyq_pdf_url":      chapter.pyq_pdf_url or "",
         "pyq_papers":       chapter.pyq_papers or [],
@@ -437,8 +440,9 @@ class ChapterEditBody(BaseModel):
     chapter_number:   Optional[int] = None
     status:           Optional[str] = None
     content_type:     Optional[str] = None
-    meta_description: Optional[str] = None
-    keywords:         Optional[str] = None
+    meta_description:    Optional[str] = None
+    meta_description_as: Optional[str] = None
+    keywords:            Optional[str] = None
     # Content
     content_en:       Optional[str] = None
     content_as:       Optional[str] = None
@@ -498,7 +502,7 @@ async def staff_update_chapter(
 
     scalar_fields = (
         "title", "title_as", "slug", "chapter_number",
-        "status", "content_type", "meta_description", "keywords",
+        "status", "content_type", "meta_description", "meta_description_as", "keywords",
         "content_en", "content_as", "notes_en", "notes_as",
         "qa_text_en", "qa_text_as",
         "rag_text_en", "rag_text_as", "qa_rag_text_en", "qa_rag_text_as",

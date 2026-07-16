@@ -50,6 +50,7 @@ class Stream(Document):
 
 class Subject(Document):
     name: str
+    name_as: Optional[str] = None           # Assamese name
     stream_id: Optional[FlexId] = None
     status: str = "active"
     slug: Optional[str] = None
@@ -112,6 +113,7 @@ class Chapter(Document):
     qa_rag_sections_en: list[dict] = Field(default_factory=list)  # [{section, question, answer, solution}] — Q&A RAG, English
     qa_rag_sections_as: list[dict] = Field(default_factory=list)  # [{section, question, answer, solution}] — Q&A RAG, Assamese
     meta_description: Optional[str] = None
+    meta_description_as: Optional[str] = None  # Assamese meta description
     keywords: Optional[str] = None
     word_count: Optional[int] = None
     notes_generated: bool = False              # legacy flag — kept for backward compat

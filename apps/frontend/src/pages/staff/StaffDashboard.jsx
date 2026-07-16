@@ -641,9 +641,15 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                   </select>
                 </div>
               </div>
-              <div>
-                <FieldLabel>Meta description</FieldLabel>
-                <textarea value={form?.meta_description || ''} onChange={set('meta_description')} rows={2} className={`${inputCls} resize-none`} placeholder="SEO meta description (max 160 chars)" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <FieldLabel>Meta description (English)</FieldLabel>
+                  <textarea value={form?.meta_description || ''} onChange={set('meta_description')} rows={3} className={`${inputCls} resize-none`} placeholder="SEO meta description (max 160 chars)" />
+                </div>
+                <div>
+                  <FieldLabel>Meta description (Assamese)</FieldLabel>
+                  <textarea value={form?.meta_description_as || ''} onChange={set('meta_description_as')} rows={3} className={`${inputCls} resize-none`} placeholder="অধ্যায়ৰ বিৱৰণ (অসমীয়া)" />
+                </div>
               </div>
               <div>
                 <FieldLabel>Keywords</FieldLabel>
@@ -1703,7 +1709,7 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
   const [filterStream, setFilterStream] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [showNewForm,  setShowNewForm]  = useState(false);
-  const [newForm,      setNewForm]      = useState({ name: '', board_id: '', class_id: '', stream_id: '', status: 'draft', description: '' });
+  const [newForm,      setNewForm]      = useState({ name: '', name_as: '', board_id: '', class_id: '', stream_id: '', status: 'draft', description: '' });
   const [creating,     setCreating]     = useState(false);
 
   const handleCreateSubject = async () => {
@@ -1712,7 +1718,7 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
     try {
       const res = await api().post('/staff/content/subjects', newForm);
       onSubjectCreated?.(res.data);
-      setNewForm({ name: '', board_id: '', class_id: '', stream_id: '', status: 'draft', description: '' });
+      setNewForm({ name: '', name_as: '', board_id: '', class_id: '', stream_id: '', status: 'draft', description: '' });
       setShowNewForm(false);
       toast.success('Subject created');
     } catch (err) {
@@ -1788,10 +1794,10 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
       {showNewForm && (
         <div className="px-4 sm:px-6 py-4 border-b border-violet-100 bg-violet-50/40 flex-shrink-0 space-y-3">
           <h3 className="text-sm font-bold text-violet-700">New Subject</h3>
-          {/* Row 1: Subject Name + Board */}
+          {/* Row 1: Subject Name (EN) + Subject Name (AS) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Subject Name *</label>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Subject Name (English) *</label>
               <input
                 className={inputCls}
                 placeholder="e.g. Physics"
@@ -1801,6 +1807,18 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
                 onKeyDown={e => e.key === 'Enter' && handleCreateSubject()}
               />
             </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Subject Name (Assamese)</label>
+              <input
+                className={inputCls}
+                placeholder="বিষয়ৰ নাম"
+                value={newForm.name_as}
+                onChange={e => setNewForm(f => ({...f, name_as: e.target.value}))}
+              />
+            </div>
+          </div>
+          {/* Row 1b: Board */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Board</label>
               <select
@@ -1812,6 +1830,7 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
                 {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
+            <div />
           </div>
           {/* Row 2: Class + Course/Stream (both cascade from Board) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
