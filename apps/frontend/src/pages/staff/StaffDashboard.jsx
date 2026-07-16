@@ -183,16 +183,90 @@ function FieldLabel({ children, chars }) {
   );
 }
 
+// ── Inline format toolbar colours ─────────────────────────────────────────────
+const FMT_COLORS = [
+  { hex: '#ef4444', label: 'Red'    },
+  { hex: '#f97316', label: 'Orange' },
+  { hex: '#eab308', label: 'Yellow' },
+  { hex: '#22c55e', label: 'Green'  },
+  { hex: '#3b82f6', label: 'Blue'   },
+  { hex: '#a855f7', label: 'Purple' },
+];
+
 function BigTextarea({ value, onChange, placeholder, rows = 14, mono = false }) {
+  const taRef = useRef(null);
+
+  // Apply a prefix+suffix around the current selection (or at cursor if no selection).
+  // Uses onMouseDown + preventDefault on toolbar buttons so the textarea never loses focus/selection.
+  const applyFmt = (prefix, suffix) => {
+    const ta = taRef.current;
+    if (!ta) return;
+    const s = ta.selectionStart;
+    const e = ta.selectionEnd;
+    const selected = value.slice(s, e);
+    const next = value.slice(0, s) + prefix + selected + suffix + value.slice(e);
+    onChange({ target: { value: next } });
+    // Restore selection inside the inserted markers after React re-renders
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.selectionStart = s + prefix.length;
+      ta.selectionEnd   = e + prefix.length;
+    });
+  };
+
+  const btn = (label, prefix, suffix, extraCls = '') => (
+    <button
+      key={label}
+      type="button"
+      title={label}
+      onMouseDown={ev => { ev.preventDefault(); applyFmt(prefix, suffix); }}
+      className={`px-1.5 py-0.5 rounded text-xs text-gray-600 hover:bg-gray-100 border border-transparent hover:border-gray-200 transition-colors select-none ${extraCls}`}
+    >
+      {label}
+    </button>
+  );
+
   return (
-    <textarea
-      value={value}
-      onChange={onChange}
-      rows={rows}
-      placeholder={placeholder}
-      spellCheck={false}
-      className={`w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-y ${mono ? 'font-mono text-xs' : 'text-gray-900'}`}
-    />
+    <div>
+      {/* ── Toolbar ── */}
+      <div className="flex items-center gap-0.5 mb-1 flex-wrap px-0.5">
+        {btn('B',  '**', '**', 'font-extrabold')}
+        {btn('I',  '*',  '*',  'italic')}
+        <button
+          type="button"
+          title="Underline"
+          onMouseDown={ev => { ev.preventDefault(); applyFmt('<u>', '</u>'); }}
+          className="px-1.5 py-0.5 rounded text-xs text-gray-600 hover:bg-gray-100 border border-transparent hover:border-gray-200 transition-colors select-none underline"
+        >U</button>
+        <button
+          type="button"
+          title="Highlight"
+          onMouseDown={ev => { ev.preventDefault(); applyFmt('<mark>', '</mark>'); }}
+          className="px-1.5 py-0.5 rounded text-xs text-gray-600 hover:bg-gray-100 border border-transparent hover:border-gray-200 transition-colors select-none"
+        ><span style={{ background: '#fef08a', borderRadius: 2, padding: '0 2px' }}>H</span></button>
+        <div className="w-px h-3.5 bg-gray-200 mx-1 self-center" />
+        {FMT_COLORS.map(({ hex, label }) => (
+          <button
+            key={hex}
+            type="button"
+            title={`${label} text`}
+            onMouseDown={ev => { ev.preventDefault(); applyFmt(`<span style="color:${hex}">`, '</span>'); }}
+            className="w-3.5 h-3.5 rounded-full border border-white shadow hover:scale-125 transition-transform"
+            style={{ background: hex }}
+          />
+        ))}
+      </div>
+      {/* ── Textarea ── */}
+      <textarea
+        ref={taRef}
+        value={value}
+        onChange={onChange}
+        rows={rows}
+        placeholder={placeholder}
+        spellCheck={false}
+        className={`w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-y ${mono ? 'font-mono text-xs' : 'text-gray-900'}`}
+      />
+    </div>
   );
 }
 
