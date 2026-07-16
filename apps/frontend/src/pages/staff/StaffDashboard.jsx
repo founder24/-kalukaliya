@@ -183,7 +183,7 @@ function FieldLabel({ children, chars }) {
   );
 }
 
-// ── Inline format toolbar colours ─────────────────────────────────────────────
+// ── Inline format toolbar colours + sizes ─────────────────────────────────────
 const FMT_COLORS = [
   { hex: '#ef4444', label: 'Red'    },
   { hex: '#f97316', label: 'Orange' },
@@ -191,6 +191,14 @@ const FMT_COLORS = [
   { hex: '#22c55e', label: 'Green'  },
   { hex: '#3b82f6', label: 'Blue'   },
   { hex: '#a855f7', label: 'Purple' },
+];
+const FMT_SIZES = [
+  { label: 'XS',  em: '0.65em' },
+  { label: 'S',   em: '0.8em'  },
+  { label: 'M',   em: '1em'    },
+  { label: 'L',   em: '1.25em' },
+  { label: 'XL',  em: '1.5em'  },
+  { label: 'XXL', em: '1.9em'  },
 ];
 
 function BigTextarea({ value, onChange, placeholder, rows = 14, mono = false }) {
@@ -245,6 +253,25 @@ function BigTextarea({ value, onChange, placeholder, rows = 14, mono = false }) 
           className="px-1.5 py-0.5 rounded text-xs text-gray-600 hover:bg-gray-100 border border-transparent hover:border-gray-200 transition-colors select-none"
         ><span style={{ background: '#fef08a', borderRadius: 2, padding: '0 2px' }}>H</span></button>
         <div className="w-px h-3.5 bg-gray-200 mx-1 self-center" />
+        {/* Font size */}
+        <select
+          title="Font size"
+          defaultValue=""
+          onMouseDown={ev => ev.stopPropagation()}
+          onChange={ev => {
+            const em = ev.target.value;
+            if (em) { applyFmt(`<span style="font-size:${em}">`, '</span>'); }
+            ev.target.value = '';
+          }}
+          className="text-[10px] text-gray-600 border border-gray-200 rounded px-1 py-0.5 bg-white hover:bg-gray-50 cursor-pointer focus:outline-none"
+        >
+          <option value="" disabled>Size</option>
+          {FMT_SIZES.map(({ label, em }) => (
+            <option key={em} value={em}>{label}</option>
+          ))}
+        </select>
+        <div className="w-px h-3.5 bg-gray-200 mx-1 self-center" />
+        {/* Text colours */}
         {FMT_COLORS.map(({ hex, label }) => (
           <button
             key={hex}
