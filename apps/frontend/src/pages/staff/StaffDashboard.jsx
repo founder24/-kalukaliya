@@ -291,7 +291,7 @@ function BigTextarea({ value, onChange, placeholder, rows = 14, mono = false }) 
         rows={rows}
         placeholder={placeholder}
         spellCheck={false}
-        className={`w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-y ${mono ? 'font-mono text-xs' : 'text-gray-900'}`}
+        className={`w-full px-3 py-2.5 bg-white text-gray-800 border border-gray-200 rounded-xl text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-violet-400 resize-y ${mono ? 'font-mono text-xs' : ''}`}
       />
     </div>
   );
