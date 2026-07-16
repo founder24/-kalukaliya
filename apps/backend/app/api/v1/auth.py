@@ -803,10 +803,10 @@ async def refresh_token_endpoint(body: RefreshTokenRequest, request: Request = N
             except HTTPException:
                 raise
             except Exception as e:
-                logger.error(f"Redis unavailable for refresh token revocation: {e}")
-                raise HTTPException(
-                    status_code=503, detail="Token validation service unavailable"
-                )
+                # Redis has been removed — JTI revocation via Redis is unavailable.
+                # Log and continue; token still expires naturally and MongoDB blacklist
+                # covers the access-token side.
+                logger.warning(f"Redis unavailable for refresh token revocation (skipping JTI claim): {e}")
 
         # Blacklist the old access token if provided (token rotation)
         if body.access_token:
