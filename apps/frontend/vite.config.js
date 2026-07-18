@@ -6,6 +6,7 @@ import { visualizer } from 'rollup-plugin-visualizer';
 import codemirrorStubPlugin from './vite-plugins/codemirror-stub.js';
 import modulepreloadInjectPlugin from './vite-plugins/modulepreload-inject.js';
 import preloadHeadersInjectPlugin from './vite-plugins/preload-headers-inject.js';
+import deferCssInjectPlugin from './vite-plugins/defer-css-inject.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -628,6 +629,11 @@ export default defineConfig(({ mode }) => ({
     // dist/_headers using the hashed filenames from this build so
     // Cloudflare can emit 103 Early Hints for the critical JS/CSS.
     preloadHeadersInjectPlugin(),
+    // PageSpeed fix: convert the render-blocking Tailwind CSS bundle from
+    // <link rel="stylesheet"> to the media="print" deferred-load pattern.
+    // Critical above-the-fold CSS is already inlined in index.html, so the
+    // full stylesheet can load asynchronously without FOUC.
+    deferCssInjectPlugin(),
   ],
 
   resolve: {

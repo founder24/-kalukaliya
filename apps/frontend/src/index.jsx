@@ -1,10 +1,21 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
-import "./sentry";
 import App, { preloadPageForKind } from "./App";
 import { initWebVitals } from "./utils/webVitals";
 import Analytics from "./utils/analytics";
+
+// Sentry is deferred until after the page is interactive so its ~60 kB
+// SDK does not sit on the critical JS path. PageSpeed measured it as
+// the dominant contributor to "Reduce unused JavaScript" savings.
+function initSentryDeferred() {
+  if (!import.meta.env.PROD) return;
+  if ('requestIdleCallback' in window) {
+    requestIdleCallback(() => import('./sentry'), { timeout: 5000 });
+  } else {
+    setTimeout(() => import('./sentry'), 3000);
+  }
+}
 
 const rootEl = document.getElementById("root");
 const tree = (
@@ -251,3 +262,4 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
 }
 
 initWebVitals();
+initSentryDeferred();
