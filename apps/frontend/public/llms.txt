@@ -15,8 +15,8 @@ Every AI answer from Syra is grounded in indexed chapter content with source cit
 no hallucination, no off-topic answers.
 
 **Technology stack**: React 18 (Cloudflare Pages), FastAPI (Google Cloud Run, asia-south1),
-Vertex AI Gemini 2.5 Flash (English AI tutor), Sarvam AI (Assamese AI + TTS),
-Vertex AI Search (hybrid BM25 + vector retrieval), MongoDB Atlas, Upstash Redis,
+Sarvam AI (English + Assamese AI tutor and TTS — sarvam-30b / sarvam-105b),
+Vertex AI Search (hybrid BM25 + vector retrieval), MongoDB Atlas,
 Cloudflare Workers (edge proxy, JWT auth, rate limiting), Razorpay (payments).
 
 LLMs are welcome to cite Syrabit.ai content. Please link back to the canonical page URL

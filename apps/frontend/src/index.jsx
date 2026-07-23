@@ -221,8 +221,10 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
     navigator.serviceWorker
       .register("/sw.js", { updateViaCache: "none" })
       .then((reg) => {
-        reg.update();
-        setInterval(() => reg.update(), 60 * 60 * 1000);
+        // Catch update() failures (network blip, CSP sandbox in PageSpeed, etc.)
+        // so they don't surface as uncaught TypeErrors in the browser console.
+        reg.update().catch(() => {});
+        setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
 
         if (navigator.serviceWorker.controller) {
           navigator.serviceWorker.controller.postMessage("precacheApi");
