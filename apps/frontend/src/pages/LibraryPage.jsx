@@ -334,17 +334,11 @@ export default function LibraryPage() {
   const [renderLimit, setRenderLimit] = useState(VIRTUAL_CHUNK);
   const sentinelRef = useRef(null);
   const [scrollContainerEl, setScrollContainerEl] = useState(null);
-  // LCP fix: only virtualise once we have a real scroll container. During
-  // SSR (scrollContainerEl === null) @tanstack/react-virtual cannot measure
-  // rows and renders nothing — the subject grid is blank in the prerendered
-  // HTML, so the LCP text element never paints until React finishes hydrating
-  // (~3.3 s). By falling through to the non-virtual <SubjectCard> path when
-  // the container is null, the first VIRTUAL_CHUNK cards are baked into the
-  // SSR snapshot, client initial render matches exactly (no hydration
-  // mismatch), and the LCP element paints at FCP time (~2.4 s) not ~3.8 s.
-  // After the scroll-container ref fires (post-mount), useVirtualGrid becomes
-  // true and the virtualiser takes over for smooth long-list scrolling.
-  const useVirtualGrid = filteredSubjects.length > 0 && scrollContainerEl !== null;
+  // useVirtualGrid: true whenever there are subjects to show.
+  // NOTE: the first VIRTUAL_CHUNK subjects are always rendered as static
+  // <SubjectCard> elements (see split-render below) so the LCP element is
+  // baked into the SSR HTML and never replaced by the virtualizer after mount.
+  const useVirtualGrid = filteredSubjects.length > 0;
   useEffect(() => { setRenderLimit(VIRTUAL_CHUNK); }, [activeFilter, deferredQuery]);
   useEffect(() => {
     // The legacy progressive-reveal sentinel is only needed for the
@@ -678,24 +672,35 @@ export default function LibraryPage() {
                 )}
               </div>
             ) : (
-              useVirtualGrid ? (
-                <VirtualSubjectGrid
-                  scrollParent={scrollContainerEl}
-                  subjects={rankedSubjects}
-                  chaptersBySubject={chaptersBySubject}
-                  savedSubjects={savedSubjects}
-                  onToggleSave={handleToggleSave}
-                  onAskAI={handleAskAI}
-                />
-              ) : (
               <>
-              <div
-                className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5"
-                data-testid="library-subject-grid"
-                style={{ contain: 'layout style', minHeight: '420px' }}
-              >
-                {visibleSubjects.flatMap((sub, index) => {
-                  const card = (
+                {/*
+                  ── Split-render LCP fix ──────────────────────────────────────
+                  The first VIRTUAL_CHUNK subjects are always rendered as plain
+                  <SubjectCard> elements. This bakes them into the SSR HTML so
+                  the LCP element (Physics card <p>) is present at FCP time.
+
+                  The virtualizer (@tanstack/react-virtual) cannot render during
+                  SSR (needs real DOM measurements) so if we handed ALL subjects
+                  to <VirtualSubjectGrid>, the SSR output would be blank and the
+                  LCP element would only appear after React's hydration long task
+                  (~3–4 s). By keeping the above-fold cards static and letting
+                  <VirtualSubjectGrid> handle only subjects from index
+                  VIRTUAL_CHUNK onwards, those cards are never replaced after
+                  hydration → Chrome registers LCP at FCP time not at ~4 s.
+
+                  filteredSubjects (stable API order) is used here intentionally
+                  — not rankedSubjects — because ranking reads localStorage which
+                  differs between SSR and client. Using the unranked slice ensures
+                  SSR and the initial client render produce identical DOM so
+                  hydrateRoot succeeds without touching the card grid.
+                  ──────────────────────────────────────────────────────────────
+                */}
+                <div
+                  className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5"
+                  data-testid="library-subject-grid"
+                  style={{ contain: 'layout style' }}
+                >
+                  {filteredSubjects.slice(0, VIRTUAL_CHUNK).map((sub, index) => (
                     <SubjectCard
                       key={sub.id}
                       sub={sub}
@@ -705,15 +710,24 @@ export default function LibraryPage() {
                       onAskAI={handleAskAI}
                       index={index}
                     />
-                  );
-                  return [card];
-                })}
-              </div>
-              {rankedSubjects.length > visibleSubjects.length && (
-                <div ref={sentinelRef} aria-hidden="true" style={{ height: 1 }} />
-              )}
+                  ))}
+                </div>
+
+                {/* Below-fold: remaining subjects via virtualizer, added after mount */}
+                {useVirtualGrid && filteredSubjects.length > VIRTUAL_CHUNK && (
+                  <VirtualSubjectGrid
+                    scrollParent={scrollContainerEl}
+                    subjects={rankedSubjects.slice(VIRTUAL_CHUNK)}
+                    chaptersBySubject={chaptersBySubject}
+                    savedSubjects={savedSubjects}
+                    onToggleSave={handleToggleSave}
+                    onAskAI={handleAskAI}
+                  />
+                )}
+                {!useVirtualGrid && rankedSubjects.length > VIRTUAL_CHUNK && (
+                  <div ref={sentinelRef} aria-hidden="true" style={{ height: 1 }} />
+                )}
               </>
-              )
             )}
           </div>
           <QuestionPapersSection />
