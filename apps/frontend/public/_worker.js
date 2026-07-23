@@ -414,7 +414,17 @@ export default {
     }
 
     try {
-      const response = await env.ASSETS.fetch(request);
+      // Normalize extension-less paths to include a trailing slash before
+      // hitting the ASSETS pipeline. CF Pages stores prerendered pages as
+      // /path/index.html and serves them at /path/ — requesting /path
+      // (no slash) gets a 308 redirect to /path/, adding a full round-trip
+      // (~935ms on mobile). Same fix as the bot path above (line ~388).
+      const assetUrl = (
+        !url.pathname.endsWith("/") &&
+        !url.pathname.match(/\.[a-z0-9]{1,10}$/i)
+      ) ? new URL(url.pathname + "/", url.origin) : url;
+      const assetRequest = assetUrl === url ? request : new Request(assetUrl, request);
+      const response = await env.ASSETS.fetch(assetRequest);
       if (response.status === 404) {
         const accept = request.headers.get("Accept") || "";
         // Same-as-before SPA fallback rules. Note that for bots we
