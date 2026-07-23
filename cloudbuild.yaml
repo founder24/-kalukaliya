@@ -224,8 +224,8 @@ steps:
         fi
 
         # INDEXNOW_INTERNAL_SECRET — internal cron auth for IndexNow (optional)
-        if gcloud secrets describe indexnow-internal-secret --project="$PROJECT" >/dev/null 2>&1; then
-          UPDATES="${UPDATES:+$UPDATES,}INDEXNOW_INTERNAL_SECRET=indexnow-internal-secret:latest"
+        if gcloud secrets describe indexnow-internal-secret --project="$$PROJECT" >/dev/null 2>&1; then
+          UPDATES="$${UPDATES:+$$UPDATES,}INDEXNOW_INTERNAL_SECRET=indexnow-internal-secret:latest"
           echo "  ✓ indexnow-internal-secret"
         else
           echo "  ⚠ indexnow-internal-secret not in SM — IndexNow cron auth disabled"
@@ -247,8 +247,8 @@ steps:
         #      echo -n 'https://pub-XXXXXXXXXXXX.r2.dev' | \
         #        gcloud secrets versions add CF_R2_PUBLIC_URL --data-file=- \
         #          --project=blissful-acumen-495019-t6
-        if gcloud secrets describe CF_R2_PUBLIC_URL --project="$PROJECT" >/dev/null 2>&1; then
-          UPDATES="${UPDATES:+$UPDATES,}CF_R2_PUBLIC_URL=CF_R2_PUBLIC_URL:latest"
+        if gcloud secrets describe CF_R2_PUBLIC_URL --project="$$PROJECT" >/dev/null 2>&1; then
+          UPDATES="$${UPDATES:+$$UPDATES,}CF_R2_PUBLIC_URL=CF_R2_PUBLIC_URL:latest"
           echo "  ✓ CF_R2_PUBLIC_URL"
         else
           echo "  ⚠ CF_R2_PUBLIC_URL not in SM — PYQ uploads will return unauthenticated CF API URLs (broken for students)"
