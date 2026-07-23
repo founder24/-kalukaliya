@@ -562,7 +562,11 @@ class SarvamAIClient:
                     # response erroneously emits its reasoning chain in `content`.
                     if not content_sniff_done:
                         content_sniff_buf += content
-                        if len(content_sniff_buf) < 150:
+                        # 60 chars is enough to detect a numbered chain-of-thought
+                        # preamble ("1. Deconstruct...") while minimising TTFB for
+                        # normal English answers. Previously 150 chars, which added
+                        # a visible pause after the reasoning phase finished.
+                        if len(content_sniff_buf) < 60:
                             continue  # keep accumulating
                         # Enough data — make the decision.
                         content_sniff_done = True

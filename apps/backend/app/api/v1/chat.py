@@ -1333,7 +1333,12 @@ async def chat_stream(
 
         # -- Final event --
         latency_ms = int((time.time() - start_time) * 1000)
-        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'route_trace': {'decision': 'sarvam', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model, 'confidence_tier': confidence_tier, 'topic_score': round(match_score, 4), 'web_used': bool(web_chunks), 'rag_path': rag_path, 'rag_chunks': len(context_chunks)}})}\n\n"
+        # Credit counters — included in syrabit_done so the frontend can update
+        # the in-chat credit badge without a separate /users/credits round-trip.
+        # Works for both authenticated and anonymous users (anon: quota_usage.count).
+        _credits_used_total = current_count
+        _remaining_credits  = max(0, limit - current_count)
+        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'credits_used_total': _credits_used_total, 'remaining_credits': _remaining_credits, 'route_trace': {'decision': 'sarvam', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model, 'confidence_tier': confidence_tier, 'topic_score': round(match_score, 4), 'web_used': bool(web_chunks), 'rag_path': rag_path, 'rag_chunks': len(context_chunks)}})}\n\n"
 
         # Record final metrics in OTel span
         with tracer.start_as_current_span("chat.stream.complete") as final_span:
@@ -1353,6 +1358,24 @@ async def chat_stream(
             user_tier=user_tier,
             streaming=True,
         )
+
+        # Increment monthly_message_count for authenticated users (streaming path).
+        # check_rate_limit() already incremented quota_usage; this keeps the
+        # user-model counter in sync so /users/me and /users/credits reflect
+        # the real usage and the profile credits badge stays accurate.
+        if user:
+            try:
+                await user.update(
+                    {
+                        "$inc": {
+                            "monthly_message_count": 1,
+                            "total_lifetime_messages": 1,
+                        },
+                        "$set": {"updated_at": datetime.now(timezone.utc)},
+                    }
+                )
+            except Exception as _ue:
+                logger.error(f"Failed to update user usage counter (stream): {_ue}")
 
         # -- Persist chat (fire-and-forget) --
         task = asyncio.create_task(

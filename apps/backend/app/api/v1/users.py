@@ -400,11 +400,21 @@ async def get_credits(
         }
 
     anon_id = resolve_anon_id(request)
-    # Anonymous usage is tracked server-side via the MongoDB rate-limit collection.
-    # Redis was previously used here but has been removed; anonymous credits_used
-    # is always returned as 0 (showing full allowance) since per-request rate
-    # enforcement still applies at the API level via check_rate_limit().
+    # Read actual usage from the MongoDB quota_usage collection that
+    # check_rate_limit() writes to on every streaming/non-streaming chat request.
     credits_used = 0
+    try:
+        import time as _time
+        from app.db.mongo import get_mongo_client
+        from app.config import settings as _settings
+        _client = get_mongo_client()
+        _db = _client[_settings.MONGODB_DB_NAME]
+        _month_key = _time.strftime("%Y-%m", _time.gmtime())
+        _doc = await _db.quota_usage.find_one({"user_id": anon_id, "month": _month_key})
+        if _doc:
+            credits_used = max(0, int(_doc.get("count", 0)))
+    except Exception:
+        pass  # fall back to 0 — still shows full allowance, rate limit still enforced
     credits_remaining = max(0, MONTHLY_LIMIT_FREE - credits_used)
     return {
         "credits_remaining": credits_remaining,
