@@ -135,9 +135,15 @@ async function sitemapProxy(request, env, url) {
       // Force the right content-type even if the backend mislabels it
       // (e.g. .txt llms passthrough must NOT be served as application/xml).
       headers.set("Content-Type", contentTypeForSeo(url.pathname));
+      // robots.txt: no-transform prevents CF's "AI Scrapers & Crawlers"
+      // managed robots.txt feature from prepending its Content-Signal block,
+      // which causes Lighthouse to flag the file as malformed (unknown directive).
+      const isTxt = /\.txt$/i.test(url.pathname);
       headers.set(
         "Cache-Control",
-        "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600",
+        isTxt
+          ? "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600, no-transform"
+          : "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600",
       );
       headers.set("X-Source", "sitemap-proxy");
       // Cloudflare Workers' fetch() auto-decompresses response bodies
