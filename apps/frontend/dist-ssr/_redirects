@@ -21,11 +21,11 @@
 # Must come BEFORE the SPA catch-all so CF Pages processes it first.
 # This is safe: / has no prerendered /index.html asset that would loop.
 # Bots are handled by _worker.js (bot-render path) before _redirects fires,
-# so they still receive the prerendered homepage HTML.
-/     /library     301
+# so they still receive the prerendered homepage HTML instead of following this redirect.
+/     /library  301
 
-# /home was the legacy landing-page path — permanently redirect to /library.
-/home /library     301
+# /home was the legacy landing-page path — redirect to /library.
+/home /library  301
 
 # SPA catch-all — serve index.html for all client-side routes.
 # This MUST be the last rule. Cloudflare Pages processes rules top-to-bottom

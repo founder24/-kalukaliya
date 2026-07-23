@@ -480,13 +480,39 @@ export default function LibraryPage() {
               </div>
             </div>
 
-            {/* Mobile: browse count */}
-            <p className="sm:hidden text-xs text-muted-foreground mb-1.5">
-              {t.browse(subjects.length, allChapters.length || slimChapterCount)}
-            </p>
+            {/* Mobile: heading + lang switcher row — h1 is the LCP element on mobile.
+                Previously hidden (hidden sm:flex desktop-only), which pushed LCP to a
+                card <p> that required React + API data (~6s render delay). Making the
+                heading visible on mobile lets the prerendered HTML paint it as the
+                first large text block before JS even boots (~0ms render delay). */}
+            <div className="flex sm:hidden items-center justify-between gap-2 mb-1">
+              <div className="min-w-0">
+                <h1
+                  className="text-foreground font-bold leading-tight"
+                  style={{ fontSize: 'clamp(1.1rem, 4.5vw, 1.25rem)' }}
+                >
+                  {t.heading}
+                </h1>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {t.browse(subjects.length, allChapters.length || slimChapterCount)}
+                </p>
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0 rounded-lg p-0.5" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.12)' }}>
+                <button
+                  onClick={() => switchLang('en')}
+                  className={`h-8 px-2 rounded-md text-[11px] font-semibold transition-all ${contentLang === 'en' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600'}`}
+                  aria-label="Switch to English"
+                >EN</button>
+                <button
+                  onClick={() => switchLang('as')}
+                  className={`h-8 px-2 rounded-md text-[11px] font-semibold transition-all ${contentLang === 'as' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600'}`}
+                  aria-label="Switch to Assamese"
+                >অস</button>
+              </div>
+            </div>
 
-            {/* Mobile: search + compact lang switcher in one row */}
-            <div className="flex sm:hidden items-center gap-2 mb-2">
+            {/* Mobile: search bar (lang switcher moved to heading row above) */}
+            <div className="flex sm:hidden items-center mb-2">
               <div className="relative flex-1 group/search">
                 <Search
                   className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none text-muted-foreground group-focus-within/search:text-primary transition-colors"
@@ -510,18 +536,6 @@ export default function LibraryPage() {
                     data-testid="library-search-clear"
                   >×</button>
                 )}
-              </div>
-              <div className="flex items-center gap-0.5 shrink-0 rounded-lg p-0.5" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.12)' }}>
-                <button
-                  onClick={() => switchLang('en')}
-                  className={`h-8 px-2 rounded-md text-[11px] font-semibold transition-all ${contentLang === 'en' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600'}`}
-                  aria-label="Switch to English"
-                >EN</button>
-                <button
-                  onClick={() => switchLang('as')}
-                  className={`h-8 px-2 rounded-md text-[11px] font-semibold transition-all ${contentLang === 'as' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600'}`}
-                  aria-label="Switch to Assamese"
-                >অস</button>
               </div>
             </div>
 

@@ -197,6 +197,7 @@ const BOT_RENDER_SKIP_PREFIXES = [
   "/signup",
   "/profile",
   "/admin",
+  "/staff",
   "/auth",
   "/api",
   "/cms",
@@ -289,7 +290,7 @@ async function spaShellResponse(request, env, url, originalStatus) {
 }
 
 function minimalRedirectResponse() {
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><script>window.location.replace('/chat')</script></head><body></body></html>`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><script>window.location.replace('/library')</script></head><body></body></html>`;
   return new Response(html, {
     status: 200,
     headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -312,6 +313,25 @@ export default {
       request.headers.get("X-Sitemap-Proxy") !== "1"
     ) {
       return sitemapProxy(request, env, url);
+    }
+
+    // Root redirect: send bare / and /home to /library for real browsers.
+    // _redirects would do this but the worker intercepts every request
+    // before Cloudflare Pages consults _redirects, so we must handle it
+    // here. Bots are excluded — they fall through to the bot-render path
+    // below so Googlebot still receives the prerendered homepage HTML.
+    if (
+      !isBot &&
+      (request.method === "GET" || request.method === "HEAD") &&
+      (url.pathname === "/" || url.pathname === "/home" || url.pathname === "/home/")
+    ) {
+      return new Response(null, {
+        status: 301,
+        headers: {
+          "Location": "/library",
+          "Cache-Control": "public, max-age=3600",
+        },
+      });
     }
 
     // Loop guard: if this request already carries the X-Bot-Render
@@ -394,7 +414,17 @@ export default {
     }
 
     try {
-      const response = await env.ASSETS.fetch(request);
+      // Normalize extension-less paths to include a trailing slash before
+      // hitting the ASSETS pipeline. CF Pages stores prerendered pages as
+      // /path/index.html and serves them at /path/ — requesting /path
+      // (no slash) gets a 308 redirect to /path/, adding a full round-trip
+      // (~935ms on mobile). Same fix as the bot path above (line ~388).
+      const assetUrl = (
+        !url.pathname.endsWith("/") &&
+        !url.pathname.match(/\.[a-z0-9]{1,10}$/i)
+      ) ? new URL(url.pathname + "/", url.origin) : url;
+      const assetRequest = assetUrl === url ? request : new Request(assetUrl, request);
+      const response = await env.ASSETS.fetch(assetRequest);
       if (response.status === 404) {
         const accept = request.headers.get("Accept") || "";
         // Same-as-before SPA fallback rules. Note that for bots we

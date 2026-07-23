@@ -3,9 +3,13 @@ import { BookOpen, FileText, MessageSquare, Clock, User, ChevronLeft, ChevronRig
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { LogoFull, LogoMark } from '@/components/Logo';
 import { pageImports } from '@/utils/pageImports';
+
+// Radix Tooltip removed — using native HTML title attribute for the collapsed
+// sidebar state. This eliminates the ~24 KB @radix-ui/react-tooltip chunk from
+// every page's critical path (the chunk loaded even on /library where tooltips
+// are never visible because the sidebar is hidden on mobile).
 
 const NAV_ITEMS = [
   { to: '/library',   icon: BookOpen,      label: 'Browser',   preloadKey: 'library' },
@@ -47,107 +51,101 @@ export const Sidebar = () => {
   }, []);
 
   return (
-    <TooltipProvider delayDuration={0}>
-      <aside
-        className={cn(
-          'hidden md:flex flex-col h-screen sticky top-0 border-r transition-all duration-300 z-40',
-          collapsed ? 'w-[64px]' : 'w-[240px]'
-        )}
-        style={{
-          background: 'var(--sidebar-glass)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          borderColor: 'hsl(var(--sidebar-border) / 0.25)',
-        }}
-        role="navigation"
-        aria-label="Main navigation"
-        data-testid="app-sidebar"
+    <aside
+      className={cn(
+        'hidden md:flex flex-col h-screen sticky top-0 border-r transition-all duration-300 z-40',
+        collapsed ? 'w-[64px]' : 'w-[240px]'
+      )}
+      style={{
+        background: 'var(--sidebar-glass)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        borderColor: 'hsl(var(--sidebar-border) / 0.25)',
+      }}
+      role="navigation"
+      aria-label="Main navigation"
+      data-testid="app-sidebar"
+    >
+      <div
+        className="flex items-center h-16 px-3 overflow-hidden"
+        style={{ borderBottom: '1px solid hsl(var(--sidebar-border) / 0.2)' }}
       >
-        <div
-          className="flex items-center h-16 px-3 overflow-hidden"
-          style={{ borderBottom: '1px solid hsl(var(--sidebar-border) / 0.2)' }}
-        >
-          <Link to="/library" className="flex items-center min-w-0">
-            {collapsed ? (
-              <LogoMark size="sm" />
-            ) : (
-              <LogoFull size="sm" />
-            )}
-          </Link>
-        </div>
+        <Link to="/library" className="flex items-center min-w-0">
+          {collapsed ? (
+            <LogoMark size="sm" />
+          ) : (
+            <LogoFull size="sm" />
+          )}
+        </Link>
+      </div>
 
-        <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
-          {NAV_ITEMS.map(({ to, icon: Icon, label, preloadKey }) => {
-            const active = isActive(to);
-            return (
-              <Tooltip key={to}>
-                <TooltipTrigger asChild>
-                  <Link
-                    to={to}
-                    className={cn(
-                      'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 relative group',
-                      active
-                        ? 'text-primary nav-item-active'
-                        : 'text-muted-foreground hover:text-foreground hover:translate-x-0.5'
-                    )}
-                    style={active ? {
-                      background: 'hsl(var(--primary) / 0.12)',
-                      boxShadow: '0 2px 12px hsl(var(--primary) / 0.1)',
-                    } : {}}
-                    onFocus={() => handlePreload(preloadKey)}
-                    onMouseEnter={e => {
-                      handlePreload(preloadKey);
-                      if (!active) e.currentTarget.style.background = 'hsl(var(--primary) / 0.06)';
-                    }}
-                    onMouseLeave={e => {
-                      if (!active) e.currentTarget.style.background = '';
-                    }}
-                    data-testid={`sidebar-nav-${label.toLowerCase()}`}
-                  >
-                    <Icon
-                      size={18}
-                      className={cn('flex-shrink-0 transition-colors', active ? 'text-primary' : '')}
-                    />
-                    {!collapsed && <span>{label}</span>}
-                    {active && !collapsed && (
-                      <div
-                        className="ml-auto w-1.5 h-1.5 rounded-full bg-primary"
-                        style={{
-                          boxShadow: '0 0 8px hsl(var(--primary) / 0.6)',
-                        }}
-                      />
-                    )}
-                  </Link>
-                </TooltipTrigger>
-                {collapsed && (
-                  <TooltipContent side="right">{label}</TooltipContent>
-                )}
-              </Tooltip>
-            );
-          })}
+      <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
+        {NAV_ITEMS.map(({ to, icon: Icon, label, preloadKey }) => {
+          const active = isActive(to);
+          return (
+            <Link
+              key={to}
+              to={to}
+              title={collapsed ? label : undefined}
+              className={cn(
+                'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 relative group',
+                active
+                  ? 'text-primary nav-item-active'
+                  : 'text-muted-foreground hover:text-foreground hover:translate-x-0.5'
+              )}
+              style={active ? {
+                background: 'hsl(var(--primary) / 0.12)',
+                boxShadow: '0 2px 12px hsl(var(--primary) / 0.1)',
+              } : {}}
+              onFocus={() => handlePreload(preloadKey)}
+              onMouseEnter={e => {
+                handlePreload(preloadKey);
+                if (!active) e.currentTarget.style.background = 'hsl(var(--primary) / 0.06)';
+              }}
+              onMouseLeave={e => {
+                if (!active) e.currentTarget.style.background = '';
+              }}
+              data-testid={`sidebar-nav-${label.toLowerCase()}`}
+              data-state="closed"
+            >
+              <Icon
+                size={18}
+                className={cn('flex-shrink-0 transition-colors', active ? 'text-primary' : '')}
+              />
+              {!collapsed && <span>{label}</span>}
+              {active && !collapsed && (
+                <div
+                  className="ml-auto w-1.5 h-1.5 rounded-full bg-primary"
+                  style={{
+                    boxShadow: '0 0 8px hsl(var(--primary) / 0.6)',
+                  }}
+                />
+              )}
+            </Link>
+          );
+        })}
 
-        </nav>
+      </nav>
 
-        <div
-          className="px-2 py-3 space-y-0.5"
-          style={{ borderTop: '1px solid hsl(var(--sidebar-border) / 0.2)' }}
-        >
-          {user ? <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-red-500 transition-all duration-200"
-                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.06)'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = ''; }}
-                aria-label="Log out of Syrabit.ai"
-                data-testid="sidebar-logout-button"
-              >
-                <LogOut size={18} className="flex-shrink-0" />
-                {!collapsed && <span>Logout</span>}
-              </button>
-            </TooltipTrigger>
-            {collapsed && <TooltipContent side="right">Logout</TooltipContent>}
-          </Tooltip> : <button
+      <div
+        className="px-2 py-3 space-y-0.5"
+        style={{ borderTop: '1px solid hsl(var(--sidebar-border) / 0.2)' }}
+      >
+        {user ? (
+          <button
+            onClick={handleLogout}
+            title={collapsed ? 'Logout' : undefined}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-red-500 transition-all duration-200"
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.06)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = ''; }}
+            aria-label="Log out of Syrabit.ai"
+            data-testid="sidebar-logout-button"
+          >
+            <LogOut size={18} className="flex-shrink-0" />
+            {!collapsed && <span>Logout</span>}
+          </button>
+        ) : (
+          <button
             onClick={() => navigate('/login')}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-primary transition-all duration-200"
             onMouseEnter={e => { e.currentTarget.style.background = 'hsl(var(--primary) / 0.06)'; }}
@@ -156,20 +154,20 @@ export const Sidebar = () => {
           >
             <LogOut size={18} className="flex-shrink-0 rotate-180" />
             {!collapsed && <span>Sign In</span>}
-          </button>}
-
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="w-full flex items-center justify-center py-2 text-muted-foreground hover:text-foreground transition-all duration-200 rounded-xl"
-            onMouseEnter={e => { e.currentTarget.style.background = 'hsl(var(--primary) / 0.06)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = ''; }}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            data-testid="sidebar-collapse-button"
-          >
-            {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
           </button>
-        </div>
-      </aside>
-    </TooltipProvider>
+        )}
+
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="w-full flex items-center justify-center py-2 text-muted-foreground hover:text-foreground transition-all duration-200 rounded-xl"
+          onMouseEnter={e => { e.currentTarget.style.background = 'hsl(var(--primary) / 0.06)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = ''; }}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          data-testid="sidebar-collapse-button"
+        >
+          {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
+      </div>
+    </aside>
   );
 };

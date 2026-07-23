@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { visualizer } from 'rollup-plugin-visualizer';
 import codemirrorStubPlugin from './vite-plugins/codemirror-stub.js';
+import sentryReplayStubPlugin from './vite-plugins/sentry-replay-stub.js';
 import modulepreloadInjectPlugin from './vite-plugins/modulepreload-inject.js';
 import preloadHeadersInjectPlugin from './vite-plugins/preload-headers-inject.js';
 import deferCssInjectPlugin from './vite-plugins/defer-css-inject.js';
@@ -621,6 +622,7 @@ export default defineConfig(({ mode }) => ({
     // named import resolves to a noop without needing to enumerate
     // exports per package.
     codemirrorStubPlugin(),
+    sentryReplayStubPlugin(),
     // Task #535: fold scripts/inject-modulepreload.mjs into the Vite
     // build so it runs as the bundle is written instead of as a
     // separate post-build node invocation.
