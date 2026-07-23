@@ -315,6 +315,25 @@ export default {
       return sitemapProxy(request, env, url);
     }
 
+    // Root redirect: send bare / and /home to /chat for real browsers.
+    // _redirects would do this but the worker intercepts every request
+    // before Cloudflare Pages consults _redirects, so we must handle it
+    // here. Bots are excluded — they fall through to the bot-render path
+    // below so Googlebot still receives the prerendered homepage HTML.
+    if (
+      !isBot &&
+      (request.method === "GET" || request.method === "HEAD") &&
+      (url.pathname === "/" || url.pathname === "/home" || url.pathname === "/home/")
+    ) {
+      return new Response(null, {
+        status: 301,
+        headers: {
+          "Location": "/chat",
+          "Cache-Control": "public, max-age=3600",
+        },
+      });
+    }
+
     // Loop guard: if this request already carries the X-Bot-Render
     // tag (i.e. it's the backend fetching back through the Pages
     // host because BACKEND_BOT_URL was misconfigured), do NOT
