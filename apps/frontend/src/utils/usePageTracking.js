@@ -132,6 +132,8 @@ function setPinnedBoostTarget(path, title) {
 function fireSyntheticPageView({ path, title, visitorId, sessionId, referrer, is404Hint }) {
   // 1) Internal analytics endpoint — same payload shape as the real
   // page-view post so backend aggregation works identically.
+  // 5 s timeout prevents ERR_TIMED_OUT console errors on slow connections
+  // (Lighthouse Slow 4G) where the backend takes longer than the test window.
   try {
     axios.post(
       `${API_BASE}/analytics/page-view`,
@@ -144,7 +146,7 @@ function fireSyntheticPageView({ path, title, visitorId, sessionId, referrer, is
         screen_width: window.screen.width,
         is_404_hint: is404Hint,
       },
-      { withCredentials: true }
+      { withCredentials: true, timeout: 5000 }
     ).catch(() => {});
   } catch {}
 
@@ -284,7 +286,7 @@ function usePageTracking() {
               screen_width: window.screen.width,
               is_404_hint: detectIs404(currentPath),
             },
-            { withCredentials: true }
+            { withCredentials: true, timeout: 5000 }
           ).catch(() => {});
         }
         startHeartbeat(sessionIdRef.current, visitorIdRef.current);
@@ -325,7 +327,7 @@ function usePageTracking() {
         screen_width: window.screen.width,
         is_404_hint: is404Hint,
       },
-      { withCredentials: true }
+      { withCredentials: true, timeout: 5000 }
     ).catch(() => {});
 
     Analytics.pageView(path, document.title);

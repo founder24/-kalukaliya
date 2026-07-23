@@ -290,7 +290,7 @@ async function spaShellResponse(request, env, url, originalStatus) {
 }
 
 function minimalRedirectResponse() {
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><script>window.location.replace('/chat')</script></head><body></body></html>`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><script>window.location.replace('/library')</script></head><body></body></html>`;
   return new Response(html, {
     status: 200,
     headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -315,7 +315,7 @@ export default {
       return sitemapProxy(request, env, url);
     }
 
-    // Root redirect: send bare / and /home to /chat for real browsers.
+    // Root redirect: send bare / and /home to /library for real browsers.
     // _redirects would do this but the worker intercepts every request
     // before Cloudflare Pages consults _redirects, so we must handle it
     // here. Bots are excluded — they fall through to the bot-render path
@@ -328,7 +328,7 @@ export default {
       return new Response(null, {
         status: 301,
         headers: {
-          "Location": "/chat",
+          "Location": "/library",
           "Cache-Control": "public, max-age=3600",
         },
       });

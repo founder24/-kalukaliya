@@ -218,33 +218,39 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
     // — the page already loaded with the latest HTML.
     const hadInitialController = !!navigator.serviceWorker.controller;
 
-    navigator.serviceWorker
-      .register("/sw.js", { updateViaCache: "none" })
-      .then((reg) => {
-        // Catch update() failures (network blip, CSP sandbox in PageSpeed, etc.)
-        // so they don't surface as uncaught TypeErrors in the browser console.
-        reg.update().catch(() => {});
-        setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+    // Wrap entire registration in try-catch: Lighthouse/PageSpeed sandboxes
+    // sometimes throw synchronous InvalidStateError ("script ('Unknown')")
+    // when the SW scope is in an invalid state. The .catch() at the end
+    // handles promise rejections; the outer try handles synchronous throws.
+    try {
+      navigator.serviceWorker
+        .register("/sw.js", { updateViaCache: "none" })
+        .then((reg) => {
+          // Catch update() failures (network blip, CSP sandbox in PageSpeed, etc.)
+          // so they don't surface as uncaught TypeErrors in the browser console.
+          reg.update().catch(() => {});
+          setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
 
-        if (navigator.serviceWorker.controller) {
-          navigator.serviceWorker.controller.postMessage("precacheApi");
-        }
-
-        reg.addEventListener("updatefound", () => {
-          const worker = reg.installing;
-          if (worker) {
-            worker.addEventListener("statechange", () => {
-              if (worker.state === "installed" && navigator.serviceWorker.controller) {
-                worker.postMessage("skipWaiting");
-              }
-              if (worker.state === "activated") {
-                worker.postMessage("precacheApi");
-              }
-            });
+          if (navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage("precacheApi");
           }
-        });
-      })
-      .catch(() => {});
+
+          reg.addEventListener("updatefound", () => {
+            const worker = reg.installing;
+            if (worker) {
+              worker.addEventListener("statechange", () => {
+                if (worker.state === "installed" && navigator.serviceWorker.controller) {
+                  worker.postMessage("skipWaiting");
+                }
+                if (worker.state === "activated") {
+                  worker.postMessage("precacheApi");
+                }
+              });
+            }
+          });
+        })
+        .catch(() => {});
+    } catch {}
 
     let refreshing = false;
     navigator.serviceWorker.addEventListener("controllerchange", () => {
