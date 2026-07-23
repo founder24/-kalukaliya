@@ -39,7 +39,7 @@ export default function CookieConsent() {
             <h3 className="text-foreground font-semibold text-sm">Cookie Notice</h3>
             <p className="text-muted-foreground text-xs mt-0.5 leading-relaxed">
               We use cookies to improve your experience and for analytics.{' '}
-              <a href="/privacy" className="underline hover:text-foreground transition-colors">Learn more</a>
+              <a href="/privacy" className="underline hover:text-foreground transition-colors">Read our Privacy Policy</a>
             </p>
             <div className="flex gap-2 mt-3">
               <button onClick={handleDecline} className="h-8 px-3 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground text-xs font-medium transition-colors">Decline</button>

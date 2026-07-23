@@ -802,8 +802,7 @@ export default function ChatPage() {
         content="Ask Syrabit's AI tutor anything about AHSEC, SEBA and Degree subjects. Get instant explanations, MCQs, definitions and exam-ready answers in English or Assamese."
       />
       <link rel="canonical" href="https://syrabit.ai/chat" />
-      {/* /chat is auth-gated and personalized — keep it out of the index. */}
-      <meta name="robots" content="noindex, follow" />
+      <meta name="robots" content="index, follow" />
       <meta property="og:title" content="Syrabit AI Chat — Ask Anything About Your Syllabus" />
       <meta
         property="og:description"
