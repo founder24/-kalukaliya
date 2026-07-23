@@ -181,6 +181,13 @@ export default function LibraryPage() {
   const classes     = bundle?.classes   || [];
   const streams     = bundle?.streams   || [];
   const allChapters = fullBundle?.chapters || bootBundle?.chapters || [];
+  // Sum chapter_count from the slim bundle's subjects to show the correct
+  // total immediately on first render — before the full chapter list lands.
+  // Prevents the "Browse 109 subjects · 0 chapters" → "480 chapters" CLS.
+  const slimChapterCount = useMemo(
+    () => subjects.reduce((sum, s) => sum + (s.chapter_count || 0), 0),
+    [subjects],
+  );
   const { data: savedSubjects = [] } = useSavedSubjects(user);
   const toggleSaved = useToggleSavedSubject();
   const handleToggleSave = useCallback((id) => toggleSaved.mutate(id), [toggleSaved]);
@@ -456,7 +463,7 @@ export default function LibraryPage() {
                   {t.heading}
                 </h1>
                 <p className="text-sm text-muted-foreground mt-0.5">
-                  {t.browse(subjects.length, allChapters.length)}
+                  {t.browse(subjects.length, allChapters.length || slimChapterCount)}
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0 rounded-xl p-0.5" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.12)' }}>
@@ -475,7 +482,7 @@ export default function LibraryPage() {
 
             {/* Mobile: browse count */}
             <p className="sm:hidden text-xs text-muted-foreground mb-1.5">
-              {t.browse(subjects.length, allChapters.length)}
+              {t.browse(subjects.length, allChapters.length || slimChapterCount)}
             </p>
 
             {/* Mobile: search + compact lang switcher in one row */}
