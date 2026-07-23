@@ -360,10 +360,42 @@ async function main() {
 
     if (slim) {
       const json = JSON.stringify(slim).replace(/</g, "\\u003c");
-      const inlineScript = `<script>window.__LIBRARY_BUNDLE__=${json};</script>`;
+      // Seed React Query via the generic __SSR_QUERIES__ mechanism that
+      // App.jsx already reads at module-load time (before hydrateRoot runs).
+      // Without this, React Query starts with an empty cache on the client,
+      // fires a fresh /api/content/library-bundle?slim=1 request at ~3 s,
+      // and re-renders the subject cards — causing a 5 s LCP render delay
+      // even though the cards are present in the prerendered SSR HTML.
+      // window.__LIBRARY_BUNDLE__ is kept for backward compat with any
+      // code that still reads it directly.
+      const ssrQ = JSON.stringify([
+        { key: ["library-bundle-slim"], data: slim },
+      ]).replace(/</g, "\\u003c");
+      const inlineScript =
+        `<script>window.__LIBRARY_BUNDLE__=${json};` +
+        `window.__SSR_QUERIES__=(window.__SSR_QUERIES__||[]).concat(${ssrQ});</script>`;
       routeHtml = routeHtml.replace(
         /<script type="module"/,
         `${inlineScript}\n    <script type="module"`,
+      );
+    }
+
+    // Deduplicate identical inline <style> blocks. The prerender pipeline
+    // can end up with two copies of the same CSS when beasties (Vite's
+    // critical-CSS inliner) already placed an inline <style> in
+    // dist/index.html AND the manual cssLinkRe inliner above also inlines
+    // the same file. Each byte saves HTML parse time on mobile. The
+    // deduplication is content-based so it is safe even if the two copies
+    // have different `data-*` attributes.
+    {
+      const seen = new Set();
+      routeHtml = routeHtml.replace(
+        /<style([^>]*)>([\s\S]*?)<\/style>/g,
+        (match, _attrs, content) => {
+          if (seen.has(content)) return "";
+          seen.add(content);
+          return match;
+        },
       );
     }
 
