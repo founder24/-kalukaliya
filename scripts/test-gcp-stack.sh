@@ -131,19 +131,23 @@ fi
 # =============================================================================
 _head "2. Secret Manager — Required Secrets"
 
+# Secret names must match the SM names used in cloudbuild.yaml --update-secrets,
+# NOT the Cloud Run env var names (which are different — e.g. env var MONGODB_URI
+# is backed by SM secret mongodb-uri).  Using the wrong name here produces false
+# MISSING failures even when the deploy succeeds.
 REQUIRED_SECRETS=(
-  "MONGODB_URI"
-  "JWT_SECRET"
-  "EDGE_SHARED_SECRET"
-  "ADMIN_JWT_SECRET"
-  "SARVAM_API_KEY"
-  "RESEND_API_KEY"
-  "RAZORPAY_KEY_ID"
-  "RAZORPAY_KEY_SECRET"
-  "RAZORPAY_WEBHOOK_SECRET"
+  "mongodb-uri"
+  "jwt-secret"
+  "edge-shared-secret"
+  "admin-jwt-secret"
+  "sarvam-api-key"
+  "resend-api-key"
+  "razorpay-key-id"
+  "razorpay-key-secret"
+  "razorpay-webhook-secret"
   "GOOGLE_APPLICATION_CREDENTIALS_JSON"
-  "RESET_TOKEN_SECRET"
-  "TRANSLATE_CRON_SECRET"
+  "reset-token-secret"
+  "translate-cron-secret"
 )
 
 OPTIONAL_SECRETS=(

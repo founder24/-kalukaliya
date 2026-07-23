@@ -359,8 +359,12 @@ async def chat_pipeline_health(request: Request):
             )
 
         body = resp.json()
+        # Use `or ""` rather than `.get("content", "")` because Sarvam returns
+        # `"content": null` (key present, value null) when the model uses its
+        # thinking path — `.get(key, default)` returns null in that case, not
+        # the default, causing `None.strip()` → AttributeError → HTTP 503.
         response_text = (
-            body.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            (body.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
         )
         result["sarvam_latency_ms"] = sarvam_latency_ms
         result["response_preview"] = response_text[:40]
