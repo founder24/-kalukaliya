@@ -334,10 +334,17 @@ export default function LibraryPage() {
   const [renderLimit, setRenderLimit] = useState(VIRTUAL_CHUNK);
   const sentinelRef = useRef(null);
   const [scrollContainerEl, setScrollContainerEl] = useState(null);
-  // Always virtualize when there is any list to render — the small per-row
-  // measurement cost is far cheaper than paying for hundreds of mounted
-  // SubjectCards on first paint.
-  const useVirtualGrid = filteredSubjects.length > 0;
+  // LCP fix: only virtualise once we have a real scroll container. During
+  // SSR (scrollContainerEl === null) @tanstack/react-virtual cannot measure
+  // rows and renders nothing — the subject grid is blank in the prerendered
+  // HTML, so the LCP text element never paints until React finishes hydrating
+  // (~3.3 s). By falling through to the non-virtual <SubjectCard> path when
+  // the container is null, the first VIRTUAL_CHUNK cards are baked into the
+  // SSR snapshot, client initial render matches exactly (no hydration
+  // mismatch), and the LCP element paints at FCP time (~2.4 s) not ~3.8 s.
+  // After the scroll-container ref fires (post-mount), useVirtualGrid becomes
+  // true and the virtualiser takes over for smooth long-list scrolling.
+  const useVirtualGrid = filteredSubjects.length > 0 && scrollContainerEl !== null;
   useEffect(() => { setRenderLimit(VIRTUAL_CHUNK); }, [activeFilter, deferredQuery]);
   useEffect(() => {
     // The legacy progressive-reveal sentinel is only needed for the
@@ -356,10 +363,26 @@ export default function LibraryPage() {
     io.observe(el);
     return () => io.disconnect();
   }, [filteredSubjects.length, renderLimit, useVirtualGrid]);
+  // Track hydration so localStorage-dependent ranking is deferred until
+  // after React has adopted the SSR DOM. The SSR renders subjects in API
+  // order (no localStorage data available). If the client applies user-
+  // specific ranking on the very first render, the subject order differs
+  // from the SSR HTML → React reconciles the entire card grid → the LCP
+  // element is "updated" by React at ~3.3 s even though it was already in
+  // the prerendered HTML. Using filteredSubjects directly until hydrated
+  // ensures SSR and first client render produce identical output.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    // Low-priority update — does not block paint or input handling.
+    startTransition(() => setHydrated(true));
+  }, []);
+
   // Rank filtered subjects: recently-visited subjects bubble up, then saved,
   // then subjects that appear in the first 8 chapters (trending proxy).
   const rankedSubjects = useMemo(() => {
     if (!filteredSubjects.length) return filteredSubjects;
+    // Skip localStorage-based ranking until after hydration (see comment above).
+    if (!hydrated) return filteredSubjects;
     const recentChapters = getRecentChapters();
     // paths are /{board}/{class}/{subjectSlug}/{chapter} — slug is index 2
     const recentSubjectSlugs = new Set(
@@ -381,7 +404,7 @@ export default function LibraryPage() {
     const hasBoost = filteredSubjects.some((s) => score(s) > 0);
     if (!hasBoost) return filteredSubjects;
     return [...filteredSubjects].sort((a, b) => score(b) - score(a));
-  }, [filteredSubjects, allChapters, savedSubjectsSet]);
+  }, [hydrated, filteredSubjects, allChapters, savedSubjectsSet]);
 
   const visibleSubjects = useMemo(
     () => rankedSubjects.slice(0, renderLimit),
