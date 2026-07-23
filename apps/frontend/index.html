@@ -106,14 +106,14 @@
     <link rel="dns-prefetch" href="https://us.i.posthog.com" />
     <link rel="dns-prefetch" href="https://us-assets.i.posthog.com" />
 
-    <!-- Font preconnect — reduces DNS/TLS handshake latency -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Preload primary font weight to eliminate FOIT -->
-    <link rel="preload" href="https://fonts.gstatic.com/s/spacegrotesk/v16/V8mDoQDjQSkFtoMM3T6r8E7mPbF4Cw.woff2" as="font" type="font/woff2" crossorigin />
-    <!-- Fonts: loaded as non-blocking stylesheet via media hack -->
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
-    <noscript><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
+    <!-- Space Grotesk — self-hosted (eliminates Google Fonts DNS+TLS round-trips).
+         The woff2 file is preloaded so it starts downloading immediately alongside
+         the font-face CSS. The CSS itself is non-blocking (media="print" swap) so
+         it never delays FCP — font-display:swap in the CSS ensures instant text
+         render with a fallback while the woff2 file is in-flight. -->
+    <link rel="preload" href="/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/fonts/space-grotesk.css" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="/fonts/space-grotesk.css" /></noscript>
 
     <!-- ── Security Meta Headers ── -->
     <!-- Security: handled by backend HTTP headers, not meta tags -->

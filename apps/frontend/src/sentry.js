@@ -25,3 +25,10 @@ if (dsn && import.meta.env.PROD) {
 }
 
 export { Sentry };
+
+// Expose on window so ErrorBoundary (which must NOT statically import this
+// module, to keep Sentry off the critical JS path) can call captureException
+// after Sentry has lazily loaded via requestIdleCallback in index.jsx.
+if (typeof window !== 'undefined') {
+  window.__syrabitSentry = Sentry;
+}

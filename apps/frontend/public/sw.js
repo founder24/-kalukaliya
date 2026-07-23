@@ -103,11 +103,10 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
+  // Cross-origin requests: fonts are now self-hosted (/fonts/*) so no
+  // Google Fonts caching needed. All other cross-origin requests (analytics,
+  // API) bypass the SW.
   if (url.origin !== self.location.origin) {
-    if (url.hostname.includes('fonts.googleapis.com') || url.hostname.includes('fonts.gstatic.com')) {
-      event.respondWith(cacheFirst(request, RUNTIME_CACHE));
-      return;
-    }
     return;
   }
 

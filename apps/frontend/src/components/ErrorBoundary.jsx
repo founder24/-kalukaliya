@@ -6,7 +6,13 @@
 import { Component } from 'react';
 import { RefreshCw, Home, AlertTriangle } from 'lucide-react';
 import { log } from '@/utils/logger';
-import { Sentry } from '../sentry';
+
+// DO NOT statically import sentry.js here — it puts ~400 KB of Sentry SDK
+// on the critical JS path and forces Vite to add 7 modulepreload hints that
+// the browser fetches eagerly on every page load, bloating TBT and FCP.
+// Instead, sentry.js sets window.__syrabitSentry after its lazy
+// requestIdleCallback import fires (index.jsx). We read that global here.
+function getSentry() { return typeof window !== 'undefined' ? window.__syrabitSentry : null; }
 
 export class ErrorBoundary extends Component {
   constructor(props) {
@@ -21,8 +27,8 @@ export class ErrorBoundary extends Component {
   componentDidCatch(error, errorInfo) {
     this.setState({ errorInfo });
 
-    // Report to Sentry SDK
-    try { Sentry.captureException(error, { extra: errorInfo }); } catch {}
+    // Report to Sentry SDK (loaded lazily — access via window global set by sentry.js)
+    try { getSentry()?.captureException(error, { extra: errorInfo }); } catch {}
 
     // Report to PostHog if available
     if (window.posthog) {
