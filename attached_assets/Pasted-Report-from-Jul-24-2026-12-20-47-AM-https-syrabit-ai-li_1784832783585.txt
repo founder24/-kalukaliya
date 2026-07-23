@@ -1,0 +1,509 @@
+Report from Jul 24, 2026, 12:20:47 AM
+https://syrabit.ai/library
+Enter a valid URL
+
+
+smartphone
+Mobile
+
+computer
+Desktop
+Showing results for URL: https://syrabit.ai/library/
+Run with original URL
+
+Discover what your real users are experiencing
+No Data
+
+Diagnose performance issues
+78
+Performance
+96
+Accessibility
+96
+Best Practices
+92
+SEO
+2/3
+Agentic Browsing
+78
+FCP
++6
+LCP
++8
+TBT
++30
+CLS
++25
+SI
++9
+Performance
+Values are estimated and may vary. The performance score is calculated directly from these metrics.See calculator.
+0–49
+50–89
+90–100
+Final Screenshot
+
+Metrics
+Expand view
+First Contentful Paint
+2.9 s
+Largest Contentful Paint
+4.7 s
+Total Blocking Time
+0 ms
+Cumulative Layout Shift
+0.035
+Speed Index
+3.0 s
+Captured at Jul 24, 2026, 12:20 AM GMT+5:30
+Emulated Moto G Power with Lighthouse 13.4.0
+Single page session
+Initial page load
+Slow 4G throttling
+Using HeadlessChromium 149.0.7827.155 with lr
+View Treemap
+Screenshot
+Screenshot
+Screenshot
+Screenshot
+Screenshot
+Screenshot
+Screenshot
+Screenshot
+Show audits relevant to:
+
+All
+
+FCP
+
+LCP
+
+TBT
+
+CLS
+Insights
+Legacy JavaScript Est savings of 29 KiB
+Polyfills and transforms enable older browsers to use new JavaScript features. However, many aren't necessary for modern browsers. Consider modifying your JavaScript build process to not transpile Baseline features, unless you know you must support older browsers. Learn why most sites can deploy ES6+ code without transpilingLCPFCPUnscored
+URL
+Wasted bytes
+syrabit.ai 1st party
+28.5 KiB
+/assets/dep-sentr….js(syrabit.ai)
+17.1 KiB
+/assets/dep-sentr….js:1:13110(syrabit.ai)
+Array.from
+/assets/dep-sentr….js(syrabit.ai)
+11.4 KiB
+/assets/dep-sentr….js:1:56413(syrabit.ai)
+Array.from
+Layout shift culprits
+Layout shifts occur when elements move absent any user interaction. Investigate the causes of layout shifts, such as elements being added, removed, or their fonts changing as the page loads.CLSUnscored
+Element
+Layout shift score
+Total
+0.000
+0.000
+…v22/V8mDoQDjQ….woff2(fonts.gstatic.com)
+Web font
+Element
+Layout shift score
+Total
+0.035
+Save Browse Ask AI Share
+<div class="grid grid-cols-2 gap-1.5 px-3 py-2.5 relative z-[2]" style="border-top: 1px solid hsl(var(--border) / 0.3);">
+0.035
+LCP breakdown
+Each subpart has specific improvement strategies. Ideally, most of the LCP time should be spent on loading the resources, not within delays.LCPUnscored
+Subpart
+Duration
+Time to first byte
+0 ms
+Element render delay
+640 ms
+Study mechanics, waves, optics, electricity, and modern physics with detailed A…
+<p class="text-xs leading-relaxed mb-1.5 sm:mb-2 line-clamp-1 sm:line-clamp-2 font-m…" style="color: hsl(var(--muted-foreground));">
+3rd parties
+3rd party code can significantly impact load performance. Reduce and defer loading of 3rd party code to prioritize your page's content.Unscored
+3rd party
+Transfer size
+Main thread time
+Google Fonts cdn 
+46 KiB	0 ms
+…v22/V8mDoQDjQ….woff2(fonts.gstatic.com)
+23 KiB
+0 ms
+…v16/V8mDoQDjQ….woff2(fonts.gstatic.com)
+23 KiB
+0 ms
+/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap(fonts.googleapis.com)
+1 KiB
+0 ms
+These insights are also available in the Chrome DevTools Performance Panel - record a trace to view more detailed information.
+Diagnostics
+Reduce unused JavaScript Est savings of 152 KiB
+Reduce unused JavaScript and defer loading scripts until they are required to decrease bytes consumed by network activity. Learn how to reduce unused JavaScript.LCPFCPUnscored
+URL
+Transfer Size
+Est Savings
+syrabit.ai 1st party
+169.1 KiB	152.2 KiB
+/assets/dep-sentr….js(syrabit.ai)
+53.6 KiB
+50.0 KiB
+/assets/dep-sentr….js(syrabit.ai)
+40.3 KiB
+35.3 KiB
+/assets/radix-CCqFMyfH.js(syrabit.ai)
+29.8 KiB
+24.9 KiB
+/assets/ChatPage-ByQZERVo.js(syrabit.ai)
+22.2 KiB
+21.0 KiB
+/assets/dep-sentr….js(syrabit.ai)
+23.2 KiB
+20.9 KiB
+Reduce unused CSS Est savings of 23 KiB
+Reduce unused rules from stylesheets and defer CSS not used for above-the-fold content to decrease bytes consumed by network activity. Learn how to reduce unused CSS.LCPFCPUnscored
+URL
+Transfer Size
+Est Savings
+syrabit.ai 1st party
+25.1 KiB	23.2 KiB
+/assets/index-CrlfLaiN.css(syrabit.ai)
+25.1 KiB
+23.2 KiB
+Avoid long main-thread tasks 1 long task found
+Lists the longest tasks on the main thread, useful for identifying worst contributors to input delay. Learn how to avoid long main-thread tasksTBTUnscored
+URL
+Start Time
+Duration
+syrabit.ai 1st party
+52 ms
+/assets/react-dom-C6gkyqHM.js(syrabit.ai)
+4,651 ms
+52 ms
+More information about the performance of your application. These numbers don't directly affect the Performance score.
+Passed audits (20)
+Hide
+Use efficient cache lifetimes
+Document request latency
+Optimize DOM size
+Duplicated JavaScript
+Font display
+Forced reflow
+Improve image delivery
+INP breakdown
+LCP request discovery
+Network dependency tree
+Render-blocking requests
+Optimize viewport for mobile
+Minify CSS
+Minify JavaScript
+Avoids enormous network payloads Total size was 761 KiB
+User Timing marks and measures
+JavaScript execution time 0.3 s
+Minimizes main-thread work 0.9 s
+Avoid non-composited animations
+Image elements have explicit width and height
+96
+Accessibility
+These checks highlight opportunities to improve the accessibility of your web app. Automatic detection can only detect a subset of issues and does not guarantee the accessibility of your web app, so manual testing is also encouraged.
+Contrast
+Background and foreground colors do not have a sufficient contrast ratio.
+Low-contrast text is difficult or impossible for many users to read. Learn how to provide sufficient color contrast.
+Failing Elements
+14
+<span class="ml-0.5 font-semibold" style="opacity: 0.7;">
+NOTES 14
+<button class="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px]…" style="background: rgba(139, 92, 246, 0.08); color: rgb(124, 58, 237);">
+NOTES 14 QUESTIONS PYQS 1 Units and Measurements 2 Motion in a Straight Line 3 …
+<div class="mx-3 mb-2 sm:mb-3 rounded-xl overflow-hidden relative z-[2]" style="background: rgba(139, 92, 246, 0.03);">
+Browse 109 subjects · 480 chapters EN অস All ★ Saved Science Arts Commerce B.A…
+<div class="flex h-screen bg-background overflow-hidden">
+These are opportunities to improve the legibility of your content.
+Best practices
+Uses ARIA roles only on compatible elements
+Many HTML elements can only be assigned certain ARIA roles. Using ARIA roles where they are not allowed can interfere with the accessibility of the web page. Learn more about ARIA roles.Unscored
+Failing Elements
+Syrabit.aiBrowserChatHistoryProfileSign In
+<aside class="hidden md:flex flex-col h-screen sticky top-0 border-r transition-all dura…" role="navigation" aria-label="Main navigation" data-testid="app-sidebar" style="background: var(--sidebar-glass); backdrop-filter: blur(20px);">
+Identical links have the same purpose.
+Links with the same destination should have the same description, to help users understand the link's purpose and decide whether to follow it. Learn more about identical links.Unscored
+Failing Elements
+Browse
+<a class="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs fo…" href="/ahsec/hs-1st-year/physics" data-discover="true" style="color: hsl(var(--muted-foreground)); background: transparent;">
+Browse
+<a class="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs fo…" href="/ahsec/hs-1st-year/chemistry" data-discover="true" style="color: hsl(var(--muted-foreground)); background: transparent;">
+Browse
+<a class="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs fo…" href="/ahsec/hs-1st-year/mathematics" data-discover="true" style="color: hsl(var(--muted-foreground)); background: transparent;">
+Browse
+<a class="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs fo…" href="/ahsec/hs-1st-year/biology" data-discover="true" style="color: hsl(var(--muted-foreground)); background: transparent;">
+These items highlight common accessibility best practices.
+Additional items to manually check (10)
+Hide
+Interactive controls are keyboard focusable
+Interactive elements indicate their purpose and state
+The page has a logical tab order
+Visual order on the page follows DOM order
+User focus is not accidentally trapped in a region
+The user's focus is directed to new content added to the page
+HTML5 landmark elements are used to improve navigation
+Offscreen content is hidden from assistive technology
+Custom controls have associated labels
+Custom controls have ARIA roles
+These items address areas which an automated testing tool cannot cover. Learn more in our guide on conducting an accessibility review.
+Passed audits (24)
+Hide
+[aria-*] attributes match their roles
+[aria-hidden="true"] is not present on the document <body>
+[role]s have all required [aria-*] attributes
+[role] values are valid
+[aria-*] attributes have valid values
+[aria-*] attributes are valid and not misspelled
+Buttons have an accessible name
+Image elements have [alt] attributes
+Form elements have associated labels
+[user-scalable="no"] is not used in the <meta name="viewport"> element and the [maximum-scale] attribute is not less than 5.
+ARIA attributes are used as specified for the element's role
+[aria-hidden="true"] elements do not contain focusable descendents
+Elements use only permitted ARIA attributes
+Document has a <title> element
+<html> element has a [lang] attribute
+<html> element has a valid value for its [lang] attribute
+Links are distinguishable without relying on color.
+Links have a discernible name
+No element has a [tabindex] value greater than 0
+Touch targets have sufficient size and spacing.
+Heading elements appear in a sequentially-descending order
+Skip links are focusable.
+Document has a main landmark.
+Deprecated ARIA roles were not used
+Not applicable (36)
+Hide
+[accesskey] values are unique
+button, link, and menuitem elements have accessible names
+Elements with role="dialog" or role="alertdialog" have accessible names.
+ARIA input fields have accessible names
+ARIA meter elements have accessible names
+ARIA progressbar elements have accessible names
+Elements with an ARIA [role] that require children to contain a specific [role] have all required children.
+[role]s are contained by their required parent element
+Elements with the role=text attribute do not have focusable descendents.
+ARIA toggle fields have accessible names
+ARIA tooltip elements have accessible names
+ARIA treeitem elements have accessible names
+The page contains a heading, skip link, or landmark region
+<dl>'s contain only properly-ordered <dt> and <dd> groups, <script>, <template> or <div> elements.
+Definition list items are wrapped in <dl> elements
+ARIA IDs are unique
+No form fields have multiple labels
+<frame> or <iframe> elements have a title
+<html> element has an [xml:lang] attribute with the same base language as the [lang] attribute.
+Input buttons have discernible text.
+<input type="image"> elements have [alt] text
+Lists contain only <li> elements and script supporting elements (<script> and <template>).
+List items (<li>) are contained within <ul>, <ol> or <menu> parent elements
+The document does not use <meta http-equiv="refresh">
+<object> elements have alternate text
+Select elements have associated label elements.
+Cells in a <table> element that use the [headers] attribute refer to table cells within the same table.
+<th> elements and elements with [role="columnheader"/"rowheader"] have data cells they describe.
+[lang] attributes have a valid value
+<video> elements contain a <track> element with [kind="captions"]
+autocomplete attributes are used correctly
+Elements with role="none" or role="presentation" do not have conflicts
+SVG elements with an img role have an accessible text alternative
+Tables have different content in the summary attribute and <caption>.
+All heading elements contain content.
+Image elements do not have [alt] attributes that are redundant text.
+96
+Best Practices
+General
+Browser errors were logged to the console
+Errors logged to the console indicate unresolved problems. They can come from network request failures and other browser concerns. Learn more about this errors in console diagnostic audit
+Source
+Description
+syrabit.ai 1st party
+…analytics/page-view:1:0(api.syrabit.ai)
+Failed to load resource: net::ERR_TIMED_OUT
+…analytics/page-view:1:0(api.syrabit.ai)
+Failed to load resource: net::ERR_TIMED_OUT
+…analytics/page-view:1:0(api.syrabit.ai)
+Failed to load resource: net::ERR_TIMED_OUT
+…users/me:1:0(api.syrabit.ai)
+Failed to load resource: the server responded with a status of 401 (Unauthorized)
+/library/:1:0(syrabit.ai)
+InvalidStateError: Failed to update a ServiceWorker for scope ('https://syrabit.ai/') with script ('Unknown'): The object is in an invalid state.
+Trust and Safety
+Ensure CSP is effective against XSS attacks
+A strong Content Security Policy (CSP) significantly reduces the risk of cross-site scripting (XSS) attacks. Learn how to use a CSP to prevent XSSUnscored
+Description
+Directive
+Severity
+Host allowlists can frequently be bypassed. Consider using CSP nonces or hashes instead, along with `'strict-dynamic'` if necessary.
+script-src
+High
+`'unsafe-inline'` allows the execution of unsafe in-page scripts and event handlers. Consider using CSP nonces or hashes to allow scripts individually.
+script-src
+High
+Mitigate DOM-based XSS with Trusted Types
+The require-trusted-types-for directive in the Content-Security-Policy (CSP) header instructs user agents to control the data passed to DOM XSS sink functions. Learn more about mitigating DOM-based XSS with Trusted Types.Unscored
+Description
+Severity
+No `Content-Security-Policy` header with Trusted Types directive found
+High
+Browser Compatibility
+Baseline Features
+Lists web features used on the page and their Baseline status as of 2026-06-05. Learn more about Baseline.Unscored
+Web-features
+Baseline Status
+Source
+syrabit.ai 1st party
+ua-client-hints	
+Limited Availability
+/assets/dep-sentr….js:3:18211(syrabit.ai)
+layout-instability	
+Limited Availability
+/assets/vendor-D9jgIU0k.js:1:3987(syrabit.ai)
+display-mode	
+Limited Availability
+/assets/PWAInstal….js:1:1245(syrabit.ai)
+fetch-priority	
+Newly Available (2024-10-29)
+/assets/prefetchRoute-DDGaHTBJ.js:2:1645(syrabit.ai)
+nullish-coalescing	
+Widely Available (2020-09-16)
+/library/:306:0(syrabit.ai)
+logical-assignments	
+Widely Available (2020-09-16)
+/library/:306:0(syrabit.ai)
+request-animation-frame	
+Widely Available (2015-07-29)
+/assets/index-B3nW8QsH.js:2:82374(syrabit.ai)
+grid	
+Widely Available (2017-10-17)
+/assets/AppLayout-5yrr3eTv.js:1:5735(syrabit.ai)
+aborting	
+Widely Available (2019-03-25)
+/assets/query-D_Mslyga.js:1:11582(syrabit.ai)
+intersection-observer	
+Widely Available (2019-03-25)
+/assets/LibraryPa….js:3:28555(syrabit.ai)
+Unattributable
+requestidlecallback	
+Limited Availability
+_lighthouse-eval.js:9:109
+background-clip-text	
+Limited Availability
+marker	
+Limited Availability
+accent-color	
+Limited Availability
+scrollbar-width	
+Newly Available (2024-12-11)
+backdrop-filter	
+Newly Available (2024-09-16)
+uint8array-base64-hex	
+Newly Available (2025-09-05)
+content-visibility	
+Newly Available (2025-09-15)
+text-wrap	
+Newly Available (2024-10-17)
+referrer-policy	
+Widely Available (2021-09-20)
+color-scheme	
+Widely Available (2022-02-03)
+js-modules	
+Widely Available (2018-05-09)
+where	
+Widely Available (2021-01-21)
+not	
+Widely Available (2021-01-21)
+outline	
+Widely Available (2023-03-27)
+webp	
+Widely Available (2020-09-16)
+flexbox	
+Widely Available (2015-09-30)
+file-selector-button	
+Widely Available (2021-04-26)
+focus-visible	
+Widely Available (2022-03-14)
+text-indent	
+Widely Available (2015-07-29)
+text-underline-offset	
+Widely Available (2020-11-19)
+aspect-ratio	
+Widely Available (2021-09-20)
+appearance	
+Widely Available (2022-03-14)
+contain-intrinsic-size	
+Widely Available (2023-09-18)
+hyphens	
+Widely Available (2023-09-18)
+Passed audits (12)
+Hide
+Uses HTTPS
+Avoids deprecated APIs
+Avoids third-party cookies
+Allows users to paste into input fields
+Avoids requesting the geolocation permission on page load
+Avoids requesting the notification permission on page load
+Displays images with correct aspect ratio
+Serves images with appropriate resolution
+Page has the HTML doctype
+Properly defines charset
+No issues in the Issues panel in Chrome Devtools
+Page has valid source maps
+Not applicable (5)
+Hide
+Redirects HTTP traffic to HTTPS
+Use a strong HSTS policy
+Ensure proper origin isolation with COOP
+Mitigate clickjacking with XFO or CSP
+Detected JavaScript libraries
+92
+SEO
+These checks ensure that your page is following basic search engine optimization advice. There are many additional factors Lighthouse does not score here that may affect your search ranking, including performance on Core Web Vitals. Learn more about Google Search Essentials.
+Content Best Practices
+Links do not have descriptive text 1 link found
+Descriptive link text helps search engines understand your content. Learn how to make links more accessible.
+Link destination
+Link Text
+syrabit.ai 1st party
+/privacy(syrabit.ai)
+Learn more
+Format your HTML in a way that enables crawlers to better understand your app’s content.
+Additional items to manually check (1)
+Hide
+Structured data is valid
+Run these additional validators on your site to check additional SEO best practices.
+Passed audits (9)
+Hide
+Page isn’t blocked from indexing
+Document has a <title> element
+Document has a meta description
+Page has successful HTTP status code
+Links are crawlable
+robots.txt is valid
+Image elements have [alt] attributes
+Document has a valid hreflang
+Document has a valid rel=canonical
+2/3
+Agentic Browsing
+These checks ensure high-quality, browsable websites for AI agents and validate the correctness of WebMCP integrations. This category is still under development and subject to change.
+Agent Accessibility
+llms.txt does not follow recommendations
+If your llms.txt file does not follow recommendations, large language models may not be able to understand how you want your website to be crawled or used for training. The llms.txt file should be a Markdown file containing at least one H1 header.
+Error
+File does not appear to contain any links.
+These audits highlight best practices for improving the accessibility of the website for AI agents.
+Passed audits (2)
+Hide
+Accessibility tree is well-formed All audits passed
+Cumulative Layout Shift 0.035
+Not applicable (3)
+Hide
+WebMCP form coverage
+WebMCP tools registered
+WebMCP schemas are valid
