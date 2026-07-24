@@ -709,7 +709,10 @@
 
 
   /* Light-theme markdown (SubjectPage uses light mode) */
-  .md-content-light { color: hsl(var(--foreground)); line-height: 1.75; }
+  /* -webkit-text-fill-color reset: overrides inherited transparent fill
+     from .shimmer-text (e.g. EmptyState h2 on mobile) which otherwise
+     bleeds into the AI response bubble on sibling renders. */
+  .md-content-light { color: hsl(var(--foreground)); -webkit-text-fill-color: currentColor; line-height: 1.75; }
   .md-content-light h1 { font-size: 1.5rem; font-weight: 700; margin: 1.2rem 0 0.5rem; border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.35rem; }
   .md-content-light h2 { font-size: 1.2rem; font-weight: 700; margin: 1rem 0 0.4rem; }
   .md-content-light h3 { font-size: 1rem; font-weight: 600; margin: 0.8rem 0 0.3rem; }

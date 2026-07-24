@@ -199,12 +199,18 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
       )}
 
       {!isUser && (
-        <div className="w-full">
+        /* Inline color + WebkitTextFillColor reset ensures the AI response
+           text is always dark and readable regardless of any CSS cascade
+           issue, including inherited -webkit-text-fill-color: transparent
+           from .shimmer-text on sibling/ancestor elements (e.g. EmptyState
+           heading on mobile). Mirrors the same hardcoded-color approach used
+           by the user bubble which is always crisp. */
+        <div className="w-full" style={{ color: '#0a0a1a', WebkitTextFillColor: 'currentColor' }}>
           <div className="flex items-center gap-2 mb-1">
             <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0">
               <img src="/logo-56.webp" alt="Syrabit.ai" width="20" height="20" className="w-full h-full object-cover" />
             </div>
-            <span className="text-xs font-semibold text-foreground/70">Syrabit AI</span>
+            <span className="text-xs font-semibold" style={{ color: 'rgba(10,10,26,0.70)' }}>Syrabit AI</span>
           </div>
           <div className="w-full" style={msg.streaming ? { willChange: 'contents', contain: 'layout style' } : undefined}>
             {msg.streaming && !msg.content && !msg.translating && (
