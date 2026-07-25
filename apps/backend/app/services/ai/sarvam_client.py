@@ -281,15 +281,24 @@ class SarvamAIClient:
         await self._client.aclose()
 
     async def generate(
-        self, system_prompt: str, user_message: str, stream: bool = False
+        self, system_prompt: str, user_message: str,
+        stream: bool = False, is_assamese: bool = False,
     ) -> str:
-        """Generate response using Sarvam AI (sarvam-m model).
+        """Generate a non-streaming response using Sarvam AI.
+
+        Args:
+            system_prompt: System instruction.
+            user_message:  User input / content to translate or process.
+            stream:        Whether to stream (default False).
+            is_assamese:   Hint that the expected output is Assamese.
+                           Used only to widen max_tokens; both EN and AS
+                           responses come back in the content field when
+                           enable_thinking=False.
 
         Retry policy:
           - 429 Too Many Requests → wait 3 s then retry once
           - 500 / 502 / 503 from Sarvam → wait 2 s then retry once
-        httpx.HTTPStatusError is re-raised after exhaustion so chat.py can
-        return an appropriate response to the client.
+        httpx.HTTPStatusError is re-raised after exhaustion.
         """
         if not self.api_key:
             raise RuntimeError("Sarvam AI not configured (SARVAM_API_KEY is empty)")
@@ -308,11 +317,13 @@ class SarvamAIClient:
                         {"role": "user", "content": user_message},
                     ],
                     "temperature": 0.3,
-                    # enable_thinking=False: sarvam-30b streams the answer in
-                    # reasoning_content (fast TTFB ~150ms); content is always
-                    # empty for this model regardless of the setting.
+                    # enable_thinking=False: sarvam-30b puts the final clean
+                    # answer in the content field (confirmed by live tests).
+                    # reasoning_content holds the internal thinking chain and
+                    # must NOT be used as the answer for non-streaming calls.
                     "enable_thinking": False,
-                    "max_tokens": 1200,
+                    # Assamese output needs more tokens (script is denser)
+                    "max_tokens": 2048 if is_assamese else 1200,
                     "stream": stream,
                 },
             )
@@ -321,11 +332,8 @@ class SarvamAIClient:
 
             if "choices" in data and len(data["choices"]) > 0:
                 msg = data["choices"][0]["message"]
-                # Use content only — the final answer from the model.
-                # reasoning_content is the internal thinking chain; do not
-                # surface it to users.
-                content = msg.get("content") or ""
-                return content
+                # content holds the clean final answer for enable_thinking=False
+                return (msg.get("content") or "").strip()
             return ""
 
         _last_http_exc: httpx.HTTPStatusError | None = None

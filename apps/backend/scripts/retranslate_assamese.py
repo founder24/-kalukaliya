@@ -29,26 +29,42 @@ FORCE       = True   # always force — this script exists to fix bad translatio
 
 async def main():
     # ── Bootstrap Beanie / MongoDB ──────────────────────────────────────────
-    from beanie import init_beanie
-    from motor.motor_asyncio import AsyncIOMotorClient
+    # Use the same init_mongo() path the app uses so Beanie + pymongo version
+    # compat is handled correctly (AsyncMongoClient, not motor).
+    from app.db.mongo import init_mongo, close_mongo
     from app.config import settings
 
-    mongo_url = settings.MONGODB_URL or os.environ.get("MONGODB_URL")
-    db_name   = getattr(settings, "MONGODB_DB_NAME", None) or os.environ.get("MONGODB_DB_NAME", "syrabit_prod")
+    # Ensure MONGODB_URI is available (it may come from MONGODB_URL env var)
+    if not settings.MONGODB_URI:
+        mongo_url = os.environ.get("MONGODB_URL") or os.environ.get("MONGODB_URI")
+        if mongo_url:
+            settings.MONGODB_URI = mongo_url  # type: ignore[attr-defined]
+        else:
+            log.error("No MONGODB_URI / MONGODB_URL in environment. Aborting.")
+            return
 
-    client = AsyncIOMotorClient(mongo_url)
-    db     = client[db_name]
-
-    # Import all document models that Beanie needs
-    from app.models.content   import Chapter, Subject, Topic
-    from app.models.seed_run  import SeedRun
-    from app.models.user      import User
-
-    await init_beanie(
-        database=db,
-        document_models=[Chapter, Subject, Topic, SeedRun, User],
-    )
+    db_name = settings.MONGODB_DB_NAME or "syrabit_prod"
+    await init_mongo()
     log.info(f"MongoDB connected — db={db_name!r}")
+
+    # ── Load SARVAM_API_KEY from GCP Secret Manager ─────────────────────────
+    try:
+        from app.core.secret_manager import load_secrets_into_settings
+        from app.services.ai.sarvam_client import sarvam_client
+        sm_results = await load_secrets_into_settings()
+        if settings.SARVAM_API_KEY:
+            sarvam_client.api_key = settings.SARVAM_API_KEY
+            log.info(f"Sarvam key loaded (prefix={settings.SARVAM_API_KEY[:8]}...)")
+        else:
+            log.error("SARVAM_API_KEY still empty after Secret Manager fetch — aborting.")
+            return
+    except Exception as e:
+        log.error(f"Failed to load secrets: {e}")
+        return
+
+    # Import models AFTER init_mongo so Beanie is already initialised
+    from app.models.content  import Chapter   # noqa: E402
+    from app.models.seed_run import SeedRun   # noqa: E402
 
     # ── Find candidate chapters ─────────────────────────────────────────────
     # All chapters with English content (regardless of whether they have AS)
@@ -116,11 +132,11 @@ async def main():
         f"Log:  /tmp/retranslate_assamese.log\n"
         f"{'─'*60}"
     )
-    client.close()
+    await close_mongo()
 
 
 async def _flush(run_id, completed, failed, skipped, failed_ids, finished: bool):
-    from app.models.seed_run import SeedRun
+    from app.models.seed_run import SeedRun   # noqa: F811
     from beanie import PydanticObjectId
     try:
         now = datetime.now(timezone.utc)

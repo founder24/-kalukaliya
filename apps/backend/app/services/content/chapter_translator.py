@@ -40,7 +40,7 @@ class ChapterTranslator:
             return text
         for attempt in range(retries):
             try:
-                return await sarvam_client.generate(system_prompt, text)
+                return await sarvam_client.generate(system_prompt, text, is_assamese=True)
             except Exception as e:
                 if attempt == retries - 1:
                     raise

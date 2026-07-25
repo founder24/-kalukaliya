@@ -37,7 +37,7 @@ class ContentTranslator:
         """Translate with exponential backoff retry."""
         for attempt in range(max_retries):
             try:
-                return await sarvam_client.generate(system_prompt, user_message)
+                return await sarvam_client.generate(system_prompt, user_message, is_assamese=True)
             except Exception as e:
                 if attempt == max_retries - 1:
                     raise

@@ -246,7 +246,7 @@ class ContentGenerationService:
         translated_parts = []
         for idx, chunk in enumerate(chunks):
             try:
-                part = await sarvam_client.generate(translate_prompt, chunk)
+                part = await sarvam_client.generate(translate_prompt, chunk, is_assamese=True)
                 if part and part.strip():
                     translated_parts.append(part.strip())
             except Exception as e:
@@ -385,7 +385,7 @@ class ContentGenerationService:
             logger.info(
                 f"Translating chunk {idx + 1}/{len(chunks)} for {chapter.title!r}"
             )
-            part = await sarvam_client.generate(translate_prompt, chunk)
+            part = await sarvam_client.generate(translate_prompt, chunk, is_assamese=True)
             if part and part.strip():
                 translated_parts.append(part.strip())
 
