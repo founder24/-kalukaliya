@@ -3,11 +3,20 @@ from pydantic import BaseModel
 from typing import Optional, List
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.models.user import User
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.anon import resolve_anon_id
+
+# AI-credit limits per tier (authoritative — matches billing pipeline)
+CREDITS_LIMITS: dict[str, int] = {
+    "free":    30,
+    "starter": 100,
+    "pro":     1000,
+    "premium": 9999,
+}
+DELETION_GRACE_HOURS = 72  # hours before hard-delete fires
 
 logger = logging.getLogger(__name__)
 
@@ -58,22 +67,10 @@ class OnboardingRequest(BaseModel):
 
 # ─── /me endpoints (original) ────────────────────────────────────────────────
 
-@router.get("/me", response_model=UserProfile)
+@router.get("/me")
 async def get_current_user_profile(user: User = Depends(get_current_user)):
-    """Get current user profile."""
-    return UserProfile(
-        id=str(user.id),
-        name=user.name or "",
-        email=user.email or "",
-        role=user.role,
-        subscription_tier=user.subscription_tier,
-        plan=user.subscription_tier,
-        monthly_message_count=user.monthly_message_count,
-        preferred_language=user.preferred_language,
-        onboarding_done=user.onboarding_done,
-        ads_opt_out=user.ads_opt_out,
-        saved_subjects=user.saved_subjects or [],
-    )
+    """Get current user profile — full response including academic + credit fields."""
+    return _build_profile_response(user)
 
 
 @router.put("/me")
@@ -120,22 +117,60 @@ async def delete_account(user: User = Depends(get_current_user)):
 
 # ─── /profile aliases (frontend uses /user/profile) ──────────────────────────
 
-@router.get("/profile", response_model=UserProfile)
+def _build_profile_response(user: User) -> dict:
+    """Build the full profile dict sent to the frontend.
+
+    Returns every field the profile page needs — academic details,
+    credit limits, deletion state — rather than the slim UserProfile model.
+    """
+    tier = user.subscription_tier or "free"
+    credits_limit = CREDITS_LIMITS.get(tier, CREDITS_LIMITS["free"])
+    credits_used = user.credits_used or 0
+    credits_remaining = user.credits_remaining if user.credits_remaining else max(0, credits_limit - credits_used)
+
+    # Soft-delete state
+    status = "active"
+    deletion_hard_at = None
+    if getattr(user, "deletion_requested", False) and user.deletion_scheduled_at:
+        status = "pending_deletion"
+        deletion_hard_at = (
+            user.deletion_scheduled_at + timedelta(hours=DELETION_GRACE_HOURS)
+        ).isoformat()
+
+    return {
+        "id":                   str(user.id),
+        "name":                 user.name or "",
+        "email":                user.email or "",
+        "role":                 user.role,
+        "subscription_tier":   tier,
+        "plan":                 tier,
+        "monthly_message_count": user.monthly_message_count,
+        "preferred_language":  user.preferred_language,
+        "onboarding_done":     user.onboarding_done,
+        "ads_opt_out":         user.ads_opt_out,
+        "saved_subjects":      user.saved_subjects or [],
+        # Academic profile
+        "phone":               user.phone,
+        "board_id":            user.board_id,
+        "board_name":          user.board_name,
+        "class_id":            user.class_id,
+        "class_name":          user.class_name,
+        "stream_id":           user.stream_id,
+        "stream_name":         user.stream_name,
+        # Credits
+        "credits_used":        credits_used,
+        "credits_limit":       credits_limit,
+        "credits_remaining":   credits_remaining,
+        # Account state
+        "status":              status,
+        "deletion_hard_at":    deletion_hard_at,
+    }
+
+
+@router.get("/profile")
 async def get_profile_alias(user: User = Depends(get_current_user)):
-    """Alias for GET /me — frontend calls /user/profile."""
-    return UserProfile(
-        id=str(user.id),
-        name=user.name or "",
-        email=user.email or "",
-        role=user.role,
-        subscription_tier=user.subscription_tier,
-        plan=user.subscription_tier,
-        monthly_message_count=user.monthly_message_count,
-        preferred_language=user.preferred_language,
-        onboarding_done=user.onboarding_done,
-        ads_opt_out=user.ads_opt_out,
-        saved_subjects=user.saved_subjects or [],
-    )
+    """Full profile — frontend calls GET /user/profile."""
+    return _build_profile_response(user)
 
 
 @router.patch("/profile")
@@ -177,34 +212,39 @@ async def patch_profile(
 
 @router.delete("/account")
 async def delete_account_alias(user: User = Depends(get_current_user)):
-    """Delete account — frontend calls DELETE /user/account."""
-    from app.models.chat import Chat
+    """Schedule account deletion — frontend calls DELETE /user/account.
 
-    await Chat.find({"user_id": str(user.id)}).delete()
+    Implements a 72-hour grace period (GDPR/DPDP soft-delete):
+    - Sets deletion_requested=True + deletion_scheduled_at=now()
+    - Returns hard_delete_at so the frontend can show a countdown
+    - A background job (or next cron run) hard-deletes after the window
+    - Cancel via POST /user/account/cancel-delete within the window
+    """
+    now = datetime.now(timezone.utc)
+    hard_delete_at = now + timedelta(hours=DELETION_GRACE_HOURS)
 
-    from app.models.feedback import ChatFeedback
+    await user.update({
+        "$set": {
+            "deletion_requested":    True,
+            "deletion_scheduled_at": now,
+        }
+    })
 
-    await ChatFeedback.find({"user_id": str(user.id)}).delete()
-
-    from app.db.mongo import get_mongo_client
-    from app.config import settings
-
-    client = get_mongo_client()
-    db = client[settings.MONGODB_DB_NAME]
-    await db.dead_letters.delete_many({"user_id": str(user.id)})
-    await db.memory_brain.delete_many({"user_id": str(user.id)})
-
-    await user.delete()
-
-    logger.info(f"User account deleted via /account: {user.email}")
-    return {"status": "success", "message": "Account deleted"}
+    logger.info(f"Account deletion scheduled: {user.email} — hard_delete_at={hard_delete_at.isoformat()}")
+    return {
+        "status":          "pending_deletion",
+        "hard_delete_at":  hard_delete_at.isoformat(),
+        "message":         f"Account scheduled for deletion in {DELETION_GRACE_HOURS} hours",
+    }
 
 
 @router.post("/account/cancel-delete")
 async def cancel_account_deletion(user: User = Depends(get_current_user)):
-    """Cancel a scheduled account deletion."""
-    updates = {"deletion_scheduled_at": None, "deletion_requested": False}
-    await user.update({"$unset": {"deletion_scheduled_at": ""}, "$set": {"deletion_requested": False}})
+    """Cancel a scheduled account deletion within the grace window."""
+    await user.update({
+        "$set":   {"deletion_requested": False},
+        "$unset": {"deletion_scheduled_at": ""},
+    })
     logger.info(f"Account deletion cancelled: {user.email}")
     return {"status": "success", "message": "Account deletion cancelled"}
 
@@ -214,47 +254,80 @@ async def cancel_account_deletion(user: User = Depends(get_current_user)):
 @router.get("/memories")
 async def list_memories(
     user: User = Depends(get_current_user),
+    # Frontend sends limit+offset; also accept page+per_page for API clients
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
     page: int = 1,
     per_page: int = 20,
     kind: Optional[str] = None,
+    subject_id: Optional[str] = None,
     q: Optional[str] = None,
 ):
-    """List saved memories for the current user from memory_brain collection."""
+    """List saved memories for the current user from memory_brain collection.
+
+    Accepts both pagination styles:
+      - Frontend: ?limit=20&offset=0
+      - API clients: ?page=1&per_page=20
+    """
     from app.db.mongo import get_mongo_client
     from app.config import settings
 
     db = get_mongo_client()[settings.MONGODB_DB_NAME]
 
+    # Resolve pagination — limit/offset takes precedence when provided
+    if limit is not None:
+        page_size = max(1, min(limit, 100))
+        skip = max(0, offset or 0)
+    else:
+        page_size = max(1, min(per_page, 100))
+        skip = (max(1, page) - 1) * page_size
+
     query: dict = {"user_id": str(user.id)}
     if kind and kind != "all":
         query["kind"] = kind
+    if subject_id:
+        query["subject_id"] = subject_id
     if q:
-        query["text"] = {"$regex": q, "$options": "i"}
+        # Search both text and content fields
+        query["$or"] = [
+            {"text":    {"$regex": q, "$options": "i"}},
+            {"content": {"$regex": q, "$options": "i"}},
+        ]
 
-    skip = (page - 1) * per_page
     try:
         total = await db.memory_brain.count_documents(query)
-        cursor = db.memory_brain.find(query).sort("created_at", -1).skip(skip).limit(per_page)
-        docs = await cursor.to_list(length=per_page)
+        cursor = db.memory_brain.find(query).sort("created_at", -1).skip(skip).limit(page_size)
+        docs = await cursor.to_list(length=page_size)
     except Exception as e:
         logger.error(f"list_memories error: {e}")
-        return {"items": [], "total": 0, "page": page, "pages": 0}
+        return {"items": [], "total": 0, "page": page, "pages": 0, "has_more": False}
 
     items = []
     for doc in docs:
         items.append({
-            "id": str(doc.get("_id", "")),
-            "text": doc.get("text", doc.get("content", "")),
-            "kind": doc.get("kind", "note"),
+            "id":           str(doc.get("_id", "")),
+            "text":         doc.get("text", doc.get("content", "")),
+            "kind":         doc.get("kind", "note"),
+            "subject_id":   doc.get("subject_id"),
             "subject_name": doc.get("subject_name"),
             "chapter_name": doc.get("chapter_name"),
-            "event": doc.get("event"),
-            "created_at": doc.get("created_at", datetime.now(timezone.utc)).isoformat()
-            if doc.get("created_at") else None,
+            "event":        doc.get("event"),
+            "created_at":   doc.get("created_at", datetime.now(timezone.utc)).isoformat()
+                            if doc.get("created_at") else None,
         })
 
-    pages = max(1, -(-total // per_page))  # ceiling division
-    return {"items": items, "total": total, "page": page, "pages": pages}
+    fetched_so_far = skip + len(items)
+    has_more = fetched_so_far < total
+    pages = max(1, -(-total // page_size))  # ceiling division
+
+    return {
+        "items":    items,
+        "total":    total,
+        "has_more": has_more,
+        # Keep page/pages for API client compat
+        "page":     page if limit is None else (skip // page_size + 1),
+        "pages":    pages,
+    }
 
 
 @router.delete("/memories")

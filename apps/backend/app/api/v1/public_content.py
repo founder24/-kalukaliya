@@ -1150,7 +1150,9 @@ async def get_question_papers(
 
     # ── Source 4: pyqs raw collection (is_image=True entries) ──
     try:
-        raw_db = Chapter.get_motor_collection().database
+        from app.db.mongo import get_mongo_client
+        from app.config import settings as _settings
+        raw_db = get_mongo_client()[_settings.MONGODB_DB_NAME]
         pyqs_col = raw_db["pyqs"]
         cursor = pyqs_col.find(
             {"is_image": True, "file_url": {"$exists": True, "$ne": None, "$ne": ""}}
