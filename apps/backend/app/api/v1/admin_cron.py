@@ -15,6 +15,9 @@ from fastapi import APIRouter, HTTPException, Request
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Admin Cron"])
 
+# How often (in chapters processed) to flush progress to MongoDB
+_MONGO_FLUSH_EVERY = 5
+
 
 def _verify_cron_token(request: Request) -> None:
     """Validate Bearer token against TRANSLATE_CRON_SECRET."""
@@ -91,7 +94,7 @@ async def cron_seed_notes(request: Request):
         }
 
     Returns immediately:
-        { "job": "started", "total_queued": N }
+        { "job": "started", "run_id": "<id>", "total_queued": N }
     """
     _verify_cron_token(request)
 
@@ -101,7 +104,7 @@ async def cron_seed_notes(request: Request):
     except Exception:
         pass
 
-    # Check if a job is already running
+    # Check if a job is already running (in-process guard first, fast path)
     existing = getattr(request.app.state, "seed_notes_status", {})
     if existing.get("running"):
         raise HTTPException(
@@ -158,9 +161,27 @@ async def cron_seed_notes(request: Request):
         return {"job": "nothing_to_do", "total_queued": 0,
                 "message": "All chapters already have content (pass force=true to regenerate)"}
 
-    # ── Initialise status ──────────────────────────────────────────────────────
+    # ── Create a persistent run document in MongoDB ────────────────────────────
+    from app.models.seed_run import SeedRun
+
+    run = SeedRun(
+        status="running",
+        total=total,
+        concurrency=concurrency,
+        force=force,
+    )
+    try:
+        await run.insert()
+        run_id = str(run.id)
+    except Exception as e:
+        logger.warning(f"Failed to insert seed_run document: {e} — continuing without DB persistence")
+        run_id = "unavailable"
+        run = None
+
+    # ── Initialise in-process status ──────────────────────────────────────────
     request.app.state.seed_notes_status = {
         "running":       True,
+        "run_id":        run_id,
         "total":         total,
         "completed":     0,
         "failed":        0,
@@ -169,7 +190,7 @@ async def cron_seed_notes(request: Request):
         "current":       "",
         "failed_ids":    [],
         "errors":        [],
-        "started_at":    datetime.now(timezone.utc).isoformat(),
+        "started_at":    run.started_at.isoformat() if run else datetime.now(timezone.utc).isoformat(),
         "finished_at":   None,
         "concurrency":   concurrency,
         "force":         force,
@@ -182,38 +203,124 @@ async def cron_seed_notes(request: Request):
             chapters=chapters,
             concurrency=concurrency,
             force=force,
+            run_id=run_id,
         )
     )
 
-    return {"job": "started", "total_queued": total, "concurrency": concurrency}
+    return {"job": "started", "run_id": run_id, "total_queued": total, "concurrency": concurrency}
 
 
 @router.get("/cron/seed-notes/status")
 async def cron_seed_notes_status(request: Request):
     """Return live progress of the running (or last completed) seed-notes job.
 
+    Falls back to the latest MongoDB run document when the in-process state
+    is missing (e.g. after a server restart).
+
     Auth: Bearer {TRANSLATE_CRON_SECRET}
     """
     _verify_cron_token(request)
 
     status = getattr(request.app.state, "seed_notes_status", None)
-    if status is None:
+    if status is not None:
+        # Calculate ETA from in-process state
+        result = dict(status)
+        done = status["completed"] + status["failed"] + status["skipped"]
+        if status["running"] and done > 0:
+            started = datetime.fromisoformat(status["started_at"])
+            elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+            rate = done / elapsed  # chapters/sec
+            remaining = status["total"] - done
+            result["eta_seconds"] = round(remaining / rate) if rate > 0 else None
+            result["elapsed_seconds"] = round(elapsed)
+        return result
+
+    # ── Fallback: read latest run from MongoDB ─────────────────────────────────
+    try:
+        from app.models.seed_run import SeedRun
+        latest = await SeedRun.find_one(
+            sort=[("started_at", -1)]
+        )
+        if latest is None:
+            return {"running": False, "message": "No seed-notes job has been started yet."}
+
+        return _seed_run_to_dict(latest)
+    except Exception as e:
+        logger.warning(f"Failed to read seed_run from MongoDB: {e}")
         return {"running": False, "message": "No seed-notes job has been started yet."}
 
-    # Calculate ETA
-    result = dict(status)
-    done = status["completed"] + status["failed"] + status["skipped"]
-    if status["running"] and done > 0:
-        started = datetime.fromisoformat(status["started_at"])
-        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-        rate = done / elapsed  # chapters/sec
-        remaining = status["total"] - done
-        result["eta_seconds"] = round(remaining / rate) if rate > 0 else None
-        result["elapsed_seconds"] = round(elapsed)
-    return result
+
+@router.get("/cron/seed-notes/history")
+async def cron_seed_notes_history(request: Request):
+    """Return the last 10 seed-notes runs for admin review.
+
+    Auth: Bearer {TRANSLATE_CRON_SECRET}
+    """
+    _verify_cron_token(request)
+
+    try:
+        from app.models.seed_run import SeedRun
+        runs = await SeedRun.find(
+            sort=[("started_at", -1)]
+        ).to_list(length=10)
+        return {"runs": [_seed_run_to_dict(r) for r in runs]}
+    except Exception as e:
+        logger.warning(f"Failed to read seed_run history from MongoDB: {e}")
+        return {"runs": [], "error": str(e)}
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
+
+def _seed_run_to_dict(run) -> dict:
+    """Serialise a SeedRun document to a plain dict."""
+    return {
+        "run_id":        str(run.id),
+        "status":        run.status,
+        "running":       run.status == "running",
+        "started_at":    run.started_at.isoformat(),
+        "finished_at":   run.finished_at.isoformat() if run.finished_at else None,
+        "total":         run.total,
+        "completed":     run.completed,
+        "failed":        run.failed,
+        "skipped":       run.skipped,
+        "topics_seeded": run.topics_seeded,
+        "failed_ids":    run.failed_ids,
+        "errors":        run.errors,
+        "concurrency":   run.concurrency,
+        "force":         run.force,
+        "current":       run.current,
+    }
+
+
+async def _flush_run_to_mongo(run_id: str, app_state) -> None:
+    """Upsert current in-process status into the MongoDB seed_run document."""
+    if run_id == "unavailable":
+        return
+    try:
+        from app.models.seed_run import SeedRun
+        from beanie import PydanticObjectId
+        status = app_state.seed_notes_status
+        await SeedRun.find_one(SeedRun.id == PydanticObjectId(run_id)).update(
+            {"$set": {
+                "status":        "running" if status.get("running") else (
+                    "error" if status.get("failed", 0) == status.get("total", 0) else "completed"
+                ),
+                "completed":     status.get("completed", 0),
+                "failed":        status.get("failed", 0),
+                "skipped":       status.get("skipped", 0),
+                "topics_seeded": status.get("topics_seeded", 0),
+                "failed_ids":    status.get("failed_ids", []),
+                "errors":        status.get("errors", []),
+                "current":       status.get("current", ""),
+                "finished_at":   (
+                    datetime.fromisoformat(status["finished_at"])
+                    if status.get("finished_at") else None
+                ),
+            }}
+        )
+    except Exception as e:
+        logger.warning(f"Failed to flush seed_run progress to MongoDB: {e}")
+
 
 async def _filter_chapters_by_board(chapters, board_name: str):
     """Filter chapter list to those belonging to the given board name."""
@@ -243,14 +350,17 @@ async def _filter_chapters_by_board(chapters, board_name: str):
         return chapters
 
 
-async def _seed_notes_background(app_state, chapters, concurrency: int, force: bool):
+async def _seed_notes_background(app_state, chapters, concurrency: int, force: bool, run_id: str):
     """Background worker: generate notes for each chapter with Sarvam concurrency guard."""
     from app.services.content_generation import content_generation_service
     from app.models.content import Subject
 
     sem = asyncio.Semaphore(concurrency)
+    processed_count = 0
+    flush_lock = asyncio.Lock()
 
     async def _process_one(ch):
+        nonlocal processed_count
         async with sem:
             chapter_id = str(ch.id)
             title = ch.title or chapter_id
@@ -287,12 +397,21 @@ async def _seed_notes_background(app_state, chapters, concurrency: int, force: b
                 app_state.seed_notes_status["errors"].append(
                     {"chapter_id": chapter_id, "title": title, "error": str(exc)[:200]}
                 )
+            finally:
+                # Periodically flush progress to MongoDB so it survives restarts
+                async with flush_lock:
+                    processed_count += 1
+                    if processed_count % _MONGO_FLUSH_EVERY == 0:
+                        await _flush_run_to_mongo(run_id, app_state)
 
     await asyncio.gather(*[_process_one(ch) for ch in chapters])
 
     app_state.seed_notes_status["running"]     = False
     app_state.seed_notes_status["current"]     = ""
     app_state.seed_notes_status["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Final flush — mark the run as completed in MongoDB
+    await _flush_run_to_mongo(run_id, app_state)
 
     total    = app_state.seed_notes_status["total"]
     done     = app_state.seed_notes_status["completed"]

@@ -30,6 +30,7 @@ from app.models.rag import (
 )
 from app.models.ai_usage_log import AiUsageLog
 from app.models.document import LibraryDocument
+from app.models.seed_run import SeedRun
 from app.db.migrations.runner import check_and_apply_migrations
 import logging
 
@@ -97,6 +98,7 @@ async def init_mongo() -> None:
                     AiUsageLog,
                     ContentAuditLog,
                     LibraryDocument,
+                    SeedRun,
                 ],
             )
 
@@ -347,6 +349,13 @@ async def create_indexes() -> None:
         )
     except Exception as e:
         logger.warning(f"ai_usage_logs index creation failed (non-fatal): {e}")
+
+    # ── Seed runs ─────────────────────────────────────────────────────────────
+    try:
+        await db.seed_runs.create_index([("started_at", DESCENDING)])
+        await db.seed_runs.create_index([("status", ASCENDING), ("started_at", DESCENDING)])
+    except Exception as e:
+        logger.warning(f"seed_runs index creation failed (non-fatal): {e}")
 
     # ── Auth rate limit (IP-based, 90s TTL buckets) ───────────────────────────
     # _id is the rate key (endpoint:ip:minute_bucket), expires_at drives TTL.
