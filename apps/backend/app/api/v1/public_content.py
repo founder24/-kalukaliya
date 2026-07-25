@@ -1040,48 +1040,151 @@ async def get_question_papers(
     skip: int = Query(0, ge=0),
 ):
     """
-    Return published question papers with R2 image URLs.
-    Supports optional filtering by board, class_level, and subject.
-    Results are sorted by year (newest first) and paginated via limit/skip.
+    Return published question papers with R2/GCS image/PDF URLs.
+
+    Sources (merged and de-duplicated by URL):
+    1. QuestionPaper Beanie collection (r2_key → asset URL)
+    2. Chapter.pyq_pdf_url (legacy single-upload R2/GCS URL)
+    3. Chapter.pyq_papers[] multi-upload entries with a url
+    4. pyqs raw collection entries where is_image=True and file_url is set
+
+    Unified shape: {id, title, subject, board, class_level, year, image_url, is_pdf}
     """
     response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
 
+    seen_urls: set = set()
+    results: list = []
+    asset_base = settings.CF_WORKER_URL.rstrip("/")
+
+    # ── Source 1: existing QuestionPaper Beanie collection ──
     try:
-        query = {"status": "published"}
+        qp_query: dict = {"status": "published"}
         if board:
-            query["board"] = board
+            qp_query["board"] = board
         if class_level:
-            query["class_level"] = class_level
+            qp_query["class_level"] = class_level
         if subject:
-            query["subject"] = subject
+            qp_query["subject"] = subject
 
         papers = (
-            await QuestionPaper.find(query)
+            await QuestionPaper.find(qp_query)
             .sort("-year")
             .skip(skip)
             .limit(limit)
             .to_list(length=limit)
         )
+        for paper in papers:
+            url = f"{asset_base}/assets/{paper.r2_key}"
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            is_pdf = paper.r2_key.lower().endswith(".pdf")
+            results.append({
+                "id": str(paper.id),
+                "title": paper.title,
+                "subject": paper.subject,
+                "board": paper.board,
+                "class_level": paper.class_level,
+                "year": paper.year,
+                "image_url": url,
+                "is_pdf": is_pdf,
+            })
     except Exception as e:
-        logger.warning(f"Question papers DB query failed: {e}")
-        return []
+        logger.warning(f"Question papers Beanie query failed: {e}")
 
-    asset_base = settings.CF_WORKER_URL.rstrip("/")
+    # ── Sources 2 & 3: chapters with pyq_pdf_url or pyq_papers[] ──
+    try:
+        # Pre-load subjects for name lookups
+        subjects_all = await Subject.find().to_list(length=None)
+        subj_by_id: dict = {str(s.id): s for s in subjects_all}
 
-    return [
-        {
-            "id": str(paper.id),
-            "title": paper.title,
-            "slug": paper.slug,
-            "r2_key": paper.r2_key,
-            "image_url": f"{asset_base}/assets/{paper.r2_key}",
-            "board": paper.board,
-            "class_level": paper.class_level,
-            "subject": paper.subject,
-            "year": paper.year,
-        }
-        for paper in papers
-    ]
+        # Chapters with legacy single-url field
+        chapters_single = await Chapter.find(
+            {"pyq_pdf_url": {"$exists": True, "$ne": None, "$ne": ""}}
+        ).to_list(length=None)
+
+        for ch in chapters_single:
+            url = ch.pyq_pdf_url or ""
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            subj = subj_by_id.get(str(ch.subject_id))
+            is_pdf = url.lower().endswith(".pdf") or "/pdf/" in url.lower()
+            results.append({
+                "id": f"ch-{ch.id}",
+                "title": f"{ch.title} — Question Paper",
+                "subject": subj.name if subj else "",
+                "board": "",
+                "class_level": "",
+                "year": None,
+                "image_url": url,
+                "is_pdf": is_pdf,
+            })
+
+        # Chapters with multi-upload pyq_papers array
+        chapters_multi = await Chapter.find(
+            {"pyq_papers": {"$exists": True, "$not": {"$size": 0}}}
+        ).to_list(length=None)
+
+        for ch in chapters_multi:
+            subj = subj_by_id.get(str(ch.subject_id))
+            subject_name = subj.name if subj else ""
+            for p in (ch.pyq_papers or []):
+                url = p.get("url", "")
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                is_pdf = url.lower().endswith(".pdf") or "/pdf/" in url.lower()
+                results.append({
+                    "id": p.get("id") or f"ch-{ch.id}-{len(results)}",
+                    "title": p.get("title") or f"{ch.title} — Question Paper",
+                    "subject": subject_name,
+                    "board": "",
+                    "class_level": "",
+                    "year": p.get("year"),
+                    "image_url": url,
+                    "is_pdf": is_pdf,
+                })
+    except Exception as e:
+        logger.warning(f"Chapter PYQ query failed: {e}")
+
+    # ── Source 4: pyqs raw collection (is_image=True entries) ──
+    try:
+        raw_db = Chapter.get_motor_collection().database
+        pyqs_col = raw_db["pyqs"]
+        cursor = pyqs_col.find(
+            {"is_image": True, "file_url": {"$exists": True, "$ne": None, "$ne": ""}}
+        )
+        raw_docs = await cursor.to_list(length=500)
+        for doc in raw_docs:
+            url = doc.get("file_url", "")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            results.append({
+                "id": str(doc.get("_id", "")),
+                "title": doc.get("title") or doc.get("name") or "Question Paper",
+                "subject": doc.get("subject_name") or doc.get("subject", ""),
+                "board": doc.get("board", ""),
+                "class_level": doc.get("class_level") or doc.get("class_name", ""),
+                "year": doc.get("year"),
+                "image_url": url,
+                "is_pdf": False,  # is_image=True means it's an image asset
+            })
+    except Exception as e:
+        logger.warning(f"pyqs raw collection query failed: {e}")
+
+    # Filter by board/subject if provided (post-merge filter for non-Beanie sources)
+    if board or subject:
+        def _matches(r: dict) -> bool:
+            if board and r.get("board") and r["board"].lower() != board.lower():
+                return False
+            if subject and r.get("subject") and subject.lower() not in r["subject"].lower():
+                return False
+            return True
+        results = [r for r in results if _matches(r)]
+
+    return results
 
 
 @router.get("/cms/posts")

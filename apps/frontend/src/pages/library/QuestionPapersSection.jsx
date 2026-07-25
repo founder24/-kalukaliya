@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import QuestionPaperCard from './QuestionPaperCard';
+import PaperViewerModal from './PaperViewerModal';
 import { useQuestionPapers } from '@/hooks/useContent';
 
 export default function QuestionPapersSection() {
   const { data: papers = [], isLoading } = useQuestionPapers();
   const [showAll, setShowAll] = useState(false);
+  const [activePaper, setActivePaper] = useState(null);
 
   if (isLoading || papers.length === 0) return null;
 
@@ -25,7 +27,7 @@ export default function QuestionPapersSection() {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {displayed.map((paper) => (
-          <QuestionPaperCard key={paper.id} paper={paper} />
+          <QuestionPaperCard key={paper.id} paper={paper} onOpen={setActivePaper} />
         ))}
       </div>
       {papers.length > 6 && (
@@ -44,6 +46,10 @@ export default function QuestionPapersSection() {
               : <><ChevronDown size={13} /> Show all {papers.length} papers</>}
           </button>
         </div>
+      )}
+
+      {activePaper && (
+        <PaperViewerModal paper={activePaper} onClose={() => setActivePaper(null)} />
       )}
     </div>
   );

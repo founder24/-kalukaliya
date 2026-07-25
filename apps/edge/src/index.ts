@@ -553,8 +553,26 @@ export default {
       const headers = new Headers();
       object.writeHttpMetadata(headers);
       headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-      headers.set('Access-Control-Allow-Origin', env.ALLOWED_ORIGIN || 'https://syrabit.ai');
+      // Assets are intentionally public — allow any origin to embed images/PDFs
+      headers.set('Access-Control-Allow-Origin', '*');
       headers.set('X-Request-ID', requestId);
+
+      // Set content type from extension if not already present in R2 metadata
+      if (!headers.has('Content-Type')) {
+        const ext = url.pathname.split('.').pop()?.toLowerCase();
+        const assetMime: Record<string, string> = {
+          pdf: 'application/pdf',
+          png: 'image/png',
+          jpg: 'image/jpeg',
+          jpeg: 'image/jpeg',
+          webp: 'image/webp',
+          gif: 'image/gif',
+          svg: 'image/svg+xml',
+        };
+        if (ext && assetMime[ext]) {
+          headers.set('Content-Type', assetMime[ext]);
+        }
+      }
 
       return new Response(object.body, { headers });
     }
