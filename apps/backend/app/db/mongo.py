@@ -351,11 +351,28 @@ async def create_indexes() -> None:
         logger.warning(f"ai_usage_logs index creation failed (non-fatal): {e}")
 
     # ── Seed runs ─────────────────────────────────────────────────────────────
+    # TTL: auto-expire run records after 90 days so the collection stays small.
+    #
+    # Migration note: earlier code created a plain non-TTL descending index
+    # ("started_at_-1").  Drop that first so it doesn't linger as dead weight;
+    # the error is intentionally ignored when the index doesn't exist.
     try:
-        await db.seed_runs.create_index([("started_at", DESCENDING)])
+        await db.seed_runs.drop_index("started_at_-1")
+        logger.info("seed_runs: dropped legacy non-TTL started_at_-1 index")
+    except Exception:
+        pass  # index didn't exist — nothing to clean up
+
+    await _ensure_ttl_index(
+        db.seed_runs, [("started_at", ASCENDING)], 90 * 24 * 3600
+    )
+    logger.info(
+        "seed_runs: TTL index on started_at confirmed (90-day retention)"
+    )
+
+    try:
         await db.seed_runs.create_index([("status", ASCENDING), ("started_at", DESCENDING)])
     except Exception as e:
-        logger.warning(f"seed_runs index creation failed (non-fatal): {e}")
+        logger.warning(f"seed_runs query index creation failed (non-fatal): {e}")
 
     # ── Auth rate limit (IP-based, 90s TTL buckets) ───────────────────────────
     # _id is the rate key (endpoint:ip:minute_bucket), expires_at drives TTL.
