@@ -90,7 +90,49 @@ async def main():
     log.info(f"SeedRun created — run_id={run_id}")
 
     # ── Translation worker ──────────────────────────────────────────────────
-    from app.services.content_generation import content_generation_service
+    # Call the Sarvam API directly (same pattern as the passing smoke test)
+    # to avoid any circuit-breaker or generate() abstraction issues.
+    from app.services.ai.sarvam_client import sarvam_client
+    import httpx as _httpx
+    from datetime import datetime as _dt, timezone as _tz
+
+    TRANSLATE_SYSTEM = (
+        "You are a professional translator specialising in Assamese educational content. "
+        "Translate the following English text to Assamese. "
+        "Output ONLY the Assamese translation. "
+        "Preserve markdown headings, bold, bullet points and LaTeX math exactly."
+    )
+    CHUNK_WORDS = 400
+
+    async def _translate_chunk(text: str) -> str:
+        """Call Sarvam directly and return the content field."""
+        resp = await sarvam_client._client.post(
+            f"{sarvam_client.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {sarvam_client.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": sarvam_client.model,
+                "messages": [
+                    {"role": "system", "content": TRANSLATE_SYSTEM},
+                    {"role": "user",   "content": text},
+                ],
+                "temperature": 0.1,
+                "enable_thinking": False,
+                "max_tokens": 2048,
+                "stream": False,
+            },
+        )
+        resp.raise_for_status()
+        msg = resp.json()["choices"][0]["message"]
+        content = (msg.get("content") or "").strip()
+        if not content:
+            # Model sometimes puts answer in reasoning_content; extract cleanly
+            from app.services.ai.sarvam_client import _extract_assamese_translation
+            rc = (msg.get("reasoning_content") or "").strip()
+            content = _extract_assamese_translation(rc) if rc else ""
+        return content
 
     sem = asyncio.Semaphore(CONCURRENCY)
     completed = failed = skipped = 0
@@ -102,22 +144,41 @@ async def main():
             chapter_id = str(ch.id)
             title      = ch.title or chapter_id
             try:
-                result = await content_generation_service.generate_assamese_only(
-                    chapter_id, force=FORCE
-                )
-                if result and result.content_as and result.content_as.strip():
+                words  = (ch.content_en or "").split()
+                chunks = [
+                    " ".join(words[i: i + CHUNK_WORDS])
+                    for i in range(0, len(words), CHUNK_WORDS)
+                ]
+                log.info(f"[{idx}/{total}] {title!r} — {len(chunks)} chunk(s)")
+
+                parts = []
+                for ci, chunk in enumerate(chunks, 1):
+                    translated = await _translate_chunk(chunk)
+                    if translated.strip():
+                        parts.append(translated.strip())
+                        log.info(f"  chunk {ci}/{len(chunks)} → {len(translated.split())} words")
+                    else:
+                        log.warning(f"  chunk {ci}/{len(chunks)} returned empty translation")
+
+                if parts:
+                    content_as = "\n\n".join(parts)
+                    await ch.update({"$set": {
+                        "content_as":  content_as,
+                        "updated_at":  _dt.now(_tz.utc),
+                    }})
                     completed += 1
-                    log.info(f"[{idx}/{total}] ✓ {title!r} — {len(result.content_as)} chars")
+                    log.info(f"[{idx}/{total}] ✓ {title!r} — {len(content_as.split())} words saved")
                 else:
                     skipped += 1
-                    log.warning(f"[{idx}/{total}] ↷ {title!r} — returned empty AS content")
+                    log.warning(f"[{idx}/{total}] ↷ {title!r} — all chunks empty")
             except Exception as exc:
                 failed += 1
                 failed_ids.append(chapter_id)
                 log.error(f"[{idx}/{total}] ✗ {title!r}: {exc}")
 
             # Flush to MongoDB every 10 chapters
-            if (completed + failed + skipped) % 10 == 0:
+            done_so_far = completed + failed + skipped
+            if done_so_far % 10 == 0:
                 await _flush(run_id, completed, failed, skipped, failed_ids, finished=False)
 
     await asyncio.gather(*[translate_one(ch, i + 1) for i, ch in enumerate(chapters)])

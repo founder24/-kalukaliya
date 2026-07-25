@@ -127,6 +127,44 @@ def _clean_educational_sections(text: str) -> str:
     return result
 
 
+def _extract_assamese_translation(rc: str) -> str:
+    """Extract the final Assamese translation from sarvam-30b reasoning_content.
+
+    For translation tasks the model:
+    1. Reasons word-by-word in English (noise — mixed EN+AS)
+    2. Wraps the final assembled translation in double-quoted strings at the end
+
+    Strategy (in order of confidence):
+    A) Last double-quoted string that is >50% Assamese chars (final clean answer).
+    B) Last paragraph (separated by blank lines) that is >60% Assamese chars.
+    C) Fall back to _extract_assamese_answer() line-by-line extraction.
+    """
+    if not rc:
+        return ""
+
+    def _assamese_ratio(s: str) -> float:
+        chars = [c for c in s if not c.isspace()]
+        if not chars:
+            return 0.0
+        return sum(1 for c in chars if '\u0980' <= c <= '\u09ff') / len(chars)
+
+    # Strategy A: last high-AS double-quoted string ≥ 30 chars
+    quoted = re.findall(r'"([^"]{30,})"', rc, re.DOTALL)
+    as_quoted = [q.strip() for q in quoted if _assamese_ratio(q) > 0.5]
+    if as_quoted:
+        return as_quoted[-1]
+
+    # Strategy B: last paragraph that is >60% Assamese
+    paragraphs = [p.strip() for p in rc.split('\n\n') if p.strip()]
+    as_paragraphs = [p for p in paragraphs if _assamese_ratio(p) > 0.6 and len(p) > 30]
+    if as_paragraphs:
+        # Return the last (and typically the longest final-draft) paragraph
+        return max(as_paragraphs, key=len)
+
+    # Strategy C: line-by-line Assamese extraction (existing function)
+    return _extract_assamese_answer(rc)
+
+
 def _extract_assamese_answer(text: str) -> str:
     """
     Extract the final Assamese-language answer from sarvam-30b's reasoning chain.
@@ -332,8 +370,19 @@ class SarvamAIClient:
 
             if "choices" in data and len(data["choices"]) > 0:
                 msg = data["choices"][0]["message"]
-                # content holds the clean final answer for enable_thinking=False
-                return (msg.get("content") or "").strip()
+                # sarvam-30b behaviour is inconsistent: sometimes the clean
+                # answer is in content, sometimes content is null and the
+                # answer is embedded in reasoning_content.
+                content = (msg.get("content") or "").strip()
+                if not content:
+                    rc = (msg.get("reasoning_content") or "").strip()
+                    if rc:
+                        content = (
+                            _extract_assamese_translation(rc)
+                            if is_assamese
+                            else _extract_english_answer(rc)
+                        )
+                return content
             return ""
 
         _last_http_exc: httpx.HTTPStatusError | None = None
