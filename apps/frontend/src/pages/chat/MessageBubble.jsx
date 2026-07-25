@@ -207,8 +207,8 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
            by the user bubble which is always crisp. */
         <div className="w-full" style={{ color: '#0a0a1a', WebkitTextFillColor: 'currentColor' }}>
           <div className="flex items-center gap-2 mb-1">
-            <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0">
-              <img src="/logo-56.webp" alt="Syrabit.ai" width="20" height="20" className="w-full h-full object-cover" />
+            <div style={{ width: 16, height: 16, borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+              <img src="/logo-56.webp" alt="Syrabit.ai" width="16" height="16" style={{ width: 16, height: 16, objectFit: 'cover', display: 'block' }} />
             </div>
             <span className="text-xs font-semibold" style={{ color: 'rgba(10,10,26,0.70)' }}>Syrabit AI</span>
           </div>
