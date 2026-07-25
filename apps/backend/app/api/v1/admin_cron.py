@@ -250,6 +250,131 @@ async def cron_seed_notes_status(request: Request):
         return {"running": False, "message": "No seed-notes job has been started yet."}
 
 
+@router.post("/cron/seed-assamese")
+async def cron_seed_assamese(request: Request):
+    """Bulk-translate content_en → content_as for chapters missing Assamese (or force all).
+
+    Launches a background job immediately. Poll GET /cron/seed-assamese/status.
+    Auth: Bearer {TRANSLATE_CRON_SECRET}
+
+    Body (all optional):
+        {
+          "limit":       500,   # max chapters (default: all)
+          "concurrency": 2,     # parallel Sarvam calls (default: 2)
+          "force":       false  # re-translate even if content_as already exists
+        }
+    """
+    _verify_cron_token(request)
+
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    existing = getattr(request.app.state, "seed_assamese_status", {})
+    if existing.get("running"):
+        raise HTTPException(
+            status_code=409,
+            detail="A seed-assamese job is already running. "
+                   "Poll GET /cron/seed-assamese/status for progress.",
+        )
+    existing_notes = getattr(request.app.state, "seed_notes_status", {})
+    if existing_notes.get("running"):
+        raise HTTPException(
+            status_code=409,
+            detail="A seed-notes job is running — wait for it to finish first.",
+        )
+
+    from app.models.content import Chapter
+
+    limit: int       = int(body.get("limit", 9999))
+    concurrency: int = max(1, min(int(body.get("concurrency", 2)), 5))
+    force: bool      = bool(body.get("force", False))
+
+    filt: dict = {"content_en": {"$exists": True, "$nin": [None, ""]}}
+    if not force:
+        filt["$or"] = [
+            {"content_as": {"$exists": False}},
+            {"content_as": None},
+            {"content_as": ""},
+        ]
+    chapters = await Chapter.find(filt).to_list(length=limit)
+
+    total = len(chapters)
+    if total == 0:
+        return {
+            "job": "nothing_to_do",
+            "total_queued": 0,
+            "message": "All chapters already have Assamese content (pass force=true to retranslate)",
+        }
+
+    from app.models.seed_run import SeedRun
+
+    run = SeedRun(status="running", run_type="assamese", total=total,
+                  concurrency=concurrency, force=force)
+    try:
+        await run.insert()
+        run_id = str(run.id)
+    except Exception as e:
+        logger.warning(f"Failed to insert seed_run (assamese): {e}")
+        run_id = "unavailable"
+        run = None
+
+    request.app.state.seed_assamese_status = {
+        "running": True, "run_id": run_id, "total": total,
+        "completed": 0, "failed": 0, "skipped": 0, "topics_seeded": 0,
+        "current": "", "failed_ids": [], "errors": [],
+        "started_at": run.started_at.isoformat() if run else datetime.now(timezone.utc).isoformat(),
+        "finished_at": None, "concurrency": concurrency, "force": force,
+    }
+
+    asyncio.create_task(_seed_assamese_background(
+        app_state=request.app.state,
+        chapters=chapters,
+        concurrency=concurrency,
+        force=force,
+        run_id=run_id,
+    ))
+
+    return {"job": "started", "run_id": run_id, "total_queued": total, "concurrency": concurrency}
+
+
+@router.get("/cron/seed-assamese/status")
+async def cron_seed_assamese_status(request: Request):
+    """Live progress of the running (or last completed) seed-assamese job.
+    Auth: Bearer {TRANSLATE_CRON_SECRET}
+    """
+    _verify_cron_token(request)
+
+    status = getattr(request.app.state, "seed_assamese_status", None)
+    if status is not None:
+        result = dict(status)
+        done = status["completed"] + status["failed"] + status["skipped"]
+        if status["running"] and done > 0:
+            started = datetime.fromisoformat(status["started_at"])
+            elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+            rate = done / elapsed
+            remaining = status["total"] - done
+            result["eta_seconds"]     = round(remaining / rate) if rate > 0 else None
+            result["elapsed_seconds"] = round(elapsed)
+        return result
+
+    try:
+        from app.models.seed_run import SeedRun
+        latest = await SeedRun.find_one(
+            SeedRun.run_type == "assamese",
+            sort=[("started_at", -1)],
+        )
+        if latest is None:
+            return {"running": False, "message": "No seed-assamese job has been started yet."}
+        from app.api.v1.admin_cron import _seed_run_to_dict
+        return _seed_run_to_dict(latest)
+    except Exception as e:
+        logger.warning(f"Failed to read seed_assamese run from MongoDB: {e}")
+        return {"running": False, "message": "No seed-assamese job has been started yet."}
+
+
 @router.get("/cron/seed-notes/history")
 async def cron_seed_notes_history(request: Request):
     """Return the last 10 seed-notes runs for admin review.
