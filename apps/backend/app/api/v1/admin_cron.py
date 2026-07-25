@@ -275,6 +275,7 @@ def _seed_run_to_dict(run) -> dict:
     """Serialise a SeedRun document to a plain dict."""
     return {
         "run_id":        str(run.id),
+        "run_type":      getattr(run, "run_type", "notes"),
         "status":        run.status,
         "running":       run.status == "running",
         "started_at":    run.started_at.isoformat(),
@@ -348,6 +349,92 @@ async def _filter_chapters_by_board(chapters, board_name: str):
     except Exception as e:
         logger.warning(f"Board filter failed ({e}), returning all chapters")
         return chapters
+
+
+async def _seed_assamese_background(app_state, chapters, concurrency: int, force: bool, run_id: str):
+    """Background worker: translate content_en → content_as for each chapter."""
+    from app.services.content_generation import content_generation_service
+
+    sem = asyncio.Semaphore(concurrency)
+    processed_count = 0
+    flush_lock = asyncio.Lock()
+    state_key = "seed_assamese_status"
+
+    async def _process_one(ch):
+        nonlocal processed_count
+        async with sem:
+            chapter_id = str(ch.id)
+            title = ch.title or chapter_id
+            app_state.seed_assamese_status["current"] = title
+            try:
+                result = await content_generation_service.generate_assamese_only(
+                    chapter_id, force=force
+                )
+                # generate_assamese_only returns the chapter unchanged if skipped
+                if result and result.content_as and result.content_as.strip():
+                    app_state.seed_assamese_status["completed"] += 1
+                    logger.info(f"Seed-assamese ✓ {title!r}")
+                else:
+                    app_state.seed_assamese_status["skipped"] += 1
+                    logger.info(f"Seed-assamese ↷ skipped {title!r} (already has AS or no EN)")
+            except Exception as exc:
+                logger.error(f"Seed-assamese ✗ {title!r}: {exc}")
+                app_state.seed_assamese_status["failed"] += 1
+                app_state.seed_assamese_status["failed_ids"].append(chapter_id)
+                app_state.seed_assamese_status["errors"].append(
+                    {"chapter_id": chapter_id, "title": title, "error": str(exc)[:200]}
+                )
+            finally:
+                async with flush_lock:
+                    processed_count += 1
+                    if processed_count % _MONGO_FLUSH_EVERY == 0:
+                        await _flush_assamese_run_to_mongo(run_id, app_state)
+
+    await asyncio.gather(*[_process_one(ch) for ch in chapters])
+
+    app_state.seed_assamese_status["running"]     = False
+    app_state.seed_assamese_status["current"]     = ""
+    app_state.seed_assamese_status["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    await _flush_assamese_run_to_mongo(run_id, app_state)
+
+    total   = app_state.seed_assamese_status["total"]
+    done    = app_state.seed_assamese_status["completed"]
+    failed  = app_state.seed_assamese_status["failed"]
+    skipped = app_state.seed_assamese_status["skipped"]
+    logger.info(
+        f"Seed-assamese job finished: {done}/{total} translated, "
+        f"{failed} failed, {skipped} skipped"
+    )
+
+
+async def _flush_assamese_run_to_mongo(run_id: str, app_state) -> None:
+    """Upsert current in-process seed-assamese status into the MongoDB seed_run document."""
+    if run_id == "unavailable":
+        return
+    try:
+        from app.models.seed_run import SeedRun
+        from beanie import PydanticObjectId
+        status = app_state.seed_assamese_status
+        await SeedRun.find_one(SeedRun.id == PydanticObjectId(run_id)).update(
+            {"$set": {
+                "status":     "running" if status.get("running") else (
+                    "error" if status.get("failed", 0) == status.get("total", 1) else "completed"
+                ),
+                "completed":  status.get("completed", 0),
+                "failed":     status.get("failed", 0),
+                "skipped":    status.get("skipped", 0),
+                "failed_ids": status.get("failed_ids", []),
+                "errors":     status.get("errors", []),
+                "current":    status.get("current", ""),
+                "finished_at": (
+                    datetime.fromisoformat(status["finished_at"])
+                    if status.get("finished_at") else None
+                ),
+            }}
+        )
+    except Exception as e:
+        logger.warning(f"Failed to flush seed_assamese run to MongoDB: {e}")
 
 
 async def _seed_notes_background(app_state, chapters, concurrency: int, force: bool, run_id: str):

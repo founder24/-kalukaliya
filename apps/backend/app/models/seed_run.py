@@ -24,6 +24,7 @@ def _now() -> datetime:
 
 class SeedRun(Document):
     status: str = "running"            # running | completed | error
+    run_type: str = "notes"            # "notes" | "assamese" — discriminates seeder kind
     started_at: datetime = Field(default_factory=_now)
     finished_at: Optional[datetime] = None
     total: int = 0

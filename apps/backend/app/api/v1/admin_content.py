@@ -26,73 +26,253 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Admin Content"], dependencies=[Depends(require_admin_session), Depends(csrf_guard)])
 
 
+# ── Seeder helpers ────────────────────────────────────────────────────────────
+
+def _live_run_to_dict(live: dict, run_type: str = "notes") -> dict:
+    """Serialise in-process app.state status dict to a run-history entry."""
+    return {
+        "run_id":        live.get("run_id", "live"),
+        "run_type":      run_type,
+        "status":        "running",
+        "running":       True,
+        "started_at":    live.get("started_at"),
+        "finished_at":   None,
+        "total":         live.get("total", 0),
+        "completed":     live.get("completed", 0),
+        "failed":        live.get("failed", 0),
+        "skipped":       live.get("skipped", 0),
+        "topics_seeded": live.get("topics_seeded", 0),
+        "failed_ids":    live.get("failed_ids", []),
+        "errors":        live.get("errors", []),
+        "concurrency":   live.get("concurrency", 2),
+        "force":         live.get("force", False),
+        "current":       live.get("current", ""),
+    }
+
+
+def _run_doc_to_dict(r) -> dict:
+    """Serialise a SeedRun Beanie document to a plain dict."""
+    return {
+        "run_id":        str(r.id),
+        "run_type":      getattr(r, "run_type", "notes"),
+        "status":        r.status,
+        "running":       r.status == "running",
+        "started_at":    r.started_at.isoformat(),
+        "finished_at":   r.finished_at.isoformat() if r.finished_at else None,
+        "total":         r.total,
+        "completed":     r.completed,
+        "failed":        r.failed,
+        "skipped":       r.skipped,
+        "topics_seeded": r.topics_seeded,
+        "failed_ids":    r.failed_ids,
+        "errors":        r.errors,
+        "concurrency":   r.concurrency,
+        "force":         r.force,
+        "current":       r.current,
+    }
+
+
 # ── Seeder Run History ────────────────────────────────────────────────────────
 
 @router.get("/content/seed-notes/history")
 async def admin_seed_notes_history(request: Request, limit: int = 20):
-    """Return recent seed-notes runs for admin review.
+    """Return recent seed-notes AND seed-assamese runs for admin review.
 
     Session-auth protected (admin panel friendly — no cron Bearer token needed).
-    Includes live in-process status when a job is actively running.
+    Includes live in-process status for whichever seeder is actively running.
     """
     from app.models.seed_run import SeedRun
 
     runs_out = []
+    live_run_ids: set[str] = set()
 
-    # Include live in-process status as the first entry when a job is running
-    live = getattr(request.app.state, "seed_notes_status", None)
-    if live and live.get("running"):
-        runs_out.append({
-            "run_id":        live.get("run_id", "live"),
-            "status":        "running",
-            "running":       True,
-            "started_at":    live.get("started_at"),
-            "finished_at":   None,
-            "total":         live.get("total", 0),
-            "completed":     live.get("completed", 0),
-            "failed":        live.get("failed", 0),
-            "skipped":       live.get("skipped", 0),
-            "topics_seeded": live.get("topics_seeded", 0),
-            "failed_ids":    live.get("failed_ids", []),
-            "errors":        live.get("errors", []),
-            "concurrency":   live.get("concurrency", 2),
-            "force":         live.get("force", False),
-            "current":       live.get("current", ""),
-        })
+    # Inject any live in-process status at the top
+    for state_key, run_type in [("seed_notes_status", "notes"), ("seed_assamese_status", "assamese")]:
+        live = getattr(request.app.state, state_key, None)
+        if live and live.get("running"):
+            runs_out.append(_live_run_to_dict(live, run_type=run_type))
+            if rid := live.get("run_id"):
+                live_run_ids.add(rid)
 
     try:
-        runs = await SeedRun.find(
-            sort=[("started_at", -1)]
-        ).to_list(length=limit)
-
-        live_run_id = live.get("run_id") if live and live.get("running") else None
+        runs = await SeedRun.find(sort=[("started_at", -1)]).to_list(length=limit)
         for r in runs:
-            # Skip the live run if it's already in the list above
-            if live_run_id and str(r.id) == live_run_id:
-                continue
-            runs_out.append({
-                "run_id":        str(r.id),
-                "status":        r.status,
-                "running":       r.status == "running",
-                "started_at":    r.started_at.isoformat(),
-                "finished_at":   r.finished_at.isoformat() if r.finished_at else None,
-                "total":         r.total,
-                "completed":     r.completed,
-                "failed":        r.failed,
-                "skipped":       r.skipped,
-                "topics_seeded": r.topics_seeded,
-                "failed_ids":    r.failed_ids,
-                "errors":        r.errors,
-                "concurrency":   r.concurrency,
-                "force":         r.force,
-                "current":       r.current,
-            })
+            if str(r.id) in live_run_ids:
+                continue   # already shown as live above
+            runs_out.append(_run_doc_to_dict(r))
     except Exception as e:
         logger.warning(f"admin_seed_notes_history: MongoDB query failed: {e}")
         if not runs_out:
             return {"runs": [], "error": str(e)}
 
     return {"runs": runs_out[:limit]}
+
+
+# ── Seed-notes trigger (admin session auth) ───────────────────────────────────
+
+@router.post("/content/seed-notes")
+async def admin_trigger_seed_notes(request: Request):
+    """Trigger a seed-notes job from the admin panel (session auth, no cron token).
+
+    Body (all optional):
+        { "chapter_ids": [...], "limit": 50, "concurrency": 2, "force": false }
+    """
+    import asyncio
+    from datetime import datetime, timezone
+    from app.models.content import Chapter
+    from app.models.seed_run import SeedRun
+    from beanie import PydanticObjectId
+    from app.api.v1.admin_cron import _seed_notes_background
+
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    existing = getattr(request.app.state, "seed_notes_status", {})
+    if existing.get("running"):
+        raise HTTPException(status_code=409,
+                            detail="A seed-notes job is already running.")
+    existing_as = getattr(request.app.state, "seed_assamese_status", {})
+    if existing_as.get("running"):
+        raise HTTPException(status_code=409,
+                            detail="A seed-assamese job is running — wait for it to finish.")
+
+    chapter_ids_raw: list = body.get("chapter_ids", [])
+    limit: int            = int(body.get("limit", 9999))
+    concurrency: int      = max(1, min(int(body.get("concurrency", 2)), 5))
+    force: bool           = bool(body.get("force", False))
+
+    if chapter_ids_raw:
+        chapters = []
+        for cid in chapter_ids_raw[:limit]:
+            try:
+                ch = await Chapter.get(PydanticObjectId(cid))
+                if ch:
+                    chapters.append(ch)
+            except Exception:
+                pass
+    else:
+        filt: dict = {}
+        if not force:
+            filt["$or"] = [
+                {"content_en": {"$exists": False}},
+                {"content_en": None},
+                {"content_en": ""},
+            ]
+        chapters = await Chapter.find(filt).to_list(length=limit)
+
+    total = len(chapters)
+    if total == 0:
+        return {"job": "nothing_to_do", "total_queued": 0,
+                "message": "All chapters already have content (pass force=true to regenerate)"}
+
+    run = SeedRun(status="running", run_type="notes", total=total,
+                  concurrency=concurrency, force=force)
+    try:
+        await run.insert()
+        run_id = str(run.id)
+    except Exception as e:
+        logger.warning(f"Failed to insert seed_run: {e}")
+        run_id = "unavailable"
+
+    request.app.state.seed_notes_status = {
+        "running": True, "run_id": run_id, "total": total,
+        "completed": 0, "failed": 0, "skipped": 0, "topics_seeded": 0,
+        "current": "", "failed_ids": [], "errors": [],
+        "started_at": run.started_at.isoformat() if run else datetime.now(timezone.utc).isoformat(),
+        "finished_at": None, "concurrency": concurrency, "force": force,
+    }
+
+    asyncio.create_task(_seed_notes_background(
+        app_state=request.app.state,
+        chapters=chapters,
+        concurrency=concurrency,
+        force=force,
+        run_id=run_id,
+    ))
+
+    return {"job": "started", "run_id": run_id, "total_queued": total, "concurrency": concurrency}
+
+
+# ── Seed-assamese trigger (admin session auth) ────────────────────────────────
+
+@router.post("/content/seed-assamese")
+async def admin_trigger_seed_assamese(request: Request):
+    """Translate content_en → content_as for published chapters missing Assamese.
+
+    Session-auth protected. Launches background job, returns immediately.
+    Body (all optional): { "limit": 200, "concurrency": 2, "force": false }
+    """
+    import asyncio
+    from datetime import datetime, timezone
+    from app.models.content import Chapter
+    from app.models.seed_run import SeedRun
+    from app.api.v1.admin_cron import _seed_assamese_background
+
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    existing_as = getattr(request.app.state, "seed_assamese_status", {})
+    if existing_as.get("running"):
+        raise HTTPException(status_code=409,
+                            detail="A seed-assamese job is already running.")
+    existing_en = getattr(request.app.state, "seed_notes_status", {})
+    if existing_en.get("running"):
+        raise HTTPException(status_code=409,
+                            detail="A seed-notes job is running — wait for it to finish.")
+
+    limit: int        = int(body.get("limit", 9999))
+    concurrency: int  = max(1, min(int(body.get("concurrency", 2)), 5))
+    force: bool       = bool(body.get("force", False))
+
+    # Chapters with English content but missing Assamese
+    filt: dict = {
+        "content_en": {"$exists": True, "$nin": [None, ""]},
+    }
+    if not force:
+        filt["$or"] = [
+            {"content_as": {"$exists": False}},
+            {"content_as": None},
+            {"content_as": ""},
+        ]
+    chapters = await Chapter.find(filt).to_list(length=limit)
+
+    total = len(chapters)
+    if total == 0:
+        return {"job": "nothing_to_do", "total_queued": 0,
+                "message": "All chapters with English content already have Assamese (pass force=true to retranslate)"}
+
+    run = SeedRun(status="running", run_type="assamese", total=total,
+                  concurrency=concurrency, force=force)
+    try:
+        await run.insert()
+        run_id = str(run.id)
+    except Exception as e:
+        logger.warning(f"Failed to insert seed_run (assamese): {e}")
+        run_id = "unavailable"
+
+    request.app.state.seed_assamese_status = {
+        "running": True, "run_id": run_id, "total": total,
+        "completed": 0, "failed": 0, "skipped": 0, "topics_seeded": 0,
+        "current": "", "failed_ids": [], "errors": [],
+        "started_at": run.started_at.isoformat() if run else datetime.now(timezone.utc).isoformat(),
+        "finished_at": None, "concurrency": concurrency, "force": force,
+    }
+
+    asyncio.create_task(_seed_assamese_background(
+        app_state=request.app.state,
+        chapters=chapters,
+        concurrency=concurrency,
+        force=force,
+        run_id=run_id,
+    ))
+
+    return {"job": "started", "run_id": run_id, "total_queued": total, "concurrency": concurrency}
 
 
 # ── Audit log helper ──────────────────────────────────────────────────────────
