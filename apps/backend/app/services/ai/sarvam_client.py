@@ -148,21 +148,36 @@ def _extract_assamese_translation(rc: str) -> str:
             return 0.0
         return sum(1 for c in chars if '\u0980' <= c <= '\u09ff') / len(chars)
 
-    # Strategy A: last high-AS double-quoted string ≥ 30 chars
+    candidates: list[str] = []
+
+    # Strategy C: line-by-line collection of every Assamese line (most complete).
+    # We always run this because it captures multi-paragraph translations.
+    line_based = _extract_assamese_answer(rc)
+    if line_based.strip():
+        candidates.append(line_based.strip())
+
+    # Strategy A: last double-quoted block ≥ 30 chars that is >50% Assamese.
+    # The model often wraps its final assembled output in quotes at the end of
+    # the "Final Output" section — this can be cleaner than Strategy C for
+    # short inputs where the reasoning embeds many draft fragments.
     quoted = re.findall(r'"([^"]{30,})"', rc, re.DOTALL)
     as_quoted = [q.strip() for q in quoted if _assamese_ratio(q) > 0.5]
     if as_quoted:
-        return as_quoted[-1]
+        candidates.append(as_quoted[-1])
 
     # Strategy B: last paragraph that is >60% Assamese
     paragraphs = [p.strip() for p in rc.split('\n\n') if p.strip()]
     as_paragraphs = [p for p in paragraphs if _assamese_ratio(p) > 0.6 and len(p) > 30]
     if as_paragraphs:
-        # Return the last (and typically the longest final-draft) paragraph
-        return max(as_paragraphs, key=len)
+        candidates.append(max(as_paragraphs, key=len))
 
-    # Strategy C: line-by-line Assamese extraction (existing function)
-    return _extract_assamese_answer(rc)
+    if not candidates:
+        return ""
+
+    # Return the LONGEST candidate — more words == more complete translation.
+    # This avoids Strategy A accidentally returning a short concluding sentence
+    # when Strategy C already found the full multi-paragraph translation.
+    return max(candidates, key=lambda s: len(s.split()))
 
 
 def _extract_assamese_answer(text: str) -> str:
