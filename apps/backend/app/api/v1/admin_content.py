@@ -26,6 +26,75 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Admin Content"], dependencies=[Depends(require_admin_session), Depends(csrf_guard)])
 
 
+# ── Seeder Run History ────────────────────────────────────────────────────────
+
+@router.get("/content/seed-notes/history")
+async def admin_seed_notes_history(request: Request, limit: int = 20):
+    """Return recent seed-notes runs for admin review.
+
+    Session-auth protected (admin panel friendly — no cron Bearer token needed).
+    Includes live in-process status when a job is actively running.
+    """
+    from app.models.seed_run import SeedRun
+
+    runs_out = []
+
+    # Include live in-process status as the first entry when a job is running
+    live = getattr(request.app.state, "seed_notes_status", None)
+    if live and live.get("running"):
+        runs_out.append({
+            "run_id":        live.get("run_id", "live"),
+            "status":        "running",
+            "running":       True,
+            "started_at":    live.get("started_at"),
+            "finished_at":   None,
+            "total":         live.get("total", 0),
+            "completed":     live.get("completed", 0),
+            "failed":        live.get("failed", 0),
+            "skipped":       live.get("skipped", 0),
+            "topics_seeded": live.get("topics_seeded", 0),
+            "failed_ids":    live.get("failed_ids", []),
+            "errors":        live.get("errors", []),
+            "concurrency":   live.get("concurrency", 2),
+            "force":         live.get("force", False),
+            "current":       live.get("current", ""),
+        })
+
+    try:
+        runs = await SeedRun.find(
+            sort=[("started_at", -1)]
+        ).to_list(length=limit)
+
+        live_run_id = live.get("run_id") if live and live.get("running") else None
+        for r in runs:
+            # Skip the live run if it's already in the list above
+            if live_run_id and str(r.id) == live_run_id:
+                continue
+            runs_out.append({
+                "run_id":        str(r.id),
+                "status":        r.status,
+                "running":       r.status == "running",
+                "started_at":    r.started_at.isoformat(),
+                "finished_at":   r.finished_at.isoformat() if r.finished_at else None,
+                "total":         r.total,
+                "completed":     r.completed,
+                "failed":        r.failed,
+                "skipped":       r.skipped,
+                "topics_seeded": r.topics_seeded,
+                "failed_ids":    r.failed_ids,
+                "errors":        r.errors,
+                "concurrency":   r.concurrency,
+                "force":         r.force,
+                "current":       r.current,
+            })
+    except Exception as e:
+        logger.warning(f"admin_seed_notes_history: MongoDB query failed: {e}")
+        if not runs_out:
+            return {"runs": [], "error": str(e)}
+
+    return {"runs": runs_out[:limit]}
+
+
 # ── Audit log helper ──────────────────────────────────────────────────────────
 
 async def _stamp_audit(

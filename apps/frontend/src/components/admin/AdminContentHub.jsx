@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import {
   PenTool, FileText, ArrowRight,
-  Loader2, Globe, Languages, BarChart2,
+  Loader2, Globe, Languages, BarChart2, History,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
@@ -14,6 +14,7 @@ const AdminCmsDocEditor  = lazy(() => import('./AdminCmsDocEditor'));
 const BlogPublishWizard  = lazy(() => import('./BlogPublishWizard'));
 const AssameseBackfillPanel = lazy(() => import('./AssameseBackfillPanel'));
 const AdminTranslationProgress = lazy(() => import('./AdminTranslationProgress'));
+const SeederHistoryPanel = lazy(() => import('./content-editor/SeederHistoryPanel'));
 
 
 const API = API_BASE;
@@ -24,6 +25,7 @@ const TABS = [
   { id: 'blog',        label: 'Blog Publisher',  icon: Globe,       color: 'sky',     desc: 'SEO & GEO-rich 5-step blog publish wizard' },
   { id: 'translation', label: 'Assamese',            icon: Languages,  color: 'amber',   desc: 'Bulk translate English chapters to Assamese via Sarvam AI' },
   { id: 'progress',    label: 'Translation Progress', icon: BarChart2,  color: 'rose',    desc: 'Track which chapters still lack Assamese translation' },
+  { id: 'seeder',      label: 'Seeder History',  icon: History,     color: 'indigo',  desc: 'Review past seed-notes runs, failures, and retry stats' },
 ];
 
 const FLOW = [
@@ -31,7 +33,8 @@ const FLOW = [
   { label: 'CMS / Docs',   sub: 'Manage docs',        tab: 'cms',         arrow: true  },
   { label: 'Blog Publisher', sub: 'SEO & publish',    tab: 'blog',        arrow: true  },
   { label: 'Assamese',     sub: 'Bulk translate',     tab: 'translation', arrow: true  },
-  { label: 'Progress',     sub: 'Track missing',      tab: 'progress',    arrow: false },
+  { label: 'Progress',     sub: 'Track missing',      tab: 'progress',    arrow: true  },
+  { label: 'Seeder',       sub: 'Run history',        tab: 'seeder',      arrow: false },
 ];
 
 const COLOR_MAP = {
@@ -66,7 +69,7 @@ function loadPersistedCtx() {
   } catch { return EMPTY_CTX; }
 }
 
-const INTERNAL_TABS = new Set(['editor', 'cms', 'blog', 'translation', 'progress']);
+const INTERNAL_TABS = new Set(['editor', 'cms', 'blog', 'translation', 'progress', 'seeder']);
 
 export default function AdminContentHub({ adminToken, onNavigate: topNavigate, navContext }) {
   const [activeTab, setActiveTab] = useState(navContext?.initialTab || 'editor');
@@ -250,6 +253,28 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
             {activeTab === 'progress' && (
               <div className="h-full overflow-hidden">
                 <AdminTranslationProgress adminToken={adminToken} />
+              </div>
+            )}
+
+            {activeTab === 'seeder' && (
+              <div className="h-full overflow-y-auto">
+                <SeederHistoryPanel
+                  adminToken={adminToken}
+                  onRetryWithIds={(failedIds) => {
+                    // Copy the failed IDs to clipboard and let the user know
+                    // to use them in the seed-notes trigger (cron endpoint)
+                    navigator.clipboard.writeText(JSON.stringify(failedIds))
+                      .then(() => {
+                        import('sonner').then(({ toast }) =>
+                          toast.success(
+                            `${failedIds.length} failed chapter IDs copied — paste into the chapter_ids field when triggering a retry`,
+                            { duration: 6000 }
+                          )
+                        );
+                      })
+                      .catch(() => {});
+                  }}
+                />
               </div>
             )}
           </Suspense>
