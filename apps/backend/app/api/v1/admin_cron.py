@@ -5,10 +5,14 @@ Auth: Bearer token (TRANSLATE_CRON_SECRET) — no session cookie required.
 These routes must NOT be mixed with session-protected admin routes.
 """
 
+import asyncio
+import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Admin Cron"])
 
 
@@ -63,3 +67,238 @@ async def cron_translate(request: Request):
         skip_existing=True,
     )
     return result
+
+
+# ── Seed Notes ────────────────────────────────────────────────────────────────
+
+@router.post("/cron/seed-notes")
+async def cron_seed_notes(request: Request):
+    """Bulk-generate English notes for all chapters that have topics but no content.
+
+    Launches a background job immediately and returns.  Poll
+    GET /cron/seed-notes/status for live progress.
+
+    Auth: Bearer {TRANSLATE_CRON_SECRET}
+
+    Body (all optional):
+        {
+          "subject_id":    "<mongo_id>",   # restrict to one subject
+          "board":         "AHSEC",        # restrict by board name
+          "chapter_ids":   ["<id>", ...],  # re-run specific chapters (retry)
+          "limit":         50,             # max chapters to process (default: all)
+          "concurrency":   2,              # parallel Sarvam calls (default: 2)
+          "force":         false           # overwrite existing content
+        }
+
+    Returns immediately:
+        { "job": "started", "total_queued": N }
+    """
+    _verify_cron_token(request)
+
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    # Check if a job is already running
+    existing = getattr(request.app.state, "seed_notes_status", {})
+    if existing.get("running"):
+        raise HTTPException(
+            status_code=409,
+            detail="A seed-notes job is already running. "
+                   "Poll GET /cron/seed-notes/status for progress.",
+        )
+
+    from app.models.content import Chapter
+    from beanie import PydanticObjectId
+
+    subject_id_raw: Optional[str] = body.get("subject_id")
+    board_filter: Optional[str]   = body.get("board")
+    chapter_ids_raw: list         = body.get("chapter_ids", [])
+    limit: int                    = int(body.get("limit", 9999))
+    concurrency: int              = max(1, min(int(body.get("concurrency", 2)), 5))
+    force: bool                   = bool(body.get("force", False))
+
+    # ── Build the candidate list ───────────────────────────────────────────────
+    if chapter_ids_raw:
+        # Explicit retry list — process these regardless of content state
+        chapters = []
+        for cid in chapter_ids_raw[:limit]:
+            try:
+                ch = await Chapter.get(PydanticObjectId(cid))
+                if ch:
+                    chapters.append(ch)
+            except Exception:
+                pass
+    else:
+        # All chapters that lack content_en (or force=True means all with topics)
+        filt = {}
+        if subject_id_raw:
+            try:
+                filt["subject_id"] = PydanticObjectId(subject_id_raw)
+            except Exception:
+                pass
+        if not force:
+            filt["$or"] = [
+                {"content_en": {"$exists": False}},
+                {"content_en": None},
+                {"content_en": ""},
+            ]
+
+        chapters = await Chapter.find(filt).to_list(length=limit)
+
+        # Board filter requires a join — do it in Python after fetching
+        if board_filter:
+            from app.models.content import Subject, Stream, Class, Board  # noqa
+            chapters = await _filter_chapters_by_board(chapters, board_filter)
+
+    total = len(chapters)
+    if total == 0:
+        return {"job": "nothing_to_do", "total_queued": 0,
+                "message": "All chapters already have content (pass force=true to regenerate)"}
+
+    # ── Initialise status ──────────────────────────────────────────────────────
+    request.app.state.seed_notes_status = {
+        "running":       True,
+        "total":         total,
+        "completed":     0,
+        "failed":        0,
+        "skipped":       0,
+        "topics_seeded": 0,
+        "current":       "",
+        "failed_ids":    [],
+        "errors":        [],
+        "started_at":    datetime.now(timezone.utc).isoformat(),
+        "finished_at":   None,
+        "concurrency":   concurrency,
+        "force":         force,
+    }
+
+    # ── Launch background task ─────────────────────────────────────────────────
+    asyncio.create_task(
+        _seed_notes_background(
+            app_state=request.app.state,
+            chapters=chapters,
+            concurrency=concurrency,
+            force=force,
+        )
+    )
+
+    return {"job": "started", "total_queued": total, "concurrency": concurrency}
+
+
+@router.get("/cron/seed-notes/status")
+async def cron_seed_notes_status(request: Request):
+    """Return live progress of the running (or last completed) seed-notes job.
+
+    Auth: Bearer {TRANSLATE_CRON_SECRET}
+    """
+    _verify_cron_token(request)
+
+    status = getattr(request.app.state, "seed_notes_status", None)
+    if status is None:
+        return {"running": False, "message": "No seed-notes job has been started yet."}
+
+    # Calculate ETA
+    result = dict(status)
+    done = status["completed"] + status["failed"] + status["skipped"]
+    if status["running"] and done > 0:
+        started = datetime.fromisoformat(status["started_at"])
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        rate = done / elapsed  # chapters/sec
+        remaining = status["total"] - done
+        result["eta_seconds"] = round(remaining / rate) if rate > 0 else None
+        result["elapsed_seconds"] = round(elapsed)
+    return result
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
+
+async def _filter_chapters_by_board(chapters, board_name: str):
+    """Filter chapter list to those belonging to the given board name."""
+    try:
+        from app.db.mongo import get_mongo_client
+        from app.config import settings
+
+        client = get_mongo_client()
+        db = client[settings.MONGODB_DB_NAME]
+        pipeline = [
+            {"$lookup": {"from": "streams",  "localField": "stream_id",   "foreignField": "_id", "as": "stream"}},
+            {"$unwind": "$stream"},
+            {"$lookup": {"from": "classes",  "localField": "stream.class_id", "foreignField": "_id", "as": "cls"}},
+            {"$unwind": "$cls"},
+            {"$lookup": {"from": "boards",   "localField": "cls.board_id",    "foreignField": "_id", "as": "board"}},
+            {"$unwind": "$board"},
+            {"$match":  {"board.name": board_name}},
+            {"$project": {"_id": 1}},
+        ]
+        subject_ids = {
+            str(doc["_id"])
+            async for doc in db["subjects"].aggregate(pipeline)
+        }
+        return [ch for ch in chapters if str(ch.subject_id) in subject_ids]
+    except Exception as e:
+        logger.warning(f"Board filter failed ({e}), returning all chapters")
+        return chapters
+
+
+async def _seed_notes_background(app_state, chapters, concurrency: int, force: bool):
+    """Background worker: generate notes for each chapter with Sarvam concurrency guard."""
+    from app.services.content_generation import content_generation_service
+    from app.models.content import Subject
+
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _process_one(ch):
+        async with sem:
+            chapter_id = str(ch.id)
+            title = ch.title or chapter_id
+            app_state.seed_notes_status["current"] = title
+            try:
+                # 1. Ensure topics exist (generates them via AI if missing)
+                if not ch.published_topics:
+                    # Try to get subject name for context
+                    subject_name = ""
+                    try:
+                        subj = await Subject.get(ch.subject_id)
+                        subject_name = subj.name if subj else ""
+                    except Exception:
+                        pass
+
+                    ch = await content_generation_service.ensure_topics(ch, subject_name=subject_name)
+                    if ch.published_topics:
+                        app_state.seed_notes_status["topics_seeded"] += 1
+                    else:
+                        # Still no topics — skip, can't generate
+                        logger.warning(f"Seed-notes: no topics for {title!r}, skipping")
+                        app_state.seed_notes_status["skipped"] += 1
+                        return
+
+                # 2. Generate notes (skips automatically if content_en present and not force)
+                await content_generation_service.generate_notes(chapter_id, force=force)
+                app_state.seed_notes_status["completed"] += 1
+                logger.info(f"Seed-notes ✓ {title!r}")
+
+            except Exception as exc:
+                logger.error(f"Seed-notes ✗ {title!r}: {exc}")
+                app_state.seed_notes_status["failed"] += 1
+                app_state.seed_notes_status["failed_ids"].append(chapter_id)
+                app_state.seed_notes_status["errors"].append(
+                    {"chapter_id": chapter_id, "title": title, "error": str(exc)[:200]}
+                )
+
+    await asyncio.gather(*[_process_one(ch) for ch in chapters])
+
+    app_state.seed_notes_status["running"]     = False
+    app_state.seed_notes_status["current"]     = ""
+    app_state.seed_notes_status["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    total    = app_state.seed_notes_status["total"]
+    done     = app_state.seed_notes_status["completed"]
+    failed   = app_state.seed_notes_status["failed"]
+    skipped  = app_state.seed_notes_status["skipped"]
+    logger.info(
+        f"Seed-notes job finished: {done}/{total} generated, "
+        f"{failed} failed, {skipped} skipped"
+    )

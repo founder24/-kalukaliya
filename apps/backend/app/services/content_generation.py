@@ -13,9 +13,14 @@ Pipeline (fully automatic):
   generate_assamese_only()  → Sarvam AI (AS, chunked) → MongoDB
                               → re-publishes to GCS so CF Pages gets bilingual JSON
                               → re-indexes in Vertex AI Search with updated content
+
+  ensure_topics()           → Sarvam AI → generates 4-6 topic titles for chapters
+                              that have no published_topics yet, saves to MongoDB.
 """
 
 import logging
+import re
+import uuid
 from datetime import datetime, timezone
 
 from beanie import PydanticObjectId
@@ -77,6 +82,71 @@ class ContentGenerationService:
     # ──────────────────────────────────────────────────────────────────────────
     # Public API
     # ──────────────────────────────────────────────────────────────────────────
+
+    async def ensure_topics(self, chapter: Chapter, subject_name: str = "") -> Chapter:
+        """Generate 4-6 topic titles for a chapter that has no published_topics.
+
+        Uses Sarvam AI to derive a realistic topic list from the chapter title
+        and subject name, then saves the result to MongoDB.  Idempotent — if
+        topics already exist the chapter is returned unchanged.
+
+        Args:
+            chapter:      The Chapter document (Beanie).
+            subject_name: Optional subject name for extra context in the prompt.
+
+        Returns:
+            The (possibly updated) Chapter document.
+        """
+        if chapter.published_topics:
+            return chapter   # already has topics
+
+        ctx = f"Subject: {subject_name}\n" if subject_name else ""
+        prompt = (
+            f"{ctx}Chapter title: {chapter.title}\n\n"
+            "List 4 to 6 specific topic titles that this chapter would cover "
+            "in an Indian university / higher secondary curriculum. "
+            "Output ONLY a numbered list — one topic per line, no extra text.\n"
+            "Example:\n1. Introduction and Overview\n2. Key Concepts\n..."
+        )
+        try:
+            raw = await sarvam_client.generate(
+                "You are a curriculum designer for Indian higher education. "
+                "Output ONLY the numbered topic list, nothing else.",
+                prompt,
+            )
+        except Exception as e:
+            logger.warning(f"ensure_topics Sarvam call failed for {chapter.title!r}: {e}")
+            return chapter
+
+        # Parse numbered / bulleted lines into topic titles
+        from app.models.content import Topic  # local import avoids circular
+
+        topics = []
+        for line in raw.strip().split("\n"):
+            line = line.strip()
+            # Strip leading number/bullet:  "1. Foo"  "- Foo"  "• Foo"
+            clean = re.sub(r"^[\d]+[.)]\s*|^[-•*]\s*", "", line).strip()
+            if clean and len(clean) > 3:
+                topics.append(
+                    Topic(
+                        id=str(uuid.uuid4()),
+                        title=clean,
+                        definition=None,
+                        topic_slug=re.sub(r"[^a-z0-9]+", "-", clean.lower()).strip("-"),
+                        definition_status="pending",
+                        wikidata_uri=None,
+                    )
+                )
+
+        if not topics:
+            logger.warning(f"ensure_topics produced no topics for {chapter.title!r} (raw: {raw[:200]!r})")
+            return chapter
+
+        chapter.published_topics = topics
+        chapter.updated_at = datetime.now(timezone.utc)
+        await chapter.save()
+        logger.info(f"ensure_topics: seeded {len(topics)} topics for {chapter.title!r}")
+        return chapter
 
     async def generate_notes(self, chapter_id: str, force: bool = False) -> Chapter:
         """Generate English notes + Assamese translation, then auto-publish.
