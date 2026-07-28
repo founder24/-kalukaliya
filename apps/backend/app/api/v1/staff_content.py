@@ -4,6 +4,7 @@ Provides subject/chapter navigation and full chapter content + RAG editing.
 """
 import asyncio
 import mimetypes
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -430,6 +431,8 @@ async def staff_get_chapter(
         "published_at":          _ts(chapter.published_at),
         "updated_at":            _ts(chapter.updated_at),
         "word_count":            chapter.word_count,
+        # Topics — used for topic-wise embedding + syllabus hierarchy mapping
+        "published_topics":      [t.model_dump() for t in (chapter.published_topics or [])],
     }
 
 
@@ -462,6 +465,8 @@ class ChapterEditBody(BaseModel):
     rag_sections_as:    Optional[list[dict]] = None
     qa_rag_sections_en: Optional[list[dict]] = None
     qa_rag_sections_as: Optional[list[dict]] = None
+    # Topics — sent as full topic dicts; upserted on save so embeddings stay in sync
+    published_topics:   Optional[list[dict]] = None
 
 
 _CONTENT_FIELDS = frozenset({
@@ -542,6 +547,28 @@ async def staff_update_chapter(
             setattr(chapter, field, val)
             changed = True
             qa_sections_changed = True
+
+    # Topics — validate and replace the whole list when provided
+    if body.published_topics is not None:
+        from app.models.content import Topic as _Topic
+        valid_topics = []
+        for raw in body.published_topics:
+            title = (raw.get("title") or "").strip()
+            if not title:
+                continue
+            slug = (raw.get("topic_slug") or "").strip() or re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+            topic_id = raw.get("id") or str(__import__("uuid").uuid4())
+            valid_topics.append(
+                _Topic(
+                    id=topic_id,
+                    title=title,
+                    topic_slug=slug,
+                    definition=raw.get("definition"),
+                    definition_status=raw.get("definition_status", "pending"),
+                )
+            )
+        chapter.published_topics = valid_topics
+        changed = True
 
     if not changed:
         return {"ok": True, "message": "No changes"}

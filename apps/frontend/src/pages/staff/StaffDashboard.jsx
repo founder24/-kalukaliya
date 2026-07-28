@@ -45,6 +45,73 @@ function Spinner({ size = 5 }) {
 
 // ── Field indicator dots ─────────────────────────────────────────────────────
 
+// ── Topic chip list editor ────────────────────────────────────────────────────
+
+function _slugifyTopic(title) {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function TopicsEditor({ topics, onChange }) {
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef(null);
+
+  const addTopic = () => {
+    const title = draft.trim();
+    if (!title) return;
+    // Avoid exact-title duplicates (case-insensitive)
+    if (topics.some(t => t.title.toLowerCase() === title.toLowerCase())) {
+      setDraft('');
+      return;
+    }
+    const newTopic = { id: crypto.randomUUID(), title, topic_slug: _slugifyTopic(title), definition_status: 'pending' };
+    onChange([...topics, newTopic]);
+    setDraft('');
+  };
+
+  const removeTopic = (id) => onChange(topics.filter(t => t.id !== id));
+
+  return (
+    <div className="space-y-2">
+      {/* Chip list */}
+      <div className="flex flex-wrap gap-1.5 min-h-[2rem]">
+        {topics.length === 0 && (
+          <span className="text-xs text-gray-400 italic">No topics yet — add one below</span>
+        )}
+        {topics.map(t => (
+          <span key={t.id}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-violet-50 text-violet-700 border border-violet-200">
+            {t.title}
+            <button
+              type="button"
+              onClick={() => removeTopic(t.id)}
+              className="ml-0.5 text-violet-400 hover:text-red-500 transition-colors leading-none"
+              title={`Remove "${t.title}"`}
+            >×</button>
+          </span>
+        ))}
+      </div>
+      {/* Add input */}
+      <div className="flex gap-2">
+        <input
+          ref={inputRef}
+          type="text"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTopic(); } }}
+          placeholder="Topic title… (Enter to add)"
+          className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-violet-400"
+        />
+        <button
+          type="button"
+          onClick={addTopic}
+          disabled={!draft.trim()}
+          className="px-3 py-2 rounded-xl text-xs font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40 transition-colors"
+        >Add</button>
+      </div>
+    </div>
+  );
+}
+
 function Dot({ filled, label }) {
   return (
     <span
@@ -756,6 +823,26 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                 <FieldLabel>Keywords</FieldLabel>
                 <input type="text" value={form?.keywords || ''} onChange={set('keywords')} className={inputCls} placeholder="comma, separated, keywords" />
               </div>
+
+              {/* ── Topics — drive topic-wise embedding + chat syllabus routing ── */}
+              <div>
+                <FieldLabel>
+                  Topics
+                  <span className="ml-1 normal-case font-normal text-gray-400">
+                    — each becomes an embedding vector for AI topic matching
+                  </span>
+                </FieldLabel>
+                <TopicsEditor
+                  topics={form?.published_topics || []}
+                  onChange={topics => setForm(f => ({ ...f, published_topics: topics }))}
+                />
+                {(form?.published_topics || []).length > 0 && (
+                  <p className="mt-1.5 text-[11px] text-gray-400">
+                    {(form?.published_topics || []).length} topic{(form?.published_topics || []).length !== 1 ? 's' : ''} · saved with the chapter · re-embedded on next publish
+                  </p>
+                )}
+              </div>
+
               {/* Content presence summary */}
               <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
                 <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Content presence</div>

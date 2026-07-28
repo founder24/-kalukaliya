@@ -210,7 +210,9 @@ class ContentPublisherService:
         board = hierarchy.get("board")
         cls = hierarchy.get("cls")
 
-        subject_slug = subject.name.lower().replace(" ", "-") if subject else ""
+        # Use the canonical subject slug, fall back to slugifying the name for
+        # legacy subjects that were created before the slug field existed.
+        subject_slug = (subject.slug or subject.name.lower().replace(" ", "-")) if subject else ""
         board_slug = board.slug if board else ""
         class_level = cls.name if cls else ""
 
