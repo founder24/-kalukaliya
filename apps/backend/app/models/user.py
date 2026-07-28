@@ -30,7 +30,7 @@ class User(Document):
     role: Optional[Literal["student", "educator", "staff", "admin"]] = "student"
 
     # Subscription
-    subscription_tier: Literal["free", "pro"] = "free"
+    subscription_tier: Literal["free", "starter", "pro", "premium"] = "free"
     subscription_status: Literal["active", "past_due", "cancelled"] = "active"
     razorpay_subscription_id: Optional[str] = None
     razorpay_customer_id: Optional[str] = None

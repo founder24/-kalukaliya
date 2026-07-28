@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { isDegreeBoard } from '@/utils/courseTypes';
@@ -27,6 +27,7 @@ export default function ProfilePage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [profile, setProfile]               = useState(null);
+  const [profileError, setProfileError]     = useState(false);
   const [loading, setLoading]               = useState(true);
   const [stats, setStats]                   = useState({ conversations: 0, saved_subjects: 0, total_tokens: 0, credits_used: 0 });
   const [editField, setEditField]           = useState(null);
@@ -48,29 +49,39 @@ export default function ProfilePage() {
   const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
   const editInputRef = useRef(null);
 
-  useEffect(() => {
+  const loadProfile = useCallback(() => {
     if (!user) return;
     setLoading(true);
+    setProfileError(false);
     Promise.all([
       apiClient().get('/user/profile'),
       apiClient().get('/user/stats'),
     ])
       .then(([profileRes, statsRes]) => {
         const p = profileRes.data;
+        if (!p || typeof p !== 'object') {
+          setProfileError(true);
+          return;
+        }
         setProfile(p);
-        setStats(statsRes.data);
+        setStats(statsRes.data || { conversations: 0, saved_subjects: 0, total_tokens: 0, credits_used: 0 });
         // Task #530: rehydrate the local opt-out flag from the server so
         // signing in on a new device immediately applies the user's
         // cross-device choice on the next ad-bearing route they visit.
         hydrateAdsOptOutFromServer(p?.ads_opt_out);
-        if (p.status === 'pending_deletion' && p.deletion_hard_at) {
+        if (p?.status === 'pending_deletion' && p?.deletion_hard_at) {
           setDeletionPending(true);
           setDeletionHardAt(p.deletion_hard_at);
         }
       })
-      .catch(() => toast.error('Failed to load profile'))
+      .catch(() => {
+        setProfileError(true);
+        toast.error('Failed to load profile');
+      })
       .finally(() => setLoading(false));
-  }, [user]);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { loadProfile(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const upgradePlan = searchParams.get('upgrade');
@@ -165,9 +176,9 @@ export default function ProfilePage() {
 
   const refreshData = async () => {
     await Promise.all([
-      apiClient().get('/user/profile').then(r => setProfile(r.data)),
-      apiClient().get('/user/stats').then(r => setStats(r.data)),
-    ]);
+      apiClient().get('/user/profile').then(r => { if (r.data && typeof r.data === 'object') setProfile(r.data); }),
+      apiClient().get('/user/stats').then(r => { if (r.data && typeof r.data === 'object') setStats(r.data); }),
+    ]).catch(() => {});
     if (refreshUser) refreshUser();
     setPaymentRefreshKey(k => k + 1);
   };
@@ -278,6 +289,33 @@ export default function ProfilePage() {
             }}
           >
             Sign In
+          </button>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (!loading && (profileError || !profile)) {
+    return (
+      <AppLayout pageTitle="Profile">
+        <PageTitle title="Profile | Syrabit.ai" />
+        <div className="flex flex-col items-center justify-center h-full px-4 py-20 text-center">
+          <div className="w-16 h-16 rounded-full mb-4 flex items-center justify-center" style={{ background: 'rgba(239,68,68,0.10)' }}>
+            <span className="text-2xl">⚠️</span>
+          </div>
+          <h2 className="text-lg font-semibold text-foreground mb-2">Couldn't load profile</h2>
+          <p className="text-muted-foreground text-sm mb-6 max-w-xs">
+            There was a problem fetching your profile. Please check your connection and try again.
+          </p>
+          <button
+            onClick={loadProfile}
+            className="h-10 px-6 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
+            style={{
+              background: 'linear-gradient(135deg, hsl(var(--primary)), #8b5cf6)',
+              boxShadow: '0 4px 15px var(--glow-primary, rgba(139,92,246,0.35))',
+            }}
+          >
+            Try Again
           </button>
         </div>
       </AppLayout>
