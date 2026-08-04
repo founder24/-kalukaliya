@@ -266,7 +266,8 @@ function injectFaqJsonLdIntoHead(html, faqEntries) {
   const tag =
     `    <script type="application/ld+json" data-pm="1">${json}</script>\n  `;
   if (html.includes("</head>")) {
-    return html.replace("</head>", `${tag}</head>`);
+    // Function replacement prevents $X substitution in JSON-LD content.
+    return html.replace("</head>", () => `${tag}</head>`);
   }
   return html;
 }
@@ -351,10 +352,9 @@ function inlineMainCssOnce(html, distDir) {
   const cssPath = path.join(distDir, "assets", m[1]);
   if (!fs.existsSync(cssPath)) return html;
   const cssContent = fs.readFileSync(cssPath, "utf-8");
-  const out = html.replace(
-    cssLinkRe,
-    `<style data-inline-css="${m[1]}">${cssContent}</style>`,
-  );
+  // Use function replacement to prevent $X substitution in CSS content.
+  const cssReplacement = `<style data-inline-css="${m[1]}">${cssContent}</style>`;
+  const out = html.replace(cssLinkRe, () => cssReplacement);
   console.log(
     `[prerender-routes] inlined ${m[1]} (${cssContent.length} bytes) — removed render-blocking CSS for subject + chapter snapshots`,
   );
@@ -372,19 +372,23 @@ function injectShell(htmlTemplate, { ssrHtml, hydrateKind, inlineScripts, pageCh
       "[prerender-routes] could not locate shell markers in dist/index.html — structure changed?",
     );
   }
+  // IMPORTANT: use () => replacement functions, NOT string replacements.
+  // String replacements interpret $', $&, $`, $1 etc. as special substitution
+  // patterns. If ssrHtml or the inline-scripts blob contain any of those
+  // sequences (e.g. $' in Assamese apostrophe+dollar combos, LaTeX notation,
+  // price strings) the resulting HTML is silently corrupted — text after the
+  // match gets injected inside the <script> tag, eventually causing the browser
+  // to see a malformed script and render the escaped tail as visible body text
+  // ("raw JSON above the navbar"). Arrow-function replacements are immune.
+  const rootReplacement = `<div id="root" data-hydrate="${hydrateKind}">${ssrHtml}</div>`;
   let html =
     htmlTemplate.slice(0, startIdx) +
-    htmlTemplate.slice(rootMatch.index).replace(
-      rootRe,
-      `<div id="root" data-hydrate="${hydrateKind}">${ssrHtml}</div>`,
-    );
+    htmlTemplate.slice(rootMatch.index).replace(rootRe, () => rootReplacement);
 
   if (inlineScripts && inlineScripts.length) {
     const blob = inlineScripts.join("\n    ");
-    html = html.replace(
-      /<script type="module"/,
-      `${blob}\n    <script type="module"`,
-    );
+    const scriptReplacement = `${blob}\n    <script type="module"`;
+    html = html.replace(/<script type="module"/, () => scriptReplacement);
   }
 
   if (pageChunkPreload && pageChunkPreload.injectFn && pageChunkPreload.chunkFile) {

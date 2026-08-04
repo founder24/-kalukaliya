@@ -191,12 +191,16 @@ async function main() {
   // Replace the legacy pre-hydration shell block AND the empty #root
   // with the SSR output. Mark with data-hydrate so the bootstrap
   // calls hydrateRoot instead of createRoot.
+  //
+  // IMPORTANT: use an arrow-function replacement, NOT a template string.
+  // String replacements passed to .replace() interpret $', $&, $` etc. as
+  // special substitution patterns; if ssrHtml contains any of those sequences
+  // (e.g. from Assamese text, dollar signs, apostrophes in EmptyState copy)
+  // the resulting HTML is silently corrupted. Function replacements are immune.
+  const rootReplacement = `<div id="root" data-hydrate="chat">${ssrHtml}</div>`;
   html =
     html.slice(0, startIdx) +
-    html.slice(rootMatch.index).replace(
-      rootRe,
-      `<div id="root" data-hydrate="chat">${ssrHtml}</div>`,
-    );
+    html.slice(rootMatch.index).replace(rootRe, () => rootReplacement);
 
   // Task #395: ChatPage is now its own dynamic chunk; inject a
   // modulepreload so the browser fetches it in parallel with the entry

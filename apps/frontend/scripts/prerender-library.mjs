@@ -293,10 +293,9 @@ async function main() {
     const cssPath = path.join(distDir, "assets", cssLinkMatch[1]);
     if (fs.existsSync(cssPath)) {
       const cssContent = fs.readFileSync(cssPath, "utf-8");
-      baseHtml = baseHtml.replace(
-        cssLinkRe,
-        `<style data-inline-css="${cssLinkMatch[1]}">${cssContent}</style>`,
-      );
+      // Function replacement prevents $X substitution in CSS content.
+      const cssReplacement = `<style data-inline-css="${cssLinkMatch[1]}">${cssContent}</style>`;
+      baseHtml = baseHtml.replace(cssLinkRe, () => cssReplacement);
       console.log(
         `[prerender-library] inlined ${cssLinkMatch[1]} (${cssContent.length} bytes) — removed render-blocking CSS`,
       );
@@ -351,12 +350,14 @@ async function main() {
       );
     }
 
+    // IMPORTANT: use () => function replacements, NOT string replacements.
+    // String replacements interpret $', $&, $` etc. as special substitution
+    // patterns — if ssrHtml or the inline-script JSON contain those sequences,
+    // the resulting HTML is silently corrupted. Function replacements are immune.
+    const rootReplacement = `<div id="root" data-hydrate="library">${ssrHtml}</div>`;
     let routeHtml =
       baseHtml.slice(0, startIdx) +
-      baseHtml.slice(rootMatch.index).replace(
-        rootRe,
-        `<div id="root" data-hydrate="library">${ssrHtml}</div>`,
-      );
+      baseHtml.slice(rootMatch.index).replace(rootRe, () => rootReplacement);
 
     if (slim) {
       const json = JSON.stringify(slim).replace(/</g, "\\u003c");
@@ -374,9 +375,10 @@ async function main() {
       const inlineScript =
         `<script>window.__LIBRARY_BUNDLE__=${json};` +
         `window.__SSR_QUERIES__=(window.__SSR_QUERIES__||[]).concat(${ssrQ});</script>`;
+      const scriptReplacement = `${inlineScript}\n    <script type="module"`;
       routeHtml = routeHtml.replace(
         /<script type="module"/,
-        `${inlineScript}\n    <script type="module"`,
+        () => scriptReplacement,
       );
     }
 
