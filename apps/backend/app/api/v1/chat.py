@@ -416,16 +416,16 @@ async def chat(
                     sources=[],
                 )
 
-            # 2c. Confidence-gated web search.
-            # HIGH/MID (≥0.65): MongoDB content is strong — web adds noise and latency.
-            # LOW/NONE (<0.65):  web search as scaffold or primary source.
-            # Skipped entirely for generic greetings and after cache hits.
+            # 2c. Web search — runs for every non-generic query, in parallel
+            # with the RAG retrieve below so it adds zero extra latency.
+            # Web is always supplementary: the system prompt weights it at 20%
+            # when RAG is available, or 50% when RAG returns nothing.
             web_chunks: list[dict] = []
-            if not skip_rag and match_score < CONFIDENCE_MID:
+            if not skip_rag:
                 web_chunks = await ChatService.retrieve_web_context(
                     sanitized_message, lang=detected_lang
                 )
-                if not context_chunks:
+                if not context_chunks and web_chunks:
                     logger.info(
                         "rag_empty_using_web_fallback",
                         extra={"user_id": user_id, "web_chunks": len(web_chunks)},
@@ -1065,8 +1065,9 @@ async def chat_stream(
                 # ── 2c. Normal confidence-gated retrieval ────────────────────────────
                 if source_card is None:
                     if match_score >= CONFIDENCE_HIGH:
-                        # HIGH (≥ 0.80): strong match → MongoDB fast path only, web skipped.
-                        # Saves ~5s of DuckDuckGo latency on on-curriculum queries.
+                        # HIGH (≥ 0.80): strong topic match → MongoDB fast path + web in parallel.
+                        # Web search adds supplementary context (20% weight in prompt)
+                        # without delaying RAG — both run concurrently via gather().
                         confidence_tier = "high"
                         logger.info(
                             "confidence_high",
@@ -1076,11 +1077,19 @@ async def chat_stream(
                                 "topic": topic_match.get("topic_title"),
                             },
                         )
-                        context_chunks = await ChatService.retrieve_context_from_chapter(
-                            chapter_id=topic_match.get("chapter_id"),
-                            chapter_title=topic_match.get("chapter_title", ""),
-                            detected_lang=detected_lang,
+                        rag_result, web_result = await asyncio.gather(
+                            ChatService.retrieve_context_from_chapter(
+                                chapter_id=topic_match.get("chapter_id"),
+                                chapter_title=topic_match.get("chapter_title", ""),
+                                detected_lang=detected_lang,
+                            ),
+                            ChatService.retrieve_web_context(
+                                sanitized_message, lang=detected_lang
+                            ),
+                            return_exceptions=True,
                         )
+                        context_chunks = rag_result if not isinstance(rag_result, Exception) else []
+                        web_chunks = web_result if not isinstance(web_result, Exception) else []
                         rag_path = "mongodb" if context_chunks else "none"
                         if not context_chunks:
                             # Chapter has no stored content — fall through to v2.
@@ -1094,8 +1103,8 @@ async def chat_stream(
                             )
 
                     elif match_score >= CONFIDENCE_MID:
-                        # MID (0.65–0.80): good match → MongoDB fast path ONLY.
-                        # Score is strong enough; web adds noise and 200-400ms latency.
+                        # MID (0.65–0.80): good match → MongoDB fast path + web in parallel.
+                        # Web supplements at 20% weight; RAG remains the primary source.
                         confidence_tier = "mid"
                         logger.info(
                             "confidence_mid",
@@ -1105,12 +1114,19 @@ async def chat_stream(
                                 "topic": topic_match.get("topic_title"),
                             },
                         )
-                        context_chunks = await ChatService.retrieve_context_from_chapter(
-                            chapter_id=topic_match.get("chapter_id"),
-                            chapter_title=topic_match.get("chapter_title", ""),
-                            detected_lang=detected_lang,
+                        rag_result, web_result = await asyncio.gather(
+                            ChatService.retrieve_context_from_chapter(
+                                chapter_id=topic_match.get("chapter_id"),
+                                chapter_title=topic_match.get("chapter_title", ""),
+                                detected_lang=detected_lang,
+                            ),
+                            ChatService.retrieve_web_context(
+                                sanitized_message, lang=detected_lang
+                            ),
+                            return_exceptions=True,
                         )
-                        web_chunks = []
+                        context_chunks = rag_result if not isinstance(rag_result, Exception) else []
+                        web_chunks = web_result if not isinstance(web_result, Exception) else []
                         rag_path = "mongodb" if context_chunks else "none"
 
                     elif match_score >= CONFIDENCE_LOW:
@@ -1143,19 +1159,26 @@ async def chat_stream(
 
                     else:
                         # NONE (< 0.50): no usable topic signal.
-                        # If the frontend provided an explicit chapter_id (card context),
-                        # use it for fast-path RAG before falling back to web-only.
+                        # Run card-context RAG (if chapter_id available) + web in parallel.
                         confidence_tier = "none"
                         logger.info(
                             "no_topic_match_stream",
                             extra={"user_id": user_id, "query": sanitized_message[:30]},
                         )
                         if request.chapter_id:
-                            context_chunks = await ChatService.retrieve_context_from_chapter(
-                                chapter_id=request.chapter_id,
-                                chapter_title=request.chapter_name or "",
-                                detected_lang=detected_lang,
+                            rag_result, web_result = await asyncio.gather(
+                                ChatService.retrieve_context_from_chapter(
+                                    chapter_id=request.chapter_id,
+                                    chapter_title=request.chapter_name or "",
+                                    detected_lang=detected_lang,
+                                ),
+                                ChatService.retrieve_web_context(
+                                    sanitized_message, lang=detected_lang
+                                ),
+                                return_exceptions=True,
                             )
+                            context_chunks = rag_result if not isinstance(rag_result, Exception) else []
+                            web_chunks = web_result if not isinstance(web_result, Exception) else []
                             rag_path = "mongodb" if context_chunks else "none"
                             logger.info(
                                 "card_context_rag_fallback",
@@ -1163,9 +1186,10 @@ async def chat_stream(
                                     "user_id": user_id,
                                     "chapter_id": request.chapter_id,
                                     "chunks": len(context_chunks),
+                                    "web_chunks": len(web_chunks),
                                 },
                             )
-                        if not context_chunks:
+                        else:
                             web_chunks = await ChatService.retrieve_web_context(
                                 sanitized_message, lang=detected_lang
                             )
