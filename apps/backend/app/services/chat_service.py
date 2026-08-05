@@ -1022,6 +1022,16 @@ class ChatService:
                     f"Gemini non-stream fallback also failed: {gemini_err}",
                     extra={"user_id": user_id},
                 )
+                # Fire the outage alert (fire-and-forget; never crashes caller).
+                try:
+                    from app.services.comms.ai_outage_alert import record_ai_outage
+                    await record_ai_outage(
+                        user_id=user_id,
+                        sarvam_error=str(sarvam_err),
+                        gemini_error=str(gemini_err),
+                    )
+                except Exception as _alert_err:
+                    logger.warning(f"ai_outage_alert record failed (non-critical): {_alert_err}")
                 raise sarvam_err  # re-raise original so caller gets the real error
 
     @staticmethod
@@ -1090,7 +1100,13 @@ class ChatService:
                 try:
                     from app.services.dead_letter import store_dead_letter
                     await store_dead_letter(
-                        user_id, request_message, detected_lang, str(sarvam_err)
+                        user_id,
+                        request_message,
+                        detected_lang,
+                        str(sarvam_err),
+                        both_providers_down=True,
+                        sarvam_error=str(sarvam_err),
+                        gemini_error=str(gemini_err),
                     )
                 except Exception as dl_err:
                     logger.warning(f"Dead-letter store failed: {dl_err}")

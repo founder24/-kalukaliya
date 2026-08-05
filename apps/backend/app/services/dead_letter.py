@@ -14,12 +14,28 @@ async def store_dead_letter(
     message: str,
     lang: str,
     error: str,
+    both_providers_down: bool = False,
+    sarvam_error: Optional[str] = None,
+    gemini_error: Optional[str] = None,
 ) -> None:
     """
     Store a failed chat attempt to MongoDB 'dead_letters' collection.
 
     Called when both Sarvam AND Vertex AI fail for a user message.
     Silently logs failures to avoid cascading errors.
+
+    When ``both_providers_down`` is True (i.e. Sarvam AND Gemini are both
+    unavailable), this also fires a de-duplicated admin alert via email so the
+    team is notified before users start reporting issues.
+
+    Args:
+        user_id:             Affected user's ID.
+        message:             The user's original message (truncated to 200 chars).
+        lang:                Detected language code.
+        error:               Primary error string used for the dead-letter record.
+        both_providers_down: Set True only when BOTH providers failed on this request.
+        sarvam_error:        Sarvam-specific error string (forwarded to the alert).
+        gemini_error:        Gemini-specific error string (forwarded to the alert).
     """
     try:
         from app.db.mongo import get_mongo_client
@@ -38,11 +54,27 @@ async def store_dead_letter(
             "status": "pending",
             "retry_count": 0,
         }
+        if both_providers_down:
+            document["both_providers_down"] = True
 
         await collection.insert_one(document)
         logger.info(f"Dead letter stored for user {user_id}, lang={lang}")
     except Exception as e:
         logger.warning(f"Failed to store dead letter (non-critical): {e}")
+
+    # Fire the outage alert outside the try block so a MongoDB failure doesn't
+    # suppress the notification (the alert itself is fire-and-forget).
+    if both_providers_down:
+        try:
+            from app.services.comms.ai_outage_alert import record_ai_outage
+
+            await record_ai_outage(
+                user_id=user_id,
+                sarvam_error=sarvam_error,
+                gemini_error=gemini_error,
+            )
+        except Exception as alert_err:
+            logger.warning(f"ai_outage_alert record failed (non-critical): {alert_err}")
 
 
 async def list_dead_letters(
