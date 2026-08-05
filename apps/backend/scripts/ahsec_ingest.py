@@ -1481,12 +1481,15 @@ async def save_chapter_content(
         chapter.notes_en = notes_text
         chapter.content_en = notes_text  # keep legacy field in sync
         chapter.rag_sections_en = rag_sections
-        chapter.qa_rag_sections_en = qa_sections
+        # Only overwrite existing Q&A if we have new pairs — never erase backfill data
+        if qa_sections or not chapter.qa_rag_sections_en:
+            chapter.qa_rag_sections_en = qa_sections
     else:
         chapter.notes_as = notes_text
         chapter.content_as = notes_text
         chapter.rag_sections_as = rag_sections
-        chapter.qa_rag_sections_as = qa_sections
+        if qa_sections or not chapter.qa_rag_sections_as:
+            chapter.qa_rag_sections_as = qa_sections
 
     # Merge topics (don't overwrite topics from the other medium)
     existing_titles = {t.title for t in (chapter.published_topics or [])}
