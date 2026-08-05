@@ -7,8 +7,10 @@ Verifies:
 - send_credit_topup_receipt_email is called with the correct values on a successful
   credit top-up verify.
 - An email send failure does NOT cause either endpoint to return an error response.
-- When Redis is completely unavailable (no stored plan or amount), /verify fails
-  closed (503) rather than trusting client-supplied plan values.
+- When Redis misses and MongoDB misses, /verify falls back to the Razorpay order API
+  and upgrades the user successfully (Razorpay fallback path).
+- When Redis, MongoDB, AND the Razorpay API all fail, /verify fails closed (503)
+  rather than trusting client-supplied plan values.
 """
 
 import hashlib
@@ -230,26 +232,36 @@ async def test_verify_payment_email_failure_does_not_cause_error(
 
 
 @pytest.mark.anyio
-async def test_verify_payment_fails_closed_when_redis_unavailable(
+async def test_verify_payment_fails_closed_when_all_sources_unavailable(
     client: AsyncClient, mock_free_user
 ):
     """
-    When Redis is completely unavailable (raises on every call), /verify must
-    return 503 rather than silently upgrading the user with an unverified plan.
+    When Redis, MongoDB, AND the Razorpay API all fail, /verify must return 503
+    rather than silently upgrading the user with an unverified plan.
     The email function must never be called in this case.
     """
     from app.main import app
     from app.api.v1.auth import get_current_user
     from app.config import settings
 
-    order_id = "order_REDISDOWN001"
-    payment_id = "pay_REDISDOWN001"
+    order_id = "order_ALLFAIL001"
+    payment_id = "pay_ALLFAIL001"
     sig = _make_signature(order_id, payment_id)
 
-    # Redis raises on every call — simulates total outage
+    # Redis raises on every call — simulates total Redis outage
     broken_redis = AsyncMock()
     broken_redis.get = AsyncMock(side_effect=Exception("Redis connection refused"))
     broken_redis.set = AsyncMock(side_effect=Exception("Redis connection refused"))
+
+    # MongoDB returns None — no pending record (e.g. write failed at order-creation time)
+    mock_db = MagicMock()
+    mock_db.payments_pending = MagicMock()
+    mock_db.payments_pending.find_one = AsyncMock(return_value=None)
+    mock_db.payments = MagicMock()
+    mock_db.payments.insert_one = AsyncMock()
+    mock_db.payments_pending.delete_one = AsyncMock()
+    mock_mongo_client = MagicMock()
+    mock_mongo_client.__getitem__ = MagicMock(return_value=mock_db)
 
     async def override_auth():
         return mock_free_user
@@ -261,11 +273,20 @@ async def test_verify_payment_fails_closed_when_redis_unavailable(
     try:
         with (
             patch("app.db.redis.get_redis", return_value=broken_redis),
+            patch("app.db.mongo.get_mongo_client", return_value=mock_mongo_client),
+            # Razorpay client.order.fetch raises — simulates Razorpay API outage
+            patch("razorpay.Client") as mock_rz_class,
             patch(
                 "app.services.comms.resend_client.send_first_purchase_receipt_email",
                 new_callable=AsyncMock,
             ) as mock_send_email,
         ):
+            mock_rz_instance = MagicMock()
+            mock_rz_instance.order.fetch = MagicMock(
+                side_effect=Exception("Razorpay API unreachable")
+            )
+            mock_rz_class.return_value = mock_rz_instance
+
             response = await client.post(
                 "/api/v1/payments/verify",
                 json={
@@ -282,6 +303,110 @@ async def test_verify_payment_fails_closed_when_redis_unavailable(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         settings.RAZORPAY_KEY_SECRET = original_secret
+
+
+# ---------------------------------------------------------------------------
+# Tests: POST /payments/verify — Razorpay API fallback when Redis + MongoDB miss
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("plan,expected_amount", [
+    ("starter", 9900),
+    ("pro", 99900),
+])
+async def test_verify_payment_razorpay_fallback_upgrades_user(
+    client: AsyncClient, mock_free_user, plan, expected_amount
+):
+    """
+    When Redis is down AND MongoDB has no pending record, /verify must call
+    Razorpay client.order.fetch as a last-resort fallback, resolve the plan and
+    amount from the order notes, upgrade the user, and send the receipt email
+    with the correct amount.
+    """
+    from app.main import app
+    from app.api.v1.auth import get_current_user
+    from app.config import settings
+
+    order_id = f"order_RZFALLBACK_{plan.upper()}"
+    payment_id = f"pay_RZFALLBACK_{plan.upper()}"
+    sig = _make_signature(order_id, payment_id)
+
+    # Redis raises on every call
+    broken_redis = AsyncMock()
+    broken_redis.get = AsyncMock(side_effect=Exception("Redis connection refused"))
+    broken_redis.set = AsyncMock(side_effect=Exception("Redis connection refused"))
+
+    # MongoDB returns None — pending record was never written
+    mock_db = MagicMock()
+    mock_db.payments_pending = MagicMock()
+    mock_db.payments_pending.find_one = AsyncMock(return_value=None)
+    mock_db.payments_pending.delete_one = AsyncMock()
+    mock_db.payments = MagicMock()
+    mock_db.payments.insert_one = AsyncMock()
+    mock_mongo_client = MagicMock()
+    mock_mongo_client.__getitem__ = MagicMock(return_value=mock_db)
+
+    # Razorpay order.fetch returns the order with notes containing the plan
+    rz_order_response = {
+        "id": order_id,
+        "amount": expected_amount,
+        "currency": "INR",
+        "notes": {"user_id": str(mock_free_user.id), "plan": plan},
+    }
+
+    async def override_auth():
+        return mock_free_user
+
+    app.dependency_overrides[get_current_user] = override_auth
+    original_secret = settings.RAZORPAY_KEY_SECRET
+    original_key_id = settings.RAZORPAY_KEY_ID
+    settings.RAZORPAY_KEY_SECRET = TEST_KEY_SECRET
+    settings.RAZORPAY_KEY_ID = "test_key_id"
+
+    try:
+        with (
+            patch("app.db.redis.get_redis", return_value=broken_redis),
+            patch("app.db.mongo.get_mongo_client", return_value=mock_mongo_client),
+            patch("razorpay.Client") as mock_rz_class,
+            patch(
+                "app.services.comms.resend_client.send_first_purchase_receipt_email",
+                new_callable=AsyncMock,
+            ) as mock_send_email,
+        ):
+            mock_rz_instance = MagicMock()
+            mock_rz_instance.order.fetch = MagicMock(return_value=rz_order_response)
+            mock_rz_class.return_value = mock_rz_instance
+
+            response = await client.post(
+                "/api/v1/payments/verify",
+                json={
+                    "razorpay_order_id": order_id,
+                    "razorpay_payment_id": payment_id,
+                    "razorpay_signature": sig,
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["status"] == "success"
+        assert plan in data["message"]
+
+        # User must be upgraded
+        mock_free_user.update.assert_called_once()
+        update_call = mock_free_user.update.call_args[0][0]
+        assert update_call["$set"]["subscription_tier"] == plan
+
+        # Receipt email must be called with the amount resolved from Razorpay (not a fallback 0)
+        mock_send_email.assert_awaited_once()
+        call_args = mock_send_email.call_args[0]
+        assert call_args[0] == mock_free_user.email   # email
+        assert call_args[1] == expected_amount         # amount in paise from Razorpay order
+        assert call_args[2] == order_id                # order_id
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        settings.RAZORPAY_KEY_SECRET = original_secret
+        settings.RAZORPAY_KEY_ID = original_key_id
 
 
 # ---------------------------------------------------------------------------

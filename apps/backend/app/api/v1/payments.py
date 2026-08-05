@@ -196,6 +196,39 @@ async def verify_payment(
                 f"MongoDB fallback lookup failed for order {body.razorpay_order_id}: {e}"
             )
 
+    # Last-resort fallback: fetch the order directly from Razorpay when both Redis and
+    # MongoDB have no record (e.g. MongoDB write failed silently at order-creation time).
+    # This mirrors the pattern used in /credit-topup/verify.
+    if (not purchased_plan or payment_amount is None) and settings.RAZORPAY_KEY_ID:
+        import razorpay as _razorpay
+
+        try:
+            _rz_client = _razorpay.Client(
+                auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+            )
+            _rz_order = await asyncio.to_thread(
+                _rz_client.order.fetch, body.razorpay_order_id
+            )
+            _fetched_plan = _rz_order.get("notes", {}).get("plan")
+            _fetched_amount = _rz_order.get("amount")
+            if _fetched_plan and _fetched_plan in plan_prices:
+                if not purchased_plan:
+                    purchased_plan = _fetched_plan
+                    logger.info(
+                        "Resolved plan from Razorpay API fallback (Redis + MongoDB miss)",
+                        extra={
+                            "order_id": body.razorpay_order_id,
+                            "plan": purchased_plan,
+                        },
+                    )
+                if payment_amount is None and _fetched_amount is not None:
+                    payment_amount = int(_fetched_amount)
+        except Exception as e:
+            logger.error(
+                f"Razorpay order fetch fallback failed for order "
+                f"{body.razorpay_order_id}: {e}"
+            )
+
     # Validate amount matches the resolved plan price (when both are available)
     if payment_amount is not None and purchased_plan:
         expected_amount = plan_prices.get(purchased_plan)
