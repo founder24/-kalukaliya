@@ -1,5 +1,5 @@
 import { Zap, CreditCard, Loader2 } from 'lucide-react';
-import { TOPUP_OPTIONS } from './shared';
+import { TOPUP_OPTIONS } from './planConfig';
 import ModalOverlay from '@/components/ui/ModalOverlay';
 
 export default function TopUpModal({

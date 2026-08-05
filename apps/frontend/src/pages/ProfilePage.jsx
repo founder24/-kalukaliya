@@ -7,7 +7,7 @@ import { PageTitle } from '@/components/PageTitle';
 import { apiClient, createPaymentOrder, verifyPayment, createCreditTopUp, verifyCreditTopUp } from '@/utils/api';
 import { toast } from 'sonner';
 import { Analytics } from '@/utils/analytics';
-import { PLANS, loadRazorpay } from './profile/shared';
+import { PLANS, loadRazorpay } from './profile/planConfig';
 import ProfileHeader from './profile/ProfileHeader';
 import AcademicDetails from './profile/AcademicDetails';
 import AiCredits from './profile/AiCredits';

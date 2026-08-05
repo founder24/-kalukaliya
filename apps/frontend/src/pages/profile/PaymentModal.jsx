@@ -1,5 +1,5 @@
 import { CheckCircle, Loader2 } from 'lucide-react';
-import { PLANS, PLAN_FEATURES } from './shared';
+import { PLANS, PLAN_FEATURES } from './planConfig';
 import { DOC_ACCESS_CONFIG } from '@/utils/plans';
 import ModalOverlay from '@/components/ui/ModalOverlay';
 

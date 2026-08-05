@@ -1,5 +1,5 @@
 import { Check, CheckCircle } from 'lucide-react';
-import { PLANS, PLAN_RANK, PLAN_FEATURES } from './shared';
+import { PLANS, PLAN_RANK, PLAN_FEATURES } from './planConfig';
 import { DOC_ACCESS_CONFIG } from '@/utils/plans';
 
 export default function SubscriptionPlans({
