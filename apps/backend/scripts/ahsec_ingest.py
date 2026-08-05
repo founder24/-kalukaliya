@@ -416,16 +416,22 @@ def _download_pdf(url: str) -> bytes:
 
 
 def _ocr_page(page, lang: str = "asm+eng") -> str:
-    """Render a PyMuPDF page to an image and OCR it with Tesseract."""
+    """Render a PyMuPDF page to an image and OCR it with Tesseract.
+
+    Performance tuning:
+    - 1.5× zoom (225 dpi equivalent) — sufficient for clear Assamese/English
+      script; 2× was unnecessarily slow for body pages.
+    - --psm 6 (uniform block of text) — faster than --psm 3 (full auto) for
+      textbook body pages which are predominantly single-column prose.
+    """
     import pytesseract
     from PIL import Image
     import io
 
-    # Render at 2× zoom for better OCR quality (300 dpi equivalent)
-    matrix = __import__("fitz").Matrix(2.0, 2.0)
+    matrix = __import__("fitz").Matrix(1.5, 1.5)
     pix = page.get_pixmap(matrix=matrix, colorspace=__import__("fitz").csRGB)
     img = Image.open(io.BytesIO(pix.tobytes("png")))
-    return pytesseract.image_to_string(img, lang=lang, config="--psm 3")
+    return pytesseract.image_to_string(img, lang=lang, config="--psm 6")
 
 
 def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
@@ -1457,9 +1463,12 @@ async def process_pdf_entry(
         return {"skipped": 1}
 
     # ── Step 2: Download + extract PDF text ───────────────────────────────────
+    # Run in a thread so that Tesseract OCR (which can take 10-60s per page
+    # for non-Unicode AS PDFs) does not block the asyncio event loop and cause
+    # MongoDB heartbeat timeouts.
     log.info(f"  Downloading PDF…")
     try:
-        pages = extract_pdf_text(pdf_url, medium=medium)
+        pages = await asyncio.to_thread(extract_pdf_text, pdf_url, medium)
         log.info(f"  Extracted {len(pages)} pages")
     except Exception as e:
         log.error(f"  PDF extraction failed: {e}")
