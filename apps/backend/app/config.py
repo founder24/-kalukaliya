@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     # Valid Sarvam chat-completion models (as of 2025-06): sarvam-30b, sarvam-105b
     # sarvam-m1 was renamed; use sarvam-30b (fast) or sarvam-105b (quality).
     # Override via SARVAM_MODEL env var if this needs to change without a deploy.
-    SARVAM_MODEL: str = "sarvam-30b"
+    SARVAM_MODEL: str = "sarvam-105b"
 
     # --- P8: Razorpay (Payments) ---
     RAZORPAY_KEY_ID: Optional[str] = None

@@ -319,7 +319,11 @@ class SarvamAIClient:
     """Sarvam AI Client for Assamese/Indic content"""
 
     def __init__(self):
-        self.api_key = settings.SARVAM_API_KEY
+        # NOTE: do NOT cache SARVAM_API_KEY here.
+        # The singleton is created at module import time — before FastAPI's
+        # lifespan runs and Secret Manager loads the key into settings.
+        # api_key is a property that reads from settings lazily at request
+        # time so it always sees the Secret-Manager-loaded value.
         self.base_url = settings.SARVAM_BASE_URL
         self.model = settings.SARVAM_MODEL
         self._client = httpx.AsyncClient(
@@ -328,6 +332,11 @@ class SarvamAIClient:
             timeout=httpx.Timeout(120.0, connect=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
+
+    @property
+    def api_key(self) -> str | None:
+        """Read lazily from settings so Secret Manager has time to load it."""
+        return settings.SARVAM_API_KEY
 
     async def close(self):
         """Close the HTTP client (call on app shutdown)"""

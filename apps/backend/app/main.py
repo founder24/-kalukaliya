@@ -103,11 +103,8 @@ async def lifespan(app: FastAPI):
         sm_results = await load_secrets_into_settings()
         logger.info(f"Secret Manager fetch results: {sm_results}")
         if settings.SARVAM_API_KEY:
-            # Patch the already-created singleton — it cached api_key=None at
-            # import time before the lifespan ran. SM is authoritative, so we
-            # push the live key into the singleton now.
-            from app.services.ai.sarvam_client import sarvam_client
-            sarvam_client.api_key = settings.SARVAM_API_KEY
+            # api_key is now a lazy property on SarvamAIClient — it reads from
+            # settings at call time, so no singleton patch is needed here.
             source = 'secret_manager' if sm_results.get('SARVAM_API_KEY') == 'loaded' else 'env_var'
             logger.info(
                 f"Sarvam AI key ready (source={source}, "
@@ -116,7 +113,7 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning(
                 "SARVAM_API_KEY is still empty after Secret Manager fetch — "
-                "Assamese AI responses will fail"
+                "chat will fall back to Gemini if Google creds are present"
             )
     except Exception as e:
         logger.error(f"Secret Manager startup failed (non-fatal): {e}")

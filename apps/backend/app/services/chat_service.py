@@ -954,8 +954,12 @@ class ChatService:
         request_message: str,
     ) -> AsyncGenerator[str, None]:
         """
-        Stream LLM response as SSE events. On Sarvam failure for Assamese,
-        falls back to Vertex AI. On double failure, stores a dead letter.
+        Stream LLM response as SSE events.
+
+        Fallback chain:
+          1. Sarvam AI (primary — sarvam-30b / sarvam-105b)
+          2. Gemini 2.5 Flash via Vertex AI (if Sarvam fails AND Google creds present)
+          3. Dead-letter store + error SSE (both providers down)
 
         Yields SSE-formatted data lines.
         """
@@ -973,23 +977,47 @@ class ChatService:
                 full_response += chunk
                 yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
 
-        except Exception as e:
+        except Exception as sarvam_err:
             logger.error(
-                f"LLM stream failed (lang={detected_lang}): {e}",
-                extra={"user_id": user_id, "error": str(e)},
+                f"Sarvam stream failed (lang={detected_lang}): {sarvam_err}",
+                extra={"user_id": user_id, "error": str(sarvam_err)},
             )
+
+            # ── Gemini 2.5 Flash fallback ──────────────────────────────────
+            # Activates automatically when Sarvam is down (billing exhausted,
+            # 5xx, circuit open). Requires GOOGLE_SA_KEY or
+            # GOOGLE_APPLICATION_CREDENTIALS_JSON to be present.
             try:
-                from app.services.dead_letter import store_dead_letter
-
-                await store_dead_letter(
-                    user_id, request_message, detected_lang, str(e)
+                from app.services.ai.gemini_fallback import stream_gemini, _available as gemini_available
+                if gemini_available():
+                    logger.info(
+                        "sarvam_fallback_to_gemini",
+                        extra={"user_id": user_id, "sarvam_error": str(sarvam_err)[:80]},
+                    )
+                    async for chunk in stream_gemini(system_prompt, sanitized_message):
+                        full_response += chunk
+                        yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+                    actual_model = "gemini-2.5-flash"
+                    # Fall through to the sentinel emit below.
+                else:
+                    raise RuntimeError("Gemini not configured")
+            except Exception as gemini_err:
+                # Both providers failed — store dead letter and surface error card.
+                logger.error(
+                    f"Gemini fallback also failed: {gemini_err}",
+                    extra={"user_id": user_id},
                 )
-            except Exception as dl_err:
-                logger.warning(f"Dead-letter store failed: {dl_err}")
-            yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
-            return
+                try:
+                    from app.services.dead_letter import store_dead_letter
+                    await store_dead_letter(
+                        user_id, request_message, detected_lang, str(sarvam_err)
+                    )
+                except Exception as dl_err:
+                    logger.warning(f"Dead-letter store failed: {dl_err}")
+                yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
+                return
 
-        # Emit the sentinel value so the router knows the model/response
+        # Emit the sentinel so the streaming endpoint captures full_response + model.
         yield f"data: {json.dumps({'__syrabit_stream_complete_7f3a9b2e__': True, 'full_response': full_response, 'actual_model': actual_model})}\n\n"
 
     # ------------------------------------------------------------------
