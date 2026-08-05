@@ -484,12 +484,8 @@ const GA4_ID_RE = /^G-[A-Z0-9]{6,12}$/;
 function ga4Plugin() {
   const raw = (process.env.VITE_GA4_ID || '').trim();
   const id = GA4_ID_RE.test(raw) ? raw : '';
-  // Phase 6: warn if GA4 ID is set in production — Zaraz handles analytics now.
-  if (id && isProd) {
-    // eslint-disable-next-line no-console
-    console.warn('[ga4] VITE_GA4_ID is set but Phase 6 prefers Zaraz. Ignoring GA4 injection.');
-    return { name: 'syrabit-ga4' };
-  }
+  // Zaraz integration was removed — GA4 is now injected directly via gtag.js.
+  // VITE_GA4_ID=G-CXJJPSV096 must be set in CF Pages production env vars.
   return {
     name: 'syrabit-ga4',
     transformIndexHtml(html) {
@@ -524,7 +520,7 @@ function ga4Plugin() {
         `        function load(){`,
         `          if(loaded)return;loaded=true;`,
         `          var s=document.createElement('script');`,
-        `          s.src='/gtag/js?id=${id}';`,
+        `          s.src='https://www.googletagmanager.com/gtag/js?id=${id}';`,
         `          s.async=true;document.head.appendChild(s);`,
         `          if(po){try{po.disconnect()}catch(e){}}`,
         `          if(timer){clearTimeout(timer);timer=null;}`,
