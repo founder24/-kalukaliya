@@ -27,34 +27,61 @@ function formatAmount(paise) {
   return `₹${(n / 100).toFixed(0)}`;
 }
 
-/** Copy text to clipboard with a textarea fallback for older mobile browsers. */
-async function copyToClipboard(text) {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
+/**
+ * Synchronous execCommand fallback — works inside modals on older iOS/Android.
+ * Returns true if it succeeded, false otherwise.
+ */
+function execCommandCopy(text) {
+  try {
+    const el = document.createElement('textarea');
+    el.value = text;
+    // Keep it off-screen but still part of the document so iOS can focus it
+    el.setAttribute('readonly', '');
+    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0';
+    document.body.appendChild(el);
+    el.focus();
+    el.select();
+    // On iOS, setSelectionRange is needed after focus
+    el.setSelectionRange(0, el.value.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(el);
+    return ok;
+  } catch {
+    return false;
   }
-  // Fallback: execCommand
-  const el = document.createElement('textarea');
-  el.value = text;
-  el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
-  document.body.appendChild(el);
-  el.focus();
-  el.select();
-  document.execCommand('copy');
-  document.body.removeChild(el);
 }
 
 function ReceiptRow({ icon: Icon, label, value, copyable = false }) {
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = useCallback(async (e) => {
+  /**
+   * iOS Safari requires clipboard.writeText() to be called synchronously
+   * inside the trusted user-gesture handler — any `await` before the call
+   * breaks the gesture context on iOS ≤15.  We therefore call writeText()
+   * directly and chain the result with .then()/.catch() instead of awaiting.
+   */
+  const handleCopy = useCallback((e) => {
     e.stopPropagation();
-    try {
-      await copyToClipboard(value);
+
+    const onSuccess = () => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error('Could not copy — please select and copy manually');
+    };
+    const onFailure = () => {
+      // execCommand fallback — synchronous, works on older iOS/Android
+      if (execCommandCopy(value)) {
+        onSuccess();
+      } else {
+        toast.error('Could not copy — please select and copy manually');
+      }
+    };
+
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      // Call writeText() synchronously within the gesture handler; handle the
+      // returned Promise without `await` so the gesture context is preserved.
+      navigator.clipboard.writeText(value).then(onSuccess).catch(onFailure);
+    } else {
+      onFailure();
     }
   }, [value]);
 
