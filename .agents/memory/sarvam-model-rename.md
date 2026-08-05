@@ -1,18 +1,18 @@
 ---
 name: Sarvam model rename
-description: sarvam-m1 is no longer a valid model name; API now requires sarvam-30b or sarvam-105b
+description: sarvam-m1 and sarvam-30b are no longer valid; API now only accepts sarvam-105b
 ---
 
-The Sarvam chat-completions API `/v1/chat/completions` rejects `sarvam-m1` with a 400:
-`Input 'sarvam-m1' should be one of sarvam-30b, sarvam-105b`
+The Sarvam chat-completions API `/v1/chat/completions` rejects `sarvam-30b` (as of Aug 2026):
+`Model 'sarvam-30b' has been deprecated. Please use one of the available models instead: sarvam-105b.`
 
-**Why:** Sarvam renamed/rebranded their models in mid-2025. The old `sarvam-m` / `sarvam-m1` names are gone.
+**Why:** Sarvam deprecated sarvam-30b; only sarvam-105b remains. The old sarvam-m1/sarvam-30b names are gone.
 
 **How to apply:**
-- Use `sarvam-30b` (faster) or `sarvam-105b` (higher quality)
-- `SARVAM_MODEL` env var in Replit shared environment is now set to `sarvam-30b`
-- `config.py` default is also updated to `sarvam-30b`
+- Use `sarvam-105b` exclusively — it is the only valid model as of Aug 2026
+- `config.py` default is `sarvam-105b`; do not revert to sarvam-30b
 - A 402 "No credits" error means the Sarvam account balance is exhausted — billing issue, not code
+- A 400 with "deprecated" in the body means the model name is wrong
 
 **Critical — reasoning model behaviour (sarvam-30b / sarvam-105b):**
 - Both are reasoning models: they return `reasoning_content` (their thinking, in English)

@@ -26,14 +26,24 @@ _GEMINI_MODEL = "gemini-2.5-flash"
 def _load_creds() -> tuple[str, str]:
     """
     Returns (project_id, creds_json_string).
-    Tries GOOGLE_SA_KEY (Replit) first, then
-    GOOGLE_APPLICATION_CREDENTIALS_JSON (Cloud Run SM).
-    Returns ("", "") if neither is available.
+
+    Priority (first non-empty wins):
+      1. GOOGLE_SA_KEY env var  — set by Replit secrets in dev
+      2. settings.GOOGLE_APPLICATION_CREDENTIALS_JSON — loaded by Secret
+         Manager during FastAPI lifespan in Cloud Run (not an env var)
+      3. GOOGLE_APPLICATION_CREDENTIALS_JSON env var — fallback for
+         environments that export it directly
+
+    Returns ("", "") if none of the above is usable.
     """
-    for raw in (
+    from app.config import settings  # imported here to avoid circular imports
+
+    candidates = [
         os.environ.get("GOOGLE_SA_KEY", ""),
+        getattr(settings, "GOOGLE_APPLICATION_CREDENTIALS_JSON", "") or "",
         os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", ""),
-    ):
+    ]
+    for raw in candidates:
         if not raw:
             continue
         try:
