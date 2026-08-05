@@ -217,17 +217,27 @@ export default function ProfilePage() {
         try {
           await verifyPayment({ razorpay_order_id: response.razorpay_order_id, razorpay_payment_id: response.razorpay_payment_id, razorpay_signature: response.razorpay_signature, plan: paymentPlan });
           Analytics.purchaseComplete(paymentPlan, orderData.amount, response.razorpay_payment_id);
-          toast.success(`🎉 ${PLANS[paymentPlan]?.label} plan activated!`, { description: `${PLANS[paymentPlan]?.credits.toLocaleString()} AI credits added to your account.` });
-          setShowPaymentModal(false);
-          await refreshData();
+          refreshData().catch(() => {});
+          const params = new URLSearchParams({
+            type: 'subscription',
+            plan: paymentPlan,
+            order_id: response.razorpay_order_id,
+            payment_id: response.razorpay_payment_id,
+            amount: String(orderData.amount),
+          });
+          navigate(`/payment/success?${params.toString()}`);
         } catch {
           try {
             const { recoverPayment } = await import('@/utils/api');
             const res = await recoverPayment();
             if (res.data?.success) {
-              toast.success(`🎉 ${PLANS[paymentPlan]?.label} plan activated!`, { description: 'Payment recovered successfully.' });
-              setShowPaymentModal(false);
-              await refreshData();
+              refreshData().catch(() => {});
+              const params = new URLSearchParams({
+                type: 'subscription',
+                plan: paymentPlan,
+                order_id: response.razorpay_order_id,
+              });
+              navigate(`/payment/success?${params.toString()}`);
               return;
             }
           } catch {}
@@ -254,9 +264,15 @@ export default function ProfilePage() {
         try {
           await verifyCreditTopUp({ razorpay_order_id: response.razorpay_order_id, razorpay_payment_id: response.razorpay_payment_id, razorpay_signature: response.razorpay_signature, credits: topUpCredits });
           Analytics.purchaseComplete(`topup_${topUpCredits}`, orderData.amount, response.razorpay_payment_id);
-          toast.success(`${topUpCredits} credits added to your account!`);
-          setShowTopUpModal(false);
-          await refreshData();
+          refreshData().catch(() => {});
+          const params = new URLSearchParams({
+            type: 'topup',
+            credits: String(topUpCredits),
+            order_id: response.razorpay_order_id,
+            payment_id: response.razorpay_payment_id,
+            amount: String(orderData.amount),
+          });
+          navigate(`/payment/success?${params.toString()}`);
         } catch { toast.error('Payment received but verification failed. Contact admin@syrabit.ai.'); }
         finally { setTopUpLoading(false); }
       });
