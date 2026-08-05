@@ -9,7 +9,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Lightweight stubs for layout components ─────────────────────────────────
 vi.mock('@/components/layout/PublicLayout', () => ({
@@ -34,6 +34,36 @@ function renderAt(url) {
 
 // ────────────────────────────────────────────────────────────────────────────
 describe('PaymentSuccessPage', () => {
+  // Seed a receipt token before every test so the page guard passes.
+  // The guard consumes the token (removeItem) on the first render, so each
+  // test must set it afresh.
+  beforeEach(() => {
+    sessionStorage.setItem('receipt_token', 'test-receipt-token');
+  });
+
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
+  // ── Guard: no receipt token ───────────────────────────────────────────────
+  describe('no receipt token — direct URL access', () => {
+    it('redirects to /profile when sessionStorage has no receipt_token', () => {
+      // Clear the token that beforeEach set so we can test the no-token path.
+      sessionStorage.removeItem('receipt_token');
+      const html = renderAt('/payment-success?type=subscription&plan=pro&amount=99900');
+      // Navigate renders as empty markup in renderToStaticMarkup — success/receipt
+      // content must not appear.
+      expect(html).not.toContain('Pro Plan Activated');
+      expect(html).not.toContain('Payment Successful!');
+    });
+
+    it('does not render the receipt card when no token is present', () => {
+      sessionStorage.removeItem('receipt_token');
+      const html = renderAt('/payment-success?order_id=ord_FAKE&payment_id=pay_FAKE');
+      expect(html).not.toContain('ord_FAKE');
+      expect(html).not.toContain('pay_FAKE');
+    });
+  });
 
   // ── Case 1: all params present (subscription) ────────────────────────────
   describe('all params present — Pro subscription', () => {

@@ -20,6 +20,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Payments"])
 
 
+def _make_receipt_token(order_id: str, payment_id: str) -> str:
+    """Return a short opaque token proving that a real verify call succeeded.
+
+    The token is HMAC-signed with RAZORPAY_KEY_SECRET so it cannot be forged
+    without the server secret.  The frontend stores it in sessionStorage and
+    PaymentSuccessPage checks for it before rendering.
+    """
+    from app.config import settings
+
+    secret = (settings.RAZORPAY_KEY_SECRET or "fallback-receipt-secret").encode()
+    msg = f"receipt:{order_id}:{payment_id}".encode()
+    return hmac.HMAC(key=secret, msg=msg, digestmod=hashlib.sha256).hexdigest()[:32]
+
+
 class CreateOrderRequest(BaseModel):
     plan: str
 
@@ -346,8 +360,13 @@ async def verify_payment(
         except Exception as e:
             logger.error(f"Failed to send first-purchase receipt email: {e}")
 
+        receipt_token = _make_receipt_token(body.razorpay_order_id, body.razorpay_payment_id)
         logger.info(f"Payment verified, user upgraded to {purchased_plan}", extra={"user_id": str(user.id)})
-        return {"status": "success", "message": f"Payment verified, plan upgraded to {purchased_plan}"}
+        return {
+            "status": "success",
+            "message": f"Payment verified, plan upgraded to {purchased_plan}",
+            "receipt_token": receipt_token,
+        }
 
     except Exception:
         # Processing failed after the idempotency key was set — delete the lock so the
@@ -526,8 +545,9 @@ async def verify_credit_topup(
     except Exception as e:
         logger.error(f"Failed to send credit top-up receipt email: {e}")
 
+    receipt_token = _make_receipt_token(body.razorpay_order_id, body.razorpay_payment_id)
     logger.info("Credits granted", extra={"user_id": str(user.id), "credits": credits})
-    return {"status": "success", "credits_granted": credits}
+    return {"status": "success", "credits_granted": credits, "receipt_token": receipt_token}
 
 
 @router.get("/history")

@@ -215,7 +215,10 @@ export default function ProfilePage() {
       orderData._plan = paymentPlan;
       openRzp(orderData, setPaymentLoading, async (response) => {
         try {
-          await verifyPayment({ razorpay_order_id: response.razorpay_order_id, razorpay_payment_id: response.razorpay_payment_id, razorpay_signature: response.razorpay_signature, plan: paymentPlan });
+          const verifyRes = await verifyPayment({ razorpay_order_id: response.razorpay_order_id, razorpay_payment_id: response.razorpay_payment_id, razorpay_signature: response.razorpay_signature, plan: paymentPlan });
+          if (verifyRes.data?.receipt_token) {
+            sessionStorage.setItem('receipt_token', verifyRes.data.receipt_token);
+          }
           Analytics.purchaseComplete(paymentPlan, orderData.amount, response.razorpay_payment_id);
           refreshData().catch(() => {});
           const params = new URLSearchParams({
@@ -262,7 +265,10 @@ export default function ProfilePage() {
       orderData._plan = `topup_${topUpCredits}`;
       openRzp(orderData, setTopUpLoading, async (response) => {
         try {
-          await verifyCreditTopUp({ razorpay_order_id: response.razorpay_order_id, razorpay_payment_id: response.razorpay_payment_id, razorpay_signature: response.razorpay_signature, credits: topUpCredits });
+          const topUpRes = await verifyCreditTopUp({ razorpay_order_id: response.razorpay_order_id, razorpay_payment_id: response.razorpay_payment_id, razorpay_signature: response.razorpay_signature, credits: topUpCredits });
+          if (topUpRes.data?.receipt_token) {
+            sessionStorage.setItem('receipt_token', topUpRes.data.receipt_token);
+          }
           Analytics.purchaseComplete(`topup_${topUpCredits}`, orderData.amount, response.razorpay_payment_id);
           refreshData().catch(() => {});
           const params = new URLSearchParams({

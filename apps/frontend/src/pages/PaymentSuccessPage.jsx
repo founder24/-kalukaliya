@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle, ArrowRight, Mail, Receipt, Zap, CreditCard } from 'lucide-react';
 import { PublicLayout } from '@/components/layout/PublicLayout';
 import { PageTitle } from '@/components/PageTitle';
@@ -28,6 +28,27 @@ function ReceiptRow({ icon: Icon, label, value }) {
 export default function PaymentSuccessPage() {
   const [searchParams] = useSearchParams();
   const [countdown, setCountdown] = useState(10);
+
+  // Guard: only render if the user arrived via a real /payments/verify call.
+  // The backend returns a receipt_token on success; ProfilePage stores it in
+  // sessionStorage before navigating here.  Direct URL access (bookmark, share,
+  // fabricated params) won't have the token and is redirected to /profile.
+  // useState initializer runs exactly once per mount, consuming the one-time token.
+  const [authorized] = useState(() => {
+    try {
+      const tok = sessionStorage.getItem('receipt_token');
+      if (!tok) return false;
+      sessionStorage.removeItem('receipt_token');
+      return true;
+    } catch {
+      // sessionStorage unavailable (private-browsing restriction, SSR) — redirect.
+      return false;
+    }
+  });
+
+  if (!authorized) {
+    return <Navigate to="/profile" replace />;
+  }
 
   const type      = searchParams.get('type') || 'subscription';
   const plan      = searchParams.get('plan');
