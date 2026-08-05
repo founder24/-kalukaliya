@@ -508,10 +508,32 @@ _AS_DIGIT_MAP = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 # Require the line to end without a trailing period — a period signals a
 # mid-sentence word-wrap by PyMuPDF, not a standalone section heading.
 _EN_EXERCISE_RE = re.compile(
-    r"^(?:EXERCISES?|QUESTIONS?|PROBLEMS?|REVIEW\s+QUESTIONS|"
-    r"PRACTICE\s+PROBLEMS?)"
+    r"^(?:"
+    # Explicit exercise/question section headers (NCERT / AHSEC standard)
+    r"EXERCISES?|TEXTBOOK\s+EXERCISES?|INTEXT\s+QUESTIONS?|"
+    r"TERMINAL\s+(?:QUESTIONS?|EXERCISES?)|"
+    r"QUESTIONS?\s+AND\s+ANSWERS?|QUESTION\s+BANK|"
+    r"REVIEW\s+QUESTIONS?|PRACTICE\s+PROBLEMS?|"
+    # Typed-question section headers used by AHSEC commerce/arts books
+    r"VERY\s+SHORT\s+ANSWER|SHORT\s+ANSWER|LONG\s+ANSWER|"
+    r"MULTIPLE\s+CHOICE\s+QUESTIONS?|MCQ[S]?|"
+    r"FILL\s+IN\s+THE\s+BLANKS?|TRUE\s+OR\s+FALSE|"
+    r"CHOOSE\s+THE\s+CORRECT|ANSWER\s+THE\s+FOLLOWING|"
+    r"MATCH\s+THE\s+FOLLOWING|TICK\s+THE\s+CORRECT|"
+    # Physics / science patterns
+    r"POINTS\s+TO\s+PONDER|THINK\s+IT\s+OVER|THINK\s+IT\s+OUT|"
+    r"ADDITIONAL\s+EXERCISES?|SUPPLEMENTARY\s+(?:EXERCISES?|PROBLEMS?)|"
+    r"PROBLEMS?|NUMERICALS?"
+    r")"
     r"[^.\n\w]*$",
     re.MULTILINE | re.IGNORECASE,
+)
+
+# Numbered-question fallback: a run of ≥3 lines like "1.", "2.", "Q.1", "1)" near the end.
+# Used when no explicit header is found.
+_EN_QUESTION_NUM_RE = re.compile(
+    r"(?:^(?:Q\.?\s*\d+|(?:[1-9]|[1-9]\d)\s*[\.\)]\s+\S.{15,})\n){3,}",
+    re.MULTILINE,
 )
 
 # Fallback: Summary / Activities section — used only when no exercises heading found.
@@ -662,14 +684,29 @@ def split_into_chapters(pages: list[dict], medium: str) -> list[dict]:
     if not toc_entries or (medium == "as" and _toc_is_degenerate(toc_entries)):
         if medium == "as":
             return _split_assamese_by_body(pages, exercise_re)
-        # English fallback: whole book as one blob
+        # English fallback: whole book as one blob.
+        # IMPORTANT: search the ENTIRE full_text for exercises — the exercise section
+        # is near the END of the PDF and is always past the first 12 000 chars.
         full_text = "\n\n".join(p["text"] for p in sorted(pages, key=lambda x: x["page_num"]))
         full_text = _clean_page_text(full_text)
+        exercises_text = ""
+        ex_match = None
+        # Try patterns in priority order; take the LAST match so we get the
+        # end-of-book exercises rather than an early in-text header.
+        for pat in (exercise_re, _EN_SUMMARY_RE, _EN_QUESTION_NUM_RE):
+            all_matches = list(pat.finditer(full_text))
+            if all_matches:
+                ex_match = all_matches[-1]   # last occurrence = end-of-chapter exercises
+                break
+        if ex_match:
+            exercises_text = full_text[ex_match.start():][:10000].strip()
+            log.info(f"    Exercises found at char {ex_match.start()} / {len(full_text)} "
+                     f"({len(exercises_text)} chars extracted)")
         return [{
             "chapter_num": 1,
             "title": "Full Book",
             "body_text": full_text[:12000],
-            "exercises_text": "",
+            "exercises_text": exercises_text,
         }]
 
     log.info(f"    TOC found: {len(toc_entries)} chapters/units")
@@ -716,7 +753,7 @@ def split_into_chapters(pages: list[dict], medium: str) -> list[dict]:
             exercises_text = chapter_pages_text[ex_match.start():]
 
         body_text = body_text[:12000].strip()
-        exercises_text = exercises_text[:6000].strip()
+        exercises_text = exercises_text[:10000].strip()
 
         chapters.append({
             "chapter_num":    ch_num,
@@ -846,7 +883,7 @@ def _split_assamese_by_body(pages: list[dict], exercise_re) -> list[dict]:
             exercises_text = chapter_text[ex_m.start():]
 
         body_text = body_text[:12000].strip()
-        exercises_text = exercises_text[:6000].strip()
+        exercises_text = exercises_text[:10000].strip()
 
         if len(body_text) < 150:
             continue
@@ -1323,6 +1360,7 @@ async def save_chapter_content(
     medium: str,
     force: bool = False,
     dry_run: bool = False,
+    source_pdf_url: str = "",
 ) -> bool:
     """
     Write notes, rag_sections, qa_rag_sections, and published_topics to a chapter.
@@ -1359,6 +1397,9 @@ async def save_chapter_content(
         for t in topics
         if t.get("title")
     ]
+
+    if source_pdf_url:
+        chapter.source_pdf_url = source_pdf_url   # store so backfill can re-find the PDF
 
     if medium == "en":
         chapter.notes_en = notes_text
@@ -1603,7 +1644,7 @@ async def process_pdf_entry(
         # ── Save to DB ────────────────────────────────────────────────────────
         written = await save_chapter_content(
             chapter, notes_text, rag_sections, qa_sections, topics,
-            medium, force=force, dry_run=dry_run,
+            medium, force=force, dry_run=dry_run, source_pdf_url=pdf_url,
         )
 
         # ── Reindex (vectorize + topic embeddings) ────────────────────────────
