@@ -121,30 +121,155 @@ def _slug(text: str) -> str:
     return re.sub(r"[\s_-]+", "-", text).strip("-")
 
 
-# Non-academic vocational subjects to skip
+# ── Catalogue filter lists ──────────────────────────────────────────────────────
+
+# Non-academic / vocational subjects — always skip
 _SKIP_KEYWORDS = {
     "it-ites", "beauty", "wellness", "apparel", "home furnishing",
     "health care", "healthcare", "automotive", "agriculture", "floriculturist",
     "electronics", "retail", "travel", "tourism", "private security", "dairy",
     "power", "food processing", "media entertainment", "telecom",
     "physical education", "bihu", "financial literacy",
+    # Extra non-user-listed subjects
+    "environmental education", "home science", "sales management",
+    "business mathematics", "geography", "sign language",
 }
 
-# MIL / regional-language textbooks to skip (keep only EN + AS)
+# MIL / regional-language textbooks — always skip (keep only EN + AS)
 _SKIP_MIL_KEYWORDS = {
     "bangla", "bengali", "hindi", "garo", "manipuri", "bodo", "sanskrit",
     "arabic", "vitan", "aroh", "sahitya", "saurav", "chayanika", "chijak",
     "anouba", "sujunai", "thunlai", "uchchatar", "advance bengali",
-    "prithibir itihas",
+    "prithibir itihas", "persian", "nepali", "karbi", "amanim",
+    "lammet", "lamet", "lit khaam", "nepli", "flemingo", "harmony",
+    "seasons",
 }
+
+# English Core book titles that lack an (E) medium marker on the AHSEC page
+_ENGLISH_CORE_BOOKS: dict[str, int] = {
+    "hornbill":  1,   # Class XI English Core Part I
+    "snapshot":  2,   # Class XI English Core Part II
+    "flamingo":  1,   # Class XII English Core Part I
+    "vistas":    2,   # Class XII English Core Part II
+}
+
+# Books labelled with Assamese/Bengali/Bodo sub-titles but no (E)/(A) marker.
+# Format: (substring_to_match, canonical_subj, medium, part_num)
+# Checked in order; first match wins.  Use None part to auto-detect from label.
+_UNMARKED_CANONICAL: list[tuple[str, str, str, int | None]] = [
+    # ── Economics XI AS ──────────────────────────────────────────────────────
+    ("byastikendrik arthabijnan parichay",  "Economics", "as", 1),
+    ("arthonitir babe parisankhya",         "Economics", "as", 2),
+    ("samastibadi arthabijnan parichay",    "Economics", "as", 1),  # XII AS Macro
+
+    # ── Economics XII EN (no medium marker) ──────────────────────────────────
+    ("introductory macroeconomics",         "Economics", "en", 1),
+    ("statistics for economics",            "Economics", "en", 2),
+    ("indian economic and development",     "Economics", "en", 2),
+    ("indian economic development",         "Economics", "en", 2),
+
+    # ── Sociology XII AS (_Ass suffix, handled below; fallback here) ─────────
+    ("bharatiya samaj",                     "Sociology", "as", 1),
+    ("bharatar samajik paribartan aru bikash", "Sociology", "as", 2),
+
+    # ── Sociology XII AS (all-caps label with (A) — handled by normal flow,
+    #    but canonical name needs mapping — done in _apply_canonical_name()) ──
+
+    # ── Political Science XII EN (no medium marker) ──────────────────────────
+    ("contemporary world politics",         "Political Science", "en", 1),
+    ("politics in india since independence","Political Science", "en", 2),
+]
+
+# Rename map: matched against the FULL subject label (with parentheticals, before stripping).
+# Covers books with (E)/(A)/_Ass markers whose label uses a non-canonical subject name.
+# Format: (substring_in_lowercase, canonical_name, part_override_or_None)
+_RENAME_MAP: list[tuple[str, str, int | None]] = [
+    # Assamese Economics XI AS (have (A) marker — go through normal flow)
+    ("arthonitir babe parisankhya",         "Economics",       2),
+    ("byastikendrik arthabijnan parichay",  "Economics",       1),
+    ("samastibadi arthabijnan parichay",    "Economics",       1),  # XII AS Macro
+    # Old Assamese Accountancy (2023) — superseded by newer "Accountancy (A)"
+    ("hisab sastra",                        "Accountancy",     None),
+    ("hisap sastra",                        "Accountancy",     None),
+    # All-caps Assamese Sociology/Economics XII AS
+    ("bharatot samajik paribarton",         "Sociology",       1),
+    ("bharatar arthanoitik unnayan",        "Economics",       2),
+    # Sociology XII AS (parenthetical Assamese sub-title in label)
+    ("bharatar samajik paribartan aru bikash", "Sociology",    2),
+    ("bharatiya samaj",                     "Sociology",       1),
+    # Political Science Assamese sub-title variants
+    ("samasamayik biswa rajniti",           "Political Science", 1),
+    ("swadhinottar bharatar rajniti",       "Political Science", 2),
+    ("bharatiya sangbidhan",                "Political Science", 1),
+    # English Core
+    ("an inspector call",                   "English Core",    2),
+]
+
+
+def _detect_medium(text: str) -> str | None:
+    """
+    Return 'en', 'as', 'SKIP', or None.
+    'SKIP'  = definitely not EN/AS (Bengali, Bodo, Hindi, …) — don't try fallback.
+    None    = no explicit marker found — caller may try _apply_unmarked.
+    """
+    if re.search(r"\(E\)", text):
+        return "en"
+    if re.search(r"\(A\)", text):
+        return "as"
+    # _Ass or (Ass) suffix → Assamese
+    if re.search(r"_Ass\b|\(Ass\)", text):
+        return "as"
+    # Explicit non-EN/AS medium markers → hard skip
+    if re.search(r"\(B\)|\(Beng\)|\(Bangla\)|\(Bengali\)|\(Bodo\)|\(MIL\b|\(Hindi\)", text, re.IGNORECASE):
+        return "SKIP"
+    if re.search(r"_Bangla\b|_Beng\b|_Bengali\b|_Bodo\b|_Hindi\b", text, re.IGNORECASE):
+        return "SKIP"
+    # English Core books (Hornbill / Snapshot / Flamingo / Vistas)
+    t_lower = text.lower()
+    for name in _ENGLISH_CORE_BOOKS:
+        if t_lower.startswith(name):
+            return "en"
+    return None  # no medium detected — try _apply_unmarked
+
+
+def _apply_unmarked(text: str) -> tuple[str, str, int] | None:
+    """
+    For entries with no (E)/(A) marker, check _UNMARKED_CANONICAL.
+    Returns (canonical_name, medium, part_num) or None (= skip).
+    """
+    t = text.lower()
+    for substr, name, med, part in _UNMARKED_CANONICAL:
+        if substr in t:
+            if part is None:
+                pm = re.search(r"Part[- ]+(I{1,3}|[12])\b", text, re.IGNORECASE)
+                part = 1
+                if pm:
+                    ps = pm.group(1).upper()
+                    part = {"I": 1, "II": 2, "III": 3}.get(ps, 1)
+            return name, med, part
+    return None
+
+
+def _apply_rename(full_label: str, part_num: int) -> tuple[str, int]:
+    """
+    Match _RENAME_MAP against the full subject label (BEFORE parenthetical stripping).
+    Returns (canonical_name, part_num).
+    """
+    sl = full_label.lower()
+    for substr, canon, part_override in _RENAME_MAP:
+        if substr in sl:
+            return canon, (part_override if part_override is not None else part_num)
+    return full_label, part_num
 
 
 def build_catalogue(class11: bool = True, class12: bool = True) -> list[dict]:
     """
     Fetch both AHSEC textbook pages and return a list of entries:
-      {subject_name, class_level, medium, pdf_url, part_num, subject_slug}
+      {subject_name, subject_slug, class_level, medium, pdf_url, part_num, book_label}
 
-    Filters: English (E) and Assamese (A) medium only; academic subjects only.
+    Keeps: English (E) and Assamese (A) medium academic subjects only.
+    Handles: English Core books without medium markers; Assamese-named subjects;
+    old Hisab Sastra vs newer Accountancy deduplication.
     """
     pages = []
     if class11:
@@ -152,7 +277,8 @@ def build_catalogue(class11: bool = True, class12: bool = True) -> list[dict]:
     if class12:
         pages.append(("12", "https://ahsec.assam.gov.in/index.php/hs-2nd-year-textbooks/"))
 
-    entries = []
+    entries: list[dict] = []
+
     for class_level, url in pages:
         log.info(f"Fetching catalogue page for Class {class_level}…")
         try:
@@ -161,74 +287,119 @@ def build_catalogue(class11: bool = True, class12: bool = True) -> list[dict]:
             log.error(f"Failed to fetch Class {class_level} catalogue: {e}")
             continue
 
-        # Extract all anchor links
         anchors = re.findall(
             r'<a[^>]+href=["\']([^"\']+\.pdf[^"\']*)["\'][^>]*>(.*?)</a>',
-            html, re.DOTALL | re.IGNORECASE
+            html, re.DOTALL | re.IGNORECASE,
         )
+
         for pdf_url, raw_text in anchors:
             text = re.sub(r"<[^>]+>", "", raw_text).strip()
             text = re.sub(r"\s+", " ", text)
             text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-
             if not text or len(text) < 3:
                 continue
 
-            # Determine medium
-            if re.search(r"\(E\)", text):
-                medium = "en"
-            elif re.search(r"\(A\)", text):
-                medium = "as"
-            else:
-                continue  # skip non-EN / non-AS
-
-            # Skip vocational + MIL
             text_lower = text.lower()
+
+            # ── 1. Skip vocational + MIL ─────────────────────────────────────
             if any(kw in text_lower for kw in _SKIP_KEYWORDS):
-                log.debug(f"  Skip vocational: {text}")
+                log.debug(f"  Skip vocational: {text!r}")
                 continue
             if any(kw in text_lower for kw in _SKIP_MIL_KEYWORDS):
-                log.debug(f"  Skip MIL: {text}")
+                log.debug(f"  Skip MIL: {text!r}")
                 continue
 
-            # Normalise subject name (strip medium marker)
-            subj_name = re.sub(r"\s*\(E\)\s*|\s*\(A\)\s*", "", text).strip()
-            subj_name = re.sub(r"\s*\|\|.*", "", subj_name).strip()
+            # ── 2. Detect medium ─────────────────────────────────────────────
+            medium = _detect_medium(text)
 
-            # Extract part number
-            part_match = re.search(r"Part[- ]+(I{1,3}|[12])\b", subj_name, re.IGNORECASE)
-            part_num = 1
-            if part_match:
-                pstr = part_match.group(1).upper()
-                part_num = {"I": 1, "II": 2, "III": 3}.get(pstr, int(pstr) if pstr.isdigit() else 1)
+            if medium == "SKIP":
+                log.debug(f"  Skip (non-EN/AS): {text!r}")
+                continue
 
-            # Canonical subject name (strip Part I/II for grouping)
-            canonical = re.sub(r"\s*Part[- ]+(I{1,3}|[12])\b", "", subj_name, flags=re.IGNORECASE).strip()
+            if medium is None:
+                # No explicit (E)/(A) marker — try unmarked canonical map
+                # (Economics sub-books, Political Science variants, etc.)
+                res = _apply_unmarked(text)
+                if res is None:
+                    log.debug(f"  Skip (no medium): {text!r}")
+                    continue
+                canonical, medium, part_num = res
+                book_label = text.strip()
+            else:
+                # ── 3. Build subject name ────────────────────────────────────
+                # Strip medium markers and trailing || notes
+                subj_name = re.sub(r"\s*\(E\)\s*|\s*\(A\)\s*", "", text)
+                subj_name = re.sub(r"\s*_Ass\b|\s*\(Ass\)\s*", "", subj_name)
+                subj_name = re.sub(r"\s*\|\|.*", "", subj_name).strip()
 
-            # Deduplicate: prefer newer URLs (2025 > 2023) when the same
-            # subject+class+medium already appears.
+                # Special: English Core books (override entire name)
+                is_eng_core = False
+                for ec_name, ec_part in _ENGLISH_CORE_BOOKS.items():
+                    if text_lower.startswith(ec_name):
+                        subj_name = "English Core"
+                        is_eng_core = True
+                        break
+
+                # Extract part number from label
+                pm = re.search(r"Part[- ]+(I{1,3}|[12])\b", subj_name, re.IGNORECASE)
+                part_num = 1
+                if pm:
+                    ps = pm.group(1).upper()
+                    part_num = {"I": 1, "II": 2, "III": 3}.get(ps, 1)
+                elif is_eng_core:
+                    for ec_name, ec_part in _ENGLISH_CORE_BOOKS.items():
+                        if text_lower.startswith(ec_name):
+                            part_num = ec_part
+                            break
+
+                # Apply rename map BEFORE stripping parenthetical sub-titles so
+                # patterns like "bharatar samajik paribartan aru bikash" that live
+                # inside parentheses are still visible to the matcher.
+                subj_no_part = re.sub(
+                    r"\s*Part[- ]+(I{1,3}|[12])\b", "", subj_name, flags=re.IGNORECASE
+                ).strip()
+                renamed, part_num = _apply_rename(subj_no_part, part_num)
+
+                if renamed != subj_no_part:
+                    # Rename matched — canonical name comes from the map
+                    canonical = renamed
+                else:
+                    # No rename — strip parenthetical sub-title to get clean name
+                    canonical = re.sub(r"\s*\([^)]{5,}\)\s*$", "", subj_no_part).strip()
+
+                # Normalize ALL-CAPS subject names (e.g. "BIOLOGY" → "Biology")
+                if canonical == canonical.upper() and re.fullmatch(r"[A-Z ]+", canonical):
+                    canonical = canonical.title()
+
+                book_label = subj_name
+
+            # ── 4. Deduplicate ───────────────────────────────────────────────
+            slug = _slug(canonical)
             existing = next(
                 (e for e in entries
-                 if e["subject_slug"] == _slug(canonical)
+                 if e["subject_slug"] == slug
                  and e["class_level"] == class_level
                  and e["medium"] == medium
                  and e["part_num"] == part_num),
-                None
+                None,
             )
             if existing:
-                # Prefer the 2025 URL over the 2023 one
-                if "2025" in pdf_url and "2025" not in existing["pdf_url"]:
+                # Prefer newer URL (2025 > 2024 > 2023)
+                def _year(u: str) -> int:
+                    m = re.search(r"/20(\d\d)/", u)
+                    return int(m.group(1)) if m else 0
+                if _year(pdf_url) > _year(existing["pdf_url"]):
                     existing["pdf_url"] = pdf_url
                 continue
 
             entries.append({
-                "subject_name":  canonical,
-                "subject_slug":  _slug(canonical),
-                "class_level":   class_level,
-                "medium":        medium,
-                "pdf_url":       pdf_url,
-                "part_num":      part_num,
-                "book_label":    subj_name,   # full label incl. Part I/II
+                "subject_name": canonical,
+                "subject_slug": slug,
+                "class_level":  class_level,
+                "medium":       medium,
+                "pdf_url":      pdf_url,
+                "part_num":     part_num,
+                "book_label":   book_label,
             })
 
     log.info(f"Catalogue built: {len(entries)} PDF entries")
