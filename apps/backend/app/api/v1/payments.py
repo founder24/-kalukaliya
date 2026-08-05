@@ -81,6 +81,7 @@ async def create_order(
         raise HTTPException(status_code=503, detail="Payment gateway unavailable")
 
     # Store amount + plan for verification (resilient payment record)
+    # Redis: fast cache (best-effort, non-fatal)
     try:
         from app.db.redis import get_redis
 
@@ -89,6 +90,29 @@ async def create_order(
         await redis.set(f"order_plan:{order['id']}", body.plan, ex=86400)
     except Exception:
         pass
+
+    # MongoDB: authoritative durable record (required for Redis-down fallback)
+    try:
+        from app.db.mongo import get_mongo_client
+        from datetime import datetime, timezone, timedelta
+
+        mongo = get_mongo_client()
+        db = mongo[settings.MONGODB_DB_NAME]
+        await db.payments_pending.replace_one(
+            {"order_id": order["id"]},
+            {
+                "order_id": order["id"],
+                "user_id": str(user.id),
+                "plan": body.plan,
+                "amount": amount,
+                "created_at": datetime.now(timezone.utc),
+                "expires_at": datetime.now(timezone.utc) + timedelta(days=2),
+            },
+            upsert=True,
+        )
+    except Exception as e:
+        logger.error(f"Failed to persist pending payment to MongoDB: {e}")
+        # Non-fatal — Redis cache may still cover the verify call; log and proceed.
 
     return {
         "order_id": order["id"],
@@ -144,9 +168,33 @@ async def verify_payment(
     except Exception:
         pass
 
-    # Fall back: derive plan from stored amount
+    # Fall back: derive plan from stored amount (Redis)
     if not purchased_plan and payment_amount is not None:
         purchased_plan = amount_to_plan.get(payment_amount)
+
+    # Authoritative fallback: read from MongoDB payments_pending when Redis missed
+    if not purchased_plan or payment_amount is None:
+        try:
+            from app.db.mongo import get_mongo_client
+
+            mongo = get_mongo_client()
+            db = mongo[settings.MONGODB_DB_NAME]
+            pending = await db.payments_pending.find_one(
+                {"order_id": body.razorpay_order_id}
+            )
+            if pending:
+                if not purchased_plan and pending.get("plan"):
+                    purchased_plan = pending["plan"]
+                    logger.info(
+                        "Resolved plan from MongoDB payments_pending (Redis miss)",
+                        extra={"order_id": body.razorpay_order_id, "plan": purchased_plan},
+                    )
+                if payment_amount is None and pending.get("amount") is not None:
+                    payment_amount = int(pending["amount"])
+        except Exception as e:
+            logger.warning(
+                f"MongoDB fallback lookup failed for order {body.razorpay_order_id}: {e}"
+            )
 
     # Validate amount matches the resolved plan price (when both are available)
     if payment_amount is not None and purchased_plan:
@@ -163,7 +211,7 @@ async def verify_payment(
     # when Redis is unavailable.
     if not purchased_plan:
         logger.error(
-            "Cannot verify plan for order — Redis metadata unavailable, failing closed",
+            "Cannot verify plan for order — Redis and MongoDB metadata unavailable, failing closed",
             extra={"order_id": body.razorpay_order_id},
         )
         raise HTTPException(

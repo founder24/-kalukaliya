@@ -382,6 +382,23 @@ async def create_indexes() -> None:
         db.auth_rate_limit, [("expires_at", ASCENDING)], 0
     )
 
+    # ── Payments pending (order metadata for Redis-down fallback) ─────────────
+    # Durable store of plan + amount written at order creation; verify_payment
+    # reads this when Redis is unavailable. TTL = 2 days (orders expire in 24h,
+    # extra day for late verifications). expires_at field drives MongoDB TTL.
+    await _ensure_ttl_index(
+        db.payments_pending, [("expires_at", ASCENDING)], 0
+    )
+    try:
+        await db.payments_pending.create_index(
+            [("order_id", ASCENDING)], unique=True
+        )
+        await db.payments_pending.create_index(
+            [("user_id", ASCENDING), ("created_at", DESCENDING)]
+        )
+    except Exception as e:
+        logger.warning(f"payments_pending query index creation failed (non-fatal): {e}")
+
     logger.info("MongoDB indexes created/verified")
 
 
