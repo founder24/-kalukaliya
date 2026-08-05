@@ -12,8 +12,8 @@ from app.core.anon import resolve_anon_id
 # AI-credit limits per tier (authoritative — matches billing pipeline)
 CREDITS_LIMITS: dict[str, int] = {
     "free":    30,
-    "starter": 100,
-    "pro":     1000,
+    "starter": 500,
+    "pro":     7000,
     "premium": 9999,
 }
 DELETION_GRACE_HOURS = 72  # hours before hard-delete fires
