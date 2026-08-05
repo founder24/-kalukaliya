@@ -456,11 +456,25 @@ def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
                 except Exception as e:
                     log.debug(f"    OCR failed p{i+1}: {e}")
 
+            # For ANY medium: if the page is image-only (no embedded text at
+            # all), fall back to Tesseract.  This handles scanned PDFs like
+            # Hornbill and Chemistry Part II that return 0 chars from PyMuPDF.
+            elif len(text) < 20:
+                try:
+                    lang = "asm+eng" if medium == "as" else "eng"
+                    ocr_text = _ocr_page(page, lang=lang)
+                    ocr_text = re.sub(r"\n{3,}", "\n\n", ocr_text).strip()
+                    if len(ocr_text) >= 20:
+                        text = ocr_text
+                        ocr_count += 1
+                except Exception as e:
+                    log.debug(f"    OCR fallback failed p{i+1}: {e}")
+
             if len(text) >= 20:
                 pages.append({"page_num": i + 1, "text": text})
 
     if ocr_count:
-        log.info(f"  OCR used on {ocr_count}/{len(pages)} pages (Assamese non-Unicode font)")
+        log.info(f"  OCR used on {ocr_count} pages (image-only / non-Unicode font)")
     return pages
 
 
@@ -1375,7 +1389,7 @@ async def reindex_chapter(chapter_id_str: str, scope: str = "notes") -> None:
         # Refresh topic embeddings
         if chapter and chapter.published_topics:
             try:
-                from app.services.content_publisher import content_publisher as _cp
+                from app.services.content_publisher import content_publisher_service as _cp
                 hierarchy = await _cp._resolve_hierarchy(chapter)
                 await _cp._generate_topic_embeddings(chapter, hierarchy)
             except Exception as e:
