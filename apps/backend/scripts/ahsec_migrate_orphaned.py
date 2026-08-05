@@ -224,12 +224,13 @@ async def run(dry_run: bool = False) -> None:
                 {"_id": orphan_subj["_id"]},
                 {"$set": {
                     "stream_id": general_stream["_id"],
+                    "status": "active",          # must be active for public API to find it
                     "updated_at": datetime.now(timezone.utc),
                 }},
             )
-            log.info(f"  Relocated '{name}' to canonical General stream")
+            log.info(f"  Relocated '{name}' to canonical General stream (status=active)")
         else:
-            log.info(f"  [DRY RUN] Would relocate '{name}' to canonical General stream")
+            log.info(f"  [DRY RUN] Would relocate '{name}' to canonical General stream (status=active)")
         relocated_subjects += 1
 
     # ── 3. Clean up orphaned stream + class if now empty ─────────────────────
@@ -248,6 +249,31 @@ async def run(dry_run: bool = False) -> None:
     pfx = "[DRY RUN] " if dry_run else ""
     log.info(f"\n{pfx}Done: content-migrated {migrated_content_chapters} chapters, "
              f"relocated {relocated_subjects} subjects, skipped {skipped}.")
+
+    # ── 4. Post-migration verification ────────────────────────────────────────
+    # Confirm every relocated subject is now status=active and discoverable.
+    if not dry_run and relocated_subjects > 0:
+        log.info("\n── Post-migration verification ──")
+        # Collect all subjects under the canonical General stream
+        general_oid = general_stream["_id"]
+        relocated = await subjects_col.find(
+            {"stream_id": general_oid}
+        ).to_list(100)
+        all_ok = True
+        for s in relocated:
+            status = s.get("status")
+            slug   = s.get("slug", "?")
+            ch_cnt = await chapters_col.count_documents({"subject_id": s["_id"]})
+            ok = status == "active"
+            mark = "✓" if ok else "✗"
+            log.info(f"  {mark} '{s.get('name')}' slug={slug!r} "
+                     f"status={status} chapters={ch_cnt}")
+            if not ok:
+                all_ok = False
+        if all_ok:
+            log.info("  All relocated subjects are active — public API can find them.")
+        else:
+            log.warning("  Some relocated subjects are NOT active — run update manually.")
 
 
 if __name__ == "__main__":
