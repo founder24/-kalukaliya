@@ -693,6 +693,73 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
     return { ...f, [fieldKey]: arr };
   });
 
+  // ── Mirror-from-notes helpers ──────────────────────────────────────────────
+  // Strips markdown syntax so the chunk is clean plain text for the vector store.
+  const _stripMarkdown = (md) =>
+    md
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/\*(.+?)\*/g, '$1')
+      .replace(/__(.+?)__/g, '$1')
+      .replace(/_(.+?)_/g, '$1')
+      .replace(/~~(.+?)~~/g, '$1')
+      .replace(/`{1,3}([^`]*)`{1,3}/g, '$1')
+      .replace(/^\s*[-*+]\s+/gm, '')
+      .replace(/^\s*\d+\.\s+/gm, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+  /** Split markdown into [{title, content}] by H2/H3 headings. */
+  const splitNotesIntoSections = (markdown) => {
+    if (!markdown?.trim()) return [];
+    const lines = markdown.split('\n');
+    const build = (headingRe) => {
+      const out = []; let cur = null;
+      for (const line of lines) {
+        const m = line.match(headingRe);
+        if (m) {
+          if (cur) {
+            const content = _stripMarkdown(cur.lines.join('\n'));
+            if (content.length > 10) out.push({ title: cur.title, content });
+          }
+          cur = { title: m[1].trim(), lines: [] };
+        } else if (cur) { cur.lines.push(line); }
+      }
+      if (cur) {
+        const content = _stripMarkdown(cur.lines.join('\n'));
+        if (content.length > 10) out.push({ title: cur.title, content });
+      }
+      return out.filter(s => s.content.length > 10);
+    };
+    // Try H2/H3 first, fall back to H1
+    return build(/^#{2,3}\s+(.+)/) || build(/^#\s+(.+)/);
+  };
+
+  /** Auto-populate the current language's RAG sections from its notes field. */
+  const mirrorFromNotes = () => {
+    const notesField = notesLang === 'en' ? 'notes_en' : 'notes_as';
+    const notes = form?.[notesField];
+    if (!notes?.trim() || notes.trim().length < 50) {
+      import('sonner').then(({ toast }) =>
+        toast.error(`No ${notesLang === 'en' ? 'English' : 'Assamese'} notes to mirror from`));
+      return;
+    }
+    const sections = splitNotesIntoSections(notes);
+    if (sections.length === 0) {
+      import('sonner').then(({ toast }) =>
+        toast.error('No ## headings found — add H2 headings to your notes to split by topic'));
+      return;
+    }
+    const existing = form?.[notesSecKey] || [];
+    if (existing.length > 0 &&
+        !window.confirm(`Replace ${existing.length} existing section(s) with ${sections.length} auto-generated ones?`)) return;
+    setForm(f => ({ ...f, [notesSecKey]: sections }));
+    import('sonner').then(({ toast }) =>
+      toast.success(`Generated ${sections.length} RAG sections from notes`));
+  };
+
   const moveSection = (fieldKey, idx, dir) => setForm(f => {
     const arr = [...(f[fieldKey] || [])];
     const t = idx + dir;
@@ -962,10 +1029,21 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                     ))}
                   </div>
 
-                  <button onClick={() => addSection(notesSecKey, { title: '', content: '' })}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 transition-colors">
-                    <PlusIcon />+ Add section
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button onClick={() => addSection(notesSecKey, { title: '', content: '' })}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 transition-colors">
+                      <PlusIcon />+ Add section
+                    </button>
+                    {/* Mirror from notes — auto-splits notes by ## headings */}
+                    {(notesLang === 'en' ? form?.notes_en : form?.notes_as)?.length > 50 && (
+                      <button
+                        onClick={mirrorFromNotes}
+                        title={`Auto-generate sections by splitting ${notesLang === 'en' ? 'English' : 'Assamese'} notes on ## headings`}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors">
+                        ⟳ Mirror from Notes
+                      </button>
+                    )}
+                  </div>
 
                   {/* Legacy blob fallback */}
                   <details className="mt-2">

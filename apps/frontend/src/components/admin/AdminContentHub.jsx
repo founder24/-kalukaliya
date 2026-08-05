@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import {
   PenTool, FileText, ArrowRight,
-  Loader2, Globe, Languages, BarChart2, History,
+  Loader2, Globe, Languages, BarChart2, History, Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
@@ -13,6 +13,7 @@ const AdminContentEditor = lazy(() => import('./AdminContentEditor'));
 const AdminCmsDocEditor  = lazy(() => import('./AdminCmsDocEditor'));
 const BlogPublishWizard  = lazy(() => import('./BlogPublishWizard'));
 const AssameseBackfillPanel = lazy(() => import('./AssameseBackfillPanel'));
+const RagMirrorPanel        = lazy(() => import('./RagMirrorPanel'));
 const AdminTranslationProgress = lazy(() => import('./AdminTranslationProgress'));
 const SeederHistoryPanel = lazy(() => import('./content-editor/SeederHistoryPanel'));
 
@@ -26,6 +27,7 @@ const TABS = [
   { id: 'translation', label: 'Assamese',            icon: Languages,  color: 'amber',   desc: 'Bulk translate English chapters to Assamese via Sarvam AI' },
   { id: 'progress',    label: 'Translation Progress', icon: BarChart2,  color: 'rose',    desc: 'Track which chapters still lack Assamese translation' },
   { id: 'seeder',      label: 'Seeder History',  icon: History,     color: 'indigo',  desc: 'Review past seed-notes runs, failures, and retry stats' },
+  { id: 'rag-mirror',  label: 'RAG Mirror',      icon: Sparkles,    color: 'emerald', desc: 'Bulk auto-generate RAG sections from chapter notes via heading splits' },
 ];
 
 const FLOW = [
@@ -35,6 +37,7 @@ const FLOW = [
   { label: 'Assamese',     sub: 'Bulk translate',     tab: 'translation', arrow: true  },
   { label: 'Progress',     sub: 'Track missing',      tab: 'progress',    arrow: true  },
   { label: 'Seeder',       sub: 'Run history',        tab: 'seeder',      arrow: false },
+  { label: 'RAG Mirror',  sub: 'Bulk fill sections', tab: 'rag-mirror',  arrow: false },
 ];
 
 const COLOR_MAP = {
@@ -69,7 +72,7 @@ function loadPersistedCtx() {
   } catch { return EMPTY_CTX; }
 }
 
-const INTERNAL_TABS = new Set(['editor', 'cms', 'blog', 'translation', 'progress', 'seeder']);
+const INTERNAL_TABS = new Set(['editor', 'cms', 'blog', 'translation', 'progress', 'seeder', 'rag-mirror']);
 
 export default function AdminContentHub({ adminToken, onNavigate: topNavigate, navContext }) {
   const [activeTab, setActiveTab] = useState(navContext?.initialTab || 'editor');
@@ -275,6 +278,13 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
                       .catch(() => {});
                   }}
                 />
+              </div>
+            )}
+            {activeTab === 'rag-mirror' && (
+              <div className="h-full overflow-y-auto">
+                <Suspense fallback={<div className="p-8 text-center text-sm text-gray-400"><Loader2 size={16} className="inline animate-spin mr-2" />Loading…</div>}>
+                  <RagMirrorPanel adminToken={adminToken} />
+                </Suspense>
               </div>
             )}
           </Suspense>

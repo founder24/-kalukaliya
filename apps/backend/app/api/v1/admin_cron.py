@@ -708,3 +708,145 @@ async def _seed_notes_background(app_state, chapters, concurrency: int, force: b
         f"Seed-notes job finished: {done}/{total} generated, "
         f"{failed} failed, {skipped} skipped"
     )
+
+
+# ── Bulk Mirror RAG ────────────────────────────────────────────────────────────
+
+def _strip_markdown_to_plain(md: str) -> str:
+    """Strip markdown syntax to produce clean plain text for RAG chunks."""
+    import re
+    text = re.sub(r'^#{1,6}\s+', '', md, flags=re.MULTILINE)   # headings
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)                # bold
+    text = re.sub(r'\*(.+?)\*', r'\1', text)                    # italic
+    text = re.sub(r'__(.+?)__', r'\1', text)
+    text = re.sub(r'_(.+?)_', r'\1', text)
+    text = re.sub(r'~~(.+?)~~', r'\1', text)                    # strikethrough
+    text = re.sub(r'`{1,3}([^`]*)`{1,3}', r'\1', text)          # code
+    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE) # bullets
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE) # numbered lists
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)        # links
+    text = re.sub(r'!\[[^\]]*\]\([^)]+\)', '', text)             # images
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def _split_notes_into_rag_sections(notes: str) -> list[dict]:
+    """Split markdown notes by H2/H3 (then H1 as fallback) into [{title, content}]."""
+    import re
+
+    def _build(lines: list[str], heading_re: str) -> list[dict]:
+        out, cur = [], None
+        for line in lines:
+            m = re.match(heading_re, line)
+            if m:
+                if cur is not None:
+                    body = _strip_markdown_to_plain('\n'.join(cur['lines']))
+                    if len(body) > 10:
+                        out.append({'title': cur['title'], 'content': body})
+                cur = {'title': m.group(1).strip(), 'lines': []}
+            elif cur is not None:
+                cur['lines'].append(line)
+        if cur is not None:
+            body = _strip_markdown_to_plain('\n'.join(cur['lines']))
+            if len(body) > 10:
+                out.append({'title': cur['title'], 'content': body})
+        return [s for s in out if len(s['content']) > 10]
+
+    lines = notes.split('\n')
+    sections = _build(lines, r'^#{2,3}\s+(.+)')   # H2 / H3
+    if not sections:
+        sections = _build(lines, r'^#\s+(.+)')    # H1 fallback
+    return sections
+
+
+@router.post("/cron/bulk-mirror-rag")
+async def cron_bulk_mirror_rag(request: Request):
+    """Auto-generate rag_sections_en from notes_en for all chapters.
+
+    Splits notes_en by H2/H3 markdown headings into {title, content} sections.
+    Markdown syntax is stripped so chunks are clean plain text.
+
+    Auth: Bearer {TRANSLATE_CRON_SECRET}
+
+    Query params:
+        force       (bool)   — overwrite chapters that already have sections (default: false)
+        limit       (int)    — max chapters to process (default: all)
+        subject_id  (str)    — restrict to one subject
+
+    Returns:
+        { "processed": N, "skipped": N, "no_headings": N, "errors": [...] }
+    """
+    _verify_cron_token(request)
+
+    from app.models.content import Chapter
+    from app.db.mongo import get_motor_collection
+    from beanie import PydanticObjectId
+
+    force      = request.query_params.get("force", "false").lower() == "true"
+    limit      = int(request.query_params.get("limit", "0")) or None
+    subject_id = request.query_params.get("subject_id") or None
+
+    # Build filter — chapters that have notes_en but (optionally) no RAG sections yet
+    filt: dict = {
+        "notes_en": {"$exists": True, "$ne": "", "$ne": None, "$type": "string"},
+    }
+    if not force:
+        filt["$or"] = [
+            {"rag_sections_en": {"$exists": False}},
+            {"rag_sections_en": None},
+            {"rag_sections_en": []},
+        ]
+    if subject_id:
+        try:
+            filt["subject_id"] = PydanticObjectId(subject_id)
+        except Exception:
+            filt["subject_id"] = subject_id
+
+    candidates = await Chapter.find(filt).to_list(length=limit or 9999)
+
+    processed = 0
+    skipped   = 0
+    no_headings = 0
+    errors: list[str] = []
+
+    coll = await get_motor_collection("chapters")
+
+    for ch in candidates:
+        notes = (ch.notes_en or "").strip()
+        if not notes or len(notes) < 50:
+            skipped += 1
+            continue
+
+        sections = _split_notes_into_rag_sections(notes)
+        if not sections:
+            no_headings += 1
+            logger.info(
+                f"bulk-mirror-rag: no headings in chapter {ch.id} "
+                f"({getattr(ch, 'title', '?')!r}) — skipped"
+            )
+            continue
+
+        try:
+            await coll.update_one(
+                {"_id": ch.id},
+                {"$set": {"rag_sections_en": sections}},
+            )
+            processed += 1
+            logger.info(
+                f"bulk-mirror-rag: wrote {len(sections)} sections "
+                f"→ chapter {ch.id} ({getattr(ch, 'title', '?')!r})"
+            )
+        except Exception as exc:
+            errors.append(f"{ch.id}: {exc}")
+            logger.exception(f"bulk-mirror-rag: failed for chapter {ch.id}")
+
+    logger.info(
+        f"bulk-mirror-rag done: {processed} processed, "
+        f"{skipped} skipped, {no_headings} no-headings, {len(errors)} errors"
+    )
+    return {
+        "processed":   processed,
+        "skipped":     skipped,
+        "no_headings": no_headings,
+        "errors":      errors,
+    }
