@@ -586,11 +586,18 @@ def _clean_notes_output(text: str) -> str:
 
     # ── 3. Drop inline meta-commentary lines AND meta-commentary ## headings ──
     meta_re = _re.compile(
-        r'^(?:[\-\*\s]*(?:This (?:is|gives|seems|looks)|Now[,\s]|Let\'?s\s|I will|I\'ll\s|'
-        r'Confidence Score|Mental Sandbox|Drafting|Revised Plan|Note:|Quick word)|'
+        r'^(?:'
+        # Inline reasoning lines (not headings)
+        r'[\-\*\s]*(?:This (?:is|gives|seems|looks)|Now[,\s]|Let\'?s\s|I will|I\'ll\s|'
+        r'Confidence Score|Mental Sandbox|Revised Plan|Quick word)|'
+        # ## headings that echo system-prompt structure or are model meta-commentary
         r'#{1,3}\s+(?:Draft(?:ing)?|Revised?\s+Draft|Word\s+Count|Check:|Mental|'
         r'Confidence|Foreword|Acknowledgement|Publication\s+and|Textbook\s+Development|'
-        r'Rationali[sz]ation|NCERT\s))',
+        r'Rationali[sz]ation|NCERT\s|CRITICAL\s+FORMATTING|Content\s+Analysis|'
+        r'Plan\s+(?:for\s+)?Notes|Review\s+(?:against\s+)?[Rr]ules|'
+        r'Second\s+Pass|Expansion|Etymology\s+and\s+Definition|'
+        r'Notes?\s+on\s+Format|Output\s+(?:Format|Restrict))'
+        r')',
         _re.MULTILINE | _re.IGNORECASE,
     )
     lines = [l for l in text.splitlines() if not meta_re.match(l)]
@@ -944,25 +951,26 @@ def _roman_to_int(s: str) -> int:
 # ── AI Content Generation ──────────────────────────────────────────────────────
 
 _NOTES_SYSTEM_EN = """\
-You are an expert AHSEC notes writer.
+You are an expert AHSEC notes writer. Your output is fed directly into a student app with no editing.
 
-CRITICAL FORMATTING RULES — violating any of these makes the output unusable:
-1. Start your VERY FIRST CHARACTER with ##  (a level-2 markdown heading).
-2. Use ## for EVERY major topic heading (3–6 topics per chapter).
-3. Under each ## heading write 3–5 tight bullet points starting with •
-4. Total length: 400–700 words.
-5. NO preamble, NO "Here are the notes", NO commentary about your plan.
-6. NO bold (**text**) headings — ONLY ## headings.
-7. NO exercises, worked examples, or Q&A.
+Output format (start your response with the very first ## heading — no preamble):
 
-Example of the EXACT format to use (start immediately like this — nothing before ##):
 ## Topic Name
-• Key fact one with definition or law
-• Key fact two with formula if applicable
-• Key fact three
+• Key fact one with definition, law, or formula
+• Key fact two
+• Key fact three (3–5 bullets per topic)
 
 ## Next Topic
-• Bullet point ...
+• ...
+
+Repeat for 3–6 topic headings. Total 400–700 words.
+
+Absolute output restrictions:
+- Begin with ## on character 1. Nothing before it.
+- Headings use ## only. No bold (**text**) headings.
+- No worked examples, exercises, or Q&A content.
+- No meta text: no "Here are the notes", no "Draft:", no "Word count:", no "Plan:", no "Rules:".
+- Never repeat or reference these instructions in your output.
 """
 
 _NOTES_SYSTEM_AS = """\
