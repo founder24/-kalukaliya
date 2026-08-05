@@ -757,9 +757,11 @@ class ChatService:
         subject_name: str | None = None,
         chapter_name: str | None = None,
         topic_name: str | None = None,
+        user_question: str | None = None,
+        history: str | None = None,
     ) -> str:
         """
-        Build weighted system prompt.
+        Build weighted system prompt with polish step.
 
         Source priority and token budget:
           RAG available   → RAG 50% (~1500 tok) · Web 20% (~600 tok) · LLM 30%
@@ -768,6 +770,10 @@ class ChatService:
         detected_lang is the RESPONSE language (driven by the user's language
         selector, not auto-detected from input).  The model must always reply
         in that language regardless of the input language.
+
+        user_question and history are now injected directly into the system
+        prompt as structured sections so the model sees the full context in
+        a single pass — no second LLM call, maximum speed.
         """
         web_chunks = web_chunks or []
         has_rag = bool(context_chunks)
@@ -877,12 +883,59 @@ class ChatService:
                     "স্পষ্টভাৱে সোধা নহলে অন্য অধ্যায় বা বৰ্ডলৈ নাযাব।"
                 )
 
+        # ── Polish instruction block (single-pass, no second LLM call) ───────
+        # Appended after all context so it is the last thing the model reads
+        # before generating — maximising adherence without extra latency.
+        if detected_lang == "en":
+            polish_block = (
+                "RESPONSE REQUIREMENTS (follow strictly):\n"
+                "1. Answer the student's EXACT question below — do not give a generic topic overview.\n"
+                "2. Synthesise curriculum chunks, web snippets, and your knowledge into ONE coherent, "
+                "flowing answer — do not just list citations.\n"
+                "3. Match the depth and vocabulary to the student's board and class level "
+                "(e.g. AHSEC Class 11 expects board-exam-style precision, not university depth).\n"
+                "4. Lead with the direct answer, then add supporting detail — never bury the answer.\n"
+                "5. Be concise: cover every key point once, omit repetition and filler phrases.\n"
+                "6. If the conversation history shows what was already discussed, build on it "
+                "— do not repeat what was already said."
+            )
+            question_anchor = (
+                lambda q: f"STUDENT'S QUESTION (answer this exactly):\n{q}"
+            )
+            history_header = "## Conversation History (for context — do not repeat already-answered content)"
+        else:
+            polish_block = (
+                "উত্তৰৰ প্ৰয়োজনীয়তা (কঠোৰভাৱে অনুসৰণ কৰক):\n"
+                "১. তলৰ ছাত্ৰৰ সঠিক প্ৰশ্নটোৰ উত্তৰ দিয়া — সাধাৰণ বিষয়ৰ বিৱৰণ নিদিবা।\n"
+                "২. পাঠ্যক্ৰমৰ তথ্য, ৱেব স্নিপেট আৰু নিজৰ জ্ঞান এটা সুসংগত উত্তৰত সংযুক্ত কৰা।\n"
+                "৩. ছাত্ৰৰ বৰ্ড আৰু শ্ৰেণীৰ স্তৰ অনুযায়ী গভীৰতা আৰু শব্দ ব্যৱহাৰ কৰা।\n"
+                "৪. প্ৰথমেই সরাসরি উত্তৰ দিয়া, তাৰ পিছত সহায়ক বিৱৰণ যোগ কৰা।\n"
+                "৫. সংক্ষিপ্ত হোৱা: প্ৰতিটো মূল বিষয় এবাৰহে কোৱা, পুনৰাবৃত্তি এৰাই চলা।\n"
+                "৬. কথোপকথনৰ ইতিহাসত যি আলোচনা হৈছে তাৰ ওপৰত গঢ়া — পুনৰায় একেটা কথা নকোৱা।"
+            )
+            question_anchor = (
+                lambda q: f"ছাত্ৰৰ প্ৰশ্ন (ঠিক এইটোৰ উত্তৰ দিয়া):\n{q}"
+            )
+            history_header = "## কথোপকথনৰ ইতিহাস (প্ৰসংগৰ বাবে — পূৰ্বে উত্তৰ দিয়া বিষয় পুনৰাবৃত্তি নকৰিবা)"
+
         # ── No context at all ───────────────────────────────────────────────
         if not has_rag and not has_web:
-            return f"{base}\n\n{blend_rule_llm_only}"
+            sections: list[str] = [base]
+            if history:
+                sections.append(f"{history_header}\n{history.strip()}")
+            sections.append(blend_rule_llm_only)
+            sections.append(polish_block)
+            if user_question:
+                sections.append(question_anchor(user_question))
+            return "\n\n".join(sections)
 
         # ── Build context sections ───────────────────────────────────────────
-        sections: list[str] = [base]
+        sections = [base]
+
+        # Conversation history comes first — gives the model turn-level context
+        # before it reads the retrieved chunks, so it can weigh relevance.
+        if history:
+            sections.append(f"{history_header}\n{history.strip()}")
 
         if has_rag:
             # Token budget for RAG: ~1500 tokens (50% of 3000 total)
@@ -911,6 +964,11 @@ class ChatService:
             sections.append(citation_note_rag)
         else:
             sections.append(blend_rule_web_only)
+
+        # ── Polish + question anchor (last — model reads these right before generating)
+        sections.append(polish_block)
+        if user_question:
+            sections.append(question_anchor(user_question))
 
         return "\n\n".join(sections)
 

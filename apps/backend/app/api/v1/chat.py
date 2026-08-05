@@ -477,17 +477,15 @@ async def chat(
                 )
 
             # 3. Build system prompt with weighted RAG 50% / Web 20% / LLM 30%
-            # Non-streaming path: topic_match is local to _maybe_retrieve() so
-            # we pass chapter context from the request card fields only.
+            # History, question, and polish step are injected inside
+            # build_system_prompt — no post-hoc string appends needed.
             system_prompt = ChatService.build_system_prompt(
                 detected_lang, context_chunks, web_chunks=web_chunks,
                 user_board=request.board_name,  user_class=request.class_name,
                 chapter_name=request.chapter_name,
+                user_question=sanitized_message,
+                history=history or None,
             )
-
-            # Include multi-turn conversation history
-            if history:
-                system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
 
             # HF-018: Context window overflow protection
             from app.core.token_budget import estimate_tokens
@@ -502,12 +500,13 @@ async def chat(
                 sanitized_message
             )
             if total_tokens > max_context - 1000:  # Leave room for response
-                # Trim history but keep curriculum context
+                # Trim history but keep curriculum context + question anchor
                 if history:
                     system_prompt = ChatService.build_system_prompt(
                         detected_lang, context_chunks,
                         user_board=request.board_name,  user_class=request.class_name,
                         chapter_name=request.chapter_name,
+                        user_question=sanitized_message,
                     )
 
             # 4. Call LLM (with Sarvam -> Vertex AI fallback)
@@ -1262,17 +1261,16 @@ async def chat_stream(
     # topic from topic_match, chapter from card context.
     _sc_subject = source_card.subject_name if source_card else None
     _tm_topic   = topic_match.get("topic_title") if topic_match else None
+    # History, question anchor, and polish step injected inside build_system_prompt.
     system_prompt = ChatService.build_system_prompt(
         detected_lang, context_chunks,
         web_chunks=web_chunks if not is_generic else [],
         user_board=request.board_name,   user_class=request.class_name,
         subject_name=_sc_subject,        chapter_name=request.chapter_name,
         topic_name=_tm_topic,
+        user_question=sanitized_message,
+        history=history or None,
     )
-
-    # Include multi-turn conversation history
-    if history:
-        system_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history}"
 
     # HF-018: Context window overflow protection
     from app.core.token_budget import estimate_tokens
@@ -1284,13 +1282,14 @@ async def chat_stream(
     )
     total_tokens = estimate_tokens(system_prompt) + estimate_tokens(sanitized_message)
     if total_tokens > max_context - 1000:  # Leave room for response
-        # Trim history but keep curriculum context
+        # Trim history but keep curriculum context + question anchor
         if history:
             system_prompt = ChatService.build_system_prompt(
                 detected_lang, context_chunks,
                 user_board=request.board_name,   user_class=request.class_name,
                 subject_name=_sc_subject,        chapter_name=request.chapter_name,
                 topic_name=_tm_topic,
+                user_question=sanitized_message,
             )
 
     # -- Stream generator with Sarvam->Vertex fallback --
