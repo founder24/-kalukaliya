@@ -718,6 +718,23 @@ async def staff_reindex_chapter(
                         fresh2.notes_rag_indexed_at = now
                         fresh2.rag_indexed_at = now  # keep legacy in sync
                         await fresh2.save()
+                        # Refresh topic embeddings so topic_matcher picks up any
+                        # changes to published_topics made since the last publish.
+                        # Non-fatal: a failure here must not block the reindex.
+                        if fresh2.published_topics:
+                            try:
+                                from app.services.content_publisher import content_publisher as _cp
+                                _hierarchy = await _cp._resolve_hierarchy(fresh2)
+                                await _cp._generate_topic_embeddings(fresh2, _hierarchy)
+                                logger.info(
+                                    "staff_content: refreshed %d topic embeddings chapter=%s",
+                                    len(fresh2.published_topics), ch_id,
+                                )
+                            except Exception as _emb_exc:
+                                logger.warning(
+                                    "staff_content: topic embedding refresh failed chapter=%s: %s",
+                                    ch_id, _emb_exc,
+                                )
                 elif s == "qa":
                     en_text = (
                         _flatten_qa_sections(fresh.qa_rag_sections_en)
