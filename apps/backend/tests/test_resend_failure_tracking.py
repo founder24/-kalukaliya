@@ -52,13 +52,18 @@ def _make_mongo_with_count(count: int):
 @pytest.fixture(autouse=True)
 def reset_in_memory_store():
     """
-    Clear the module-level in-memory failure list before and after each test
-    so tests don't bleed into each other.
+    Clear the module-level in-memory failure list, the per-recipient rate-limit
+    dict, and the alert cooldown timestamp before and after each test so tests
+    don't bleed into each other.
     """
     import app.services.comms.resend_client as rc
     rc._email_failure_timestamps.clear()
+    rc._email_send_times.clear()
+    rc._last_alert_time = 0.0
     yield
     rc._email_failure_timestamps.clear()
+    rc._email_send_times.clear()
+    rc._last_alert_time = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -268,3 +273,107 @@ async def test_get_failures_falls_back_to_inmemory_when_mongo_down():
         count = await rc.get_email_failures_last_hour()
 
     assert count == 3, f"Expected 3 from in-memory fallback, got {count}"
+
+
+# ---------------------------------------------------------------------------
+# Tests: alert cooldown — fires once, then suppressed until window resets
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_alert_fires_exactly_once_for_many_failures_above_threshold(caplog):
+    """
+    When N > _EMAIL_ALERT_THRESHOLD failures occur in quick succession,
+    EMAIL_DELIVERY_FAILURE_ALERT must be logged exactly once (not N-threshold+1
+    times), because the cooldown suppresses repeat alerts within the same window.
+    """
+    import logging
+    import app.services.comms.resend_client as rc
+    from app.config import settings
+
+    threshold = rc._EMAIL_ALERT_THRESHOLD  # 5
+    N = threshold + 5  # well above threshold
+    original_key = settings.RESEND_API_KEY
+    settings.RESEND_API_KEY = "fake-key"
+
+    try:
+        with (
+            _make_mongo_unavailable(),
+            patch("app.services.comms.resend_client._get_client") as mock_get_client,
+            caplog.at_level(logging.ERROR, logger="app.services.comms.resend_client"),
+        ):
+            mock_httpx = MagicMock()
+            mock_httpx.post = AsyncMock(side_effect=Exception("503 Service Unavailable"))
+            mock_get_client.return_value = mock_httpx
+
+            for _ in range(N):
+                await rc._send_email("test@example.com", "Subject", "<p>body</p>")
+    finally:
+        settings.RESEND_API_KEY = original_key
+
+    alert_logs = [
+        r for r in caplog.records
+        if "EMAIL_DELIVERY_FAILURE_ALERT" in r.message and r.levelno == logging.ERROR
+    ]
+    assert len(alert_logs) == 1, (
+        f"Expected exactly 1 alert log for {N} failures, got {len(alert_logs)}"
+    )
+
+
+@pytest.mark.anyio
+async def test_alert_fires_again_after_cooldown_expires(caplog):
+    """
+    After the cooldown window passes, a new alert must be emitted the next time
+    the threshold is crossed.
+    """
+    import logging
+    import app.services.comms.resend_client as rc
+
+    threshold = rc._EMAIL_ALERT_THRESHOLD
+
+    # Simulate that an alert was already emitted just over one cooldown ago
+    rc._last_alert_time = time.time() - rc._EMAIL_ALERT_COOLDOWN - 1
+
+    with (
+        _make_mongo_with_count(threshold),
+        caplog.at_level(logging.ERROR, logger="app.services.comms.resend_client"),
+    ):
+        await rc._record_email_failure()
+
+    alert_logs = [
+        r for r in caplog.records
+        if "EMAIL_DELIVERY_FAILURE_ALERT" in r.message and r.levelno == logging.ERROR
+    ]
+    assert len(alert_logs) == 1, (
+        "Expected exactly 1 alert after cooldown expired, "
+        f"got {len(alert_logs)}"
+    )
+
+
+@pytest.mark.anyio
+async def test_alert_suppressed_within_cooldown_window(caplog):
+    """
+    When an alert was already emitted recently (within the cooldown window),
+    subsequent failures above the threshold must NOT emit another alert.
+    """
+    import logging
+    import app.services.comms.resend_client as rc
+
+    threshold = rc._EMAIL_ALERT_THRESHOLD
+
+    # Simulate that an alert fired just 60 seconds ago (well within the 1-hour cooldown)
+    rc._last_alert_time = time.time() - 60
+
+    with (
+        _make_mongo_with_count(threshold + 3),
+        caplog.at_level(logging.ERROR, logger="app.services.comms.resend_client"),
+    ):
+        await rc._record_email_failure()
+
+    alert_logs = [
+        r for r in caplog.records
+        if "EMAIL_DELIVERY_FAILURE_ALERT" in r.message and r.levelno == logging.ERROR
+    ]
+    assert len(alert_logs) == 0, (
+        f"Alert must be suppressed within the cooldown window, got {len(alert_logs)}"
+    )

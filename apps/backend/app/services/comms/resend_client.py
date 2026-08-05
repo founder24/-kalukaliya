@@ -31,7 +31,9 @@ _email_send_times: dict[str, list[float]] = defaultdict(list)
 # ---------------------------------------------------------------------------
 _EMAIL_FAILURE_WINDOW = 3600  # seconds (1 hour)
 _EMAIL_ALERT_THRESHOLD = 5     # emit ERROR alert after this many failures/hour
+_EMAIL_ALERT_COOLDOWN = 3600   # seconds — suppress repeat alerts within this window
 _email_failure_timestamps: list[float] = []  # in-memory fallback
+_last_alert_time: float = 0.0  # timestamp of the most-recent EMAIL_DELIVERY_FAILURE_ALERT
 
 
 async def _record_email_failure() -> None:
@@ -61,7 +63,10 @@ async def _record_email_failure() -> None:
 
     # Derive alert count from MongoDB when possible; fall back to in-memory
     count = await get_email_failures_last_hour()
-    if count >= _EMAIL_ALERT_THRESHOLD:
+    global _last_alert_time
+    now_alert = _time.time()
+    if count >= _EMAIL_ALERT_THRESHOLD and (now_alert - _last_alert_time) >= _EMAIL_ALERT_COOLDOWN:
+        _last_alert_time = now_alert
         logger.error(
             f"EMAIL_DELIVERY_FAILURE_ALERT: {count} email send failures in the last hour"
         )
