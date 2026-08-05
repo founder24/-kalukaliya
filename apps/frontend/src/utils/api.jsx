@@ -88,7 +88,7 @@ axios.interceptors.response.use(
 );
 
 export const apiClient = () =>
-  axios.create({ baseURL: API_BASE, withCredentials: true });
+  axios.create({ baseURL: API_BASE, ...authConfig() });
 
 export const getRecentMemories = (limit = 5) =>
   axios.get(`${API_BASE}/edu/memory/recent`, { params: { limit }, ...authConfig() });
