@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # JWT_SECRET                   | jwt-secret                     | (none — no alias)
 # ADMIN_JWT_SECRET             | admin-jwt-secret               | (none — keep isolated)
 # SARVAM_API_KEY               | sarvam-api-key                 | (none)
+# GEMINI_API_KEY               | gemini-api-key                 | (none) — Google AI Studio fallback
 # RESEND_API_KEY               | resend-api-key                 | (none)
 # POSTHOG_API_KEY              | posthog-api-key                | (none)
 # RAZORPAY_KEY_ID              | razorpay-key-id                | (none)
@@ -119,6 +120,12 @@ class Settings(BaseSettings):
     # --- Sarvam AI (Indic + English) ---
     SARVAM_API_KEY: Optional[str] = None
     SARVAM_BASE_URL: str = "https://api.sarvam.ai/v1"
+
+    # --- Gemini AI fallback (Google AI Studio — no Vertex IAM needed) ---
+    # Set this to bypass Vertex AI IAM entirely.  Get a key from
+    # https://aistudio.google.com/app/apikey and store in GCP SM as
+    # "gemini-api-key" + in Replit secrets as GEMINI_API_KEY.
+    GEMINI_API_KEY: Optional[str] = None
     # Valid Sarvam chat-completion models (as of 2025-06): sarvam-30b, sarvam-105b
     # sarvam-m1 was renamed; use sarvam-30b (fast) or sarvam-105b (quality).
     # Override via SARVAM_MODEL env var if this needs to change without a deploy.
