@@ -5,7 +5,7 @@ stack = "BEST_EFFORT_FALLBACK"
 
 [nix]
 channel = "stable-25_05"
-packages = ["cargo", "libiconv", "libxcrypt", "openssl", "pkg-config", "rustc"]
+packages = ["cargo", "freetype", "lcms2", "libiconv", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "openssl", "pkg-config", "rustc", "tcl", "tesseract", "tk", "zlib"]
 
 [workflows]
 runButton = "Project"
