@@ -187,5 +187,27 @@ describe('PaymentSuccessPage', () => {
       expect(html).toContain('Starter Plan Activated');
       expect(html).toContain('₹99');
     });
+
+    it('shows "Credits Added" fallback heading when credits param is non-numeric', () => {
+      const html = renderAt('/payment-success?type=topup&credits=abc&amount=19900');
+      expect(html).not.toContain('NaN');
+      expect(html).toContain('Credits Added');
+    });
+
+    it('shows "Credits Added" fallback heading when credits param is missing', () => {
+      const html = renderAt('/payment-success?type=topup&amount=19900');
+      expect(html).not.toContain('NaN');
+      expect(html).toContain('Credits Added');
+    });
+
+    it('does not render the Amount paid row when amount is zero', () => {
+      const html = renderAt('/payment-success?amount=0&type=subscription&plan=pro');
+      expect(html).not.toContain('Amount paid');
+    });
+
+    it('does not render the Amount paid row when amount is negative', () => {
+      const html = renderAt('/payment-success?amount=-500&type=subscription&plan=pro');
+      expect(html).not.toContain('Amount paid');
+    });
   });
 });

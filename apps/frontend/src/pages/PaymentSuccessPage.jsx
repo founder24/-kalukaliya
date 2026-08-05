@@ -8,7 +8,7 @@ import { PLANS } from './profile/planConfig';
 function formatAmount(raw) {
   if (!raw) return null;
   const n = parseInt(raw, 10);
-  if (isNaN(n)) return null;
+  if (isNaN(n) || n <= 0) return null;
   return `₹${(n / 100).toFixed(0)}`;
 }
 
@@ -38,14 +38,21 @@ export default function PaymentSuccessPage() {
 
   const planInfo = plan ? PLANS[plan] : null;
 
+  const creditsNum = credits !== null ? Number(credits) : NaN;
+  const creditsDisplay = !isNaN(creditsNum) && creditsNum > 0
+    ? creditsNum.toLocaleString()
+    : null;
+
   const heading = type === 'topup'
-    ? `${Number(credits).toLocaleString()} Credits Added`
+    ? creditsDisplay ? `${creditsDisplay} Credits Added` : 'Credits Added'
     : planInfo
       ? `${planInfo.label} Plan Activated`
       : 'Payment Successful!';
 
   const subtext = type === 'topup'
-    ? `${Number(credits).toLocaleString()} AI credits have been added to your account.`
+    ? creditsDisplay
+      ? `${creditsDisplay} AI credits have been added to your account.`
+      : 'Credits have been added to your account.'
     : planInfo
       ? `${planInfo.creditsLabel} AI credits are now available on your account.`
       : 'Your payment was processed successfully.';
@@ -85,7 +92,7 @@ export default function PaymentSuccessPage() {
           <div className="rounded-2xl px-5 py-1"
             style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(139,92,246,0.18)' }}>
             <ReceiptRow icon={CreditCard} label="Amount paid"    value={amount} />
-            <ReceiptRow icon={Zap}        label="Plan / top-up"  value={planInfo ? `${planInfo.label} Plan` : credits ? `${Number(credits).toLocaleString()} credits` : null} />
+            <ReceiptRow icon={Zap}        label="Plan / top-up"  value={planInfo ? `${planInfo.label} Plan` : creditsDisplay ? `${creditsDisplay} credits` : null} />
             <ReceiptRow icon={Receipt}    label="Order ID"        value={orderId} />
             <ReceiptRow icon={Receipt}    label="Payment ID"      value={paymentId} />
           </div>
