@@ -1362,7 +1362,28 @@ async def chat_stream(
         # Works for both authenticated and anonymous users (anon: quota_usage.count).
         _credits_used_total = current_count
         _remaining_credits  = max(0, limit - current_count)
-        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'credits_used_total': _credits_used_total, 'remaining_credits': _remaining_credits, 'route_trace': {'decision': 'sarvam', 'lang': detected_lang, 'fallback': actual_model != target_model, 'model': actual_model, 'confidence_tier': confidence_tier, 'topic_score': round(match_score, 4), 'web_used': bool(web_chunks), 'rag_path': rag_path, 'rag_chunks': len(context_chunks)}})}\n\n"
+        _rt = {
+            'decision': 'sarvam',
+            'lang': detected_lang,
+            'fallback': actual_model != target_model,
+            'model': actual_model,
+            'confidence_tier': confidence_tier,
+            'topic_score': round(match_score, 4),
+            'web_used': bool(web_chunks),
+            'rag_path': rag_path,
+            'rag_chunks': len(context_chunks),
+            # Content context — used by the dev QA badge to show what matched
+            'matched_topic':   topic_match.get('topic_title')   if topic_match else None,
+            'matched_chapter': (topic_match.get('chapter_title') if topic_match else None)
+                               or (source_card.chapter_name if source_card else None),
+            'matched_subject': (source_card.subject_name if source_card else None)
+                               or (topic_match.get('subject_slug') if topic_match else None),
+            'matched_class':   (topic_match.get('class_level') if topic_match else None)
+                               or (source_card.class_level if source_card else None),
+            'matched_board':   (source_card.board_name if source_card else None)
+                               or (topic_match.get('board_slug') if topic_match else None),
+        }
+        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'credits_used_total': _credits_used_total, 'remaining_credits': _remaining_credits, 'route_trace': _rt})}\n\n"
 
         # Record final metrics in OTel span
         with tracer.start_as_current_span("chat.stream.complete") as final_span:

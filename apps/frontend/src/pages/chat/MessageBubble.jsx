@@ -433,42 +433,37 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                 aria-controls={`router-log-panel-${msg.id || messageIndex}`}
                 data-testid="chat-router-qa-badge"
               >
-                <span className="font-semibold uppercase">QA</span>
-                <span>route=<b>{msg.route_trace.decision}</b></span>
-                <span>lang={msg.route_trace.lang}</span>
-                {msg.route_trace.pinecone_namespace
-                  ? <span>ns={msg.route_trace.pinecone_namespace}</span>
-                  : <span className="opacity-60">ns=∅</span>}
-                {msg.route_trace.embed_provider
-                  ? <span>embed={msg.route_trace.embed_provider}</span>
-                  : <span className="opacity-60">embed=∅</span>}
-                {Array.isArray(msg.route_trace.provider_chain) && msg.route_trace.provider_chain.length > 0 && (
-                  <span>head={msg.route_trace.provider_chain[0]}</span>
+                <span className="font-semibold uppercase tracking-wide">QA</span>
+                <span className="mx-0.5 opacity-30">|</span>
+
+                {/* ── Content match context ── */}
+                {msg.route_trace.matched_topic
+                  ? <span className="font-semibold text-amber-800 dark:text-amber-300" title="Matched topic">{msg.route_trace.matched_topic}</span>
+                  : <span className="opacity-40">topic=∅</span>}
+                {msg.route_trace.matched_chapter && (
+                  <><span className="opacity-30">·</span><span title="Chapter">{msg.route_trace.matched_chapter}</span></>
                 )}
-                {/* Task #39 — surface the real numeric centroid
-                    similarity + the configured threshold so the
-                    0.55 default can be eyeballed against actual
-                    traffic. ``topic_score`` is the value the
-                    dispatcher actually fed into the route() gate;
-                    ``topic_threshold`` is what it was compared
-                    against (CHAT_ROUTER_TOPIC_THRESHOLD env or
-                    0.55 default). Renders only when a probe ran
-                    (direct / casual paths leave it null). */}
+                {msg.route_trace.matched_subject && (
+                  <><span className="opacity-30">·</span><span title="Subject">{msg.route_trace.matched_subject}</span></>
+                )}
+                {msg.route_trace.matched_class && (
+                  <><span className="opacity-30">·</span><span title="Class">Cl {msg.route_trace.matched_class}</span></>
+                )}
+                {msg.route_trace.matched_board && (
+                  <><span className="opacity-30">·</span><span title="Board" className="uppercase">{msg.route_trace.matched_board}</span></>
+                )}
+
+                <span className="mx-0.5 opacity-30">|</span>
+
+                {/* ── Routing summary ── */}
+                <span className="opacity-70">route=<b>{msg.route_trace.decision}</b></span>
+                <span className="opacity-70">lang={msg.route_trace.lang}</span>
                 {typeof msg.route_trace.topic_score === 'number' && (
-                  <span title="centroid similarity from chat_router.probe_topic_score">
+                  <span className="opacity-70" title="centroid similarity score">
                     score=<b>{msg.route_trace.topic_score.toFixed(3)}</b>
                   </span>
                 )}
-                {typeof msg.route_trace.topic_threshold === 'number' && (
-                  <span className="opacity-70" title="CHAT_ROUTER_TOPIC_THRESHOLD env / 0.55 default">
-                    th={msg.route_trace.topic_threshold.toFixed(2)}
-                  </span>
-                )}
-                {msg.route_trace.reason && (
-                  <span className="opacity-70" title={msg.route_trace.reason}>
-                    · {String(msg.route_trace.reason).slice(0, 48)}
-                  </span>
-                )}
+
                 <span className="opacity-60 ml-1" aria-hidden="true">
                   {routerPanelOpen ? '▾' : '▸'}
                 </span>
