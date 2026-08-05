@@ -28,6 +28,7 @@ class VerifyPaymentRequest(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: str
     razorpay_signature: str
+    plan: Optional[str] = None  # hint from client; server validates against stored order
 
 
 class CreditTopUpRequest(BaseModel):
@@ -56,7 +57,8 @@ async def create_order(
     if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
         raise HTTPException(status_code=503, detail="Payment service not configured")
 
-    plan_prices = {"pro": 29900, "premium": 59900}
+    plan_prices = {"starter": 9900, "pro": 99900}
+    plan_labels = {"starter": "Starter", "pro": "Pro"}
     amount = plan_prices.get(body.plan)
     if not amount:
         raise HTTPException(status_code=400, detail="Invalid plan")
@@ -78,16 +80,23 @@ async def create_order(
         logger.error(f"Razorpay order creation failed: {e}")
         raise HTTPException(status_code=503, detail="Payment gateway unavailable")
 
-    # Store amount for later verification (resilient payment record)
+    # Store amount + plan for verification (resilient payment record)
     try:
         from app.db.redis import get_redis
 
         redis = get_redis()
         await redis.set(f"order_amount:{order['id']}", str(amount), ex=86400)
+        await redis.set(f"order_plan:{order['id']}", body.plan, ex=86400)
     except Exception:
         pass
 
-    return {"order_id": order["id"], "amount": amount, "currency": "INR"}
+    return {
+        "order_id": order["id"],
+        "amount": amount,
+        "currency": "INR",
+        "key_id": settings.RAZORPAY_KEY_ID,
+        "plan_label": plan_labels[body.plan],
+    }
 
 
 @router.post("/verify")
@@ -120,16 +129,42 @@ async def verify_payment(
     except Exception:
         pass
 
-    # Validate amount matches expected plan price
-    if payment_amount is not None:
-        plan_prices = {"pro": 29900, "premium": 59900}
-        expected_amounts = set(plan_prices.values())
-        if payment_amount not in expected_amounts:
+    # Determine which plan was purchased
+    plan_prices = {"starter": 9900, "pro": 99900}
+    amount_to_plan = {v: k for k, v in plan_prices.items()}
+
+    # Try to retrieve plan from Redis (stored at order creation time)
+    purchased_plan = None
+    try:
+        from app.db.redis import get_redis
+        redis = get_redis()
+        stored_plan = await redis.get(f"order_plan:{body.razorpay_order_id}")
+        if stored_plan:
+            purchased_plan = stored_plan if isinstance(stored_plan, str) else stored_plan.decode()
+    except Exception:
+        pass
+
+    # Fall back: derive plan from stored amount
+    if not purchased_plan and payment_amount is not None:
+        purchased_plan = amount_to_plan.get(payment_amount)
+
+    # Fall back: trust the client-sent plan (only if amount also matches)
+    if not purchased_plan and body.plan and body.plan in plan_prices:
+        purchased_plan = body.plan
+
+    # Validate amount matches the resolved plan price
+    if payment_amount is not None and purchased_plan:
+        expected_amount = plan_prices.get(purchased_plan)
+        if expected_amount and payment_amount != expected_amount:
             logger.warning(
                 f"Payment amount mismatch: stored={payment_amount}, "
-                f"expected one of {expected_amounts}, order={body.razorpay_order_id}"
+                f"expected={expected_amount} for plan={purchased_plan}, order={body.razorpay_order_id}"
             )
             raise HTTPException(status_code=400, detail="Payment amount mismatch")
+
+    # Default to pro if plan cannot be determined (safe fallback)
+    if not purchased_plan:
+        purchased_plan = "pro"
 
     from datetime import datetime, timezone, timedelta
 
@@ -137,7 +172,7 @@ async def verify_payment(
     await user.update(
         {
             "$set": {
-                "subscription_tier": "pro",
+                "subscription_tier": purchased_plan,
                 "subscription_status": "active",
                 "razorpay_subscription_id": body.razorpay_order_id,
                 "current_period_start": now,
@@ -180,8 +215,8 @@ async def verify_payment(
     except Exception as e:
         logger.error(f"Failed to send first-purchase receipt email: {e}")
 
-    logger.info("Payment verified, user upgraded", extra={"user_id": str(user.id)})
-    return {"status": "success", "message": "Payment verified, plan upgraded to pro"}
+    logger.info(f"Payment verified, user upgraded to {purchased_plan}", extra={"user_id": str(user.id)})
+    return {"status": "success", "message": f"Payment verified, plan upgraded to {purchased_plan}"}
 
 
 @router.post("/recover")
@@ -237,6 +272,7 @@ async def create_credit_topup(
         "amount": amount,
         "currency": "INR",
         "credits": body.credits,
+        "key_id": settings.RAZORPAY_KEY_ID,
     }
 
 
