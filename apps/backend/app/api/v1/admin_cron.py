@@ -807,6 +807,7 @@ async def cron_bulk_mirror_rag(request: Request):
     processed = 0
     skipped   = 0
     no_headings = 0
+    no_headings_list: list[dict] = []   # [{chapter_id, title, subject_id}] — enriched below
     errors: list[str] = []
 
     coll = await get_motor_collection("chapters")
@@ -820,6 +821,11 @@ async def cron_bulk_mirror_rag(request: Request):
         sections = _split_notes_into_rag_sections(notes)
         if not sections:
             no_headings += 1
+            no_headings_list.append({
+                "chapter_id": str(ch.id),
+                "title":      getattr(ch, "title", "") or "",
+                "subject_id": str(ch.subject_id) if getattr(ch, "subject_id", None) else "",
+            })
             logger.info(
                 f"bulk-mirror-rag: no headings in chapter {ch.id} "
                 f"({getattr(ch, 'title', '?')!r}) — skipped"
@@ -840,15 +846,37 @@ async def cron_bulk_mirror_rag(request: Request):
             errors.append(f"{ch.id}: {exc}")
             logger.exception(f"bulk-mirror-rag: failed for chapter {ch.id}")
 
+    # Bulk-resolve subject names for the no-headings list (one $in query, not N queries)
+    if no_headings_list:
+        try:
+            from app.models.content import Subject
+            from beanie import PydanticObjectId as _OID
+            unique_sids = list({r["subject_id"] for r in no_headings_list if r["subject_id"]})
+            oid_map: dict = {}
+            for sid in unique_sids:
+                try:
+                    oid_map[sid] = _OID(sid)
+                except Exception:
+                    pass
+            subjects = await Subject.find({"_id": {"$in": list(oid_map.values())}}).to_list(length=9999)
+            sid_to_name = {str(s.id): (s.name or "") for s in subjects}
+            for row in no_headings_list:
+                row["subject_name"] = sid_to_name.get(row["subject_id"], "")
+        except Exception as exc:
+            logger.warning(f"bulk-mirror-rag: subject name lookup failed: {exc}")
+            for row in no_headings_list:
+                row.setdefault("subject_name", "")
+
     logger.info(
         f"bulk-mirror-rag done: {processed} processed, "
         f"{skipped} skipped, {no_headings} no-headings, {len(errors)} errors"
     )
     return {
-        "processed":   processed,
-        "skipped":     skipped,
-        "no_headings": no_headings,
-        "errors":      errors,
+        "processed":        processed,
+        "skipped":          skipped,
+        "no_headings":      no_headings,
+        "no_headings_list": no_headings_list,
+        "errors":           errors,
     }
 
 

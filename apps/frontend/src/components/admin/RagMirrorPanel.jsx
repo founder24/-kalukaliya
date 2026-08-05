@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import axios from 'axios';
-import { Loader2, Sparkles, CheckCircle2, AlertTriangle, Zap } from 'lucide-react';
+import { Loader2, Sparkles, CheckCircle2, AlertTriangle, Zap, ExternalLink } from 'lucide-react';
 import { API_BASE } from '@/utils/api';
 
 /**
@@ -181,6 +181,50 @@ export default function RagMirrorPanel({ adminToken }) {
               <div><dt className="text-gray-500">Errors</dt>
                 <dd className="font-semibold text-rose-600">{mirrorResult.errors?.length ?? 0}</dd></div>
             </dl>
+            {/* No-headings chapters — actionable list so staff know what to fix */}
+            {mirrorResult.no_headings_list?.length > 0 && (
+              <details>
+                <summary className="text-xs text-amber-600 cursor-pointer hover:text-amber-800 font-medium">
+                  ⚠ {mirrorResult.no_headings_list.length} chapter{mirrorResult.no_headings_list.length !== 1 ? 's' : ''} have no ## headings — click to see which ones
+                </summary>
+                <div className="mt-2 rounded-lg border border-amber-200 overflow-hidden">
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="bg-amber-50 text-amber-800">
+                        <th className="text-left px-3 py-1.5 font-semibold">Chapter</th>
+                        <th className="text-left px-3 py-1.5 font-semibold">Subject</th>
+                        <th className="px-3 py-1.5 w-8" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-amber-100">
+                      {mirrorResult.no_headings_list.map((row) => (
+                        <tr key={row.chapter_id} className="bg-white hover:bg-amber-50 transition-colors">
+                          <td className="px-3 py-1.5 text-gray-800 font-medium max-w-[200px] truncate" title={row.title}>
+                            {row.title || <span className="text-gray-400 italic">Untitled</span>}
+                          </td>
+                          <td className="px-3 py-1.5 text-gray-500 max-w-[140px] truncate" title={row.subject_name}>
+                            {row.subject_name || <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-3 py-1.5 text-right">
+                            <a
+                              href={`#chapter:${row.chapter_id}`}
+                              title="Open in chapter editor"
+                              className="inline-flex items-center gap-1 text-violet-500 hover:text-violet-700"
+                            >
+                              <ExternalLink size={11} />
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-1.5 text-[11px] text-amber-600">
+                  Add <code className="font-mono bg-amber-50 px-0.5 rounded">##</code> headings to these chapters' notes, then re-run Mirror.
+                </p>
+              </details>
+            )}
+
             {mirrorResult.errors?.length > 0 && (
               <details>
                 <summary className="text-xs text-rose-500 cursor-pointer hover:text-rose-700">
