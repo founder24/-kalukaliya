@@ -22,6 +22,36 @@ _EMAIL_RATE_LIMIT = 10
 _EMAIL_RATE_WINDOW = 60  # seconds
 _email_send_times: dict[str, list[float]] = defaultdict(list)
 
+# ---------------------------------------------------------------------------
+# Email failure tracking (in-memory, sliding 1-hour window)
+# ---------------------------------------------------------------------------
+_EMAIL_FAILURE_WINDOW = 3600  # seconds (1 hour)
+_EMAIL_ALERT_THRESHOLD = 5     # emit ERROR alert after this many failures/hour
+_email_failure_timestamps: list[float] = []
+
+
+def _record_email_failure() -> None:
+    """Record a send failure and emit an alert log if the threshold is exceeded."""
+    now = _time.time()
+    _email_failure_timestamps.append(now)
+    # Prune entries older than the window to bound memory
+    cutoff = now - _EMAIL_FAILURE_WINDOW
+    while _email_failure_timestamps and _email_failure_timestamps[0] < cutoff:
+        _email_failure_timestamps.pop(0)
+
+    count = len(_email_failure_timestamps)
+    if count >= _EMAIL_ALERT_THRESHOLD:
+        logger.error(
+            f"EMAIL_DELIVERY_FAILURE_ALERT: {count} email send failures in the last hour"
+        )
+
+
+def get_email_failures_last_hour() -> int:
+    """Return the number of email send failures in the last hour (for health checks)."""
+    now = _time.time()
+    cutoff = now - _EMAIL_FAILURE_WINDOW
+    return sum(1 for t in _email_failure_timestamps if t >= cutoff)
+
 
 def _check_rate_limit(recipient: str) -> bool:
     """Check if sending to this recipient would exceed rate limit."""
@@ -103,6 +133,7 @@ async def _send_email(to: str, subject: str, html_body: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"Failed to send email to {to}: {e}")
+        _record_email_failure()
         return False
 
 

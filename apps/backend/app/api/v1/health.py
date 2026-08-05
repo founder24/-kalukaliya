@@ -124,6 +124,8 @@ async def basic_health_check():
         mongodb_ok = False
 
     if settings.startup_errors or not mongodb_ok:
+        from app.services.comms.resend_client import get_email_failures_last_hour
+
         errors = list(settings.startup_errors)
         if not mongodb_ok and not any("MongoDB" in e for e in errors):
             errors.append(
@@ -137,6 +139,7 @@ async def basic_health_check():
                 "service": "syrabit-backend",
                 "mongodb_initialized": mongodb_ok,
                 "error_count": len(errors),
+                "email_failures_last_hour": get_email_failures_last_hour(),
                 # Do NOT expose error details publicly — they can contain
                 # infrastructure hints (URI patterns, IP allowlist messages).
                 # Full details are available at /api/v1/health/deep (admin only).
@@ -145,10 +148,13 @@ async def basic_health_check():
             },
         )
 
+    from app.services.comms.resend_client import get_email_failures_last_hour
+
     response = {
         "status": "healthy",
         "service": "syrabit-backend",
         "mongodb_initialized": True,
+        "email_failures_last_hour": get_email_failures_last_hour(),
         "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
     }
     if warnings:
@@ -194,9 +200,15 @@ async def deep_health_check():
         overall_status = "healthy"
         status_code = status.HTTP_200_OK
 
+    from app.services.comms.resend_client import get_email_failures_last_hour
+
     return JSONResponse(
         status_code=status_code,
-        content={"status": overall_status, "checks": checks},
+        content={
+            "status": overall_status,
+            "checks": checks,
+            "email_failures_last_hour": get_email_failures_last_hour(),
+        },
     )
 
 
