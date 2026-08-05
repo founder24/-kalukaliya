@@ -528,6 +528,49 @@ _AS_EXERCISE_RE = re.compile(
 )
 
 
+def _clean_notes_output(text: str) -> str:
+    """Strip model reasoning preamble and normalise heading format.
+
+    The model sometimes outputs chain-of-thought reasoning before the actual
+    notes, and may use **bold** headings instead of ## headings despite the
+    system prompt.  This function:
+      1. Strips everything before the first ## or **Topic heading.
+      2. Converts "**Topic N: Name**" / "**Name**" section headers → "## Name".
+      3. Removes residual meta-commentary lines (e.g. "This is a good set…").
+    """
+    # ── 1. Find the first structural heading ─────────────────────────────────
+    import re as _re
+    # Look for ## heading or a **TITLE** bold heading at start of a line
+    heading_re = _re.compile(
+        r'^(?:##\s|\*\*(?:Topic\s+\d+[:\.\-–]?\s*)?[A-Z])',
+        _re.MULTILINE,
+    )
+    m = heading_re.search(text)
+    if m and m.start() > 0:
+        text = text[m.start():]
+
+    # ── 2. Convert **Topic N: Name** → ## Name ───────────────────────────────
+    text = _re.sub(
+        r'^\*\*(?:Topic\s+\d+[:\.\-–]\s*)?(.+?)\*\*\s*$',
+        lambda mo: f"## {mo.group(1).strip()}",
+        text,
+        flags=_re.MULTILINE,
+    )
+
+    # ── 3. Drop inline meta-commentary lines ─────────────────────────────────
+    meta_re = _re.compile(
+        r'^[\-\*\s]*(?:This (?:is|gives|seems|looks)|Now[,\s]|Let\'?s\s|I will|I\'ll\s|'
+        r'Confidence Score|Mental Sandbox|Drafting|Revised Plan|Note:|Quick word)',
+        _re.MULTILINE | _re.IGNORECASE,
+    )
+    lines = [l for l in text.splitlines() if not meta_re.match(l)]
+    text = "\n".join(lines)
+
+    # ── 4. Collapse excess blank lines ───────────────────────────────────────
+    text = _re.sub(r'\n{3,}', '\n\n', text).strip()
+    return text
+
+
 def _is_readable_assamese(text: str) -> bool:
     """Return True if text contains a meaningful proportion of Assamese Unicode glyphs."""
     if not text:
@@ -856,17 +899,25 @@ def _roman_to_int(s: str) -> int:
 # ── AI Content Generation ──────────────────────────────────────────────────────
 
 _NOTES_SYSTEM_EN = """\
-You are an expert AHSEC notes writer. Output ONLY the study notes — no preamble, \
-no commentary, no "Here are the notes" sentence. Begin your response immediately \
-with the first ## heading.
+You are an expert AHSEC notes writer.
 
-Rules:
-- Use ## for each major topic (3–6 topics per chapter).
-- Under each ## heading write 3–5 tight bullet points with key facts, definitions, \
-  formulas, or laws.
-- Total length: 400–700 words.
-- Do NOT include exercises, worked examples, or Q&A.
-- First line of your response MUST be a ## heading.
+CRITICAL FORMATTING RULES — violating any of these makes the output unusable:
+1. Start your VERY FIRST CHARACTER with ##  (a level-2 markdown heading).
+2. Use ## for EVERY major topic heading (3–6 topics per chapter).
+3. Under each ## heading write 3–5 tight bullet points starting with •
+4. Total length: 400–700 words.
+5. NO preamble, NO "Here are the notes", NO commentary about your plan.
+6. NO bold (**text**) headings — ONLY ## headings.
+7. NO exercises, worked examples, or Q&A.
+
+Example of the EXACT format to use (start immediately like this — nothing before ##):
+## Topic Name
+• Key fact one with definition or law
+• Key fact two with formula if applicable
+• Key fact three
+
+## Next Topic
+• Bullet point ...
 """
 
 _NOTES_SYSTEM_AS = """\
@@ -934,7 +985,7 @@ async def generate_notes(
             user_message=user_msg,
             is_assamese=is_as,
         )
-        result = result.strip()
+        result = _clean_notes_output(result.strip())
         if len(result) >= 300:
             return result
         if attempt < 2:
@@ -943,7 +994,7 @@ async def generate_notes(
             )
         await asyncio.sleep(2.0)
 
-    return result  # return whatever we got on the last attempt
+    return _clean_notes_output(result)  # return cleaned result on last attempt
 
 
 async def generate_qa(
@@ -1254,7 +1305,7 @@ async def upsert_chapter(
         slug=slug,
         chapter_number=chapter_num,
         content_type="notes",
-        status="draft",
+        status="active",  # visible to students immediately via the public API
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
