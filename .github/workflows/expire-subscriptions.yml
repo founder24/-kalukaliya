@@ -1,0 +1,60 @@
+name: Expire Subscriptions (Daily)
+
+on:
+  schedule:
+    # Run at 02:00 UTC every day
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  API_URL: https://api.syrabit.ai/api/v1/admin/cron/expire-subscriptions
+
+jobs:
+  expire-subscriptions:
+    name: Downgrade lapsed paid users to free
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Call expire-subscriptions endpoint
+        id: expire
+        run: |
+          HTTP_STATUS=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST "$API_URL" \
+            -H "Authorization: Bearer ${{ secrets.TRANSLATE_CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+
+          echo "HTTP status: $HTTP_STATUS"
+          echo "Response body:"
+          cat /tmp/response.json
+
+          echo "http_status=${HTTP_STATUS}" >> "$GITHUB_OUTPUT"
+
+          if [[ "$HTTP_STATUS" -lt 200 || "$HTTP_STATUS" -ge 300 ]]; then
+            echo "::error::expire-subscriptions returned HTTP ${HTTP_STATUS}"
+            exit 1
+          fi
+
+      - name: Parse and summarise result
+        if: success()
+        run: |
+          EXPIRED=$(jq -r '.expired // 0' /tmp/response.json)
+          SKIPPED=$(jq -r '.skipped // 0' /tmp/response.json)
+          ERRORS=$(jq -r '.errors | length' /tmp/response.json)
+
+          echo "✅ expire-subscriptions complete"
+          echo "   Expired → free : ${EXPIRED}"
+          echo "   Already free   : ${SKIPPED}"
+          echo "   Errors         : ${ERRORS}"
+
+          if [[ "$ERRORS" -gt 0 ]]; then
+            echo "::warning::${ERRORS} user(s) could not be downgraded — check the response body above."
+            jq '.errors' /tmp/response.json
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Daily expire-subscriptions cron FAILED (HTTP ${{ steps.expire.outputs.http_status }})."
+          echo "::error::Lapsed paid users have NOT been downgraded. Re-run this workflow manually after investigating."
