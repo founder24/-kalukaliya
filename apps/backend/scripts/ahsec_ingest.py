@@ -1203,7 +1203,7 @@ async def upsert_subject(
         name=subject_name,
         slug=subject_slug,
         stream_id=stream.id,
-        status="draft",
+        status="active",  # immediately accessible via the public API
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
