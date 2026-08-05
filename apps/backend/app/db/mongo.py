@@ -374,6 +374,13 @@ async def create_indexes() -> None:
     except Exception as e:
         logger.warning(f"seed_runs query index creation failed (non-fatal): {e}")
 
+    # ── Email failure events (cross-pod, restart-safe failure counter) ────────
+    # Each document is {"ts": <datetime>}. TTL = 3600s so documents auto-expire
+    # exactly at the edge of the 1-hour sliding window — no manual pruning needed.
+    await _ensure_ttl_index(
+        db.email_failure_events, [("ts", ASCENDING)], 3600
+    )
+
     # ── Auth rate limit (IP-based, 90s TTL buckets) ───────────────────────────
     # _id is the rate key (endpoint:ip:minute_bucket), expires_at drives TTL.
     # Short TTL (90s) covers the current minute + partial next minute so no

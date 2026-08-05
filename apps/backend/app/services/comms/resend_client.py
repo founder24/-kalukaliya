@@ -4,6 +4,7 @@ import httpx
 import logging
 import time as _time
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote as url_quote
 
@@ -23,34 +24,72 @@ _EMAIL_RATE_WINDOW = 60  # seconds
 _email_send_times: dict[str, list[float]] = defaultdict(list)
 
 # ---------------------------------------------------------------------------
-# Email failure tracking (in-memory, sliding 1-hour window)
+# Email failure tracking
+# Primary store: MongoDB `email_failure_events` collection (survives restarts,
+# aggregates across pods). TTL index on `ts` auto-expires documents after 1 hour.
+# Fallback: in-memory list used when MongoDB is unavailable.
 # ---------------------------------------------------------------------------
 _EMAIL_FAILURE_WINDOW = 3600  # seconds (1 hour)
 _EMAIL_ALERT_THRESHOLD = 5     # emit ERROR alert after this many failures/hour
-_email_failure_timestamps: list[float] = []
+_email_failure_timestamps: list[float] = []  # in-memory fallback
 
 
-def _record_email_failure() -> None:
-    """Record a send failure and emit an alert log if the threshold is exceeded."""
+async def _record_email_failure() -> None:
+    """Record a send failure in MongoDB (with in-memory fallback) and alert if threshold exceeded."""
     now = _time.time()
+
+    # Always update the in-memory list so the fallback path stays accurate
     _email_failure_timestamps.append(now)
-    # Prune entries older than the window to bound memory
     cutoff = now - _EMAIL_FAILURE_WINDOW
     while _email_failure_timestamps and _email_failure_timestamps[0] < cutoff:
         _email_failure_timestamps.pop(0)
 
-    count = len(_email_failure_timestamps)
+    # Attempt to persist to MongoDB so failures survive restarts and aggregate
+    # across multiple Cloud Run instances.
+    try:
+        from app.db.mongo import get_mongo_client
+        from app.config import settings as _settings
+
+        client = get_mongo_client()
+        db = client[_settings.MONGODB_DB_NAME]
+        await db.email_failure_events.insert_one(
+            {"ts": datetime.now(timezone.utc)}
+        )
+    except Exception as exc:
+        # MongoDB unavailable — the in-memory list already recorded this event.
+        logger.debug(f"email_failure_events MongoDB write skipped: {exc}")
+
+    # Derive alert count from MongoDB when possible; fall back to in-memory
+    count = await get_email_failures_last_hour()
     if count >= _EMAIL_ALERT_THRESHOLD:
         logger.error(
             f"EMAIL_DELIVERY_FAILURE_ALERT: {count} email send failures in the last hour"
         )
 
 
-def get_email_failures_last_hour() -> int:
-    """Return the number of email send failures in the last hour (for health checks)."""
-    now = _time.time()
-    cutoff = now - _EMAIL_FAILURE_WINDOW
-    return sum(1 for t in _email_failure_timestamps if t >= cutoff)
+async def get_email_failures_last_hour() -> int:
+    """Return the number of email send failures in the last hour.
+
+    Queries MongoDB for a cross-pod, restart-safe count.
+    Falls back to the in-memory list when MongoDB is unavailable.
+    """
+    try:
+        from app.db.mongo import get_mongo_client
+        from app.config import settings as _settings
+
+        client = get_mongo_client()
+        db = client[_settings.MONGODB_DB_NAME]
+        import datetime as _dt
+        window_start = datetime.now(timezone.utc) - _dt.timedelta(seconds=_EMAIL_FAILURE_WINDOW)
+        count = await db.email_failure_events.count_documents(
+            {"ts": {"$gte": window_start}}
+        )
+        return count
+    except Exception:
+        # MongoDB unavailable — return in-memory count
+        now = _time.time()
+        cutoff = now - _EMAIL_FAILURE_WINDOW
+        return sum(1 for t in _email_failure_timestamps if t >= cutoff)
 
 
 def _check_rate_limit(recipient: str) -> bool:
@@ -133,7 +172,7 @@ async def _send_email(to: str, subject: str, html_body: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"Failed to send email to {to}: {e}")
-        _record_email_failure()
+        await _record_email_failure()
         return False
 
 

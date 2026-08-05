@@ -139,7 +139,7 @@ async def basic_health_check():
                 "service": "syrabit-backend",
                 "mongodb_initialized": mongodb_ok,
                 "error_count": len(errors),
-                "email_failures_last_hour": get_email_failures_last_hour(),
+                "email_failures_last_hour": await get_email_failures_last_hour(),
                 # Do NOT expose error details publicly — they can contain
                 # infrastructure hints (URI patterns, IP allowlist messages).
                 # Full details are available at /api/v1/health/deep (admin only).
@@ -154,7 +154,7 @@ async def basic_health_check():
         "status": "healthy",
         "service": "syrabit-backend",
         "mongodb_initialized": True,
-        "email_failures_last_hour": get_email_failures_last_hour(),
+        "email_failures_last_hour": await get_email_failures_last_hour(),
         "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
     }
     if warnings:
@@ -207,7 +207,7 @@ async def deep_health_check():
         content={
             "status": overall_status,
             "checks": checks,
-            "email_failures_last_hour": get_email_failures_last_hour(),
+            "email_failures_last_hour": await get_email_failures_last_hour(),
         },
     )
 
