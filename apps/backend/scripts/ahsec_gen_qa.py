@@ -40,23 +40,35 @@ async def main(args: argparse.Namespace) -> None:
     from app.db.mongo import init_mongo
     from app.config import settings
     from app.models.content import Chapter, Subject
-    from app.services.ai.sarvam_client import SarvamClient
+    from app.services.ai.sarvam_client import sarvam_client
 
-    # Bootstrap DB
+    # Bootstrap DB + secrets
     mongo_url = os.environ.get("MONGODB_URL") or os.environ.get("MONGODB_URI")
     if mongo_url and not settings.MONGODB_URI:
         settings.MONGODB_URI = mongo_url  # type: ignore[attr-defined]
+
+    if not settings.SARVAM_API_KEY:
+        try:
+            from app.core.secret_manager import load_secrets_into_settings
+            await load_secrets_into_settings()
+        except Exception as e:
+            log.warning(f"Secret Manager fetch failed: {e}")
+
     await init_mongo()
+    log.info(f"MongoDB connected — db={settings.MONGODB_DB_NAME!r}")
+
+    if settings.SARVAM_API_KEY:
+        log.info(f"Sarvam key loaded (prefix={settings.SARVAM_API_KEY[:8]}…)")
+    elif not args.dry_run:
+        log.error("SARVAM_API_KEY not set — run with --dry-run or set key")
+        sys.exit(1)
 
     medium = args.medium  # "en" or "as"
     notes_field = "notes_en" if medium == "en" else "notes_as"
     qa_field = "qa_rag_sections_en" if medium == "en" else "qa_rag_sections_as"
 
     # Find chapters that have notes but no Q&A (unless --force)
-    filter_q: dict = {
-        "board": "ahsec",
-        notes_field: {"$exists": True, "$gt": ""},
-    }
+    filter_q: dict = {notes_field: {"$exists": True, "$gt": ""}}
     if not args.force:
         filter_q[qa_field] = {"$size": 0}
 
@@ -75,7 +87,6 @@ async def main(args: argparse.Namespace) -> None:
         log.info(f"  After subject filter '{args.subject}': {len(filtered)} chapters")
         chapters = filtered
 
-    sarvam = SarvamClient()
     processed = skipped = failed = 0
 
     for ch in chapters:
@@ -103,7 +114,7 @@ async def main(args: argparse.Namespace) -> None:
 
         try:
             qa_pairs = await generate_qa_from_notes(
-                sarvam, notes_text, ch_title, subj.name, medium
+                sarvam_client, notes_text, ch_title, subj.name, medium
             )
         except Exception as e:
             log.error(f"    Sarvam failed: {e}")
