@@ -362,8 +362,39 @@ async def verify_payment(
 
 @router.post("/recover")
 async def recover_payment(user: User = Depends(get_current_user)):
-    """Check for pending/incomplete payments."""
-    return {"pending_payments": []}
+    """
+    Return any pending (unverified) payments for the current user.
+
+    A payments_pending record is written at order-creation time and deleted on
+    successful verify.  If verify failed mid-flight the record survives and can
+    be used to retry.  This endpoint surfaces those orphaned records so the
+    client can offer a retry or show a helpful message.
+
+    Note: records older than 2 days are auto-expired by MongoDB TTL.  Only
+    live, retryable records are returned here.
+    """
+    from app.db.mongo import get_mongo_client
+    from datetime import datetime, timezone
+
+    try:
+        mongo = get_mongo_client()
+        db = mongo[settings.MONGODB_DB_NAME]
+        now = datetime.now(timezone.utc)
+        # Only return records that have not yet expired
+        cursor = db.payments_pending.find(
+            {"user_id": str(user.id), "expires_at": {"$gt": now}}
+        ).sort("created_at", -1)
+        records = await cursor.to_list(length=20)
+        for r in records:
+            r["_id"] = str(r["_id"])
+            # Serialize datetime fields for JSON
+            for field in ("created_at", "expires_at"):
+                if field in r and isinstance(r[field], datetime):
+                    r[field] = r[field].isoformat()
+        return {"pending_payments": records}
+    except Exception as e:
+        logger.error(f"Failed to fetch pending payments for recovery: {e}")
+        return {"pending_payments": []}
 
 
 @router.post("/credit-topup")
