@@ -38,3 +38,4 @@
 - [Syrabit /library LCP fix](syrabit-library-lcp-fix.md) — PSI 82→89; VirtualGrid renders 0 SSR cards (split-render fix); __SSR_QUERIES__ seed; hydration-stable ranking; remaining 89→95+ gap
 - [Profile page crash defensive fixes](profile-page-crash-defense.md) — Root cause unknown (no prod trace); added null guard + error state + loadProfile callback; subscription_tier Literal widened
 - [Prerender $X replacement corruption](prerender-replace-corruption.md) — html.replace(pattern, string) with $' in data corrupts HTML; always use () => replacement in prerender scripts
+- [AHSEC Q&A pipeline](ahsec-qa-pipeline.md) — exercise extraction fix, Q&A format, meta-commentary cleanup, system prompt lesson, backfill script
