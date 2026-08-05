@@ -131,12 +131,18 @@ async def verify_payment(
             )
             raise HTTPException(status_code=400, detail="Payment amount mismatch")
 
+    from datetime import datetime, timezone, timedelta
+
+    now = datetime.now(timezone.utc)
     await user.update(
         {
             "$set": {
                 "subscription_tier": "pro",
                 "subscription_status": "active",
                 "razorpay_subscription_id": body.razorpay_order_id,
+                "current_period_start": now,
+                "current_period_end": now + timedelta(days=30),
+                "cancel_at_period_end": False,
             }
         }
     )

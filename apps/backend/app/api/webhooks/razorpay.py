@@ -170,7 +170,10 @@ async def handle_razorpay_webhook(request: Request):
             await user.update({"$set": {"cancel_at_period_end": True}})
         logger.info(f"Subscription cancelled: {sub_id}")
 
-    elif event.get("event") == "subscription.expired":
+    elif event.get("event") in ("subscription.completed", "subscription.expired"):
+        # Razorpay sends "subscription.completed" when a subscription reaches its
+        # end date (the event name the dashboard exposes). "subscription.expired"
+        # is an older alias kept for backwards compatibility.
         sub_id = _validate_subscription_id(payload["subscription"]["id"])
         user = await User.find_one({"razorpay_subscription_id": sub_id})
         if user:
@@ -183,7 +186,12 @@ async def handle_razorpay_webhook(request: Request):
                     }
                 }
             )
-        logger.info(f"Subscription expired, user downgraded: {sub_id}")
+            logger.info(
+                f"Subscription completed/expired, user downgraded to free: "
+                f"{sub_id} ({user.email})"
+            )
+        else:
+            logger.warning(f"subscription.completed: no user found for sub_id={sub_id}")
 
     # Mark as completed
     try:

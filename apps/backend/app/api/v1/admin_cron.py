@@ -33,6 +33,81 @@ def _verify_cron_token(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Invalid cron token")
 
 
+@router.post("/cron/expire-subscriptions")
+async def cron_expire_subscriptions(request: Request):
+    """Downgrade users whose paid subscription period has lapsed.
+
+    Finds every non-free user where current_period_end is in the past
+    (or unset and the account is older than 30 days) and sets them back
+    to free.  Safe to run multiple times — already-free users are skipped.
+
+    Auth: Bearer {TRANSLATE_CRON_SECRET}
+
+    Returns:
+        { "expired": N, "skipped": N, "errors": [...] }
+    """
+    _verify_cron_token(request)
+
+    from app.db.mongo import get_mongo_client
+    from app.config import settings
+
+    now = datetime.now(timezone.utc)
+    client = get_mongo_client()
+    db = client[settings.MONGODB_DB_NAME]
+
+    # Find paid users whose period has ended
+    cursor = db.users.find(
+        {
+            "subscription_tier": {"$nin": ["free", None]},
+            "$or": [
+                # Period explicitly set and expired
+                {"current_period_end": {"$lt": now}},
+                # Legacy: paid but period never recorded — treat as expired if
+                # cancel_at_period_end is True (manually cancelled via webhook)
+                {
+                    "current_period_end": {"$exists": False},
+                    "cancel_at_period_end": True,
+                },
+            ],
+        },
+        {"_id": 1, "email": 1, "subscription_tier": 1, "current_period_end": 1},
+    )
+
+    expired = 0
+    skipped = 0
+    errors = []
+
+    async for doc in cursor:
+        user_id = doc["_id"]
+        try:
+            result = await db.users.update_one(
+                {"_id": user_id},
+                {
+                    "$set": {
+                        "subscription_tier": "free",
+                        "subscription_status": "cancelled",
+                        "cancel_at_period_end": False,
+                    }
+                },
+            )
+            if result.modified_count:
+                expired += 1
+                logger.info(
+                    f"Subscription expired → free: {doc.get('email', user_id)} "
+                    f"(period_end={doc.get('current_period_end')})"
+                )
+            else:
+                skipped += 1
+        except Exception as e:
+            errors.append({"user_id": str(user_id), "error": str(e)})
+            logger.error(f"Failed to expire subscription for {user_id}: {e}")
+
+    logger.info(
+        f"expire-subscriptions complete: expired={expired}, skipped={skipped}, errors={len(errors)}"
+    )
+    return {"expired": expired, "skipped": skipped, "errors": errors}
+
+
 @router.post("/cron/translate")
 async def cron_translate(request: Request):
     """
