@@ -193,7 +193,7 @@ export default function SignupPage() {
         </div>
       </div>
 
-      <div className="w-full lg:w-[48%] flex flex-col items-center justify-center p-4 sm:p-6 lg:min-h-screen relative" style={{ scrollPaddingBottom: '2rem' }}>
+      <div className="w-full lg:w-[48%] flex flex-col items-center justify-center p-4 sm:p-6 lg:min-h-screen relative bg-background" style={{ scrollPaddingBottom: '2rem' }}>
         <div className="absolute inset-0 pointer-events-none">
           <div className="absolute top-[20%] right-[10%] w-[300px] h-[300px] rounded-full opacity-60"
             style={{ background: 'radial-gradient(circle, rgba(124,58,237,0.06) 0%, transparent 70%)', filter: 'blur(40px)' }} />

@@ -12,6 +12,11 @@
    ══════════════════════════════════════════════════════════════ */
 @layer base {
   :root {
+    /* This is a light-only design system. Declare it so browsers (Chrome
+       Force Dark, Samsung Internet auto-dark, Safari invert) never apply
+       automatic dark-mode transformations to any element on the page. */
+    color-scheme: light only;
+
     /* ── Surfaces ── */
     --background: 240 20% 96%;        /* #f0f0f5 */
     --foreground: 240 65% 7%;         /* #0a0a1a */
