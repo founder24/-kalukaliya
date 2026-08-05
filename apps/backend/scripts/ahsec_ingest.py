@@ -1194,10 +1194,14 @@ def qa_to_rag_sections(qa_pairs: list[dict]) -> list[dict]:
 # ── Topics extraction from notes ───────────────────────────────────────────────
 
 _META_HEADING_RE = re.compile(
-    r"^(?:Draft(?:ing)?|Revised?\s+Draft|Word\s+Count|Check|Mental\s+Sandbox|"
-    r"Note(?:s\s+on)?:|Quick\s+Word|Confidence\s+Score|Foreword|"
-    r"Acknowledgement|Publication\s+and|Textbook\s+Development\s+Committee|"
-    r"Rationali[sz]ation|NCERT|About\s+(?:the\s+)?(?:Author|Book|Text))",
+    r"^(?:"
+    r"Draft(?:ing)?|Revised?\s+Draft|Word\s+Count\s*(?:Check)?|Mental\s+Sandbox|"
+    r"Notes?\s+on\s+Format|Quick\s+Word|Confidence\s+Score|"
+    r"Textbook\s+Development\s+Committee|"
+    r"(?:Content\s+)?Analy[sz]is\s*:|Plan\s+for\s+Notes|"
+    r"Review\s+(?:against\s+)?Rules|Second\s+Pass|"
+    r"(?:CRITICAL\s+)?FORMATTING\s+RULES"
+    r")",
     re.IGNORECASE,
 )
 
@@ -1206,7 +1210,8 @@ def extract_topics_from_notes(notes_md: str) -> list[dict]:
     """Extract ## headings from notes as topic list for topic_embeddings.
 
     Skips headings that look like model meta-commentary (draft plans,
-    word-count checks, acknowledgement pages, etc.).
+    word-count checks, etc.). Does NOT filter headings just because they
+    end with ':' — legitimate subject headings often include a colon.
     """
     import uuid as _uuid
     topics = []
@@ -1214,8 +1219,8 @@ def extract_topics_from_notes(notes_md: str) -> list[dict]:
         title = m.group(1).strip()
         if not title or len(title) < 3:
             continue
-        # Skip meta-commentary headings the model sometimes generates
-        if _META_HEADING_RE.match(title) or title.endswith(":"):
+        # Skip clearly meta-commentary headings the model sometimes generates
+        if _META_HEADING_RE.match(title):
             continue
         slug = re.sub(r"[\s_-]+", "-", re.sub(r"[^\w\s-]", "", title.lower())).strip("-")
         topics.append({
