@@ -141,181 +141,223 @@ async def verify_payment(
     if not hmac.compare_digest(expected, body.razorpay_signature):
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
-    # Retrieve stored amount for payment record
-    payment_amount = None
+    # Idempotency: use Redis SET NX to prevent double-upgrade on retry / double-click.
+    # The key is held as a processing lock; it is deleted on any failure so the
+    # customer can retry.  Only a fully successful upgrade leaves the key in place.
+    _dedup_redis = None
+    _dedup_key = None
     try:
         from app.db.redis import get_redis
 
-        redis = get_redis()
-        stored_amount = await redis.get(f"order_amount:{body.razorpay_order_id}")
-        if stored_amount:
-            payment_amount = int(stored_amount)
-    except Exception:
-        pass
+        _dedup_redis = get_redis()
+        _dedup_key = f"sub_verify:{body.razorpay_order_id}"
+        _was_new = await _dedup_redis.set(_dedup_key, "1", ex=604800, nx=True)
+        if not _was_new:
+            logger.info(
+                "Duplicate subscription verify ignored",
+                extra={"order_id": body.razorpay_order_id},
+            )
+            return {
+                "status": "already_processed",
+                "message": "Subscription upgrade already processed for this order",
+            }
+    except Exception as _e:
+        # Fail-open: Redis unavailable → continue processing.
+        # Double-upgrade is idempotent for subscription tier; receipt duplicate is
+        # the only real harm, which is acceptable over blocking a legitimate upgrade.
+        logger.warning(
+            "Redis unavailable for subscription verify idempotency; processing anyway",
+            extra={"error": str(_e)},
+        )
+        _dedup_redis = None
+        _dedup_key = None
 
-    # Determine which plan was purchased
-    plan_prices = {"starter": 9900, "pro": 99900}
-    amount_to_plan = {v: k for k, v in plan_prices.items()}
-
-    # Try to retrieve plan from Redis (stored at order creation time)
-    purchased_plan = None
     try:
-        from app.db.redis import get_redis
-        redis = get_redis()
-        stored_plan = await redis.get(f"order_plan:{body.razorpay_order_id}")
-        if stored_plan:
-            purchased_plan = stored_plan if isinstance(stored_plan, str) else stored_plan.decode()
-    except Exception:
-        pass
+        # Retrieve stored amount for payment record
+        payment_amount = None
+        try:
+            from app.db.redis import get_redis
 
-    # Fall back: derive plan from stored amount (Redis)
-    if not purchased_plan and payment_amount is not None:
-        purchased_plan = amount_to_plan.get(payment_amount)
+            redis = get_redis()
+            stored_amount = await redis.get(f"order_amount:{body.razorpay_order_id}")
+            if stored_amount:
+                payment_amount = int(stored_amount)
+        except Exception:
+            pass
 
-    # Authoritative fallback: read from MongoDB payments_pending when Redis missed
-    if not purchased_plan or payment_amount is None:
+        # Determine which plan was purchased
+        plan_prices = {"starter": 9900, "pro": 99900}
+        amount_to_plan = {v: k for k, v in plan_prices.items()}
+
+        # Try to retrieve plan from Redis (stored at order creation time)
+        purchased_plan = None
+        try:
+            from app.db.redis import get_redis
+            redis = get_redis()
+            stored_plan = await redis.get(f"order_plan:{body.razorpay_order_id}")
+            if stored_plan:
+                purchased_plan = stored_plan if isinstance(stored_plan, str) else stored_plan.decode()
+        except Exception:
+            pass
+
+        # Fall back: derive plan from stored amount (Redis)
+        if not purchased_plan and payment_amount is not None:
+            purchased_plan = amount_to_plan.get(payment_amount)
+
+        # Authoritative fallback: read from MongoDB payments_pending when Redis missed
+        if not purchased_plan or payment_amount is None:
+            try:
+                from app.db.mongo import get_mongo_client
+
+                mongo = get_mongo_client()
+                db = mongo[settings.MONGODB_DB_NAME]
+                pending = await db.payments_pending.find_one(
+                    {"order_id": body.razorpay_order_id}
+                )
+                if pending:
+                    if not purchased_plan and pending.get("plan"):
+                        purchased_plan = pending["plan"]
+                        logger.info(
+                            "Resolved plan from MongoDB payments_pending (Redis miss)",
+                            extra={"order_id": body.razorpay_order_id, "plan": purchased_plan},
+                        )
+                    if payment_amount is None and pending.get("amount") is not None:
+                        payment_amount = int(pending["amount"])
+            except Exception as e:
+                logger.warning(
+                    f"MongoDB fallback lookup failed for order {body.razorpay_order_id}: {e}"
+                )
+
+        # Last-resort fallback: fetch the order directly from Razorpay when both Redis and
+        # MongoDB have no record (e.g. MongoDB write failed silently at order-creation time).
+        # This mirrors the pattern used in /credit-topup/verify.
+        if (not purchased_plan or payment_amount is None) and settings.RAZORPAY_KEY_ID:
+            import razorpay as _razorpay
+
+            try:
+                _rz_client = _razorpay.Client(
+                    auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+                )
+                _rz_order = await asyncio.to_thread(
+                    _rz_client.order.fetch, body.razorpay_order_id
+                )
+                _fetched_plan = _rz_order.get("notes", {}).get("plan")
+                _fetched_amount = _rz_order.get("amount")
+                if _fetched_plan and _fetched_plan in plan_prices:
+                    if not purchased_plan:
+                        purchased_plan = _fetched_plan
+                        logger.info(
+                            "Resolved plan from Razorpay API fallback (Redis + MongoDB miss)",
+                            extra={
+                                "order_id": body.razorpay_order_id,
+                                "plan": purchased_plan,
+                            },
+                        )
+                    if payment_amount is None and _fetched_amount is not None:
+                        payment_amount = int(_fetched_amount)
+            except Exception as e:
+                logger.error(
+                    f"Razorpay order fetch fallback failed for order "
+                    f"{body.razorpay_order_id}: {e}"
+                )
+
+        # Validate amount matches the resolved plan price (when both are available)
+        if payment_amount is not None and purchased_plan:
+            expected_amount = plan_prices.get(purchased_plan)
+            if expected_amount and payment_amount != expected_amount:
+                logger.warning(
+                    f"Payment amount mismatch: stored={payment_amount}, "
+                    f"expected={expected_amount} for plan={purchased_plan}, order={body.razorpay_order_id}"
+                )
+                raise HTTPException(status_code=400, detail="Payment amount mismatch")
+
+        # Fail closed: never upgrade if neither plan nor amount could be verified server-side.
+        # Trusting client-supplied plan values would allow underpayment-to-upgrade escalation
+        # when Redis is unavailable.
+        if not purchased_plan:
+            logger.error(
+                "Cannot verify plan for order — Redis and MongoDB metadata unavailable, failing closed",
+                extra={"order_id": body.razorpay_order_id},
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Order metadata unavailable; please contact support if payment was charged",
+            )
+
+        from datetime import datetime, timezone, timedelta
+
+        now = datetime.now(timezone.utc)
+        await user.update(
+            {
+                "$set": {
+                    "subscription_tier": purchased_plan,
+                    "subscription_status": "active",
+                    "razorpay_subscription_id": body.razorpay_order_id,
+                    "current_period_start": now,
+                    "current_period_end": now + timedelta(days=30),
+                    "cancel_at_period_end": False,
+                }
+            }
+        )
+
+        # Clean up the pending record now that payment is verified
+        try:
+            from app.db.mongo import get_mongo_client as _get_mongo_client
+
+            _mongo = _get_mongo_client()
+            _db = _mongo[settings.MONGODB_DB_NAME]
+            await _db.payments_pending.delete_one({"order_id": body.razorpay_order_id})
+        except Exception as e:
+            logger.warning(f"Failed to delete payments_pending record: {e}")
+
+        # HF-029: Record payment in payments collection
         try:
             from app.db.mongo import get_mongo_client
+            from datetime import datetime, timezone
 
-            mongo = get_mongo_client()
-            db = mongo[settings.MONGODB_DB_NAME]
-            pending = await db.payments_pending.find_one(
-                {"order_id": body.razorpay_order_id}
+            client = get_mongo_client()
+            db = client[settings.MONGODB_DB_NAME]
+            await db.payments.insert_one(
+                {
+                    "user_id": str(user.id),
+                    "razorpay_order_id": body.razorpay_order_id,
+                    "razorpay_payment_id": body.razorpay_payment_id,
+                    "amount": payment_amount,
+                    "status": "completed",
+                    "type": "subscription",
+                    "created_at": datetime.now(timezone.utc),
+                }
             )
-            if pending:
-                if not purchased_plan and pending.get("plan"):
-                    purchased_plan = pending["plan"]
-                    logger.info(
-                        "Resolved plan from MongoDB payments_pending (Redis miss)",
-                        extra={"order_id": body.razorpay_order_id, "plan": purchased_plan},
-                    )
-                if payment_amount is None and pending.get("amount") is not None:
-                    payment_amount = int(pending["amount"])
         except Exception as e:
-            logger.warning(
-                f"MongoDB fallback lookup failed for order {body.razorpay_order_id}: {e}"
-            )
+            logger.error(f"Failed to record payment: {e}")
 
-    # Last-resort fallback: fetch the order directly from Razorpay when both Redis and
-    # MongoDB have no record (e.g. MongoDB write failed silently at order-creation time).
-    # This mirrors the pattern used in /credit-topup/verify.
-    if (not purchased_plan or payment_amount is None) and settings.RAZORPAY_KEY_ID:
-        import razorpay as _razorpay
-
+        # Send first-purchase confirmation email (non-fatal)
         try:
-            _rz_client = _razorpay.Client(
-                auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+            from app.services.comms.resend_client import send_first_purchase_receipt_email
+
+            # Use the authoritative plan price; payment_amount is always present here
+            # because we fail-closed above when it's unavailable.
+            receipt_amount = payment_amount if payment_amount is not None else plan_prices.get(purchased_plan, 0)
+            await send_first_purchase_receipt_email(
+                user.email,
+                receipt_amount,
+                body.razorpay_order_id,
             )
-            _rz_order = await asyncio.to_thread(
-                _rz_client.order.fetch, body.razorpay_order_id
-            )
-            _fetched_plan = _rz_order.get("notes", {}).get("plan")
-            _fetched_amount = _rz_order.get("amount")
-            if _fetched_plan and _fetched_plan in plan_prices:
-                if not purchased_plan:
-                    purchased_plan = _fetched_plan
-                    logger.info(
-                        "Resolved plan from Razorpay API fallback (Redis + MongoDB miss)",
-                        extra={
-                            "order_id": body.razorpay_order_id,
-                            "plan": purchased_plan,
-                        },
-                    )
-                if payment_amount is None and _fetched_amount is not None:
-                    payment_amount = int(_fetched_amount)
         except Exception as e:
-            logger.error(
-                f"Razorpay order fetch fallback failed for order "
-                f"{body.razorpay_order_id}: {e}"
-            )
+            logger.error(f"Failed to send first-purchase receipt email: {e}")
 
-    # Validate amount matches the resolved plan price (when both are available)
-    if payment_amount is not None and purchased_plan:
-        expected_amount = plan_prices.get(purchased_plan)
-        if expected_amount and payment_amount != expected_amount:
-            logger.warning(
-                f"Payment amount mismatch: stored={payment_amount}, "
-                f"expected={expected_amount} for plan={purchased_plan}, order={body.razorpay_order_id}"
-            )
-            raise HTTPException(status_code=400, detail="Payment amount mismatch")
+        logger.info(f"Payment verified, user upgraded to {purchased_plan}", extra={"user_id": str(user.id)})
+        return {"status": "success", "message": f"Payment verified, plan upgraded to {purchased_plan}"}
 
-    # Fail closed: never upgrade if neither plan nor amount could be verified server-side.
-    # Trusting client-supplied plan values would allow underpayment-to-upgrade escalation
-    # when Redis is unavailable.
-    if not purchased_plan:
-        logger.error(
-            "Cannot verify plan for order — Redis and MongoDB metadata unavailable, failing closed",
-            extra={"order_id": body.razorpay_order_id},
-        )
-        raise HTTPException(
-            status_code=503,
-            detail="Order metadata unavailable; please contact support if payment was charged",
-        )
-
-    from datetime import datetime, timezone, timedelta
-
-    now = datetime.now(timezone.utc)
-    await user.update(
-        {
-            "$set": {
-                "subscription_tier": purchased_plan,
-                "subscription_status": "active",
-                "razorpay_subscription_id": body.razorpay_order_id,
-                "current_period_start": now,
-                "current_period_end": now + timedelta(days=30),
-                "cancel_at_period_end": False,
-            }
-        }
-    )
-
-    # Clean up the pending record now that payment is verified
-    try:
-        from app.db.mongo import get_mongo_client as _get_mongo_client
-
-        _mongo = _get_mongo_client()
-        _db = _mongo[settings.MONGODB_DB_NAME]
-        await _db.payments_pending.delete_one({"order_id": body.razorpay_order_id})
-    except Exception as e:
-        logger.warning(f"Failed to delete payments_pending record: {e}")
-
-    # HF-029: Record payment in payments collection
-    try:
-        from app.db.mongo import get_mongo_client
-        from datetime import datetime, timezone
-
-        client = get_mongo_client()
-        db = client[settings.MONGODB_DB_NAME]
-        await db.payments.insert_one(
-            {
-                "user_id": str(user.id),
-                "razorpay_order_id": body.razorpay_order_id,
-                "razorpay_payment_id": body.razorpay_payment_id,
-                "amount": payment_amount,
-                "status": "completed",
-                "type": "subscription",
-                "created_at": datetime.now(timezone.utc),
-            }
-        )
-    except Exception as e:
-        logger.error(f"Failed to record payment: {e}")
-
-    # Send first-purchase confirmation email (non-fatal)
-    try:
-        from app.services.comms.resend_client import send_first_purchase_receipt_email
-
-        # Use the authoritative plan price; payment_amount is always present here
-        # because we fail-closed above when it's unavailable.
-        receipt_amount = payment_amount if payment_amount is not None else plan_prices.get(purchased_plan, 0)
-        await send_first_purchase_receipt_email(
-            user.email,
-            receipt_amount,
-            body.razorpay_order_id,
-        )
-    except Exception as e:
-        logger.error(f"Failed to send first-purchase receipt email: {e}")
-
-    logger.info(f"Payment verified, user upgraded to {purchased_plan}", extra={"user_id": str(user.id)})
-    return {"status": "success", "message": f"Payment verified, plan upgraded to {purchased_plan}"}
+    except Exception:
+        # Processing failed after the idempotency key was set — delete the lock so the
+        # customer can retry.  If Redis is already gone, ignore the cleanup error.
+        if _dedup_redis is not None and _dedup_key is not None:
+            try:
+                await _dedup_redis.delete(_dedup_key)
+            except Exception:
+                pass
+        raise
 
 
 @router.post("/recover")

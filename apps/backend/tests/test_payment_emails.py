@@ -456,6 +456,263 @@ async def test_verify_payment_invalid_signature_rejected(client: AsyncClient):
 
 
 # ---------------------------------------------------------------------------
+# Tests: POST /payments/verify — idempotency (duplicate order)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_verify_payment_duplicate_returns_already_processed(
+    client: AsyncClient, mock_free_user, mock_mongo_db
+):
+    """
+    A second POST /payments/verify for the same order_id must return
+    { status: 'already_processed' } without calling user.update or the email
+    function a second time.
+    """
+    from app.main import app
+    from app.api.v1.auth import get_current_user
+    from app.config import settings
+
+    order_id = "order_DUP001"
+    payment_id = "pay_DUP001"
+    sig = _make_signature(order_id, payment_id)
+    mock_client, _ = mock_mongo_db
+
+    # Redis mock where SET NX returns None (falsy) — key already exists
+    dup_redis = AsyncMock()
+    dup_redis.set = AsyncMock(return_value=None)  # NX miss → already set
+    dup_redis.get = AsyncMock(return_value=None)
+
+    async def override_auth():
+        return mock_free_user
+
+    app.dependency_overrides[get_current_user] = override_auth
+    original_secret = settings.RAZORPAY_KEY_SECRET
+    settings.RAZORPAY_KEY_SECRET = TEST_KEY_SECRET
+
+    try:
+        with (
+            patch("app.db.redis.get_redis", return_value=dup_redis),
+            patch("app.db.mongo.get_mongo_client", return_value=mock_client),
+            patch(
+                "app.services.comms.resend_client.send_first_purchase_receipt_email",
+                new_callable=AsyncMock,
+            ) as mock_send_email,
+        ):
+            response = await client.post(
+                "/api/v1/payments/verify",
+                json={
+                    "razorpay_order_id": order_id,
+                    "razorpay_payment_id": payment_id,
+                    "razorpay_signature": sig,
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "already_processed"
+
+        # Neither the user record nor the email must be touched on a duplicate
+        mock_free_user.update.assert_not_called()
+        mock_send_email.assert_not_awaited()
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        settings.RAZORPAY_KEY_SECRET = original_secret
+
+
+@pytest.mark.anyio
+async def test_verify_payment_dedup_key_released_on_processing_failure(
+    client: AsyncClient, mock_free_user
+):
+    """
+    If /payments/verify acquires the idempotency lock but then fails during
+    processing (e.g. plan metadata unavailable → 503), the lock must be deleted
+    so the customer can retry.
+
+    This simulates the failure-after-lock scenario:
+    1. First call: SET NX succeeds (was_new=True), but plan resolution fails → 503
+       The dedup key must be deleted in the cleanup path.
+    2. Second call: SET NX succeeds again (key was freed), plan resolves → 200 success.
+    """
+    from app.main import app
+    from app.api.v1.auth import get_current_user
+    from app.config import settings
+
+    order_id = "order_FAILRETRY001"
+    payment_id = "pay_FAILRETRY001"
+    sig = _make_signature(order_id, payment_id)
+
+    # ---- Redis state machine ------------------------------------------------
+    # Track whether the key has been deleted so the second call sees a fresh lock.
+    key_deleted = False
+    set_nx_call_count = 0
+
+    async def _set(key, value, ex=None, nx=False):
+        nonlocal set_nx_call_count, key_deleted
+        if nx and key.startswith("sub_verify:"):
+            set_nx_call_count += 1
+            # First call: key doesn't exist yet → True (was_new)
+            # Second call: key was deleted in cleanup → True again (was_new)
+            return True
+        return True  # non-NX sets (order_amount / order_plan) also return True
+
+    async def _get(key):
+        nonlocal set_nx_call_count
+        # First attempt: no plan/amount available → force failure path
+        if set_nx_call_count == 1:
+            return None
+        # Second attempt: plan and amount are available → success path
+        if key.startswith("order_amount:"):
+            return str(PLAN_PRICES["pro"]).encode()
+        if key.startswith("order_plan:"):
+            return b"pro"
+        return None
+
+    async def _delete(key):
+        nonlocal key_deleted
+        if key.startswith("sub_verify:"):
+            key_deleted = True
+
+    stateful_redis = AsyncMock()
+    stateful_redis.set = AsyncMock(side_effect=_set)
+    stateful_redis.get = AsyncMock(side_effect=_get)
+    stateful_redis.delete = AsyncMock(side_effect=_delete)
+
+    # MongoDB: no pending record (forces Redis-miss path to use GET for plan/amount)
+    mock_db = MagicMock()
+    mock_db.payments_pending = MagicMock()
+    mock_db.payments_pending.find_one = AsyncMock(return_value=None)
+    mock_db.payments_pending.delete_one = AsyncMock()
+    mock_db.payments = MagicMock()
+    mock_db.payments.insert_one = AsyncMock()
+    mock_mongo_client = MagicMock()
+    mock_mongo_client.__getitem__ = MagicMock(return_value=mock_db)
+
+    async def override_auth():
+        return mock_free_user
+
+    app.dependency_overrides[get_current_user] = override_auth
+    original_secret = settings.RAZORPAY_KEY_SECRET
+    original_key_id = settings.RAZORPAY_KEY_ID
+    settings.RAZORPAY_KEY_SECRET = TEST_KEY_SECRET
+    settings.RAZORPAY_KEY_ID = ""  # disables Razorpay fallback so plan stays None → 503
+
+    try:
+        with (
+            patch("app.db.redis.get_redis", return_value=stateful_redis),
+            patch("app.db.mongo.get_mongo_client", return_value=mock_mongo_client),
+            patch(
+                "app.services.comms.resend_client.send_first_purchase_receipt_email",
+                new_callable=AsyncMock,
+            ) as mock_send_email,
+        ):
+            # --- First call: fails with 503 because plan cannot be resolved ---
+            response1 = await client.post(
+                "/api/v1/payments/verify",
+                json={
+                    "razorpay_order_id": order_id,
+                    "razorpay_payment_id": payment_id,
+                    "razorpay_signature": sig,
+                },
+            )
+            assert response1.status_code == 503, response1.text
+
+            # Dedup key must have been released so the customer can retry
+            assert key_deleted, "Dedup key must be deleted when processing fails"
+            mock_free_user.update.assert_not_called()
+            mock_send_email.assert_not_awaited()
+
+            # --- Second call: plan is now available → succeeds ---
+            settings.RAZORPAY_KEY_ID = original_key_id  # re-enable for completeness
+            response2 = await client.post(
+                "/api/v1/payments/verify",
+                json={
+                    "razorpay_order_id": order_id,
+                    "razorpay_payment_id": payment_id,
+                    "razorpay_signature": sig,
+                },
+            )
+            assert response2.status_code == 200, response2.text
+            assert response2.json()["status"] == "success"
+            mock_free_user.update.assert_called_once()
+            mock_send_email.assert_awaited_once()
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        settings.RAZORPAY_KEY_SECRET = original_secret
+        settings.RAZORPAY_KEY_ID = original_key_id
+
+
+@pytest.mark.anyio
+async def test_verify_payment_idempotency_redis_down_falls_through(
+    client: AsyncClient, mock_free_user, mock_mongo_db
+):
+    """
+    When Redis is unavailable during the idempotency check, /verify must fall
+    through and process the payment normally (fail-open).  The user must be
+    upgraded and the receipt email must be sent.
+    """
+    from app.main import app
+    from app.api.v1.auth import get_current_user
+    from app.config import settings
+
+    order_id = "order_IDEM_REDISDOWN001"
+    payment_id = "pay_IDEM_REDISDOWN001"
+    sig = _make_signature(order_id, payment_id)
+    mock_client, _ = mock_mongo_db
+
+    # Redis raises on every call, including the SET NX idempotency check
+    broken_redis = AsyncMock()
+    broken_redis.set = AsyncMock(side_effect=Exception("Redis connection refused"))
+    broken_redis.get = AsyncMock(side_effect=Exception("Redis connection refused"))
+
+    # MongoDB has the pending record so plan/amount resolve without Redis
+    mock_pending = {"order_id": order_id, "plan": "pro", "amount": PLAN_PRICES["pro"]}
+    mock_db = MagicMock()
+    mock_db.payments_pending = MagicMock()
+    mock_db.payments_pending.find_one = AsyncMock(return_value=mock_pending)
+    mock_db.payments_pending.delete_one = AsyncMock()
+    mock_db.payments = MagicMock()
+    mock_db.payments.insert_one = AsyncMock()
+    mongo_client = MagicMock()
+    mongo_client.__getitem__ = MagicMock(return_value=mock_db)
+
+    async def override_auth():
+        return mock_free_user
+
+    app.dependency_overrides[get_current_user] = override_auth
+    original_secret = settings.RAZORPAY_KEY_SECRET
+    settings.RAZORPAY_KEY_SECRET = TEST_KEY_SECRET
+
+    try:
+        with (
+            patch("app.db.redis.get_redis", return_value=broken_redis),
+            patch("app.db.mongo.get_mongo_client", return_value=mongo_client),
+            patch(
+                "app.services.comms.resend_client.send_first_purchase_receipt_email",
+                new_callable=AsyncMock,
+            ) as mock_send_email,
+        ):
+            response = await client.post(
+                "/api/v1/payments/verify",
+                json={
+                    "razorpay_order_id": order_id,
+                    "razorpay_payment_id": payment_id,
+                    "razorpay_signature": sig,
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "success"
+
+        # User must be upgraded despite Redis being down
+        mock_free_user.update.assert_called_once()
+        # Receipt email must be sent
+        mock_send_email.assert_awaited_once()
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        settings.RAZORPAY_KEY_SECRET = original_secret
+
+
+# ---------------------------------------------------------------------------
 # Tests: POST /payments/credit-topup/verify — email called correctly
 # ---------------------------------------------------------------------------
 
