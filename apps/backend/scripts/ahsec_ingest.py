@@ -1127,13 +1127,28 @@ async def _find_or_create_stream(board_id, class_id, stream_name: str = "General
     return stream
 
 
+# AHSEC uses board-specific class names that differ from the generic "Class N" pattern.
+# Map class_level → the actual class name stored in MongoDB for each board.
+_BOARD_CLASS_NAMES: dict[str, dict[str, str]] = {
+    "ahsec": {"11": "HS 1st Year", "12": "HS 2nd Year"},
+}
+
+
 async def upsert_subject(
     subject_name: str,
     subject_slug: str,
     class_level: str,
     board_slug: str = "ahsec",
 ) -> Optional[object]:
-    """Find an existing subject by slug+class, or create a new one."""
+    """Find an existing subject by slug+class, or create a new one.
+
+    Search order:
+    1. Look up the board-specific class name (e.g. "HS 1st Year" for AHSEC class 11).
+    2. Search ALL streams under that class for a subject matching the slug or name.
+    3. Only if nothing found: create a new subject in a "General" stream.
+    This prevents creating duplicate orphaned hierarchies when the script is run
+    against a DB that already has an established subject tree.
+    """
     from app.models.content import Board, Class, Stream, Subject
     from beanie import PydanticObjectId
 
@@ -1142,15 +1157,21 @@ async def upsert_subject(
         log.error(f"Board '{board_slug}' not found in DB — run setup first")
         return None
 
-    # Find the class (Class 11 or Class 12)
-    cls_name = f"Class {class_level}"
-    cls = await Class.find_one({"board_id": board.id, "name": cls_name})
+    # ── 1. Resolve class name ────────────────────────────────────────────────
+    # Try board-specific alias first (e.g. "HS 1st Year"), then generic fallback.
+    canonical_cls_names = _BOARD_CLASS_NAMES.get(board_slug, {})
+    preferred_cls_name = canonical_cls_names.get(class_level, f"Class {class_level}")
+
+    cls = await Class.find_one({"board_id": board.id, "name": preferred_cls_name})
+    if not cls:
+        # Generic fallback — e.g. "Class 11" for other boards
+        cls = await Class.find_one({"board_id": board.id, "name": f"Class {class_level}"})
     if not cls:
         cls = await Class.find_one({"board_id": board.id, "name": {"$regex": class_level}})
     if not cls:
-        log.warning(f"Class '{cls_name}' not found under board '{board_slug}' — creating")
+        log.warning(f"Class '{preferred_cls_name}' not found under board '{board_slug}' — creating")
         cls = Class(
-            name=cls_name,
+            name=preferred_cls_name,
             board_id=board.id,
             status="active",
             created_at=datetime.now(timezone.utc),
@@ -1158,24 +1179,26 @@ async def upsert_subject(
         )
         await cls.insert()
 
-    # Find/create a general stream
+    # ── 2. Search ALL streams under this class for an existing subject ───────
+    # This prevents duplicates when the subject lives in a non-General stream
+    # (e.g. Chemistry lives in "Science", not "General").
+    all_streams = await Stream.find({"class_id": cls.id}).to_list(length=50)
+    for st in all_streams:
+        # Fast path: exact slug match
+        subj = await Subject.find_one({"slug": subject_slug, "stream_id": st.id})
+        if subj:
+            log.debug(f"  Found existing subject '{subj.name}' in stream '{st.name}'")
+            return subj
+    for st in all_streams:
+        # Slower: match by normalised name slug
+        all_subjs = await Subject.find({"stream_id": st.id}).to_list(length=500)
+        for s in all_subjs:
+            if _slug(s.name) == subject_slug:
+                log.debug(f"  Matched subject '{s.name}' by name slug in stream '{st.name}'")
+                return s
+
+    # ── 3. Not found in any stream — create in General stream ────────────────
     stream = await _find_or_create_stream(board.id, cls.id)
-
-    # Check if subject already exists by slug (case-insensitive)
-    subj = await Subject.find_one({
-        "slug": subject_slug,
-        "stream_id": stream.id,
-    })
-    if subj:
-        return subj
-
-    # Also check by name similarity
-    all_subjs = await Subject.find({"stream_id": stream.id}).to_list(length=500)
-    for s in all_subjs:
-        if s.slug == subject_slug or _slug(s.name) == subject_slug:
-            return s
-
-    # Create new subject
     subj = Subject(
         name=subject_name,
         slug=subject_slug,

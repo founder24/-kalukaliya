@@ -380,13 +380,16 @@ class SarvamAIClient:
                         {"role": "user", "content": user_message},
                     ],
                     "temperature": 0.3,
-                    # enable_thinking=False: sarvam-30b puts the final clean
-                    # answer in the content field (confirmed by live tests).
-                    # reasoning_content holds the internal thinking chain and
-                    # must NOT be used as the answer for non-streaming calls.
-                    "enable_thinking": False,
-                    # Assamese output needs more tokens (script is denser)
-                    "max_tokens": max_tokens if max_tokens is not None else (2048 if is_assamese else 1200),
+                    # Match the streaming chat endpoint: enable_thinking=True
+                    # for English so the model's internal reasoning is separated
+                    # into reasoning_content (hidden) and the final clean answer
+                    # stays in content.  For Assamese keep it False — the model
+                    # reasons in English in reasoning_content and we extract the
+                    # Assamese lines from there via _extract_assamese_translation.
+                    "enable_thinking": not is_assamese,
+                    # English notes need enough room for the response; Assamese
+                    # script is denser and Q&A arrays can be long.
+                    "max_tokens": max_tokens if max_tokens is not None else (2048 if is_assamese else 2048),
                     "stream": stream,
                 },
             )
