@@ -903,10 +903,8 @@ async def cron_bulk_reindex(request: Request):
     """
     _verify_cron_token(request)
 
-    from datetime import datetime, timezone
     from app.models.content import Chapter
     from beanie import PydanticObjectId
-    import uuid
 
     # Guard against double-start
     existing = getattr(request.app.state, "reindex_status", {})
@@ -947,7 +945,23 @@ async def cron_bulk_reindex(request: Request):
             "message": "All chapters are already indexed (pass force=true to reindex).",
         }
 
-    run_id = str(uuid.uuid4())
+    # Create a persistent run document so progress survives server restarts
+    from app.models.seed_run import SeedRun as _SeedRun
+
+    run = _SeedRun(
+        status="running",
+        run_type="reindex",
+        total=total,
+        concurrency=concurrency,
+        force=force,
+    )
+    try:
+        await run.insert()
+        run_id = str(run.id)
+    except Exception as e:
+        logger.warning(f"Failed to insert seed_run (reindex): {e} — continuing without DB persistence")
+        run_id = "unavailable"
+        run = None
 
     request.app.state.reindex_status = {
         "running":    True,
@@ -956,7 +970,7 @@ async def cron_bulk_reindex(request: Request):
         "processed":  0,
         "skipped":    0,
         "errors":     [],
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": run.started_at.isoformat() if run else datetime.now(timezone.utc).isoformat(),
         "finished_at": None,
         "concurrency": concurrency,
         "force":       force,
@@ -976,16 +990,40 @@ async def cron_bulk_reindex(request: Request):
 
 @router.get("/cron/bulk-reindex/status")
 async def cron_bulk_reindex_status(request: Request):
-    """Return live progress of the running (or last completed) bulk-reindex job."""
+    """Return live progress of the running (or last completed) bulk-reindex job.
+
+    Falls back to the latest MongoDB SeedRun(run_type='reindex') document when
+    the in-process state is missing (e.g. after a server restart or redeploy).
+
+    Auth: Bearer {TRANSLATE_CRON_SECRET}
+    """
     _verify_cron_token(request)
+
     status = getattr(request.app.state, "reindex_status", None)
-    if not status:
+    if status is not None:
+        return status
+
+    # Fallback: read latest reindex run from MongoDB
+    try:
+        from app.models.seed_run import SeedRun
+        latest = await SeedRun.find_one(
+            SeedRun.run_type == "reindex",
+            sort=[("started_at", -1)],
+        )
+        if latest is None:
+            return {"running": False, "run_id": None, "message": "No reindex job has run yet."}
+        return _reindex_run_to_dict(latest)
+    except Exception as e:
+        logger.warning(f"Failed to read reindex run from MongoDB: {e}")
         return {"running": False, "run_id": None, "message": "No reindex job has run yet."}
-    return status
 
 
 async def _reindex_background(app_state, chapters, concurrency: int, run_id: str) -> None:
-    """Background worker: index each chapter into Vectorize, updating app_state as it goes."""
+    """Background worker: index each chapter into Vectorize, updating app_state as it goes.
+
+    Flushes progress to MongoDB every _MONGO_FLUSH_EVERY chapters so the run
+    document survives a server restart or mid-flight redeploy.
+    """
     import asyncio as _asyncio
     from datetime import datetime, timezone
     from app.models.content import Chapter
@@ -993,8 +1031,11 @@ async def _reindex_background(app_state, chapters, concurrency: int, run_id: str
 
     status = app_state.reindex_status
     sem = _asyncio.Semaphore(concurrency)
+    processed_count = 0
+    flush_lock = _asyncio.Lock()
 
     async def _reindex_one(ch: Chapter) -> None:
+        nonlocal processed_count
         sections_en = ch.rag_sections_en or []
         sections_as = getattr(ch, "rag_sections_as", None) or []
 
@@ -1022,13 +1063,71 @@ async def _reindex_background(app_state, chapters, concurrency: int, run_id: str
             except Exception as exc:
                 status["errors"].append(f"{ch.id}: {exc}")
                 logger.exception(f"bulk-reindex: failed for chapter {ch.id}")
+            finally:
+                async with flush_lock:
+                    processed_count += 1
+                    if processed_count % _MONGO_FLUSH_EVERY == 0:
+                        await _flush_reindex_run_to_mongo(run_id, app_state)
 
     try:
         await _asyncio.gather(*[_reindex_one(ch) for ch in chapters])
     finally:
         status["running"]     = False
         status["finished_at"] = datetime.now(timezone.utc).isoformat()
+        # Final flush — marks the run as completed in MongoDB
+        await _flush_reindex_run_to_mongo(run_id, app_state)
         logger.info(
             f"bulk-reindex done: {status['processed']} indexed, "
             f"{status['skipped']} skipped, {len(status['errors'])} errors"
         )
+
+
+async def _flush_reindex_run_to_mongo(run_id: str, app_state) -> None:
+    """Upsert current in-process reindex status into the MongoDB SeedRun document."""
+    if run_id == "unavailable":
+        return
+    try:
+        from app.models.seed_run import SeedRun
+        from beanie import PydanticObjectId
+        status = app_state.reindex_status
+        # Errors are stored as strings in reindex_status; wrap them so
+        # SeedRun.errors (List[dict]) stays consistent with other run types.
+        errors_as_dicts = [
+            {"error": e} if isinstance(e, str) else e
+            for e in status.get("errors", [])
+        ]
+        await SeedRun.find_one(SeedRun.id == PydanticObjectId(run_id)).update(
+            {"$set": {
+                "status":     "running" if status.get("running") else "completed",
+                "completed":  status.get("processed", 0),   # reindex uses "processed"
+                "skipped":    status.get("skipped", 0),
+                "errors":     errors_as_dicts,
+                "current":    status.get("current", ""),
+                "finished_at": (
+                    datetime.fromisoformat(status["finished_at"])
+                    if status.get("finished_at") else None
+                ),
+            }}
+        )
+    except Exception as e:
+        logger.warning(f"Failed to flush reindex run to MongoDB: {e}")
+
+
+def _reindex_run_to_dict(run) -> dict:
+    """Serialise a SeedRun(run_type='reindex') document back to the reindex status shape."""
+    return {
+        "run_id":      str(run.id),
+        "running":     run.status == "running",
+        "total":       run.total,
+        "processed":   run.completed,   # stored as "completed" in SeedRun
+        "skipped":     run.skipped,
+        # Unwrap error dicts back to strings to match the live status format
+        "errors":      [
+            e.get("error", str(e)) if isinstance(e, dict) else str(e)
+            for e in run.errors
+        ],
+        "started_at":  run.started_at.isoformat(),
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "concurrency": run.concurrency,
+        "force":       run.force,
+    }
