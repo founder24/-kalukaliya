@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Receipt, RefreshCw, Loader2, CheckCircle, XCircle, Clock, AlertTriangle, ChevronDown, ChevronUp, CreditCard, Zap, Mail, X } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Receipt, RefreshCw, Loader2, CheckCircle, XCircle, Clock, AlertTriangle, ChevronDown, ChevronUp, CreditCard, Zap, Mail, X, Copy, Check } from 'lucide-react';
 import { getPaymentHistory, requestRefund } from '@/utils/api';
 import { toast } from 'sonner';
 
@@ -27,15 +27,61 @@ function formatAmount(paise) {
   return `₹${(n / 100).toFixed(0)}`;
 }
 
-function ReceiptRow({ icon: Icon, label, value }) {
+/** Copy text to clipboard with a textarea fallback for older mobile browsers. */
+async function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  // Fallback: execCommand
+  const el = document.createElement('textarea');
+  el.value = text;
+  el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+  document.body.appendChild(el);
+  el.focus();
+  el.select();
+  document.execCommand('copy');
+  document.body.removeChild(el);
+}
+
+function ReceiptRow({ icon: Icon, label, value, copyable = false }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async (e) => {
+    e.stopPropagation();
+    try {
+      await copyToClipboard(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error('Could not copy — please select and copy manually');
+    }
+  }, [value]);
+
   if (!value) return null;
   return (
     <div className="flex items-center justify-between gap-3 py-2.5 border-b border-border/50 last:border-0">
-      <div className="flex items-center gap-2 text-muted-foreground text-sm">
+      <div className="flex items-center gap-2 text-muted-foreground text-sm shrink-0">
         <Icon size={14} className="shrink-0" />
         <span>{label}</span>
       </div>
-      <span className="text-sm font-medium text-foreground font-mono break-all text-right max-w-[55%]">{value}</span>
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span className="text-sm font-medium text-foreground font-mono break-all text-right">{value}</span>
+        {copyable && (
+          <button
+            onClick={handleCopy}
+            aria-label={copied ? 'Copied!' : `Copy ${label}`}
+            title={copied ? 'Copied!' : `Copy ${label}`}
+            className="shrink-0 p-1 rounded-md transition-colors"
+            style={copied
+              ? { color: '#10b981', background: 'rgba(16,185,129,0.10)' }
+              : { color: 'hsl(var(--muted-foreground))', background: 'transparent' }
+            }
+          >
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -99,8 +145,8 @@ function ReceiptModal({ payment, onClose }) {
           <ReceiptRow icon={CreditCard} label="Amount paid"   value={amount} />
           <ReceiptRow icon={Zap}        label="Plan / top-up" value={planLabel} />
           <ReceiptRow icon={Clock}      label="Date"          value={formatDate(payment.date || payment.created_at)} />
-          <ReceiptRow icon={Receipt}    label="Order ID"      value={orderId} />
-          <ReceiptRow icon={Receipt}    label="Payment ID"    value={paymentId} />
+          <ReceiptRow icon={Receipt}    label="Order ID"      value={orderId}    copyable />
+          <ReceiptRow icon={Receipt}    label="Payment ID"    value={paymentId}  copyable />
         </div>
 
         {/* Email note */}
