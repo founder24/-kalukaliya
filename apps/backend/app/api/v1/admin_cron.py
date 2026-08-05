@@ -887,8 +887,8 @@ async def cron_bulk_reindex(request: Request):
     """Push rag_sections_en (and rag_sections_as) to Vectorize for every chapter
     that has structured RAG sections in MongoDB.
 
-    Calls ingest_chapter_v2 with sections_en/sections_as for each chapter so
-    each section becomes its own vector chunk — no legacy blob fallback.
+    Launches a background job immediately and returns.
+    Poll GET /cron/bulk-reindex/status for live progress.
 
     Auth: Bearer {TRANSLATE_CRON_SECRET}
 
@@ -898,16 +898,24 @@ async def cron_bulk_reindex(request: Request):
         subject_id  (str)    — restrict to one subject
         concurrency (int)    — parallel ingest tasks (default: 3, max: 6)
 
-    Returns:
-        { "processed": N, "skipped": N, "errors": [...] }
+    Returns immediately:
+        { "job": "started", "run_id": "<uuid>", "total_queued": N }
     """
     _verify_cron_token(request)
 
-    import asyncio as _asyncio
     from datetime import datetime, timezone
     from app.models.content import Chapter
-    from app.services.rag.ingestion_v2 import ingest_chapter_v2
     from beanie import PydanticObjectId
+    import uuid
+
+    # Guard against double-start
+    existing = getattr(request.app.state, "reindex_status", {})
+    if existing.get("running"):
+        raise HTTPException(
+            status_code=409,
+            detail="A bulk-reindex job is already running. "
+                   "Poll GET /cron/bulk-reindex/status for progress.",
+        )
 
     force       = request.query_params.get("force", "false").lower() == "true"
     limit       = int(request.query_params.get("limit", "0")) or None
@@ -919,7 +927,6 @@ async def cron_bulk_reindex(request: Request):
         "rag_sections_en": {"$exists": True, "$not": {"$size": 0}, "$ne": None},
     }
     if not force:
-        # Only chapters not yet pushed to Vectorize (rag_indexed_at absent/null)
         filt["$or"] = [
             {"rag_indexed_at": {"$exists": False}},
             {"rag_indexed_at": None},
@@ -931,20 +938,68 @@ async def cron_bulk_reindex(request: Request):
             filt["subject_id"] = subject_id
 
     candidates = await Chapter.find(filt).to_list(length=limit or 9999)
+    total = len(candidates)
 
-    processed = 0
-    skipped   = 0
-    errors: list[str] = []
+    if total == 0:
+        return {
+            "job": "nothing_to_do",
+            "total_queued": 0,
+            "message": "All chapters are already indexed (pass force=true to reindex).",
+        }
 
+    run_id = str(uuid.uuid4())
+
+    request.app.state.reindex_status = {
+        "running":    True,
+        "run_id":     run_id,
+        "total":      total,
+        "processed":  0,
+        "skipped":    0,
+        "errors":     [],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+        "concurrency": concurrency,
+        "force":       force,
+    }
+
+    asyncio.create_task(
+        _reindex_background(
+            app_state=request.app.state,
+            chapters=candidates,
+            concurrency=concurrency,
+            run_id=run_id,
+        )
+    )
+
+    return {"job": "started", "run_id": run_id, "total_queued": total, "concurrency": concurrency}
+
+
+@router.get("/cron/bulk-reindex/status")
+async def cron_bulk_reindex_status(request: Request):
+    """Return live progress of the running (or last completed) bulk-reindex job."""
+    _verify_cron_token(request)
+    status = getattr(request.app.state, "reindex_status", None)
+    if not status:
+        return {"running": False, "run_id": None, "message": "No reindex job has run yet."}
+    return status
+
+
+async def _reindex_background(app_state, chapters, concurrency: int, run_id: str) -> None:
+    """Background worker: index each chapter into Vectorize, updating app_state as it goes."""
+    import asyncio as _asyncio
+    from datetime import datetime, timezone
+    from app.models.content import Chapter
+    from app.services.rag.ingestion_v2 import ingest_chapter_v2
+
+    status = app_state.reindex_status
     sem = _asyncio.Semaphore(concurrency)
 
     async def _reindex_one(ch: Chapter) -> None:
-        nonlocal processed, skipped
         sections_en = ch.rag_sections_en or []
         sections_as = getattr(ch, "rag_sections_as", None) or []
 
         if not sections_en and not sections_as:
-            skipped += 1
+            status["skipped"] += 1
             return
 
         async with sem:
@@ -956,27 +1011,24 @@ async def cron_bulk_reindex(request: Request):
                     metadata={"subject_id": str(ch.subject_id)},
                     source_type="notes",
                 )
-                # Stamp rag_indexed_at so force=false skips on next run
                 await Chapter.find_one({"_id": ch.id}).update(
                     {"$set": {"rag_indexed_at": datetime.now(timezone.utc)}}
                 )
-                processed += 1
+                status["processed"] += 1
                 logger.info(
                     f"bulk-reindex: indexed chapter {ch.id} "
                     f"({len(sections_en)} EN + {len(sections_as)} AS sections)"
                 )
             except Exception as exc:
-                errors.append(f"{ch.id}: {exc}")
+                status["errors"].append(f"{ch.id}: {exc}")
                 logger.exception(f"bulk-reindex: failed for chapter {ch.id}")
 
-    await _asyncio.gather(*[_reindex_one(ch) for ch in candidates])
-
-    logger.info(
-        f"bulk-reindex done: {processed} indexed, "
-        f"{skipped} skipped, {len(errors)} errors"
-    )
-    return {
-        "processed": processed,
-        "skipped":   skipped,
-        "errors":    errors,
-    }
+    try:
+        await _asyncio.gather(*[_reindex_one(ch) for ch in chapters])
+    finally:
+        status["running"]     = False
+        status["finished_at"] = datetime.now(timezone.utc).isoformat()
+        logger.info(
+            f"bulk-reindex done: {status['processed']} indexed, "
+            f"{status['skipped']} skipped, {len(status['errors'])} errors"
+        )

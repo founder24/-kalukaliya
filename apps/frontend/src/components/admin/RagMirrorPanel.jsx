@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Loader2, Sparkles, CheckCircle2, AlertTriangle, Zap, ExternalLink } from 'lucide-react';
 import { API_BASE } from '@/utils/api';
@@ -59,11 +59,16 @@ export default function RagMirrorPanel({ adminToken }) {
   const [limit,         setLimit]         = useState('');
 
   // ── Step 2: Reindex ─────────────────────────────────────────────────────────
-  const [reindexRunning, setReindexRunning] = useState(false);
-  const [reindexResult,  setReindexResult]  = useState(null);
-  const [reindexError,   setReindexError]   = useState(null);
-  const [reindexForce,   setReindexForce]   = useState(false);
+  const [reindexRunning,     setReindexRunning]     = useState(false);
+  const [reindexProgress,    setReindexProgress]    = useState(null);  // live status dict
+  const [reindexResult,      setReindexResult]      = useState(null);  // final status when done
+  const [reindexError,       setReindexError]       = useState(null);
+  const [reindexForce,       setReindexForce]       = useState(false);
   const [reindexConcurrency, setReindexConcurrency] = useState('3');
+  const pollRef = useRef(null);
+
+  // Clean up poller on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   const runMirror = async () => {
     if (mirrorRunning) return;
@@ -88,11 +93,35 @@ export default function RagMirrorPanel({ adminToken }) {
     }
   };
 
+  const stopPolling = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  };
+
+  const pollStatus = async (token) => {
+    try {
+      const { data } = await axios.get(
+        `${API_BASE}/admin/cron/bulk-reindex/status`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setReindexProgress(data);
+      if (!data.running) {
+        stopPolling();
+        setReindexRunning(false);
+        setReindexResult(data);
+      }
+    } catch (err) {
+      // Keep polling — transient network blip shouldn't abort
+      console.warn('[RagMirrorPanel] status poll error:', err.message);
+    }
+  };
+
   const runReindex = async () => {
     if (reindexRunning) return;
     setReindexRunning(true);
     setReindexResult(null);
+    setReindexProgress(null);
     setReindexError(null);
+    stopPolling();
     try {
       const params = new URLSearchParams();
       if (reindexForce)              params.set('force', 'true');
@@ -104,10 +133,16 @@ export default function RagMirrorPanel({ adminToken }) {
         {},
         { headers: { Authorization: `Bearer ${adminToken}` } },
       );
-      setReindexResult(data);
+      if (data.job === 'nothing_to_do') {
+        setReindexResult(data);
+        setReindexRunning(false);
+        return;
+      }
+      // Job started — begin polling
+      setReindexProgress({ running: true, total: data.total_queued, processed: 0, skipped: 0, errors: [] });
+      pollRef.current = setInterval(() => pollStatus(adminToken), 3000);
     } catch (err) {
       setReindexError(err?.response?.data?.detail || err.message || 'Request failed');
-    } finally {
       setReindexRunning(false);
     }
   };
@@ -259,7 +294,7 @@ export default function RagMirrorPanel({ adminToken }) {
           <p className="text-xs text-gray-500 leading-relaxed pl-7">
             Embeds every <code className="font-mono bg-gray-100 px-1 rounded">rag_sections_en</code> entry
             and upserts it to Cloudflare Vectorize as an individual topic-section chunk.
-            Chapters already indexed are skipped unless Force is checked.
+            Runs in the background — progress updates every 3 s.
           </p>
         </div>
 
@@ -287,36 +322,81 @@ export default function RagMirrorPanel({ adminToken }) {
         <button onClick={runReindex} disabled={reindexRunning}
           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-violet-600 hover:bg-violet-700 disabled:bg-violet-300 text-white transition-colors">
           {reindexRunning
-            ? <><Loader2 size={14} className="animate-spin" /> Indexing…</>
+            ? <><Loader2 size={14} className="animate-spin" /> Starting…</>
             : <><Zap size={14} /> Run Bulk Reindex</>}
         </button>
 
         <ErrorBox error={reindexError} />
 
-        {reindexResult && (
-          <ResultCard result={reindexResult} color="violet">
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
-              <div><dt className="text-gray-500">Chapters indexed</dt>
-                <dd className="font-semibold text-gray-900">{reindexResult.processed ?? 0}</dd></div>
-              <div><dt className="text-gray-500">Skipped (already indexed)</dt>
-                <dd className="font-semibold text-gray-900">{reindexResult.skipped ?? 0}</dd></div>
-              <div><dt className="text-gray-500">Errors</dt>
-                <dd className="font-semibold text-rose-600">{reindexResult.errors?.length ?? 0}</dd></div>
-            </dl>
-            {reindexResult.errors?.length > 0 && (
-              <details>
-                <summary className="text-xs text-rose-500 cursor-pointer hover:text-rose-700">
-                  Show errors ({reindexResult.errors.length})
-                </summary>
-                <pre className="mt-2 text-[11px] font-mono text-rose-700 bg-rose-50 rounded-lg p-2 overflow-x-auto whitespace-pre-wrap">
-                  {reindexResult.errors.join('\n')}
-                </pre>
-              </details>
+        {/* ── Live progress ──────────────────────────────────────────────── */}
+        {reindexProgress && reindexProgress.running && (() => {
+          const total     = reindexProgress.total     || 1;
+          const processed = reindexProgress.processed || 0;
+          const skipped   = reindexProgress.skipped   || 0;
+          const done      = processed + skipped;
+          const pct       = Math.min(100, Math.round((done / total) * 100));
+          return (
+            <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-4 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 text-violet-700 font-medium">
+                  <Loader2 size={12} className="animate-spin" /> Indexing chapters…
+                </span>
+                <span className="font-semibold text-violet-900 tabular-nums">
+                  {done} / {total}
+                </span>
+              </div>
+              {/* Progress bar */}
+              <div className="w-full h-2 bg-violet-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-violet-500 rounded-full transition-all duration-500"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <div className="flex gap-4 text-[11px] text-violet-600">
+                <span>✓ {processed} indexed</span>
+                <span>↷ {skipped} skipped</span>
+                {reindexProgress.errors?.length > 0 && (
+                  <span className="text-rose-500">✕ {reindexProgress.errors.length} errors</span>
+                )}
+                <span className="ml-auto opacity-60">{pct}%</span>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── Final result card (once done) ──────────────────────────────── */}
+        {reindexResult && !reindexResult.running && (
+          <>
+            {reindexResult.job === 'nothing_to_do' ? (
+              <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-xs text-gray-600">
+                All chapters are already indexed. Check <strong>Force re-index</strong> to push again.
+              </div>
+            ) : (
+              <ResultCard result={reindexResult} color="violet">
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
+                  <div><dt className="text-gray-500">Chapters indexed</dt>
+                    <dd className="font-semibold text-gray-900">{reindexResult.processed ?? 0}</dd></div>
+                  <div><dt className="text-gray-500">Skipped (already indexed)</dt>
+                    <dd className="font-semibold text-gray-900">{reindexResult.skipped ?? 0}</dd></div>
+                  <div><dt className="text-gray-500">Errors</dt>
+                    <dd className="font-semibold text-rose-600">{reindexResult.errors?.length ?? 0}</dd></div>
+                </dl>
+                {reindexResult.errors?.length > 0 && (
+                  <details>
+                    <summary className="text-xs text-rose-500 cursor-pointer hover:text-rose-700">
+                      Show errors ({reindexResult.errors.length})
+                    </summary>
+                    <pre className="mt-2 text-[11px] font-mono text-rose-700 bg-rose-50 rounded-lg p-2 overflow-x-auto whitespace-pre-wrap">
+                      {reindexResult.errors.join('\n')}
+                    </pre>
+                  </details>
+                )}
+                <p className="text-xs text-violet-700">
+                  ✓ Sections are live in Vectorize — chat queries will now match topic-level chunks.
+                </p>
+              </ResultCard>
             )}
-            <p className="text-xs text-violet-700">
-              ✓ Sections are live in Vectorize — chat queries will now match topic-level chunks.
-            </p>
-          </ResultCard>
+          </>
         )}
       </section>
 
