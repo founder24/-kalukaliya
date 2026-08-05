@@ -345,6 +345,7 @@ class SarvamAIClient:
     async def generate(
         self, system_prompt: str, user_message: str,
         stream: bool = False, is_assamese: bool = False,
+        max_tokens: int | None = None,
     ) -> str:
         """Generate a non-streaming response using Sarvam AI.
 
@@ -385,7 +386,7 @@ class SarvamAIClient:
                     # must NOT be used as the answer for non-streaming calls.
                     "enable_thinking": False,
                     # Assamese output needs more tokens (script is denser)
-                    "max_tokens": 2048 if is_assamese else 1200,
+                    "max_tokens": max_tokens if max_tokens is not None else (2048 if is_assamese else 1200),
                     "stream": stream,
                 },
             )

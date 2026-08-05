@@ -384,12 +384,13 @@ def build_catalogue(class11: bool = True, class12: bool = True) -> list[dict]:
                 None,
             )
             if existing:
-                # Prefer newer URL (2025 > 2024 > 2023)
+                # Prefer newer URL (2025 > 2024 > 2023); update label too
                 def _year(u: str) -> int:
                     m = re.search(r"/20(\d\d)/", u)
                     return int(m.group(1)) if m else 0
                 if _year(pdf_url) > _year(existing["pdf_url"]):
                     existing["pdf_url"] = pdf_url
+                    existing["book_label"] = book_label
                 continue
 
             entries.append({
@@ -483,9 +484,20 @@ _TOC_AS_RE = re.compile(
 _AS_DIGIT_MAP = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 
 # Exercise / questions section markers (English)
+# Primary: actual exercise/question/problem headings (preferred).
+# Require the line to end without a trailing period — a period signals a
+# mid-sentence word-wrap by PyMuPDF, not a standalone section heading.
 _EN_EXERCISE_RE = re.compile(
-    r"^(?:EXERCISES?|Summary|SUMMARY|QUESTIONS?|PROBLEMS?|REVIEW\s+QUESTIONS|"
-    r"ACTIVITIES|PRACTICE\s+PROBLEMS?|SELF[\s-]?ASSESSMENT)\b",
+    r"^(?:EXERCISES?|QUESTIONS?|PROBLEMS?|REVIEW\s+QUESTIONS|"
+    r"PRACTICE\s+PROBLEMS?)"
+    r"[^.\n\w]*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+# Fallback: Summary / Activities section — used only when no exercises heading found.
+_EN_SUMMARY_RE = re.compile(
+    r"^(?:Summary|SUMMARY|ACTIVITIES|SELF[\s-]?ASSESSMENT)"
+    r"[^.\n\w]*$",
     re.MULTILINE | re.IGNORECASE,
 )
 # Assamese exercises (Unicode)
@@ -628,10 +640,14 @@ def split_into_chapters(pages: list[dict], medium: str) -> list[dict]:
             log.debug(f"    Ch {ch_num} '{title}': too short ({len(chapter_pages_text)} chars), skipping")
             continue
 
-        # Separate exercises block from body
+        # Separate exercises block from body.
+        # For English: try strict exercises heading first (EXERCISES/QUESTIONS/PROBLEMS),
+        # then fall back to Summary — so we don't confuse Summary with exercises.
         body_text = chapter_pages_text
         exercises_text = ""
         ex_match = exercise_re.search(chapter_pages_text)
+        if ex_match is None and exercise_re is _EN_EXERCISE_RE:
+            ex_match = _EN_SUMMARY_RE.search(chapter_pages_text)
         if ex_match:
             body_text = chapter_pages_text[:ex_match.start()]
             exercises_text = chapter_pages_text[ex_match.start():]
@@ -760,6 +776,8 @@ def _split_assamese_by_body(pages: list[dict], exercise_re) -> list[dict]:
         body_text = chapter_text
         exercises_text = ""
         ex_m = exercise_re.search(chapter_text)
+        if ex_m is None and exercise_re is _EN_EXERCISE_RE:
+            ex_m = _EN_SUMMARY_RE.search(chapter_text)
         if ex_m:
             body_text = chapter_text[:ex_m.start()]
             exercises_text = chapter_text[ex_m.start():]
@@ -844,17 +862,20 @@ _NOTES_SYSTEM_AS = """\
 """
 
 _QA_SYSTEM_EN = """\
-You are an AHSEC subject expert. Given the exercise section of a textbook chapter,
-extract every question or problem and provide a complete solution.
-- For numerical / calculation problems: show the step-by-step working and the final answer.
-- For short-answer questions: write a concise but complete factual answer.
-- For long-answer / descriptive questions: write a structured answer in 3-6 sentences.
-Format strictly as a JSON array (no markdown fences, no extra keys):
-[
-  {"question": "<question text>", "answer": "<complete solution>"},
-  ...
-]
-If the exercises section contains no answerable questions, return [].
+You are an AHSEC subject expert. Output ONLY a valid JSON array — no prose, no markdown fences, no explanation before or after.
+Start your response with [ on the very first character.
+
+For each exercise question or problem provide:
+  {"question": "<question text>", "answer": "<complete solution>"}
+
+Rules:
+- Numerical/calculation problems: show step-by-step working and final answer inside "answer".
+- Short-answer questions: concise but complete factual answer.
+- Long-answer questions: 3-6 structured sentences.
+- If no answerable questions exist, output exactly: []
+
+Example output (start immediately like this):
+[{"question": "Calculate the molar mass of H2O.", "answer": "H=1, O=16. Molar mass = 2(1)+16 = 18 g/mol."}]
 """
 
 _QA_SYSTEM_AS = """\
@@ -928,6 +949,7 @@ async def generate_qa(
         system_prompt=system,
         user_message=user_msg,
         is_assamese=is_as,
+        max_tokens=4096,   # Q&A JSON arrays need more room than regular notes
     )
 
     # Try to parse JSON from the response
@@ -1571,11 +1593,14 @@ async def main() -> None:
     else:
         catalogue = build_catalogue(class11=want_c11, class12=want_c12)
 
-    # Apply filters
+    # Apply filters (subject match is case-insensitive)
     if args.medium:
         catalogue = [e for e in catalogue if e["medium"] == args.medium]
     if args.subject:
-        catalogue = [e for e in catalogue if e["subject_slug"] == args.subject or args.subject in e["subject_slug"]]
+        want = args.subject.lower()
+        catalogue = [e for e in catalogue
+                     if e["subject_slug"] == want or want in e["subject_slug"]
+                     or want in e["subject_name"].lower()]
 
     log.info(f"Processing {len(catalogue)} entries "
              f"({'dry-run' if args.dry_run else 'live'}, delay={args.delay}s)")
