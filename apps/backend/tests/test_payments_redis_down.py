@@ -338,3 +338,155 @@ async def test_verify_payment_does_not_misresolve_to_pro_when_redis_down(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         settings.RAZORPAY_KEY_SECRET = original_key_secret
+
+
+# ---------------------------------------------------------------------------
+# Credit top-up verify — Redis failure behaviour
+# ---------------------------------------------------------------------------
+
+TOPUP_ORDER_ID = "order_TOPUP_REDIS_TEST_001"
+TOPUP_PAYMENT_ID = "pay_TOPUP_REDIS_TEST_001"
+TOPUP_CREDITS = 50
+
+
+@pytest.fixture
+def mock_topup_user():
+    """Free-tier user with some existing credits."""
+    user = MagicMock()
+    user.id = "user-topup-redis-test"
+    user.email = "topup@example.com"
+    user.subscription_tier = "free"
+    user.credits_remaining = 10
+    user.update = AsyncMock()
+    return user
+
+
+@pytest.mark.anyio
+async def test_credit_topup_verify_fails_closed_when_redis_down(
+    client: AsyncClient, mock_topup_user
+):
+    """
+    When Redis is completely unavailable, /payments/credit-topup/verify must return 503.
+
+    The idempotency SET NX relies on Redis to prevent double-crediting.  There is no
+    MongoDB fallback for this path, so the endpoint deliberately fails closed rather
+    than risk granting duplicate credits.  This test documents that the fail-closed
+    behaviour is intentional, not accidental.
+    """
+    from app.main import app
+    from app.api.v1.auth import get_current_user
+    from app.config import settings
+
+    sig = _make_signature(TOPUP_ORDER_ID, TOPUP_PAYMENT_ID)
+
+    async def override_auth():
+        return mock_topup_user
+
+    app.dependency_overrides[get_current_user] = override_auth
+    original_key_secret = settings.RAZORPAY_KEY_SECRET
+    settings.RAZORPAY_KEY_SECRET = TEST_KEY_SECRET
+
+    try:
+        with patch("app.db.redis.get_redis", return_value=_make_broken_redis()):
+            response = await client.post(
+                "/api/v1/payments/credit-topup/verify",
+                json={
+                    "razorpay_order_id": TOPUP_ORDER_ID,
+                    "razorpay_payment_id": TOPUP_PAYMENT_ID,
+                    "razorpay_signature": sig,
+                },
+            )
+
+        assert response.status_code == 503, (
+            f"Expected 503 when Redis is down for credit top-up idempotency, "
+            f"got {response.status_code}: {response.text}"
+        )
+        # Credits must NOT have been granted
+        mock_topup_user.update.assert_not_awaited()
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        settings.RAZORPAY_KEY_SECRET = original_key_secret
+
+
+@pytest.mark.anyio
+async def test_credit_topup_verify_razorpay_fallback_when_redis_get_misses(
+    client: AsyncClient, mock_topup_user
+):
+    """
+    When the Redis dedup SET NX succeeds (no duplicate) but the credit_order GET
+    returns None (cache miss — e.g. Redis was briefly unavailable when the order was
+    created), /payments/credit-topup/verify must fall back to the Razorpay order API
+    to retrieve the credit amount and grant credits successfully.
+
+    This confirms the Razorpay fallback path works end-to-end and that a Redis cache
+    miss does NOT block the customer from receiving their credits.
+    """
+    from app.main import app
+    from app.api.v1.auth import get_current_user
+    from app.config import settings
+
+    sig = _make_signature(TOPUP_ORDER_ID, TOPUP_PAYMENT_ID)
+
+    # Redis that succeeds on SET NX but returns None on GET (cache miss)
+    partial_redis = AsyncMock()
+    partial_redis.set = AsyncMock(return_value=True)   # SET NX → True = first time seen
+    partial_redis.get = AsyncMock(return_value=None)   # credit_order key not cached
+
+    # Razorpay order.fetch returns credits in notes (as stored by create-order)
+    mock_razorpay_order = {
+        "id": TOPUP_ORDER_ID,
+        "notes": {"credits": str(TOPUP_CREDITS), "type": "credit_topup"},
+    }
+    mock_razorpay_instance = MagicMock()
+    mock_razorpay_instance.order.fetch = MagicMock(return_value=mock_razorpay_order)
+
+    async def override_auth():
+        return mock_topup_user
+
+    app.dependency_overrides[get_current_user] = override_auth
+    original_key_secret = settings.RAZORPAY_KEY_SECRET
+    original_key_id = settings.RAZORPAY_KEY_ID
+    settings.RAZORPAY_KEY_SECRET = TEST_KEY_SECRET
+    settings.RAZORPAY_KEY_ID = TEST_KEY_ID
+
+    try:
+        with (
+            patch("app.db.redis.get_redis", return_value=partial_redis),
+            patch("razorpay.Client", return_value=mock_razorpay_instance),
+            patch(
+                "app.services.comms.resend_client.send_credit_topup_receipt_email",
+                new_callable=AsyncMock,
+            ),
+        ):
+            response = await client.post(
+                "/api/v1/payments/credit-topup/verify",
+                json={
+                    "razorpay_order_id": TOPUP_ORDER_ID,
+                    "razorpay_payment_id": TOPUP_PAYMENT_ID,
+                    "razorpay_signature": sig,
+                },
+            )
+
+        assert response.status_code == 200, (
+            f"Expected 200 when Redis GET misses and Razorpay fallback is used, "
+            f"got {response.status_code}: {response.text}"
+        )
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["credits_granted"] == TOPUP_CREDITS
+
+        # Credits must have been added to the user's account
+        mock_topup_user.update.assert_awaited_once()
+        update_doc = mock_topup_user.update.call_args[0][0]
+        new_balance = update_doc["$set"]["credits_remaining"]
+        assert new_balance == mock_topup_user.credits_remaining + TOPUP_CREDITS, (
+            f"Expected credits_remaining={mock_topup_user.credits_remaining + TOPUP_CREDITS}, "
+            f"got {new_balance}"
+        )
+
+        # Razorpay order.fetch must have been called (fallback was actually used)
+        mock_razorpay_instance.order.fetch.assert_called_once_with(TOPUP_ORDER_ID)
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        settings.RAZORPAY_KEY_SECRET = original_key_secret
+        settings.RAZORPAY_KEY_ID = original_key_id
