@@ -108,6 +108,33 @@ def _stream_sync(system_prompt: str, user_message: str) -> list[str]:
             pass
 
 
+async def generate_gemini(
+    system_prompt: str,
+    user_message: str,
+    timeout: float = 90.0,
+) -> str:
+    """
+    Generate a complete (non-streaming) response from Gemini 2.5 Flash.
+    Returns the full response string.
+    Raises RuntimeError on timeout or failure.
+    """
+    if not _available():
+        raise RuntimeError("Gemini fallback: Google credentials not configured")
+
+    logger.info("gemini_fallback.generate: activating (Sarvam AI unavailable)")
+    try:
+        chunks = await asyncio.wait_for(
+            asyncio.to_thread(_stream_sync, system_prompt, user_message),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        raise RuntimeError(f"Gemini fallback timed out after {timeout}s")
+    except Exception as e:
+        raise RuntimeError(f"Gemini fallback failed: {e}")
+
+    return "".join(chunks)
+
+
 async def stream_gemini(
     system_prompt: str,
     user_message: str,

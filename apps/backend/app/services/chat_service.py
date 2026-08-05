@@ -927,8 +927,11 @@ class ChatService:
         user_id: str,
     ) -> tuple[str, str]:
         """
-        Call the LLM. On Sarvam failure for Assamese, falls back to Vertex AI.
+        Call the LLM (non-streaming). Fallback chain:
+          1. Sarvam AI (primary)
+          2. Gemini 2.5 Flash via Vertex AI (if Sarvam fails AND Google creds present)
         Returns (response_text, actual_model_used).
+        Raises on double failure.
         """
         from app.services.ai.router import generate_response
 
@@ -940,9 +943,28 @@ class ChatService:
                 stream=False,
             )
             return response_text, target_model
-        except (RuntimeError, Exception) as e:
-            logger.error(f"Sarvam generate failed (lang={detected_lang}): {e}")
-            raise
+        except Exception as sarvam_err:
+            logger.error(
+                f"Sarvam generate failed (lang={detected_lang}): {sarvam_err}",
+                extra={"user_id": user_id, "error": str(sarvam_err)},
+            )
+            # ── Gemini 2.5 Flash fallback ───────────────────────────────
+            try:
+                from app.services.ai.gemini_fallback import generate_gemini, _available as gemini_available
+                if gemini_available():
+                    logger.info(
+                        "sarvam_non_stream_fallback_to_gemini",
+                        extra={"user_id": user_id, "sarvam_error": str(sarvam_err)[:80]},
+                    )
+                    response_text = await generate_gemini(system_prompt, sanitized_message)
+                    return response_text, "gemini-2.5-flash"
+                raise RuntimeError("Gemini not configured")
+            except Exception as gemini_err:
+                logger.error(
+                    f"Gemini non-stream fallback also failed: {gemini_err}",
+                    extra={"user_id": user_id},
+                )
+                raise sarvam_err  # re-raise original so caller gets the real error
 
     @staticmethod
     async def stream_llm(

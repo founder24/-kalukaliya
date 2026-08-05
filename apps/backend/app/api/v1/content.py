@@ -192,13 +192,6 @@ async def list_chapters(
                     "metadata.subject": subject,
                     "status": "published",
                 },
-                projection={
-                    "_id": 0,
-                    "slug": 1,
-                    "title": 1,
-                    "description": 1,
-                    "metadata": 1,
-                },
             )
             .skip(skip)
             .limit(limit)
