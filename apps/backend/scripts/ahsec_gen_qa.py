@@ -318,6 +318,30 @@ async def main(args: argparse.Namespace) -> None:
         if not getattr(ch, "pdf_url", None) and str(ch.id) in progress_urls:
             ch.pdf_url = progress_urls[str(ch.id)]  # type: ignore[attr-defined]
 
+    # Build subject_name → pdf_url using the Class 11 EN catalog.
+    # Class 11 entries overwrite Class 12 so same-named subjects (Chemistry,
+    # Physics, etc.) get the correct Class 11 PDF URL.
+    from scripts.ahsec_ingest import build_catalogue as _build_cat
+    import re as _re
+
+    def _norm(s: str) -> str:
+        return _re.sub(r"\s+", "", s.lower())
+
+    cat_12 = [e for e in _build_cat(class11=False, class12=True)
+              if e.get("medium", "").lower() in ("en", "e", "english", "")]
+    cat_11 = [e for e in _build_cat(class11=True, class12=False)
+              if e.get("medium", "").lower() in ("en", "e", "english", "")]
+    url_map: dict[str, str] = {_norm(e["subject_name"]): e["pdf_url"] for e in cat_12}
+    url_map.update({_norm(e["subject_name"]): e["pdf_url"] for e in cat_11})  # 11 wins
+    log.info(f"Catalog: {len(url_map)} EN subject→URL entries (Class 11 priority)")
+
+    # Inject PDF URLs from catalog into chapters that have source_pdf_url or need lookup
+    for ch in chapters:
+        if not getattr(ch, "source_pdf_url", None):
+            subj_tmp = await Subject.get(ch.subject_id)
+            if subj_tmp:
+                ch._injected_pdf_url = url_map.get(_norm(subj_tmp.name))  # type: ignore[attr-defined]
+
     sarvam = SarvamClient()
     processed = skipped = failed = 0
 

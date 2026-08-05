@@ -90,13 +90,18 @@ def _load_done_keys() -> set[str]:
     return done
 
 
-def _log_progress(key: str, status: str, detail: str = "") -> None:
+def _log_progress(
+    key: str, status: str, detail: str = "",
+    chapter_id: str = "", pdf_url: str = "",
+) -> None:
     with PROGRESS_FILE.open("a") as f:
         f.write(json.dumps({
             "ts": datetime.now(timezone.utc).isoformat(),
             "key": key,
             "status": status,
             "detail": detail,
+            "chapter_id": chapter_id,
+            "pdf_url": pdf_url,
         }) + "\n")
 
 
@@ -579,10 +584,13 @@ def _clean_notes_output(text: str) -> str:
         flags=_re.MULTILINE,
     )
 
-    # ── 3. Drop inline meta-commentary lines ─────────────────────────────────
+    # ── 3. Drop inline meta-commentary lines AND meta-commentary ## headings ──
     meta_re = _re.compile(
-        r'^[\-\*\s]*(?:This (?:is|gives|seems|looks)|Now[,\s]|Let\'?s\s|I will|I\'ll\s|'
-        r'Confidence Score|Mental Sandbox|Drafting|Revised Plan|Note:|Quick word)',
+        r'^(?:[\-\*\s]*(?:This (?:is|gives|seems|looks)|Now[,\s]|Let\'?s\s|I will|I\'ll\s|'
+        r'Confidence Score|Mental Sandbox|Drafting|Revised Plan|Note:|Quick word)|'
+        r'#{1,3}\s+(?:Draft(?:ing)?|Revised?\s+Draft|Word\s+Count|Check:|Mental|'
+        r'Confidence|Foreword|Acknowledgement|Publication\s+and|Textbook\s+Development|'
+        r'Rationali[sz]ation|NCERT\s))',
         _re.MULTILINE | _re.IGNORECASE,
     )
     lines = [l for l in text.splitlines() if not meta_re.match(l)]
@@ -1177,13 +1185,29 @@ def qa_to_rag_sections(qa_pairs: list[dict]) -> list[dict]:
 
 # ── Topics extraction from notes ───────────────────────────────────────────────
 
+_META_HEADING_RE = re.compile(
+    r"^(?:Draft(?:ing)?|Revised?\s+Draft|Word\s+Count|Check|Mental\s+Sandbox|"
+    r"Note(?:s\s+on)?:|Quick\s+Word|Confidence\s+Score|Foreword|"
+    r"Acknowledgement|Publication\s+and|Textbook\s+Development\s+Committee|"
+    r"Rationali[sz]ation|NCERT|About\s+(?:the\s+)?(?:Author|Book|Text))",
+    re.IGNORECASE,
+)
+
+
 def extract_topics_from_notes(notes_md: str) -> list[dict]:
-    """Extract ## headings from notes as topic list for topic_embeddings."""
+    """Extract ## headings from notes as topic list for topic_embeddings.
+
+    Skips headings that look like model meta-commentary (draft plans,
+    word-count checks, acknowledgement pages, etc.).
+    """
     import uuid as _uuid
     topics = []
     for m in re.finditer(r"^#{1,3}\s+(.+)", notes_md, re.MULTILINE):
         title = m.group(1).strip()
         if not title or len(title) < 3:
+            continue
+        # Skip meta-commentary headings the model sometimes generates
+        if _META_HEADING_RE.match(title) or title.endswith(":"):
             continue
         slug = re.sub(r"[\s_-]+", "-", re.sub(r"[^\w\s-]", "", title.lower())).strip("-")
         topics.append({
@@ -1653,7 +1677,11 @@ async def process_pdf_entry(
             await reindex_chapter(str(chapter.id), scope=scope)
 
         if written:
-            _log_progress(progress_key, "done")
+            _log_progress(
+                progress_key, "done",
+                chapter_id=str(chapter.id),
+                pdf_url=pdf_url,
+            )
             done_keys.add(progress_key)
             stats["done"] += 1
         else:
