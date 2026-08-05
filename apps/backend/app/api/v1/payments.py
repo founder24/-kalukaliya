@@ -168,6 +168,18 @@ async def verify_payment(
     except Exception as e:
         logger.error(f"Failed to record payment: {e}")
 
+    # Send first-purchase confirmation email (non-fatal)
+    try:
+        from app.services.comms.resend_client import send_first_purchase_receipt_email
+
+        await send_first_purchase_receipt_email(
+            user.email,
+            payment_amount or 29900,
+            body.razorpay_order_id,
+        )
+    except Exception as e:
+        logger.error(f"Failed to send first-purchase receipt email: {e}")
+
     logger.info("Payment verified, user upgraded", extra={"user_id": str(user.id)})
     return {"status": "success", "message": "Payment verified, plan upgraded to pro"}
 
@@ -292,6 +304,19 @@ async def verify_credit_topup(
     # Grant credits
     current_credits = getattr(user, "credits_remaining", 0) or 0
     await user.update({"$set": {"credits_remaining": current_credits + credits}})
+
+    # Send credit top-up confirmation email (non-fatal)
+    try:
+        from app.services.comms.resend_client import send_credit_topup_receipt_email
+
+        await send_credit_topup_receipt_email(
+            user.email,
+            credits,
+            credits * 100,  # 1 credit = 1 INR = 100 paise
+            body.razorpay_order_id,
+        )
+    except Exception as e:
+        logger.error(f"Failed to send credit top-up receipt email: {e}")
 
     logger.info("Credits granted", extra={"user_id": str(user.id), "credits": credits})
     return {"status": "success", "credits_granted": credits}

@@ -124,7 +124,7 @@ async def send_welcome_email(email: str, name: str = None) -> bool:
 
 
 async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
-    """Send payment receipt email."""
+    """Send payment receipt email (used for renewals via webhook)."""
     amount_inr = amount / 100  # Convert paise to rupees
     safe_event_id = html.escape(event_id)
     email_html = f"""
@@ -148,9 +148,85 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
     <p>Best regards,<br>The Syrabit Team</p>
     {UNSUBSCRIBE_FOOTER}
     """
-    result = await _send_email(email, "Payment Receipt - Syrabit Pro", email_html)
+    result = await _send_email(email, "Renewal Receipt - Syrabit Pro", email_html)
     if result:
         logger.info(f"Receipt email sent to {email}")
+    return result
+
+
+async def send_first_purchase_receipt_email(
+    email: str, amount: int, order_id: str
+) -> bool:
+    """Send first-purchase confirmation email after a user upgrades to Pro."""
+    amount_inr = amount / 100  # Convert paise to rupees
+    safe_order_id = html.escape(order_id)
+    email_html = f"""
+    <h1>Welcome to Syrabit Pro! \U0001f389</h1>
+    <p>Your payment was successful and your account has been upgraded.</p>
+    <table style="width: 100%; max-width: 400px; border-collapse: collapse;">
+        <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Amount Paid:</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">\u20b9{amount_inr:.2f}</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Order ID:</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">{safe_order_id}</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Plan:</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">Syrabit Pro</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Status:</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">\u2705 Active</td>
+        </tr>
+    </table>
+    <p>You now have unlimited access to Syrabit Pro features. Enjoy!</p>
+    <p>Best regards,<br>The Syrabit Team</p>
+    {UNSUBSCRIBE_FOOTER}
+    """
+    result = await _send_email(email, "Welcome to Syrabit Pro \U0001f389", email_html)
+    if result:
+        logger.info(f"First-purchase receipt email sent to {email}")
+    return result
+
+
+async def send_credit_topup_receipt_email(
+    email: str, credits: int, amount: int, order_id: str
+) -> bool:
+    """Send credit top-up confirmation email."""
+    amount_inr = amount / 100  # Convert paise to rupees
+    safe_order_id = html.escape(order_id)
+    email_html = f"""
+    <h1>Credits Added! \u2b50</h1>
+    <p>Your credit top-up was successful.</p>
+    <table style="width: 100%; max-width: 400px; border-collapse: collapse;">
+        <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Credits Added:</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">{credits}</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Amount Paid:</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">\u20b9{amount_inr:.2f}</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Order ID:</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">{safe_order_id}</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Status:</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;">\u2705 Credited</td>
+        </tr>
+    </table>
+    <p>Your credits are now available. Happy learning!</p>
+    <p>Best regards,<br>The Syrabit Team</p>
+    {UNSUBSCRIBE_FOOTER}
+    """
+    result = await _send_email(
+        email, f"{credits} Credits Added to Your Syrabit Account", email_html
+    )
+    if result:
+        logger.info(f"Credit top-up receipt email sent to {email}")
     return result
 
 
