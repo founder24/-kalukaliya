@@ -850,3 +850,105 @@ async def cron_bulk_mirror_rag(request: Request):
         "no_headings": no_headings,
         "errors":      errors,
     }
+
+
+# ── Bulk Reindex ───────────────────────────────────────────────────────────────
+
+@router.post("/cron/bulk-reindex")
+async def cron_bulk_reindex(request: Request):
+    """Push rag_sections_en (and rag_sections_as) to Vectorize for every chapter
+    that has structured RAG sections in MongoDB.
+
+    Calls ingest_chapter_v2 with sections_en/sections_as for each chapter so
+    each section becomes its own vector chunk — no legacy blob fallback.
+
+    Auth: Bearer {TRANSLATE_CRON_SECRET}
+
+    Query params:
+        force       (bool)   — reindex even chapters already indexed (default: false)
+        limit       (int)    — max chapters to process (default: all)
+        subject_id  (str)    — restrict to one subject
+        concurrency (int)    — parallel ingest tasks (default: 3, max: 6)
+
+    Returns:
+        { "processed": N, "skipped": N, "errors": [...] }
+    """
+    _verify_cron_token(request)
+
+    import asyncio as _asyncio
+    from datetime import datetime, timezone
+    from app.models.content import Chapter
+    from app.services.rag.ingestion_v2 import ingest_chapter_v2
+    from beanie import PydanticObjectId
+
+    force       = request.query_params.get("force", "false").lower() == "true"
+    limit       = int(request.query_params.get("limit", "0")) or None
+    subject_id  = request.query_params.get("subject_id") or None
+    concurrency = max(1, min(int(request.query_params.get("concurrency", "3")), 6))
+
+    # Find chapters that have structured RAG sections
+    filt: dict = {
+        "rag_sections_en": {"$exists": True, "$not": {"$size": 0}, "$ne": None},
+    }
+    if not force:
+        # Only chapters not yet pushed to Vectorize (rag_indexed_at absent/null)
+        filt["$or"] = [
+            {"rag_indexed_at": {"$exists": False}},
+            {"rag_indexed_at": None},
+        ]
+    if subject_id:
+        try:
+            filt["subject_id"] = PydanticObjectId(subject_id)
+        except Exception:
+            filt["subject_id"] = subject_id
+
+    candidates = await Chapter.find(filt).to_list(length=limit or 9999)
+
+    processed = 0
+    skipped   = 0
+    errors: list[str] = []
+
+    sem = _asyncio.Semaphore(concurrency)
+
+    async def _reindex_one(ch: Chapter) -> None:
+        nonlocal processed, skipped
+        sections_en = ch.rag_sections_en or []
+        sections_as = getattr(ch, "rag_sections_as", None) or []
+
+        if not sections_en and not sections_as:
+            skipped += 1
+            return
+
+        async with sem:
+            try:
+                await ingest_chapter_v2(
+                    chapter_id=str(ch.id),
+                    sections_en=sections_en or None,
+                    sections_as=sections_as or None,
+                    metadata={"subject_id": str(ch.subject_id)},
+                    source_type="notes",
+                )
+                # Stamp rag_indexed_at so force=false skips on next run
+                await Chapter.find_one({"_id": ch.id}).update(
+                    {"$set": {"rag_indexed_at": datetime.now(timezone.utc)}}
+                )
+                processed += 1
+                logger.info(
+                    f"bulk-reindex: indexed chapter {ch.id} "
+                    f"({len(sections_en)} EN + {len(sections_as)} AS sections)"
+                )
+            except Exception as exc:
+                errors.append(f"{ch.id}: {exc}")
+                logger.exception(f"bulk-reindex: failed for chapter {ch.id}")
+
+    await _asyncio.gather(*[_reindex_one(ch) for ch in candidates])
+
+    logger.info(
+        f"bulk-reindex done: {processed} indexed, "
+        f"{skipped} skipped, {len(errors)} errors"
+    )
+    return {
+        "processed": processed,
+        "skipped":   skipped,
+        "errors":    errors,
+    }
