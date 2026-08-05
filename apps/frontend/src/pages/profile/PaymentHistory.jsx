@@ -32,7 +32,8 @@ export default function PaymentHistory({ refreshKey = 0 }) {
     setLoading(true);
     try {
       const res = await getPaymentHistory();
-      setPayments(res.data || []);
+      // Backend returns { payments: [...] }, not a bare array
+      setPayments(Array.isArray(res.data) ? res.data : (res.data?.payments || []));
     } catch {
       toast.error('Failed to load payment history');
     } finally {
