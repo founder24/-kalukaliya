@@ -235,6 +235,16 @@ async def verify_payment(
         }
     )
 
+    # Clean up the pending record now that payment is verified
+    try:
+        from app.db.mongo import get_mongo_client as _get_mongo_client
+
+        _mongo = _get_mongo_client()
+        _db = _mongo[settings.MONGODB_DB_NAME]
+        await _db.payments_pending.delete_one({"order_id": body.razorpay_order_id})
+    except Exception as e:
+        logger.warning(f"Failed to delete payments_pending record: {e}")
+
     # HF-029: Record payment in payments collection
     try:
         from app.db.mongo import get_mongo_client
