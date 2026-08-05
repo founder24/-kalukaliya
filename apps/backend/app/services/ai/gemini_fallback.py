@@ -161,6 +161,14 @@ async def stream_gemini(
     except asyncio.TimeoutError:
         raise RuntimeError(f"Gemini fallback timed out after {timeout}s")
     except Exception as e:
+        err = str(e)
+        if "403" in err or "PERMISSION_DENIED" in err:
+            logger.error(
+                "Gemini fallback 403 PERMISSION_DENIED — service account lacks "
+                "'aiplatform.endpoints.predict'. Fix: grant roles/aiplatform.user to "
+                "cloudflare-edge-invoker@blissful-acumen-495019-t6.iam.gserviceaccount.com "
+                "at https://console.cloud.google.com/iam-admin/iam"
+            )
         raise RuntimeError(f"Gemini fallback failed: {e}")
 
     for chunk in chunks:

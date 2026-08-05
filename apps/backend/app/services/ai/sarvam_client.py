@@ -757,6 +757,8 @@ class SarvamAIClient:
         Stream with retry logic for resilience.
 
         - On 5xx or timeout: retries up to max_retries times
+        - On 4xx (400/401/402/403/404): raises immediately — permanent errors,
+          retry is pointless and would trip the circuit breaker on every request.
         - If all retries exhausted, raises to let caller handle fallback
         - HF-078: If chunks were already sent to client, cannot retry
         """
@@ -774,6 +776,15 @@ class SarvamAIClient:
                 # HF-078: If chunks were already sent to client, cannot retry
                 if chunks_yielded:
                     raise
+                # 4xx errors are permanent client errors — never retry.
+                # The error message is "Sarvam stream failed: HTTP 4XX".
+                err_str = str(e)
+                is_client_error = "HTTP 4" in err_str or "circuit open" in err_str
+                if is_client_error:
+                    logger.warning(
+                        f"Sarvam stream permanent error (no retry): {e}"
+                    )
+                    break
                 if attempt < max_retries:
                     logger.warning(
                         f"Sarvam stream attempt {attempt + 1} failed: {e}, "
