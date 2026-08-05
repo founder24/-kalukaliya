@@ -647,26 +647,29 @@ def _roman_to_int(s: str) -> int:
 # ── AI Content Generation ──────────────────────────────────────────────────────
 
 _NOTES_SYSTEM_EN = """\
-You are an expert AHSEC (Assam Higher Secondary Education Council) notes writer.
-Write concise, well-structured study notes covering only the CORE CONCEPTS from
-the chapter content provided. Format with Markdown:
-- Use ## for each major topic heading (match the headings present in the source text).
-- Under each heading write 3-6 tight bullet points or a short paragraph.
-- Include important definitions, formulas, laws, and key facts.
-- Avoid unnecessary padding; every sentence must carry information.
-- Target 400-700 words total.
-- Do NOT include exercises, questions, or answers in the notes.
+You are an expert AHSEC notes writer. Output ONLY the study notes — no preamble, \
+no commentary, no "Here are the notes" sentence. Begin your response immediately \
+with the first ## heading.
+
+Rules:
+- Use ## for each major topic (3–6 topics per chapter).
+- Under each ## heading write 3–5 tight bullet points with key facts, definitions, \
+  formulas, or laws.
+- Total length: 400–700 words.
+- Do NOT include exercises, worked examples, or Q&A.
+- First line of your response MUST be a ## heading.
 """
 
 _NOTES_SYSTEM_AS = """\
-তুমি এজন দক্ষ AHSEC (অসম উচ্চতৰ মাধ্যমিক শিক্ষা পৰিষদ) টোকা লেখক।
-নিম্নলিখিত অধ্যায়ৰ বিষয়বস্তুৰ পৰা কেৱল মূল ধাৰণাসমূহ সামৰি সংক্ষিপ্ত, সুসংগঠিত অসমীয়া ভাষাত অধ্যয়ন টোকা লিখা।
-বিন্যাস:
-- প্ৰতিটো মূল বিষয়ৰ বাবে ## শিৰোনাম ব্যৱহাৰ কৰা।
-- প্ৰতিটো শিৰোনামৰ তলত ৩-৬টা সংক্ষিপ্ত বিন্দু বা এটা চমু অনুচ্ছেদ লিখা।
+তুমি এজন দক্ষ AHSEC টোকা লেখক। কেৱল অধ্যয়ন টোকাহে লিখা — কোনো পূৰ্বমন্তব্য নকৰিবা। \
+প্ৰথম শাৰীটো অৱশ্যে ## শিৰোনাম হ'ব লাগিব।
+
+নিয়ম:
+- প্ৰতিটো মূল বিষয়ৰ বাবে ## শিৰোনাম ব্যৱহাৰ কৰা (প্ৰতি অধ্যায়ত ৩–৬টা বিষয়)।
+- প্ৰতিটো ## শিৰোনামৰ তলত ৩–৫টা সংক্ষিপ্ত বিন্দু লিখা।
 - গুৰুত্বপূৰ্ণ সংজ্ঞা, সূত্ৰ, নিয়ম আৰু মূল তথ্য অন্তৰ্ভুক্ত কৰা।
-- মুঠ ৪০০-৭০০ শব্দ লক্ষ্য কৰা।
-- অনুশীলনী বা প্ৰশ্নোত্তৰ অন্তৰ্ভুক্ত নকৰিবা।
+- মুঠ ৪০০–৭০০ শব্দ।
+- অনুশীলনী অন্তৰ্ভুক্ত নকৰিবা।
 """
 
 _QA_SYSTEM_EN = """\
@@ -791,13 +794,35 @@ async def generate_qa(
 
 def notes_to_rag_sections(notes_md: str) -> list[dict]:
     """
-    Split Markdown notes on ## headings → [{title, content}] for rag_sections.
+    Split Markdown notes into [{title, content}] for rag_sections.
+    Handles three heading styles in priority order:
+      1. ## / ### Markdown headings  (preferred)
+      2. **Bold** headings on their own line (Sarvam fallback format)
+      3. Numbered headings: "1. Title" / "1) Title" on their own line
     Strips Markdown symbols so chunks are clean plain text for the vector store.
     """
     lines = notes_md.split("\n")
     sections: list[dict] = []
     cur_title: Optional[str] = None
     cur_lines: list[str] = []
+
+    # Detect which heading style is present
+    has_md_headings    = any(re.match(r"^#{1,3}\s+\S", l) for l in lines)
+    has_bold_headings  = any(re.match(r"^\*\*[^*]{3,60}\*\*\s*$", l) for l in lines)
+    has_num_headings   = any(re.match(r"^\d+[.)]\s+\S", l) for l in lines)
+
+    if has_md_headings:
+        heading_re = re.compile(r"^#{1,3}\s+(.+)")
+    elif has_bold_headings:
+        heading_re = re.compile(r"^\*\*([^*]{3,60})\*\*\s*$")
+    elif has_num_headings:
+        heading_re = re.compile(r"^\d+[.)]\s+(.+)")
+    else:
+        # No detectable heading — treat whole text as one section
+        content = _strip_md(notes_md).strip()
+        if content:
+            return [{"title": "Notes", "content": content[:3000]}]
+        return []
 
     def _flush():
         nonlocal cur_title, cur_lines
@@ -809,13 +834,12 @@ def notes_to_rag_sections(notes_md: str) -> list[dict]:
         cur_lines = []
 
     for line in lines:
-        m = re.match(r"^#{1,3}\s+(.+)", line)
+        m = heading_re.match(line)
         if m:
             _flush()
             cur_title = m.group(1).strip()
-        else:
-            if cur_title is not None:
-                cur_lines.append(line)
+        elif cur_title is not None:
+            cur_lines.append(line)
 
     _flush()
     return sections
