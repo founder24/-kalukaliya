@@ -148,11 +148,7 @@ async def verify_payment(
     if not purchased_plan and payment_amount is not None:
         purchased_plan = amount_to_plan.get(payment_amount)
 
-    # Fall back: trust the client-sent plan (only if amount also matches)
-    if not purchased_plan and body.plan and body.plan in plan_prices:
-        purchased_plan = body.plan
-
-    # Validate amount matches the resolved plan price
+    # Validate amount matches the resolved plan price (when both are available)
     if payment_amount is not None and purchased_plan:
         expected_amount = plan_prices.get(purchased_plan)
         if expected_amount and payment_amount != expected_amount:
@@ -162,9 +158,18 @@ async def verify_payment(
             )
             raise HTTPException(status_code=400, detail="Payment amount mismatch")
 
-    # Default to pro if plan cannot be determined (safe fallback)
+    # Fail closed: never upgrade if neither plan nor amount could be verified server-side.
+    # Trusting client-supplied plan values would allow underpayment-to-upgrade escalation
+    # when Redis is unavailable.
     if not purchased_plan:
-        purchased_plan = "pro"
+        logger.error(
+            "Cannot verify plan for order — Redis metadata unavailable, failing closed",
+            extra={"order_id": body.razorpay_order_id},
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Order metadata unavailable; please contact support if payment was charged",
+        )
 
     from datetime import datetime, timezone, timedelta
 
@@ -207,9 +212,12 @@ async def verify_payment(
     try:
         from app.services.comms.resend_client import send_first_purchase_receipt_email
 
+        # Use the authoritative plan price; payment_amount is always present here
+        # because we fail-closed above when it's unavailable.
+        receipt_amount = payment_amount if payment_amount is not None else plan_prices.get(purchased_plan, 0)
         await send_first_purchase_receipt_email(
             user.email,
-            payment_amount or 29900,
+            receipt_amount,
             body.razorpay_order_id,
         )
     except Exception as e:
