@@ -224,7 +224,7 @@ export default function PaymentHistory({ refreshKey = 0 }) {
                             {p.credits_added > 0 && <span>+{p.credits_added} credits</span>}
                           </div>
                         </div>
-                        <p className="text-sm font-bold text-foreground whitespace-nowrap">{p.amount_display || p.amount_formatted || p.amount}</p>
+                        <p className="text-sm font-bold text-foreground whitespace-nowrap">{p.amount_display || p.amount_formatted || formatAmount(p.amount) || p.amount}</p>
                       </div>
 
                       {/* View receipt + refund row */}
