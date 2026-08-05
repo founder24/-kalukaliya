@@ -87,7 +87,7 @@ VERTEX_SEARCH_LOCATION = "global"
 VERTEX_SEARCH_SERVING_CONFIG = "default_search"
 CLOUDFLARE_ACCOUNT_ID = "d66e40eac539fff1db270fddf384a5ec"
 CLOUDFLARE_KV_NAMESPACE_ID = "981e939bcca445c481d4be818ebefee7"
-SARVAM_MODEL = "sarvam-30b"
+SARVAM_MODEL = "sarvam-105b"
 CF_R2_PUBLIC_URL = "https://pub-0af278045dba4daeb4a93fa8a348dcac.r2.dev"
 
 [postMerge]
