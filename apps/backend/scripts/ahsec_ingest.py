@@ -985,32 +985,36 @@ _NOTES_SYSTEM_AS = """\
 - অনুশীলনী অন্তৰ্ভুক্ত নকৰিবা।
 """
 
-_QA_SYSTEM_EN = """\
-You are an AHSEC subject expert. Output ONLY a valid JSON array — no prose, no markdown fences, no explanation before or after.
-Start your response with [ on the very first character.
+_QA_FROM_NOTES_SYSTEM_EN = """\
+You are an AHSEC exam question setter. Given chapter study notes, generate 5-8 exam questions with complete model answers.
 
-For each exercise question or problem provide:
-  {"question": "<question text>", "answer": "<complete solution>"}
+Output ONLY a valid JSON array — start your response with [ on the very first character, no text before it.
 
-Rules:
-- Numerical/calculation problems: show step-by-step working and final answer inside "answer".
-- Short-answer questions: concise but complete factual answer.
-- Long-answer questions: 3-6 structured sentences.
-- If no answerable questions exist, output exactly: []
+[{"question": "<question>", "answer": "<complete answer>"}]
 
-Example output (start immediately like this):
-[{"question": "Calculate the molar mass of H2O.", "answer": "H=1, O=16. Molar mass = 2(1)+16 = 18 g/mol."}]
+Guidelines:
+- Include a mix of short-answer (1-2 sentences) and long-answer (3-5 sentences) questions.
+- Questions must be directly answerable from the notes provided.
+- Answers must be factually correct and complete.
+- Do NOT generate questions about the author, publication history, or textbook credits.
+- If notes are too short to generate meaningful questions, output exactly: []
 """
 
-_QA_SYSTEM_AS = """\
-তুমি এজন AHSEC বিষয় বিশেষজ্ঞ। তলত দিয়া অনুশীলনী প্ৰশ্নসমূহৰ সম্পূৰ্ণ সমাধান অসমীয়া ভাষাত লিখা।
-বিন্যাস (JSON array হিচাপে):
-[
-  {"question": "<প্ৰশ্ন>", "answer": "<সম্পূৰ্ণ সমাধান>"},
-  ...
-]
-উত্তৰ তথ্যভিত্তিক আৰু শিক্ষামূলক ৰাখা। প্ৰশ্ন নাথাকিলে [] ৰিটাৰ্ন কৰা।
+_QA_FROM_NOTES_SYSTEM_AS = """\
+তুমি এজন AHSEC পৰীক্ষাৰ প্ৰশ্নকৰ্তা। তলত দিয়া অধ্যায়ৰ টোকাৰ পৰা ৫-৮টা পৰীক্ষাৰ প্ৰশ্ন আৰু সম্পূৰ্ণ আদৰ্শ উত্তৰ অসমীয়া ভাষাত লিখা।
+
+কেৱল JSON array আউটপুট কৰা — প্ৰথম আখৰটো [ হ'ব লাগিব, আগত একো নালাগিব:
+[{"question": "<প্ৰশ্ন>", "answer": "<সম্পূৰ্ণ উত্তৰ>"}]
+
+নিৰ্দেশনা:
+- চুটি উত্তৰ (১-২ বাক্য) আৰু দীঘল উত্তৰ (৩-৫ বাক্য) মিহলি কৰা।
+- প্ৰশ্নবোৰ টোকাৰ পৰাই উত্তৰ দিব পৰা হ'ব লাগিব।
+- টোকা চুটি হ'লে [] ৰিটাৰ্ন কৰা।
 """
+
+# Legacy prompt kept for backward compat (used when exercises_text is available)
+_QA_SYSTEM_EN = _QA_FROM_NOTES_SYSTEM_EN
+_QA_SYSTEM_AS = _QA_FROM_NOTES_SYSTEM_AS
 
 
 async def generate_notes(
@@ -1050,6 +1054,66 @@ async def generate_notes(
     return _clean_notes_output(result)  # return cleaned result on last attempt
 
 
+def _parse_qa_json(raw: str) -> list[dict]:
+    """Parse a JSON array of {question, answer} dicts from a Sarvam response."""
+    raw = raw.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
+    raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
+    raw = raw.strip()
+    try:
+        pairs = json.loads(raw)
+        if isinstance(pairs, list):
+            return [
+                {"question": str(p.get("question", "")), "answer": str(p.get("answer", ""))}
+                for p in pairs
+                if p.get("question") and p.get("answer")
+            ]
+    except Exception:
+        m = re.search(r"\[.*\]", raw, re.DOTALL)
+        if m:
+            try:
+                pairs = json.loads(m.group(0))
+                if isinstance(pairs, list):
+                    return [
+                        {"question": str(p.get("question", "")), "answer": str(p.get("answer", ""))}
+                        for p in pairs if p.get("question") and p.get("answer")
+                    ]
+            except Exception:
+                pass
+    return []
+
+
+async def generate_qa_from_notes(
+    sarvam,
+    notes_text: str,
+    chapter_title: str,
+    subject_name: str,
+    medium: str,
+) -> list[dict]:
+    """Generate Q&A pairs by asking Sarvam to create questions from chapter notes.
+
+    This is the primary Q&A generation path — it does not require an exercise
+    section to exist in the PDF. Sarvam invents exam-style questions AND answers
+    them based solely on the notes content.
+    """
+    if not notes_text or len(notes_text) < 100:
+        return []
+
+    is_as = medium == "as"
+    system = _QA_FROM_NOTES_SYSTEM_AS if is_as else _QA_FROM_NOTES_SYSTEM_EN
+    user_msg = (
+        f"Subject: {subject_name}\nChapter: {chapter_title}\n\n"
+        f"--- CHAPTER NOTES ---\n{notes_text[:5000]}"
+    )
+    raw = await sarvam.generate(
+        system_prompt=system,
+        user_message=user_msg,
+        is_assamese=is_as,
+        max_tokens=4096,
+    )
+    return _parse_qa_json(raw)
+
+
 async def generate_qa(
     sarvam,
     exercises_text: str,
@@ -1058,7 +1122,11 @@ async def generate_qa(
     subject_name: str,
     medium: str,
 ) -> list[dict]:
-    """Call Sarvam to generate Q&A solutions for a chapter's exercises."""
+    """Call Sarvam to generate Q&A solutions for a chapter's exercises.
+
+    Kept for backward compatibility; new code should prefer
+    generate_qa_from_notes() which doesn't require an exercise section.
+    """
     if not exercises_text or len(exercises_text) < 50:
         return []
 
@@ -1073,38 +1141,9 @@ async def generate_qa(
         system_prompt=system,
         user_message=user_msg,
         is_assamese=is_as,
-        max_tokens=4096,   # Q&A JSON arrays need more room than regular notes
+        max_tokens=4096,
     )
-
-    # Try to parse JSON from the response
-    raw = raw.strip()
-    # Strip markdown code fences if present
-    raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
-    raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
-    raw = raw.strip()
-
-    try:
-        pairs = json.loads(raw)
-        if isinstance(pairs, list):
-            return [
-                {"question": str(p.get("question", "")), "answer": str(p.get("answer", ""))}
-                for p in pairs
-                if p.get("question") and p.get("answer")
-            ]
-    except Exception:
-        # Fall back: try to extract JSON array from anywhere in the response
-        m = re.search(r"\[.*\]", raw, re.DOTALL)
-        if m:
-            try:
-                pairs = json.loads(m.group(0))
-                if isinstance(pairs, list):
-                    return [
-                        {"question": str(p.get("question", "")), "answer": str(p.get("answer", ""))}
-                        for p in pairs if p.get("question")
-                    ]
-            except Exception:
-                pass
-    return []
+    return _parse_qa_json(raw)
 
 
 # ── Notes → RAG Sections ───────────────────────────────────────────────────────
@@ -1663,11 +1702,13 @@ async def process_pdf_entry(
             stats["skipped"] += 1
             continue
 
-        # ── Generate Q&A ──────────────────────────────────────────────────────
+        # ── Generate Q&A from notes ───────────────────────────────────────────
         qa_pairs: list[dict] = []
-        if not dry_run and ex_text:
+        if not dry_run:
             try:
-                qa_pairs = await generate_qa(sarvam, ex_text, notes_text, ch_title, subject_name, medium)
+                qa_pairs = await generate_qa_from_notes(
+                    sarvam, notes_text, ch_title, subject_name, medium
+                )
                 await asyncio.sleep(delay)
                 log.info(f"    Generated {len(qa_pairs)} Q&A pairs")
             except Exception as e:
