@@ -185,6 +185,9 @@ async def patch_profile(
     if body.preferred_language is not None:
         updates["preferred_language"] = body.preferred_language
     if body.ads_opt_out is not None:
+        tier = user.subscription_tier or "free"
+        if body.ads_opt_out and tier == "free":
+            raise HTTPException(status_code=403, detail="Ad-free experience requires a paid plan")
         updates["ads_opt_out"] = body.ads_opt_out
     if body.board_id is not None:
         updates["board_id"] = body.board_id

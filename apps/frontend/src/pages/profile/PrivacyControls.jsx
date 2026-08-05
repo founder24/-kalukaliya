@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ShieldOff, ChevronRight, Brain } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ShieldOff, ChevronRight, Brain, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getAdsOptOut,
@@ -14,13 +14,14 @@ import { useAuth } from '@/context/AuthContext';
 
 export default function PrivacyControls({ profile }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [optedOut, setOptedOut] = useState(false);
   const [saving, setSaving] = useState(false);
   const announcedRef = useRef(false);
 
-  // Hydrate from the server-side value when the profile loads, so the
-  // toggle reflects the cross-device preference instead of whatever
-  // localStorage happened to hold on this device.
+  const isPaidUser = profile?.plan && profile.plan !== 'free';
+
+  // Hydrate from the server-side value when the profile loads.
   useEffect(() => {
     let next;
     if (profile && typeof profile.ads_opt_out === 'boolean') {
@@ -30,12 +31,6 @@ export default function PrivacyControls({ profile }) {
     }
     setOptedOut(next);
 
-    // Task #532: one-time announcement that the opt-out preference now
-    // syncs across the user's devices. Only shown to signed-in users
-    // who already had ads opted out (locally OR on the server) — i.e.
-    // the population whose existing choice has just been "promoted"
-    // to a cross-device account preference. Mark seen on first run so
-    // it never reappears, even if they toggle the setting later.
     if (
       user &&
       profile &&
@@ -44,11 +39,6 @@ export default function PrivacyControls({ profile }) {
       !hasSeenAdsCrossDeviceBanner()
     ) {
       announcedRef.current = true;
-      // IMPORTANT: read the *initial* local value (snapshotted at JS
-      // bundle load), not the live localStorage flag — by the time
-      // this effect runs, ProfilePage's `hydrateAdsOptOutFromServer`
-      // has already overwritten localStorage with the server value, so
-      // checking it now would miss legacy local-only opt-outs.
       const hadLocalOptOut = getInitialLocalAdsOptOut();
       if (next || hadLocalOptOut) {
         toast.success(
@@ -62,19 +52,21 @@ export default function PrivacyControls({ profile }) {
 
   const handleToggle = async () => {
     if (saving) return;
+
+    // Free users: nudge toward upgrade instead of toggling.
+    if (!isPaidUser) {
+      toast.info('Upgrade to Starter or Pro to remove ads.', {
+        action: { label: 'Upgrade', onClick: () => navigate('/profile?upgrade=starter') },
+      });
+      return;
+    }
+
     const next = !optedOut;
-    // Optimistic local update so the UI is instant.
     setOptedOut(next);
     setAdsOptOut(next);
 
-    // Signed-out fallback: this control is normally only reachable from
-    // the auth-gated profile page, but if the session has expired in
-    // the background we still want to honour the local toggle and tell
-    // the user how to make it stick across devices.
     if (!user) {
-      toast.info(
-        'Saved on this device. Sign in to sync this preference across all your devices.'
-      );
+      toast.info('Saved on this device. Sign in to sync this preference across all your devices.');
       return;
     }
 
@@ -86,12 +78,8 @@ export default function PrivacyControls({ profile }) {
           ? 'Ads disabled across all your devices — takes effect on next page load'
           : 'Ads re-enabled across all your devices — thanks for supporting Syrabit'
       );
-      // The user has now made an explicit cross-device choice; suppress
-      // the one-time announcement on subsequent visits.
       markAdsCrossDeviceBannerSeen();
     } catch {
-      // Server save failed — keep the local change but warn the user
-      // that other devices won't pick it up until they're online.
       toast.warning(
         'Saved on this device, but we couldn\'t sync it across your other devices. Try again when you\'re back online.'
       );
@@ -111,38 +99,59 @@ export default function PrivacyControls({ profile }) {
         <div
           className="flex items-start gap-3 p-3 rounded-xl"
           style={{
-            background: 'rgba(124,58,237,0.06)',
-            border: '1px solid rgba(139,92,246,0.18)',
+            background: isPaidUser ? 'rgba(124,58,237,0.06)' : 'rgba(148,163,184,0.06)',
+            border: isPaidUser
+              ? '1px solid rgba(139,92,246,0.18)'
+              : '1px solid rgba(148,163,184,0.18)',
           }}
         >
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.25)' }}
+            style={
+              isPaidUser
+                ? { background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.25)' }
+                : { background: 'rgba(148,163,184,0.10)', border: '1px solid rgba(148,163,184,0.20)' }
+            }
           >
-            <ShieldOff size={16} style={{ color: 'hsl(var(--primary))' }} />
+            <ShieldOff size={16} style={{ color: isPaidUser ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))' }} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-foreground">Opt out of ads</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm font-semibold text-foreground">Opt out of ads</p>
+              {!isPaidUser && (
+                <span
+                  className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                  style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' }}
+                >
+                  <Lock size={8} /> Paid
+                </span>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground/70 mt-0.5">
-              Stop ad scripts from loading. While you're signed in, this preference is saved to
-              your account and synced across all your devices, and applies on the next page you open.
+              {isPaidUser
+                ? 'Stop ad scripts from loading. While you\'re signed in, this preference is saved to your account and synced across all your devices, and applies on the next page you open.'
+                : 'Ad-free browsing is included with Starter and Pro plans. Upgrade to remove all ads across your devices.'}
             </p>
           </div>
           <button
             type="button"
             role="switch"
-            aria-checked={optedOut}
-            aria-label="Opt out of ads"
+            aria-checked={isPaidUser ? optedOut : false}
+            aria-label={isPaidUser ? 'Opt out of ads' : 'Upgrade to opt out of ads'}
             onClick={handleToggle}
             data-testid="ads-optout-toggle"
             className="relative flex-shrink-0 w-11 h-6 rounded-full transition-colors"
             style={{
-              background: optedOut ? 'hsl(var(--primary))' : 'rgba(148,163,184,0.35)',
+              background: isPaidUser && optedOut
+                ? 'hsl(var(--primary))'
+                : 'rgba(148,163,184,0.35)',
+              cursor: isPaidUser ? 'pointer' : 'not-allowed',
+              opacity: isPaidUser ? 1 : 0.5,
             }}
           >
             <span
               className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform shadow"
-              style={{ transform: optedOut ? 'translateX(22px)' : 'translateX(2px)' }}
+              style={{ transform: isPaidUser && optedOut ? 'translateX(22px)' : 'translateX(2px)' }}
             />
           </button>
         </div>
