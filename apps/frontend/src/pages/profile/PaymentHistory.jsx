@@ -244,7 +244,14 @@ export default function PaymentHistory({ refreshKey = 0 }) {
               </div>
             ) : (
               <div className="space-y-2">
-                {payments.map((p) => {
+                {(() => {
+                  const completedTotal = payments
+                    .filter((p) => p.status === 'completed')
+                    .reduce((sum, p) => sum + (parseInt(p.amount, 10) || 0), 0);
+                  const showTotal = payments.filter((p) => p.status === 'completed').length >= 2;
+                  return (
+                    <>
+                      {payments.map((p) => {
                   const statusCfg = STATUS_CONFIG[p.status] || STATUS_CONFIG.unknown;
                   const StatusIcon = statusCfg.icon;
                   const canRefund = p.status === 'completed' && !p.refund_status;
@@ -340,6 +347,15 @@ export default function PaymentHistory({ refreshKey = 0 }) {
                     </div>
                   );
                 })}
+                      {showTotal && (
+                        <div className="mt-1 pt-2 border-t border-border/40 flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">Total paid</span>
+                          <span className="text-xs font-semibold text-foreground">{formatAmount(completedTotal)}</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>
