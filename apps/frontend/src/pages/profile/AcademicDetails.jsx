@@ -7,6 +7,7 @@ import { LogoMark } from '@/components/Logo';
 import { StarRating, UsageDots } from './shared';
 import { getSubjectsByCourseType, apiClient } from '@/utils/api';
 import { toast } from 'sonner';
+import AcademicCascadeSelector from './AcademicCascadeSelector';
 
 const COURSE_TYPE_ICONS = {
   'target':   Target,
@@ -196,19 +197,11 @@ function CourseTypeSelector({ profile, onUpdate }) {
 }
 
 export default function AcademicDetails({ profile, isDegreeProfile, openEdit, onProfileUpdate }) {
-  const baseFields = [
-    { key: 'name',       label: 'Display Name', value: profile?.name,       icon: User,          placeholder: 'Your full name' },
-    { key: 'board_name', label: 'Board',        value: profile?.board_name, icon: Globe,         placeholder: 'AssamBoard division (AHSEC, DEGREE or SEBA)' },
-    { key: 'class_name', label: 'Class / Sem',  value: profile?.class_name, icon: GraduationCap, placeholder: 'e.g. Class 12, 2nd Sem' },
+  // Only name and phone remain as free-text edits
+  const textFields = [
+    { key: 'name',  label: 'Display Name', value: profile?.name,  icon: User,  placeholder: 'Your full name' },
+    { key: 'phone', label: 'Phone',        value: profile?.phone, icon: Phone, placeholder: 'Optional phone number' },
   ];
-
-  if (!isDegreeProfile) {
-    baseFields.push({
-      key: 'stream_name', label: 'Stream', value: profile?.stream_name, icon: Layers, placeholder: 'e.g. Science (PCM), B.Com'
-    });
-  }
-
-  baseFields.push({ key: 'phone', label: 'Phone', value: profile?.phone, icon: Phone, placeholder: 'Optional phone number' });
 
   return (
     <>
@@ -216,30 +209,55 @@ export default function AcademicDetails({ profile, isDegreeProfile, openEdit, on
         <div className="px-4 py-3 border-b border-border">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Academic Details</p>
         </div>
-        {baseFields.map(({ key, label, value, icon: Icon, placeholder }, i) => (
-          <button
-            key={key}
-            onClick={() => openEdit(key, label, placeholder)}
-            className={`w-full flex items-center gap-3 px-4 py-3.5 hover:bg-accent/30 transition-colors text-left ${
-              key !== 'phone' || isDegreeProfile ? 'border-b border-border/50' : ''
-            }`}
-            data-testid={`edit-field-${key}`}
-          >
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(139,92,246,0.15)' }}>
-              <Icon size={14} style={{ color: 'hsl(var(--primary))' }} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className="text-sm font-medium text-foreground truncate">{value || `Add ${label.toLowerCase()}`}</p>
-            </div>
-            <ChevronRight size={14} className="text-muted-foreground/70 flex-shrink-0" />
-          </button>
-        ))}
 
+        {/* Name — still a free-text field */}
+        <button
+          onClick={() => openEdit('name', 'Display Name', 'Your full name')}
+          className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-accent/30 transition-colors text-left border-b border-border/50"
+          data-testid="edit-field-name"
+        >
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(139,92,246,0.15)' }}>
+            <User size={14} style={{ color: 'hsl(var(--primary))' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-muted-foreground">Display Name</p>
+            <p className={`text-sm font-medium truncate ${profile?.name ? 'text-foreground' : 'text-muted-foreground/60'}`}>
+              {profile?.name || 'Add display name'}
+            </p>
+          </div>
+          <ChevronRight size={14} className="text-muted-foreground/70 flex-shrink-0" />
+        </button>
+
+        {/* Board → Class → Stream → Subject cascade dropdowns */}
+        <AcademicCascadeSelector
+          profile={profile}
+          onProfileUpdate={onProfileUpdate}
+        />
+
+        {/* Course type selector (degree boards only) */}
         {isDegreeProfile && (
           <CourseTypeSelector profile={profile} onUpdate={onProfileUpdate} />
         )}
+
+        {/* Phone — free-text field */}
+        <button
+          onClick={() => openEdit('phone', 'Phone', 'Optional phone number')}
+          className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-accent/30 transition-colors text-left"
+          data-testid="edit-field-phone"
+        >
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(139,92,246,0.15)' }}>
+            <Phone size={14} style={{ color: 'hsl(var(--primary))' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-muted-foreground">Phone</p>
+            <p className={`text-sm font-medium truncate ${profile?.phone ? 'text-foreground' : 'text-muted-foreground/60'}`}>
+              {profile?.phone || 'Add phone number'}
+            </p>
+          </div>
+          <ChevronRight size={14} className="text-muted-foreground/70 flex-shrink-0" />
+        </button>
       </div>
 
       <div className="glass-card rounded-2xl overflow-hidden">
