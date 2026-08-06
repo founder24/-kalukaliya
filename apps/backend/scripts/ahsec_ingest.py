@@ -414,7 +414,7 @@ def build_catalogue(class11: bool = True, class12: bool = True) -> list[dict]:
 
 # ── PDF Text Extraction ────────────────────────────────────────────────────────
 
-def _download_pdf(url: str, total_timeout: int = 120) -> bytes:
+def _download_pdf(url: str, total_timeout: int = 300) -> bytes:
     """Download a PDF with a hard wall-clock cap (default 120 s).
 
     urllib timeout= resets on each received chunk, so a slow server can drip
