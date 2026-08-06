@@ -414,10 +414,43 @@ def build_catalogue(class11: bool = True, class12: bool = True) -> list[dict]:
 
 # ── PDF Text Extraction ────────────────────────────────────────────────────────
 
-def _download_pdf(url: str) -> bytes:
+def _download_pdf(url: str, total_timeout: int = 120) -> bytes:
+    """Download a PDF with a hard total-time cap (default 120 s).
+
+    urllib timeout= only resets on each chunk, so a slow server can stall
+    forever.  We enforce a wall-clock deadline with a threading.Timer that
+    closes the connection if the full read hasn't finished in time.
+    """
+    import threading
+
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, context=_ssl_ctx(), timeout=60) as r:
-        return r.read()
+    response = urllib.request.urlopen(req, context=_ssl_ctx(), timeout=30)
+
+    result: list[bytes] = []
+    error: list[Exception] = []
+
+    def _read() -> None:
+        try:
+            result.append(response.read())
+        except Exception as exc:
+            error.append(exc)
+
+    t = threading.Thread(target=_read, daemon=True)
+    t.start()
+    t.join(timeout=total_timeout)
+
+    if t.is_alive():
+        # Force-close the socket so the background thread unblocks
+        try:
+            response.close()
+        except Exception:
+            pass
+        raise TimeoutError(f"PDF download exceeded {total_timeout}s wall-clock: {url}")
+
+    if error:
+        raise error[0]
+
+    return result[0]
 
 
 def _ocr_page(page, lang: str = "asm+eng") -> str:
