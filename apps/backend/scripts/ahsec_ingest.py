@@ -21,7 +21,7 @@ Options:
     --delay S           Seconds between Sarvam calls (default 1.5)
     --pilot             Shorthand: Chemistry XI EN + Biology XI AS only
 
-Progress is logged to /tmp/ahsec_ingest_progress.jsonl for resume support.
+Progress is logged to scripts/.ahsec_ingest_progress.jsonl for resume support.
 On re-run without --force, already-completed chapters are skipped.
 """
 
@@ -49,7 +49,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("/tmp/ahsec_ingest.log"),
+        logging.FileHandler(Path(__file__).parent / ".ahsec_ingest.log"),
     ],
 )
 log = logging.getLogger("ahsec_ingest")
@@ -72,7 +72,7 @@ def _parse_args() -> argparse.Namespace:
 
 # ── Progress log ───────────────────────────────────────────────────────────────
 
-PROGRESS_FILE = Path("/tmp/ahsec_ingest_progress.jsonl")
+PROGRESS_FILE = Path(__file__).parent / ".ahsec_ingest_progress.jsonl"
 
 
 def _load_done_keys() -> set[str]:
