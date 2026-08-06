@@ -1686,6 +1686,15 @@ async def process_pdf_entry(
         # ── Upsert chapter ────────────────────────────────────────────────────
         chapter, created = await upsert_chapter(subj.id, ch_num, ch_title, medium)
 
+        # ── Early skip: chapter already has notes and we're not forcing ────────
+        existing_notes = (chapter.notes_en if medium == "en" else chapter.notes_as) or ""
+        if not force and len(existing_notes) > 100:
+            log.info(f"    ↳ Skip (already has {medium.upper()} notes, use --force to overwrite)")
+            stats["skipped"] += 1
+            _log_progress(progress_key, "done", chapter_id=str(chapter.id), pdf_url=pdf_url)
+            done_keys.add(progress_key)
+            continue
+
         # ── Generate notes ─────────────────────────────────────────────────────
         notes_text = ""
         if not dry_run:
