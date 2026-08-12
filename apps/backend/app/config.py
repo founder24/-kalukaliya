@@ -126,8 +126,8 @@ class Settings(BaseSettings):
     # https://aistudio.google.com/app/apikey and store in GCP SM as
     # "gemini-api-key" + in Replit secrets as GEMINI_API_KEY.
     GEMINI_API_KEY: Optional[str] = None
-    # Valid Sarvam chat-completion models (as of 2025-06): sarvam-30b, sarvam-105b
-    # sarvam-m1 was renamed; use sarvam-30b (fast) or sarvam-105b (quality).
+    # Valid Sarvam chat-completion models (as of 2026-08): sarvam-105b, sarvam-105b-conversations
+    # sarvam-30b was deprecated 2026-08. Use sarvam-105b (general) or sarvam-105b-conversations.
     # Override via SARVAM_MODEL env var if this needs to change without a deploy.
     SARVAM_MODEL: str = "sarvam-105b"
 

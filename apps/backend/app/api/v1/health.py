@@ -345,7 +345,7 @@ async def chat_pipeline_health(request: Request):
             )
 
         payload = {
-            "model": settings.SARVAM_MODEL or "sarvam-30b",
+            "model": settings.SARVAM_MODEL or "sarvam-105b",
             "messages": [
                 {
                     "role": "system",
