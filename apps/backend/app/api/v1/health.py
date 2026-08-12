@@ -353,8 +353,10 @@ async def chat_pipeline_health(request: Request):
                 },
                 {"role": "user", "content": "ping"},
             ],
-            "max_tokens": 10,
-            "temperature": 0,
+            "max_tokens": 20,
+            "temperature": 0.3,
+            "enable_thinking": False,
+            "stream": False,
         }
 
         t0 = _time.monotonic()
