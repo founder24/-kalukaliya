@@ -16,11 +16,22 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from app.api.v1.admin import require_admin_session, csrf_guard
-from app.api.v1.health import _is_quota_error
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    """Return True when *exc* is a transient Gemini quota exhaustion (HTTP 429).
+
+    Inlined here (rather than imported from health.py) so this module has no
+    dependency on private helpers in a sibling file — prevents ImportError if
+    the two files land in different commits during a deploy.
+    """
+    err = str(exc).upper()
+    return "429" in err or "RESOURCE_EXHAUSTED" in err or "QUOTA" in err
+
 
 router = APIRouter(
     tags=["Admin Pipeline Health"],
