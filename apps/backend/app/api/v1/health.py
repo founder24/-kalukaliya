@@ -16,6 +16,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Health"])
 
 
+def _is_quota_error(exc: Exception) -> bool:
+    """Return True when *exc* is a transient Gemini quota exhaustion (HTTP 429).
+
+    Gemini raises these as RuntimeError with the HTTP status or gRPC status
+    code embedded in the message string.  We treat them as "degraded" rather
+    than "unhealthy" so a brief quota blip does not cause a false-positive CI
+    failure.  Step 1 (main AI pipeline) is unaffected — it does not call this
+    helper and still fails hard on any error including quota exhaustion.
+    """
+    err = str(exc).upper()
+    return "429" in err or "RESOURCE_EXHAUSTED" in err or "QUOTA" in err
+
+
 async def _safe_check(coro, timeout: float = 5.0) -> Dict[str, Any]:
     """Run a health check coroutine with a timeout."""
     try:
@@ -545,57 +558,85 @@ async def chat_pipeline_health(request: Request):
 
         # ── Non-streaming probe result ────────────────────────────────────────
         if isinstance(ns_result, Exception):
-            return JSONResponse(
-                status_code=503,
-                content={
-                    **result,
-                    "status": "unhealthy",
-                    "step": "assamese_probe",
-                    "error": str(ns_result)[:120],
-                },
-            )
-        result["assamese_probe"] = ns_result
-        if not ns_result.get("has_assamese_script"):
-            return JSONResponse(
-                status_code=503,
-                content={
-                    **result,
-                    "status": "unhealthy",
-                    "step": "assamese_probe",
-                    "error": (
-                        "generate_gemini() returned no Assamese script — Assamese students "
-                        "would receive English when Sarvam is unavailable. "
-                        "Verify the system-prompt language instruction."
-                    ),
-                },
-            )
+            if _is_quota_error(ns_result):
+                # Transient quota exhaustion: degrade gracefully so CI is not
+                # blocked by a brief 429 blip.  ops can see the quota_warning
+                # field in the response body.
+                logger.warning(
+                    "assamese_probe: Gemini quota exhausted (429) — marking degraded: %s",
+                    str(ns_result)[:120],
+                )
+                result["assamese_probe"] = {
+                    "status": "degraded",
+                    "quota_warning": str(ns_result)[:120],
+                }
+            else:
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        **result,
+                        "status": "unhealthy",
+                        "step": "assamese_probe",
+                        "error": str(ns_result)[:120],
+                    },
+                )
+        else:
+            result["assamese_probe"] = ns_result
+            if not ns_result.get("has_assamese_script"):
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        **result,
+                        "status": "unhealthy",
+                        "step": "assamese_probe",
+                        "error": (
+                            "generate_gemini() returned no Assamese script — Assamese students "
+                            "would receive English when Sarvam is unavailable. "
+                            "Verify the system-prompt language instruction."
+                        ),
+                    },
+                )
 
         # ── Streaming probe result ────────────────────────────────────────────
         if isinstance(st_result, Exception):
-            return JSONResponse(
-                status_code=503,
-                content={
-                    **result,
-                    "status": "unhealthy",
-                    "step": "streaming_assamese_probe",
-                    "error": str(st_result)[:120],
-                },
-            )
-        result["streaming_assamese_probe"] = st_result
-        if not st_result.get("has_assamese_script"):
-            return JSONResponse(
-                status_code=503,
-                content={
-                    **result,
-                    "status": "unhealthy",
-                    "step": "streaming_assamese_probe",
-                    "error": (
-                        "stream_gemini() returned no Assamese script — streaming Assamese "
-                        "chat would be broken when Sarvam is unavailable. "
-                        "Verify the system-prompt language instruction."
-                    ),
-                },
-            )
+            if _is_quota_error(st_result):
+                # Transient quota exhaustion: degrade gracefully so CI is not
+                # blocked by a brief 429 blip.  ops can see the quota_warning
+                # field in the response body.
+                logger.warning(
+                    "streaming_assamese_probe: Gemini quota exhausted (429) — marking degraded: %s",
+                    str(st_result)[:120],
+                )
+                result["streaming_assamese_probe"] = {
+                    "status": "degraded",
+                    "quota_warning": str(st_result)[:120],
+                }
+            else:
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        **result,
+                        "status": "unhealthy",
+                        "step": "streaming_assamese_probe",
+                        "error": str(st_result)[:120],
+                    },
+                )
+        else:
+            result["streaming_assamese_probe"] = st_result
+            if not st_result.get("has_assamese_script"):
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        **result,
+                        "status": "unhealthy",
+                        "step": "streaming_assamese_probe",
+                        "error": (
+                            "stream_gemini() returned no Assamese script — streaming Assamese "
+                            "chat would be broken when Sarvam is unavailable. "
+                            "Verify the system-prompt language instruction."
+                        ),
+                    },
+                )
 
     # ── Step 3: MongoDB vector search reachability ───────────────────────────
     try:
@@ -611,7 +652,13 @@ async def chat_pipeline_health(request: Request):
         result["rag_status"] = "unavailable"
         result["rag_error"] = str(e)[:80]
 
-    result["status"] = "healthy"
+    # Downgrade overall status to "degraded" when either Assamese probe reported
+    # quota pressure (HTTP 200 is still returned — CI is not blocked).
+    any_quota_degraded = any(
+        isinstance(result.get(k), dict) and result[k].get("status") == "degraded"
+        for k in ("assamese_probe", "streaming_assamese_probe")
+    )
+    result["status"] = "degraded" if any_quota_degraded else "healthy"
     return JSONResponse(status_code=200, content=result)
 
 
