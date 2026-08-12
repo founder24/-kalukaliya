@@ -312,10 +312,15 @@ async def chat_pipeline_health(request: Request):
     """
     End-to-end chat pipeline integration test.
 
-    Exercises the full Sarvam AI → MongoDB RAG → response pipeline with a
-    minimal probe question. Intended for CI post-deploy smoke testing.
+    Exercises the full AI pipeline (Sarvam → Gemini fallback) with a minimal
+    probe question, exactly as real student chat requests do.  The response
+    indicates which provider served the request so CI can distinguish between
+    Sarvam healthy vs. Gemini-fallback-only.
 
-    Auth: Bearer token matching TRANSLATE_CRON_SECRET (same as cron endpoints).
+    Auth: Bearer token matching TRANSLATE_CRON_SECRET.
+    The CF Worker overwrites Authorization with an OIDC identity token and
+    saves the original in X-User-JWT — both headers are checked.
+
     Returns 200 on success, 503 on failure, 401 on bad/missing token.
     """
     import time as _time
@@ -323,9 +328,16 @@ async def chat_pipeline_health(request: Request):
     from app.config import settings
 
     # ── Auth: require TRANSLATE_CRON_SECRET ──────────────────────────────────
+    # CF Worker overwrites Authorization with a Google OIDC token; the original
+    # caller token is preserved in X-User-JWT.  Check both.
     auth_header = request.headers.get("Authorization", "")
-    token = auth_header.removeprefix("Bearer ").strip()
+    fallback_header = request.headers.get("X-User-JWT", "")
     expected = settings.TRANSLATE_CRON_SECRET
+
+    def _bearer(h: str) -> str:
+        return h[7:].strip() if h.startswith("Bearer ") else ""
+
+    token = _bearer(auth_header) or _bearer(fallback_header)
     if not expected or token != expected:
         return JSONResponse(
             status_code=401,
@@ -334,69 +346,48 @@ async def chat_pipeline_health(request: Request):
 
     result: Dict[str, Any] = {}
 
-    # ── Step 1: Sarvam AI live generation call ───────────────────────────────
+    # ── Step 1: Full AI pipeline (Sarvam → Gemini fallback) ─────────────────
+    # Uses the exact same code path as real student chat messages so this probe
+    # gives a true signal about what students actually experience.
     try:
-        import httpx
-
-        if not settings.SARVAM_API_KEY:
-            return JSONResponse(
-                status_code=503,
-                content={"status": "unhealthy", "error": "SARVAM_API_KEY not configured"},
-            )
-
-        payload = {
-            "model": settings.SARVAM_MODEL or "sarvam-105b",
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a test probe. Respond with exactly the single word PONG and nothing else.",
-                },
-                {"role": "user", "content": "ping"},
-            ],
-            "max_tokens": 20,
-            "temperature": 0.3,
-            "enable_thinking": False,
-            "stream": False,
-        }
-
-        t0 = _time.monotonic()
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{settings.SARVAM_BASE_URL}/chat/completions",
-                headers={
-                    "API-Subscription-Key": settings.SARVAM_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-        sarvam_latency_ms = round((_time.monotonic() - t0) * 1000, 1)
-
-        if resp.status_code != 200:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "status": "unhealthy",
-                    "step": "sarvam_call",
-                    "error": f"HTTP {resp.status_code}",
-                    "latency_ms": sarvam_latency_ms,
-                },
-            )
-
-        body = resp.json()
-        # Use `or ""` rather than `.get("content", "")` because Sarvam returns
-        # `"content": null` (key present, value null) when the model uses its
-        # thinking path — `.get(key, default)` returns null in that case, not
-        # the default, causing `None.strip()` → AttributeError → HTTP 503.
-        response_text = (
-            (body.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+        from app.services.ai.sarvam_client import generate_with_sarvam
+        from app.services.ai.gemini_fallback import (
+            generate_gemini,
+            _available as gemini_available,
         )
-        result["sarvam_latency_ms"] = sarvam_latency_ms
-        result["response_preview"] = response_text[:40]
+        from app.core.circuit_breaker import SarvamBillingExhaustedError, CircuitBreakerError
+
+        _sys = "You are a test probe. Respond with exactly the single word PONG and nothing else."
+        _usr = "ping"
+        provider = "sarvam"
+        t0 = _time.monotonic()
+
+        try:
+            response_text = await generate_with_sarvam(
+                system_prompt=_sys,
+                user_message=_usr,
+                stream=False,
+            )
+        except (SarvamBillingExhaustedError, CircuitBreakerError, Exception) as sarvam_err:
+            # Sarvam unavailable (billing exhausted, circuit open, or API error).
+            # Fall through to Gemini exactly as real chat does.
+            if not gemini_available():
+                raise RuntimeError(
+                    f"Sarvam failed ({str(sarvam_err)[:80]}) and Gemini not configured"
+                )
+            logger.info(f"chat_pipeline_probe: Sarvam failed ({sarvam_err!r:.80}), using Gemini fallback")
+            response_text = await generate_gemini(_sys, _usr, max_output_tokens=20)
+            provider = "gemini-2.5-flash"
+
+        latency_ms = round((_time.monotonic() - t0) * 1000, 1)
+        result["provider"] = provider
+        result["latency_ms"] = latency_ms
+        result["response_preview"] = (response_text or "")[:40]
 
     except Exception as e:
         return JSONResponse(
             status_code=503,
-            content={"status": "unhealthy", "step": "sarvam_call", "error": str(e)[:120]},
+            content={"status": "unhealthy", "step": "ai_pipeline", "error": str(e)[:120]},
         )
 
     # ── Step 2: MongoDB vector search reachability ───────────────────────────

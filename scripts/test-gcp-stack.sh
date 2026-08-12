@@ -57,8 +57,7 @@ echo -e "  ${B}Region  :${X} ${GCP_REGION}"
 echo -e "  ${B}Service :${X} ${GCP_SERVICE}"
 echo -e "  ${B}API     :${X} ${API_URL}"
 echo ""
-echo -e "  ${DIM}Note: Vertex Search and Gemini have been removed.${X}"
-echo -e "  ${DIM}AI: Sarvam AI (sarvam-30b) for all languages.${X}"
+echo -e "  ${DIM}AI: Sarvam AI (sarvam-105b) primary; Gemini 2.5 Flash fallback when Sarvam billing exhausted.${X}"
 echo -e "  ${DIM}RAG: MongoDB vector search (text-embedding-005).${X}"
 
 # ── Preflight: gcloud available ───────────────────────────────────────────────
@@ -191,7 +190,8 @@ done
 
 # Also confirm removed secrets are NOT accidentally still mounted
 _head "2b. Confirming Removed Secrets Are Gone"
-DEAD_SECRETS=("GEMINI_API_KEY" "VERTEX_AI_SA_KEY" "VERTEX_SEARCH_DATASTORE_ID")
+# Note: GEMINI_API_KEY is intentionally kept — it powers the Sarvam fallback.
+DEAD_SECRETS=("VERTEX_AI_SA_KEY" "VERTEX_SEARCH_DATASTORE_ID")
 for SECRET in "${DEAD_SECRETS[@]}"; do
   EXISTS=$(gcloud secrets describe "$SECRET" \
     --project "$GCP_PROJECT" \
@@ -224,7 +224,7 @@ SARVAM_MODEL_SET=$(echo "$ENV_VARS" | grep "SARVAM_MODEL=" || echo "")
 if [[ -n "$SARVAM_MODEL_SET" ]]; then
   _ok "SARVAM_MODEL env var: ${SARVAM_MODEL_SET##*=}"
 else
-  _warn "SARVAM_MODEL not set explicitly (will default to sarvam-30b)"
+  _warn "SARVAM_MODEL not set explicitly (will default to sarvam-105b via config.py)"
 fi
 
 TRUST_EDGE=$(echo "$ENV_VARS" | grep "TRUST_EDGE_AUTH=" || echo "")
@@ -496,27 +496,35 @@ else
   if [[ -z "$SVC_URL" ]]; then
     _warn "No Cloud Run URL — skipping chat pipeline test"
   else
+    # Cloud Run now requires OIDC auth (org policy blocks allUsers invoker).
+    # Pass OIDC in Authorization (Cloud Run IAM) and cron secret in X-User-JWT
+    # (the health endpoint checks both, mirroring the CF Worker proxy behaviour).
     ID_TOKEN=$(gcloud auth print-identity-token 2>/dev/null || echo "")
     CHAT_CODE=$(curl -s -o /tmp/syrabit_chat_pipeline.json \
       -w "%{http_code}" \
-      --max-time 30 \
-      -H "Authorization: Bearer ${CRON_SECRET}" \
+      --max-time 40 \
+      -H "Authorization: Bearer ${ID_TOKEN}" \
+      -H "X-User-JWT: Bearer ${CRON_SECRET}" \
       "${SVC_URL}/api/v1/health/chat-pipeline" 2>/dev/null || echo "000")
 
     CHAT_BODY=$(cat /tmp/syrabit_chat_pipeline.json 2>/dev/null || echo "{}")
 
     if [[ "$CHAT_CODE" == "200" ]]; then
       CHAT_STATUS=$(jq_py "$CHAT_BODY" "d.get('status','?')")
-      SARVAM_LAT=$(jq_py "$CHAT_BODY" "str(d.get('sarvam_latency_ms','?'))")
+      AI_PROVIDER=$(jq_py "$CHAT_BODY" "d.get('provider','?')")
+      AI_LAT=$(jq_py "$CHAT_BODY" "str(d.get('latency_ms','?'))")
       RESP_PREVIEW=$(jq_py "$CHAT_BODY" "d.get('response_preview','?')")
       RAG_STATUS=$(jq_py "$CHAT_BODY" "d.get('rag_status','?')")
       RAG_TOPICS=$(jq_py "$CHAT_BODY" "str(d.get('rag_topics_cached','?'))")
 
-      _ok "Chat pipeline healthy (status=${CHAT_STATUS})"
-      _info "Sarvam latency : ${SARVAM_LAT}ms"
+      _ok "Chat pipeline healthy (status=${CHAT_STATUS}, provider=${AI_PROVIDER})"
+      _info "AI latency     : ${AI_LAT}ms"
       _info "Response       : ${RESP_PREVIEW}"
       _info "RAG            : ${RAG_STATUS} (${RAG_TOPICS} topics cached)"
 
+      if [[ "$AI_PROVIDER" == "gemini-2.5-flash" ]]; then
+        _warn "Chat served by Gemini fallback — Sarvam billing exhausted or circuit open. Top up at api.sarvam.ai."
+      fi
       if [[ "$RAG_STATUS" == "degraded" ]]; then
         _warn "RAG degraded — no topic embeddings cached (MongoDB vector search may be empty)"
       fi
@@ -526,7 +534,7 @@ else
       CHAT_ERR=$(jq_py "$CHAT_BODY" "d.get('error', d.get('step','?'))")
       _fail "Chat pipeline → HTTP 503 (${CHAT_ERR})"
     elif [[ "$CHAT_CODE" == "000" ]]; then
-      _fail "Chat pipeline → connection timeout (Cloud Run not responding in 30s)"
+      _fail "Chat pipeline → connection timeout (Cloud Run not responding in 40s)"
     else
       _fail "Chat pipeline → HTTP ${CHAT_CODE}"
     fi
