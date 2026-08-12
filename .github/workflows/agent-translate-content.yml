@@ -62,14 +62,10 @@ jobs:
           RESPONSE=$(cat /tmp/translate_response.json 2>/dev/null || echo '{}')
           echo "Response: $RESPONSE"
 
-          # Fail only on auth errors — any other status means the request reached
-          # the backend (200 = success, 504 = proxy timeout while processing, etc.)
-          if [[ "$HTTP_STATUS" == "401" || "$HTTP_STATUS" == "403" ]]; then
-            echo "::error::Authentication failed (HTTP ${HTTP_STATUS}) — check TRANSLATE_CRON_SECRET and BACKEND_URL secrets."
-            exit 1
-          fi
+          echo "HTTP status: $HTTP_STATUS"
 
           if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
+            # Full success — parse and report translation counts
             FAILED=$(echo "$RESPONSE" | jq -r '.failed // 0')
             TRANSLATED=$(echo "$RESPONSE" | jq -r '.translated // 0')
             SKIPPED=$(echo "$RESPONSE" | jq -r '.skipped // 0')
@@ -78,6 +74,20 @@ jobs:
               echo "::warning::$FAILED translations failed (check Sarvam/Gemini billing)"
               echo "$RESPONSE" | jq -r '.errors[]' 2>/dev/null || true
             fi
+          elif [[ "$HTTP_STATUS" == "504" ]]; then
+            # 504 = Cloudflare edge proxy timed out waiting for the backend response.
+            # The translate job takes several minutes; the edge has a hard subrequest
+            # timeout that fires before the backend finishes. The request DID reach the
+            # backend and authentication succeeded — this is a proxy timing constraint,
+            # not a failure of the translation job itself. The job continues running
+            # server-side. Track async progress via GET /api/v1/admin/cron/translate/status
+            # once that endpoint is implemented (see follow-up task #205).
+            echo "::notice::HTTP 504 — Cloudflare proxy timeout. The translation job was accepted by the backend and is running asynchronously. This is expected until the endpoint is made async (task #205)."
+          elif [[ "$HTTP_STATUS" == "401" || "$HTTP_STATUS" == "403" ]]; then
+            echo "::error::Authentication failed (HTTP ${HTTP_STATUS}) — check TRANSLATE_CRON_SECRET and BACKEND_URL secrets."
+            exit 1
           else
-            echo "::notice::HTTP ${HTTP_STATUS} — request reached backend (proxy timeout or backend error); translation may still be running."
+            echo "::error::Unexpected HTTP ${HTTP_STATUS} from translation endpoint — potential backend error."
+            echo "Response: $RESPONSE"
+            exit 1
           fi
