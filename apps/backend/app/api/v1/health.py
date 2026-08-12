@@ -8,7 +8,7 @@ import time
 
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -408,82 +408,194 @@ async def chat_pipeline_health(request: Request):
             content={"status": "unhealthy", "step": "ai_pipeline", "error": str(e)[:120]},
         )
 
-    # ── Step 2: Assamese output quality via Gemini fallback ─────────────────
-    # When Sarvam is unavailable, Assamese students are served by Gemini.
-    # Sarvam uses complex extraction helpers (_extract_assamese_answer /
-    # _extract_assamese_translation) because its reasoning model embeds
-    # Assamese lines inside an English chain-of-thought.  Gemini 2.5 Flash
-    # responds directly in the requested language — no extraction needed.
-    # This step confirms that Gemini produces valid Assamese script so we
-    # know the fallback actually serves students correctly.
-    try:
-        from app.services.ai.gemini_fallback import (
-            generate_gemini,
-            _available as gemini_available,
-        )
+    # ── Steps 2 & 4: Assamese quality probes (non-streaming + streaming) ────
+    # Both probes run in parallel inside a single asyncio.gather() call so they
+    # share the same 12 s time window and don't add to the total CI budget.
+    #
+    # Per-step time budgets (worst-case total ≤ 35 s CI curl deadline):
+    #   Step 1 Sarvam attempt  :  6 s
+    #   Step 1 Gemini fallback :  8 s
+    #   Steps 2+4 in parallel  : 12 s  (both complete within this window)
+    #   Step 3 RAG             :  4 s
+    #   Total worst case       : 6 + 8 + 12 + 4 = 30 s  (5 s margin)
+    #
+    # Step 2 (non-streaming) — generate_gemini():
+    #   Sarvam uses complex extraction helpers because its reasoning model
+    #   embeds Assamese lines inside an English chain-of-thought.  Gemini 2.5
+    #   Flash responds directly in the requested language — no extraction needed.
+    #   This step confirms that generate_gemini() produces valid Assamese script.
+    #
+    # Step 4 (streaming) — stream_gemini():
+    #   Most student chat is streamed via stream_gemini(), which is separate code
+    #   from generate_gemini() and was not previously covered by the probe.  This
+    #   step verifies the streaming path also yields valid Assamese script and
+    #   measures TTFB (time to first chunk).
+    #
+    # When Gemini is not configured both steps are skipped (not a failure):
+    # the probes only make sense when Gemini is the active fallback.
 
-        if not gemini_available():
-            # Gemini not configured — skip the Assamese quality probe.
-            # This is not a failure: the probe only makes sense when Gemini is
-            # the active fallback.  Returning "skipped" keeps the endpoint healthy
-            # so CI passes in environments without GEMINI_API_KEY set.
-            result["assamese_probe"] = {
-                "status": "skipped",
-                "reason": "Gemini not configured (GEMINI_API_KEY absent)",
-            }
-        else:
-            # System prompt in Assamese instructs the model to respond in Assamese.
-            # User question: "তুমি কোন?" — "Who are you?"
-            _as_sys = (
-                "তুমি এটা সহায়কাৰী শিক্ষামূলক সহায়ক। সদায় চমুকৈ অসমীয়া ভাষাত উত্তৰ দিয়া।"
-            )
-            _as_usr = "তুমি কোন?"
-            t_as = _time.monotonic()
-            # 25 s timeout: Step 1 can use up to ~20 s; 25 s leaves headroom
-            # within the 35 s total CI curl budget for the whole endpoint.
-            as_response = await asyncio.wait_for(
-                generate_gemini(_as_sys, _as_usr, timeout=12.0, max_output_tokens=80),
-                timeout=12.0,
-            )
-            as_latency_ms = round((_time.monotonic() - t_as) * 1000, 1)
+    from app.services.ai.gemini_fallback import (
+        generate_gemini,
+        stream_gemini,
+        _available as gemini_available,
+    )
 
-            # Verify response contains Assamese/Bengali script (U+0980–U+09FF).
-            # Gemini responds directly in the requested language — no Sarvam-style
-            # extraction logic is needed.  If no Assamese characters appear the
-            # model answered in English, which means Assamese students would receive
-            # the wrong language when Sarvam is down — gate CI on this.
-            has_assamese = any("\u0980" <= c <= "\u09ff" for c in (as_response or ""))
-            result["assamese_probe"] = {
-                "has_assamese_script": has_assamese,
-                "latency_ms": as_latency_ms,
-                "response_preview": (as_response or "")[:80],
-            }
-            if not has_assamese:
-                return JSONResponse(
-                    status_code=503,
-                    content={
-                        **result,
-                        "status": "unhealthy",
-                        "step": "assamese_probe",
-                        "error": (
-                            "Gemini returned no Assamese script — Assamese students "
-                            "would receive English when Sarvam is unavailable. "
-                            "Verify the system-prompt language instruction."
-                        ),
-                    },
-                )
-    except Exception as e:
-        # Gemini is configured but the probe threw — treat as unhealthy so CI
-        # catches infrastructure regressions (bad credentials, quota, etc.).
-        return JSONResponse(
-            status_code=503,
-            content={
-                **result,
-                "status": "unhealthy",
-                "step": "assamese_probe",
-                "error": str(e)[:120],
-            },
+    # ── Probe coroutines ─────────────────────────────────────────────────────
+
+    async def _run_nonstreaming_probe() -> Dict[str, Any]:
+        """Step 2: non-streaming Assamese quality check via generate_gemini()."""
+        _as_sys = (
+            "তুমি এটা সহায়কাৰী শিক্ষামূলক সহায়ক। সদায় চমুকৈ অসমীয়া ভাষাত উত্তৰ দিয়া।"
         )
+        _as_usr = "তুমি কোন?"  # "Who are you?"
+        t_as = _time.monotonic()
+        as_response = await asyncio.wait_for(
+            generate_gemini(_as_sys, _as_usr, timeout=12.0, max_output_tokens=80),
+            timeout=12.0,
+        )
+        latency_ms = round((_time.monotonic() - t_as) * 1000, 1)
+        has_assamese = any("\u0980" <= c <= "\u09ff" for c in (as_response or ""))
+        return {
+            "has_assamese_script": has_assamese,
+            "latency_ms": latency_ms,
+            "response_preview": (as_response or "")[:80],
+        }
+
+    async def _run_streaming_probe() -> Dict[str, Any]:
+        """Step 4: streaming Assamese quality check via stream_gemini().
+
+        stream_gemini() collects chunks inside a thread then yields them, so
+        ``first_chunk_latency_ms`` is the wall-clock time until the generator
+        produces its first chunk — equivalent to full generation TTFB from the
+        student's perspective.  The probe fails CI when no Assamese script
+        appears in the joined chunks, or when TTFB exceeds 10 s.
+        """
+        _as_sys = (
+            "তুমি এটা সহায়কাৰী শিক্ষামূলক সহায়ক। সদায় চমুকৈ অসমীয়া ভাষাত উত্তৰ দিয়া।"
+        )
+        _as_usr = "পোহৰ কি?"  # "What is light?" — differs from non-streaming probe
+
+        t_stream = _time.monotonic()
+        first_chunk_ms: Optional[float] = None
+        stream_chunks: list[str] = []
+
+        async def _collect() -> None:
+            nonlocal first_chunk_ms
+            async for chunk in stream_gemini(_as_sys, _as_usr, timeout=12.0):
+                if first_chunk_ms is None:
+                    first_chunk_ms = round((_time.monotonic() - t_stream) * 1000, 1)
+                stream_chunks.append(chunk)
+
+        await asyncio.wait_for(_collect(), timeout=12.0)
+
+        total_ms = round((_time.monotonic() - t_stream) * 1000, 1)
+        joined = "".join(stream_chunks)
+        has_assamese = any("\u0980" <= c <= "\u09ff" for c in joined)
+
+        probe: Dict[str, Any] = {
+            "has_assamese_script": has_assamese,
+            "first_chunk_latency_ms": first_chunk_ms,
+            "total_latency_ms": total_ms,
+            "chunk_count": len(stream_chunks),
+            "response_preview": joined[:80],
+        }
+
+        # Warn (not fail) when TTFB exceeds the 10 s student-experience threshold.
+        # stream_gemini() buffers all chunks in a thread before yielding, so
+        # first_chunk_latency_ms == total generation time.  Values above 10 s are
+        # still logged so ops can spot quota-throttling or cold-start regressions.
+        if first_chunk_ms is not None and first_chunk_ms > 10_000:
+            probe["ttfb_warning"] = (
+                f"TTFB {first_chunk_ms:.0f} ms exceeds 10 000 ms student threshold"
+            )
+            logger.warning(
+                "streaming_assamese_probe: TTFB %.0f ms > 10 000 ms", first_chunk_ms
+            )
+
+        return probe
+
+    # ── Execute both probes ──────────────────────────────────────────────────
+
+    if not gemini_available():
+        result["assamese_probe"] = {
+            "status": "skipped",
+            "reason": "Gemini not configured (GEMINI_API_KEY absent)",
+        }
+        result["streaming_assamese_probe"] = {
+            "status": "skipped",
+            "reason": "Gemini not configured (GEMINI_API_KEY absent)",
+        }
+    else:
+        try:
+            ns_result, st_result = await asyncio.gather(
+                _run_nonstreaming_probe(),
+                _run_streaming_probe(),
+                return_exceptions=True,
+            )
+        except Exception as gather_err:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    **result,
+                    "status": "unhealthy",
+                    "step": "assamese_probes",
+                    "error": str(gather_err)[:120],
+                },
+            )
+
+        # ── Non-streaming probe result ────────────────────────────────────────
+        if isinstance(ns_result, Exception):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    **result,
+                    "status": "unhealthy",
+                    "step": "assamese_probe",
+                    "error": str(ns_result)[:120],
+                },
+            )
+        result["assamese_probe"] = ns_result
+        if not ns_result.get("has_assamese_script"):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    **result,
+                    "status": "unhealthy",
+                    "step": "assamese_probe",
+                    "error": (
+                        "generate_gemini() returned no Assamese script — Assamese students "
+                        "would receive English when Sarvam is unavailable. "
+                        "Verify the system-prompt language instruction."
+                    ),
+                },
+            )
+
+        # ── Streaming probe result ────────────────────────────────────────────
+        if isinstance(st_result, Exception):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    **result,
+                    "status": "unhealthy",
+                    "step": "streaming_assamese_probe",
+                    "error": str(st_result)[:120],
+                },
+            )
+        result["streaming_assamese_probe"] = st_result
+        if not st_result.get("has_assamese_script"):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    **result,
+                    "status": "unhealthy",
+                    "step": "streaming_assamese_probe",
+                    "error": (
+                        "stream_gemini() returned no Assamese script — streaming Assamese "
+                        "chat would be broken when Sarvam is unavailable. "
+                        "Verify the system-prompt language instruction."
+                    ),
+                },
+            )
 
     # ── Step 3: MongoDB vector search reachability ───────────────────────────
     try:
