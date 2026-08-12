@@ -76,13 +76,12 @@ jobs:
             fi
           elif [[ "$HTTP_STATUS" == "504" ]]; then
             # 504 = Cloudflare edge proxy timed out waiting for the backend response.
-            # The translate job takes several minutes; the edge has a hard subrequest
-            # timeout that fires before the backend finishes. The request DID reach the
-            # backend and authentication succeeded — this is a proxy timing constraint,
-            # not a failure of the translation job itself. The job continues running
-            # server-side. Track async progress via GET /api/v1/admin/cron/translate/status
-            # once that endpoint is implemented (see follow-up task #205).
-            echo "::notice::HTTP 504 — Cloudflare proxy timeout. The translation job was accepted by the backend and is running asynchronously. This is expected until the endpoint is made async (task #205)."
+            # /cron/translate is synchronous: a 504 means the request was cut off
+            # before the backend finished (or returned a result). The job may or may
+            # not have completed server-side — there is no way to tell without a status
+            # endpoint. This will be fixed when the endpoint is made async (task #205).
+            echo "::error::HTTP 504 — Cloudflare proxy timeout. The /cron/translate endpoint is synchronous and too slow for the edge proxy. Until it is made async (task #205), this workflow cannot confirm translation success."
+            exit 1
           elif [[ "$HTTP_STATUS" == "401" || "$HTTP_STATUS" == "403" ]]; then
             echo "::error::Authentication failed (HTTP ${HTTP_STATUS}) — check TRANSLATE_CRON_SECRET and BACKEND_URL secrets."
             exit 1

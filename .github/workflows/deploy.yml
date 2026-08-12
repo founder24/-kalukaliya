@@ -183,10 +183,16 @@ jobs:
             echo "⚠ translate-cron-secret not found in SM — skipping KV prewarm"
             exit 0
           fi
+          # Cloud Run requires an OIDC identity token in Authorization.
+          # The cron secret is passed in X-Cron-Token so the backend can
+          # extract it independently of the IAM auth header.
+          ID_TOKEN=$(gcloud auth print-identity-token \
+            --audiences="${SERVICE_URL}" 2>/dev/null || echo "")
           echo "Starting CONTENT_KV prewarm (batch push rendered HTML)..."
           HTTP=$(curl -sf -o /tmp/kv_prewarm.json -w "%{http_code}" \
             -X POST "${SERVICE_URL}/api/v1/admin/content/kv-prewarm" \
-            -H "Authorization: Bearer ${SECRET}" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "X-Cron-Token: Bearer ${SECRET}" \
             -H "Content-Type: application/json" \
             --max-time 300 2>/dev/null || echo "000")
           echo "KV prewarm HTTP: ${HTTP}"
@@ -403,11 +409,18 @@ jobs:
             exit 0
           fi
 
+          # Cloud Run requires an OIDC identity token in Authorization.
+          # The cron secret is passed in X-Cron-Token so the backend can
+          # extract it independently of the IAM auth header.
+          ID_TOKEN=$(gcloud auth print-identity-token \
+            --audiences="${SVC_URL}" 2>/dev/null || echo "")
+
           echo "Hitting ${SVC_URL}/api/v1/health/chat-pipeline ..."
           HTTP=$(curl -s -o /tmp/chat_pipeline.json \
             -w "%{http_code}" \
             --max-time 35 \
-            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "X-Cron-Token: Bearer ${CRON_SECRET}" \
             "${SVC_URL}/api/v1/health/chat-pipeline" 2>/dev/null || echo "000")
 
           echo "HTTP: $HTTP"

@@ -2455,10 +2455,20 @@ async def kv_prewarm(request: Request):
     """
     from app.config import settings
 
+    # Three auth paths (same as _verify_cron_token in admin_cron.py):
+    #   X-User-JWT     → edge-proxied via Cloudflare Worker
+    #   X-Cron-Token   → direct Cloud Run call with OIDC in Authorization
+    #   Authorization  → legacy direct call (local dev / Replit shell)
+    x_user_jwt = request.headers.get("x-user-jwt", "")
+    x_cron_token = request.headers.get("x-cron-token", "")
     auth_header = request.headers.get("authorization", "")
-    if not auth_header.startswith("Bearer "):
+    token = None
+    for raw in (x_user_jwt, x_cron_token, auth_header):
+        if raw.startswith("Bearer "):
+            token = raw[7:]
+            break
+    if not token:
         raise HTTPException(status_code=401, detail="Missing Bearer token")
-    token = auth_header[7:]
     if not settings.TRANSLATE_CRON_SECRET or token != settings.TRANSLATE_CRON_SECRET:
         raise HTTPException(status_code=403, detail="Invalid token")
 

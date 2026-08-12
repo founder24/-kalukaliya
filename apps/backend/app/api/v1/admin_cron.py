@@ -20,33 +20,37 @@ _MONGO_FLUSH_EVERY = 5
 
 
 def _verify_cron_token(request: Request) -> None:
-    """Validate Bearer token against TRANSLATE_CRON_SECRET.
+    """Validate cron token against TRANSLATE_CRON_SECRET.
 
-    Checks both X-User-JWT and Authorization headers. When a cron request
-    arrives via the Cloudflare edge Worker, the Worker overwrites the
-    Authorization header with a Google OIDC identity token (for Cloud Run
-    IAM) and preserves the caller's original Bearer token in X-User-JWT.
-    Direct calls (e.g., from the Replit shell or CI runners that bypass
-    Cloudflare) carry the cron token in Authorization as usual.
+    Three auth paths are supported:
+
+    1. **Edge-proxied (Cloudflare Worker)**: The Worker replaces Authorization
+       with a Google OIDC identity token (for Cloud Run IAM) and moves the
+       original Bearer token to X-User-JWT.  → check X-User-JWT.
+
+    2. **Direct Cloud Run (CI/deploy workflows with IAM auth)**: Caller sends
+       an OIDC token in Authorization (for Cloud Run IAM) and the cron secret
+       in X-Cron-Token.  → check X-Cron-Token.
+
+    3. **Legacy direct (local dev / Replit shell)**: Caller sends the cron
+       token directly in Authorization (no OIDC layer).  → check Authorization.
     """
     from app.config import settings
 
-    # X-User-JWT carries the original Bearer token when the request passes
-    # through the Cloudflare edge Worker (which overwrites Authorization with
-    # a Google OIDC identity token for Cloud Run IAM auth).
     x_user_jwt = request.headers.get("x-user-jwt", "")
+    x_cron_token = request.headers.get("x-cron-token", "")
     auth_header = request.headers.get("authorization", "")
 
     expected = settings.TRANSLATE_CRON_SECRET
 
-    # Try X-User-JWT first (edge-proxied path), then Authorization (direct path)
-    for header in (x_user_jwt, auth_header):
-        if header.startswith("Bearer "):
-            token = header[7:]
+    # Check all three paths in priority order
+    for raw in (x_user_jwt, x_cron_token, auth_header):
+        if raw.startswith("Bearer "):
+            token = raw[7:]
             if expected and token == expected:
                 return  # valid
 
-    if not x_user_jwt.startswith("Bearer ") and not auth_header.startswith("Bearer "):
+    if not any(h.startswith("Bearer ") for h in (x_user_jwt, x_cron_token, auth_header)):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
     raise HTTPException(status_code=403, detail="Invalid cron token")
 

@@ -328,17 +328,20 @@ async def chat_pipeline_health(request: Request):
     from app.config import settings
 
     # ── Auth: require TRANSLATE_CRON_SECRET ──────────────────────────────────
-    # CF Worker overwrites Authorization with a Google OIDC token; the original
-    # caller token is preserved in X-User-JWT.  Check both.
-    auth_header = request.headers.get("Authorization", "")
-    fallback_header = request.headers.get("X-User-JWT", "")
+    # Three paths (same as _verify_cron_token in admin_cron.py):
+    #   X-User-JWT     → edge-proxied via Cloudflare Worker
+    #   X-Cron-Token   → direct Cloud Run call with OIDC in Authorization
+    #   Authorization  → legacy direct call (local dev / Replit shell)
     expected = settings.TRANSLATE_CRON_SECRET
-
-    def _bearer(h: str) -> str:
-        return h[7:].strip() if h.startswith("Bearer ") else ""
-
-    token = _bearer(auth_header) or _bearer(fallback_header)
-    if not expected or token != expected:
+    x_user_jwt = request.headers.get("X-User-JWT", "")
+    x_cron_token = request.headers.get("X-Cron-Token", "")
+    auth_header = request.headers.get("Authorization", "")
+    token = None
+    for raw in (x_user_jwt, x_cron_token, auth_header):
+        if raw.startswith("Bearer "):
+            token = raw[7:]
+            break
+    if not expected or not token or token != expected:
         return JSONResponse(
             status_code=401,
             content={"status": "unauthorized", "error": "Valid TRANSLATE_CRON_SECRET required"},
