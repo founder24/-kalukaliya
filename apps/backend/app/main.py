@@ -45,6 +45,7 @@ from app.api.v1 import (
     admin_security,
     admin_corpus,
     admin_db_health,
+   admin_pipeline_health,
     admin_rag,
     admin_cron,
     admin_billing,
@@ -486,6 +487,9 @@ def create_app() -> FastAPI:
     app.include_router(admin_corpus.router, prefix="/api/v1", tags=["Admin Corpus"])
     app.include_router(
         admin_db_health.router, prefix="/api/v1/admin", tags=["Admin DB Health"]
+    )
+    app.include_router(
+        admin_pipeline_health.router, prefix="/api/v1/admin", tags=["Admin Pipeline Health"]
     )
     app.include_router(admin_rag.router, prefix="/api/v1/admin", tags=["Admin RAG"])
     app.include_router(admin_pyq.router, prefix="/api/v1/admin", tags=["Admin PYQ"])

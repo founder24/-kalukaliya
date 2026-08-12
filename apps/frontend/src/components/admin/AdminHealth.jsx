@@ -27,6 +27,12 @@ export default function AdminHealth({ adminToken, onNavigate }) {
   const [prerenderLoading, setPrerenderLoading] = useState(false);
   const [prerenderTriggering, setPrerenderTriggering] = useState(false);
 
+  // Task #214 — Chat pipeline probe: surfaces streaming_assamese_probe.first_chunk_latency_ms
+  // and the assamese_probe latency on the Workers AI tab so on-call staff can spot a
+  // Gemini TTFB regression without manually hitting /health/chat-pipeline.
+  const [chatPipelineProbe, setChatPipelineProbe] = useState(null);
+  const [chatPipelineLoading, setChatPipelineLoading] = useState(false);
+
   // Task #750 — Trustpilot AggregateRating JSON-LD verifier report.
   // Polled on the same cadence as other infra widgets so a regression
   // (build-time inject + daily prod re-check) shows up here without
@@ -74,6 +80,16 @@ export default function AdminHealth({ adminToken, onNavigate }) {
   // lastVerifyRc/lastAggregateRc, lastRunUrl, workflowUrl.
   const [cfDriftCronHealth, setCfDriftCronHealth] = useState(null);
   const [cfDriftCronLoading, setCfDriftCronLoading] = useState(false);
+
+  const loadChatPipelineProbe = useCallback(() => {
+    setChatPipelineLoading(true);
+    axios.get(`${API_BASE}/admin/health/chat-pipeline-probe`, {
+      headers: adminHeaders(adminToken), withCredentials: true,
+    })
+      .then((r) => setChatPipelineProbe(r.data))
+      .catch(() => setChatPipelineProbe({ _error: true }))
+      .finally(() => setChatPipelineLoading(false));
+  }, [adminToken]);
 
   const loadCfDriftCronHealth = useCallback(() => {
     setCfDriftCronLoading(true);
@@ -527,6 +543,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
 
   useEffect(() => {
     if (!adminToken) return;
+    loadChatPipelineProbe();
     loadTpJsonldReport();
     loadTpJsonldHistory();
     loadTpJsonldAlerts();
@@ -581,6 +598,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     loadAxiomCredits();
     loadSentryCredits();
     const id = setInterval(() => {
+      loadChatPipelineProbe();
       loadTpJsonldReport();
       loadTpJsonldHistory();
       loadTpJsonldAlerts();
@@ -607,7 +625,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
       loadSentryCredits();
     }, 60000);
     return () => clearInterval(id);
-  }, [adminToken, loadTpJsonldReport, loadTpJsonldHistory,
+  }, [adminToken, loadChatPipelineProbe, loadTpJsonldReport, loadTpJsonldHistory,
       loadTpJsonldAlerts, loadTpCronHealth, loadCfDriftCronHealth,
       loadEdgeProxyDeployCronHealth, loadUnifiedLogsCfPullCronHealth,
       loadD1MirrorLagHealth,
@@ -1283,6 +1301,9 @@ export default function AdminHealth({ adminToken, onNavigate }) {
             routingConfig={routingConfig} setRoutingConfig={setRoutingConfig}
             embedBurst={embedBurst} embedCooldownDisplay={embedCooldownDisplay}
             metricsMeta={metricsMeta}
+            chatPipelineProbe={chatPipelineProbe}
+            chatPipelineLoading={chatPipelineLoading}
+            loadChatPipelineProbe={loadChatPipelineProbe}
           />
         )}
         {healthTab === 'rag' && (

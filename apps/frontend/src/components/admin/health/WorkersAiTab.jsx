@@ -7,10 +7,178 @@ import { adminHeaders } from './shared';
 import { toast } from 'sonner';
 import { computeHeavyFreshness, computeThrottleFreshness } from '@/utils/metricsFreshness';
 
-export default function WorkersAiTab({ adminToken, waiStatus, waiToggling, toggleWorkersAi, loadWorkersAi, waiThrottle, groqThrottle, geminiThrottle, azureOpenaiThrottle, deepgramThrottle, assameseUnavailable, assameseRecentExpanded, setAssameseRecentExpanded, routingConfig, setRoutingConfig, embedBurst, embedCooldownDisplay, metricsMeta }) {
+export default function WorkersAiTab({ adminToken, waiStatus, waiToggling, toggleWorkersAi, loadWorkersAi, waiThrottle, groqThrottle, geminiThrottle, azureOpenaiThrottle, deepgramThrottle, assameseUnavailable, assameseRecentExpanded, setAssameseRecentExpanded, routingConfig, setRoutingConfig, embedBurst, embedCooldownDisplay, metricsMeta, chatPipelineProbe, chatPipelineLoading, loadChatPipelineProbe }) {
   return (
           <SectionErrorBoundary name="Workers AI Fallback">
             <div className="space-y-4">
+
+              {/* Task #214 — Chat pipeline probe card.
+                  Surfaces streaming_assamese_probe.first_chunk_latency_ms
+                  from /admin/health/chat-pipeline-probe so on-call staff can
+                  spot a Gemini TTFB regression on the dashboard without
+                  manually curling the probe endpoint. */}
+              <div className="rounded-2xl p-4 border border-violet-200 bg-violet-50/40 shadow-sm" data-testid="chat-pipeline-probe-card">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-xs font-semibold text-violet-800">Chat Pipeline Probe</p>
+                    <p className="text-[10px] text-violet-600/70 mt-0.5">
+                      End-to-end AI probe: Sarvam → Gemini fallback · Assamese quality gates · streaming TTFB
+                    </p>
+                  </div>
+                  <button
+                    onClick={loadChatPipelineProbe}
+                    disabled={chatPipelineLoading}
+                    className="px-2.5 py-1 rounded-md text-[11px] border border-violet-300 text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+                    data-testid="btn-refresh-chat-pipeline-probe"
+                  >
+                    {chatPipelineLoading ? '…' : '↻ Refresh'}
+                  </button>
+                </div>
+
+                {!chatPipelineProbe ? (
+                  <p className="text-xs text-gray-400 py-2">Loading…</p>
+                ) : chatPipelineProbe._error ? (
+                  <p className="text-xs text-red-500 py-2">Failed to load probe data — check admin session.</p>
+                ) : (
+                  <>
+                    {/* Metric tiles */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+
+                      {/* Provider */}
+                      <div className="rounded-lg p-2.5 bg-white border border-violet-100">
+                        <p className="text-[10px] uppercase font-semibold text-violet-400 mb-0.5">Provider</p>
+                        <p className={`text-sm font-bold ${
+                          chatPipelineProbe.provider === 'sarvam' ? 'text-emerald-600' :
+                          chatPipelineProbe.provider === 'gemini-2.5-flash' ? 'text-amber-600' :
+                          'text-gray-400'
+                        }`}>
+                          {chatPipelineProbe.provider === 'sarvam' ? 'Sarvam' :
+                           chatPipelineProbe.provider === 'gemini-2.5-flash' ? 'Gemini (fallback)' :
+                           chatPipelineProbe.step === 'ai_pipeline' ? '✗ Unavailable' : '—'}
+                        </p>
+                        {chatPipelineProbe.latency_ms != null && (
+                          <p className="text-[10px] text-gray-400 tabular-nums">{chatPipelineProbe.latency_ms} ms</p>
+                        )}
+                      </div>
+
+                      {/* Non-streaming Assamese probe */}
+                      {(() => {
+                        const ap = chatPipelineProbe.assamese_probe;
+                        if (!ap) return null;
+                        const skipped = ap.status === 'skipped';
+                        const degraded = ap.status === 'degraded';
+                        const ok = ap.has_assamese_script === true;
+                        return (
+                          <div className="rounded-lg p-2.5 bg-white border border-violet-100">
+                            <p className="text-[10px] uppercase font-semibold text-violet-400 mb-0.5">Assamese probe</p>
+                            <p className={`text-sm font-bold ${
+                              skipped ? 'text-gray-400' :
+                              degraded ? 'text-amber-600' :
+                              ok ? 'text-emerald-600' : 'text-red-600'
+                            }`}>
+                              {skipped ? '— Skipped' :
+                               degraded ? '⚠ Quota' :
+                               ok ? '✓ Assamese' : '✗ No script'}
+                            </p>
+                            {ap.latency_ms != null && (
+                              <p className="text-[10px] text-gray-400 tabular-nums">{ap.latency_ms} ms</p>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Streaming TTFB — the key metric for this task */}
+                      {(() => {
+                        const sp = chatPipelineProbe.streaming_assamese_probe;
+                        if (!sp) return null;
+                        const skipped = sp.status === 'skipped';
+                        const degraded = sp.status === 'degraded';
+                        const ttfb = sp.first_chunk_latency_ms;
+                        const hasTtfbWarn = sp.ttfb_warning || (ttfb != null && ttfb > 10000);
+                        const ok = sp.has_assamese_script === true;
+                        return (
+                          <div className={`rounded-lg p-2.5 border ${
+                            hasTtfbWarn ? 'bg-amber-50 border-amber-200' :
+                            'bg-white border-violet-100'
+                          }`} data-testid="streaming-assamese-probe-tile">
+                            <div className="flex items-center gap-1 mb-0.5">
+                              <p className="text-[10px] uppercase font-semibold text-violet-400">Streaming TTFB</p>
+                              {hasTtfbWarn && !skipped && (
+                                <span
+                                  className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-100 text-amber-700"
+                                  data-testid="ttfb-slow-badge"
+                                  title={sp.ttfb_warning || `${ttfb?.toLocaleString()} ms > 10 000 ms threshold`}
+                                >
+                                  SLOW
+                                </span>
+                              )}
+                            </div>
+                            <p className={`text-sm font-bold tabular-nums ${
+                              skipped ? 'text-gray-400' :
+                              degraded ? 'text-amber-600' :
+                              hasTtfbWarn ? 'text-amber-700' :
+                              ok ? 'text-emerald-600' : 'text-red-600'
+                            }`}>
+                              {skipped ? '— Skipped' :
+                               degraded ? '⚠ Quota' :
+                               ttfb != null ? `${ttfb.toLocaleString()} ms` : '—'}
+                            </p>
+                            {!skipped && !degraded && (
+                              <p className={`text-[10px] ${ok ? 'text-emerald-600' : 'text-red-500'}`}>
+                                {ok ? '✓ Assamese script' : '✗ No script'}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* RAG */}
+                      <div className="rounded-lg p-2.5 bg-white border border-violet-100">
+                        <p className="text-[10px] uppercase font-semibold text-violet-400 mb-0.5">RAG</p>
+                        <p className={`text-sm font-bold ${
+                          chatPipelineProbe.rag_status === 'healthy' ? 'text-emerald-600' :
+                          chatPipelineProbe.rag_status === 'degraded' ? 'text-amber-600' :
+                          chatPipelineProbe.rag_status === 'unavailable' ? 'text-red-500' :
+                          'text-gray-400'
+                        }`}>
+                          {chatPipelineProbe.rag_status || '—'}
+                        </p>
+                        {chatPipelineProbe.rag_topics_cached != null && (
+                          <p className="text-[10px] text-gray-400">{chatPipelineProbe.rag_topics_cached} topics</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Overall status pill + failure step */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                        chatPipelineProbe.status === 'healthy' ? 'bg-emerald-100 text-emerald-700' :
+                        chatPipelineProbe.status === 'degraded' ? 'bg-amber-100 text-amber-700' :
+                        chatPipelineProbe.status === 'unhealthy' ? 'bg-red-100 text-red-700' :
+                        'bg-gray-100 text-gray-500'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                          chatPipelineProbe.status === 'healthy' ? 'bg-emerald-500' :
+                          chatPipelineProbe.status === 'degraded' ? 'bg-amber-400' :
+                          chatPipelineProbe.status === 'unhealthy' ? 'bg-red-500' :
+                          'bg-gray-400'
+                        }`} />
+                        {chatPipelineProbe.status || 'unknown'}
+                      </span>
+                      {chatPipelineProbe.step && (
+                        <span className="text-[11px] text-red-600 font-medium">
+                          Failed at: <code className="font-mono">{chatPipelineProbe.step}</code>
+                        </span>
+                      )}
+                      {chatPipelineProbe.error && (
+                        <span className="text-[11px] text-gray-500 truncate max-w-xs" title={chatPipelineProbe.error}>
+                          {chatPipelineProbe.error.slice(0, 80)}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
 
               {/* Task #297 — locked provider chain surfacing.
                   Reads /admin/routing-config (pools is an ARRAY of
