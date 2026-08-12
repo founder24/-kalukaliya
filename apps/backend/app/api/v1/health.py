@@ -124,7 +124,10 @@ async def basic_health_check():
         mongodb_ok = False
 
     if settings.startup_errors or not mongodb_ok:
-        from app.services.comms.resend_client import get_email_failures_last_hour
+        from app.services.comms.resend_client import (
+            get_email_failures_last_hour,
+            get_email_rate_limiter_mode,
+        )
 
         errors = list(settings.startup_errors)
         if not mongodb_ok and not any("MongoDB" in e for e in errors):
@@ -140,6 +143,8 @@ async def basic_health_check():
                 "mongodb_initialized": mongodb_ok,
                 "error_count": len(errors),
                 "email_failures_last_hour": await get_email_failures_last_hour(),
+                # "redis" = fleet-wide cap active; "in_memory" = per-pod only (degraded protection)
+                "email_rate_limiter": get_email_rate_limiter_mode(),
                 # Do NOT expose error details publicly — they can contain
                 # infrastructure hints (URI patterns, IP allowlist messages).
                 # Full details are available at /api/v1/health/deep (admin only).
@@ -148,13 +153,18 @@ async def basic_health_check():
             },
         )
 
-    from app.services.comms.resend_client import get_email_failures_last_hour
+    from app.services.comms.resend_client import (
+        get_email_failures_last_hour,
+        get_email_rate_limiter_mode,
+    )
 
     response = {
         "status": "healthy",
         "service": "syrabit-backend",
         "mongodb_initialized": True,
         "email_failures_last_hour": await get_email_failures_last_hour(),
+        # "redis" = fleet-wide cap active; "in_memory" = per-pod only (degraded protection)
+        "email_rate_limiter": get_email_rate_limiter_mode(),
         "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
     }
     if warnings:

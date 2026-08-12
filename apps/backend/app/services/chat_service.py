@@ -281,7 +281,16 @@ class ChatService:
             if not chapters:
                 return [], subject.name if subject else None, _resolved_slug, 0
 
-            # ── Build numbered chapter list with topics ───────────────────────
+            # ── Build numbered chapter list with topics (capped for prompt budget) ──
+            # Cap: 60 chapters max, 5 topics per chapter, 6 000 chars total.
+            # Prevents subjects with 200+ chapters from producing a 30 KB system
+            # prompt that stalls every model's thinking phase.
+            _MAX_CHAPTERS = 60
+            _MAX_TOPICS_PER_CH = 5
+            _MAX_SYLLABUS_CHARS = 6000
+
+            chapters = chapters[:_MAX_CHAPTERS]
+
             lines: list[str] = []
             for i, ch in enumerate(chapters, 1):
                 title = (ch.title_as if lang == "as" and getattr(ch, "title_as", None) else ch.title) or ch.title
@@ -292,7 +301,7 @@ class ChatService:
                 topic_titles = [
                     getattr(t, "title", None) for t in raw_topics
                     if getattr(t, "title", None)
-                ]
+                ][:_MAX_TOPICS_PER_CH]
                 if desc:
                     line = f"{i}. **{title}** — {desc}"
                 else:
@@ -302,6 +311,8 @@ class ChatService:
                 lines.append(line)
 
             syllabus_text = "\n".join(lines)
+            if len(syllabus_text) > _MAX_SYLLABUS_CHARS:
+                syllabus_text = syllabus_text[:_MAX_SYLLABUS_CHARS] + "\n…(truncated)"
             subject_name = subject.name if subject else None
             resolved_slug = _resolved_slug
 
@@ -1058,16 +1069,39 @@ class ChatService:
         full_response = ""
         actual_model = target_model
 
+        # ── Sarvam streaming with 8-second TTFB watchdog ─────────────────────
+        # If the first token hasn't arrived within _SARVAM_TTFB_DEADLINE seconds
+        # we cancel the Sarvam connection and fall through to Gemini immediately,
+        # rather than waiting up to 120 s for the httpx timeout to fire.
+        _SARVAM_TTFB_DEADLINE = 8.0
+        _sarvam_gen = stream_response(
+            system_prompt=system_prompt,
+            user_message=sanitized_message,
+            model=target_model,
+        )
         try:
-            async for chunk in stream_response(
-                system_prompt=system_prompt,
-                user_message=sanitized_message,
-                model=target_model,
-            ):
-                full_response += chunk
-                yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+            # First chunk with deadline — raises TimeoutError → Gemini fallback
+            try:
+                first_chunk = await asyncio.wait_for(
+                    _sarvam_gen.__anext__(), timeout=_SARVAM_TTFB_DEADLINE
+                )
+            except StopAsyncIteration:
+                first_chunk = None  # empty stream; proceed to sentinel
+
+            if first_chunk is not None:
+                full_response += first_chunk
+                yield f"data: {json.dumps({'content': first_chunk, 'done': False})}\n\n"
+                # Remaining chunks — no per-chunk deadline needed after first token
+                async for chunk in _sarvam_gen:
+                    full_response += chunk
+                    yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
 
         except Exception as sarvam_err:
+            # Ensure the generator is closed so underlying connections are released
+            try:
+                await _sarvam_gen.aclose()
+            except Exception:
+                pass
             logger.error(
                 f"Sarvam stream failed (lang={detected_lang}): {sarvam_err}",
                 extra={"user_id": user_id, "error": str(sarvam_err)},

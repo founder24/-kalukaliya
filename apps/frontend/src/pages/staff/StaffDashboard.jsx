@@ -2230,19 +2230,22 @@ function SubjectCard({ subject, boards, classes, onClick }) {
   // stream_name is resolved server-side and returned on the subject object
   const courseName = subject.stream_name || null;
   return (
-    <button onClick={onClick} className="text-left p-4 bg-white rounded-2xl border border-gray-100 hover:border-violet-200 hover:shadow-md transition-all group">
+    <button
+      onClick={onClick}
+      className="w-full min-w-0 overflow-hidden text-left p-4 bg-white rounded-2xl border border-gray-100 hover:border-violet-200 hover:shadow-md transition-all group"
+    >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-50 to-violet-100 flex items-center justify-center text-violet-600 flex-shrink-0"><BookIcon /></div>
         <StatusBadge status={subject.status} />
       </div>
-      <div className="font-semibold text-gray-900 text-sm leading-snug group-hover:text-violet-700 transition-colors line-clamp-2 mb-2">{subject.name}</div>
+      <div className="font-semibold text-gray-900 text-sm leading-snug group-hover:text-violet-700 transition-colors line-clamp-2 mb-2 break-words">{subject.name}</div>
       {/* Hierarchy breadcrumb: Board → Class → Course */}
-      <div className="flex items-center gap-1 flex-wrap text-[10px] text-gray-400">
-        {board && <span className="px-1.5 py-0.5 rounded bg-gray-50 border border-gray-100">{board.name}</span>}
-        {(board && (cls || courseName)) && <span className="text-gray-300">›</span>}
-        {cls   && <span className="px-1.5 py-0.5 rounded bg-gray-50 border border-gray-100">{cls.name}</span>}
-        {(cls && courseName) && <span className="text-gray-300">›</span>}
-        {courseName && <span className="px-1.5 py-0.5 rounded bg-violet-50 border border-violet-100 text-violet-500">{courseName}</span>}
+      <div className="flex items-center gap-1 flex-wrap text-[10px] text-gray-400 min-w-0">
+        {board && <span className="px-1.5 py-0.5 rounded bg-gray-50 border border-gray-100 truncate max-w-[7rem]" title={board.name}>{board.name}</span>}
+        {(board && (cls || courseName)) && <span className="text-gray-300 flex-shrink-0">›</span>}
+        {cls   && <span className="px-1.5 py-0.5 rounded bg-gray-50 border border-gray-100 truncate max-w-[7rem]" title={cls.name}>{cls.name}</span>}
+        {(cls && courseName) && <span className="text-gray-300 flex-shrink-0">›</span>}
+        {courseName && <span className="px-1.5 py-0.5 rounded bg-violet-50 border border-violet-100 text-violet-500 truncate max-w-[7rem]" title={courseName}>{courseName}</span>}
       </div>
     </button>
   );
@@ -2387,7 +2390,7 @@ export default function StaffDashboard() {
       {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* Mobile drawer */}
-      <div className={`fixed inset-y-0 left-0 z-50 w-72 lg:hidden transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div className={`fixed inset-y-0 left-0 z-50 w-72 lg:hidden transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <Sidebar user={user} onLogout={handleLogout} view={view} onViewChange={handleViewChange} onChangePassword={() => { setSidebarOpen(false); setChangePwOpen(true); }} />
       </div>
 

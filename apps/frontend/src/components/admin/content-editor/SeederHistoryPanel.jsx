@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Loader2, RefreshCw, CheckCircle, XCircle, Clock,
   Copy, Check, AlertTriangle, ChevronDown, ChevronUp,
-  Play, Minus, Languages, FileText, Zap,
+  Play, Minus, Languages, FileText, Zap, WifiOff, Trash2,
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -300,6 +300,238 @@ function LaunchCard({ title, description, color, icon: Icon, onLaunch, loading, 
   );
 }
 
+// ── Stuck Chapters panel ──────────────────────────────────────────────────────
+
+function StuckChaptersPanel({ adminToken, anyJobRunning }) {
+  const [stuck, setStuck]           = useState(null);   // null = not loaded yet
+  const [loading, setLoading]       = useState(false);
+  const [retrying, setRetrying]     = useState(false);
+  const [clearing, setClearing]     = useState(false);
+  const [clearResult, setClearResult] = useState(null); // last clear stats
+  const [expanded, setExpanded]     = useState(false);
+
+  const fetchStuck = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get(
+        `${API}/admin/content/seed-notes/stuck`,
+        authHeaders(adminToken),
+      );
+      setStuck(res.data?.stuck || []);
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || 'Failed to load stuck chapters';
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [adminToken]);
+
+  const handleRetryAll = async () => {
+    if (!stuck?.length) return;
+    setRetrying(true);
+    try {
+      const res = await axios.post(
+        `${API}/admin/content/seed-notes/stuck/retry`,
+        { stuck },
+        authHeaders(adminToken),
+      );
+      toast.success(res.data?.message || `Retry launched for ${stuck.length} chapters`);
+      // Refresh stuck list after pipeline has had time to run (2 min)
+      setTimeout(fetchStuck, 120_000);
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || 'Failed to launch re-run';
+      toast.error(msg);
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const handleClearResolved = async () => {
+    setClearing(true);
+    setClearResult(null);
+    try {
+      const res = await axios.post(
+        `${API}/admin/content/seed-notes/stuck/clear`,
+        {},
+        authHeaders(adminToken),
+      );
+      const d = res.data;
+      if (!d.compacted && !d.file_exists) {
+        toast.info('No progress log found — nothing to clear.');
+      } else if (d.resolved_cleared === 0) {
+        toast.info('No resolved entries to clear — all stuck chapters are still unresolved.');
+      } else {
+        toast.success(
+          `Cleared ${d.resolved_cleared} resolved entr${d.resolved_cleared === 1 ? 'y' : 'ies'} · ${d.still_stuck} still stuck`,
+        );
+      }
+      setClearResult(d);
+      // Refresh the stuck list so counts update immediately
+      await fetchStuck();
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || 'Failed to clear resolved chapters';
+      toast.error(msg);
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const count = stuck?.length ?? 0;
+
+  return (
+    <div className="rounded-xl border border-orange-200 bg-orange-50 overflow-hidden">
+      {/* Header row */}
+      <div className="px-4 py-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <WifiOff size={15} className="text-orange-500 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-orange-700">
+              Provider-Unavailable Chapters
+              {stuck !== null && (
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                  count > 0
+                    ? 'bg-orange-100 text-orange-700 border-orange-300'
+                    : 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                }`}>
+                  {count}
+                </span>
+              )}
+            </p>
+            <p className="text-xs text-orange-600/70 mt-0.5">
+              Chapters where both Sarvam and Gemini failed to generate notes
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {stuck === null ? (
+            <button
+              onClick={fetchStuck}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-orange-100 hover:bg-orange-200 text-orange-700 border border-orange-200 transition-colors disabled:opacity-50"
+            >
+              {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+              {loading ? 'Checking…' : 'Check'}
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={fetchStuck}
+                disabled={loading}
+                title="Refresh stuck chapter list"
+                className="p-1.5 rounded-lg bg-orange-100 hover:bg-orange-200 transition-colors text-orange-500 border border-orange-200 disabled:opacity-50"
+              >
+                {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+              </button>
+              <button
+                onClick={handleClearResolved}
+                disabled={clearing || loading}
+                title="Compact the progress log and remove resolved entries"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-white hover:bg-gray-50 text-gray-600 border border-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {clearing ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                {clearing ? 'Clearing…' : 'Clear resolved'}
+              </button>
+              {count > 0 && (
+                <>
+                  <button
+                    onClick={() => setExpanded(e => !e)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-orange-100 hover:bg-orange-200 text-orange-700 border border-orange-200 transition-colors"
+                    title={expanded ? 'Collapse list' : 'View chapter IDs'}
+                  >
+                    {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                    {expanded ? 'Hide' : 'View'}
+                  </button>
+                  <button
+                    onClick={handleRetryAll}
+                    disabled={retrying || anyJobRunning}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 hover:bg-orange-600 text-white border border-orange-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {retrying ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+                    {retrying ? 'Launching…' : `Retry All (${count})`}
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Clear result stats */}
+      {clearResult && clearResult.compacted && (
+        <div className="px-4 pb-3 border-t border-orange-100">
+          <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-gray-500">
+            <span className="font-semibold text-gray-600 flex items-center gap-1">
+              <Trash2 size={9} className="text-gray-400" />
+              Last clear result:
+            </span>
+            {[
+              { label: 'Before',   value: clearResult.records_before,  color: 'text-gray-600' },
+              { label: 'After',    value: clearResult.records_after,   color: 'text-gray-600' },
+              { label: 'Cleared',  value: clearResult.resolved_cleared, color: clearResult.resolved_cleared > 0 ? 'text-emerald-600' : 'text-gray-400' },
+              { label: 'Still stuck', value: clearResult.still_stuck, color: clearResult.still_stuck > 0 ? 'text-orange-500' : 'text-gray-400' },
+            ].map(({ label, value, color }) => (
+              <span key={label} className="flex items-center gap-1">
+                <span className="text-gray-400">{label}:</span>
+                <span className={`font-bold ${color}`}>{value ?? 0}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Chapter list */}
+      {stuck !== null && count === 0 && (
+        <div className="px-4 pb-3">
+          <p className="text-xs text-emerald-600 flex items-center gap-1.5">
+            <CheckCircle size={11} />
+            No stuck chapters — all provider-unavailable entries have been resolved.
+          </p>
+        </div>
+      )}
+      {expanded && count > 0 && (
+        <div className="border-t border-orange-200 px-4 py-3 space-y-2">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[10px] font-semibold text-orange-600 uppercase tracking-wide">
+              {count} chapter{count !== 1 ? 's' : ''} awaiting re-run
+            </p>
+            <div className="flex gap-1.5">
+              <CopyButton
+                value={stuck.map(c => c.chapter_id).filter(Boolean)}
+                label="Copy IDs (JSON)"
+                title="Stuck chapter IDs"
+              />
+              <CopyButton
+                value={stuck.map(c => c.chapter_id).filter(Boolean).join(',')}
+                label="Copy CSV"
+                title="Stuck IDs (CSV)"
+              />
+            </div>
+          </div>
+          <div className="bg-white rounded-lg border border-orange-100 max-h-52 overflow-y-auto divide-y divide-orange-50">
+            {stuck.map((ch, i) => (
+              <div key={ch.chapter_id || ch.key || i} className="px-3 py-2 flex items-start gap-2">
+                <WifiOff size={10} className="text-orange-400 flex-shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-mono text-gray-700 break-all leading-tight">
+                    {ch.chapter_id || <span className="text-gray-400 italic">no chapter_id</span>}
+                  </p>
+                  {ch.detail && (
+                    <p className="text-[10px] text-orange-500 mt-0.5 truncate">{ch.detail}</p>
+                  )}
+                  {ch.ts && (
+                    <p className="text-[9px] text-gray-400 mt-0.5">{fmtDate(ch.ts)}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Main panel ────────────────────────────────────────────────────────────────
 
 export default function SeederHistoryPanel({ adminToken, onRetryWithIds }) {
@@ -468,6 +700,9 @@ export default function SeederHistoryPanel({ adminToken, onRetryWithIds }) {
           </p>
         </div>
       )}
+
+      {/* Stuck chapters */}
+      <StuckChaptersPanel adminToken={adminToken} anyJobRunning={anyJobRunning} />
 
       {/* Divider */}
       <div className="border-t border-gray-100 pt-2">

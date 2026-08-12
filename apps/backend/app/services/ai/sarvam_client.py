@@ -3,6 +3,7 @@ import json
 import asyncio
 import logging
 import re
+import time
 from typing import AsyncGenerator
 
 from app.config import settings
@@ -10,6 +11,7 @@ from app.core.circuit_breaker import (
     sarvam_circuit_breaker,
     CircuitBreakerError,
     CircuitState,
+    SarvamBillingExhaustedError,
 )
 
 logger = logging.getLogger(__name__)
@@ -318,6 +320,11 @@ def _strip_think_block(text: str | None) -> str:
 class SarvamAIClient:
     """Sarvam AI Client for Assamese/Indic content"""
 
+    # How long to skip Sarvam after a 402 before retrying (30 minutes).
+    # After this interval, the next request will attempt Sarvam once; if it
+    # succeeds (credits replenished) the flag clears and normal routing resumes.
+    BILLING_RECHECK_INTERVAL: float = 30 * 60
+
     def __init__(self):
         # NOTE: do NOT cache SARVAM_API_KEY here.
         # The singleton is created at module import time — before FastAPI's
@@ -332,6 +339,33 @@ class SarvamAIClient:
             timeout=httpx.Timeout(120.0, connect=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
+
+        # Billing-exhausted guard: set to epoch time of expiry when a 402 is
+        # received.  While time.time() < _billing_exhausted_until, every call
+        # to generate() and stream_generate() raises SarvamBillingExhaustedError
+        # immediately — no Sarvam HTTP request is made, zero credits wasted.
+        # Resets to 0.0 when Sarvam responds successfully (credits replenished).
+        self._billing_exhausted_until: float = 0.0
+
+    # ── Billing-exhausted helpers ───────────────────────────────────────────
+
+    def billing_exhausted(self) -> bool:
+        """Return True while the billing-exhausted block is active."""
+        return time.time() < self._billing_exhausted_until
+
+    def _set_billing_exhausted(self) -> None:
+        """Mark billing as exhausted for BILLING_RECHECK_INTERVAL seconds."""
+        self._billing_exhausted_until = time.time() + self.BILLING_RECHECK_INTERVAL
+        logger.warning(
+            "sarvam_billing_exhausted: 402 received — skipping Sarvam for "
+            f"{int(self.BILLING_RECHECK_INTERVAL // 60)} minutes"
+        )
+
+    def _clear_billing_exhausted(self) -> None:
+        """Clear the billing-exhausted flag after a successful response."""
+        if self._billing_exhausted_until > 0.0:
+            logger.info("sarvam_billing_restored: successful response after billing-exhausted period")
+        self._billing_exhausted_until = 0.0
 
     @property
     def api_key(self) -> str | None:
@@ -366,6 +400,14 @@ class SarvamAIClient:
         if not self.api_key:
             raise RuntimeError("Sarvam AI not configured (SARVAM_API_KEY is empty)")
 
+        # If billing was exhausted on a previous request, skip the HTTP call
+        # entirely until the recheck interval expires.  This prevents every chat
+        # request from paying a 402 round-trip while credits are zero.
+        if self.billing_exhausted():
+            raise SarvamBillingExhaustedError(
+                "Sarvam billing exhausted — falling through to Gemini fallback"
+            )
+
         async def _do_generate():
             response = await self._client.post(
                 f"{self.base_url}/chat/completions",
@@ -380,19 +422,30 @@ class SarvamAIClient:
                         {"role": "user", "content": user_message},
                     ],
                     "temperature": 0.3,
-                    # Match the streaming chat endpoint: enable_thinking=True
-                    # for English so the model's internal reasoning is separated
-                    # into reasoning_content (hidden) and the final clean answer
-                    # stays in content.  For Assamese keep it False — the model
-                    # reasons in English in reasoning_content and we extract the
-                    # Assamese lines from there via _extract_assamese_translation.
-                    "enable_thinking": not is_assamese,
-                    # English notes need enough room for the response; Assamese
+                    # Non-streaming calls: always use enable_thinking=False.
+                    # When enable_thinking=True in non-streaming mode, sarvam-30b
+                    # inconsistently places chain-of-thought planning content
+                    # (Topic Selection, Drafting Content, Word Count Check…)
+                    # directly in the content field instead of reasoning_content,
+                    # polluting the stored notes.  With enable_thinking=False the
+                    # model's full reasoning (including the clean final answer) is
+                    # always in reasoning_content; content may be null or clean.
+                    # The fallback path below extracts the answer from
+                    # reasoning_content via _extract_english_answer / _extract_assamese_translation.
+                    "enable_thinking": False,
+                    # English notes need room for dense chapter content; Assamese
                     # script is denser and Q&A arrays can be long.
-                    "max_tokens": max_tokens if max_tokens is not None else (2048 if is_assamese else 2048),
+                    "max_tokens": max_tokens if max_tokens is not None else (3000 if is_assamese else 3000),
                     "stream": stream,
                 },
             )
+            # 402 = Sarvam billing credits exhausted.  Set the billing-exhausted
+            # flag so all subsequent generate/stream calls skip Sarvam entirely
+            # until BILLING_RECHECK_INTERVAL expires, then raise before
+            # raise_for_status() so the circuit breaker never counts it as a failure.
+            if response.status_code == 402:
+                self._set_billing_exhausted()
+                raise SarvamBillingExhaustedError("Sarvam billing exhausted (402)")
             response.raise_for_status()
             data = response.json()
 
@@ -418,7 +471,13 @@ class SarvamAIClient:
         for attempt in range(2):
             try:
                 result = await sarvam_circuit_breaker.call(_do_generate)
+                self._clear_billing_exhausted()
                 return _strip_think_block(result)
+            except SarvamBillingExhaustedError:
+                # Billing exhausted: propagate directly so call_llm falls to Gemini.
+                # Do not wrap in RuntimeError — the specific type is needed so the
+                # circuit breaker's call() can skip _on_failure() (see circuit_breaker.py).
+                raise
             except CircuitBreakerError as e:
                 raise RuntimeError(f"Sarvam AI unavailable: {e}")
             except httpx.HTTPStatusError as e:
@@ -473,6 +532,13 @@ class SarvamAIClient:
 
         if sarvam_circuit_breaker.state == CircuitState.OPEN:
             raise RuntimeError("Sarvam AI unavailable (circuit open)")
+
+        # If billing was exhausted on a previous request, skip the HTTP call
+        # entirely until the recheck interval expires.
+        if self.billing_exhausted():
+            raise SarvamBillingExhaustedError(
+                "Sarvam billing exhausted — falling through to Gemini fallback"
+            )
 
         # Detect response language from the system prompt so we can apply the
         # right post-processing strategy and set an appropriate token budget.
@@ -732,8 +798,16 @@ class SarvamAIClient:
             if buffer and not in_think_block:
                 yield buffer
 
+            self._clear_billing_exhausted()
             sarvam_circuit_breaker._on_success()
         except Exception as e:
+            # 402 billing exhausted: set the billing-exhausted flag so all
+            # subsequent calls skip Sarvam entirely until BILLING_RECHECK_INTERVAL
+            # expires.  Do NOT record as a circuit breaker failure.
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 402:
+                self._set_billing_exhausted()
+                raise SarvamBillingExhaustedError("Sarvam billing exhausted (402)")
+
             sarvam_circuit_breaker._on_failure()
             if isinstance(e, httpx.HTTPStatusError):
                 body = ""

@@ -53,7 +53,8 @@ export default function ChapterEditForm({
         { target_lang: 'as-IN' },
         authHeaders(adminToken)
       );
-      setContentForm(f => ({ ...f, content_as: res.data.translated_text || '' }));
+      // Store translation in notes_as (primary Assamese field, mirrors notes_en)
+      setContentForm(f => ({ ...f, notes_as: res.data.translated_text || '' }));
       setEditorKey(k => k + 1);
       toast.success(`Translated — ${res.data.word_count} words`, { id: tid });
     } catch (err) {
@@ -71,7 +72,8 @@ export default function ChapterEditForm({
       return editorLang === 'as' ? 'qa_text_as' : 'qa_text_en';
     }
     if (contentMode === 'rag') return editorLang === 'as' ? 'rag_text_as' : 'rag_text_en';
-    return editorLang === 'as' ? 'content_as' : 'content';
+    // Reader mode: use notes_en/as (primary pipeline fields) — loaded with content_en/as fallback
+    return editorLang === 'as' ? 'notes_as' : 'notes_en';
   }, [contentMode, editorLang, isQA]);
 
   const activeContent = isQA
@@ -80,7 +82,8 @@ export default function ChapterEditForm({
         : (editorLang === 'as' ? (contentForm.qa_text_as || '') : (contentForm.qa_text_en || '')))
     : (contentMode === 'rag'
         ? (editorLang === 'as' ? (contentForm.rag_text_as || '') : (contentForm.rag_text_en || ''))
-        : (editorLang === 'as' ? (contentForm.content_as || '') : contentForm.content));
+        // Reader mode: notes_en/as are primary; content/content_as are legacy (loaded as fallback on open)
+        : (editorLang === 'as' ? (contentForm.notes_as || '') : (contentForm.notes_en || '')));
 
   const handleContentChange = useCallback((e) => {
     const md = e.target.value;
@@ -296,31 +299,34 @@ export default function ChapterEditForm({
                 </button>
               </div>
             {editorLang === 'as' && (
-              contentForm.content_as ? (
-                <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200">{contentForm.content_as.split(/\s+/).length} words</span>
+              // Check notes_as first (primary), fall back to content_as (legacy)
+              (contentForm.notes_as || contentForm.content_as) ? (
+                <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200">
+                  {(contentForm.notes_as || contentForm.content_as).split(/\s+/).length} words
+                </span>
               ) : (
                 <span className="text-[10px] text-gray-400">No Assamese content</span>
               )
             )}
-            {!contentForm.content_as && editTarget?.id && (
+            {!(contentForm.notes_as || contentForm.content_as) && editTarget?.id && (
               <button
                 onClick={handleTranslateToAssamese}
-                disabled={translating || !contentForm.content?.trim()}
+                disabled={translating || !(contentForm.notes_en || contentForm.content)?.trim()}
                 className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-50 transition-all shadow-sm"
               >
                 {translating ? <Loader2 size={12} className="animate-spin" /> : <Languages size={12} />}
                 {translating ? 'Translating…' : 'Translate to অসমীয়া'}
               </button>
             )}
-            {!contentForm.content_as && !editTarget?.id && editorLang === 'as' && (
+            {!(contentForm.notes_as || contentForm.content_as) && !editTarget?.id && editorLang === 'as' && (
               <span className="ml-auto text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded-md border border-amber-200">
                 Save chapter first to use auto-translate
               </span>
             )}
-            {contentForm.content_as && (
+            {(contentForm.notes_as || contentForm.content_as) && (
               <button
                 onClick={handleTranslateToAssamese}
-                disabled={translating || !contentForm.content?.trim() || !editTarget?.id}
+                disabled={translating || !(contentForm.notes_en || contentForm.content)?.trim() || !editTarget?.id}
                 className="ml-auto flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-medium text-violet-500 hover:bg-violet-100 disabled:opacity-50 transition-all border border-violet-200"
               >
                 {translating ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}

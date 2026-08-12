@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Admin Content"], dependencies=[Depends(require_admin_session), Depends(csrf_guard)])
 
+# ── Progress log paths (module-level so tests can redirect via patch.object) ──
+import pathlib as _pathlib
+_AHSEC_SCRIPTS_DIR   = _pathlib.Path(__file__).parent.parent.parent.parent / "scripts"
+_AHSEC_PROGRESS_FILE = _AHSEC_SCRIPTS_DIR / ".ahsec_ingest_progress.jsonl"
+_AHSEC_PROGRESS_LOCK = _AHSEC_SCRIPTS_DIR / ".ahsec_ingest_progress.lock"
+
 
 # ── Seeder helpers ────────────────────────────────────────────────────────────
 
@@ -108,6 +114,479 @@ async def admin_seed_notes_history(request: Request, limit: int = 20):
     return {"runs": runs_out[:limit]}
 
 
+# ── Stuck chapters (notes_provider_unavailable) ───────────────────────────────
+
+@router.get("/content/seed-notes/stuck")
+async def admin_seed_notes_stuck():
+    """Return chapters that failed notes generation due to both providers being
+    unavailable (status='notes_provider_unavailable' in the AHSEC progress log),
+    reconciled against MongoDB so chapters already fixed clear automatically.
+
+    For each JSONL candidate the endpoint checks the Chapter document: if the
+    notes field for the logged medium is now non-empty the chapter is excluded
+    (it was resolved by a subsequent run or manual edit).  Only truly unresolved
+    chapters are returned.
+    """
+    import json as _json
+    from beanie import PydanticObjectId
+    from app.models.content import Chapter as _Chapter
+
+    progress_file = _AHSEC_PROGRESS_FILE
+
+    if not progress_file.exists():
+        return {"stuck": [], "total": 0, "file_exists": False}
+
+    # Read all records; track latest status per progress key
+    # (JSONL is append-only — later entries supersede earlier ones for same key)
+    latest_by_key: dict[str, dict] = {}
+    try:
+        for line in progress_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = _json.loads(line)
+            except Exception:
+                continue
+            dedup_key = rec.get("key") or rec.get("chapter_id", "")
+            if not dedup_key:
+                continue
+            latest_by_key[dedup_key] = rec
+    except Exception as e:
+        logger.warning(f"admin_seed_notes_stuck: failed to read progress file: {e}")
+        return {"stuck": [], "total": 0, "error": str(e)}
+
+    candidates = [
+        r for r in latest_by_key.values()
+        if r.get("status") == "notes_provider_unavailable"
+    ]
+
+    if not candidates:
+        return {"stuck": [], "total": 0, "file_exists": True}
+
+    # Reconcile against MongoDB: exclude chapters whose notes field is now populated
+    stuck = []
+    for r in candidates:
+        chapter_id = r.get("chapter_id", "")
+        medium = r.get("medium") or "en"
+
+        if chapter_id:
+            try:
+                chapter_doc = await _Chapter.get(PydanticObjectId(chapter_id))
+                if chapter_doc:
+                    notes_field = chapter_doc.notes_en if medium == "en" else chapter_doc.notes_as
+                    if notes_field and len(notes_field) > 100:
+                        # Notes now exist — chapter was resolved; skip it
+                        continue
+            except Exception:
+                pass  # lookup failure → include in stuck list to be safe
+
+        stuck.append({
+            "chapter_id": chapter_id,
+            "key":        r.get("key", ""),
+            "pdf_url":    r.get("pdf_url", ""),
+            "medium":     medium,
+            "detail":     r.get("detail", ""),
+            "ts":         r.get("ts", ""),
+        })
+
+    # Newest failures first
+    stuck.sort(key=lambda x: x["ts"], reverse=True)
+
+    return {
+        "stuck": stuck,
+        "total": len(stuck),
+        "file_exists": True,
+    }
+
+
+# ── Stuck chapters retry background ──────────────────────────────────────────
+
+async def _ahsec_stuck_retry_background(app, stuck_chapters: list[dict]) -> None:
+    """Background task: re-run the AHSEC notes pipeline for provider-unavailable chapters.
+
+    Groups by pdf_url (downloads each PDF exactly once), extracts the specific
+    chapter by raw_num from the progress key, runs generate_notes() through the
+    real Sarvam → Gemini fallback chain, saves notes_en/notes_as to MongoDB,
+    and writes a terminal 'done' (or updated 'notes_provider_unavailable') record
+    to .ahsec_ingest_progress.jsonl so the stuck-list reconciles correctly.
+    """
+    import re as _re
+    import sys
+    from pathlib import Path as _Path
+
+    backend_root = _Path(__file__).parent.parent.parent.parent
+    if str(backend_root) not in sys.path:
+        sys.path.insert(0, str(backend_root))
+
+    # ── Outer try/finally guarantees compaction always runs ───────────────────
+    # This covers all exit paths: normal completion, early return on import
+    # failure, and any unexpected exception that escapes the processing loops.
+    try:
+        try:
+            from scripts.ahsec_ingest import (
+                generate_notes,
+                extract_pdf_text,
+                split_into_chapters,
+                save_chapter_content,
+                reindex_chapter,
+                _log_progress,
+                NotesProviderUnavailableError,
+                notes_to_rag_sections,
+                extract_topics_from_notes,
+            )
+        except Exception as exc:
+            logger.error(f"ahsec_stuck_retry: failed to import ingest module: {exc}")
+            return  # finally block below still fires
+
+        from app.services.ai.sarvam_client import sarvam_client
+        from app.models.content import Chapter as _Chapter, Subject as _Subject
+        from beanie import PydanticObjectId
+
+        # Group by pdf_url so each PDF is downloaded only once
+        by_pdf: dict[str, list[dict]] = {}
+        for ch in stuck_chapters:
+            pdf_url = (ch.get("pdf_url") or "").strip()
+            key     = (ch.get("key") or "").strip()
+            if not pdf_url or not key:
+                continue
+            m = _re.search(r'\|ch(\d+)$', key)
+            if not m:
+                logger.warning(f"ahsec_stuck_retry: cannot parse raw_num from key {key!r}")
+                continue
+            raw_num = int(m.group(1))
+            by_pdf.setdefault(pdf_url, []).append({
+                "chapter_id": (ch.get("chapter_id") or "").strip(),
+                "key":        key,
+                "raw_num":    raw_num,
+                "medium":     ch.get("medium") or "en",
+            })
+
+        for pdf_url, items in by_pdf.items():
+            medium = items[0]["medium"]
+
+            # Download + extract PDF (once per URL)
+            try:
+                pages         = await extract_pdf_text(pdf_url, medium)
+                chapter_texts = split_into_chapters(pages, medium)
+            except Exception as exc:
+                logger.error(f"ahsec_stuck_retry: PDF extraction failed for {pdf_url}: {exc}")
+                continue
+
+            raw_num_map = {c["chapter_num"]: c for c in chapter_texts}
+
+            for item in items:
+                raw_num    = item["raw_num"]
+                key        = item["key"]
+                chapter_id = item["chapter_id"]
+
+                ch_info = raw_num_map.get(raw_num)
+                if not ch_info:
+                    logger.warning(
+                        f"ahsec_stuck_retry: ch{raw_num} not found in PDF {pdf_url} "
+                        f"(detected chapters: {sorted(raw_num_map)})"
+                    )
+                    continue
+
+                body_text = ch_info["body_text"]
+                ch_title  = ch_info["title"]
+
+                # Fetch chapter + subject from MongoDB
+                try:
+                    chapter_doc = await _Chapter.get(PydanticObjectId(chapter_id))
+                    if not chapter_doc:
+                        logger.warning(f"ahsec_stuck_retry: chapter {chapter_id} not in MongoDB")
+                        continue
+                    subj         = await _Subject.get(chapter_doc.subject_id)
+                    subject_name = subj.name if subj else "Unknown"
+                except Exception as exc:
+                    logger.error(f"ahsec_stuck_retry: DB lookup failed for {chapter_id}: {exc}")
+                    continue
+
+                # Run the real AHSEC generate_notes (Sarvam → Gemini)
+                try:
+                    notes_text = await generate_notes(
+                        sarvam_client, body_text, ch_title, subject_name, medium
+                    )
+                except NotesProviderUnavailableError as exc:
+                    logger.warning(
+                        f"ahsec_stuck_retry: providers still unavailable for '{ch_title}': {exc}"
+                    )
+                    _log_progress(
+                        key, "notes_provider_unavailable",
+                        detail=f"[reason={exc.reason}] {exc}",
+                        chapter_id=chapter_id, pdf_url=pdf_url, medium=medium,
+                    )
+                    continue
+                except Exception as exc:
+                    logger.error(f"ahsec_stuck_retry: generate_notes failed for '{ch_title}': {exc}")
+                    _log_progress(
+                        key, "error",
+                        detail=str(exc), chapter_id=chapter_id, pdf_url=pdf_url, medium=medium,
+                    )
+                    continue
+
+                if not notes_text or len(notes_text) < 50:
+                    logger.warning(f"ahsec_stuck_retry: empty/short notes for '{ch_title}' — skipping")
+                    continue
+
+                # Save notes_en/notes_as + RAG sections to MongoDB
+                rag_sections = notes_to_rag_sections(notes_text)
+                topics       = extract_topics_from_notes(notes_text)
+
+                try:
+                    written = await save_chapter_content(
+                        chapter_doc, notes_text, rag_sections, [], topics,
+                        medium, force=True, dry_run=False, source_pdf_url=pdf_url,
+                        title_as=ch_title if medium == "as" else "",
+                    )
+                except Exception as exc:
+                    logger.error(f"ahsec_stuck_retry: save failed for '{ch_title}': {exc}")
+                    continue
+
+                if written:
+                    try:
+                        await reindex_chapter(chapter_id, scope="notes")
+                    except Exception as exc:
+                        logger.warning(f"ahsec_stuck_retry: reindex failed for {chapter_id}: {exc}")
+                    # Write terminal progress record — this is what clears the stuck list
+                    _log_progress(
+                        key, "done",
+                        chapter_id=chapter_id, pdf_url=pdf_url, medium=medium,
+                    )
+                    logger.info(
+                        f"ahsec_stuck_retry: ✓ '{ch_title}' ({chapter_id}) — "
+                        f"{len(notes_text)} chars written, progress log updated"
+                    )
+                else:
+                    logger.warning(f"ahsec_stuck_retry: save_chapter_content skipped '{ch_title}'")
+
+    finally:
+        # ── Auto-compact: guaranteed regardless of exit path ─────────────────
+        # Fires after normal completion, early return on import failure, and
+        # any unexpected exception that escapes the processing loops.
+        try:
+            compact_result = await _compact_progress_log()
+            logger.info(
+                f"ahsec_stuck_retry: auto-compact complete — "
+                f"resolved_cleared={compact_result.get('resolved_cleared', 0)}, "
+                f"still_stuck={compact_result.get('still_stuck', 0)}"
+            )
+        except Exception as compact_exc:
+            logger.warning(f"ahsec_stuck_retry: auto-compact failed (non-fatal): {compact_exc}")
+
+
+async def _compact_progress_log() -> dict:
+    """Compact the AHSEC progress log: keep only the latest record per key.
+
+    Shared helper used by both the HTTP clear endpoint and the retry background
+    task (auto-called after a retry run completes so the list self-heals without
+    a manual 'Clear resolved' click).
+
+    A chapter is resolved (dropped) when EITHER:
+    - its latest log status is not 'notes_provider_unavailable', OR
+    - its notes field in MongoDB is now non-empty (manually fixed).
+
+    Thread/process safety: acquires LOCK_EX on the shared advisory lock file
+    before reading or writing; the ingest script holds LOCK_SH during each
+    append, so the two never interleave.  The new content is written to a sibling
+    temp file and atomically renamed (os.replace) into place.
+
+    Returns:
+        {
+          "compacted": bool,
+          "records_before": int,
+          "records_after": int,
+          "resolved_cleared": int,
+          "still_stuck": int,
+          "file_exists": bool,
+        }
+    """
+    import fcntl
+    import json as _json
+    import os as _os
+    import tempfile as _tempfile
+    from beanie import PydanticObjectId
+    from app.models.content import Chapter as _Chapter
+
+    # Use module-level constants so tests can redirect via patch.object()
+    progress_file = _AHSEC_PROGRESS_FILE
+    lock_file     = _AHSEC_PROGRESS_LOCK
+
+    if not progress_file.exists():
+        return {
+            "compacted": False,
+            "records_before": 0,
+            "records_after": 0,
+            "resolved_cleared": 0,
+            "still_stuck": 0,
+            "file_exists": False,
+        }
+
+    lf = lock_file.open("a+")
+    try:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+
+        latest_by_key: dict[str, dict] = {}
+        raw_line_count = 0
+        try:
+            for line in progress_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                raw_line_count += 1
+                try:
+                    rec = _json.loads(line)
+                except Exception:
+                    continue
+                dedup_key = rec.get("key") or rec.get("chapter_id", "")
+                if not dedup_key:
+                    continue
+                latest_by_key[dedup_key] = rec
+        except Exception as e:
+            logger.warning(f"_compact_progress_log: failed to read: {e}")
+            return {
+                "compacted": False,
+                "records_before": raw_line_count,
+                "records_after": 0,
+                "resolved_cleared": 0,
+                "still_stuck": 0,
+                "file_exists": True,
+                "error": str(e),
+            }
+
+        log_stuck_recs:     list[dict] = []
+        log_resolved_count: int        = 0
+        for rec in latest_by_key.values():
+            if rec.get("status") == "notes_provider_unavailable":
+                log_stuck_recs.append(rec)
+            else:
+                log_resolved_count += 1
+
+        still_stuck_recs:     list[dict] = []
+        mongo_resolved_count: int        = 0
+        for rec in log_stuck_recs:
+            chapter_id = rec.get("chapter_id", "")
+            medium     = rec.get("medium") or "en"
+            resolved   = False
+            if chapter_id:
+                try:
+                    chapter_doc = await _Chapter.get(PydanticObjectId(chapter_id))
+                    if chapter_doc:
+                        notes_field = (
+                            chapter_doc.notes_en if medium == "en"
+                            else chapter_doc.notes_as
+                        )
+                        if notes_field and len(notes_field) > 100:
+                            resolved = True
+                except Exception:
+                    pass
+            if resolved:
+                mongo_resolved_count += 1
+            else:
+                still_stuck_recs.append(rec)
+
+        resolved_count = log_resolved_count + mongo_resolved_count
+
+        still_stuck_recs.sort(key=lambda r: r.get("ts", ""))
+        new_content = "\n".join(_json.dumps(r) for r in still_stuck_recs)
+        if new_content:
+            new_content += "\n"
+
+        try:
+            fd, tmp_path = _tempfile.mkstemp(
+                dir=str(progress_file.parent), prefix=".ahsec_ingest_progress.", suffix=".tmp"
+            )
+            try:
+                with _os.fdopen(fd, "w", encoding="utf-8") as tf:
+                    tf.write(new_content)
+                _os.replace(tmp_path, str(progress_file))
+            except Exception:
+                try:
+                    _os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+        except Exception as e:
+            logger.error(f"_compact_progress_log: write failed: {e}")
+            return {
+                "compacted": False,
+                "records_before": raw_line_count,
+                "records_after": len(latest_by_key),
+                "resolved_cleared": 0,
+                "still_stuck": len(still_stuck_recs),
+                "file_exists": True,
+                "error": str(e),
+            }
+
+    finally:
+        fcntl.flock(lf, fcntl.LOCK_UN)
+        lf.close()
+
+    logger.info(
+        f"_compact_progress_log: {raw_line_count} lines → {len(still_stuck_recs)} kept "
+        f"(log-resolved={log_resolved_count}, mongo-resolved={mongo_resolved_count})"
+    )
+    return {
+        "compacted": True,
+        "records_before": raw_line_count,
+        "records_after": len(still_stuck_recs),
+        "resolved_cleared": resolved_count,
+        "still_stuck": len(still_stuck_recs),
+        "file_exists": True,
+    }
+
+
+@router.post("/content/seed-notes/stuck/clear")
+async def admin_clear_resolved_stuck_chapters():
+    """Compact the AHSEC progress log — delegates to _compact_progress_log().
+
+    Kept as a named endpoint so the admin 'Clear resolved' button continues to
+    work; the compaction logic now also runs automatically at the end of every
+    successful retry background task.
+    """
+    return await _compact_progress_log()
+@router.post("/content/seed-notes/stuck/retry")
+async def admin_retry_stuck_chapters(request: Request):
+    """Trigger a targeted AHSEC notes retry for provider-unavailable chapters.
+
+    Body: {"stuck": [{chapter_id, key, pdf_url, medium, ...}, ...]}
+    (the exact shape returned by GET /content/seed-notes/stuck).
+
+    For each chapter: downloads the source PDF (grouped, downloaded once per URL),
+    extracts the chapter text by position, calls generate_notes() via the real
+    Sarvam → Gemini fallback chain, writes notes_en/notes_as to MongoDB, and
+    appends a terminal 'done' record to .ahsec_ingest_progress.jsonl so the
+    stuck list reconciles correctly on the next GET call.
+
+    Returns immediately; the retry runs as a background task.
+    """
+    import asyncio
+
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    stuck: list = body.get("stuck", [])
+    if not stuck:
+        raise HTTPException(status_code=400, detail="No stuck chapters provided.")
+    if len(stuck) > 200:
+        raise HTTPException(
+            status_code=400, detail="Too many chapters — max 200 per retry batch."
+        )
+
+    asyncio.create_task(_ahsec_stuck_retry_background(request.app, stuck))
+    return {
+        "queued": len(stuck),
+        "message": (
+            f"Retry launched for {len(stuck)} stuck chapter(s). "
+            "Refresh the stuck list in ~2 minutes to see results."
+        ),
+    }
+
+
 # ── Seed-notes trigger (admin session auth) ───────────────────────────────────
 
 @router.post("/content/seed-notes")
@@ -156,10 +635,18 @@ async def admin_trigger_seed_notes(request: Request):
     else:
         filt: dict = {}
         if not force:
-            filt["$or"] = [
-                {"content_en": {"$exists": False}},
-                {"content_en": None},
-                {"content_en": ""},
+            # Skip chapters that already have notes in EITHER field:
+            # notes_en  — written by the AHSEC ingestion pipeline
+            # content_en — written by the legacy AI seed path
+            # A chapter must have BOTH absent to be re-seeded.
+            _absent = lambda field: [  # noqa: E731
+                {field: {"$exists": False}},
+                {field: None},
+                {field: ""},
+            ]
+            filt["$and"] = [
+                {"$or": _absent("notes_en")},
+                {"$or": _absent("content_en")},
             ]
         chapters = await Chapter.find(filt).to_list(length=limit)
 
@@ -230,15 +717,27 @@ async def admin_trigger_seed_assamese(request: Request):
     concurrency: int  = max(1, min(int(body.get("concurrency", 2)), 5))
     force: bool       = bool(body.get("force", False))
 
-    # Chapters with English content but missing Assamese
+    # Chapters with English content (notes_en primary, content_en legacy) but missing Assamese.
+    # notes_en/notes_as are the primary pipeline fields written by the AHSEC ingestion
+    # pipeline; content_en/content_as are the legacy AI-seed fields.  We must check both
+    # so that chapters seeded via either path are picked up and translated.
     filt: dict = {
-        "content_en": {"$exists": True, "$nin": [None, ""]},
+        "$or": [
+            {"notes_en": {"$exists": True, "$nin": [None, ""]}},
+            {"content_en": {"$exists": True, "$nin": [None, ""]}},
+        ]
     }
     if not force:
-        filt["$or"] = [
-            {"content_as": {"$exists": False}},
-            {"content_as": None},
-            {"content_as": ""},
+        _absent = lambda field: [  # noqa: E731
+            {field: {"$exists": False}},
+            {field: None},
+            {field: ""},
+        ]
+        # Skip only when BOTH notes_as and content_as are already populated.
+        # If either primary (notes_as) or legacy (content_as) is absent, re-translate.
+        filt["$and"] = [
+            {"$or": _absent("notes_as")},
+            {"$or": _absent("content_as")},
         ]
     chapters = await Chapter.find(filt).to_list(length=limit)
 
@@ -361,8 +860,12 @@ class ChapterUpdate(BaseModel):
     chapter_number: Optional[int] = None
     slug: Optional[str] = None
     description: Optional[str] = None
-    content: Optional[str] = None        # student-facing English content → saved as content_en
-    content_as: Optional[str] = None     # student-facing Assamese content
+    # Primary AI-generated notes (written by ingestion pipeline)
+    notes_en: Optional[str] = None       # primary English notes → saved as notes_en
+    notes_as: Optional[str] = None       # primary Assamese notes → saved as notes_as
+    # Legacy student-facing content fields (pre-notes pipeline)
+    content: Optional[str] = None        # legacy English content → saved as content_en
+    content_as: Optional[str] = None     # legacy Assamese content
     content_type: Optional[str] = None   # section: 'notes' | 'qa' | 'question_paper' | ...
     # Q&A section student-facing text
     qa_text_en: Optional[str] = None
@@ -370,9 +873,8 @@ class ChapterUpdate(BaseModel):
     title_as: Optional[str] = None       # Assamese chapter title
     order: Optional[int] = None
     topics: Optional[list[str]] = None
-    pyq_pdf_url: Optional[str] = None   # public URL to Question Paper PDF
-    version: Optional[int] = None        # optimistic locking — omit to bypass, send current value to guard
     pyq_pdf_url: Optional[str] = None    # URL to the PYQ PDF (question_paper chapters)
+    version: Optional[int] = None        # optimistic locking — omit to bypass, send current value to guard
 
 
 class ChapterRagUpdate(BaseModel):
@@ -422,9 +924,9 @@ class FAQRequest(BaseModel):
     faqs: list[FAQEntry]
 
 
-# ============================
+# ----------------------------
 # LAYER 1: Board CRUD
-# ============================
+# ----------------------------
 
 
 @router.post("/content/boards")
@@ -480,9 +982,9 @@ async def update_board(request: Request, board_id: str, body: BoardUpdate):
     }
 
 
-# ============================
+# ----------------------------
 # LAYER 1: Class CRUD
-# ============================
+# ----------------------------
 
 
 @router.post("/content/classes")
@@ -516,9 +1018,9 @@ async def list_classes(request: Request, board_id: Optional[str] = Query(None), 
     }
 
 
-# ============================
+# ----------------------------
 # LAYER 1: Stream CRUD
-# ============================
+# ----------------------------
 
 
 @router.post("/content/streams")
@@ -552,9 +1054,9 @@ async def list_streams(request: Request, class_id: Optional[str] = Query(None), 
     }
 
 
-# ============================
+# ----------------------------
 # LAYER 1: Subject CRUD
-# ============================
+# ----------------------------
 
 
 @router.post("/content/subjects")
@@ -592,9 +1094,9 @@ async def list_subjects(request: Request, stream_id: Optional[str] = Query(None)
     }
 
 
-# ============================
+# ----------------------------
 # LAYER 1: Chapter CRUD
-# ============================
+# ----------------------------
 
 
 @router.post("/content/chapters")
@@ -658,6 +1160,10 @@ async def list_chapters(
                 "notes_generated": ch.notes_generated,
                 "version": ch.version,
                 # Content fields — needed by the edit form
+                # notes_en/as are the primary (ingestion-pipeline) fields; content_en/as are legacy fallbacks.
+                # The admin editor loads notes_en and falls back to content_en so staff always see content.
+                "notes_en": ch.notes_en,
+                "notes_as": ch.notes_as,
                 "content": ch.content_en,
                 "content_en": ch.content_en,
                 "content_as": ch.content_as,
@@ -701,6 +1207,10 @@ async def get_chapter(request: Request, chapter_id: str):
         "chapter_number": chapter.chapter_number,
         "status": chapter.status,
         "content_type": chapter.content_type,
+        # notes_en/as: primary ingestion-pipeline fields (editor reads these first)
+        "notes_en": chapter.notes_en,
+        "notes_as": chapter.notes_as,
+        # content_en/as: legacy fallback fields
         "content_en": chapter.content_en,
         "content_as": chapter.content_as,
         "rag_text_en": chapter.rag_text_en,
@@ -758,6 +1268,16 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate,
         changes["title_as"] = {"before": chapter.title_as, "after": body.title_as}
     if body.status is not None and body.status != chapter.status:
         changes["status"] = {"before": chapter.status, "after": body.status}
+    if body.notes_en is not None:
+        changes["notes_en"] = {
+            "words_before": len(chapter.notes_en.split()) if chapter.notes_en else 0,
+            "words_after": len(body.notes_en.split()) if body.notes_en else 0,
+        }
+    if body.notes_as is not None:
+        changes["notes_as"] = {
+            "words_before": len(chapter.notes_as.split()) if chapter.notes_as else 0,
+            "words_after": len(body.notes_as.split()) if body.notes_as else 0,
+        }
     if body.content is not None:
         changes["content_en"] = {
             "words_before": len(chapter.content_en.split()) if chapter.content_en else 0,
@@ -781,9 +1301,20 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate,
         chapter.status = body.status
     if body.chapter_number is not None:
         chapter.chapter_number = body.chapter_number
+    # Primary notes fields (ingestion pipeline writes here; admin editor edits here)
+    if body.notes_en is not None:
+        chapter.notes_en = body.notes_en
+        chapter.notes_generated = bool(body.notes_en)
+        # notes_en is the authoritative word count source when present
+        chapter.word_count = len(body.notes_en.split()) if body.notes_en else 0
+    if body.notes_as is not None:
+        chapter.notes_as = body.notes_as
+    # Legacy content fields (kept for backward compat; editor falls back to these on load)
     if body.content is not None:
         chapter.content_en = body.content
-        chapter.word_count = len(body.content.split()) if body.content else 0
+        # Only update word_count from content_en if notes_en was not also sent
+        if body.notes_en is None:
+            chapter.word_count = len(body.content.split()) if body.content else 0
     if body.content_as is not None:
         chapter.content_as = body.content_as
     if body.content_type is not None:
@@ -795,8 +1326,10 @@ async def update_chapter(request: Request, chapter_id: str, body: ChapterUpdate,
     if body.pyq_pdf_url is not None:
         chapter.pyq_pdf_url = body.pyq_pdf_url
     now = datetime.now(timezone.utc)
-    # Stamp content_saved_at whenever student-facing text changes
-    if body.content is not None or body.content_as is not None or body.qa_text_en is not None or body.qa_text_as is not None:
+    # Stamp content_saved_at whenever any student-facing text changes
+    if (body.notes_en is not None or body.notes_as is not None
+            or body.content is not None or body.content_as is not None
+            or body.qa_text_en is not None or body.qa_text_as is not None):
         chapter.content_saved_at = now
     chapter.updated_at = now
     chapter.version = chapter.version + 1
@@ -972,9 +1505,9 @@ async def get_chapter_audit_log(request: Request, chapter_id: str, limit: int = 
     }
 
 
-# ============================
+# ----------------------------
 # LAYER 2: Topics
-# ============================
+# ----------------------------
 
 
 @router.post("/content/chapters/{chapter_id}/topics")
@@ -1050,9 +1583,9 @@ async def delete_topic(request: Request, topic_id: str):
     return {"status": "deleted", "topic_id": topic_id}
 
 
-# ============================
+# ----------------------------
 # LAYER 2: Content Editing
-# ============================
+# ----------------------------
 
 
 @router.put("/content/chapters/{chapter_id}/content/en")
@@ -1104,9 +1637,9 @@ async def get_content(request: Request, chapter_id: str, lang: str):
     return {"chapter_id": chapter_id, "lang": lang, "content": content}
 
 
-# ============================
+# ----------------------------
 # LAYER 2: Topic Index
-# ============================
+# ----------------------------
 
 
 @router.get("/content/subjects/{subject_id}/topic-index")
@@ -1136,9 +1669,9 @@ async def get_topic_index(request: Request, subject_id: str):
     return {"subject_id": subject_id, "topics": index, "total": len(index)}
 
 
-# ============================
+# ----------------------------
 # LAYER 3: AI Generation
-# ============================
+# ----------------------------
 
 
 @router.post("/content/chapters/{chapter_id}/generate-notes")
@@ -1220,9 +1753,9 @@ async def generate_notes_assamese(request: Request, chapter_id: str, body: Gener
         raise HTTPException(status_code=500, detail="Translation failed")
 
 
-# ============================
+# ----------------------------
 # LAYER 3: Publishing
-# ============================
+# ----------------------------
 
 
 @router.post("/content/chapters/{chapter_id}/publish")
@@ -1411,9 +1944,9 @@ async def publish_pages(request: Request, chapter_id: str):
     return {"chapter_id": chapter_id, "result": result}
 
 
-# ============================
+# ----------------------------
 # LAYER 3: FAQ JSON-LD
-# ============================
+# ----------------------------
 
 
 @router.post("/content/chapters/{chapter_id}/faq-jsonld")
@@ -1444,9 +1977,9 @@ async def set_faq_jsonld(request: Request, chapter_id: str, body: FAQRequest):
     return {"status": "updated", "faq_count": len(faq_jsonld)}
 
 
-# ============================
+# ----------------------------
 # LAYER 4: Content Pipeline
-# ============================
+# ----------------------------
 
 
 class PipelineGenerateRequest(BaseModel):
@@ -1528,9 +2061,9 @@ async def get_pipeline_status(request: Request, knowledge_id: str = Query(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============================
+# ----------------------------
 # LAYER 4b: CMS Documents (Blog/SEO posts)
-# ============================
+# ----------------------------
 
 
 class CmsDocCreate(BaseModel):
@@ -1707,9 +2240,9 @@ async def save_cms_document_revision(request: Request, doc_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============================
+# ----------------------------
 # LAYER 4b: Translation Progress
-# ============================
+# ----------------------------
 
 
 @router.get("/content/translation-progress")
@@ -1768,9 +2301,9 @@ async def get_translation_progress(request: Request):
     }
 
 
-# ============================
+# ----------------------------
 # LAYER 6: Agent Ingest (Replit Chat → MongoDB)
-# ============================
+# ----------------------------
 
 
 class _AgentTopicIn(BaseModel):
@@ -1885,9 +2418,9 @@ async def ingest_from_agent(request: Request, body: AgentIngestRequest):
     }
 
 
-# ============================
+# ----------------------------
 # LAYER 5: GCS Sync
-# ============================
+# ----------------------------
 
 
 @router.post("/sync-to-gcs")
@@ -1904,9 +2437,9 @@ async def sync_to_gcs(request: Request):
         raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
 
 
-# ============================
+# ----------------------------
 # LAYER 6: Cloudflare KV Pre-warm
-# ============================
+# ----------------------------
 
 
 @router.post("/content/kv-prewarm")

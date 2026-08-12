@@ -23,6 +23,18 @@ class CircuitBreakerError(Exception):
     pass
 
 
+class SarvamBillingExhaustedError(Exception):
+    """Raised when Sarvam returns HTTP 402 (billing credits exhausted).
+
+    This is a permanent billing state that won't self-recover — it must not
+    be counted as a circuit breaker failure.  The circuit breaker stays CLOSED
+    so the very first request after credits are topped up succeeds immediately,
+    without waiting for the reset timeout.
+    """
+
+    pass
+
+
 class CircuitBreaker:
     """
     Circuit Breaker implementation for AI provider calls.
@@ -125,6 +137,16 @@ class CircuitBreaker:
             async with self._state_lock:
                 self._on_success()
             return result
+        except SarvamBillingExhaustedError:
+            # 402 billing exhausted: do NOT record as a circuit breaker failure.
+            # If the circuit is HALF_OPEN, the probe slot was already consumed
+            # by _half_open_calls += 1 above.  Un-consume it so the billing
+            # recheck can actually send a probe to Sarvam once the flag expires
+            # (otherwise the half-open limit blocks all Sarvam attempts forever).
+            async with self._state_lock:
+                if self._state == CircuitState.HALF_OPEN:
+                    self._half_open_calls = max(0, self._half_open_calls - 1)
+            raise
         except Exception:
             async with self._state_lock:
                 self._on_failure()

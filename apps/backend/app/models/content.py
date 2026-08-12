@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from beanie import Document, PydanticObjectId
 from pydantic import BaseModel, Field
+from pymongo import ASCENDING, IndexModel
 
 # Flexible ID type: accepts MongoDB ObjectIds AND legacy short/UUID string IDs
 # stored in the DB (e.g. 'b1', 's13', '0bd48cd1-3912-47f8-...')
@@ -138,6 +139,20 @@ class Chapter(Document):
 
     class Settings:
         name = "chapters"
+        indexes = [
+            # Partial unique index on (subject_id, slug_as) — only enforced for
+            # non-null slug_as values so existing chapters with slug_as=null are
+            # unaffected.  Prevents concurrent Assamese seed workers from
+            # persisting the same slug_as for two different chapters in the same
+            # subject; the second write gets a DuplicateKeyError and the caller
+            # retries with a numeric-suffix candidate.
+            IndexModel(
+                [("subject_id", ASCENDING), ("slug_as", ASCENDING)],
+                unique=True,
+                partialFilterExpression={"slug_as": {"$type": "string"}},
+                name="chapters_subject_slug_as_unique",
+            ),
+        ]
 
 
 class ContentAuditLog(Document):

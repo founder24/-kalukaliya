@@ -29,7 +29,7 @@
 - [Syrabit confidence-aware chat pipeline](syrabit-confidence-chat.md) — 2-phase embed+gate retrieval; SourceCard SSE emitted before LLM; source card enhances existing MessageBubble card (not a new panel)
 - [Syrabit god-level upgrade progress](syrabit-upgrade-progress.md) — Admin hardening phases 1-6 complete: PublishJob tracking, unpublished-edit badge, conversations pagination, admin actions analytics
 - [Syrabit admin publish job pattern](syrabit-publish-job.md) — PublishJob (publish_jobs collection) tracks 7-step pipeline; POST publish returns job_id immediately; asyncio.create_task runs pipeline; GET + retry endpoints exist
-- [Sarvam enable_thinking mode strategy](sarvam-enable-thinking.md) — English: enable_thinking=True → clean content field; Assamese: False → extract from reasoning_content
+- [Sarvam enable_thinking mode strategy](sarvam-enable-thinking.md) — Non-streaming: always False (True leaks planning into content field); streaming EN: True, AS: False
 - [Syrabit user route aliases](syrabit-user-route-aliases.md) — Frontend uses /user/profile, /user/account, /user/memories; backend must expose these as aliases to /users/me
 - [Admin panel audit findings](admin-panel-audit.md) — AWS-Native section removed (no backend); URL routing via useSearchParams; AdminShellDebug overlay (Ctrl+Shift+D)
 - [Admin panel silent-failure fixes](admin-panel-silent-failures.md) — 4 silent-blank bugs fixed: dashboard skeleton on first load, conversations error banner, logs table loading row, chapters loading spinner
@@ -39,3 +39,5 @@
 - [Profile page crash defensive fixes](profile-page-crash-defense.md) — Root cause unknown (no prod trace); added null guard + error state + loadProfile callback; subscription_tier Literal widened
 - [Prerender $X replacement corruption](prerender-replace-corruption.md) — html.replace(pattern, string) with $' in data corrupts HTML; always use () => replacement in prerender scripts
 - [AHSEC Q&A pipeline](ahsec-qa-pipeline.md) — exercise extraction fix, Q&A format, meta-commentary cleanup, system prompt lesson, backfill script
+- [AHSEC Q&A pipeline disabled](syrabit-qa-pipeline-disabled.md) — Q&A + published_topics cleared from all 548 chapters; ingestion now writes notes only; re-enable by un-commenting generate_qa_from_notes() call
+- [AHSEC prelim-page detection](ahsec-prelim-signals.md) — _PRELIM_SIGNALS gaps that let "Textbook Publication Details/Educational Philosophy/NCF" pages become chapter notes; 16 chapters cleared Aug 2026

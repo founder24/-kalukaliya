@@ -191,20 +191,43 @@ steps:
           echo "  ⚠ SENTRY_DSN not in SM — Sentry error tracking disabled"
         fi
 
-        # UPSTASH_REDIS_REST_URL — rate limiting (optional: app degrades gracefully without Redis)
+        # UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN — fleet-wide email flood cap
+        # Without these, each Cloud Run pod enforces its own 10 emails/min counter, so the
+        # effective cap scales with pod count (3 pods → 30 emails/min).  With Redis, the cap
+        # is shared across the entire fleet.  The app falls back to in-memory gracefully.
+        # Verify Redis is active in production: GET /health → "email_rate_limiter": "redis"
+        #
+        # ONE-TIME SETUP (run in Cloud Shell once your Upstash account is ready):
+        #   echo -n 'https://YOUR_INSTANCE.upstash.io' | \
+        #     gcloud secrets create upstash-redis-rest-url \
+        #       --replication-policy=automatic --data-file=- \
+        #       --project=blissful-acumen-495019-t6
+        #   echo -n 'YOUR_UPSTASH_TOKEN' | \
+        #     gcloud secrets create upstash-redis-rest-token \
+        #       --replication-policy=automatic --data-file=- \
+        #       --project=blissful-acumen-495019-t6
+        #   # Grant the backend SA access:
+        #   gcloud secrets add-iam-policy-binding upstash-redis-rest-url \
+        #     --project=blissful-acumen-495019-t6 \
+        #     --member=serviceAccount:syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com \
+        #     --role=roles/secretmanager.secretAccessor
+        #   gcloud secrets add-iam-policy-binding upstash-redis-rest-token \
+        #     --project=blissful-acumen-495019-t6 \
+        #     --member=serviceAccount:syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com \
+        #     --role=roles/secretmanager.secretAccessor
         if gcloud secrets describe upstash-redis-rest-url --project="$$PROJECT" >/dev/null 2>&1; then
           UPDATES="$${UPDATES:+$$UPDATES,}UPSTASH_REDIS_REST_URL=upstash-redis-rest-url:latest"
-          echo "  ✓ upstash-redis-rest-url"
+          echo "  ✓ upstash-redis-rest-url (fleet-wide email flood cap: ACTIVE)"
         else
-          echo "  ⚠ upstash-redis-rest-url not in SM — Redis rate limiting disabled"
+          echo "  ⚠ upstash-redis-rest-url not in SM — email flood cap is per-pod only (see setup instructions above)"
         fi
 
-        # UPSTASH_REDIS_REST_TOKEN — rate limiting (optional)
+        # UPSTASH_REDIS_REST_TOKEN — required alongside UPSTASH_REDIS_REST_URL
         if gcloud secrets describe upstash-redis-rest-token --project="$$PROJECT" >/dev/null 2>&1; then
           UPDATES="$${UPDATES:+$$UPDATES,}UPSTASH_REDIS_REST_TOKEN=upstash-redis-rest-token:latest"
           echo "  ✓ upstash-redis-rest-token"
         else
-          echo "  ⚠ upstash-redis-rest-token not in SM — Redis rate limiting disabled"
+          echo "  ⚠ upstash-redis-rest-token not in SM — email flood cap is per-pod only"
         fi
 
         # POSTHOG_API_KEY — product analytics (optional)

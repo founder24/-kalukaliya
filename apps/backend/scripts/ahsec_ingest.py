@@ -54,6 +54,23 @@ logging.basicConfig(
 )
 log = logging.getLogger("ahsec_ingest")
 
+
+class NotesProviderUnavailableError(RuntimeError):
+    """Raised by generate_notes() when both Sarvam and Gemini are unable to
+    produce notes.  The caller should record the chapter with
+    status='notes_provider_unavailable' so staff can retry it later.
+
+    Attributes:
+        reason (str): Machine-readable root cause.  One of:
+            "missing_credentials" — GEMINI_API_KEY is absent; deploy a fix.
+            "provider_error"      — API quota/rate-limit/network error; wait
+                                    for quota reset or check API status.
+    """
+
+    def __init__(self, message: str, reason: str = "provider_error") -> None:
+        super().__init__(message)
+        self.reason = reason
+
 # ── CLI args ───────────────────────────────────────────────────────────────────
 
 def _parse_args() -> argparse.Namespace:
@@ -67,12 +84,24 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--limit",    type=int, default=None)
     p.add_argument("--delay",    type=float, default=1.5)
     p.add_argument("--pilot",    action="store_true")
+    p.add_argument(
+        "--no-post-run",
+        action="store_true",
+        help=(
+            "Skip the automatic fill-gaps + retry-blank-notes cleanup that runs "
+            "after a full ingestion pass.  Set automatically when called from "
+            "ahsec_fill_gaps.sh or ahsec_retry_blank_notes.sh to prevent recursion."
+        ),
+    )
     return p.parse_args()
 
 
 # ── Progress log ───────────────────────────────────────────────────────────────
 
-PROGRESS_FILE = Path(__file__).parent / ".ahsec_ingest_progress.jsonl"
+PROGRESS_FILE      = Path(__file__).parent / ".ahsec_ingest_progress.jsonl"
+# Advisory lock file shared with the admin compaction endpoint so that
+# a compaction rewrite never races with an in-progress append.
+PROGRESS_LOCK_FILE = Path(__file__).parent / ".ahsec_ingest_progress.lock"
 
 
 def _load_done_keys() -> set[str]:
@@ -90,19 +119,124 @@ def _load_done_keys() -> set[str]:
     return done
 
 
+def _compact_progress_log_sync() -> dict:
+    """Compact the AHSEC progress log in-process (sync, no MongoDB).
+
+    Reads the JSONL file, keeps only the latest record per key, and atomically
+    rewrites the file.  This prevents the append-only log from growing without
+    bound across successive bulk seed runs.
+
+    MongoDB reconciliation (checking notes_en/notes_as) is intentionally
+    omitted here — the admin GET /stuck endpoint handles that at query time.
+    The goal is purely to bound file size by deduplicating per-chapter entries.
+
+    Thread/process safety: acquires LOCK_EX on PROGRESS_LOCK_FILE before
+    reading or writing.  Writes to a temp file and atomically renames into
+    place so readers never see a partial file.
+
+    Returns a summary dict with keys:
+        records_before, records_after, removed, compacted, error (if any).
+    """
+    import fcntl
+    import os as _os
+    import tempfile as _tempfile
+
+    if not PROGRESS_FILE.exists():
+        return {"compacted": False, "records_before": 0, "records_after": 0,
+                "removed": 0, "file_exists": False}
+
+    lf = PROGRESS_LOCK_FILE.open("a+")
+    try:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+
+        latest_by_key: dict[str, dict] = {}
+        raw_count = 0
+        try:
+            for line in PROGRESS_FILE.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                raw_count += 1
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                dedup_key = rec.get("key") or rec.get("chapter_id", "")
+                if dedup_key:
+                    latest_by_key[dedup_key] = rec
+        except Exception as e:
+            return {"compacted": False, "records_before": raw_count,
+                    "records_after": 0, "removed": 0, "file_exists": True, "error": str(e)}
+
+        kept = sorted(latest_by_key.values(), key=lambda r: r.get("ts", ""))
+        new_content = "\n".join(json.dumps(r) for r in kept)
+        if new_content:
+            new_content += "\n"
+
+        scripts_dir = PROGRESS_FILE.parent
+        try:
+            fd, tmp_path = _tempfile.mkstemp(
+                dir=str(scripts_dir),
+                prefix=".ahsec_ingest_progress.",
+                suffix=".tmp",
+            )
+            try:
+                with _os.fdopen(fd, "w", encoding="utf-8") as tf:
+                    tf.write(new_content)
+                _os.replace(tmp_path, str(PROGRESS_FILE))
+            except Exception:
+                try:
+                    _os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+        except Exception as e:
+            return {"compacted": False, "records_before": raw_count,
+                    "records_after": 0, "removed": 0, "file_exists": True, "error": str(e)}
+
+        removed = raw_count - len(kept)
+        return {
+            "compacted": True,
+            "records_before": raw_count,
+            "records_after": len(kept),
+            "removed": removed,
+            "file_exists": True,
+        }
+    finally:
+        fcntl.flock(lf, fcntl.LOCK_UN)
+        lf.close()
+
+
 def _log_progress(
     key: str, status: str, detail: str = "",
-    chapter_id: str = "", pdf_url: str = "",
+    chapter_id: str = "", pdf_url: str = "", medium: str = "",
 ) -> None:
-    with PROGRESS_FILE.open("a") as f:
-        f.write(json.dumps({
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "key": key,
-            "status": status,
-            "detail": detail,
-            "chapter_id": chapter_id,
-            "pdf_url": pdf_url,
-        }) + "\n")
+    """Append one progress record to the JSONL log.
+
+    Acquires a shared (LOCK_SH) advisory lock on PROGRESS_LOCK_FILE before
+    writing so that the admin compaction endpoint (which holds LOCK_EX) can
+    safely quiesce all writers before rewriting the file.
+    """
+    import fcntl
+
+    record = json.dumps({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "key": key,
+        "status": status,
+        "detail": detail,
+        "chapter_id": chapter_id,
+        "pdf_url": pdf_url,
+        "medium": medium,
+    }) + "\n"
+
+    # Open the lock file in append mode so it is created if absent.
+    with PROGRESS_LOCK_FILE.open("a+") as lf:
+        fcntl.flock(lf, fcntl.LOCK_SH)
+        try:
+            with PROGRESS_FILE.open("a") as f:
+                f.write(record)
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
 
 
 # ── AHSEC PDF Catalogue ────────────────────────────────────────────────────────
@@ -124,6 +258,39 @@ def _slug(text: str) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     text = re.sub(r"[^\w\s-]", "", text.lower())
     return re.sub(r"[\s_-]+", "-", text).strip("-")
+
+
+def _slug_as(text: str) -> str:
+    """Generate a URL-friendly slug from Assamese (Unicode) text.
+
+    Keeps Unicode letters (Lo), modifier letters (Lm), spacing combining marks
+    (Mc — Assamese vowel signs such as ো ী া ু), non-spacing combining marks
+    (Mn — e.g. virama ্), and decimal digits (Nd) so that the URL is a
+    fully-readable Assamese-script string.
+
+    Example: "কোষ জীৱবিজ্ঞান" → "কোষ-জীৱবিজ্ঞান"
+
+    Python's ``\\w`` does NOT include Mc/Mn characters, so a regex-replace
+    approach would silently strip dependent vowel signs and virama, producing
+    a corrupt slug. This function uses unicodedata.category() explicitly.
+    """
+    text = unicodedata.normalize("NFC", text).strip().lower()
+    # Replace runs of whitespace / separators with a single hyphen
+    text = re.sub(r"[\s\-_]+", "-", text)
+    # Keep only: Unicode letters (all L* categories), combining marks, digits + hyphens.
+    # Lo = other letters (Assamese base consonants), Ll/Lu/Lt = cased Latin letters,
+    # Lm = modifier letters, Mc = spacing combining marks (Assamese vowel signs),
+    # Mn = non-spacing combining marks (virama), Nd = decimal digits.
+    _KEEP_CATS = {"Lo", "Ll", "Lu", "Lt", "Lm", "Mc", "Mn", "Nd"}
+    result = []
+    for ch in text:
+        if ch == "-" or unicodedata.category(ch) in _KEEP_CATS:
+            result.append(ch)
+    text = "".join(result)
+    # Collapse multiple consecutive hyphens (can appear when punctuation sat
+    # between two words before it was removed)
+    text = re.sub(r"-+", "-", text)
+    return text.strip("-")
 
 
 # ── Catalogue filter lists ──────────────────────────────────────────────────────
@@ -408,6 +575,29 @@ def build_catalogue(class11: bool = True, class12: bool = True) -> list[dict]:
                 "book_label":   book_label,
             })
 
+    # ── Biology XI English gap note ───────────────────────────────────────────
+    # AHSEC does not publish an English-medium Biology textbook for Class XI;
+    # only the Assamese edition (BIOLOGY_1ST-YR_*.pdf) is hosted.  That PDF
+    # also uses a proprietary non-Unicode Assamese font so PyMuPDF extracts
+    # garbled characters rather than readable text — passing that to Sarvam
+    # would produce low-quality notes.
+    #
+    # Until AHSEC publishes a Biology XI (E) PDF, the 22 pre-seeded Biology XI
+    # English chapter stubs will remain empty.  The library UI hides empty
+    # chapter stubs so students are not shown broken links.  Once a usable
+    # English PDF URL appears on the AHSEC catalogue page, the code below will
+    # automatically include it in the next ingestion run without any changes.
+    if class11 and not any(
+        e["subject_slug"] == "biology"
+        and e["class_level"] == "11"
+        and e["medium"] == "en"
+        for e in entries
+    ):
+        log.info(
+            "  Biology XI: no English PDF on AHSEC — chapter stubs remain "
+            "empty until AHSEC publishes a Biology XI (E) textbook"
+        )
+
     log.info(f"Catalogue built: {len(entries)} PDF entries")
     return entries
 
@@ -462,18 +652,32 @@ def _ocr_page(page, lang: str = "asm+eng") -> str:
     return pytesseract.image_to_string(img, lang=lang, config="--psm 6")
 
 
-def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
+# Maximum wall-clock seconds allowed for a single Tesseract OCR call.
+# Large diagram pages in Biology/Chemistry AS PDFs can stall Tesseract
+# indefinitely; exceeding this threshold skips the page rather than
+# blocking the entire ingestion run.
+OCR_PAGE_TIMEOUT = 120
+
+
+async def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
     """
     Download a PDF and extract text per page using PyMuPDF (fitz).
     For Assamese PDFs: if a page's embedded text is garbled (non-Unicode
     Assamese font), fall back to Tesseract OCR with lang='asm+eng'.
+
+    Each OCR call is wrapped in asyncio.wait_for with OCR_PAGE_TIMEOUT
+    seconds.  A page that exceeds the deadline is skipped with a warning
+    rather than stalling the entire book.
+
     Returns [{page_num, text}].  Pages with < 20 chars are skipped.
     """
     import fitz  # PyMuPDF
 
-    data = _download_pdf(url)
+    data = await asyncio.to_thread(_download_pdf, url)
     pages = []
     ocr_count = 0
+    ocr_skipped = 0
+    ocr_start = time.monotonic()
 
     with fitz.open(stream=data, filetype="pdf") as doc:
         for i, page in enumerate(doc):
@@ -484,9 +688,18 @@ def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
             # (very few actual Assamese Unicode chars), fall back to OCR.
             if medium == "as" and len(text) > 30 and not _is_readable_assamese(text):
                 try:
-                    text = _ocr_page(page, lang="asm+eng")
+                    text = await asyncio.wait_for(
+                        asyncio.to_thread(_ocr_page, page, "asm+eng"),
+                        timeout=OCR_PAGE_TIMEOUT,
+                    )
                     text = re.sub(r"\n{3,}", "\n\n", text).strip()
                     ocr_count += 1
+                except asyncio.TimeoutError:
+                    log.warning(
+                        f"    OCR timeout on p{i+1} (>{OCR_PAGE_TIMEOUT}s) — skipping page"
+                    )
+                    ocr_skipped += 1
+                    continue
                 except Exception as e:
                     log.debug(f"    OCR failed p{i+1}: {e}")
 
@@ -496,19 +709,32 @@ def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
             elif len(text) < 20:
                 try:
                     lang = "asm+eng" if medium == "as" else "eng"
-                    ocr_text = _ocr_page(page, lang=lang)
+                    ocr_text = await asyncio.wait_for(
+                        asyncio.to_thread(_ocr_page, page, lang),
+                        timeout=OCR_PAGE_TIMEOUT,
+                    )
                     ocr_text = re.sub(r"\n{3,}", "\n\n", ocr_text).strip()
                     if len(ocr_text) >= 20:
                         text = ocr_text
                         ocr_count += 1
+                except asyncio.TimeoutError:
+                    log.warning(
+                        f"    OCR timeout on p{i+1} (>{OCR_PAGE_TIMEOUT}s) — skipping page"
+                    )
+                    ocr_skipped += 1
+                    continue
                 except Exception as e:
                     log.debug(f"    OCR fallback failed p{i+1}: {e}")
 
             if len(text) >= 20:
                 pages.append({"page_num": i + 1, "text": text})
 
-    if ocr_count:
-        log.info(f"  OCR used on {ocr_count} pages (image-only / non-Unicode font)")
+    if ocr_count or ocr_skipped:
+        ocr_elapsed = time.monotonic() - ocr_start
+        log.info(
+            f"  OCR summary: {ocr_count} pages OCR'd, {ocr_skipped} timed-out/skipped"
+            f" — total OCR wall time {ocr_elapsed:.1f}s"
+        )
     return pages
 
 
@@ -584,20 +810,35 @@ def _clean_notes_output(text: str) -> str:
     The model sometimes outputs chain-of-thought reasoning before the actual
     notes, and may use **bold** headings instead of ## headings despite the
     system prompt.  This function:
-      1. Strips everything before the first ## or **Topic heading.
+      1. Strips everything before the first ## heading (only ## — not ** bold,
+         which also appears in planning mental-outline sections and would anchor
+         too early, leaving the rest of the planning intact).
       2. Converts "**Topic N: Name**" / "**Name**" section headers → "## Name".
       3. Removes residual meta-commentary lines (e.g. "This is a good set…").
+
+    If no ## heading is found at all (model used only **bold** headings), falls
+    back to the first **TITLE** bold line as the anchor so some stripping still
+    happens.
     """
-    # ── 1. Find the first structural heading ─────────────────────────────────
     import re as _re
-    # Look for ## heading or a **TITLE** bold heading at start of a line
-    heading_re = _re.compile(
-        r'^(?:##\s|\*\*(?:Topic\s+\d+[:\.\-–]?\s*)?[A-Z])',
-        _re.MULTILINE,
-    )
-    m = heading_re.search(text)
+
+    # ── 1. Strip everything before the first ## heading ───────────────────────
+    # Only anchor on ## (not **) so that planning mental-outline bold lines
+    # like "**Topic 1: Discovery...**" in the "Drafting Content" section don't
+    # cause an early, incorrect anchor that leaves the rest of the planning.
+    hash_re = _re.compile(r'^##\s', _re.MULTILINE)
+    m = hash_re.search(text)
     if m and m.start() > 0:
         text = text[m.start():]
+    elif not m:
+        # Fallback: no ## found — try first **TITLE** bold heading
+        bold_re = _re.compile(
+            r'^(?:\*\*(?:Topic\s+\d+[:\.\-–]?\s*)?[A-Z])',
+            _re.MULTILINE,
+        )
+        mb = bold_re.search(text)
+        if mb and mb.start() > 0:
+            text = text[mb.start():]
 
     # ── 2. Convert **Topic N: Name** → ## Name ───────────────────────────────
     text = _re.sub(
@@ -611,7 +852,8 @@ def _clean_notes_output(text: str) -> str:
     meta_re = _re.compile(
         r'^(?:'
         # Inline reasoning lines (not headings)
-        r'[\-\*\s]*(?:This (?:is|gives|seems|looks)|Now[,\s]|Let\'?s\s|I will|I\'ll\s|'
+        r'[\-\*\s]*(?:This (?:is|gives|seems|looks|sounds)|Now[,\s]|Let\'?s\s|I will|I\'ll\s|'
+        r'Putting it together|Straightforward\.|Let\'?s (?:stick|try)|'
         r'Confidence Score|Mental Sandbox|Revised Plan|Quick word)|'
         # ## headings that echo system-prompt structure or are model meta-commentary
         r'#{1,3}\s+(?:Draft(?:ing)?|Revised?\s+Draft|Word\s+Count|Check:|Mental|'
@@ -623,11 +865,52 @@ def _clean_notes_output(text: str) -> str:
         r')',
         _re.MULTILINE | _re.IGNORECASE,
     )
-    lines = [l for l in text.splitlines() if not meta_re.match(l)]
+    # Translation-glossary lines: "English Term -> অসমীয়া (Romanized)" or
+    # "English Term -> অসমীয়া (romanized-word)." — produced by models that
+    # treat the task as a word-by-word translation exercise.
+    gloss_re = _re.compile(
+        r'^"?[A-Za-z][A-Za-z0-9 \-\'\"]+?"?\s*->\s*.+\([A-Za-z][A-Za-z\- ]+\)[.\s]*$',
+        _re.MULTILINE,
+    )
+    lines = [
+        l for l in text.splitlines()
+        if not meta_re.match(l) and not gloss_re.match(l.strip())
+    ]
     text = "\n".join(lines)
+
+    # ── 3b. Strip translation-reasoning sentences embedded mid-paragraph ────────
+    # These appear when the model reasons inline rather than on separate lines,
+    # e.g. "This is a direct and accurate translation. Putting it together: ..."
+    # We remove sentences that are clearly model self-commentary (all-English,
+    # containing known reasoning phrases) from otherwise Assamese paragraphs.
+    reasoning_sentence_re = _re.compile(
+        r'(?:^|(?<=\. ))'
+        r'(?:This (?:is|sounds|seems|looks) [a-z].*?|'
+        r'Putting it together[^.]*\.|'
+        r'Let\'?s (?:try|stick|use)[^.]*\.|'
+        r'Straightforward\.|'
+        r'is (?:fine|correct|a direct)[^.]*\.|'
+        r'Adding "[^"]*" for [^.]*\.|'
+        r'Direct translation[^.]*\.)'
+        r'(?=\s|$)',
+        _re.MULTILINE | _re.IGNORECASE,
+    )
+    text = reasoning_sentence_re.sub('', text)
 
     # ── 4. Collapse excess blank lines ───────────────────────────────────────
     text = _re.sub(r'\n{3,}', '\n\n', text).strip()
+
+    # ── 5. Final preamble strip ───────────────────────────────────────────────
+    # Safety net for the case where the model produces no ## headings at all
+    # (steps 1–4 may leave AI preamble prose intact).  Strip every leading line
+    # that does not begin with a # heading character.
+    out_lines = text.splitlines()
+    first_heading = next(
+        (i for i, l in enumerate(out_lines) if l.strip().startswith('#')), None
+    )
+    if first_heading is not None and first_heading > 0:
+        text = "\n".join(out_lines[first_heading:]).strip()
+
     return text
 
 
@@ -639,37 +922,199 @@ def _is_readable_assamese(text: str) -> bool:
     return assamese_count / max(len(text), 1) > 0.05
 
 
+# Keywords that indicate a page is part of the preliminary section
+# (cover, copyright notice, foreword, acknowledgements, TOC).
+_PRELIM_SIGNALS = re.compile(
+    r"\b(?:copyright|©|\bforeword\b|\bpreface\b|acknowledgement|acknowledgment|"
+    r"all rights reserved|printed at|published by|first published|"
+    r"reprint|edition|isbn|ncert|prepared by|textbook development|"
+    r"rationali[sz]ation|adopted by ahsec|publication division|"
+    r"sri aurobindo marg|new delhi|"
+    # Additional publication-page markers found in AHSEC textbooks:
+    r"textbook publication details|educational philosophy|"
+    r"content rationali[sz]ation|national curriculum framework|"
+    r"astppcl|assam state textbook production|"
+    r"about the textbook|textbook overview|textbook information|"
+    r"purpose and approach of the textbook|"
+    r"adopted by assam higher secondary|"
+    r"printed on \d+gsm|published for the session|"
+    r"higher secondary.*english medium.*session|"
+    r"illustrations by ncert|"
+    # Additional patterns for intro/preface sections that may lack the above:
+    r"to the (?:teacher|student|reader)|how to use this (?:book|textbook)|"
+    r"a note (?:to|from) the|note to (?:teacher|student)|"
+    r"editorial (?:board|committee|note)|textbook committee|"
+    r"chief advis(?:or|er)|development team|curriculum committee|"
+    r"foreword and educational|educational philosophy and|"
+    r"philosophy of education|learning outcomes|"
+    r"approach of the textbook|approach of this (?:book|textbook)|"
+    r"about this (?:book|textbook)|introduction to (?:the )?textbook|"
+    r"how this book (?:is )?organised|organisation of (?:the )?(?:book|textbook)|"
+    r"features of (?:the )?(?:book|textbook)|special features)\b",
+    re.IGNORECASE,
+)
+
+# Line-start anchored pattern for pages that BEGIN with a known prelim heading.
+# Catches pages whose body text doesn't contain the above keywords but whose
+# very first line is an unambiguous prelim section title (e.g. a page that
+# starts with "Foreword and Educational Philosophy" as a standalone heading
+# but contains only running prose beneath it).
+_PRELIM_PAGE_HEADER_RE = re.compile(
+    r"^(?:Foreword|Preface|Acknowledgements?|Acknowledgments?|"
+    r"Foreword\s+and\s+|Preface\s+to\s+|"
+    r"About\s+(?:the|this)\s+(?:Textbook|Book)|"
+    r"To\s+the\s+(?:Teacher|Student|Reader|Learner)|"
+    r"How\s+to\s+Use\s+(?:this|the)\s+(?:Book|Textbook)|"
+    r"A\s+Note\s+(?:to|from)\s+the|Note\s+to\s+(?:Teacher|Student)|"
+    r"Introduction\s+to\s+(?:the\s+)?(?:Textbook|Book)|"
+    r"Textbook\s+Development\s+Committee|Editorial\s+(?:Board|Committee)|"
+    r"Chief\s+Advis(?:or|er)|Special\s+Thanks|"
+    r"Educational\s+Philosophy|Philosophy\s+of\s+Education|"
+    r"Learning\s+Outcomes?\s+(?:and|of|for)|"
+    r"Organisation\s+of\s+(?:the\s+)?(?:Book|Textbook)|"
+    r"Features\s+of\s+(?:the\s+)?(?:Book|Textbook))",
+    re.IGNORECASE,
+)
+
+# Regex to detect notes output that begins with a prelim-page heading.
+# Used as a post-generation guard: if Sarvam faithfully summarised foreword/
+# acknowledgement content (because _detect_prelim_boundary missed the page),
+# the notes will open with one of these ## headings and should be discarded.
+_NOTES_PRELIM_START_RE = re.compile(
+    r"^#{1,3}\s+(?:Foreword|Preface|Acknowledgements?|Acknowledgments?|"
+    r"About\s+(?:the|this)\s+(?:Textbook|Book)|"
+    r"Textbook\s+(?:Publication|Development|Overview|Information|Committee)|"
+    r"Educational\s+Philosophy|Philosophy\s+of\s+Education|"
+    r"National\s+Curriculum\s+Framework|"
+    r"Content\s+Rationali[sz]ation|Purpose\s+and\s+Approach|"
+    r"Introduction\s+to\s+(?:the\s+)?(?:Textbook|Book)|"
+    r"Learning\s+Outcomes?\s+(?:and|of|for)|"
+    r"To\s+the\s+(?:Teacher|Student|Reader|Learner)|"
+    r"Organisation\s+of\s+(?:the\s+)?(?:Book|Textbook)|"
+    r"Features\s+of\s+(?:the\s+)?(?:Book|Textbook))",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _notes_start_with_prelim(text: str) -> bool:
+    """Return True if generated notes begin with a publication-page heading.
+
+    This is a post-generation safety net: if _detect_prelim_boundary missed
+    a foreword/acknowledgement page, Sarvam may faithfully summarise that
+    content and produce notes that open with "## Foreword and Educational
+    Philosophy" (or similar).  Discarding such output lets the chapter be
+    flagged for re-ingestion rather than storing bad content.
+    """
+    if not text:
+        return False
+    # Only inspect the first 400 chars — a prelim heading will always be first
+    return bool(_NOTES_PRELIM_START_RE.match(text.strip()[:400]))
+
+
+def _detect_prelim_boundary(sorted_pages: list[dict]) -> int:
+    """
+    Return the index (into sorted_pages) of the first content-bearing page,
+    skipping the preliminary section (cover, copyright, foreword,
+    acknowledgements, TOC).
+
+    A page is classified as "prelim" if it:
+      - has very few characters (< 100) — likely a cover/image-only page, OR
+      - contains publication/metadata keywords (_PRELIM_SIGNALS), OR
+      - STARTS with a known prelim section heading (_PRELIM_PAGE_HEADER_RE), OR
+      - looks like a TOC page (has "contents" heading or ≥3 standalone page
+        numbers on their own lines).
+
+    The first page that passes none of the above tests is returned as the
+    start of actual chapter content.  Only the first 25 pages are checked
+    so we never skip into the body of a short book.
+    """
+    def _is_prelim_page(text: str) -> bool:
+        stripped = text.strip()
+        if len(stripped) < 100:
+            return True  # blank / cover / image-only
+        if _PRELIM_SIGNALS.search(stripped):
+            return True
+        # Check if page STARTS with a known prelim section heading.
+        # This catches pages whose body prose doesn't contain keyword signals
+        # but whose very first line is an unambiguous prelim title.
+        if _PRELIM_PAGE_HEADER_RE.match(stripped):
+            return True
+        lower = stripped.lower()
+        if "contents" in lower:
+            return True
+        # 3+ standalone page-number lines → TOC page
+        standalone_nums = re.findall(r"^\s*\d{1,3}\s*$", stripped, re.MULTILINE)
+        if len(standalone_nums) >= 3:
+            return True
+        return False
+
+    for i, page in enumerate(sorted_pages[:25]):
+        if not _is_prelim_page(page["text"]):
+            return i
+    # All first 25 pages looked like prelim — start from page 25
+    return min(25, len(sorted_pages))
+
+def _strip_toc_title(title: str) -> str:
+    """Remove leading colon / dash / whitespace artefacts from a TOC title.
+
+    Some AHSEC Biology/Chemistry PDFs format TOC entries as:
+        Chapter 1
+         : Reproduction in Organisms
+        3
+    so the captured title group starts with ": " which is NOT part of the
+    actual chapter name and prevents title-search matching in the body text.
+    """
+    # Strip leading whitespace, colons, dashes, and en/em-dashes
+    return re.sub(r'^[\s:–—\-]+', '', title).strip()
 def _parse_toc(pages_text: str) -> list[dict]:
     """
     Parse a table of contents to extract {chapter_num, title, start_page}.
     Handles both English (Unit N / Chapter N) and Assamese (অধ্যায় N) patterns.
     Returns a list sorted by start_page.
     """
-    entries: list[dict] = []
-
     # ── English: strict three-line pattern ───────────────────────────────────
+    # Collect into a dict keyed by chapter_num so we can fill gaps with the
+    # loose pattern (some chapters have wrapped two-line titles that the strict
+    # pattern cannot match).
+    strict_entries: dict[int, dict] = {}
     for m in _TOC_ENTRY_RE.finditer(pages_text):
         num   = int(m.group(1))
-        title = m.group(2).strip()
+        title = _strip_toc_title(m.group(2).strip())
         page  = int(m.group(3))
         if not title or page < 1 or page > 999:
             continue
-        entries.append({"chapter_num": num, "title": title, "start_page": page})
+        strict_entries[num] = {"chapter_num": num, "title": title, "start_page": page}
 
-    if entries:
-        return sorted(entries, key=lambda x: x["start_page"])
-
-    # ── English: looser — Unit/Chapter N + title + nearby page number ────────
+    # ── English: looser — fills chapters whose titles wrap across two TOC lines
+    # Example (Biology XII Ch. 9):
+    #   Chapter 9
+    #    : Strategies for Enhancement in   ← captured by TOC_UNIT_RE
+    #   Food Production                    ← continuation — must be joined
+    #   172                                ← page number
+    loose_entries: dict[int, dict] = {}
     for m in _TOC_UNIT_RE.finditer(pages_text):
-        num   = int(m.group(1))
-        title = m.group(2).strip()
-        snippet = pages_text[m.end():m.end() + 150]
+        num = int(m.group(1))
+        if num in strict_entries:
+            continue  # already resolved by the strict pattern — skip
+        title   = _strip_toc_title(m.group(2).strip())
+        # m.end() sits immediately after the captured title text; the very next
+        # character is typically a newline before the continuation / page number.
+        snippet = pages_text[m.end():m.end() + 200].lstrip("\n")
+        # Grab a potential title-continuation line: the first snippet line
+        # that is NOT a standalone number and NOT a chapter-range like "143-194".
+        first_line_m = re.match(r"^([^\n]{3,80})\n", snippet)
+        if first_line_m and not re.fullmatch(r"\s*\d{1,4}\s*", first_line_m.group(1)):
+            continuation = first_line_m.group(1).strip()
+            if continuation and not re.fullmatch(r"\d+[-–\u2013\u2014]\d+", continuation):
+                title   = (title + " " + continuation).strip()
+                snippet = snippet[first_line_m.end():]
         pnum_m = re.search(r"^\s*(\d{1,4})\s*$", snippet, re.MULTILINE)
         if pnum_m:
             page = int(pnum_m.group(1))
             if 1 <= page <= 999 and title:
-                entries.append({"chapter_num": num, "title": title, "start_page": page})
+                loose_entries[num] = {"chapter_num": num, "title": title, "start_page": page}
 
+    entries = list(strict_entries.values()) + list(loose_entries.values())
     if entries:
         return sorted(entries, key=lambda x: x["start_page"])
 
@@ -717,35 +1162,33 @@ def split_into_chapters(pages: list[dict], medium: str) -> list[dict]:
     toc_text = "\n".join(page_map.get(i, "") for i in range(1, min(21, max_page + 1)))
     toc_entries = _parse_toc(toc_text)
 
+    # Helper: detect whether the PDF body is predominantly in Assamese.
+    # Skip the first 12 pages (prelim/cover/copyright/foreword pages are often
+    # in English even for Assamese-medium books) and sample up to 20 body pages.
+    def _pdf_is_assamese() -> bool:
+        sorted_body = sorted(pages, key=lambda x: x["page_num"])[12:32]
+        sample = " ".join(p["text"] for p in sorted_body)
+        return _is_readable_assamese(sample)
+
     # For Assamese PDFs: TOC chapter numbers are often garbled by OCR (stylised fonts).
     # Fall back to body-text chapter heading detection if the TOC is missing or corrupt.
-    if not toc_entries or (medium == "as" and _toc_is_degenerate(toc_entries)):
-        if medium == "as":
+    #
+    # Cross-medium case (EN medium, Assamese-source PDF):
+    # When AHSEC does not publish an English-medium Biology PDF for a class, the
+    # Assamese PDF is used as a source and English notes are generated by Sarvam
+    # (the model understands both languages).  In that case, detect the Assamese
+    # content here and delegate to _split_assamese_by_body so we get individual
+    # per-chapter splits rather than treating the whole book as one blob.
+    if not toc_entries or _toc_is_degenerate(toc_entries):
+        if medium == "as" or _pdf_is_assamese():
+            if medium == "en":
+                log.info(
+                    "    Assamese-source PDF detected for EN medium — "
+                    "using Assamese chapter split; Sarvam will generate EN notes"
+                )
             return _split_assamese_by_body(pages, exercise_re)
-        # English fallback: whole book as one blob.
-        # IMPORTANT: search the ENTIRE full_text for exercises — the exercise section
-        # is near the END of the PDF and is always past the first 12 000 chars.
-        full_text = "\n\n".join(p["text"] for p in sorted(pages, key=lambda x: x["page_num"]))
-        full_text = _clean_page_text(full_text)
-        exercises_text = ""
-        ex_match = None
-        # Try patterns in priority order; take the LAST match so we get the
-        # end-of-book exercises rather than an early in-text header.
-        for pat in (exercise_re, _EN_SUMMARY_RE, _EN_QUESTION_NUM_RE):
-            all_matches = list(pat.finditer(full_text))
-            if all_matches:
-                ex_match = all_matches[-1]   # last occurrence = end-of-chapter exercises
-                break
-        if ex_match:
-            exercises_text = full_text[ex_match.start():][:10000].strip()
-            log.info(f"    Exercises found at char {ex_match.start()} / {len(full_text)} "
-                     f"({len(exercises_text)} chars extracted)")
-        return [{
-            "chapter_num": 1,
-            "title": "Full Book",
-            "body_text": full_text[:12000],
-            "exercises_text": exercises_text,
-        }]
+        # English fallback: body-text chapter split (then Full Book as last resort).
+        return _split_english_by_body(pages, exercise_re)
 
     log.info(f"    TOC found: {len(toc_entries)} chapters/units")
 
@@ -755,8 +1198,8 @@ def split_into_chapters(pages: list[dict], medium: str) -> list[dict]:
     # We find each chapter's real starting PDF page by searching for its title.
     resolved = _resolve_chapter_pages(pages, toc_entries, max_page)
     if not resolved:
-        log.warning("    Could not resolve chapter pages via title search — skipping")
-        return []
+        log.warning("    Could not resolve chapter pages via title search — falling back to body-text split")
+        return _split_english_by_body(pages, exercise_re) if medium == "en" else _split_assamese_by_body(pages, exercise_re)
 
     log.info(f"    Resolved {len(resolved)} chapter start pages via title search")
 
@@ -822,9 +1265,11 @@ def _resolve_chapter_pages(
     # We'll skip pages that appear to be the TOC itself when searching.
     def _is_toc_or_prelim(text: str) -> bool:
         lower = text.lower()
-        # A page is TOC-like if it says "contents" or lists 3+ standalone numbers
-        # (page number lines) in a short stretch — characteristic of a TOC page.
-        if "contents" in lower:
+        # A page is TOC-like if it has "contents" as a standalone heading line
+        # OR as "table of contents".  A bare substring check would incorrectly
+        # flag Biology chapter pages containing scientific phrases like
+        # "cell contents", "gastric contents", "contents of the ovule", etc.
+        if re.search(r"^\s*(?:table\s+of\s+)?contents\s*$", lower, re.MULTILINE):
             return True
         standalone_nums = re.findall(r"^\s*\d{1,3}\s*$", text, re.MULTILINE)
         return len(standalone_nums) >= 3
@@ -848,6 +1293,29 @@ def _resolve_chapter_pages(
             if key in p["text"].lower():
                 found_page = p["page_num"]
                 break
+
+        # ── Fuzzy fallback: word-overlap match ────────────────────────────────
+        # When exact substring matching fails (e.g. the body page renders the
+        # title with extra whitespace, line-breaks, or minor OCR differences),
+        # check whether most significant words from the title appear on the page.
+        if found_page is None and len(title_lower) >= 8:
+            title_words = set(re.findall(r"\b\w{4,}\b", title_lower))
+            if len(title_words) >= 2:
+                for p in page_list:
+                    if p["page_num"] < search_from:
+                        continue
+                    if _is_toc_or_prelim(p["text"]):
+                        continue
+                    page_lower = p["text"].lower()
+                    matched = sum(1 for w in title_words if w in page_lower)
+                    threshold = max(2, int(len(title_words) * 0.65))
+                    if matched >= threshold:
+                        found_page = p["page_num"]
+                        log.debug(
+                            f"    Ch {ch_num} '{title}': fuzzy match on p{p['page_num']} "
+                            f"({matched}/{len(title_words)} words)"
+                        )
+                        break
 
         if found_page is None:
             log.debug(f"    Ch {ch_num} '{title}': title not found in body — skipping")
@@ -873,6 +1341,13 @@ _AS_BODY_CHAPTER_RE = re.compile(
     re.MULTILINE,
 )
 
+# Body-text chapter heading for English PDFs: "CHAPTER N" or "Chapter N" on its own line.
+# Used when TOC parsing fails — finds actual chapter-start headings in the body.
+_EN_BODY_CHAPTER_RE = re.compile(
+    r"^(?:CHAPTER|Chapter|UNIT|Unit)\s+(\d{1,2})\b",
+    re.MULTILINE,
+)
+
 
 def _split_assamese_by_body(pages: list[dict], exercise_re) -> list[dict]:
     """
@@ -885,10 +1360,19 @@ def _split_assamese_by_body(pages: list[dict], exercise_re) -> list[dict]:
     matches = list(_AS_BODY_CHAPTER_RE.finditer(full_text))
     if not matches:
         log.warning("  Assamese: no অধ্যায় headings found in body text — treating as single chunk")
+        prelim_idx = _detect_prelim_boundary(sorted_pages)
+        if prelim_idx > 0:
+            log.info(
+                f"    Full Book (AS): skipping {prelim_idx} prelim page(s), "
+                f"starting body from PDF page {sorted_pages[prelim_idx]['page_num']}"
+            )
+        content_text = "\n\n".join(
+            _clean_page_text(p["text"]) for p in sorted_pages[prelim_idx:]
+        )
         return [{
             "chapter_num": 1,
             "title": "Full Book",
-            "body_text": full_text[:12000],
+            "body_text": content_text[:12000],
             "exercises_text": "",
         }]
 
@@ -930,6 +1414,91 @@ def _split_assamese_by_body(pages: list[dict], exercise_re) -> list[dict]:
             "chapter_num":    ch_num,
             "title":          title[:200],
             "body_text":      body_text,
+            "exercises_text": exercises_text,
+        })
+
+    return chapters
+
+
+def _split_english_by_body(pages: list[dict], exercise_re) -> list[dict]:
+    """
+    Split English PDF into chapters using body-text "CHAPTER N" / "UNIT N" headings.
+    Called when TOC approach fails for English-medium PDFs.
+
+    Strategy:
+    - Collect all matches of _EN_BODY_CHAPTER_RE across the full text.
+    - Keep only the FIRST occurrence of each chapter number to suppress running-header
+      duplicates (running headers repeat the chapter number on every page).
+    - Use consecutive first-occurrence positions as chapter boundaries.
+    - Falls back to a single "Full Book" chunk only if no headings are found at all.
+    """
+    sorted_pages = sorted(pages, key=lambda x: x["page_num"])
+    full_text = "\n\n".join(_clean_page_text(p["text"]) for p in sorted_pages)
+
+    # Keep only the first match per chapter number (suppresses running headers)
+    first_occurrences: dict[int, "re.Match[str]"] = {}
+    for m in _EN_BODY_CHAPTER_RE.finditer(full_text):
+        ch_num = int(m.group(1))
+        if ch_num not in first_occurrences:
+            first_occurrences[ch_num] = m
+
+    if not first_occurrences:
+        log.warning("  English: no CHAPTER/UNIT headings found in body text — treating as Full Book")
+        prelim_idx = _detect_prelim_boundary(sorted_pages)
+        if prelim_idx > 0:
+            log.info(
+                f"    Full Book: skipping {prelim_idx} prelim page(s), "
+                f"starting body from PDF page {sorted_pages[prelim_idx]['page_num']}"
+            )
+        content_text = _clean_page_text("\n\n".join(
+            p["text"] for p in sorted_pages[prelim_idx:]
+        ))
+        return [{
+            "chapter_num": 1,
+            "title": "Full Book",
+            "body_text": content_text[:12000],
+            "exercises_text": "",
+        }]
+
+    sorted_entries = sorted(first_occurrences.items(), key=lambda x: x[1].start())
+    log.info(f"    English body-text split: {len(sorted_entries)} chapters found")
+
+    chapters = []
+    for idx, (ch_num, m) in enumerate(sorted_entries):
+        start = m.start()
+        end = sorted_entries[idx + 1][1].start() if idx + 1 < len(sorted_entries) else len(full_text)
+        chapter_text = full_text[start:end]
+
+        # Extract title: first non-empty, non-numeric line after the heading keyword
+        title = f"Chapter {ch_num}"
+        snippet = full_text[m.end(): m.end() + 400]
+        for line in snippet.splitlines():
+            line = line.strip()
+            if line and not re.fullmatch(r"[\d\s\-–—.,:;]+", line) and len(line) > 3:
+                title = line[:200]
+                break
+
+        # Separate exercises from body
+        body_text = chapter_text
+        exercises_text = ""
+        ex_m = exercise_re.search(chapter_text)
+        if ex_m is None and exercise_re is _EN_EXERCISE_RE:
+            ex_m = _EN_SUMMARY_RE.search(chapter_text)
+        if ex_m:
+            body_text = chapter_text[:ex_m.start()]
+            exercises_text = chapter_text[ex_m.start():]
+
+        body_text = body_text[:12000].strip()
+        exercises_text = exercises_text[:10000].strip()
+
+        if len(body_text) < 150:
+            log.debug(f"    Ch {ch_num} '{title}': too short ({len(body_text)} chars), skipping")
+            continue
+
+        chapters.append({
+            "chapter_num": ch_num,
+            "title": title[:200],
+            "body_text": body_text,
             "exercises_text": exercises_text,
         })
 
@@ -986,7 +1555,10 @@ Output format (start your response with the very first ## heading — no preambl
 ## Next Topic
 • ...
 
-Repeat for 3–6 topic headings. Total 400–700 words.
+Cover EVERY major topic in the chapter — use as many ## headings as the chapter has topics (typically 6–15).
+Do NOT stop early. A chapter with 12 topics must have 12 ## sections.
+Target 2000–4000 words — use the full range; content-heavy chapters need every word.
+Never truncate mid-topic. Every ## section must be fully completed before you finish.
 
 Absolute output restrictions:
 - Begin with ## on character 1. Nothing before it.
@@ -997,15 +1569,23 @@ Absolute output restrictions:
 """
 
 _NOTES_SYSTEM_AS = """\
-তুমি এজন দক্ষ AHSEC টোকা লেখক। কেৱল অধ্যয়ন টোকাহে লিখা — কোনো পূৰ্বমন্তব্য নকৰিবা। \
+তুমি এজন দক্ষ AHSEC অসমীয়া টোকা লেখক। অসমীয়া মাধ্যমৰ ছাত্ৰ-ছাত্ৰীৰ বাবে পোনপটীয়াকৈ অধ্যয়ন টোকা লিখা।
 প্ৰথম শাৰীটো অৱশ্যে ## শিৰোনাম হ'ব লাগিব।
 
 নিয়ম:
-- প্ৰতিটো মূল বিষয়ৰ বাবে ## শিৰোনাম ব্যৱহাৰ কৰা (প্ৰতি অধ্যায়ত ৩–৬টা বিষয়)।
+- অধ্যায়ৰ প্ৰতিটো মূল বিষয়ৰ বাবে ## শিৰোনাম ব্যৱহাৰ কৰা — সকলো বিষয় সামৰিবা (সাধাৰণতে ৬–১৫টা)।
+- আগতীয়াকৈ নাথামিবা — যিমানটা বিষয় আছে সিমানটা ## অংশ লিখিব লাগিব।
 - প্ৰতিটো ## শিৰোনামৰ তলত ৩–৫টা সংক্ষিপ্ত বিন্দু লিখা।
 - গুৰুত্বপূৰ্ণ সংজ্ঞা, সূত্ৰ, নিয়ম আৰু মূল তথ্য অন্তৰ্ভুক্ত কৰা।
-- মুঠ ৪০০–৭০০ শব্দ।
+- বিষয়বস্তু-সমৃদ্ধ অধ্যায়ৰ বাবে ৮০০–২০০০ শব্দ লিখা।
 - অনুশীলনী অন্তৰ্ভুক্ত নকৰিবা।
+
+কঠোৰ নিষেধ — এইবোৰ কেতিয়াও নকৰিবা:
+- "English term -> অসমীয়া (Romanized)" ধৰণৰ শব্দভাণ্ডাৰ তালিকা নকৰিবা।
+- ব্ৰেকেটত ৰোমান লিপিত উচ্চাৰণ নকৰিবা, যেনে (Samatalat Goti)।
+- "This is a direct translation", "Putting it together", "Straightforward" আদি ইংৰাজী মেটা-মন্তব্য নকৰিবা।
+- অনুবাদৰ প্ৰক্ৰিয়া বা যুক্তি-তৰ্ক দেখুওৱা নকৰিবা।
+- সম্পূৰ্ণ অসমীয়া বাক্যত টোকা লিখা — চিন্তাৰ ব্যাখ্যা নহয়।
 """
 
 _QA_FROM_NOTES_SYSTEM_EN = """\
@@ -1021,6 +1601,26 @@ Guidelines:
 - Answers must be factually correct and complete.
 - Do NOT generate questions about the author, publication history, or textbook credits.
 - If notes are too short to generate meaningful questions, output exactly: []
+"""
+
+_QA_FROM_NOTES_SYSTEM_EN_LITERATURE = """\
+You are an AHSEC English exam question setter specialising in literature and comprehension.
+Given study notes about a prose passage, poem, or play, generate 5-8 exam questions with complete model answers.
+
+Output ONLY a valid JSON array — start your response with [ on the very first character, no text before it.
+
+[{"question": "<question>", "answer": "<complete answer>"}]
+
+Guidelines:
+- Write comprehension, theme-analysis, and character-study questions appropriate for Class 11/12 English exams.
+- Include a mix of short-answer (2-3 sentences) and paragraph-length (4-6 sentences) questions.
+- Long answers should discuss themes, character motivation, literary devices, or the author's message.
+- Short answers should explain meaning, describe an event, or identify a literary element.
+- Phrase questions the way they appear in board exams: "What does the author mean by…", "How does the poet convey…", "Discuss the theme of…", "Describe the character of…", "What is the significance of…"
+- Answers must be written in complete, fluent English paragraphs — NOT bullet points.
+- Answers must be directly supported by the notes provided.
+- Do NOT generate questions about publication history, textbook credits, or author biography unless the notes discuss them as literary content.
+- You MUST produce at least 5 question-answer pairs. Output exactly [] only if the notes contain fewer than 50 words.
 """
 
 _QA_FROM_NOTES_SYSTEM_AS = """\
@@ -1039,6 +1639,14 @@ _QA_FROM_NOTES_SYSTEM_AS = """\
 _QA_SYSTEM_EN = _QA_FROM_NOTES_SYSTEM_EN
 _QA_SYSTEM_AS = _QA_FROM_NOTES_SYSTEM_AS
 
+# Subject names that indicate English literature content
+_LITERATURE_SUBJECT_KEYWORDS = {"english core", "english", "woven words"}
+
+
+def _is_literature_subject(subject_name: str) -> bool:
+    """Return True when the subject is English literature (English Core, etc.)."""
+    return subject_name.strip().lower() in _LITERATURE_SUBJECT_KEYWORDS
+
 
 async def generate_notes(
     sarvam,
@@ -1047,34 +1655,135 @@ async def generate_notes(
     subject_name: str,
     medium: str,
 ) -> str:
-    """Call Sarvam to generate concise summary notes for a chapter.
-    Retries up to 2 more times if the response is suspiciously short (< 300 chars).
+    """Generate chapter notes — Sarvam primary, Gemini fallback at 3× token budget.
+
+    Sarvam (sarvam-105b starter tier) caps at 4096 output tokens (~3000 words).
+    When Sarvam fails or produces < 2500 chars, Gemini 2.5 Flash is used
+    with max_output_tokens=16384 (~12000 words), giving full coverage of all topics.
     """
     is_as = medium == "as"
     system = _NOTES_SYSTEM_AS if is_as else _NOTES_SYSTEM_EN
 
-    # Send first 10 000 chars; if that gives a short reply retry with first 5000
-    # (sometimes shorter input prompts a fuller response from the model).
+    # ── Pass 1: Sarvam (fast, low-latency) ───────────────────────────────────
+    # Try progressively smaller input slices if the first attempt returns too little.
+    sarvam_result = ""
+    sarvam_ok = False
     for attempt, body_slice in enumerate([10000, 5000, 3000]):
         user_msg = (
             f"Subject: {subject_name}\nChapter: {chapter_title}\n\n"
-            f"--- CHAPTER CONTENT ---\n{body_text[:body_slice]}"
+            f"--- CHAPTER CONTENT ---\n{body_text[:body_slice]}\n\n"
+            f"Begin your response with the first ## heading. "
+            f"Do not write any introductory sentence before it."
         )
-        result = await sarvam.generate(
-            system_prompt=system,
-            user_message=user_msg,
-            is_assamese=is_as,
-        )
+        try:
+            result = await sarvam.generate(
+                system_prompt=system,
+                user_message=user_msg,
+                is_assamese=is_as,
+                max_tokens=4096,   # starter tier cap for sarvam-105b
+            )
+        except Exception as sarvam_err:
+            log.warning(
+                f"    Sarvam notes attempt {attempt + 1} failed "
+                f"({type(sarvam_err).__name__}: {str(sarvam_err)[:120]}) — "
+                f"will try Gemini fallback"
+            )
+            break  # stop retrying Sarvam; fall through to Gemini
+
         result = _clean_notes_output(result.strip())
-        if len(result) >= 300:
-            return result
+        # Post-generation guard: publication-page content leaked through prelim filter.
+        if _notes_start_with_prelim(result):
+            log.warning(
+                f"    Notes start with prelim/publication-page heading — "
+                f"discarding (prelim detection missed a page for '{chapter_title}')"
+            )
+            return ""
+        if len(result) >= 2500:
+            sarvam_result = result
+            sarvam_ok = True
+            break
         if attempt < 2:
             log.warning(
-                f"    Notes too short ({len(result)} chars), retrying with smaller slice…"
+                f"    Notes too short ({len(result)} chars, need ≥2500), retrying with smaller slice…"
             )
+        sarvam_result = result
         await asyncio.sleep(2.0)
 
-    return _clean_notes_output(result)  # return cleaned result on last attempt
+    if sarvam_ok:
+        return sarvam_result
+
+    # ── Pass 2: Gemini 2.5 Flash (3× token budget — covers all topics) ───────
+    # Activated when: (a) Sarvam threw an error (billing/quota/rate-limit), OR
+    #                 (b) Sarvam returned fewer than 300 chars after all retries.
+    log.info(
+        f"    Gemini fallback for notes "
+        f"(Sarvam gave {len(sarvam_result)} chars, below 2500-char threshold) — trying with 16384 tokens…"
+    )
+    try:
+        from app.services.ai.gemini_fallback import (
+            generate_gemini,
+            _available as gemini_available,
+        )
+        if not gemini_available():
+            log.warning(
+                "    [PROVIDER UNAVAILABLE] Both notes providers have failed for "
+                f"chapter '{chapter_title}': Sarvam gave {len(sarvam_result)} chars "
+                "and Gemini is not configured. "
+                "Remediation: add GEMINI_API_KEY to GCP Secret Manager "
+                "(secret name: gemini-api-key) so the fallback can activate. "
+                "This chapter will be flagged as 'notes_provider_unavailable' "
+                "in the progress log — re-run with --force after fixing the key."
+            )
+            raise NotesProviderUnavailableError(
+                f"Both notes providers unavailable for '{chapter_title}': "
+                "Sarvam failed/quota-exhausted and GEMINI_API_KEY is not set. "
+                "Add GEMINI_API_KEY to GCP Secret Manager (gemini-api-key).",
+                reason="missing_credentials",
+            )
+
+        gemini_user_msg = (
+            f"Subject: {subject_name}\nChapter: {chapter_title}\n\n"
+            f"--- CHAPTER CONTENT ---\n{body_text[:15000]}\n\n"
+            f"Begin your response with the first ## heading. "
+            f"Do not write any introductory sentence before it."
+        )
+        gemini_result = await generate_gemini(
+            system_prompt=system,
+            user_message=gemini_user_msg,
+            max_output_tokens=16384,  # covers all topics in the densest chapters (15–20 topics)
+            timeout=180.0,
+        )
+        gemini_result = _clean_notes_output(gemini_result.strip())
+        if _notes_start_with_prelim(gemini_result):
+            log.warning("    Gemini notes also start with prelim content — discarding")
+            return ""
+        if len(gemini_result) >= 2500:
+            log.info(
+                f"    Gemini produced {len(gemini_result)} chars — using as final notes"
+            )
+            return gemini_result
+        log.warning(
+            f"    Gemini also returned short output ({len(gemini_result)} chars, need ≥2500)"
+        )
+    except NotesProviderUnavailableError:
+        raise  # re-raise so the caller records the distinct progress state
+    except Exception as gemini_err:
+        log.warning(f"    Gemini notes fallback failed: {gemini_err}")
+
+    # Both providers failed or both returned too-short output.
+    log.warning(
+        f"    [PROVIDER UNAVAILABLE] Both notes providers failed for "
+        f"chapter '{chapter_title}': Sarvam gave {len(sarvam_result)} chars "
+        "and Gemini also failed or returned insufficient output. "
+        "Remediation: check SARVAM_API_KEY quota and GEMINI_API_KEY in "
+        "GCP Secret Manager. Re-run with --force after fixing credentials."
+    )
+    raise NotesProviderUnavailableError(
+        f"Both notes providers failed for '{chapter_title}': "
+        "Sarvam and Gemini both returned insufficient output. "
+        "Check SARVAM_API_KEY quota and GEMINI_API_KEY in GCP Secret Manager.",
+        reason="provider_error",
+    )
 
 
 def _parse_qa_json(raw: str) -> list[dict]:
@@ -1123,7 +1832,12 @@ async def generate_qa_from_notes(
         return []
 
     is_as = medium == "as"
-    system = _QA_FROM_NOTES_SYSTEM_AS if is_as else _QA_FROM_NOTES_SYSTEM_EN
+    if is_as:
+        system = _QA_FROM_NOTES_SYSTEM_AS
+    elif _is_literature_subject(subject_name):
+        system = _QA_FROM_NOTES_SYSTEM_EN_LITERATURE
+    else:
+        system = _QA_FROM_NOTES_SYSTEM_EN
     user_msg = (
         f"Subject: {subject_name}\nChapter: {chapter_title}\n\n"
         f"--- CHAPTER NOTES ---\n{notes_text[:5000]}"
@@ -1134,7 +1848,30 @@ async def generate_qa_from_notes(
         is_assamese=is_as,
         max_tokens=4096,
     )
-    return _parse_qa_json(raw)
+    pairs = _parse_qa_json(raw)
+
+    # If the model returned nothing and this is a literature chapter, retry with
+    # a more direct prompt that emphasises the comprehension-question expectation.
+    if not pairs and _is_literature_subject(subject_name) and not is_as:
+        log.warning(
+            f"    Literature Q&A: empty result on first attempt for '{chapter_title}' — retrying"
+        )
+        await asyncio.sleep(2.0)
+        retry_user_msg = (
+            f"Subject: {subject_name}\nChapter: {chapter_title}\n\n"
+            f"These are study notes for an English literature chapter. "
+            f"Generate 5 comprehension questions with paragraph-length answers based on these notes.\n\n"
+            f"--- CHAPTER NOTES ---\n{notes_text[:4000]}"
+        )
+        raw = await sarvam.generate(
+            system_prompt=system,
+            user_message=retry_user_msg,
+            is_assamese=False,
+            max_tokens=4096,
+        )
+        pairs = _parse_qa_json(raw)
+
+    return pairs
 
 
 async def generate_qa(
@@ -1154,7 +1891,12 @@ async def generate_qa(
         return []
 
     is_as = medium == "as"
-    system = _QA_SYSTEM_AS if is_as else _QA_SYSTEM_EN
+    if is_as:
+        system = _QA_SYSTEM_AS
+    elif _is_literature_subject(subject_name):
+        system = _QA_FROM_NOTES_SYSTEM_EN_LITERATURE
+    else:
+        system = _QA_SYSTEM_EN
     user_msg = (
         f"Subject: {subject_name}\nChapter: {chapter_title}\n\n"
         f"--- CHAPTER NOTES (context) ---\n{chapter_notes[:3000]}\n\n"
@@ -1410,12 +2152,62 @@ async def upsert_chapter(
     chapter_num: int,
     title: str,
     medium: str,
+    source_pdf_url: str = "",
 ) -> object:
-    """Find or create a chapter by subject_id + chapter_number."""
-    from app.models.content import Chapter
-    from beanie import PydanticObjectId
+    """Find or create a chapter by subject_id + normalised title.
 
-    # Try to find by chapter_number first
+    Matching priority:
+      1. (subject_id, title) exact match — prevents duplicate rows when the
+         ingestion restarts mid-run and chapter_number resets to 1.
+      2. (subject_id, source_pdf_url) — catches "Full Book" chapters where the
+         same PDF was already ingested under a different chapter_number on a
+         prior run.  Only used when source_pdf_url is provided.
+      3. (subject_id, chapter_number) — legacy fallback for records that were
+         inserted before the title-match logic existed.
+
+    If none match, a new Chapter is inserted.
+    """
+    from app.models.content import Chapter
+
+    title_norm = title.strip()
+
+    # 1. Primary match: same subject + same title (case-insensitive)
+    chapter = await Chapter.find_one({
+        "subject_id": subject_id,
+        "title": {"$regex": f"^{re.escape(title_norm)}$", "$options": "i"},
+    })
+    if chapter:
+        # Keep chapter_number in sync if ingestion assigned a different number
+        if chapter.chapter_number != chapter_num:
+            log.info(
+                f"    Reusing chapter '{title}' (stored as #{chapter.chapter_number}, "
+                f"ingestion says #{chapter_num}) — updating chapter_number"
+            )
+            chapter.chapter_number = chapter_num
+            chapter.updated_at = datetime.now(timezone.utc)
+            await chapter.save()
+        return chapter, False  # (chapter, created)
+
+    # 2. PDF-URL match: same subject + same source PDF (handles "Full Book" chapters
+    #    that share an identical title across multiple restarts but were stored with
+    #    different chapter_numbers before the title-match logic was in place).
+    if source_pdf_url:
+        chapter = await Chapter.find_one({
+            "subject_id": subject_id,
+            "source_pdf_url": source_pdf_url,
+        })
+        if chapter:
+            log.info(
+                f"    Reusing chapter '{chapter.title}' matched by source_pdf_url "
+                f"(stored as #{chapter.chapter_number}, ingestion says #{chapter_num})"
+            )
+            if chapter.chapter_number != chapter_num:
+                chapter.chapter_number = chapter_num
+                chapter.updated_at = datetime.now(timezone.utc)
+                await chapter.save()
+            return chapter, False  # (chapter, created)
+
+    # 3. Fallback: same subject + same chapter_number (pre-title-match rows)
     chapter = await Chapter.find_one({
         "subject_id": subject_id,
         "chapter_number": chapter_num,
@@ -1423,8 +2215,8 @@ async def upsert_chapter(
     if chapter:
         return chapter, False  # (chapter, created)
 
-    # Determine slug
-    slug = re.sub(r"[\s_-]+", "-", re.sub(r"[^\w\s-]", "", title.lower())).strip("-")
+    # 4. Create new chapter
+    slug = re.sub(r"[\s_-]+", "-", re.sub(r"[^\w\s-]", "", title_norm.lower())).strip("-")
     # Ensure slug uniqueness within subject
     existing_slugs = {
         ch.slug for ch in await Chapter.find({"subject_id": subject_id}).to_list(length=500)
@@ -1436,7 +2228,7 @@ async def upsert_chapter(
         counter += 1
 
     chapter = Chapter(
-        title=title,
+        title=title_norm,
         subject_id=subject_id,
         slug=slug,
         chapter_number=chapter_num,
@@ -1446,8 +2238,66 @@ async def upsert_chapter(
         updated_at=datetime.now(timezone.utc),
     )
     await chapter.insert()
-    log.info(f"    Created chapter '{title}' (#{chapter_num})")
+    log.info(f"    Created chapter '{title_norm}' (#{chapter_num})")
     return chapter, True  # (chapter, created)
+
+
+async def _ensure_unique_slug_as(chapter, candidate: str) -> str:
+    """Return a slug_as that is unique within the chapter's subject.
+
+    Checks existing sibling chapters for ``slug_as`` collisions and appends
+    a numeric suffix (``-2``, ``-3``, …) until the value is free.  The
+    current chapter itself is excluded from the collision set.
+
+    This function is the *optimistic* pre-save step; the DB-level partial
+    unique index on (subject_id, slug_as) is the authoritative guard against
+    concurrent writers.  When a DuplicateKeyError is raised on ``save()``,
+    the caller should call this function again with the conflicting slug as
+    ``candidate`` (the fresh DB read will now include the rival's entry) and
+    retry the save.
+
+    Raises the underlying exception for genuine database errors (connection
+    failures, etc.) so that the caller fails loudly instead of silently
+    persisting a colliding slug.  Only raises ``CollectionWasNotInitialized``
+    silently (returns ``candidate``) — this covers unit-test environments
+    where Beanie has not been connected to a real MongoDB instance.
+    """
+    try:
+        from beanie.exceptions import CollectionWasNotInitialized as _NotInit
+    except ImportError:
+        _NotInit = None
+
+    from app.models.content import Chapter as _Ch
+    subject_id = getattr(chapter, "subject_id", None)
+    chapter_id = getattr(chapter, "id", None)
+    if not subject_id:
+        return candidate
+
+    try:
+        siblings = await _Ch.find({"subject_id": subject_id}).to_list(length=500)
+    except Exception as _e:
+        if _NotInit and isinstance(_e, _NotInit):
+            # Beanie not connected (unit-test / dry-run) — skip uniqueness check
+            return candidate
+        # Genuine database error — re-raise so the caller surfaces the failure
+        raise
+
+    taken = {
+        getattr(s, "slug_as", None)
+        for s in siblings
+        if s.id != chapter_id and getattr(s, "slug_as", None)
+    }
+    if candidate not in taken:
+        return candidate
+
+    # Strip any prior numeric suffix to avoid accumulating "slug-2-2-3" chains
+    base = re.sub(r"-\d+$", "", candidate)
+    counter = 2
+    while f"{base}-{counter}" in taken:
+        counter += 1
+    unique = f"{base}-{counter}"
+    log.info(f"    ↳ slug_as collision: {candidate!r} → {unique!r}")
+    return unique
 
 
 async def save_chapter_content(
@@ -1460,10 +2310,16 @@ async def save_chapter_content(
     force: bool = False,
     dry_run: bool = False,
     source_pdf_url: str = "",
+    title_as: str = "",
 ) -> bool:
     """
     Write notes, rag_sections, qa_rag_sections, and published_topics to a chapter.
     Returns True if content was written, False if skipped.
+
+    title_as: Assamese chapter title extracted from the Assamese PDF.  When
+    supplied (and medium='as'), both chapter.title_as and chapter.slug_as are
+    populated so students land on a readable /as/… URL instead of the English
+    slug fallback.
     """
     now = datetime.now(timezone.utc)
 
@@ -1504,33 +2360,76 @@ async def save_chapter_content(
         chapter.notes_en = notes_text
         chapter.content_en = notes_text  # keep legacy field in sync
         chapter.rag_sections_en = rag_sections
-        # Only overwrite existing Q&A if we have new pairs — never erase backfill data
-        if qa_sections or not chapter.qa_rag_sections_en:
-            chapter.qa_rag_sections_en = qa_sections
+        # Q&A pipeline disabled — never write qa_rag_sections from ingestion
+        # chapter.qa_rag_sections_en is managed manually
     else:
         chapter.notes_as = notes_text
         chapter.content_as = notes_text
         chapter.rag_sections_as = rag_sections
-        if qa_sections or not chapter.qa_rag_sections_as:
-            chapter.qa_rag_sections_as = qa_sections
+        # Q&A pipeline disabled — never write qa_rag_sections from ingestion
+        # chapter.qa_rag_sections_as is managed manually
 
-    # Merge topics (don't overwrite topics from the other medium)
-    existing_titles = {t.title for t in (chapter.published_topics or [])}
-    for t in valid_topics:
-        if t.title not in existing_titles:
-            chapter.published_topics = list(chapter.published_topics or []) + [t]
-            existing_titles.add(t.title)
+        # Populate title_as from the Assamese PDF title when provided.
+        # Only overwrite when title_as is not already set (preserves manual edits).
+        if title_as and isinstance(title_as, str) and title_as.strip():
+            if not getattr(chapter, "title_as", None):
+                chapter.title_as = title_as.strip()
+
+        # Derive slug_as so the /as/* route resolves to a proper Assamese URL.
+        # Only set when slug_as is not already present (preserves manual edits).
+        if not getattr(chapter, "slug_as", None):
+            effective_title_as = (
+                getattr(chapter, "title_as", None)
+                or (title_as.strip() if title_as else None)
+            )
+            if effective_title_as and isinstance(effective_title_as, str):
+                # Assamese-script slug derived from the Assamese title
+                candidate = _slug_as(effective_title_as)
+            else:
+                # Fallback: reuse the English slug so the /as/* route still resolves
+                candidate = getattr(chapter, "slug", None) or ""
+
+            if candidate:
+                # Ensure the slug is unique within the subject so two same-titled
+                # chapters (e.g. "Full Book" parts) don't resolve to the same URL.
+                chapter.slug_as = await _ensure_unique_slug_as(chapter, candidate)
+                log.info(f"    ↳ slug_as={chapter.slug_as!r}")
+
+    # published_topics (Questions tab) are managed manually — ingestion does not write them
+    # Merge valid_topics is intentionally disabled here.
 
     _wc_src = chapter.notes_en or chapter.content_en or ""
     chapter.word_count = len(_wc_src.split()) if _wc_src.strip() else 0
     chapter.notes_generated = True
     chapter.content_saved_at = now
     chapter.notes_rag_updated_at = now
-    if qa_sections:
-        chapter.qa_rag_updated_at = now
     chapter.updated_at = now
 
-    await chapter.save()
+    # Save with DuplicateKeyError retry for slug_as conflicts.
+    # The DB-level partial unique index on (subject_id, slug_as) is the
+    # authoritative guard; a concurrent write that wins the race will cause the
+    # second writer's save() to throw DuplicateKeyError.  We re-scan siblings
+    # and apply a fresh suffix, then retry.
+    from pymongo.errors import DuplicateKeyError as _DuplicateKeyError
+    _max_retries = 3
+    for _attempt in range(_max_retries):
+        try:
+            await chapter.save()
+            break
+        except _DuplicateKeyError as _dup_err:
+            if _attempt >= _max_retries - 1:
+                raise
+            _err_str = str(_dup_err)
+            if "slug_as" not in _err_str and "chapters_subject_slug_as_unique" not in _err_str:
+                # Unrelated uniqueness constraint — do not retry
+                raise
+            _old = getattr(chapter, "slug_as", None) or ""
+            chapter.slug_as = await _ensure_unique_slug_as(chapter, _old)
+            log.warning(
+                f"    ↳ Concurrent slug_as conflict: {_old!r} → {chapter.slug_as!r} "
+                f"(retry {_attempt + 1}/{_max_retries})"
+            )
+
     log.info(
         f"    ↳ Saved {medium.upper()} notes ({len(notes_text)} chars), "
         f"{len(rag_sections)} RAG sections, {len(qa_sections)} QA sections, "
@@ -1657,12 +2556,12 @@ async def process_pdf_entry(
         return {"skipped": 1}
 
     # ── Step 2: Download + extract PDF text ───────────────────────────────────
-    # Run in a thread so that Tesseract OCR (which can take 10-60s per page
-    # for non-Unicode AS PDFs) does not block the asyncio event loop and cause
-    # MongoDB heartbeat timeouts.
+    # extract_pdf_text is async: it offloads _download_pdf to a thread and
+    # wraps each Tesseract OCR call in asyncio.wait_for so a hung page is
+    # skipped after OCR_PAGE_TIMEOUT seconds instead of blocking forever.
     log.info(f"  Downloading PDF…")
     try:
-        pages = await asyncio.to_thread(extract_pdf_text, pdf_url, medium)
+        pages = await extract_pdf_text(pdf_url, medium)
         log.info(f"  Extracted {len(pages)} pages")
     except Exception as e:
         log.error(f"  PDF extraction failed: {e}")
@@ -1707,7 +2606,8 @@ async def process_pdf_entry(
         log.info(f"  Ch {ch_num}: '{ch_title}' ({len(body_text)} body chars, {len(ex_text)} ex chars)")
 
         # ── Upsert chapter ────────────────────────────────────────────────────
-        chapter, created = await upsert_chapter(subj.id, ch_num, ch_title, medium)
+        chapter, created = await upsert_chapter(subj.id, ch_num, ch_title, medium,
+                                                 source_pdf_url=pdf_url)
 
         # ── Early skip: chapter already has notes and we're not forcing ────────
         existing_notes = (chapter.notes_en if medium == "en" else chapter.notes_as) or ""
@@ -1724,9 +2624,27 @@ async def process_pdf_entry(
             try:
                 notes_text = await generate_notes(sarvam, body_text, ch_title, subject_name, medium)
                 await asyncio.sleep(delay)
+            except NotesProviderUnavailableError as e:
+                # Both Sarvam and Gemini are unavailable — record a distinct state
+                # so staff can filter and retry these chapters without hunting
+                # through student complaints.
+                log.warning(
+                    f"    Chapter '{ch_title}' flagged as notes_provider_unavailable — "
+                    "see WARN above for remediation steps"
+                )
+                _log_progress(
+                    progress_key, "notes_provider_unavailable",
+                    detail=f"[reason={e.reason}] {e}",
+                    chapter_id=str(chapter.id),
+                    pdf_url=pdf_url,
+                    medium=medium,
+                )
+                stats["errors"] += 1
+                continue
             except Exception as e:
                 log.error(f"    Notes generation failed: {e}")
-                _log_progress(progress_key, "error", str(e))
+                _log_progress(progress_key, "error", str(e),
+                              chapter_id=str(chapter.id), pdf_url=pdf_url)
                 stats["errors"] += 1
                 continue
         else:
@@ -1737,33 +2655,27 @@ async def process_pdf_entry(
             stats["skipped"] += 1
             continue
 
-        # ── Generate Q&A from notes ───────────────────────────────────────────
+        # Q&A generation is disabled — will be added manually later.
         qa_pairs: list[dict] = []
-        if not dry_run:
-            try:
-                qa_pairs = await generate_qa_from_notes(
-                    sarvam, notes_text, ch_title, subject_name, medium
-                )
-                await asyncio.sleep(delay)
-                log.info(f"    Generated {len(qa_pairs)} Q&A pairs")
-            except Exception as e:
-                log.warning(f"    QA generation failed (non-fatal): {e}")
 
         # ── Build sections ────────────────────────────────────────────────────
         rag_sections = notes_to_rag_sections(notes_text)
-        qa_sections  = qa_to_rag_sections(qa_pairs)
+        qa_sections: list[dict] = []   # empty; Q&A pipeline is off
         topics       = extract_topics_from_notes(notes_text)
 
         # ── Save to DB ────────────────────────────────────────────────────────
+        # When processing Assamese medium, ch_title is the Assamese chapter
+        # title extracted from the Assamese PDF; pass it so save_chapter_content
+        # can populate chapter.title_as and derive slug_as from it.
         written = await save_chapter_content(
             chapter, notes_text, rag_sections, qa_sections, topics,
             medium, force=force, dry_run=dry_run, source_pdf_url=pdf_url,
+            title_as=ch_title if medium == "as" else "",
         )
 
-        # ── Reindex (vectorize + topic embeddings) ────────────────────────────
+        # ── Reindex (vectorize + topic embeddings, notes only) ────────────────
         if written and not dry_run:
-            scope = "all" if qa_sections else "notes"
-            await reindex_chapter(str(chapter.id), scope=scope)
+            await reindex_chapter(str(chapter.id), scope="notes")
 
         if written:
             _log_progress(
@@ -1812,11 +2724,15 @@ async def main() -> None:
     if settings.SARVAM_API_KEY:
         log.info(f"Sarvam key loaded (prefix={settings.SARVAM_API_KEY[:8]}…)")
     else:
-        if not args.dry_run:
-            log.error("SARVAM_API_KEY not available — run with --dry-run or set key")
-            sys.exit(1)
-        log.warning("SARVAM_API_KEY missing — proceeding in dry-run mode only")
-        args.dry_run = True
+        # Don't abort here — Gemini may be configured as the sole provider.
+        # The pre-flight check below handles the "neither provider available" case.
+        if args.dry_run:
+            log.warning("SARVAM_API_KEY missing — proceeding in dry-run mode only")
+        else:
+            log.warning(
+                "SARVAM_API_KEY not available — will rely on Gemini fallback if configured. "
+                "Set SARVAM_API_KEY for primary notes generation."
+            )
 
     # ── Build catalogue ───────────────────────────────────────────────────────
     want_c11 = args.class11 or (not args.class11 and not args.class12)
@@ -1860,6 +2776,38 @@ async def main() -> None:
     log.info(f"Processing {len(catalogue)} entries "
              f"({'dry-run' if args.dry_run else 'live'}, delay={args.delay}s)")
 
+    # ── Pre-flight: verify at least one notes provider is reachable ───────────
+    # Prevents processing hundreds of chapters only to silently store empty notes
+    # when both Sarvam and Gemini are misconfigured.
+    if not args.dry_run:
+        from app.services.ai.gemini_fallback import _available as gemini_available
+        _sarvam_ready = bool(settings.SARVAM_API_KEY)
+        _gemini_ready = gemini_available()
+        if not _sarvam_ready and not _gemini_ready:
+            log.error(
+                "PRE-FLIGHT FAILED: No notes provider is available. "
+                "SARVAM_API_KEY is missing and GEMINI_API_KEY / GOOGLE_SA_KEY are not set. "
+                "Chapters would be stored with empty notes — aborting. "
+                "Fix: set SARVAM_API_KEY (primary) and/or add GEMINI_API_KEY to "
+                "GCP Secret Manager (secret name: gemini-api-key) as fallback, "
+                "then re-run."
+            )
+            sys.exit(1)
+        elif not _sarvam_ready:
+            log.warning(
+                "PRE-FLIGHT WARNING: SARVAM_API_KEY is missing — "
+                "Gemini 2.5 Flash fallback will be used for ALL chapters. "
+                "Ingestion will be slower and may cost more API quota."
+            )
+        elif not _gemini_ready:
+            log.warning(
+                "PRE-FLIGHT WARNING: GEMINI_API_KEY is not configured — "
+                "if Sarvam hits a quota/billing error, affected chapters will be "
+                "flagged as 'notes_provider_unavailable' in the progress log. "
+                "Fix: add GEMINI_API_KEY to GCP Secret Manager (secret name: gemini-api-key) "
+                "so the fallback activates automatically."
+            )
+
     done_keys = _load_done_keys()
     log.info(f"Resuming — {len(done_keys)} chapters already done")
 
@@ -1887,6 +2835,138 @@ async def main() -> None:
     log.info(f"\n{'='*60}")
     log.info(f"Pipeline complete: {total['done']} written, {total['skipped']} skipped, {total['errors']} errors")
     log.info(f"Progress log: {PROGRESS_FILE}")
+
+    # ── Compact progress log after every bulk run ─────────────────────────────
+    # Prevents the append-only JSONL from growing without bound across
+    # successive seed runs by deduplicating to one record per chapter key.
+    if not args.dry_run:
+        try:
+            compact = _compact_progress_log_sync()
+            if compact.get("compacted"):
+                log.info(
+                    f"Progress log compacted: {compact['records_before']} → "
+                    f"{compact['records_after']} records "
+                    f"({compact['removed']} duplicates removed)"
+                )
+            elif compact.get("error"):
+                log.warning(f"Progress log compaction failed (non-fatal): {compact['error']}")
+        except Exception as exc:
+            log.warning(f"Progress log compaction failed (non-fatal): {exc}")
+
+    # ── Post-run cleanup (fill gaps + retry blanks) ────────────────────────────
+    # Automatically chains the two manual follow-up workflows that staff used
+    # to run after every ingestion pass.  Skipped for dry-run, pilot, targeted
+    # (--subject), partial (--limit), and explicit --no-post-run invocations.
+    if _should_run_post_cleanup(args):
+        await _run_post_ingestion_cleanup(medium=args.medium)
+    else:
+        skip_reasons = []
+        if args.dry_run:        skip_reasons.append("--dry-run")
+        if args.pilot:          skip_reasons.append("--pilot")
+        if args.subject:        skip_reasons.append(f"--subject {args.subject}")
+        if args.limit:          skip_reasons.append(f"--limit {args.limit}")
+        if args.no_post_run:    skip_reasons.append("--no-post-run")
+        if skip_reasons:
+            log.info(f"Post-run cleanup skipped ({', '.join(skip_reasons)})")
+
+
+def _should_run_post_cleanup(args: argparse.Namespace) -> bool:
+    """Return True when the post-ingestion cleanup passes should fire automatically.
+
+    Post-cleanup is skipped when the run is:
+    - ``--dry-run``    — nothing was written, nothing to clean up.
+    - ``--pilot``      — small smoke-test run; not a full data pass.
+    - ``--subject``    — targeted single-subject run; fill-gaps and retry-blank
+                         are already scoped to every subject, so chaining them
+                         after a targeted run would process unrelated subjects.
+    - ``--limit``      — deliberately partial run; cleanup would be misleading.
+    - ``--no-post-run``— explicit opt-out; also used internally by the shell
+                         scripts to prevent recursive invocation.
+    """
+    if args.dry_run or args.pilot:
+        return False
+    if args.subject:
+        return False
+    if args.limit:
+        return False
+    if args.no_post_run:
+        return False
+    return True
+
+
+async def _run_post_ingestion_cleanup(medium: str | None) -> None:
+    """Run fill-gaps then retry-blank-notes after a full ingestion pass.
+
+    Mirrors what staff does manually after each seed run:
+      1. AHSEC Fill Partial Subjects  → picks up any chapters the main loop
+         missed due to rate-limits, network errors, or new catalogue entries.
+      2. AHSEC Retry Blank Notes      → unlocks chapters whose notes field came
+         back empty (blank-notes outage), then runs fill-gaps again for those.
+
+    Both steps are non-fatal — a failure is logged as a warning and the next
+    step still runs.  The ``medium`` argument is forwarded as ``--medium en``
+    or ``--medium as`` when the parent run was medium-specific, so the cleanup
+    stays in scope.
+
+    Note: fill-gaps calls ``ahsec_ingest.py --subject <subj>``, and retry-blank
+    calls fill-gaps the same way, so the ``not args.subject`` guard in
+    ``_should_run_post_cleanup`` already prevents any recursive triggering even
+    without the ``--no-post-run`` flag.
+    """
+    import subprocess
+
+    backend_dir = Path(__file__).parent.parent
+    # Assamese notes are paused (coming soon). Post-run cleanup is EN-only.
+    # When AS is re-enabled, change this line to:
+    #   medium_args = ["--medium", medium] if medium else []
+    effective_medium = medium if medium == "en" else "en"
+    medium_args = ["--medium", effective_medium]
+
+    log.info("")
+    log.info("=" * 60)
+    log.info("POST-RUN CLEANUP  (runs automatically after every full ingestion pass)")
+    log.info("  Skip with --no-post-run if you want to trigger these steps manually.")
+    log.info("=" * 60)
+
+    # ── Step 1: Fill partial subjects ─────────────────────────────────────────
+    log.info("")
+    log.info("POST-RUN 1/2 — Fill partial subjects (ahsec_fill_gaps.sh)")
+    try:
+        result = subprocess.run(
+            ["bash", "scripts/ahsec_fill_gaps.sh"] + medium_args,
+            cwd=str(backend_dir),
+        )
+        if result.returncode != 0:
+            log.warning(
+                f"fill-gaps finished with exit code {result.returncode} (non-fatal — "
+                "retry-blank-notes will still run)"
+            )
+        else:
+            log.info("POST-RUN 1/2 — Fill partial subjects complete")
+    except Exception as exc:
+        log.warning(f"fill-gaps raised an unexpected error (non-fatal): {exc}")
+
+    # ── Step 2: Retry blank notes ─────────────────────────────────────────────
+    log.info("")
+    log.info("POST-RUN 2/2 — Retry blank notes (ahsec_retry_blank_notes.sh)")
+    try:
+        result = subprocess.run(
+            ["bash", "scripts/ahsec_retry_blank_notes.sh"] + medium_args,
+            cwd=str(backend_dir),
+        )
+        if result.returncode != 0:
+            log.warning(
+                f"retry-blank-notes finished with exit code {result.returncode} (non-fatal)"
+            )
+        else:
+            log.info("POST-RUN 2/2 — Retry blank notes complete")
+    except Exception as exc:
+        log.warning(f"retry-blank-notes raised an unexpected error (non-fatal): {exc}")
+
+    log.info("")
+    log.info("=" * 60)
+    log.info("POST-RUN CLEANUP COMPLETE")
+    log.info("=" * 60)
 
 
 if __name__ == "__main__":

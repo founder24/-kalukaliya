@@ -33,7 +33,7 @@ OR: `npx wrangler secret put NAME --env production`
 
 - `JWT_SECRET` — must exactly match GCP value
 - `EDGE_SHARED_SECRET` — must exactly match GCP value
-- `GOOGLE_SA_KEY` — full JSON of `cloudflare-edge-invoker` SA (✅ set June 2026)
+- `GOOGLE_SA_KEY` — full JSON of `cloudflare-edge-invoker` SA (✅ set June 2026; CF Worker secret is separate from Replit GOOGLE_SA_KEY secret)
 - `JWT_PUBLIC_KEY` — optional, only if RS256 enabled
 
 ## Cloudflare Pages — Frontend Build Env Vars
@@ -63,5 +63,6 @@ Set at: Pages → syrabit → Settings → Environment Variables → Production
 ## Key relationships
 - `JWT_SECRET` must be IDENTICAL in GCP Secret Manager AND Cloudflare Worker
 - `EDGE_SHARED_SECRET` must be IDENTICAL in GCP AND Cloudflare Worker
-- `GOOGLE_SA_KEY` in Cloudflare = key for `cloudflare-edge-invoker` SA (not the backend SA)
+- `GOOGLE_SA_KEY` in Cloudflare Worker = key for `cloudflare-edge-invoker` SA (not the backend SA)
+- `GOOGLE_SA_KEY` in Replit Secrets = key for `syrabit-backend-sa` SA (has roles/aiplatform.user; used by ingestion scripts and gemini_fallback.py Vertex AI path)
 - Cloud Run project: `blissful-acumen-495019-t6`, region: `asia-south1`, service: `syrabit-backend`

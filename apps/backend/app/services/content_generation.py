@@ -163,17 +163,22 @@ class ContentGenerationService:
 
         Args:
             chapter_id: The chapter to generate notes for.
-            force: When False (default), skip if content_en already exists.
+            force: When False (default), skip if notes_en OR content_en already
+                   exists (notes_en is checked first as the primary pipeline field).
                    Set True to regenerate and re-publish.
         """
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
         if not chapter:
             raise ValueError(f"Chapter {chapter_id} not found")
 
-        if not force and chapter.content_en and chapter.content_en.strip():
+        if not force and (
+            (chapter.notes_en and chapter.notes_en.strip())
+            or (chapter.content_en and chapter.content_en.strip())
+        ):
+            present_field = "notes_en" if (chapter.notes_en and chapter.notes_en.strip()) else "content_en"
             logger.info(
                 f"Skipping generation for chapter {chapter_id} "
-                f"({chapter.title!r}) — content_en already present. "
+                f"({chapter.title!r}) — {present_field} already present. "
                 "Pass force=True to overwrite."
             )
             return chapter
@@ -343,27 +348,44 @@ class ContentGenerationService:
         and re-indexed in Vertex AI Search so that Cloudflare Pages and RAG
         always serve the latest bilingual content.
 
+        Source field priority: notes_en (primary pipeline) → content_en (legacy).
+        Target field: notes_as (primary pipeline); content_as also written for
+        backward-compatibility with legacy reader code that still checks content_as.
+
         Args:
             chapter_id: The chapter to translate.
-            force: When False (default), skip if content_as already exists.
+            force: When False (default), skip if notes_as or content_as already exists.
                    Set True to re-translate and re-publish.
         """
         chapter = await Chapter.get(PydanticObjectId(chapter_id))
         if not chapter:
             raise ValueError(f"Chapter {chapter_id} not found")
 
-        if not chapter.content_en:
+        # Read from notes_en first (primary pipeline field), fall back to content_en
+        source_en = (chapter.notes_en or "").strip() or (chapter.content_en or "").strip()
+        if not source_en:
             raise ValueError(
-                f"Chapter {chapter_id} has no English content to translate"
+                f"Chapter {chapter_id} has no English content to translate "
+                "(neither notes_en nor content_en is set)"
             )
 
-        if not force and chapter.content_as and chapter.content_as.strip():
-            logger.info(
-                f"Skipping Assamese translation for chapter {chapter_id} "
-                f"({chapter.title!r}) — content_as already present. "
-                "Pass force=True to overwrite."
-            )
-            return chapter
+        # Skip if we already have a translation in the primary field (notes_as),
+        # or in the legacy field (content_as) for chapters pre-dating the migration.
+        if not force:
+            if (chapter.notes_as and chapter.notes_as.strip()):
+                logger.info(
+                    f"Skipping Assamese translation for chapter {chapter_id} "
+                    f"({chapter.title!r}) — notes_as already present. "
+                    "Pass force=True to overwrite."
+                )
+                return chapter
+            if (chapter.content_as and chapter.content_as.strip()):
+                logger.info(
+                    f"Skipping Assamese translation for chapter {chapter_id} "
+                    f"({chapter.title!r}) — content_as already present. "
+                    "Pass force=True to overwrite."
+                )
+                return chapter
 
         translate_prompt = (
             "You are a professional translator. "
@@ -373,7 +395,7 @@ class ContentGenerationService:
         )
 
         # Split into ~400-word chunks so reasoning + output fit in 4096 tokens
-        words = chapter.content_en.split()
+        words = source_en.split()
         chunk_size = 400
         chunks = [
             " ".join(words[i : i + chunk_size])
@@ -389,13 +411,16 @@ class ContentGenerationService:
             if part and part.strip():
                 translated_parts.append(part.strip())
 
-        content_as = "\n\n".join(translated_parts)
-        chapter.content_as = content_as
+        notes_as = "\n\n".join(translated_parts)
+        # Write to the primary pipeline field (notes_as) AND keep content_as in sync
+        # so legacy reader code that still checks content_as continues to work.
+        chapter.notes_as = notes_as
+        chapter.content_as = notes_as
         chapter.updated_at = datetime.now(timezone.utc)
         await chapter.save()
         logger.info(
             f"Assamese translation saved for {chapter.title!r} "
-            f"({len(content_as.split())} words)"
+            f"({len(notes_as.split())} words) → notes_as + content_as"
         )
 
         # Re-sync GCS + Vertex Search so CF Pages and RAG pick up the Assamese content

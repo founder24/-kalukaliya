@@ -28,7 +28,12 @@ export function findSiblingChapters(chapters, currentChapterId, currentChapterSl
  * Build sibling chapter links inside a subject for fallback "related" content
  * when the SEO related-by-chapter API returns nothing.
  */
-export function siblingsAsRelated(chapters, currentChapterId, currentChapterSlug, basePath, limit = 6) {
+/**
+ * @param {boolean} [useSlugAs=false] - When true, prefer ch.slug_as (Assamese
+ *   URL slug) over ch.slug for the seo_path. Pass true when basePath is already
+ *   the /as/… prefix so related links stay in the Assamese URL space.
+ */
+export function siblingsAsRelated(chapters, currentChapterId, currentChapterSlug, basePath, limit = 6, useSlugAs = false) {
   if (!Array.isArray(chapters) || chapters.length === 0 || !basePath) return [];
   const filtered = chapters.filter((ch) => {
     if (currentChapterId && (ch.id === currentChapterId || ch._id === currentChapterId)) return false;
@@ -38,6 +43,6 @@ export function siblingsAsRelated(chapters, currentChapterId, currentChapterSlug
   return filtered.slice(0, limit).map((ch) => ({
     id: ch.id || ch._id || ch.slug,
     title: ch.title || ch.slug,
-    seo_path: `${basePath}/${ch.slug}`,
+    seo_path: `${basePath}/${useSlugAs ? (ch.slug_as || ch.slug) : ch.slug}`,
   }));
 }

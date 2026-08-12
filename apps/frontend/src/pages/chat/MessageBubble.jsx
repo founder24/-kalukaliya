@@ -23,13 +23,6 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
   const [hiddenLinks, setHiddenLinks] = useState([]);
   const [hiddenOpen, setHiddenOpen] = useState(false);
   const [requestState, setRequestState] = useState({}); // host -> 'pending'|'sent'|'failed'
-  // Task #42 — dev-only "router log" expander on the QA badge.
-  // ``routerLogState`` is one of 'idle' | 'loading' | 'ok' | 'error';
-  // ``routerLogs`` holds the matching backend log lines.
-  const [routerPanelOpen, setRouterPanelOpen] = useState(false);
-  const [routerLogState, setRouterLogState] = useState('idle');
-  const [routerLogs, setRouterLogs] = useState([]);
-  const [routerLogError, setRouterLogError] = useState(null);
   // Countdown for the auto-retry that fires 8 s after an AI unavailable error.
   const [retryCountdown, setRetryCountdown] = useState(null);
   const retryTimerRef = useRef(null);
@@ -235,20 +228,16 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               <div
                 role="alert"
                 data-testid={msg.isAssameseUnavailable ? 'assamese-unavailable-card' : 'ai-unavailable-card'}
-                className="flex flex-col gap-3 rounded-2xl px-4 py-3.5 mt-1"
-                style={{
-                  background: 'rgba(124,58,237,0.06)',
-                  border: '1px solid rgba(124,58,237,0.18)',
-                  maxWidth: '26rem',
-                }}
+                className="flex flex-col gap-3 rounded-2xl px-4 py-3.5 mt-1 bg-card border border-border"
+                style={{ maxWidth: '26rem' }}
               >
                 <div className="flex items-start gap-3">
                   <div
-                    className="mt-0.5 flex-shrink-0 flex items-center justify-center rounded-full"
-                    style={{ width: 32, height: 32, background: 'rgba(124,58,237,0.12)' }}
+                    className="mt-0.5 flex-shrink-0 flex items-center justify-center rounded-full bg-violet-100 dark:bg-violet-900/40"
+                    style={{ width: 32, height: 32 }}
                     aria-hidden="true"
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                     </svg>
                   </div>
@@ -265,10 +254,10 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                     ) : (
                       <>
                         <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.45' }}>
-                          Syra is resting — please try again in a moment
+                          Syra is resting — try again in a moment
                         </p>
                         <p className="text-[12.5px] text-muted-foreground mt-0.5">
-                          All AI services are temporarily busy. Your question is saved.
+                          Your question is saved and will retry automatically.
                         </p>
                       </>
                     )}
@@ -278,8 +267,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                   <button
                     type="button"
                     onClick={() => { if (onRetry) onRetry(); }}
-                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors"
-                    style={{ background: '#7c3aed', color: '#fff' }}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white transition-colors"
                     aria-label={msg.isAssameseUnavailable ? 'আকৌ চেষ্টা কৰক' : 'Retry now'}
                     data-testid="ai-unavailable-retry"
                   >
@@ -290,8 +278,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                     <button
                       type="button"
                       onClick={onSwitchToEnglish}
-                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors border"
-                      style={{ background: 'transparent', borderColor: 'rgba(124,58,237,0.35)', color: '#7c3aed' }}
+                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30"
                       aria-label="Switch to English mode and retry"
                       data-testid="assamese-switch-english"
                     >
@@ -300,7 +287,8 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                     </button>
                   )}
                   {retryCountdown !== null && (
-                    <span className="text-[12px] text-muted-foreground">
+                    <span className="text-[12px] text-muted-foreground flex items-center gap-1">
+                      <Loader2 size={11} className="animate-spin" />
                       Auto-retry in {retryCountdown}s…
                     </span>
                   )}
@@ -386,164 +374,6 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               </div>
             )}
 
-            {/* Task #37 — dev-only QA badge surfacing the per-turn
-                router decision (decision / lang / namespace / embed
-                provider / chain head). Mounted only when Vite is in
-                dev mode AND the backend emitted a route_trace, so it
-                never ships to production users. */}
-            {!msg.streaming && msg.route_trace && import.meta.env.DEV && (
-              <button
-                type="button"
-                onClick={async () => {
-                  const next = !routerPanelOpen;
-                  setRouterPanelOpen(next);
-                  // Lazy-fetch the matching backend log lines the first
-                  // time the panel opens (or on every open if the prior
-                  // attempt failed). conversation_id may be missing on
-                  // the very first turn before the backend assigns one
-                  // — fall back to no filter so the most-recent log
-                  // line still surfaces in dev.
-                  if (!next) return;
-                  if (routerLogState === 'loading') return;
-                  if (routerLogState === 'ok' && routerLogs.length > 0) return;
-                  setRouterLogState('loading');
-                  setRouterLogError(null);
-                  try {
-                    const params = new URLSearchParams();
-                    if (conversationId) params.set('conversation_id', conversationId);
-                    params.set('limit', '20');
-                    const res = await fetch(
-                      `${API_BASE}/dev/router-logs/recent?${params.toString()}`,
-                      { credentials: 'omit' },
-                    );
-                    if (!res.ok) {
-                      throw new Error(`HTTP ${res.status}`);
-                    }
-                    const data = await res.json();
-                    setRouterLogs(Array.isArray(data?.logs) ? data.logs : []);
-                    setRouterLogState('ok');
-                  } catch (e) {
-                    setRouterLogError(e?.message || 'fetch failed');
-                    setRouterLogState('error');
-                  }
-                }}
-                className="mt-2 inline-flex flex-wrap items-center gap-1.5 rounded-md border border-dashed border-amber-400/60 bg-amber-50/70 px-2 py-1 text-[10px] font-mono text-amber-900 dark:border-amber-300/40 dark:bg-amber-900/20 dark:text-amber-200 cursor-pointer text-left hover:bg-amber-100/70 dark:hover:bg-amber-900/30 transition-colors"
-                title="Click to expand router trace + matching backend log lines (dev only)"
-                aria-expanded={routerPanelOpen}
-                aria-controls={`router-log-panel-${msg.id || messageIndex}`}
-                data-testid="chat-router-qa-badge"
-              >
-                <span className="font-semibold uppercase tracking-wide">QA</span>
-                <span className="mx-0.5 opacity-30">|</span>
-
-                {/* ── Content match context ── */}
-                {msg.route_trace.matched_topic
-                  ? <span className="font-semibold text-amber-800 dark:text-amber-300" title="Matched topic">{msg.route_trace.matched_topic}</span>
-                  : <span className="opacity-40">topic=∅</span>}
-                {msg.route_trace.matched_chapter && (
-                  <><span className="opacity-30">·</span><span title="Chapter">{msg.route_trace.matched_chapter}</span></>
-                )}
-                {msg.route_trace.matched_subject && (
-                  <><span className="opacity-30">·</span><span title="Subject">{msg.route_trace.matched_subject}</span></>
-                )}
-                {msg.route_trace.matched_class && (
-                  <><span className="opacity-30">·</span><span title="Class">Cl {msg.route_trace.matched_class}</span></>
-                )}
-                {msg.route_trace.matched_board && (
-                  <><span className="opacity-30">·</span><span title="Board" className="uppercase">{msg.route_trace.matched_board}</span></>
-                )}
-
-                <span className="mx-0.5 opacity-30">|</span>
-
-                {/* ── Routing summary ── */}
-                <span className="opacity-70">route=<b>{msg.route_trace.decision}</b></span>
-                <span className="opacity-70">lang={msg.route_trace.lang}</span>
-                {typeof msg.route_trace.topic_score === 'number' && (
-                  <span className="opacity-70" title="centroid similarity score">
-                    score=<b>{msg.route_trace.topic_score.toFixed(3)}</b>
-                  </span>
-                )}
-
-                <span className="opacity-60 ml-1" aria-hidden="true">
-                  {routerPanelOpen ? '▾' : '▸'}
-                </span>
-              </button>
-            )}
-
-            {/* Task #42 — dev-only "router log" expander. Pretty-prints
-                the full route_trace JSON and renders the matching
-                backend [STREAM][ROUTER=...] log lines tailed from the
-                in-process ring buffer at /api/dev/router-logs/recent.
-                Gated on import.meta.env.DEV so it never ships to
-                production users. */}
-            {!msg.streaming && msg.route_trace && import.meta.env.DEV && routerPanelOpen && (
-              <div
-                id={`router-log-panel-${msg.id || messageIndex}`}
-                data-testid="chat-router-log-panel"
-                className="mt-1 rounded-md border border-amber-300/50 bg-amber-50/60 p-2 text-[11px] font-mono text-amber-900 dark:border-amber-300/30 dark:bg-amber-900/15 dark:text-amber-100"
-                style={{ maxWidth: 'min(100%, 42rem)' }}
-              >
-                <div className="text-[10px] uppercase font-semibold opacity-70 mb-1">
-                  route_trace
-                </div>
-                <pre
-                  className="whitespace-pre-wrap break-all bg-amber-100/40 dark:bg-amber-900/25 rounded p-1.5 m-0"
-                  style={{ maxHeight: '12rem', overflow: 'auto' }}
-                  data-testid="chat-router-log-trace-json"
-                >
-                  {JSON.stringify(msg.route_trace, null, 2)}
-                </pre>
-                <div className="text-[10px] uppercase font-semibold opacity-70 mt-2 mb-1">
-                  backend log lines
-                  {conversationId
-                    ? <span className="ml-1 normal-case opacity-70">(cid={String(conversationId).slice(0, 8)}…)</span>
-                    : <span className="ml-1 normal-case opacity-70">(no cid — showing recent)</span>}
-                </div>
-                {routerLogState === 'loading' && (
-                  <div className="flex items-center gap-1.5 opacity-80">
-                    <Loader2 size={11} className="animate-spin" />
-                    Fetching…
-                  </div>
-                )}
-                {routerLogState === 'error' && (
-                  <div
-                    className="opacity-80"
-                    data-testid="chat-router-log-error"
-                  >
-                    Could not load router logs: {routerLogError || 'unknown error'}.
-                    The dev tail endpoint is gated on a non-production
-                    backend env (ENV/ENVIRONMENT ≠ production).
-                  </div>
-                )}
-                {routerLogState === 'ok' && routerLogs.length === 0 && (
-                  <div className="opacity-80">
-                    No matching <code>[STREAM][ROUTER=…]</code> log lines
-                    in the last {500} entries of the in-process buffer.
-                  </div>
-                )}
-                {routerLogState === 'ok' && routerLogs.length > 0 && (
-                  <ul
-                    className="space-y-1 m-0 p-0 list-none"
-                    style={{ maxHeight: '14rem', overflow: 'auto' }}
-                    data-testid="chat-router-log-lines"
-                  >
-                    {routerLogs.map((line, idx) => (
-                      <li
-                        key={`${line.ts}-${idx}`}
-                        className="bg-amber-100/40 dark:bg-amber-900/25 rounded p-1.5"
-                      >
-                        <div className="opacity-60 text-[10px]">
-                          {line.ts} · {line.level}
-                        </div>
-                        <div className="whitespace-pre-wrap break-all">
-                          {line.message}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
 
             {!msg.streaming && msg.content && (() => {
               const subjectLabel = msg.rag_subject_name || msg.ctx_subject_name || null;

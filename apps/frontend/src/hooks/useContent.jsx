@@ -136,7 +136,7 @@ export const useLibraryBundle = (enabled = true) =>
   useQuery({
     queryKey: ['library-bundle'],
     queryFn: fetchLibraryBundle,
-    staleTime: 30 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
     enabled,
   });
@@ -145,7 +145,7 @@ export const useLibraryBundleSlim = () =>
   useQuery({
     queryKey: ['library-bundle-slim'],
     queryFn: fetchLibraryBundleSlim,
-    staleTime: 30 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
     retry: 4,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 15000),
@@ -161,7 +161,7 @@ export const useLibraryBundleBoot = (boardId, enabled = true) =>
   useQuery({
     queryKey: ['library-bundle-boot', boardId],
     queryFn: () => fetchLibraryBundleBoot(boardId),
-    staleTime: 30 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
     enabled: !!boardId && enabled,
   });

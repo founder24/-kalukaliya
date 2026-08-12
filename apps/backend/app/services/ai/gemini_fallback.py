@@ -80,63 +80,85 @@ def _available() -> bool:
 
 # ── Sync worker (runs in asyncio.to_thread) ───────────────────────────────────
 
-def _stream_sync(system_prompt: str, user_message: str) -> list[str]:
+def _stream_sync(
+    system_prompt: str,
+    user_message: str,
+    max_output_tokens: int = 2000,
+) -> list[str]:
     """
     Run Gemini streaming synchronously inside asyncio.to_thread.
     Returns the accumulated list of text chunks.
     Raises RuntimeError on any failure.
 
-    Prefers GEMINI_API_KEY (Google AI Studio, no Vertex IAM needed).
-    Falls back to Vertex AI service-account credentials when no key is set.
+    Tries GEMINI_API_KEY (Google AI Studio) first; if the project is blocked
+    (403 PERMISSION_DENIED) or the model is unavailable (404 NOT_FOUND), falls
+    through to Vertex AI service-account credentials automatically.
     """
     from google import genai as google_genai
-    from google.genai.types import GenerateContentConfig
 
     api_key = _get_api_key()
 
     if api_key:
-        # ── Path 1: Google AI Studio (API key, no IAM) ────────────────────
-        logger.debug("gemini_fallback: using Google AI Studio (API key)")
+        # ── Path 1: Google AI Studio (API key) ────────────────────────────
+        logger.debug("gemini_fallback: trying Google AI Studio (API key)")
         client = google_genai.Client(api_key=api_key)
-    else:
-        # ── Path 2: Vertex AI (service-account credentials) ───────────────
-        project_id, creds_json = _load_vertex_creds()
-        if not project_id:
-            raise RuntimeError("Gemini fallback: no credentials available "
-                               "(set GEMINI_API_KEY or GOOGLE_SA_KEY)")
-        logger.debug("gemini_fallback: using Vertex AI (service account)")
-        tf = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
         try:
-            tf.write(creds_json)
-            tf.close()
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tf.name
-            client = google_genai.Client(
-                vertexai=True,
-                project=project_id,
-                location="us-central1",
-            )
-            return _call_model(client, system_prompt, user_message)
-        finally:
-            try:
-                os.unlink(tf.name)
-            except Exception:
-                pass
+            return _call_model(client, system_prompt, user_message, max_output_tokens)
+        except Exception as e:
+            err = str(e)
+            if "403" in err or "PERMISSION_DENIED" in err or "404" in err or "NOT_FOUND" in err:
+                logger.warning(
+                    "gemini_fallback: API-key path failed (%s) — falling through to Vertex AI",
+                    err[:120],
+                )
+                # Fall through to Vertex AI below
+            else:
+                raise
 
-    return _call_model(client, system_prompt, user_message)
+    # ── Path 2: Vertex AI (service-account credentials) ───────────────────
+    project_id, creds_json = _load_vertex_creds()
+    if not project_id:
+        raise RuntimeError("Gemini fallback: no credentials available "
+                           "(set GEMINI_API_KEY or GOOGLE_SA_KEY)")
+    logger.debug("gemini_fallback: using Vertex AI (service account)")
+    tf = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    try:
+        tf.write(creds_json)
+        tf.close()
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tf.name
+        client = google_genai.Client(
+            vertexai=True,
+            project=project_id,
+            location="us-central1",
+        )
+        return _call_model(client, system_prompt, user_message, max_output_tokens)
+    finally:
+        try:
+            os.unlink(tf.name)
+        except Exception:
+            pass
 
 
-def _call_model(client, system_prompt: str, user_message: str) -> list[str]:
+def _call_model(
+    client,
+    system_prompt: str,
+    user_message: str,
+    max_output_tokens: int = 2000,
+) -> list[str]:
     """Execute the streaming generate call and collect chunks."""
     from google.genai.types import GenerateContentConfig
 
-    combined = f"{system_prompt}\n\n{user_message}"
     chunks: list[str] = []
     for chunk in client.models.generate_content_stream(
         model=_GEMINI_MODEL,
-        contents=[{"role": "user", "parts": [{"text": combined}]}],
+        contents=[{"role": "user", "parts": [{"text": user_message}]}],
         config=GenerateContentConfig(
+            # Pass system prompt via system_instruction so Gemini treats it as
+            # model context rather than user content — prevents the model from
+            # echoing instructions back verbatim in its response.
+            system_instruction=system_prompt,
             temperature=0.3,
-            max_output_tokens=2000,
+            max_output_tokens=max_output_tokens,
             thinking_config={"thinking_budget": 0},
         ),
     ):
@@ -151,20 +173,27 @@ async def generate_gemini(
     system_prompt: str,
     user_message: str,
     timeout: float = 90.0,
+    max_output_tokens: int = 2000,
 ) -> str:
     """
     Generate a complete (non-streaming) response from Gemini 2.5 Flash.
     Returns the full response string.
     Raises RuntimeError on timeout or failure.
+
+    max_output_tokens: upper bound on generated tokens. Raise this for long-form
+    content (e.g. chapter notes) where 2000 tokens would truncate the output.
     """
     if not _available():
         raise RuntimeError("Gemini fallback: no credentials configured "
                            "(set GEMINI_API_KEY)")
 
-    logger.info("gemini_fallback.generate: activating (Sarvam AI unavailable)")
+    logger.info(
+        "gemini_fallback.generate: activating (Sarvam AI unavailable)",
+        extra={"max_output_tokens": max_output_tokens},
+    )
     try:
         chunks = await asyncio.wait_for(
-            asyncio.to_thread(_stream_sync, system_prompt, user_message),
+            asyncio.to_thread(_stream_sync, system_prompt, user_message, max_output_tokens),
             timeout=timeout,
         )
     except asyncio.TimeoutError:

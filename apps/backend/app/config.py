@@ -143,6 +143,14 @@ class Settings(BaseSettings):
     RESEND_FROM_ADDRESS: str = "noreply@syrabit.ai"
     RESEND_FROM_NAME: str = "Syrabit Education"
 
+    # --- Upstash Redis (optional — email flood-cap shared state) ---
+    # When set, the per-recipient email rate limiter stores its counters in Redis
+    # so the cap is enforced across all Cloud Run pods, not just per-process.
+    # Falls back gracefully to in-memory if these vars are absent or unreachable.
+    # Note: kept optional per deployment policy (see upstash-optional-secret.md).
+    UPSTASH_REDIS_REST_URL: Optional[str] = None
+    UPSTASH_REDIS_REST_TOKEN: Optional[str] = None
+
     # --- SEO / IndexNow ---
     INDEXNOW_API_KEY: Optional[str] = None
     INDEXNOW_INTERNAL_SECRET: Optional[str] = None

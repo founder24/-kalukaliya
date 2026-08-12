@@ -33,8 +33,13 @@ export default function SubjectLandingPage() {
   const [expandedPyqId, setExpandedPyqId] = useState(null);
 
   const SECTIONS = useMemo(() => {
-    const notesChs = chapters.filter(ch => !ch.content_type || (ch.content_type !== 'qa' && ch.content_type !== 'question_paper'));
-    const qaChs = chapters.filter(ch => ch.content_type === 'qa');
+    // notes_generated=false means the ingestion pipeline hasn't produced notes yet — hide those
+    // stubs so students never land on a blank page. They auto-appear once ingestion runs.
+    const notesChs = chapters.filter(ch =>
+      (!ch.content_type || (ch.content_type !== 'qa' && ch.content_type !== 'question_paper'))
+      && ch.notes_generated
+    );
+    const qaChs = chapters.filter(ch => ch.content_type === 'qa' && ch.notes_generated);
     // Subject-level PYQ papers — read from subject.pyq_papers (not chapters)
     const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => ({
       id:          p.id || `pyq-${pi}`,

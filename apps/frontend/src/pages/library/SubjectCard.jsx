@@ -64,8 +64,24 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
 
   const SECTIONS = useMemo(() => {
     const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
-    const notesChs = chapters.filter(ch => !ch.content_type || !QA_TYPES.has(ch.content_type));
-    const qaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type));
+    // Notes section: chapters that aren't dedicated Q&A-only chapters AND have actual content.
+    // notes_generated=false means the ingestion pipeline hasn't produced notes yet — hide those
+    // stubs so students never land on a blank page. They auto-appear once ingestion runs.
+    const notesChs = chapters.filter(ch =>
+      (!ch.content_type || !QA_TYPES.has(ch.content_type)) && ch.notes_generated
+      && (isAs ? ch.has_assamese : true)
+    );
+    // Questions section: dedicated Q&A chapters (content_type) OR notes chapters that
+    // also have Q&A content (has_qa=true, populated by the ingestion pipeline).
+    // "Full Book" is a generic ingestion artifact title used when a PDF has no TOC —
+    // hide it from the Q section whenever the subject also has properly-named Q&A
+    // chapters, so the Questions tab doesn't mirror the Notes tab with "Full Book" ×N.
+    const _GENERIC_TITLE = /^full\s+book$/i;
+    const _allQaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type) || ch.has_qa);
+    const _hasNamedQa = _allQaChs.some(ch => !_GENERIC_TITLE.test((ch.title || '').trim()));
+    const qaChs = _hasNamedQa
+      ? _allQaChs.filter(ch => !_GENERIC_TITLE.test((ch.title || '').trim()))
+      : _allQaChs;
     // Subject-level PYQ papers — [{id, title, class_name, year, description, pages:[]}]
     const pyqGroups = (sub.pyq_papers || []).map((p, pi) => ({
       id:          p.id || `pyq-${pi}`,
@@ -370,10 +386,15 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
             <div key={section.key}>
               {visChapters.map((ch, i) => {
                 const effectiveSlug = ch.slug || (ch.title ? ch.title.toLowerCase().replace(/[^\p{L}\p{N}\p{M}]+/gu, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '') : '');
+                // In Assamese mode, prefer the Assamese URL slug so students land on
+                // a readable /as/… address instead of the English slug fallback.
+                const asSlug = isAs ? (ch.slug_as || effectiveSlug) : effectiveSlug;
                 const hasValidLink = !!(sub.boardSlug && sub.classSlug && sub.slug && effectiveSlug);
                 const hasContent = ch.notes_generated !== false;
                 const chPath = hasValidLink
-                  ? `/${sub.boardSlug}/${sub.classSlug}/${sub.slug}/${effectiveSlug}`
+                  ? (isAs
+                    ? `/as/${sub.boardSlug}/${sub.classSlug}/${sub.slug}/${asSlug}`
+                    : `/${sub.boardSlug}/${sub.classSlug}/${sub.slug}/${effectiveSlug}`)
                   : subjectLandingPath;
                 return (
                   <div

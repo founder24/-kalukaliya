@@ -622,7 +622,9 @@ export default function ChapterPage() {
   }, [setSearchParams]);
 
   const isQuestionPaper = data?.content_type === 'question_paper' || data?.content_type === 'pyq';
-  const hasAssamese = isQuestionPaper ? false : (data?.has_assamese || false);
+  // Assamese notes are coming soon — always show the "coming soon" placeholder.
+  // Flip this back to `data?.has_assamese || false` once AS content is ready.
+  const hasAssamese = false;
   const displayContent = useMemo(() => {
     if (!data) return '';
     if (isQuestionPaper) return data.content;
@@ -896,6 +898,8 @@ export default function ChapterPage() {
   }, [loading, data, topicParam, chunkParam, rchunkParam]);
 
   const basePath = `/${board}/${classSlug}/${subjectSlug}`;
+  // Assamese base path — all /as/* routes omit the stream segment.
+  const asBasePath = isAssamesePath ? `/as/${board}/${classSlug}/${subjectSlug}` : basePath;
   // Chapter URL is always the canonical "home" for its content; on
   // the topic deep-link route we point canonical back here with the
   // `#topic-<slug>` fragment per the spec (Step 2). The chapter URL
@@ -909,9 +913,14 @@ export default function ChapterPage() {
   // "core", etc. Mirrors the chapter-recent push earlier in the
   // file (search "pushRecentChapter").
   const _chapterStreamSlug = streamSlug || data?.stream_slug || '';
-  const _chapterPath = _chapterStreamSlug
-    ? `/${board}/${classSlug}/${_chapterStreamSlug}/${subjectSlug}/${chapterSlug}`
-    : `${basePath}/${chapterSlug}`;
+  // For Assamese URLs, prefer slug_as from the resolved data (falls back to
+  // the English slug so the URL remains valid before slug_as is written).
+  const _asChapterSlug = data?.slug_as || chapterSlug;
+  const _chapterPath = isAssamesePath
+    ? `${asBasePath}/${_asChapterSlug}`
+    : (_chapterStreamSlug
+      ? `/${board}/${classSlug}/${_chapterStreamSlug}/${subjectSlug}/${chapterSlug}`
+      : `${basePath}/${chapterSlug}`);
   const chapterUrl = `https://syrabit.ai${_chapterPath}`;
   const canonical = topicSlugParam
     ? `${chapterUrl}#topic-${topicSlugParam}`
@@ -924,18 +933,23 @@ export default function ChapterPage() {
   const readMins = data?.word_count ? Math.max(1, Math.ceil(data.word_count / 200)) : null;
 
   const handleShare = useCallback(() => {
-    Analytics.chapterShare(data?.title || chapterSlug, `${basePath}/${chapterSlug}`);
+    // In Assamese mode share the /as/… URL with the Assamese slug so the link
+    // the student copies lands on the correct Assamese-canonical page.
+    const _shareSlug = isAssamesePath ? (data?.slug_as || chapterSlug) : chapterSlug;
+    const _shareBase = isAssamesePath ? `/as/${board}/${classSlug}/${subjectSlug}` : basePath;
+    const _sharePath = `${_shareBase}/${_shareSlug}`;
+    Analytics.chapterShare(data?.title || chapterSlug, _sharePath);
     const chapTitle = data?.topic_title || data?.chapter_title || chapterSlug;
     const subjName = data?.subject_name || subjectSlug;
     const brdName = data?.board_name || board;
     const clsName = data?.class_name || classSlug;
     const shareTitle = `${chapTitle} — ${subjName} | ${brdName} ${clsName} Notes`;
     const shareDesc = data?.meta_description || `${chapTitle} notes for ${subjName}. Complete study material for ${brdName} ${clsName} students.`;
-    share(shareTitle, `${basePath}/${chapterSlug}`, {
+    share(shareTitle, _sharePath, {
       showSerpPreview: true,
       description: shareDesc,
     });
-  }, [data?.title, data?.meta_description, data?.topic_title, data?.chapter_title, data?.subject_name, data?.board_name, data?.class_name, chapterSlug, basePath, subjectSlug, board, classSlug, share]);
+  }, [data?.title, data?.meta_description, data?.topic_title, data?.chapter_title, data?.subject_name, data?.board_name, data?.class_name, data?.slug_as, chapterSlug, basePath, subjectSlug, board, classSlug, isAssamesePath, share]);
 
   const markdownComponents = useMemo(() => {
     const extractText = (node) => {
@@ -1287,8 +1301,8 @@ export default function ChapterPage() {
               </div>
             )}
           </div>
-          {!isQuestionPaper && contentLang === 'as' && !data.content_as && (
-            <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-1.5">
+          {!isQuestionPaper && contentLang === 'as' && !hasAssamese && (
+            <p data-testid="assamese-unavailable-notice" className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-1.5">
               <span aria-hidden="true">⚠️</span>
               {'এই অধ্যায়ৰ বাবে অসমীয়া সংস্কৰণ এতিয়াও উপলব্ধ নহয় — ইংৰাজী বিষয়বস্তু দেখুৱাই আছে।'}
               <span className="ml-1 text-amber-600 font-normal">(Assamese version not yet available — showing English)</span>
@@ -1329,17 +1343,30 @@ export default function ChapterPage() {
             >
               {/* Notes mode — main markdown content */}
               {(isQuestionPaper || contentMode === 'notes') && (
-                <Suspense fallback={
-                  <div className="space-y-3">
-                    {[...Array(6)].map((_, i) => (
-                      <Skeleton key={i} className="h-5 w-full" style={{ width: `${65 + (i % 3) * 12}%` }} />
-                    ))}
+                // Show an empty state when this chapter has no notes yet rather than a blank page.
+                // Ingestion fills notes_en → content is fetched → displayContent becomes non-empty
+                // and this branch re-renders automatically on the next page load.
+                !isQuestionPaper && !displayContent ? (
+                  <div className="py-12 text-center space-y-3" data-testid="notes-empty-state">
+                    <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                      {contentLang === 'as'
+                        ? 'এই অধ্যায়ৰ নোট সোনকালে আহিব।'
+                        : 'Notes for this chapter are being prepared.'}
+                    </p>
                   </div>
-                }>
-                  <MarkdownRenderer components={markdownComponents}>
-                    {displayContent}
-                  </MarkdownRenderer>
-                </Suspense>
+                ) : (
+                  <Suspense fallback={
+                    <div className="space-y-3">
+                      {[...Array(6)].map((_, i) => (
+                        <Skeleton key={i} className="h-5 w-full" style={{ width: `${65 + (i % 3) * 12}%` }} />
+                      ))}
+                    </div>
+                  }>
+                    <MarkdownRenderer components={markdownComponents}>
+                      {displayContent}
+                    </MarkdownRenderer>
+                  </Suspense>
+                )
               )}
               {/* Q&A mode — source citation / topic definition cards */}
               {!isQuestionPaper && contentMode === 'qa' && (
@@ -1429,10 +1456,21 @@ export default function ChapterPage() {
               // fallback if that tab has no content there.
               const _currentTab = searchParams.get('tab');
               const _tabSuffix = _currentTab ? `?tab=${_currentTab}` : '';
-              const prevLink = prev ? { title: prev.title || prev.slug, path: `${basePath}/${prev.slug}${_tabSuffix}` } : null;
-              const nextLink = next ? { title: next.title || next.slug, path: `${basePath}/${next.slug}${_tabSuffix}` } : null;
+              // In Assamese mode, navigate to /as/… using slug_as so the student
+              // stays in the Assamese URL space across chapter-to-chapter nav.
+              // _navBase uses the variables already in scope from ChapterPage render:
+              // board, classSlug, subjectSlug are route params; basePath = `/${board}/${classSlug}/${subjectSlug}`
+              const _navBase = isAssamesePath ? `/as/${board}/${classSlug}/${subjectSlug}` : basePath;
+              const prevLink = prev ? {
+                title: (isAssamesePath && prev.title_as) ? prev.title_as : (prev.title || prev.slug),
+                path: `${_navBase}/${isAssamesePath ? (prev.slug_as || prev.slug) : prev.slug}${_tabSuffix}`,
+              } : null;
+              const nextLink = next ? {
+                title: (isAssamesePath && next.title_as) ? next.title_as : (next.title || next.slug),
+                path: `${_navBase}/${isAssamesePath ? (next.slug_as || next.slug) : next.slug}${_tabSuffix}`,
+              } : null;
               const seedRelated = relatedChapterTopics || [];
-              const siblings = siblingsAsRelated(subjChapters, data?.chapter_id, chapterSlug, basePath, 8);
+              const siblings = siblingsAsRelated(subjChapters, data?.chapter_id, chapterSlug, _navBase, 8, isAssamesePath);
               const related = (() => {
                 const out = [...seedRelated];
                 if (out.length < 4) {

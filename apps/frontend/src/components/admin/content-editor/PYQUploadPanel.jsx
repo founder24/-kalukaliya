@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Upload, FileText, Loader2, Trash2, Play,
   Download, ExternalLink, ChevronDown, ChevronUp,
-  Type, Image, Maximize2, Minimize2,
+  Type, Image, Maximize2, Minimize2, ChevronLeft, ChevronRight, Layers,
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -26,8 +26,18 @@ const SIZE_PRESETS = [
 function ImageCard({ pyq, onProcess, onDelete, isProcessing }) {
   const [scale, setScale] = useState(50);
   const [preview, setPreview] = useState(false);
+  const [pageIdx, setPageIdx] = useState(0);
+
   const st = STATUS_MAP[pyq.processing_status] || STATUS_MAP.uploaded;
-  const hasImage = pyq.is_image && pyq.file_url;
+
+  // Resolve the list of image URLs — supports legacy single-URL and new multi-URL docs
+  const urls = pyq.file_urls?.length ? pyq.file_urls : (pyq.file_url ? [pyq.file_url] : []);
+  const isMultiPage = urls.length > 1;
+  const currentUrl = urls[pageIdx] || '';
+  const hasImage = pyq.is_image && currentUrl;
+
+  const prevPage = (e) => { e.stopPropagation(); setPageIdx(i => Math.max(0, i - 1)); };
+  const nextPage = (e) => { e.stopPropagation(); setPageIdx(i => Math.min(urls.length - 1, i + 1)); };
 
   return (
     <div className="group relative rounded-xl border border-gray-200 bg-white overflow-hidden transition-shadow hover:shadow-md">
@@ -35,13 +45,39 @@ function ImageCard({ pyq, onProcess, onDelete, isProcessing }) {
         <div className="relative bg-[#f8f8f8]" style={{ minHeight: 80 }}>
           <div className="flex items-center justify-center p-2" style={{ maxHeight: 300, overflow: 'hidden' }}>
             <img
-              src={pyq.file_url}
-              alt={pyq.filename}
+              src={currentUrl}
+              alt={`${pyq.filename} page ${pageIdx + 1}`}
               className="rounded-lg object-contain transition-all duration-200"
               style={{ width: `${scale}%`, maxHeight: 280 }}
               onClick={() => setPreview(true)}
             />
           </div>
+
+          {/* Multi-page navigation */}
+          {isMultiPage && (
+            <div className="absolute top-2 left-0 right-0 flex items-center justify-center gap-1 pointer-events-none">
+              <span className="text-[10px] bg-black/50 text-white px-2 py-0.5 rounded-full font-mono pointer-events-auto">
+                {pageIdx + 1} / {urls.length}
+              </span>
+            </div>
+          )}
+          {isMultiPage && pageIdx > 0 && (
+            <button
+              onClick={prevPage}
+              className="absolute left-1 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/40 text-white hover:bg-black/60 z-10"
+            >
+              <ChevronLeft size={14} />
+            </button>
+          )}
+          {isMultiPage && pageIdx < urls.length - 1 && (
+            <button
+              onClick={nextPage}
+              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/40 text-white hover:bg-black/60 z-10"
+            >
+              <ChevronRight size={14} />
+            </button>
+          )}
+
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity">
             <div className="flex items-center gap-1.5">
               {SIZE_PRESETS.map(p => (
@@ -94,6 +130,12 @@ function ImageCard({ pyq, onProcess, onDelete, isProcessing }) {
               {pyq.question_count > 0 && (
                 <span className="text-[9px] text-gray-400">{pyq.question_count}Q</span>
               )}
+              {isMultiPage && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-500 font-medium flex items-center gap-0.5">
+                  <Layers size={8} />
+                  {urls.length}p
+                </span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-0.5">
@@ -112,8 +154,8 @@ function ImageCard({ pyq, onProcess, onDelete, isProcessing }) {
                 <ExternalLink size={11} />
               </a>
             )}
-            {pyq.file_url && !pyq.file_url.startsWith('data:') && (
-              <a href={pyq.file_url} target="_blank" rel="noopener noreferrer" title="Download" className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-emerald-500">
+            {currentUrl && !currentUrl.startsWith('data:') && (
+              <a href={currentUrl} target="_blank" rel="noopener noreferrer" title="Download" className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-emerald-500">
                 <Download size={11} />
               </a>
             )}
@@ -129,7 +171,18 @@ function ImageCard({ pyq, onProcess, onDelete, isProcessing }) {
           className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-8 cursor-pointer"
           onClick={() => setPreview(false)}
         >
-          <img src={pyq.file_url} alt={pyq.filename} className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" />
+          <img src={currentUrl} alt={pyq.filename} className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" />
+          {isMultiPage && (
+            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2">
+              {urls.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={(e) => { e.stopPropagation(); setPageIdx(i); }}
+                  className={`w-2 h-2 rounded-full transition-colors ${i === pageIdx ? 'bg-amber-400' : 'bg-white/40 hover:bg-white/70'}`}
+                />
+              ))}
+            </div>
+          )}
           <button className="absolute top-6 right-6 p-2 rounded-full bg-white/10 text-white hover:bg-white/20">
             <Minimize2 size={18} />
           </button>
@@ -154,6 +207,7 @@ export default function PYQUploadPanel({
   const [textContent, setTextContent] = useState('');
   const [submittingText, setSubmittingText] = useState(false);
   const [viewMode, setViewMode] = useState('grid');
+  const [groupImages, setGroupImages] = useState(false);
   const fileInputRef = useRef(null);
   const dropRef = useRef(null);
   const uploadingRef = useRef(false);
@@ -202,16 +256,20 @@ export default function PYQUploadPanel({
       formData.append('class_id', classId || '');
       formData.append('stream_id', streamId || '');
       formData.append('chapter_id', chapterId || '');
+      // group=true → all images in this batch become one multi-page PYQ entry
+      formData.append('group', groupImages ? 'true' : 'false');
 
-      const res = await axios.post(`${API}/admin/pyq/upload`, formData, {
-        ...authHeaders(adminToken),
-        headers: { ...authHeaders(adminToken).headers, 'Content-Type': 'multipart/form-data' },
-      });
+      // NOTE: Do NOT set Content-Type manually — axios auto-adds the correct
+      // multipart/form-data boundary when the body is FormData.
+      const res = await axios.post(`${API}/admin/pyq/upload`, formData, authHeaders(adminToken));
       const imgCount = valid.filter(f => f.type.startsWith('image/')).length;
       const pdfCount = valid.length - imgCount;
       const parts = [];
-      if (pdfCount > 0) parts.push(`${pdfCount} PDF(s)`);
-      if (imgCount > 0) parts.push(`${imgCount} image(s)`);
+      if (pdfCount > 0) parts.push(`${pdfCount} PDF${pdfCount > 1 ? 's' : ''}`);
+      if (imgCount > 0) {
+        if (groupImages && imgCount > 1) parts.push(`${imgCount} images grouped as 1 PYQ`);
+        else parts.push(`${imgCount} image${imgCount > 1 ? 's' : ''}`);
+      }
       toast.success(`${parts.join(' + ')} uploaded`);
       await loadPyqs();
     } catch (e) {
@@ -221,7 +279,7 @@ export default function PYQUploadPanel({
       uploadingRef.current = false;
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, [examYear, subjectId, boardId, classId, streamId, chapterId, adminToken, loadPyqs]);
+  }, [examYear, subjectId, boardId, classId, streamId, chapterId, adminToken, groupImages, loadPyqs]);
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
@@ -385,6 +443,26 @@ export default function PYQUploadPanel({
             )}
           </div>
 
+          {/* Group toggle — shown above the drop zone */}
+          <button
+            onClick={() => setGroupImages(v => !v)}
+            className={`flex items-center gap-2 w-full px-3 py-2 rounded-xl border text-xs font-medium transition-all ${
+              groupImages
+                ? 'border-violet-400 bg-violet-500/10 text-violet-700'
+                : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+            }`}
+          >
+            <Layers size={13} className={groupImages ? 'text-violet-500' : 'text-gray-400'} />
+            <span className="flex-1 text-left">
+              {groupImages
+                ? 'Group mode ON — all selected images will form one multi-page PYQ'
+                : 'Group images as one PYQ (for multi-page scans)'}
+            </span>
+            <span className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${groupImages ? 'bg-violet-500' : 'bg-gray-200'}`}>
+              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${groupImages ? 'left-4' : 'left-0.5'}`} />
+            </span>
+          </button>
+
           <div
             ref={dropRef}
             onDrop={handleDrop}
@@ -420,7 +498,7 @@ export default function PYQUploadPanel({
                 </div>
                 <div className="text-center">
                   <span className="text-sm font-medium text-gray-700 block">
-                    Drop images or PDFs here
+                    {groupImages ? 'Drop page images here (will group as one PYQ)' : 'Drop images or PDFs here'}
                   </span>
                   <span className="text-xs text-gray-400 mt-0.5 block">
                     or <span className="text-amber-600 font-medium">click to browse</span>
@@ -533,11 +611,11 @@ export default function PYQUploadPanel({
                           <ExternalLink size={12} />
                         </a>
                       )}
-                      {pyq.file_url && !pyq.file_url.startsWith('data:') && (
-                        <a href={pyq.file_url} target="_blank" rel="noopener noreferrer" title="Download" className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-emerald-500">
+                      {(() => { const u = pyq.file_urls?.[0] || pyq.file_url; return u && !u.startsWith('data:') ? (
+                        <a href={u} target="_blank" rel="noopener noreferrer" title="Download" className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-emerald-500">
                           <Download size={12} />
                         </a>
-                      )}
+                      ) : null; })()}
                       <button onClick={() => deleteOne(pyq.id)} title="Delete" className="p-1.5 rounded-lg hover:bg-red-500/10 text-red-400">
                         <Trash2 size={12} />
                       </button>

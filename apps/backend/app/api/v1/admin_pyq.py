@@ -7,6 +7,7 @@ import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
@@ -14,6 +15,68 @@ from app.api.v1.admin import require_admin_session, csrf_guard
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+async def _upload_pyq_file(data: bytes, fname: str, ct: str, chapter_id: str) -> str:
+    """Upload a PYQ file to storage.
+
+    Tries Cloudflare R2 first (preferred — fast, cheap, already configured),
+    then falls back to GCS.  Raises HTTPException(503) if both fail so the
+    caller can surface a meaningful error rather than silently storing an
+    empty URL.
+
+    Returns the public URL of the uploaded object.
+    """
+    uid = _uuid.uuid4().hex
+
+    # ── Try R2 ────────────────────────────────────────────────────────────────
+    account_id = (
+        getattr(settings, "CF_ACCOUNT_ID", None)
+        or getattr(settings, "CLOUDFLARE_ACCOUNT_ID", None)
+    )
+    api_token  = getattr(settings, "CF_API_TOKEN", None)
+    r2_bucket  = getattr(settings, "CF_R2_BUCKET", "syrabit-assets")
+    r2_public  = getattr(settings, "CF_R2_PUBLIC_URL", None)
+
+    if account_id and api_token and r2_public:
+        key = f"pyq-uploads/{chapter_id or 'global'}/{uid}/{fname}"
+        r2_url = (
+            f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
+            f"/r2/buckets/{r2_bucket}/objects/{key}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.put(
+                    r2_url,
+                    content=data,
+                    headers={"Authorization": f"Bearer {api_token}", "Content-Type": ct},
+                )
+            if resp.status_code in (200, 201):
+                return f"{r2_public.rstrip('/')}/{key}"
+            logger.warning("R2 pyq upload returned %s: %s", resp.status_code, resp.text[:200])
+        except Exception as exc:
+            logger.warning("R2 pyq upload error: %s", exc)
+
+    # ── Fall back to GCS ──────────────────────────────────────────────────────
+    try:
+        from app.services.content.gcs_store import gcs_content_store
+        blob_name = f"pyq-uploads/{chapter_id or 'global'}/{uid}/{fname}"
+        bucket = gcs_content_store._get_bucket()
+        blob = bucket.blob(blob_name)
+        blob.upload_from_string(data, content_type=ct or "application/octet-stream")
+        blob.make_public()
+        return blob.public_url
+    except Exception as exc:
+        logger.warning("GCS pyq upload failed: %s", exc)
+
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "File storage unavailable — "
+            "neither Cloudflare R2 nor GCS is configured or reachable. "
+            "Check CF_R2_PUBLIC_URL / CF_API_TOKEN or GOOGLE_SA_KEY."
+        ),
+    )
 
 router = APIRouter(
     tags=["Admin PYQ"],
@@ -35,6 +98,9 @@ def _fmt(doc: dict) -> dict:
     for k in ("created_at", "updated_at"):
         if isinstance(doc.get(k), datetime):
             doc[k] = doc[k].isoformat()
+    # Ensure file_urls is always a list (may be absent on older documents)
+    if "file_urls" not in doc:
+        doc["file_urls"] = [doc["file_url"]] if doc.get("file_url") else []
     return doc
 
 
@@ -104,11 +170,23 @@ async def upload_pyq_files(
     class_id: str = Form(""),
     stream_id: str = Form(""),
     chapter_id: str = Form(""),
+    group: bool = Form(False),
 ):
-    """Upload PDF / image PYQ files. Stores them on GCS if configured."""
+    """Upload PDF / image PYQ files.
+
+    Files are stored on Cloudflare R2 (preferred) then GCS (fallback).
+
+    When ``group=true`` all uploaded images are stored as a **single** PYQ
+    document with a ``file_urls`` list — useful when a question paper spans
+    multiple scanned pages that belong together.  PDFs are always stored
+    individually regardless of the group flag.
+    """
+    allowed_image_exts = {"jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif"}
     col = _col()
     created_ids: list[str] = []
 
+    # Validate all files first before touching storage
+    parsed: list[dict] = []
     for file in files:
         data = await file.read()
         if len(data) > 50 * 1024 * 1024:
@@ -116,48 +194,114 @@ async def upload_pyq_files(
         fname = file.filename or "upload"
         ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
         ct = file.content_type or ""
-        is_pdf = ext == "pdf" or ct == "application/pdf"
-        allowed_image_exts = {"jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif"}
+        is_pdf   = ext == "pdf" or ct == "application/pdf"
         is_image = ct.startswith("image/") or ext in allowed_image_exts
         if not is_pdf and not is_image:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type '{ext}' — only PDF and images allowed")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type '{ext}' — only PDF and images allowed",
+            )
+        parsed.append({"data": data, "fname": fname, "ct": ct, "is_pdf": is_pdf, "is_image": is_image})
 
-        file_url = ""
-        try:
-            from app.services.content.gcs_store import gcs_content_store
-            blob_name = f"pyq-uploads/{chapter_id}/{_uuid.uuid4().hex}/{fname}"
-            bucket = gcs_content_store._get_bucket()
-            blob = bucket.blob(blob_name)
-            blob.upload_from_string(data, content_type=ct or "application/octet-stream")
-            blob.make_public()
-            file_url = blob.public_url
-        except Exception as exc:
-            logger.warning(f"GCS pyq upload failed: {exc}")
+    # Upload to storage and create MongoDB records
+    # ── Grouped mode: all images → one PYQ document ──────────────────────────
+    if group:
+        images = [p for p in parsed if p["is_image"]]
+        pdfs   = [p for p in parsed if p["is_pdf"]]
 
-        pyq_id = _uuid.uuid4().hex
-        doc = {
-            "_id": pyq_id,
-            "chapter_id": chapter_id,
-            "subject_id": subject_id,
-            "board_id": board_id,
-            "class_id": class_id,
-            "stream_id": stream_id,
-            "exam_year": exam_year,
-            "paper_type": paper_type,
-            "filename": fname,
-            "file_url": file_url,
-            "is_image": is_image,
-            "is_pdf": is_pdf,
-            "is_text": False,
-            "processing_status": "uploaded",
-            "question_count": 0,
-            "text_content": None,
-            "seo_url": None,
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-        }
-        await col.insert_one(doc)
-        created_ids.append(pyq_id)
+        if images:
+            file_urls: list[str] = []
+            for p in images:
+                url = await _upload_pyq_file(p["data"], p["fname"], p["ct"], chapter_id)
+                file_urls.append(url)
+
+            pyq_id = _uuid.uuid4().hex
+            doc = {
+                "_id":               pyq_id,
+                "chapter_id":        chapter_id,
+                "subject_id":        subject_id,
+                "board_id":          board_id,
+                "class_id":          class_id,
+                "stream_id":         stream_id,
+                "exam_year":         exam_year,
+                "paper_type":        paper_type,
+                "filename":          images[0]["fname"],
+                "file_url":          file_urls[0],  # first page (backward compat)
+                "file_urls":         file_urls,      # all pages
+                "page_count":        len(file_urls),
+                "is_image":          True,
+                "is_pdf":            False,
+                "is_text":           False,
+                "processing_status": "uploaded",
+                "question_count":    0,
+                "text_content":      None,
+                "seo_url":           None,
+                "created_at":        datetime.now(timezone.utc),
+                "updated_at":        datetime.now(timezone.utc),
+            }
+            await col.insert_one(doc)
+            created_ids.append(pyq_id)
+
+        # PDFs are always stored individually even in group mode
+        for p in pdfs:
+            file_url = await _upload_pyq_file(p["data"], p["fname"], p["ct"], chapter_id)
+            pyq_id = _uuid.uuid4().hex
+            doc = {
+                "_id":               pyq_id,
+                "chapter_id":        chapter_id,
+                "subject_id":        subject_id,
+                "board_id":          board_id,
+                "class_id":          class_id,
+                "stream_id":         stream_id,
+                "exam_year":         exam_year,
+                "paper_type":        paper_type,
+                "filename":          p["fname"],
+                "file_url":          file_url,
+                "file_urls":         [file_url],
+                "page_count":        1,
+                "is_image":          False,
+                "is_pdf":            True,
+                "is_text":           False,
+                "processing_status": "uploaded",
+                "question_count":    0,
+                "text_content":      None,
+                "seo_url":           None,
+                "created_at":        datetime.now(timezone.utc),
+                "updated_at":        datetime.now(timezone.utc),
+            }
+            await col.insert_one(doc)
+            created_ids.append(pyq_id)
+
+    else:
+        # ── Default mode: one PYQ document per file ───────────────────────────
+        for p in parsed:
+            file_url = await _upload_pyq_file(p["data"], p["fname"], p["ct"], chapter_id)
+            pyq_id = _uuid.uuid4().hex
+            doc = {
+                "_id":               pyq_id,
+                "chapter_id":        chapter_id,
+                "subject_id":        subject_id,
+                "board_id":          board_id,
+                "class_id":          class_id,
+                "stream_id":         stream_id,
+                "exam_year":         exam_year,
+                "paper_type":        paper_type,
+                "filename":          p["fname"],
+                "file_url":          file_url,
+                "file_urls":         [file_url],
+                "page_count":        1,
+                "is_image":          p["is_image"],
+                "is_pdf":            p["is_pdf"],
+                "is_text":           False,
+                "processing_status": "uploaded",
+                "question_count":    0,
+                "text_content":      None,
+                "seo_url":           None,
+                "created_at":        datetime.now(timezone.utc),
+                "updated_at":        datetime.now(timezone.utc),
+            }
+            await col.insert_one(doc)
+            created_ids.append(pyq_id)
 
     return {"status": "ok", "ids": created_ids, "count": len(created_ids)}
 

@@ -253,6 +253,7 @@ async def get_library_bundle(
                             "title": ch.title,
                             "title_as": ch.title_as or None,
                             "slug": ch.slug,
+                            "slug_as": getattr(ch, "slug_as", None) or None,
                             "subject_id": subj_id,
                             "order": ch.chapter_number,
                             "content_type": ch.content_type or "notes",
@@ -261,7 +262,10 @@ async def get_library_bundle(
                             or bool(ch.notes_en or ch.content_en
                                     or ch.notes_as or ch.content_as),
                             "has_assamese": bool(ch.notes_as or ch.content_as),
-                            "has_qa": bool(ch.qa_text_en or ch.qa_text_as),
+                            "has_qa": bool(
+                                ch.qa_rag_sections_en or ch.qa_rag_sections_as
+                                or ch.qa_text_en or ch.qa_text_as
+                            ),
                             "status": ch.status,
                             "pyq_papers": [
                                 {
@@ -392,13 +396,19 @@ async def get_library_bundle(
                 "title": ch.title,
                 "title_as": ch.title_as or None,
                 "slug": ch.slug,
+                "slug_as": getattr(ch, "slug_as", None) or None,
                 "subject_id": subj_id,
                 "order": ch.chapter_number,
+                "content_type": ch.content_type or "notes",
                 "topic_count": len(ch.published_topics),
                 "notes_generated": ch.notes_generated
                 or bool(ch.notes_en or ch.content_en
                         or ch.notes_as or ch.content_as),
                 "has_assamese": bool(ch.notes_as or ch.content_as),
+                "has_qa": bool(
+                    ch.qa_rag_sections_en or ch.qa_rag_sections_as
+                    or ch.qa_text_en or ch.qa_text_as
+                ),
                 "status": ch.status,
             }
             chapter_list.append(ch_data)
@@ -863,6 +873,26 @@ async def _resolve_chapter_by_slug(
     content_as = chapter_doc.notes_as or chapter_doc.content_as or ""
     has_assamese = bool(content_as)
 
+    # Guard against thin-content indexing on /as/ routes.
+    #
+    # When a seed run fails mid-way the /as/ URL resolves to a valid 200 but
+    # `has_assamese` is False (no Assamese notes were generated).  CDN edges and
+    # search crawlers would happily cache and index that empty page, causing
+    # thin-content penalties and a poor student experience.
+    #
+    # Decision (2026-08): use response-header approach rather than a 307 redirect
+    # so the frontend can still render a graceful fallback in the browser.
+    # - `Cache-Control: no-store` prevents CDN edges (Cloudflare) from caching the
+    #   response, ensuring it is re-fetched on every request so it self-heals once
+    #   content arrives.
+    # - `X-Robots-Tag: noindex` instructs all crawlers (Googlebot, etc.) not to
+    #   include this URL in search indexes.
+    # The public Cache-Control header set at the top of this function is replaced
+    # only for this specific case; English routes are unaffected.
+    if use_slug_as and not has_assamese:
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Robots-Tag"] = "noindex"
+
     # Compute prev/next chapters for navigation
     chapter_idx = next(
         (i for i, ch in enumerate(chapters) if ch.id == chapter_doc.id), None
@@ -892,6 +922,7 @@ async def _resolve_chapter_by_slug(
         "title": chapter_doc.title,
         "chapter_title": chapter_doc.title,
         "chapter_slug": chapter_doc.slug,
+        "slug_as": getattr(chapter_doc, "slug_as", None) or None,
         "topic_title": topic_title,
         "subject_name": subject_doc.name,
         "subject_slug": subject_doc.slug or _slugify(subject_doc.name),

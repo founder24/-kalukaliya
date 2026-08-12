@@ -16,12 +16,25 @@ _http_client: Optional[httpx.AsyncClient] = None
 
 RESEND_API_URL = "https://api.resend.com/emails"
 
-# Simple in-memory rate limiter: max 10 emails per minute per recipient
-# Note (HF-073): This rate limiter is in-memory only (per-instance). In a multi-pod
-# deployment, use Redis-based rate limiting to share state across instances.
+# Per-recipient email rate limiter: max 10 emails per minute per recipient.
+# Primary store: Upstash Redis REST API — shared across all Cloud Run pods so the
+# cap is enforced fleet-wide (fixes HF-073).
+# Fallback: in-memory dict used when Redis credentials are absent or unreachable.
 _EMAIL_RATE_LIMIT = 10
 _EMAIL_RATE_WINDOW = 60  # seconds
 _email_send_times: dict[str, list[float]] = defaultdict(list)
+
+
+def get_email_rate_limiter_mode() -> str:
+    """Return 'redis' if Upstash credentials are configured, else 'in_memory'.
+
+    Used by the health check to surface whether the fleet-wide cap is active.
+    Credentials being present does not guarantee Redis is reachable — the code
+    always falls back to in-memory on transient errors.
+    """
+    if settings.UPSTASH_REDIS_REST_URL and settings.UPSTASH_REDIS_REST_TOKEN:
+        return "redis"
+    return "in_memory"
 
 # ---------------------------------------------------------------------------
 # Email failure tracking
@@ -33,11 +46,60 @@ _EMAIL_FAILURE_WINDOW = 3600  # seconds (1 hour)
 _EMAIL_ALERT_THRESHOLD = 5     # emit ERROR alert after this many failures/hour
 _EMAIL_ALERT_COOLDOWN = 3600   # seconds — suppress repeat alerts within this window
 _email_failure_timestamps: list[float] = []  # in-memory fallback
-_last_alert_time: float = 0.0  # timestamp of the most-recent EMAIL_DELIVERY_FAILURE_ALERT
+_last_alert_time: float = 0.0  # in-memory fallback for the most-recent alert timestamp
+
+# Singleton document id used in the email_alert_state collection
+_ALERT_STATE_DOC_ID = "email_alert"
+
+
+async def _claim_alert_cooldown_in_mongo(now: float, cutoff: float) -> Optional[bool]:
+    """Atomically claim the alert cooldown slot in MongoDB.
+
+    Uses a single conditional upsert so only one pod across the fleet wins the
+    claim within a given cooldown window, eliminating the read-then-write race.
+
+    The filter matches only when the stored timestamp is absent or older than
+    *cutoff*.  If the filter doesn't match (another pod recently won the claim),
+    the upsert would try to insert a document with the same ``_id``, which
+    MongoDB rejects with ``DuplicateKeyError`` — we treat that as a lost claim.
+
+    Returns:
+        True  — this pod won the claim and should fire the alert.
+        False — another pod holds an active cooldown; stay silent.
+        None  — MongoDB is unavailable; caller must fall back to in-memory state.
+    """
+    try:
+        from pymongo.errors import DuplicateKeyError
+        from app.db.mongo import get_mongo_client
+        from app.config import settings as _settings
+
+        client = get_mongo_client()
+        db = client[_settings.MONGODB_DB_NAME]
+        try:
+            result = await db.email_alert_state.update_one(
+                {
+                    "_id": _ALERT_STATE_DOC_ID,
+                    "$or": [
+                        {"last_alert_ts": {"$exists": False}},
+                        {"last_alert_ts": {"$lt": cutoff}},
+                    ],
+                },
+                {"$set": {"last_alert_ts": now}},
+                upsert=True,
+            )
+            # Won if an existing doc was updated OR a new doc was upserted
+            return result.matched_count > 0 or result.upserted_id is not None
+        except DuplicateKeyError:
+            # Another pod raced to upsert the document — we lost the claim
+            return False
+    except Exception:
+        # Real MongoDB outage — signal caller to use in-memory fallback
+        return None
 
 
 async def _record_email_failure() -> None:
     """Record a send failure in MongoDB (with in-memory fallback) and alert if threshold exceeded."""
+    global _last_alert_time
     now = _time.time()
 
     # Always update the in-memory list so the fallback path stays accurate
@@ -63,10 +125,24 @@ async def _record_email_failure() -> None:
 
     # Derive alert count from MongoDB when possible; fall back to in-memory
     count = await get_email_failures_last_hour()
-    global _last_alert_time
-    now_alert = _time.time()
-    if count >= _EMAIL_ALERT_THRESHOLD and (now_alert - _last_alert_time) >= _EMAIL_ALERT_COOLDOWN:
-        _last_alert_time = now_alert
+    if count >= _EMAIL_ALERT_THRESHOLD:
+        now_alert = _time.time()
+        alert_cutoff = now_alert - _EMAIL_ALERT_COOLDOWN
+
+        # Attempt an atomic MongoDB claim so only one pod fires per cooldown window
+        claimed = await _claim_alert_cooldown_in_mongo(now_alert, alert_cutoff)
+
+        if claimed is None:
+            # MongoDB unavailable — fall back to per-pod in-memory cooldown (fail-open:
+            # we prefer to alert rather than silently miss a notification).
+            if (now_alert - _last_alert_time) < _EMAIL_ALERT_COOLDOWN:
+                return  # in-memory cooldown still active for this pod
+            _last_alert_time = now_alert
+        elif not claimed:
+            return  # another pod holds an active cooldown, stay silent
+        else:
+            _last_alert_time = now_alert  # keep in-memory in sync with won claim
+
         logger.error(
             f"EMAIL_DELIVERY_FAILURE_ALERT: {count} email send failures in the last hour"
         )
@@ -97,16 +173,95 @@ async def get_email_failures_last_hour() -> int:
         return sum(1 for t in _email_failure_timestamps if t >= cutoff)
 
 
-def _check_rate_limit(recipient: str) -> bool:
-    """Check if sending to this recipient would exceed rate limit."""
+async def _check_rate_limit_redis(recipient: str, window_bucket: int) -> Optional[bool]:
+    """Attempt to enforce the rate limit via Upstash Redis REST API.
+
+    Uses a fixed-window counter keyed by recipient + 1-minute bucket.  Two
+    commands are pipelined atomically:
+      1. INCR  — atomically increments (and creates) the counter.
+      2. EXPIRE key seconds NX — sets the TTL only the first time so the window
+         does not slide on every request (NX option, Redis ≥ 7.0, Upstash OK).
+
+    Returns:
+        True  — the send is within the limit (proceed).
+        False — the limit is exceeded (block the send).
+        None  — Redis is unavailable; caller must fall back to in-memory state.
+    """
+    url = settings.UPSTASH_REDIS_REST_URL
+    token = settings.UPSTASH_REDIS_REST_TOKEN
+    if not url or not token:
+        return None  # Redis not configured — use in-memory fallback
+
+    key = f"email_rate:{recipient}:{window_bucket}"
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as redis_client:
+            resp = await redis_client.post(
+                f"{url}/pipeline",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=[
+                    ["INCR", key],
+                    ["EXPIRE", key, _EMAIL_RATE_WINDOW, "NX"],
+                ],
+            )
+            resp.raise_for_status()
+            results = resp.json()
+            # results[0] is the INCR response: {"result": <new_count>}
+            new_count = results[0]["result"]
+            return new_count <= _EMAIL_RATE_LIMIT
+    except Exception as exc:
+        logger.debug(f"Redis rate-limit check failed (will use in-memory fallback): {exc}")
+        return None  # Redis unavailable — fall back to in-memory
+
+
+async def _check_rate_limit(recipient: str) -> bool:
+    """Check if sending to this recipient would exceed the rate limit.
+
+    Tries a shared Redis counter first so the limit is enforced across all
+    Cloud Run pods.  Falls back to a per-process in-memory list when Redis is
+    unavailable, preserving the original behaviour.
+    """
     now = _time.time()
-    # Clean old entries for this recipient
+    window_bucket = int(now // _EMAIL_RATE_WINDOW)
+
+    # --- Primary: Redis shared counter ---
+    redis_result = await _check_rate_limit_redis(recipient, window_bucket)
+    if redis_result is not None:
+        return redis_result
+
+    # --- Fallback: per-process in-memory list ---
     _email_send_times[recipient] = [
         t for t in _email_send_times[recipient] if now - t < _EMAIL_RATE_WINDOW
     ]
-    # Prune global dict if it grows too large to prevent unbounded memory usage
+    # Prune global dict if it grows too large to prevent unbounded memory usage.
+    # Instead of clearing everything (which resets all windows and risks a send
+    # flood), evict only recipients whose last send is outside the rate window —
+    # i.e. they are inactive and safe to drop.  If that is not enough to bring
+    # the size under budget, evict the recipients with the oldest most-recent
+    # send time until we are back within budget.  Active/high-volume recipients
+    # are never evicted.
     if len(_email_send_times) > 10000:
-        _email_send_times.clear()
+        cutoff = now - _EMAIL_RATE_WINDOW
+        # Collect recipients whose most-recent send is stale (all sends expired)
+        stale = [
+            addr
+            for addr, times in _email_send_times.items()
+            if not times or max(times) < cutoff
+        ]
+        for addr in stale:
+            del _email_send_times[addr]
+        # If still over budget, evict least-recently-active recipients
+        if len(_email_send_times) > 10000:
+            # Sort by most-recent send time ascending (oldest first)
+            sorted_by_last = sorted(
+                _email_send_times.keys(),
+                key=lambda a: max(_email_send_times[a]) if _email_send_times[a] else 0,
+            )
+            to_remove = sorted_by_last[: len(_email_send_times) - 10000]
+            for addr in to_remove:
+                del _email_send_times[addr]
     if len(_email_send_times[recipient]) >= _EMAIL_RATE_LIMIT:
         return False
     _email_send_times[recipient].append(now)
@@ -145,7 +300,7 @@ async def _send_email(to: str, subject: str, html_body: str) -> bool:
         logger.warning("RESEND_API_KEY not set - email sending disabled")
         return False
 
-    if not _check_rate_limit(to):
+    if not await _check_rate_limit(to):
         logger.warning(f"Rate limit exceeded for {to} - email not sent")
         return False
 

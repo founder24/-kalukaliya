@@ -432,7 +432,7 @@ function App() {
       queryClient.prefetchQuery({
         queryKey: ['library-bundle-slim'],
         queryFn: () => apiClient().get('/content/library-bundle?slim=1').then((r) => r.data),
-        staleTime: 30 * 60 * 1000,
+        staleTime: 5 * 60 * 1000,
       });
     }, { timeout: 2000 });
 
@@ -440,7 +440,7 @@ function App() {
       queryClient.prefetchQuery({
         queryKey: ['library-bundle'],
         queryFn: () => apiClient().get('/content/library-bundle').then((r) => r.data),
-        staleTime: 30 * 60 * 1000,
+        staleTime: 5 * 60 * 1000,
       });
     };
 

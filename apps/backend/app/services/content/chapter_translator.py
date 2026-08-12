@@ -15,18 +15,24 @@ from app.services.ai.sarvam_client import sarvam_client
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
-    "You are a translator for educational content. Translate the following "
-    "English text to Assamese (অসমীয়া). "
-    "Preserve all mathematical formulas, chemical equations, proper nouns, "
-    "and technical terms in English. Maintain the markdown formatting exactly. "
-    "The translation should be natural and academically appropriate for "
-    "college students in Assam. Only output the translation, nothing else."
+    "You are an expert Assamese (অসমীয়া) educational writer for Class 11/12 students in Assam. "
+    "Rewrite the following educational content directly in fluent Assamese. "
+    "Rules:\n"
+    "- Output ONLY the Assamese text. Start immediately — no preamble, no commentary.\n"
+    "- Do NOT write translation annotations like 'English term -> Assamese (Romanized)'.\n"
+    "- Do NOT include romanized pronunciations in parentheses, e.g. (Samatalat Goti).\n"
+    "- Do NOT explain your translation choices or show reasoning like "
+    "'This is a direct translation', 'Putting it together', 'Straightforward'.\n"
+    "- Preserve all mathematical formulas ($...$ LaTeX), chemical equations, and code blocks exactly.\n"
+    "- Technical terms with no standard Assamese equivalent may remain in English.\n"
+    "- Maintain markdown formatting (##, ###, *, -, **bold**) exactly as in the source.\n"
+    "- Write as a natural Assamese teacher explaining concepts — not as a word-for-word translator."
 )
 
 TITLE_SYSTEM_PROMPT = (
     "Translate this English chapter title to Assamese (অসমীয়া). "
-    "Keep any technical terms, unit codes, and acronyms in English. "
-    "Output only the translated title, nothing else."
+    "Keep technical terms, unit codes, and acronyms in English. "
+    "Output ONLY the translated title — no explanation, no romanized pronunciation, nothing else."
 )
 
 CHUNK_WORD_LIMIT = 700
@@ -35,12 +41,63 @@ CHUNK_WORD_LIMIT = 700
 class ChapterTranslator:
     """Translates Chapter documents from English to Assamese via Sarvam AI."""
 
+    def _scrub_translation_artifacts(self, text: str) -> str:
+        """
+        Remove model reasoning / translation-annotation lines that leak into output
+        despite the system prompt telling the model to output only Assamese text.
+
+        Strips:
+          • Glossary lines: "English term -> অসমীয়া (Romanized)."
+          • Reasoning sentences: "This is a direct translation.", "Putting it together:", etc.
+          • Lone English meta-sentences in otherwise Assamese paragraphs.
+        """
+        import re
+        # Full lines that are translation-glossary entries
+        gloss_re = re.compile(
+            r'^"?[A-Za-z][A-Za-z0-9 \-\'\"()]+?"?\s*->\s*.+\([A-Za-z][A-Za-z\- ]+\)[.\s]*$',
+            re.MULTILINE,
+        )
+        # Full lines that are pure English reasoning (no Assamese Unicode)
+        eng_reason_re = re.compile(
+            r'^(?:'
+            r'This (?:is|sounds|seems|looks|gives)[^.\n]*\.|'
+            r'Putting it together[^.\n]*[.:]|'
+            r'Let\'?s (?:try|stick|use)[^.\n]*\.|'
+            r'Straightforward\.|'
+            r'(?:is|sounds) (?:fine|correct|natural|a bit clunky)[^.\n]*\.|'
+            r'Adding ["\'][^"\']+["\'] for [^.\n]*\.|'
+            r'Direct translation[^.\n]*\.'
+            r')\s*$',
+            re.MULTILINE | re.IGNORECASE,
+        )
+        lines = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if gloss_re.match(stripped) or eng_reason_re.match(stripped):
+                continue
+            lines.append(line)
+        text = "\n".join(lines)
+        # Inline reasoning sentences embedded within Assamese paragraphs
+        inline_re = re.compile(
+            r'(?:This (?:is|sounds) [a-z][^.]*\.|'
+            r'Putting it together[^.]*\.|'
+            r'Let\'?s (?:try|stick)[^.]*\.|'
+            r'Straightforward\.|'
+            r'is (?:fine|correct|a direct)[^.]*\.)\s*',
+            re.IGNORECASE,
+        )
+        text = inline_re.sub('', text)
+        # Collapse excess blank lines
+        text = re.sub(r'\n{3,}', '\n\n', text).strip()
+        return text
+
     async def _translate(self, system_prompt: str, text: str, retries: int = 3) -> str:
         if not text or not text.strip():
             return text
         for attempt in range(retries):
             try:
-                return await sarvam_client.generate(system_prompt, text, is_assamese=True)
+                result = await sarvam_client.generate(system_prompt, text, is_assamese=True)
+                return self._scrub_translation_artifacts(result)
             except Exception as e:
                 if attempt == retries - 1:
                     raise

@@ -218,10 +218,18 @@ async def cron_seed_notes(request: Request):
             except Exception:
                 pass
         if not force:
-            filt["$or"] = [
-                {"content_en": {"$exists": False}},
-                {"content_en": None},
-                {"content_en": ""},
+            # Skip chapters that already have notes in EITHER field:
+            # notes_en  — written by the AHSEC ingestion pipeline
+            # content_en — written by the legacy AI seed path
+            # A chapter must have BOTH absent to be re-seeded.
+            _absent = lambda field: [  # noqa: E731
+                {field: {"$exists": False}},
+                {field: None},
+                {field: ""},
+            ]
+            filt["$and"] = [
+                {"$or": _absent("notes_en")},
+                {"$or": _absent("content_en")},
             ]
 
         chapters = await Chapter.find(filt).to_list(length=limit)
@@ -367,12 +375,24 @@ async def cron_seed_assamese(request: Request):
     concurrency: int = max(1, min(int(body.get("concurrency", 2)), 5))
     force: bool      = bool(body.get("force", False))
 
-    filt: dict = {"content_en": {"$exists": True, "$nin": [None, ""]}}
+    # Chapters with English content (notes_en primary, content_en legacy) but missing Assamese.
+    # notes_en/notes_as are the primary pipeline fields; content_en/content_as are legacy.
+    filt: dict = {
+        "$or": [
+            {"notes_en": {"$exists": True, "$nin": [None, ""]}},
+            {"content_en": {"$exists": True, "$nin": [None, ""]}},
+        ]
+    }
     if not force:
-        filt["$or"] = [
-            {"content_as": {"$exists": False}},
-            {"content_as": None},
-            {"content_as": ""},
+        _absent = lambda field: [  # noqa: E731
+            {field: {"$exists": False}},
+            {field: None},
+            {field: ""},
+        ]
+        # Skip only when BOTH notes_as and content_as are already populated.
+        filt["$and"] = [
+            {"$or": _absent("notes_as")},
+            {"$or": _absent("content_as")},
         ]
     chapters = await Chapter.find(filt).to_list(length=limit)
 
@@ -570,8 +590,14 @@ async def _seed_assamese_background(app_state, chapters, concurrency: int, force
                 result = await content_generation_service.generate_assamese_only(
                     chapter_id, force=force
                 )
-                # generate_assamese_only returns the chapter unchanged if skipped
-                if result and result.content_as and result.content_as.strip():
+                # generate_assamese_only returns the chapter unchanged if skipped.
+                # Check notes_as first (primary pipeline field), fall back to content_as
+                # (legacy field) for chapters processed before the notes_as migration.
+                has_as = result and (
+                    (result.notes_as and result.notes_as.strip())
+                    or (result.content_as and result.content_as.strip())
+                )
+                if has_as:
                     app_state.seed_assamese_status["completed"] += 1
                     logger.info(f"Seed-assamese ✓ {title!r}")
                 else:
@@ -606,6 +632,11 @@ async def _seed_assamese_background(app_state, chapters, concurrency: int, force
         f"Seed-assamese job finished: {done}/{total} translated, "
         f"{failed} failed, {skipped} skipped"
     )
+    # NOTE: Do NOT compact the AHSEC progress JSONL here.
+    # This background job uses content_generation_service (MongoDB), not
+    # ahsec_ingest.py, so it never writes to .ahsec_ingest_progress.jsonl.
+    # Compacting from here would destroy 'done' entries that the CLI relies
+    # on for resume (_load_done_keys), forcing unnecessary re-processing.
 
 
 async def _flush_assamese_run_to_mongo(run_id: str, app_state) -> None:
@@ -708,6 +739,11 @@ async def _seed_notes_background(app_state, chapters, concurrency: int, force: b
         f"Seed-notes job finished: {done}/{total} generated, "
         f"{failed} failed, {skipped} skipped"
     )
+    # NOTE: Do NOT compact the AHSEC progress JSONL here.
+    # This background job uses content_generation_service (MongoDB), not
+    # ahsec_ingest.py, so it never writes to .ahsec_ingest_progress.jsonl.
+    # Compacting from here would destroy 'done' entries that the CLI relies
+    # on for resume (_load_done_keys), forcing unnecessary re-processing.
 
 
 # ── Bulk Mirror RAG ────────────────────────────────────────────────────────────
@@ -761,10 +797,15 @@ def _split_notes_into_rag_sections(notes: str) -> list[dict]:
 
 @router.post("/cron/bulk-mirror-rag")
 async def cron_bulk_mirror_rag(request: Request):
-    """Auto-generate rag_sections_en from notes_en for all chapters.
+    """Auto-generate rag_sections_en and rag_sections_as from notes_en/notes_as.
 
-    Splits notes_en by H2/H3 markdown headings into {title, content} sections.
+    Splits notes by H2/H3 markdown headings into {title, content} sections.
     Markdown syntax is stripped so chunks are clean plain text.
+
+    Processes English sections (notes_en → rag_sections_en) AND Assamese
+    sections (notes_as → rag_sections_as) in a single pass.  After this cron
+    runs, POST /cron/bulk-reindex will pick up both section sets and push them
+    to Vectorize so Assamese queries return relevant results.
 
     Auth: Bearer {TRANSLATE_CRON_SECRET}
 
@@ -774,7 +815,11 @@ async def cron_bulk_mirror_rag(request: Request):
         subject_id  (str)    — restrict to one subject
 
     Returns:
-        { "processed": N, "skipped": N, "no_headings": N, "errors": [...] }
+        {
+          "processed_en": N, "processed_as": N,
+          "skipped": N, "no_headings_en": N, "no_headings_as": N,
+          "errors": [...]
+        }
     """
     _verify_cron_token(request)
 
@@ -786,16 +831,30 @@ async def cron_bulk_mirror_rag(request: Request):
     limit      = int(request.query_params.get("limit", "0")) or None
     subject_id = request.query_params.get("subject_id") or None
 
-    # Build filter — chapters that have notes_en but (optionally) no RAG sections yet
-    filt: dict = {
-        "notes_en": {"$exists": True, "$ne": "", "$ne": None, "$type": "string"},
-    }
-    if not force:
-        filt["$or"] = [
-            {"rag_sections_en": {"$exists": False}},
-            {"rag_sections_en": None},
-            {"rag_sections_en": []},
-        ]
+    # Build filter — chapters that have notes_en OR notes_as and need section generation.
+    # When force=false: only include chapters missing at least one of the two section sets.
+    _has_notes_en = {"notes_en": {"$exists": True, "$nin": [None, ""], "$type": "string"}}
+    _has_notes_as = {"notes_as": {"$exists": True, "$nin": [None, ""], "$type": "string"}}
+    _missing_sections_en = {"$or": [
+        {"rag_sections_en": {"$exists": False}},
+        {"rag_sections_en": None},
+        {"rag_sections_en": []},
+    ]}
+    _missing_sections_as = {"$or": [
+        {"rag_sections_as": {"$exists": False}},
+        {"rag_sections_as": None},
+        {"rag_sections_as": []},
+    ]}
+
+    if force:
+        filt: dict = {"$or": [_has_notes_en, _has_notes_as]}
+    else:
+        # Pick up chapters that need at least one section set regenerated.
+        filt = {"$or": [
+            {"$and": [_has_notes_en, _missing_sections_en]},
+            {"$and": [_has_notes_as, _missing_sections_as]},
+        ]}
+
     if subject_id:
         try:
             filt["subject_id"] = PydanticObjectId(subject_id)
@@ -804,42 +863,86 @@ async def cron_bulk_mirror_rag(request: Request):
 
     candidates = await Chapter.find(filt).to_list(length=limit or 9999)
 
-    processed = 0
-    skipped   = 0
-    no_headings = 0
-    no_headings_list: list[dict] = []   # [{chapter_id, title, subject_id}] — enriched below
+    processed_en  = 0
+    processed_as  = 0
+    skipped       = 0
+    no_headings_en = 0
+    no_headings_as = 0
+    no_headings_list: list[dict] = []   # [{chapter_id, title, subject_id, lang}]
     errors: list[str] = []
 
     coll = await get_motor_collection("chapters")
 
     for ch in candidates:
-        notes = (ch.notes_en or "").strip()
-        if not notes or len(notes) < 50:
+        notes_en = (ch.notes_en or "").strip()
+        notes_as = (getattr(ch, "notes_as", None) or "").strip()
+
+        chapter_has_en = bool(notes_en) and len(notes_en) >= 50
+        chapter_has_as = bool(notes_as) and len(notes_as) >= 50
+
+        needs_en = chapter_has_en and (
+            force or not (ch.rag_sections_en)
+        )
+        needs_as = chapter_has_as and (
+            force or not getattr(ch, "rag_sections_as", None)
+        )
+
+        if not chapter_has_en and not chapter_has_as:
             skipped += 1
             continue
 
-        sections = _split_notes_into_rag_sections(notes)
-        if not sections:
-            no_headings += 1
-            no_headings_list.append({
-                "chapter_id": str(ch.id),
-                "title":      getattr(ch, "title", "") or "",
-                "subject_id": str(ch.subject_id) if getattr(ch, "subject_id", None) else "",
-            })
-            logger.info(
-                f"bulk-mirror-rag: no headings in chapter {ch.id} "
-                f"({getattr(ch, 'title', '?')!r}) — skipped"
-            )
+        update_fields: dict = {}
+
+        # ── English ──────────────────────────────────────────────────────────
+        if needs_en:
+            sections_en = _split_notes_into_rag_sections(notes_en)
+            if not sections_en:
+                no_headings_en += 1
+                no_headings_list.append({
+                    "chapter_id": str(ch.id),
+                    "title":      getattr(ch, "title", "") or "",
+                    "subject_id": str(ch.subject_id) if getattr(ch, "subject_id", None) else "",
+                    "lang": "en",
+                })
+                logger.info(
+                    f"bulk-mirror-rag: no EN headings in chapter {ch.id} "
+                    f"({getattr(ch, 'title', '?')!r}) — skipped EN"
+                )
+            else:
+                update_fields["rag_sections_en"] = sections_en
+                processed_en += 1
+
+        # ── Assamese ─────────────────────────────────────────────────────────
+        if needs_as:
+            sections_as = _split_notes_into_rag_sections(notes_as)
+            if not sections_as:
+                no_headings_as += 1
+                no_headings_list.append({
+                    "chapter_id": str(ch.id),
+                    "title":      getattr(ch, "title", "") or "",
+                    "subject_id": str(ch.subject_id) if getattr(ch, "subject_id", None) else "",
+                    "lang": "as",
+                })
+                logger.info(
+                    f"bulk-mirror-rag: no AS headings in chapter {ch.id} "
+                    f"({getattr(ch, 'title', '?')!r}) — skipped AS"
+                )
+            else:
+                update_fields["rag_sections_as"] = sections_as
+                processed_as += 1
+
+        if not update_fields:
+            # Nothing to write for this chapter (no headings in either lang)
             continue
 
         try:
             await coll.update_one(
                 {"_id": ch.id},
-                {"$set": {"rag_sections_en": sections}},
+                {"$set": update_fields},
             )
-            processed += 1
             logger.info(
-                f"bulk-mirror-rag: wrote {len(sections)} sections "
+                f"bulk-mirror-rag: wrote EN={len(update_fields.get('rag_sections_en', []))} "
+                f"AS={len(update_fields.get('rag_sections_as', []))} sections "
                 f"→ chapter {ch.id} ({getattr(ch, 'title', '?')!r})"
             )
         except Exception as exc:
@@ -868,13 +971,16 @@ async def cron_bulk_mirror_rag(request: Request):
                 row.setdefault("subject_name", "")
 
     logger.info(
-        f"bulk-mirror-rag done: {processed} processed, "
-        f"{skipped} skipped, {no_headings} no-headings, {len(errors)} errors"
+        f"bulk-mirror-rag done: EN={processed_en} AS={processed_as} processed, "
+        f"{skipped} skipped, no-headings EN={no_headings_en} AS={no_headings_as}, "
+        f"{len(errors)} errors"
     )
     return {
-        "processed":        processed,
+        "processed_en":     processed_en,
+        "processed_as":     processed_as,
         "skipped":          skipped,
-        "no_headings":      no_headings,
+        "no_headings_en":   no_headings_en,
+        "no_headings_as":   no_headings_as,
         "no_headings_list": no_headings_list,
         "errors":           errors,
     }

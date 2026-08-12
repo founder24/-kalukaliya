@@ -1,33 +1,44 @@
 ---
 name: Sarvam enable_thinking mode strategy
-description: How enable_thinking affects where the final answer lands; extraction strategy for non-streaming calls
+description: When to use enable_thinking=True vs False in Sarvam API calls, and the planning-leak bug that resulted from using True in non-streaming mode.
 ---
 
 ## Rule
-- **Non-streaming generate() call**: always use `enable_thinking=False`.
-  - `content` field: **inconsistently populated** — sometimes holds the clean final answer, sometimes is null even on 200 OK.
-  - `reasoning_content` field: **always populated** — contains the full internal reasoning + embedded Assamese drafts.
-  - Correct approach: read `content` first; if empty, extract from `reasoning_content`.
 
-- **Streaming generate() call** (English responses): use `enable_thinking=True` — model's internal reasoning goes to `reasoning_content` (hidden), clean final answer comes in `content` field (streamed directly).
-
-## Extraction from reasoning_content (translation tasks)
-`_extract_assamese_translation(rc)` runs THREE strategies in parallel and returns the LONGEST result by word count:
-- **Strategy C** (primary): line-by-line — collects all Assamese-script lines, deduplicates by first-40-char key keeping last occurrence. Most complete for multi-paragraph content.
-- **Strategy A** (secondary): last double-quoted string > 30 chars that is >50% Assamese — captures the model's final assembled output in the "Final Output" section.
-- **Strategy B** (tertiary): last paragraph > 60% Assamese — useful when model outputs without quoting.
-- Winner = `max(candidates, key=lambda s: len(s.split()))`.
+**Non-streaming `generate()` calls: always `enable_thinking=False`.**
+**Streaming `chat_service` calls: `enable_thinking=True` for English, `False` for Assamese.**
 
 ## Why
-Taking the longest candidate is critical: Strategy A can return a short concluding sentence (12 words) while the full multi-paragraph translation is in Strategy C (1900+ words). Without this, some chapters are severely truncated.
 
-## How to apply
-- In `_do_generate()` closure: `content = (msg.get("content") or "").strip()`. If empty: use `_extract_assamese_translation(rc)` for `is_assamese=True`, `_extract_english_answer(rc)` otherwise.
-- Follow with `_strip_think_block(result)` — removes `<think>` tags if model included them in content field.
-- `max_tokens`: 2048 for Assamese (sarvam-30b), 1200 for English.
+`enable_thinking=True` in non-streaming mode does NOT reliably separate the model's chain-of-thought from the `content` field. Sarvam-30b inconsistently places its planning preamble ("Topic Selection:", "Drafting Content:", "Word Count Check:", "Constraints Analysis:") directly into `content`, polluting stored notes.
 
-## Triggering retranslation from shell
-The backend admin API is the reliable path (not standalone scripts — they die in Replit's ShellExec env):
-1. Generate admin JWT: `jwt.encode({"sub": "...", "type": "admin", "role": "admin", "iat": ..., "exp": ...}, settings.ADMIN_JWT_SECRET, algorithm="HS256")`
-2. `curl -X POST http://localhost:8000/api/v1/admin/content/seed-assamese -H "Authorization: Bearer $TOKEN" -d '{"force": true, "concurrency": 3}'`
-3. StatReload will interrupt the job if you edit backend code files mid-run. Avoid edits while seeding.
+With `enable_thinking=False` in non-streaming:
+- `content` field: sometimes holds the clean final answer, sometimes null/empty
+- `reasoning_content`: always populated with full reasoning + embedded final answer
+- Fallback: `_extract_english_answer(reasoning_content)` reliably extracts the answer
+
+The streaming path uses `enable_thinking=True` for English correctly because the streaming handler buffers `reasoning_content` separately and only yields `content` chunks to the client.
+
+## Planning preamble detection (for cleanup scripts)
+
+Real-world patterns that appeared in `notes_en` due to this bug:
+```
+*   **Topic Selection:** ...          # bullet + bold
+*   **Initial Plan:** ...             # bullet + bold  
+1.  **Deconstruct the Request:** ...  # numbered + bold
+## Constraints Analysis:              # ## planning heading
+## Drafting the Notes ...:            # ## planning heading
+## Topic Planning:                    # ## planning heading
+## Key Themes and Elements...:        # ## planning heading
+## Plan:                              # ## planning heading
+## Structuring the Notes              # ## planning heading
+```
+
+Cleanup script: `apps/backend/scripts/clean_polluted_notes.py`
+
+## `_clean_notes_output` fix (ahsec_ingest.py)
+
+Step 1 now ONLY anchors on `##\s` headings to find the start of real content.
+The old code also matched `**Topic N:` bold lines — which appear in planning mental-outline sections — causing it to anchor too early and leave the rest of the planning intact.
+
+**How to apply:** Any time you add or modify a non-streaming Sarvam call, ensure `enable_thinking=False`. The streaming path in `chat_service.py` retains `enable_thinking=True` for English — do not change that.

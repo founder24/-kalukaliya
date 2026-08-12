@@ -6,10 +6,12 @@ Verifies:
 - EMAIL_DELIVERY_FAILURE_ALERT is logged once the threshold (5) is crossed
 - Old timestamps (>1 hour) are excluded from the count
 - Both the in-memory fallback path (MongoDB unavailable) and the MongoDB path work
+- The alert cooldown is shared across pods via MongoDB (email_alert_state collection)
 """
 
 import time
 import pytest
+from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -26,16 +28,41 @@ def _make_mongo_unavailable():
     )
 
 
-def _make_mongo_with_count(count: int):
+def _make_alert_update_result(claimed: bool):
+    """Return a mock UpdateResult that represents winning or losing the atomic claim."""
+    r = MagicMock()
+    if claimed:
+        r.matched_count = 1   # existing doc matched and updated → won
+        r.upserted_id = None
+    else:
+        r.matched_count = 0   # filter didn't match and no upsert → lost
+        r.upserted_id = None
+    return r
+
+
+def _make_mongo_with_count(count: int, alert_claimed: bool = True):
     """
-    Patch get_mongo_client so count_documents returns *count* and
-    insert_one succeeds silently.
+    Patch get_mongo_client so:
+    - email_failure_events.count_documents returns *count* and insert_one succeeds
+    - email_alert_state.update_one returns a "won" result when alert_claimed=True,
+      or a "lost" result (matched_count=0, upserted_id=None) when alert_claimed=False,
+      simulating the atomic conditional-upsert claim.
     """
-    mock_coll = MagicMock()
-    mock_coll.count_documents = AsyncMock(return_value=count)
-    mock_coll.insert_one = AsyncMock()
+    # email_failure_events collection
+    mock_failure_coll = MagicMock()
+    mock_failure_coll.count_documents = AsyncMock(return_value=count)
+    mock_failure_coll.insert_one = AsyncMock()
+
+    # email_alert_state collection — atomic upsert claim
+    mock_alert_coll = MagicMock()
+    mock_alert_coll.update_one = AsyncMock(
+        return_value=_make_alert_update_result(alert_claimed)
+    )
+
     mock_db = MagicMock()
-    mock_db.email_failure_events = mock_coll
+    mock_db.email_failure_events = mock_failure_coll
+    mock_db.email_alert_state = mock_alert_coll
+
     mock_client = MagicMock()
     mock_client.__getitem__ = MagicMock(return_value=mock_db)
     return patch(
@@ -323,19 +350,17 @@ async def test_alert_fires_exactly_once_for_many_failures_above_threshold(caplog
 @pytest.mark.anyio
 async def test_alert_fires_again_after_cooldown_expires(caplog):
     """
-    After the cooldown window passes, a new alert must be emitted the next time
-    the threshold is crossed.
+    When the MongoDB atomic claim succeeds (cooldown expired), a new alert must
+    be emitted the next time the threshold is crossed.
     """
     import logging
     import app.services.comms.resend_client as rc
 
     threshold = rc._EMAIL_ALERT_THRESHOLD
 
-    # Simulate that an alert was already emitted just over one cooldown ago
-    rc._last_alert_time = time.time() - rc._EMAIL_ALERT_COOLDOWN - 1
-
+    # alert_claimed=True → the conditional upsert matched (old ts replaced) → fires
     with (
-        _make_mongo_with_count(threshold),
+        _make_mongo_with_count(threshold, alert_claimed=True),
         caplog.at_level(logging.ERROR, logger="app.services.comms.resend_client"),
     ):
         await rc._record_email_failure()
@@ -345,7 +370,7 @@ async def test_alert_fires_again_after_cooldown_expires(caplog):
         if "EMAIL_DELIVERY_FAILURE_ALERT" in r.message and r.levelno == logging.ERROR
     ]
     assert len(alert_logs) == 1, (
-        "Expected exactly 1 alert after cooldown expired, "
+        "Expected exactly 1 alert when MongoDB claim is won, "
         f"got {len(alert_logs)}"
     )
 
@@ -353,19 +378,18 @@ async def test_alert_fires_again_after_cooldown_expires(caplog):
 @pytest.mark.anyio
 async def test_alert_suppressed_within_cooldown_window(caplog):
     """
-    When an alert was already emitted recently (within the cooldown window),
-    subsequent failures above the threshold must NOT emit another alert.
+    When the MongoDB atomic claim fails (another pod holds an active cooldown),
+    the current pod must NOT emit another alert.
     """
     import logging
     import app.services.comms.resend_client as rc
 
     threshold = rc._EMAIL_ALERT_THRESHOLD
 
-    # Simulate that an alert fired just 60 seconds ago (well within the 1-hour cooldown)
-    rc._last_alert_time = time.time() - 60
-
+    # alert_claimed=False → the conditional upsert filter didn't match (fresh ts in DB)
+    # → another pod already fired within this window → suppress
     with (
-        _make_mongo_with_count(threshold + 3),
+        _make_mongo_with_count(threshold + 3, alert_claimed=False),
         caplog.at_level(logging.ERROR, logger="app.services.comms.resend_client"),
     ):
         await rc._record_email_failure()
@@ -375,5 +399,260 @@ async def test_alert_suppressed_within_cooldown_window(caplog):
         if "EMAIL_DELIVERY_FAILURE_ALERT" in r.message and r.levelno == logging.ERROR
     ]
     assert len(alert_logs) == 0, (
-        f"Alert must be suppressed within the cooldown window, got {len(alert_logs)}"
+        f"Alert must be suppressed when MongoDB claim is lost, got {len(alert_logs)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests: shared (cross-pod) cooldown via MongoDB email_alert_state atomic claim
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_alert_suppressed_when_mongo_shows_recent_alert(caplog):
+    """
+    When the MongoDB conditional upsert returns 'lost' (another pod recently
+    updated the cooldown timestamp), the current pod must NOT fire even if its
+    own in-memory _last_alert_time is 0.
+    """
+    import logging
+    import app.services.comms.resend_client as rc
+
+    threshold = rc._EMAIL_ALERT_THRESHOLD
+    # In-memory says no prior alert (default 0.0 from fixture)
+    assert rc._last_alert_time == 0.0
+
+    # alert_claimed=False → the atomic upsert filter didn't match (DB has a fresh ts)
+    with (
+        _make_mongo_with_count(threshold + 2, alert_claimed=False),
+        caplog.at_level(logging.ERROR, logger="app.services.comms.resend_client"),
+    ):
+        await rc._record_email_failure()
+
+    alert_logs = [
+        r for r in caplog.records
+        if "EMAIL_DELIVERY_FAILURE_ALERT" in r.message and r.levelno == logging.ERROR
+    ]
+    assert len(alert_logs) == 0, (
+        "Alert must be suppressed when MongoDB claim is lost (another pod owns it); "
+        f"got {len(alert_logs)} alert(s)"
+    )
+
+
+@pytest.mark.anyio
+async def test_alert_fires_when_mongo_shows_expired_alert(caplog):
+    """
+    When the MongoDB conditional upsert wins (stored timestamp is past the cutoff
+    or absent), the current pod should fire a new alert.
+    """
+    import logging
+    import app.services.comms.resend_client as rc
+
+    threshold = rc._EMAIL_ALERT_THRESHOLD
+
+    # alert_claimed=True → the atomic upsert matched (old ts replaced) → fires
+    with (
+        _make_mongo_with_count(threshold, alert_claimed=True),
+        caplog.at_level(logging.ERROR, logger="app.services.comms.resend_client"),
+    ):
+        await rc._record_email_failure()
+
+    alert_logs = [
+        r for r in caplog.records
+        if "EMAIL_DELIVERY_FAILURE_ALERT" in r.message and r.levelno == logging.ERROR
+    ]
+    assert len(alert_logs) == 1, (
+        f"Expected 1 alert when MongoDB claim is won (expired ts), got {len(alert_logs)}"
+    )
+
+
+@pytest.mark.anyio
+async def test_alert_fires_when_mongo_alert_state_write_fails(caplog):
+    """
+    Fail-open: when the MongoDB atomic upsert raises a generic exception (real
+    outage, not a lost-claim DuplicateKeyError), the alert must still be emitted
+    using the in-memory cooldown so a DB outage doesn't silently suppress alerts.
+    """
+    import logging
+    import app.services.comms.resend_client as rc
+
+    threshold = rc._EMAIL_ALERT_THRESHOLD
+
+    # email_failure_events works fine; email_alert_state.update_one raises
+    mock_failure_coll = MagicMock()
+    mock_failure_coll.count_documents = AsyncMock(return_value=threshold)
+    mock_failure_coll.insert_one = AsyncMock()
+
+    mock_alert_coll = MagicMock()
+    mock_alert_coll.update_one = AsyncMock(side_effect=Exception("network timeout"))
+
+    mock_db = MagicMock()
+    mock_db.email_failure_events = mock_failure_coll
+    mock_db.email_alert_state = mock_alert_coll
+
+    mock_client = MagicMock()
+    mock_client.__getitem__ = MagicMock(return_value=mock_db)
+
+    # _last_alert_time is 0.0 (fixture reset) → in-memory cooldown is expired → fires
+    with (
+        patch("app.db.mongo.get_mongo_client", return_value=mock_client),
+        caplog.at_level(logging.ERROR, logger="app.services.comms.resend_client"),
+    ):
+        await rc._record_email_failure()
+
+    alert_logs = [
+        r for r in caplog.records
+        if "EMAIL_DELIVERY_FAILURE_ALERT" in r.message and r.levelno == logging.ERROR
+    ]
+    assert len(alert_logs) == 1, (
+        f"Alert must fire when email_alert_state update_one raises (fail-open), got {len(alert_logs)}"
+    )
+
+
+@pytest.mark.anyio
+async def test_exactly_one_pod_fires_alert_when_two_claim_concurrently(caplog):
+    """
+    Simulate two pods calling _record_email_failure when the threshold is met.
+    Pod A wins the atomic MongoDB claim; Pod B's filter doesn't match (lost).
+    Exactly one EMAIL_DELIVERY_FAILURE_ALERT must be emitted across both calls.
+    """
+    import logging
+    import app.services.comms.resend_client as rc
+
+    threshold = rc._EMAIL_ALERT_THRESHOLD
+
+    # Pod A wins: upsert creates/updates the doc → upserted_id is truthy
+    win_result = MagicMock()
+    win_result.matched_count = 0
+    win_result.upserted_id = "oid-pod-a"  # truthy → won
+
+    # Pod B loses: filter didn't match (DB now has a fresh ts from Pod A)
+    lose_result = MagicMock()
+    lose_result.matched_count = 0
+    lose_result.upserted_id = None  # → lost
+
+    alert_call_index = 0
+
+    async def alternating_update_one(*args, **kwargs):
+        nonlocal alert_call_index
+        alert_call_index += 1
+        return win_result if alert_call_index == 1 else lose_result
+
+    mock_failure_coll = MagicMock()
+    mock_failure_coll.count_documents = AsyncMock(return_value=threshold)
+    mock_failure_coll.insert_one = AsyncMock()
+
+    mock_alert_coll = MagicMock()
+    mock_alert_coll.update_one = alternating_update_one
+
+    mock_db = MagicMock()
+    mock_db.email_failure_events = mock_failure_coll
+    mock_db.email_alert_state = mock_alert_coll
+
+    mock_client = MagicMock()
+    mock_client.__getitem__ = MagicMock(return_value=mock_db)
+
+    with (
+        patch("app.db.mongo.get_mongo_client", return_value=mock_client),
+        caplog.at_level(logging.ERROR, logger="app.services.comms.resend_client"),
+    ):
+        await rc._record_email_failure()  # Pod A — wins the claim
+        await rc._record_email_failure()  # Pod B — loses the claim
+
+    alert_logs = [
+        r for r in caplog.records
+        if "EMAIL_DELIVERY_FAILURE_ALERT" in r.message and r.levelno == logging.ERROR
+    ]
+    assert len(alert_logs) == 1, (
+        f"Expected exactly 1 alert when two pods race for the claim; got {len(alert_logs)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests: cooldown resets correctly after 1-hour window (long outage visibility)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_alert_refires_after_cooldown_expires_inmemory(caplog):
+    """
+    After the 1-hour cooldown window elapses, a new wave of failures above the
+    threshold must re-fire the alert so on-call staff are reminded the outage
+    persists.
+
+    Approach: set _last_alert_time to more than _EMAIL_ALERT_COOLDOWN seconds ago
+    (simulating one hour passing), pre-fill the in-memory failure list up to
+    threshold - 1, then call _record_email_failure() once more to cross the
+    threshold with MongoDB unavailable.  The in-memory cooldown path must detect
+    the expired window and emit a second EMAIL_DELIVERY_FAILURE_ALERT.
+    """
+    import logging
+    import app.services.comms.resend_client as rc
+
+    threshold = rc._EMAIL_ALERT_THRESHOLD
+    now = time.time()
+
+    # Simulate: the previous alert fired more than one cooldown window ago
+    rc._last_alert_time = now - rc._EMAIL_ALERT_COOLDOWN - 10
+
+    # Pre-fill in-memory store with (threshold - 1) recent failures so the next
+    # _record_email_failure call crosses the threshold
+    for _ in range(threshold - 1):
+        rc._email_failure_timestamps.append(now - 30)
+
+    with (
+        _make_mongo_unavailable(),
+        caplog.at_level(logging.ERROR, logger="app.services.comms.resend_client"),
+    ):
+        # This call appends the threshold-th failure and should re-fire the alert
+        await rc._record_email_failure()
+
+    alert_logs = [
+        r for r in caplog.records
+        if "EMAIL_DELIVERY_FAILURE_ALERT" in r.message and r.levelno == logging.ERROR
+    ]
+    assert len(alert_logs) == 1, (
+        "Expected alert to re-fire once the 1-hour cooldown expires; "
+        f"got {len(alert_logs)} alert(s)"
+    )
+
+
+@pytest.mark.anyio
+async def test_alert_does_not_refire_when_count_below_threshold_after_ttl_reset(caplog):
+    """
+    After the 1-hour MongoDB TTL window, old failure documents expire and
+    count_documents drops below the threshold.  Even though the alert cooldown
+    has also expired, the alert must NOT re-fire — it should only re-trigger
+    when there are genuinely new failures that push the count back above the
+    threshold.
+
+    Approach: expire the cooldown via _last_alert_time, then mock MongoDB to
+    return a count of threshold - 1 (old docs gone, not enough new ones yet).
+    No EMAIL_DELIVERY_FAILURE_ALERT should be emitted.
+    """
+    import logging
+    import app.services.comms.resend_client as rc
+
+    threshold = rc._EMAIL_ALERT_THRESHOLD
+    now = time.time()
+
+    # Cooldown has expired — more than 1 hour since the last alert
+    rc._last_alert_time = now - rc._EMAIL_ALERT_COOLDOWN - 10
+
+    # MongoDB shows count just below threshold: old docs expired, no new failures yet
+    below_threshold_count = threshold - 1
+
+    with (
+        _make_mongo_with_count(below_threshold_count),
+        caplog.at_level(logging.ERROR, logger="app.services.comms.resend_client"),
+    ):
+        await rc._record_email_failure()
+
+    alert_logs = [
+        r for r in caplog.records
+        if "EMAIL_DELIVERY_FAILURE_ALERT" in r.message and r.levelno == logging.ERROR
+    ]
+    assert len(alert_logs) == 0, (
+        "Alert must NOT re-fire when MongoDB count is below threshold after "
+        f"TTL reset; got {len(alert_logs)} alert(s)"
     )
