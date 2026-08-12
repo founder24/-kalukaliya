@@ -1,30 +1,33 @@
 """
 Sarvam AI client — primary LLM for all student chat (English and Assamese).
 
-Billing-exhaustion → Gemini 2.5 Flash fallback chain
+Billing-exhaustion and the Gemini 2.5 Flash fallback
 =====================================================
-When Sarvam returns HTTP 402 (credits exhausted):
+``chat_service.call_llm()`` and ``chat_service.stream_llm()`` (chat_service.py)
+catch **any** exception from Sarvam and activate Gemini as the fallback — the
+specific exception type does not determine whether Gemini kicks in.
 
-  1. ``_set_billing_exhausted()`` is called — marks a 30-minute block
-     (``BILLING_RECHECK_INTERVAL``).
-  2. ``SarvamBillingExhaustedError`` is raised immediately (NOT counted as a
-     circuit-breaker failure — billing outages are not service reliability events).
-  3. All subsequent ``generate()`` / ``stream_generate()`` calls skip the HTTP
-     round-trip entirely and re-raise ``SarvamBillingExhaustedError`` for the
-     duration of the block.
-  4. **Callers** — ``chat_service.call_llm()`` and ``chat_service.stream_llm()``
-     in ``app/services/chat_service.py`` — catch this error and activate the
-     Gemini 2.5 Flash fallback (``app/services/ai/gemini_fallback.py``).
-  5. After ``BILLING_RECHECK_INTERVAL`` (30 min) expires, the next request
-     retries Sarvam.  A successful response calls ``_clear_billing_exhausted()``,
-     restoring normal routing.
+``SarvamBillingExhaustedError`` is still the correct type to raise for HTTP 402
+for two reasons that are separate from fallback routing:
 
-To change the fallback trigger (e.g. new HTTP status code, error body pattern):
+  1. **Circuit-breaker isolation** — ``sarvam_circuit_breaker.call()`` skips
+     ``_on_failure()`` for ``SarvamBillingExhaustedError`` (see circuit_breaker.py).
+     A 402 is a billing event, not a reliability failure; recording it as one
+     would drive the circuit open and suppress retry-after-recharge behaviour.
+
+  2. **30-minute short-circuit** — after the first 402, ``_set_billing_exhausted()``
+     sets ``_billing_exhausted_until``.  All subsequent ``generate()`` /
+     ``stream_generate()`` calls skip the Sarvam HTTP round-trip entirely until
+     the interval expires, then retry once.  A successful response calls
+     ``_clear_billing_exhausted()``, restoring normal routing.
+
+To change the 402-detection trigger (e.g. Sarvam switches to a different status
+code or adds a recognisable error body):
   • Update the ``response.status_code == 402`` branch in ``generate()``
-  • Update the matching ``e.response.status_code == 402`` branch in
-    ``stream_generate()``'s except block
+  • Update the matching ``e.response.status_code == 402`` branch in the
+    ``except`` block of ``stream_generate()``
 Both branches must call ``_set_billing_exhausted()`` and raise
-``SarvamBillingExhaustedError`` — anything else breaks the fallback chain.
+``SarvamBillingExhaustedError`` to preserve circuit-breaker isolation.
 """
 
 import httpx
@@ -469,14 +472,14 @@ class SarvamAIClient:
                 },
             )
             # ── 402 = Sarvam billing credits exhausted ──────────────────────────
-            # PRIMARY TRIGGER for the Gemini fallback (non-streaming path).
-            # Chain: _set_billing_exhausted() → SarvamBillingExhaustedError raised
-            # → caught by chat_service.call_llm() → generate_gemini() activates.
-            # Raised BEFORE raise_for_status() so the circuit breaker never counts
-            # billing exhaustion as a reliability failure.
-            # If the trigger condition changes (e.g. Sarvam switches to a different
-            # error code or body), update this branch AND the matching branch in
-            # stream_generate()'s except block to keep both paths in sync.
+            # Raised BEFORE raise_for_status() so the circuit breaker never
+            # records this as a reliability failure (billing ≠ service outage).
+            # Sets the 30-minute short-circuit so subsequent calls skip the
+            # HTTP round-trip entirely.  chat_service catches *any* Sarvam error
+            # and routes to Gemini, but this specific type preserves the
+            # circuit-breaker isolation described in the module docstring.
+            # If the trigger condition changes, also update the matching branch
+            # in stream_generate()'s except block to keep both paths in sync.
             if response.status_code == 402:
                 self._set_billing_exhausted()
                 raise SarvamBillingExhaustedError("Sarvam billing exhausted (402)")
@@ -509,11 +512,11 @@ class SarvamAIClient:
                 return _strip_think_block(result)
             except SarvamBillingExhaustedError:
                 # Propagate as-is — do NOT wrap in RuntimeError.
-                # chat_service.call_llm() (chat_service.py) catches this specific
-                # type and activates generate_gemini() as the Gemini fallback.
-                # A generic RuntimeError would be treated as a hard failure and
-                # would NOT trigger the fallback.  The circuit breaker's call()
-                # also skips _on_failure() for this type (see circuit_breaker.py).
+                # chat_service catches any Sarvam error for Gemini routing, but
+                # the circuit breaker's call() skips _on_failure() only for this
+                # specific type (see circuit_breaker.py).  Wrapping it in a plain
+                # RuntimeError would lose that protection and count billing
+                # exhaustion as a service failure, risking a spurious circuit-open.
                 raise
             except CircuitBreakerError as e:
                 raise RuntimeError(f"Sarvam AI unavailable: {e}")
@@ -838,14 +841,13 @@ class SarvamAIClient:
             self._clear_billing_exhausted()
             sarvam_circuit_breaker._on_success()
         except Exception as e:
-            # ── 402 = Sarvam billing credits exhausted ──────────────────────────
-            # PRIMARY TRIGGER for the Gemini fallback (streaming path).
+            # ── 402 = Sarvam billing credits exhausted (streaming path) ─────────
             # Mirror of the generate() non-streaming 402 branch — must be kept
             # in sync whenever the trigger condition changes.
-            # Chain: _set_billing_exhausted() → SarvamBillingExhaustedError raised
-            # → re-raised by stream_generate_with_retry() → caught by
-            # chat_service.stream_llm() → stream_gemini() activates.
-            # Not recorded as a circuit-breaker failure (billing ≠ reliability).
+            # Sets the 30-minute short-circuit; raises before circuit-breaker
+            # _on_failure() so billing exhaustion is not recorded as a service
+            # failure.  chat_service.stream_llm() catches any Sarvam error for
+            # Gemini routing; this specific type preserves CB isolation.
             if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 402:
                 self._set_billing_exhausted()
                 raise SarvamBillingExhaustedError("Sarvam billing exhausted (402)")
@@ -930,9 +932,9 @@ async def generate_with_sarvam(
 
     Raises:
         SarvamBillingExhaustedError — when Sarvam billing is exhausted (402).
-            Callers should catch this specific type and activate the Gemini
-            fallback (``gemini_fallback.generate_gemini``).  Do not catch it
-            as a plain RuntimeError or the fallback chain breaks.
+            ``chat_service`` catches any Sarvam exception for Gemini routing;
+            this type is kept distinct only to preserve circuit-breaker
+            isolation (billing exhaustion is not a service reliability event).
         RuntimeError — for other Sarvam failures (circuit open, HTTP 5xx, etc.).
     """
     return await sarvam_client.generate(
