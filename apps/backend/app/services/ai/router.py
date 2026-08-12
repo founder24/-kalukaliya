@@ -1,8 +1,13 @@
 """
-Chat routing uses Sarvam AI for both English and Assamese.
+Chat routing: Sarvam-105b is the primary model for both English and Assamese.
+The system prompt instructs the model which language to respond in.
 
-Vertex AI / Gemini has been removed. Sarvam-30b and Sarvam-105b handle both
-languages well; the system prompt instructs the model which language to respond in.
+Fallback: when Sarvam AI billing is exhausted (402) or the service is
+unavailable, traffic automatically falls back to Gemini 2.5 Flash via
+``app.services.ai.gemini_fallback`` (generate_gemini / stream_gemini).
+Gemini credentials are resolved from GEMINI_API_KEY (Google AI Studio) or
+GOOGLE_SA_KEY / GOOGLE_APPLICATION_CREDENTIALS_JSON (Vertex AI).
+
 Cloudflare Workers AI is NOT used for chat — it is only used for OCR endpoints
 in chat.py.
 """

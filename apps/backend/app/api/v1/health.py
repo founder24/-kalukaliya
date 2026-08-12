@@ -407,7 +407,16 @@ async def chat_pipeline_health(request: Request):
             _available as gemini_available,
         )
 
-        if gemini_available():
+        if not gemini_available():
+            # Gemini not configured — skip the Assamese quality probe.
+            # This is not a failure: the probe only makes sense when Gemini is
+            # the active fallback.  Returning "skipped" keeps the endpoint healthy
+            # so CI passes in environments without GEMINI_API_KEY set.
+            result["assamese_probe"] = {
+                "status": "skipped",
+                "reason": "Gemini not configured (GEMINI_API_KEY absent)",
+            }
+        else:
             # System prompt in Assamese instructs the model to respond in Assamese.
             # User question: "তুমি কোন?" — "Who are you?"
             _as_sys = (
@@ -415,35 +424,50 @@ async def chat_pipeline_health(request: Request):
             )
             _as_usr = "তুমি কোন?"
             t_as = _time.monotonic()
+            # 25 s timeout: Step 1 can use up to ~20 s; 25 s leaves headroom
+            # within the 35 s total CI curl budget for the whole endpoint.
             as_response = await generate_gemini(
-                _as_sys, _as_usr, timeout=40.0, max_output_tokens=80
+                _as_sys, _as_usr, timeout=25.0, max_output_tokens=80
             )
             as_latency_ms = round((_time.monotonic() - t_as) * 1000, 1)
 
             # Verify response contains Assamese/Bengali script (U+0980–U+09FF).
-            # A clean Gemini response will contain these directly — no extraction
-            # logic is needed, unlike the Sarvam reasoning-model path.
+            # Gemini responds directly in the requested language — no Sarvam-style
+            # extraction logic is needed.  If no Assamese characters appear the
+            # model answered in English, which means Assamese students would receive
+            # the wrong language when Sarvam is down — gate CI on this.
             has_assamese = any("\u0980" <= c <= "\u09ff" for c in (as_response or ""))
-            assamese_result: Dict[str, Any] = {
+            result["assamese_probe"] = {
                 "has_assamese_script": has_assamese,
                 "latency_ms": as_latency_ms,
                 "response_preview": (as_response or "")[:80],
             }
             if not has_assamese:
-                # Gemini responded but not in Assamese — likely answered in English.
-                # Students would receive English instead of Assamese when Sarvam is down.
-                assamese_result["warning"] = (
-                    "Gemini response contains no Assamese script — "
-                    "verify the system-prompt language instruction"
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        **result,
+                        "status": "unhealthy",
+                        "step": "assamese_probe",
+                        "error": (
+                            "Gemini returned no Assamese script — Assamese students "
+                            "would receive English when Sarvam is unavailable. "
+                            "Verify the system-prompt language instruction."
+                        ),
+                    },
                 )
-            result["assamese_probe"] = assamese_result
-        else:
-            result["assamese_probe"] = {
-                "status": "skipped",
-                "reason": "Gemini not configured (GEMINI_API_KEY absent)",
-            }
     except Exception as e:
-        result["assamese_probe"] = {"status": "error", "error": str(e)[:120]}
+        # Gemini is configured but the probe threw — treat as unhealthy so CI
+        # catches infrastructure regressions (bad credentials, quota, etc.).
+        return JSONResponse(
+            status_code=503,
+            content={
+                **result,
+                "status": "unhealthy",
+                "step": "assamese_probe",
+                "error": str(e)[:120],
+            },
+        )
 
     # ── Step 3: MongoDB vector search reachability ───────────────────────────
     try:
