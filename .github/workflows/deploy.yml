@@ -84,7 +84,6 @@ jobs:
             --region="$REGION" \
             --project="$PROJECT" \
             --port=8000 \
-            --allow-unauthenticated \
             --min-instances=1 \
             --service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com \
             --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,SARVAM_MODEL=sarvam-105b,TRUST_EDGE_AUTH=true \
@@ -153,12 +152,20 @@ jobs:
         run: |
           SERVICE_URL="${{ steps.get-url.outputs.service_url }}"
           echo "Polling ${SERVICE_URL}/api/v1/health ..."
+          # Cloud Run requires an OIDC identity token (org policy blocks allUsers invoker).
+          # gcloud auth print-identity-token uses the SA credentials from the auth step.
+          ID_TOKEN=$(gcloud auth print-identity-token --audiences="${SERVICE_URL}" 2>/dev/null || echo "")
           for i in $(seq 1 36); do
             HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${ID_TOKEN}" \
               "${SERVICE_URL}/api/v1/health" --max-time 8 2>/dev/null || echo "000")
             if [[ "$HTTP" == "200" ]]; then
               echo "✔ Backend healthy after $((i * 5))s (HTTP 200)"
               exit 0
+            fi
+            # Refresh token every 10 attempts (~50s) in case it expired
+            if (( i % 10 == 0 )); then
+              ID_TOKEN=$(gcloud auth print-identity-token --audiences="${SERVICE_URL}" 2>/dev/null || echo "")
             fi
             echo "  Attempt ${i}/36 — HTTP ${HTTP}, retrying in 5s..."
             sleep 5

@@ -62,18 +62,17 @@ export async function proxyRequest(
     headers.set('X-Edge-Signature', signatureHex);
   }
 
-  // Preserve user's JWT before OIDC overwrite so backend can still verify it
-  // Cloud Run IAM requires OIDC in Authorization, but the app needs the user JWT.
-  // Backend reads X-User-JWT as fallback when edge-trust HMAC doesn't match.
+  // Preserve user's JWT before OIDC overwrite so backend can still verify it.
+  // Cloud Run IAM requires an OIDC identity token in Authorization for all
+  // requests. The original caller token (user JWT or cron secret) is saved in
+  // X-User-JWT so the backend can still validate it after the overwrite.
+  // _verify_cron_token() checks both Authorization and X-User-JWT.
   const originalAuth = headers.get('Authorization');
   if (originalAuth && originalAuth.startsWith('Bearer ')) {
     headers.set('X-User-JWT', originalAuth);
   }
 
-  // Inject Google identity token for Cloud Run authentication.
-  // The cron token (TRANSLATE_CRON_SECRET) is already preserved in X-User-JWT above,
-  // so overwriting Authorization with the OIDC token is safe: Cloud Run IAM validates
-  // the OIDC token, and the backend's _verify_cron_token() reads X-User-JWT.
+  // Inject Google identity token for Cloud Run authentication (required for all routes).
   const idToken = await getIdentityToken(env);
   if (idToken) {
     headers.set('Authorization', 'Bearer ' + idToken);
