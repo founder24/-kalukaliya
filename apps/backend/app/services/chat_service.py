@@ -632,18 +632,44 @@ class ChatService:
                 logger.debug(f"mongo_fast_path: chapter {chapter_id!r} not found")
                 return []
 
-            # Prefer rag_text (pure prose, retrieval-optimised) over content_* (may
-            # contain HTML/UI markup that degrades RAG quality).
-            # Cross-lingual fallback: if Assamese rag_text absent, fall back to English.
+            # Content priority (mirrors bulk_seed_rag_en.py _get_chapter_text()):
+            #   1. rag_sections_en/as — staff-curated structured sections (flattened to prose)
+            #   2. rag_text_en/as     — staff-curated plain-text, retrieval-optimised
+            #   3. notes_en/as        — AI-generated structured study notes (AHSEC ingest)
+            #   4. content_en/as      — legacy HTML/Markdown blob
+            # Cross-lingual fallback: if the requested language is absent, fall to English.
+            def _sections_text(sections: list) -> str:
+                """Flatten [{title, content}] sections into a single prose string."""
+                parts: list[str] = []
+                for s in sections or []:
+                    if not isinstance(s, dict):
+                        continue
+                    t = s.get("title", "")
+                    c = s.get("content", "")
+                    if t:
+                        parts.append(f"## {t}")
+                    if c:
+                        parts.append(c)
+                return "\n\n".join(parts)
+
             if detected_lang == "as":
                 content = (
-                    chapter.rag_text_as
+                    (_sections_text(chapter.rag_sections_as) if chapter.rag_sections_as else None)
+                    or chapter.rag_text_as
+                    or chapter.notes_as
                     or chapter.content_as
+                    or (_sections_text(chapter.rag_sections_en) if chapter.rag_sections_en else None)
                     or chapter.rag_text_en
+                    or chapter.notes_en
                     or chapter.content_en
                 )
             else:
-                content = chapter.rag_text_en or chapter.content_en
+                content = (
+                    (_sections_text(chapter.rag_sections_en) if chapter.rag_sections_en else None)
+                    or chapter.rag_text_en
+                    or chapter.notes_en
+                    or chapter.content_en
+                )
 
             if not content:
                 logger.debug(

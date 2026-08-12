@@ -153,11 +153,39 @@ async def _fast_path(
         if not chapter:
             return []
 
-        content = (
-            chapter.content_as
-            if lang == "as" and chapter.content_as
-            else chapter.content_en
-        )
+        # Content priority (mirrors bulk_seed_rag_en.py _get_chapter_text()):
+        #   rag_sections → rag_text → notes → content — for both AS and EN.
+        # Cross-lingual fallback to English when the Assamese field is absent.
+        def _sections_text(sections: list) -> str:
+            parts: list[str] = []
+            for s in sections or []:
+                if not isinstance(s, dict):
+                    continue
+                t, c = s.get("title", ""), s.get("content", "")
+                if t:
+                    parts.append(f"## {t}")
+                if c:
+                    parts.append(c)
+            return "\n\n".join(parts)
+
+        if lang == "as":
+            content = (
+                (_sections_text(chapter.rag_sections_as) if getattr(chapter, "rag_sections_as", None) else None)
+                or getattr(chapter, "rag_text_as", None)
+                or getattr(chapter, "notes_as", None)
+                or getattr(chapter, "content_as", None)
+                or (_sections_text(chapter.rag_sections_en) if getattr(chapter, "rag_sections_en", None) else None)
+                or getattr(chapter, "rag_text_en", None)
+                or getattr(chapter, "notes_en", None)
+                or getattr(chapter, "content_en", None)
+            )
+        else:
+            content = (
+                (_sections_text(chapter.rag_sections_en) if getattr(chapter, "rag_sections_en", None) else None)
+                or getattr(chapter, "rag_text_en", None)
+                or getattr(chapter, "notes_en", None)
+                or getattr(chapter, "content_en", None)
+            )
         if not content:
             return []
 
