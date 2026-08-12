@@ -22,27 +22,31 @@ _MONGO_FLUSH_EVERY = 5
 def _verify_cron_token(request: Request) -> None:
     """Validate Bearer token against TRANSLATE_CRON_SECRET.
 
-    The Cloudflare edge proxy overwrites the Authorization header with a
-    Google OIDC identity token (for Cloud Run auth) and saves the original
-    caller token in X-User-JWT.  We check both headers so cron callers
-    passing a Bearer token via either header are accepted.
+    Checks both X-User-JWT and Authorization headers. When a cron request
+    arrives via the Cloudflare edge Worker, the Worker overwrites the
+    Authorization header with a Google OIDC identity token (for Cloud Run
+    IAM) and preserves the caller's original Bearer token in X-User-JWT.
+    Direct calls (e.g., from the Replit shell or CI runners that bypass
+    Cloudflare) carry the cron token in Authorization as usual.
     """
     from app.config import settings
 
+    # X-User-JWT carries the original Bearer token when the request passes
+    # through the Cloudflare edge Worker (which overwrites Authorization with
+    # a Google OIDC identity token for Cloud Run IAM auth).
+    x_user_jwt = request.headers.get("x-user-jwt", "")
     auth_header = request.headers.get("authorization", "")
-    # Fallback: CF edge proxy preserves original Authorization in X-User-JWT
-    # when it overwrites Authorization with an OIDC identity token.
-    fallback_header = request.headers.get("x-user-jwt", "")
 
     expected = settings.TRANSLATE_CRON_SECRET
 
-    for header in (auth_header, fallback_header):
+    # Try X-User-JWT first (edge-proxied path), then Authorization (direct path)
+    for header in (x_user_jwt, auth_header):
         if header.startswith("Bearer "):
             token = header[7:]
             if expected and token == expected:
                 return  # valid
 
-    if not auth_header.startswith("Bearer ") and not fallback_header.startswith("Bearer "):
+    if not x_user_jwt.startswith("Bearer ") and not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
     raise HTTPException(status_code=403, detail="Invalid cron token")
 
