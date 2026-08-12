@@ -20,17 +20,31 @@ _MONGO_FLUSH_EVERY = 5
 
 
 def _verify_cron_token(request: Request) -> None:
-    """Validate Bearer token against TRANSLATE_CRON_SECRET."""
+    """Validate Bearer token against TRANSLATE_CRON_SECRET.
+
+    The Cloudflare edge proxy overwrites the Authorization header with a
+    Google OIDC identity token (for Cloud Run auth) and saves the original
+    caller token in X-User-JWT.  We check both headers so cron callers
+    passing a Bearer token via either header are accepted.
+    """
     from app.config import settings
 
     auth_header = request.headers.get("authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    # Fallback: CF edge proxy preserves original Authorization in X-User-JWT
+    # when it overwrites Authorization with an OIDC identity token.
+    fallback_header = request.headers.get("x-user-jwt", "")
 
-    token = auth_header[7:]
     expected = settings.TRANSLATE_CRON_SECRET
-    if not expected or token != expected:
-        raise HTTPException(status_code=403, detail="Invalid cron token")
+
+    for header in (auth_header, fallback_header):
+        if header.startswith("Bearer "):
+            token = header[7:]
+            if expected and token == expected:
+                return  # valid
+
+    if not auth_header.startswith("Bearer ") and not fallback_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    raise HTTPException(status_code=403, detail="Invalid cron token")
 
 
 @router.post("/cron/expire-subscriptions")

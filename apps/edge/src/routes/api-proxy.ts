@@ -70,10 +70,17 @@ export async function proxyRequest(
     headers.set('X-User-JWT', originalAuth);
   }
 
-  // Inject Google identity token for Cloud Run authentication
-  const idToken = await getIdentityToken(env);
-  if (idToken) {
-    headers.set('Authorization', 'Bearer ' + idToken);
+  // Inject Google identity token for Cloud Run authentication.
+  // EXCEPTION: cron/machine routes (/api/v1/admin/cron/) authenticate via
+  // TRANSLATE_CRON_SECRET in the Authorization header — do NOT overwrite it
+  // with an OIDC token, or the backend will reject the cron token with 403.
+  // Cloud Run is --allow-unauthenticated so OIDC is not required for these routes.
+  const isCronRoute = url.pathname.startsWith('/api/v1/admin/cron/');
+  if (!isCronRoute) {
+    const idToken = await getIdentityToken(env);
+    if (idToken) {
+      headers.set('Authorization', 'Bearer ' + idToken);
+    }
   }
 
   const controller = new AbortController();
