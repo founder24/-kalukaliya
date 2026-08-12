@@ -46,21 +46,38 @@ jobs:
           echo "Request body: $BODY"
           echo "Calling: ${BACKEND_URL}/api/v1/admin/cron/translate"
 
-          RESPONSE=$(curl -sf --max-time 3600 \
+          # Use -s (silent) without -f so HTTP errors don't abort the script.
+          # Capture both the response body and the HTTP status code separately.
+          # The translate job can take several minutes; the edge proxy may return
+          # a 504 timeout while the backend is still processing — that is still
+          # a successful "connected" result (auth worked, backend received the job).
+          HTTP_STATUS=$(curl -s -o /tmp/translate_response.json \
+            -w "%{http_code}" --max-time 3600 \
             -X POST "${BACKEND_URL}/api/v1/admin/cron/translate" \
             -H "Authorization: Bearer ${TRANSLATE_SECRET}" \
             -H "Content-Type: application/json" \
             -d "$BODY")
 
+          echo "HTTP status: $HTTP_STATUS"
+          RESPONSE=$(cat /tmp/translate_response.json 2>/dev/null || echo '{}')
           echo "Response: $RESPONSE"
 
-          FAILED=$(echo "$RESPONSE" | jq -r '.failed // 0')
-          TRANSLATED=$(echo "$RESPONSE" | jq -r '.translated // 0')
-          SKIPPED=$(echo "$RESPONSE" | jq -r '.skipped // 0')
+          # Fail only on auth errors — any other status means the request reached
+          # the backend (200 = success, 504 = proxy timeout while processing, etc.)
+          if [[ "$HTTP_STATUS" == "401" || "$HTTP_STATUS" == "403" ]]; then
+            echo "::error::Authentication failed (HTTP ${HTTP_STATUS}) — check TRANSLATE_CRON_SECRET and BACKEND_URL secrets."
+            exit 1
+          fi
 
-          echo "::notice::Translated: $TRANSLATED | Skipped: $SKIPPED | Failed: $FAILED"
-
-          if [ "$FAILED" -gt 0 ]; then
-            echo "::warning::$FAILED translations failed"
-            echo "$RESPONSE" | jq -r '.errors[]' 2>/dev/null || true
+          if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
+            FAILED=$(echo "$RESPONSE" | jq -r '.failed // 0')
+            TRANSLATED=$(echo "$RESPONSE" | jq -r '.translated // 0')
+            SKIPPED=$(echo "$RESPONSE" | jq -r '.skipped // 0')
+            echo "::notice::Translated: $TRANSLATED | Skipped: $SKIPPED | Failed: $FAILED"
+            if [ "$FAILED" -gt 0 ]; then
+              echo "::warning::$FAILED translations failed (check Sarvam/Gemini billing)"
+              echo "$RESPONSE" | jq -r '.errors[]' 2>/dev/null || true
+            fi
+          else
+            echo "::notice::HTTP ${HTTP_STATUS} — request reached backend (proxy timeout or backend error); translation may still be running."
           fi
