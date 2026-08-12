@@ -365,21 +365,36 @@ async def chat_pipeline_health(request: Request):
         provider = "sarvam"
         t0 = _time.monotonic()
 
+        # Per-step time budgets keep the total endpoint latency within the
+        # 35 s CI curl deadline:
+        #   Sarvam attempt  :  6 s  (billing-exhausted short-circuits instantly)
+        #   Gemini fallback :  8 s  (only used if Sarvam fails)
+        #   Assamese probe  : 12 s  (Step 2 below)
+        #   RAG             :  4 s  (Step 3 below)
+        #   Total worst case: 6 + 8 + 12 + 4 = 30 s  (5 s margin)
         try:
-            response_text = await generate_with_sarvam(
-                system_prompt=_sys,
-                user_message=_usr,
-                stream=False,
+            response_text = await asyncio.wait_for(
+                generate_with_sarvam(
+                    system_prompt=_sys,
+                    user_message=_usr,
+                    stream=False,
+                ),
+                timeout=6.0,
             )
-        except (SarvamBillingExhaustedError, CircuitBreakerError, Exception) as sarvam_err:
-            # Sarvam unavailable (billing exhausted, circuit open, or API error).
+        except (SarvamBillingExhaustedError, CircuitBreakerError, asyncio.TimeoutError, Exception) as sarvam_err:
+            # Sarvam unavailable (billing exhausted, circuit open, timeout, or API error).
             # Fall through to Gemini exactly as real chat does.
             if not gemini_available():
                 raise RuntimeError(
                     f"Sarvam failed ({str(sarvam_err)[:80]}) and Gemini not configured"
                 )
             logger.info(f"chat_pipeline_probe: Sarvam failed ({sarvam_err!r:.80}), using Gemini fallback")
-            response_text = await generate_gemini(_sys, _usr, max_output_tokens=20)
+            # asyncio.wait_for provides the hard deadline regardless of any
+            # internal timeout inside generate_gemini (ensures CI budget holds).
+            response_text = await asyncio.wait_for(
+                generate_gemini(_sys, _usr, timeout=8.0, max_output_tokens=20),
+                timeout=8.0,
+            )
             provider = "gemini-2.5-flash"
 
         latency_ms = round((_time.monotonic() - t0) * 1000, 1)
@@ -426,8 +441,9 @@ async def chat_pipeline_health(request: Request):
             t_as = _time.monotonic()
             # 25 s timeout: Step 1 can use up to ~20 s; 25 s leaves headroom
             # within the 35 s total CI curl budget for the whole endpoint.
-            as_response = await generate_gemini(
-                _as_sys, _as_usr, timeout=25.0, max_output_tokens=80
+            as_response = await asyncio.wait_for(
+                generate_gemini(_as_sys, _as_usr, timeout=12.0, max_output_tokens=80),
+                timeout=12.0,
             )
             as_latency_ms = round((_time.monotonic() - t_as) * 1000, 1)
 
@@ -474,7 +490,7 @@ async def chat_pipeline_health(request: Request):
         from app.services.ai.topic_matcher import topic_matcher
 
         if not topic_matcher._is_cache_valid():
-            await asyncio.wait_for(topic_matcher._load_embeddings(), timeout=5.0)
+            await asyncio.wait_for(topic_matcher._load_embeddings(), timeout=4.0)
 
         topic_count = len(topic_matcher._embeddings or [])
         result["rag_topics_cached"] = topic_count
