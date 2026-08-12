@@ -44,10 +44,10 @@ jobs:
           BODY=$(echo "$BODY" | jq --argjson l "$LIMIT" '. + {limit: $l}')
 
           echo "Request body: $BODY"
-          echo "Calling: ${BACKEND_URL}/api/v1/admin/content/translate/cron"
+          echo "Calling: ${BACKEND_URL}/api/v1/admin/cron/translate"
 
           RESPONSE=$(curl -sf --max-time 3600 \
-            -X POST "${BACKEND_URL}/api/v1/admin/content/translate/cron" \
+            -X POST "${BACKEND_URL}/api/v1/admin/cron/translate" \
             -H "Authorization: Bearer ${TRANSLATE_SECRET}" \
             -H "Content-Type: application/json" \
             -d "$BODY")
