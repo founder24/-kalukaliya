@@ -393,7 +393,59 @@ async def chat_pipeline_health(request: Request):
             content={"status": "unhealthy", "step": "ai_pipeline", "error": str(e)[:120]},
         )
 
-    # ── Step 2: MongoDB vector search reachability ───────────────────────────
+    # ── Step 2: Assamese output quality via Gemini fallback ─────────────────
+    # When Sarvam is unavailable, Assamese students are served by Gemini.
+    # Sarvam uses complex extraction helpers (_extract_assamese_answer /
+    # _extract_assamese_translation) because its reasoning model embeds
+    # Assamese lines inside an English chain-of-thought.  Gemini 2.5 Flash
+    # responds directly in the requested language — no extraction needed.
+    # This step confirms that Gemini produces valid Assamese script so we
+    # know the fallback actually serves students correctly.
+    try:
+        from app.services.ai.gemini_fallback import (
+            generate_gemini,
+            _available as gemini_available,
+        )
+
+        if gemini_available():
+            # System prompt in Assamese instructs the model to respond in Assamese.
+            # User question: "তুমি কোন?" — "Who are you?"
+            _as_sys = (
+                "তুমি এটা সহায়কাৰী শিক্ষামূলক সহায়ক। সদায় চমুকৈ অসমীয়া ভাষাত উত্তৰ দিয়া।"
+            )
+            _as_usr = "তুমি কোন?"
+            t_as = _time.monotonic()
+            as_response = await generate_gemini(
+                _as_sys, _as_usr, timeout=40.0, max_output_tokens=80
+            )
+            as_latency_ms = round((_time.monotonic() - t_as) * 1000, 1)
+
+            # Verify response contains Assamese/Bengali script (U+0980–U+09FF).
+            # A clean Gemini response will contain these directly — no extraction
+            # logic is needed, unlike the Sarvam reasoning-model path.
+            has_assamese = any("\u0980" <= c <= "\u09ff" for c in (as_response or ""))
+            assamese_result: Dict[str, Any] = {
+                "has_assamese_script": has_assamese,
+                "latency_ms": as_latency_ms,
+                "response_preview": (as_response or "")[:80],
+            }
+            if not has_assamese:
+                # Gemini responded but not in Assamese — likely answered in English.
+                # Students would receive English instead of Assamese when Sarvam is down.
+                assamese_result["warning"] = (
+                    "Gemini response contains no Assamese script — "
+                    "verify the system-prompt language instruction"
+                )
+            result["assamese_probe"] = assamese_result
+        else:
+            result["assamese_probe"] = {
+                "status": "skipped",
+                "reason": "Gemini not configured (GEMINI_API_KEY absent)",
+            }
+    except Exception as e:
+        result["assamese_probe"] = {"status": "error", "error": str(e)[:120]}
+
+    # ── Step 3: MongoDB vector search reachability ───────────────────────────
     try:
         from app.services.ai.topic_matcher import topic_matcher
 

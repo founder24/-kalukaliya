@@ -9,6 +9,22 @@ Authentication priority (first that works wins):
 
 Using the API-key path avoids Vertex AI IAM entirely and is the recommended
 path for production fallback.
+
+Assamese output quality
+=======================
+Gemini 2.5 Flash responds directly in the language specified by the system
+prompt — no post-processing extraction is needed.  This is different from
+the Sarvam path, where the reasoning model embeds Assamese lines inside an
+English chain-of-thought, requiring ``_extract_assamese_answer()`` /
+``_extract_assamese_translation()`` to recover the clean output.
+
+For Assamese requests, the caller should pass an Assamese (or bilingual)
+system prompt instructing the model to respond in Assamese.  The response
+will contain Assamese script directly; there is no need to call any of
+the Sarvam-specific extraction helpers.
+
+The ``/health/chat-pipeline`` endpoint runs an Assamese probe that verifies
+this assumption on every CI deploy.
 """
 
 from __future__ import annotations
