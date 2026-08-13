@@ -41,3 +41,5 @@
 - [AHSEC Q&A pipeline](ahsec-qa-pipeline.md) — exercise extraction fix, Q&A format, meta-commentary cleanup, system prompt lesson, backfill script
 - [AHSEC Q&A pipeline disabled](syrabit-qa-pipeline-disabled.md) — Q&A + published_topics cleared from all 548 chapters; ingestion now writes notes only; re-enable by un-commenting generate_qa_from_notes() call
 - [AHSEC prelim-page detection](ahsec-prelim-signals.md) — _PRELIM_SIGNALS gaps that let "Textbook Publication Details/Educational Philosophy/NCF" pages become chapter notes; 16 chapters cleared Aug 2026
+- [RAG field priority](rag-field-priority.md) — retrieval paths must read rag_sections→rag_text→notes_en→content_en; notes_en was missing, silently returning 0 context
+- [CF_ACCOUNT_ID alias in embedder](cf-account-id-alias.md) — embedder must use CF_ACCOUNT_ID or CLOUDFLARE_ACCOUNT_ID; using only CF_ACCOUNT_ID caused silent 0-chunk indexing in dev
