@@ -220,6 +220,17 @@ export default function StaffLogin() {
         <div className="mt-8 text-center text-purple-300/60 text-sm">
           <p>© 2024 Syrabit.ai. All rights reserved.</p>
           <p className="mt-1">For staff members only</p>
+          <p className="mt-3 text-xs">
+            Developed by{' '}
+            <a
+              href="https://ayanbhaumik.in/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-purple-200 hover:text-white"
+            >
+              Ayan Bhaumik
+            </a>
+          </p>
         </div>
       </div>
     </div>

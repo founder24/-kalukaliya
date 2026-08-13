@@ -392,6 +392,18 @@ export default function StaffDashboard() {
         </main>
       </div>
 
+      <footer className="px-4 py-5 text-center text-xs text-gray-500 lg:ml-72">
+        Developed by{' '}
+        <a
+          href="https://ayanbhaumik.in/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-purple-700 hover:text-purple-800"
+        >
+          Ayan Bhaumik
+        </a>
+      </footer>
+
       {/* Page Editor Modal */}
       {showPageEditor && (
         <PageEditor

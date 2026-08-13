@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import { Link } from 'react-router-dom';
 import { PublicNavbar } from './PublicNavbar';
 import { PublicBottomNav } from './PublicBottomNav';
+import { DeveloperCredit } from './DeveloperCredit';
 
 export const PublicLayout = ({ children }) => {
   return (
@@ -36,6 +37,7 @@ export const PublicLayout = ({ children }) => {
               &copy; {new Date().getFullYear()} Syrabit.ai. All rights reserved.
             </p>
           </div>
+          <DeveloperCredit className="mt-5 text-center" />
         </div>
       </footer>
     </div>

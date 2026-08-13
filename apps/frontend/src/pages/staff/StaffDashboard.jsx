@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { API_BASE } from '@/utils/api';
 import { getToken } from '@/hooks/useTokenManager';
+import { DeveloperCredit } from '@/components/layout/DeveloperCredit';
 import axios from 'axios';
 import { toast } from 'sonner';
 
@@ -2415,6 +2416,9 @@ export default function StaffDashboard() {
             <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} onReindexChapter={handleReindexChapter} onChapterCreated={handleChapterCreated} />
           )}
         </main>
+        <footer className="border-t border-gray-100 bg-white px-4 py-3 text-center">
+          <DeveloperCredit />
+        </footer>
       </div>
 
       {/* Chapter editor */}

@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { BottomNav } from './BottomNav';
 import { Navbar } from './Navbar';
+import { DeveloperCredit } from './DeveloperCredit';
 
 export function AppLayout(props) {
   const { pageTitle, hideNavbar, children } = props;
@@ -30,6 +31,9 @@ export function AppLayout(props) {
             tabIndex={-1}
           >
             {children ? children : <Outlet />}
+            <footer className="px-4 py-5 text-center">
+              <DeveloperCredit />
+            </footer>
           </main>
         </div>
       </div>
