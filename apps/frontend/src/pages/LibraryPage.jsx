@@ -330,7 +330,12 @@ export default function LibraryPage() {
   // 2,763 mobile DOM-node count Lighthouse was reporting and removes the
   // forced reflow that the IntersectionObserver sentinel triggered as
   // each new chunk mounted.
-  const VIRTUAL_CHUNK = 6;
+  // VIRTUAL_CHUNK = 20: the first 20 subjects are always rendered as static
+  // <SubjectCard> elements (SSR-safe, no scroll-container dependency).
+  // The virtualizer only takes over for subjects beyond position 20, which
+  // means the user always sees at least 20 cards even if the virtualizer
+  // scroll-parent ref hasn't resolved yet.
+  const VIRTUAL_CHUNK = 20;
   const [renderLimit, setRenderLimit] = useState(VIRTUAL_CHUNK);
   const sentinelRef = useRef(null);
   const [scrollContainerEl, setScrollContainerEl] = useState(null);
@@ -371,12 +376,41 @@ export default function LibraryPage() {
     startTransition(() => setHydrated(true));
   }, []);
 
-  // Rank filtered subjects: recently-visited subjects bubble up, then saved,
-  // then subjects that appear in the first 8 chapters (trending proxy).
+  // Rank filtered subjects:
+  //   1. Content quality (always applied): subjects with more notes / Q&A /
+  //      topics rank above empty ones regardless of personalization.
+  //   2. User-profile match: subjects belonging to the user's active board
+  //      get a +50 boost so they appear before other boards' content.
+  //   3. Recency / saved / trending (existing): recently-visited +100,
+  //      saved +20, appears in first 8 chapters (trending proxy) +10.
   const rankedSubjects = useMemo(() => {
     if (!filteredSubjects.length) return filteredSubjects;
-    // Skip localStorage-based ranking until after hydration (see comment above).
-    if (!hydrated) return filteredSubjects;
+
+    // Content-quality score — safe to compute pre-hydration (no localStorage).
+    const qualityScore = (sub) => {
+      let q = 0;
+      // notes_pct: 0-100 → contributes up to 30 pts
+      q += Math.min((sub.notes_pct || 0) * 0.3, 30);
+      // Per-chapter Q&A availability (chapters may be absent in slim bundle)
+      const chs = chaptersBySubject.get(sub.id) || [];
+      const qaCount = chs.filter((c) => c.has_qa).length;
+      q += Math.min(qaCount * 2, 20);
+      // Topic richness from seo_stats
+      q += Math.min((sub.seo_stats?.topic_count || 0) * 0.5, 15);
+      // PYQ papers present
+      q += Math.min((sub.pyq_papers?.length || 0) * 3, 10);
+      return q;
+    };
+
+    // Before hydration only sort by content quality so SSR/client stay close
+    // (no localStorage reads → no hydration mismatch on the top 20 cards).
+    if (!hydrated) {
+      const anyQuality = filteredSubjects.some((s) => qualityScore(s) > 0);
+      if (!anyQuality) return filteredSubjects;
+      return [...filteredSubjects].sort((a, b) => qualityScore(b) - qualityScore(a));
+    }
+
+    // Post-hydration: full personalization + quality combined.
     const recentChapters = getRecentChapters();
     // paths are /{board}/{class}/{subjectSlug}/{chapter} — slug is index 2
     const recentSubjectSlugs = new Set(
@@ -389,16 +423,22 @@ export default function LibraryPage() {
       allChapters.slice(0, 8).map((ch) => ch.subject_id).filter(Boolean)
     );
     const score = (sub) => {
-      let s = 0;
+      let s = qualityScore(sub);
+      // Personalization: user's board bubbles its subjects to the top.
+      // activeBoardId comes from onboarding profile or logged-in user.board_id.
+      if (activeBoardId) {
+        const stream = streamMap.get(sub.stream_id);
+        const cls = classMap.get(stream?.class_id);
+        if (cls && String(cls.board_id) === String(activeBoardId)) s += 50;
+      }
       if (recentSubjectSlugs.has(sub.slug)) s += 100;
       if (savedSubjectsSet.has(sub.id)) s += 20;
       if (trendingSubjectIds.has(sub.id)) s += 10;
       return s;
     };
-    const hasBoost = filteredSubjects.some((s) => score(s) > 0);
-    if (!hasBoost) return filteredSubjects;
     return [...filteredSubjects].sort((a, b) => score(b) - score(a));
-  }, [hydrated, filteredSubjects, allChapters, savedSubjectsSet]);
+  }, [hydrated, filteredSubjects, allChapters, savedSubjectsSet,
+      chaptersBySubject, activeBoardId, streamMap, classMap]);
 
   const visibleSubjects = useMemo(
     () => rankedSubjects.slice(0, renderLimit),
@@ -700,7 +740,7 @@ export default function LibraryPage() {
                   data-testid="library-subject-grid"
                   style={{ contain: 'layout style' }}
                 >
-                  {filteredSubjects.slice(0, VIRTUAL_CHUNK).map((sub, index) => (
+                  {rankedSubjects.slice(0, VIRTUAL_CHUNK).map((sub, index) => (
                     <SubjectCard
                       key={sub.id}
                       sub={sub}
@@ -713,8 +753,13 @@ export default function LibraryPage() {
                   ))}
                 </div>
 
-                {/* Below-fold: remaining subjects via virtualizer, added after mount */}
-                {useVirtualGrid && filteredSubjects.length > VIRTUAL_CHUNK && (
+                {/* Below-fold: remaining subjects via virtualizer.
+                    Guard on scrollContainerEl so the virtualizer is never
+                    constructed with a null scroll parent — without the guard
+                    the virtualizer initialises with no scroll element and
+                    renders 0 rows, making the list appear to stop after the
+                    first VIRTUAL_CHUNK static cards. */}
+                {useVirtualGrid && scrollContainerEl && rankedSubjects.length > VIRTUAL_CHUNK && (
                   <VirtualSubjectGrid
                     scrollParent={scrollContainerEl}
                     subjects={rankedSubjects.slice(VIRTUAL_CHUNK)}
