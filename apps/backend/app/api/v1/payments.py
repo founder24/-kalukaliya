@@ -573,6 +573,230 @@ async def payment_history(user: User = Depends(get_current_user)):
         return {"payments": []}
 
 
+class CreateQRRequest(BaseModel):
+    plan: str
+
+
+async def _rz_post(path: str, data: dict) -> dict:
+    """Direct Razorpay REST call (used for endpoints without SDK wrappers)."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f"https://api.razorpay.com/v1{path}",
+            json=data,
+            auth=(settings.RAZORPAY_KEY_ID or "", settings.RAZORPAY_KEY_SECRET or ""),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def _rz_get(path: str, params: dict | None = None) -> dict:
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(
+            f"https://api.razorpay.com/v1{path}",
+            params=params,
+            auth=(settings.RAZORPAY_KEY_ID or "", settings.RAZORPAY_KEY_SECRET or ""),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+@router.post("/create-qr")
+async def create_payment_qr(
+    body: CreateQRRequest, user: User = Depends(get_current_user)
+):
+    """
+    Create a Razorpay UPI QR code with the plan amount pre-loaded.
+    Returns image_url (a direct PNG hosted by Razorpay) for display in the
+    payment modal.  No Razorpay checkout.js required — works in all browsers.
+    """
+    import time as _time
+
+    if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
+        raise HTTPException(status_code=503, detail="Payment service not configured")
+
+    plan_prices = {"starter": 9900, "pro": 99900}
+    plan_labels = {"starter": "Starter", "pro": "Pro"}
+    amount = plan_prices.get(body.plan)
+    if not amount:
+        raise HTTPException(status_code=400, detail="Invalid plan")
+
+    expires_in = 1800  # 30 minutes
+
+    try:
+        qr = await _rz_post(
+            "/payments/qr_codes",
+            {
+                "type": "upi_qr",
+                "name": f"Syrabit {plan_labels[body.plan]}",
+                "usage": "single_use",
+                "fixed_amount": True,
+                "payment_amount": amount,
+                "description": f"Syrabit {plan_labels[body.plan]} — ₹{amount // 100}",
+                "close_by": int(_time.time()) + expires_in,
+                "customer": {
+                    "name": user.name or "Student",
+                    "email": user.email,
+                },
+            },
+        )
+    except Exception as e:
+        logger.error(f"Razorpay QR code creation failed: {e}")
+        raise HTTPException(status_code=503, detail="Payment gateway unavailable")
+
+    qr_id = qr.get("id")
+    image_url = qr.get("image_url")
+    if not qr_id or not image_url:
+        logger.error(f"Unexpected Razorpay QR response: {qr}")
+        raise HTTPException(status_code=503, detail="Payment gateway returned unexpected response")
+
+    # Persist for polling / user association
+    from app.db.mongo import get_mongo_client
+    from datetime import datetime, timezone, timedelta
+
+    try:
+        mongo = get_mongo_client()
+        db = mongo[settings.MONGODB_DB_NAME]
+        await db.payments_pending.replace_one(
+            {"qr_code_id": qr_id},
+            {
+                "qr_code_id": qr_id,
+                "user_id": str(user.id),
+                "plan": body.plan,
+                "amount": amount,
+                "created_at": datetime.now(timezone.utc),
+                "expires_at": datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+            },
+            upsert=True,
+        )
+    except Exception as e:
+        logger.error(f"Failed to persist QR code record: {e}")
+
+    return {
+        "qr_code_id": qr_id,
+        "image_url": image_url,
+        "amount": amount,
+        "expires_in": expires_in,
+    }
+
+
+@router.get("/poll-qr/{qr_code_id}")
+async def poll_qr_payment(
+    qr_code_id: str, user: User = Depends(get_current_user)
+):
+    """
+    Poll for payment on a UPI QR code.  Called every few seconds by the
+    payment modal.  Returns { status: "pending" } until the payment is
+    captured; then upgrades the user, records the payment, and returns
+    { status: "paid", receipt_token }.
+    """
+    if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
+        raise HTTPException(status_code=503, detail="Payment service not configured")
+
+    # Security: verify QR code belongs to the requesting user
+    from app.db.mongo import get_mongo_client
+
+    mongo = get_mongo_client()
+    db = mongo[settings.MONGODB_DB_NAME]
+    record = await db.payments_pending.find_one({"qr_code_id": qr_code_id})
+    if not record or record.get("user_id") != str(user.id):
+        raise HTTPException(status_code=404, detail="QR code not found")
+
+    plan = record.get("plan")
+    expected_amount = record.get("amount")
+
+    # Fetch payments for this QR code from Razorpay
+    try:
+        resp = await _rz_get(f"/payments/qr_codes/{qr_code_id}/payments")
+    except Exception as e:
+        logger.warning(f"Razorpay QR poll failed: {e}")
+        return {"status": "pending"}
+
+    items = resp.get("items", [])
+    payment = None
+    for p in items:
+        if p.get("status") == "captured" and p.get("amount") == expected_amount:
+            payment = p
+            break
+
+    if not payment:
+        return {"status": "pending"}
+
+    payment_id = payment["id"]
+
+    # Idempotency: Redis SET NX (non-fatal if Redis is down)
+    try:
+        from app.db.redis import get_redis
+
+        redis = get_redis()
+        dedup_key = f"qr_verify:{qr_code_id}"
+        was_new = await redis.set(dedup_key, "1", ex=604800, nx=True)
+        if not was_new:
+            # Already processed — still return paid so frontend can redirect
+            return {"status": "paid", "plan": plan, "payment_id": payment_id, "amount": expected_amount}
+    except Exception:
+        pass
+
+    # Upgrade user
+    from datetime import datetime, timezone, timedelta
+
+    now = datetime.now(timezone.utc)
+    plan_prices = {"starter": 9900, "pro": 99900}
+    await user.update(
+        {
+            "$set": {
+                "subscription_tier": plan,
+                "subscription_status": "active",
+                "razorpay_subscription_id": qr_code_id,
+                "current_period_start": now,
+                "current_period_end": now + timedelta(days=30),
+                "cancel_at_period_end": False,
+            }
+        }
+    )
+
+    # Durable payment record
+    try:
+        await db.payments.insert_one(
+            {
+                "user_id": str(user.id),
+                "razorpay_order_id": qr_code_id,
+                "razorpay_payment_id": payment_id,
+                "amount": expected_amount,
+                "status": "completed",
+                "type": "subscription",
+                "created_at": now,
+            }
+        )
+        await db.payments_pending.delete_one({"qr_code_id": qr_code_id})
+    except Exception as e:
+        logger.error(f"Failed to record QR payment: {e}")
+
+    # Receipt email (non-fatal)
+    try:
+        from app.services.comms.resend_client import send_first_purchase_receipt_email
+
+        await send_first_purchase_receipt_email(user.email, expected_amount, qr_code_id)
+    except Exception as e:
+        logger.error(f"Failed to send QR receipt email: {e}")
+
+    receipt_token = _make_receipt_token(qr_code_id, payment_id)
+    logger.info(
+        f"QR payment verified, user upgraded to {plan}",
+        extra={"user_id": str(user.id), "qr_code_id": qr_code_id},
+    )
+    return {
+        "status": "paid",
+        "plan": plan,
+        "payment_id": payment_id,
+        "amount": expected_amount,
+        "receipt_token": receipt_token,
+    }
+
+
 @router.post("/refund-request")
 async def refund_request(body: RefundRequest, user: User = Depends(get_current_user)):
     """Submit a refund request."""

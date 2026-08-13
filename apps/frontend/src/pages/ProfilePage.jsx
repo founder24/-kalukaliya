@@ -417,8 +417,8 @@ export default function ProfilePage() {
         deleting={deleting} handleDeleteAccount={handleDeleteAccount} setShowDeleteConfirm={setShowDeleteConfirm}
       />
       <PaymentModal
-        showPaymentModal={showPaymentModal} paymentPlan={paymentPlan} paymentLoading={paymentLoading}
-        setShowPaymentModal={setShowPaymentModal} handleRazorpayCheckout={handleRazorpayCheckout}
+        showPaymentModal={showPaymentModal} paymentPlan={paymentPlan}
+        setShowPaymentModal={setShowPaymentModal}
       />
       <TopUpModal
         showTopUpModal={showTopUpModal} topUpCredits={topUpCredits} setTopUpCredits={setTopUpCredits}
