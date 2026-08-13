@@ -38,10 +38,14 @@ def _get_http_client() -> httpx.AsyncClient:
 
 
 def _cf_embed_url() -> str:
-    account_id = settings.CF_ACCOUNT_ID
+    # Accept either CF_ACCOUNT_ID (Cloud Run / wrangler) or CLOUDFLARE_ACCOUNT_ID
+    # (Replit secret name + KV client alias).  Both refer to the same Cloudflare
+    # account; keeping both names avoids silently broken embedding in dev.
+    account_id = settings.CF_ACCOUNT_ID or settings.CLOUDFLARE_ACCOUNT_ID
     if not account_id:
         raise RuntimeError(
-            "CF_ACCOUNT_ID is not set. Cannot call CF Workers AI embedding API."
+            "CF_ACCOUNT_ID (or CLOUDFLARE_ACCOUNT_ID) is not set. "
+            "Cannot call CF Workers AI embedding API."
         )
     return (
         f"https://api.cloudflare.com/client/v4/accounts/"

@@ -638,27 +638,80 @@ async def chat_pipeline_health(request: Request):
                     },
                 )
 
-    # ── Step 3: MongoDB vector search reachability ───────────────────────────
+    # ── Step 3: RAG retrieval health check ───────────────────────────────────
+    # Three sub-checks:
+    #   a) topic_embeddings count (TopicMatcher cache)
+    #   b) chunks collection document count (Vectorize seed status)
+    #   c) real retrieve_v2() call with a cached topic embedding (end-to-end)
+    # rag_status: "healthy" = chunks returned, "degraded" = topics ok but 0
+    # chunks, "unavailable" = topics missing or error. HTTP 200 always returned
+    # (CI is not blocked by RAG degradation — students still get an answer,
+    #  just without chapter context).
     try:
         from app.services.ai.topic_matcher import topic_matcher
+        from app.db.mongo import get_mongo_client
 
         if not topic_matcher._is_cache_valid():
             await asyncio.wait_for(topic_matcher._load_embeddings(), timeout=4.0)
 
         topic_count = len(topic_matcher._embeddings or [])
         result["rag_topics_cached"] = topic_count
-        result["rag_status"] = "healthy" if topic_count > 0 else "degraded"
+
+        # Count indexed chunks (Vectorize seed status)
+        try:
+            _db = get_mongo_client()[settings.MONGODB_DB_NAME]
+            chunks_indexed = await asyncio.wait_for(
+                _db["chunks"].count_documents({}), timeout=3.0
+            )
+        except Exception:
+            chunks_indexed = -1  # MongoDB unavailable; don't fail the whole step
+        result["rag_chunks_indexed"] = chunks_indexed
+
+        # End-to-end retrieval call using a cached topic embedding as the test
+        # query — skips the CF Workers AI embed call entirely (no extra latency).
+        rag_path = "skipped"
+        rag_chunks_returned = 0
+        if topic_count > 0:
+            try:
+                test_entry = (topic_matcher._embeddings or [])[0]
+                test_emb = test_entry.get("embedding") if isinstance(test_entry, dict) else None
+                if test_emb:
+                    from app.services.rag.retrieval_v2 import retrieve_v2
+                    test_chunks, rag_path = await asyncio.wait_for(
+                        retrieve_v2(
+                            query="health-probe",
+                            lang="en",
+                            limit=3,
+                            embedding=test_emb,
+                        ),
+                        timeout=6.0,
+                    )
+                    rag_chunks_returned = len(test_chunks)
+            except Exception as _rag_err:
+                rag_path = f"error:{str(_rag_err)[:60]}"
+
+        result["rag_path"] = rag_path
+        result["rag_chunks_returned"] = rag_chunks_returned
+        result["rag_status"] = (
+            "healthy" if rag_chunks_returned > 0
+            else "degraded" if topic_count > 0
+            else "unavailable"
+        )
     except Exception as e:
         result["rag_status"] = "unavailable"
         result["rag_error"] = str(e)[:80]
 
-    # Downgrade overall status to "degraded" when either Assamese probe reported
-    # quota pressure (HTTP 200 is still returned — CI is not blocked).
-    any_quota_degraded = any(
-        isinstance(result.get(k), dict) and result[k].get("status") == "degraded"
-        for k in ("assamese_probe", "streaming_assamese_probe")
+    # Downgrade overall status to "degraded" when any sub-system reported quota
+    # pressure or RAG returned 0 chunks.  HTTP 200 is still returned — CI is
+    # not blocked.
+    any_degraded = (
+        any(
+            isinstance(result.get(k), dict) and result[k].get("status") == "degraded"
+            for k in ("assamese_probe", "streaming_assamese_probe")
+        )
+        or result.get("rag_status") == "degraded"
     )
-    result["status"] = "degraded" if any_quota_degraded else "healthy"
+    result["status"] = "degraded" if any_degraded else "healthy"
     return JSONResponse(status_code=200, content=result)
 
 
