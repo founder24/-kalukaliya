@@ -1780,6 +1780,7 @@ async def publish_chapter(request: Request, chapter_id: str):
             PublishJobStep(name="indexnow", label="IndexNow ping"),
             PublishJobStep(name="wikidata", label="Wikidata enrichment"),
             PublishJobStep(name="embeddings", label="Topic embeddings"),
+            PublishJobStep(name="rag_reindex", label="RAG vector reindex"),
         ],
     )
     await job.insert()
@@ -1843,6 +1844,7 @@ async def bulk_publish_subject(request: Request, subject_id: str):
                 PublishJobStep(name="indexnow", label="IndexNow ping"),
                 PublishJobStep(name="wikidata", label="Wikidata enrichment"),
                 PublishJobStep(name="embeddings", label="Topic embeddings"),
+                PublishJobStep(name="rag_reindex", label="RAG vector reindex"),
             ],
         )
         await job.insert()
@@ -1894,10 +1896,10 @@ async def retry_publish_job(request: Request, job_id: str):
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.status not in ("failed",):
+    if job.status not in ("failed", "partial"):
         raise HTTPException(
             status_code=400,
-            detail=f"Job status is '{job.status}'; only 'failed' jobs can be retried",
+            detail=f"Job status is '{job.status}'; only 'failed' or 'partial' jobs can be retried",
         )
 
     job.status = "pending"
@@ -1911,6 +1913,7 @@ async def retry_publish_job(request: Request, job_id: str):
         PublishJobStep(name="indexnow", label="IndexNow ping"),
         PublishJobStep(name="wikidata", label="Wikidata enrichment"),
         PublishJobStep(name="embeddings", label="Topic embeddings"),
+        PublishJobStep(name="rag_reindex", label="RAG vector reindex"),
     ]
     await job.save()
 

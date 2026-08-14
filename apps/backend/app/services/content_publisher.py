@@ -266,8 +266,20 @@ class ContentPublisherService:
 
         return {"status": "generated", "count": generated, "errors": errors}
 
+    # Steps whose failure should surface as "partial" (not "done") to signal
+    # that the chapter may not be fully live.  Non-critical steps (pages_rebuild,
+    # indexnow, wikidata, embeddings, rag_reindex) are best-effort.
+    _CRITICAL_STEPS = frozenset({"gcs", "cloudflare", "status_update"})
+
     async def publish_chapter_with_job(self, chapter_id: str, job_id: str) -> None:
-        """Run the full publish pipeline, updating a PublishJob document at each step."""
+        """Run the full publish pipeline, updating a PublishJob document at each step.
+
+        Terminal statuses:
+          done    — all critical steps succeeded (non-critical failures are logged).
+          partial — at least one critical step (gcs/cloudflare/status_update) failed;
+                    staff should inspect the failed step and retry.
+          failed  — an unexpected exception escaped the pipeline entirely.
+        """
         from app.models.rag import PublishJob, PublishJobStep
         from beanie import PydanticObjectId as _OID
 
@@ -285,6 +297,8 @@ class ContentPublisherService:
             job.finished_at = now()
             await job.save()
             return
+
+        critical_failures: list[str] = []
 
         async def _run_step(name: str, coro):
             step = next((s for s in job.steps if s.name == name), None)
@@ -310,6 +324,8 @@ class ContentPublisherService:
                 step.finished_at = now()
                 job.updated_at = now()
                 await job.save()
+            if step.status == "failed" and name in self._CRITICAL_STEPS:
+                critical_failures.append(name)
             return result
 
         try:
@@ -366,7 +382,176 @@ class ContentPublisherService:
 
             await _run_step("embeddings", _do_embeddings())
 
-            job.status = "done"
+            async def _do_rag_reindex():
+                """Re-index all RAG scopes (notes, Q&A, PYQ) into Vectorize so chat stays fresh.
+
+                Returns status="error" if any scope had ingestion errors or produced zero
+                vector writes when content was present, so the step is recorded as failed
+                and staff are prompted to retry.
+                """
+                from app.services.rag.ingestion_v2 import ingest_chapter_v2
+
+                # Reload so we operate on the post-status_update chapter.
+                fresh = await Chapter.get(_OID(chapter_id))
+                if not fresh:
+                    return {"status": "skipped", "reason": "chapter_not_found"}
+
+                subject_id = str(fresh.subject_id)
+                scope_results: dict = {}
+                all_errors: list[str] = []
+                any_failure = False
+
+                async def _ingest_scope(
+                    scope_name: str,
+                    source_type: str,
+                    sections_en: list[dict],
+                    sections_as: list[dict],
+                    text_en: str | None,
+                    text_as: str | None,
+                ) -> dict:
+                    """Run ingest_chapter_v2 for one scope; return a result summary dict."""
+                    has_en = bool(sections_en or text_en)
+                    has_as = bool(sections_as or text_as)
+                    if not has_en and not has_as:
+                        return {"status": "skipped", "reason": "no_content"}
+                    result = await ingest_chapter_v2(
+                        chapter_id=chapter_id,
+                        content_en=text_en,
+                        content_as=text_as,
+                        sections_en=sections_en or None,
+                        sections_as=sections_as or None,
+                        metadata={"subject_id": subject_id},
+                        source_type=source_type,
+                    )
+                    en_r = result.get("en", {})
+                    as_r = result.get("as", {})
+                    errors = en_r.get("errors", []) + as_r.get("errors", [])
+                    en_vec = en_r.get("vectorize_upserted", 0)
+                    as_vec = as_r.get("vectorize_upserted", 0)
+                    # Treat as failed if there were explicit errors OR if content existed but
+                    # Vectorize accepted zero vectors (silent outage / upsert drop).
+                    failed = (
+                        bool(errors)
+                        or (has_en and en_vec == 0)
+                        or (has_as and as_vec == 0)
+                    )
+                    return {
+                        "status": "error" if failed else "done",
+                        "en_vectorize_upserted": en_vec,
+                        "as_vectorize_upserted": as_vec,
+                        "en_mongo_inserted": en_r.get("mongo_inserted", 0),
+                        "as_mongo_inserted": as_r.get("mongo_inserted", 0),
+                        "errors": errors,
+                    }
+
+                # ── Notes scope ───────────────────────────────────────────────
+                notes_sec_en: list[dict] = getattr(fresh, "rag_sections_en", None) or []
+                notes_sec_as: list[dict] = getattr(fresh, "rag_sections_as", None) or []
+                # Retrieval-only rag_text_* blobs (staff-curated corpus) take priority
+                # over student-facing notes_* markdown.  content_* is a last resort.
+                notes_txt_en = (
+                    None if notes_sec_en
+                    else (getattr(fresh, "rag_text_en", None) or fresh.notes_en or fresh.content_en)
+                )
+                notes_txt_as = (
+                    None if notes_sec_as
+                    else (
+                        getattr(fresh, "rag_text_as", None)
+                        or getattr(fresh, "notes_as", None)
+                        or getattr(fresh, "content_as", None)
+                    )
+                )
+                notes_res = await _ingest_scope(
+                    "notes", "notes", notes_sec_en, notes_sec_as, notes_txt_en, notes_txt_as
+                )
+                scope_results["notes"] = notes_res
+                if notes_res.get("errors"):
+                    all_errors.extend(notes_res["errors"])
+                if notes_res.get("status") == "error":
+                    any_failure = True
+                elif notes_res.get("status") == "done":
+                    try:
+                        fresh.notes_rag_indexed_at = now()
+                    except Exception:
+                        pass
+
+                # ── Q&A scope ─────────────────────────────────────────────────
+                qa_sec_en: list[dict] = getattr(fresh, "qa_rag_sections_en", None) or []
+                qa_sec_as: list[dict] = getattr(fresh, "qa_rag_sections_as", None) or []
+                qa_txt_en = (
+                    None if qa_sec_en else getattr(fresh, "qa_rag_text_en", None)
+                )
+                qa_txt_as = (
+                    None if qa_sec_as else getattr(fresh, "qa_rag_text_as", None)
+                )
+                qa_res = await _ingest_scope(
+                    "qa", "important_questions", qa_sec_en, qa_sec_as, qa_txt_en, qa_txt_as
+                )
+                scope_results["qa"] = qa_res
+                if qa_res.get("errors"):
+                    all_errors.extend(qa_res["errors"])
+                if qa_res.get("status") == "error":
+                    any_failure = True
+                elif qa_res.get("status") == "done":
+                    try:
+                        fresh.qa_rag_indexed_at = now()
+                    except Exception:
+                        pass
+
+                # ── PYQ scope ─────────────────────────────────────────────────
+                pyq_txt_en = getattr(fresh, "pyq_rag_text", None)
+                pyq_txt_as = getattr(fresh, "pyq_rag_text_as", None)
+                pyq_res = await _ingest_scope(
+                    "pyq", "pyq", [], [], pyq_txt_en, pyq_txt_as
+                )
+                scope_results["pyq"] = pyq_res
+                if pyq_res.get("errors"):
+                    all_errors.extend(pyq_res["errors"])
+                if pyq_res.get("status") == "error":
+                    any_failure = True
+                elif pyq_res.get("status") == "done":
+                    try:
+                        fresh.pyq_rag_indexed_at = now()
+                    except Exception:
+                        pass
+
+                # Check that at least one scope had indexable content.
+                all_scopes_skipped = all(
+                    r.get("status") == "skipped" for r in scope_results.values()
+                )
+                if all_scopes_skipped:
+                    return {"status": "skipped", "reason": "no_content", "scopes": scope_results}
+
+                # Persist per-scope timestamps only when every content-bearing scope
+                # succeeded.  On any failure the per-scope *_rag_indexed_at fields are
+                # left at their previous value so stale-state consumers can still detect
+                # that the index is out of date.
+                final_status = "error" if any_failure else "done"
+                if final_status == "done":
+                    try:
+                        fresh.rag_indexed_at = now()
+                        await fresh.save()
+                    except Exception as _stamp_exc:
+                        logger.warning(f"rag_reindex: could not stamp timestamps: {_stamp_exc}")
+
+                return {
+                    "status": final_status,
+                    "scopes": scope_results,
+                    "errors": all_errors,
+                }
+
+            await _run_step("rag_reindex", _do_rag_reindex())
+
+            # Mark as "partial" if any critical step failed so staff know to retry.
+            if critical_failures:
+                job.status = "partial"
+                job.error = f"Critical steps failed: {', '.join(critical_failures)}"
+                logger.warning(
+                    f"publish_chapter_with_job {job_id}: partial — "
+                    f"critical failures: {critical_failures}"
+                )
+            else:
+                job.status = "done"
             job.finished_at = now()
             job.updated_at = now()
             await job.save()

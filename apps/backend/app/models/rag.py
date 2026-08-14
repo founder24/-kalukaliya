@@ -190,8 +190,13 @@ class PublishJob(Document):
     """
     Tracks a full chapter publish pipeline run.
 
-    Steps: gcs | cloudflare | status_update | pages_rebuild | indexnow | wikidata | embeddings
-    Status lifecycle: pending → running → done / failed
+    Steps: gcs | cloudflare | status_update | pages_rebuild | indexnow | wikidata | embeddings | rag_reindex
+    Status lifecycle: pending → running → done / partial / failed
+
+    done    — all critical steps (gcs, cloudflare, status_update) succeeded.
+    partial — at least one critical step failed; chapter may not be fully live.
+              Staff should inspect the failed step and retry.
+    failed  — an unexpected exception escaped the pipeline entirely.
     """
 
     chapter_id: str
