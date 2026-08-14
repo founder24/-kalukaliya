@@ -22,6 +22,7 @@ import { MobileNavSwitch } from '@/components/layout/MobileNavSwitch';
 import { useLibraryBundle, useLibraryBundleSlim } from '@/hooks/useContent';
 import { findSiblingChapters, siblingsAsRelated } from '@/utils/siblingChapter';
 import RelatedTopicsNav from '@/components/chapter/RelatedTopicsNav';
+import QuestionPaperViewer from '@/components/chapter/QuestionPaperViewer';
 import { pushRecentChapter } from '@/utils/recentChapters';
 import { HighlightSavePopover } from '@/components/study/HighlightSavePopover';
 import { ReadAloudButton } from '@/components/study/ReadAloudButton';
@@ -269,6 +270,7 @@ export default function ChapterPage() {
   const [error, setError] = useState(null);
   const skipFirstFetchRef = useRef(!!initialChapterData);
   const [pyqData, setPyqData] = useState(null);
+  const [pyqImages, setPyqImages] = useState([]);
   // P0 #1 of the AI-visibility plan — FAQPage JSON-LD entries built from
   // the chapter's published MCQs. Fed into chapterSchema() via
   // pageData.data.faq_entries so the existing JSON-LD pipeline emits a
@@ -562,12 +564,19 @@ export default function ChapterPage() {
 
   useEffect(() => {
     setPyqData(null);
+    setPyqImages([]);
     if (!data?.chapter_id) return;
     let cancelled = false;
+    // Text PYQs (important questions)
     apiClient()
       .get(`/content/chapters/${data.chapter_id}/topic-pyqs?limit=50`)
       .then(r => { if (!cancelled) setPyqData(r.data); })
       .catch(() => { if (!cancelled) setPyqData(null); });
+    // Image-based question papers uploaded via admin panel → R2
+    apiClient()
+      .get(`/content/chapters/${data.chapter_id}/pyq-images`)
+      .then(r => { if (!cancelled) setPyqImages(r.data?.papers || []); })
+      .catch(() => { if (!cancelled) setPyqImages([]); });
     return () => { cancelled = true; };
   }, [data?.chapter_id]);
 
@@ -604,7 +613,7 @@ export default function ChapterPage() {
     // silently fall back to Notes so the user never sees a blank content area.
     // We use setContentMode directly (not switchTab) so the URL param is NOT
     // rewritten — it stays stale until the user manually switches tabs.
-    if (validTab === 'pyq' && !data?.pyq_pdf_url) validTab = 'notes';
+    if (validTab === 'pyq' && !data?.pyq_pdf_url && !pyqImages.length) validTab = 'notes';
     setContentMode(validTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.chapter_id]);
@@ -1320,7 +1329,7 @@ export default function ChapterPage() {
                 {[
                   { id: 'notes', label: contentLang === 'as' ? 'নোটছ' : 'Notes', icon: FileText },
                   { id: 'qa', label: contentLang === 'as' ? 'প্ৰশ্নোত্তৰ' : 'Questions', icon: HelpCircle },
-                  ...(data?.pyq_pdf_url ? [{ id: 'pyq', label: contentLang === 'as' ? 'প্ৰশ্নকাকত' : 'Question Paper', icon: FileText }] : []),
+                  ...((data?.pyq_pdf_url || pyqImages.length > 0) ? [{ id: 'pyq', label: contentLang === 'as' ? 'প্ৰশ্নকাকত' : 'Question Paper', icon: FileText }] : []),
                 ].map(({ id, label, icon: Icon }) => (
                   <button
                     key={id}
@@ -1399,37 +1408,46 @@ export default function ChapterPage() {
                   )}
                 </div>
               )}
-              {/* PYQ mode — uploaded question paper PDF or image */}
-              {!isQuestionPaper && contentMode === 'pyq' && data?.pyq_pdf_url && (
+              {/* PYQ mode — image pages uploaded via admin panel (primary),
+                  with legacy single-file fallback below when no images exist */}
+              {!isQuestionPaper && contentMode === 'pyq' && (
                 <div data-testid="pyq-viewer">
-                  {/\.(jpe?g|png|webp|gif|tiff?)(\?|$)/i.test(data.pyq_pdf_url) ? (
-                    <div className="text-center py-2">
-                      <img
-                        src={data.pyq_pdf_url}
-                        alt={contentLang === 'as' ? `${data.title || ''} প্ৰশ্নকাকত` : `${data.title || ''} Question Paper`}
-                        className="max-w-full mx-auto rounded-xl border border-gray-200 shadow-sm"
-                        style={{ maxHeight: '80vh', objectFit: 'contain' }}
-                      />
+                  {/* Structured image viewer — one page after another */}
+                  <QuestionPaperViewer papers={pyqImages} lang={contentLang} />
+
+                  {/* Legacy single-file fallback (PDF or single image via staff upload) */}
+                  {!pyqImages.length && data?.pyq_pdf_url && (
+                    <div className="mt-2">
+                      {/\.(jpe?g|png|webp|gif|tiff?)(\?|$)/i.test(data.pyq_pdf_url) ? (
+                        <div className="text-center py-2">
+                          <img
+                            src={data.pyq_pdf_url}
+                            alt={contentLang === 'as' ? `${data.title || ''} প্ৰশ্নকাকত` : `${data.title || ''} Question Paper`}
+                            className="max-w-full mx-auto rounded-xl border border-gray-200 shadow-sm"
+                            style={{ maxHeight: '80vh', objectFit: 'contain' }}
+                          />
+                        </div>
+                      ) : (
+                        <iframe
+                          src={data.pyq_pdf_url}
+                          title={contentLang === 'as' ? `${data.title || ''} প্ৰশ্নকাকত` : `${data.title || ''} Question Paper`}
+                          className="w-full rounded-xl border border-gray-200"
+                          style={{ height: '80vh', minHeight: '500px' }}
+                          allow="fullscreen"
+                        />
+                      )}
+                      <div className="mt-3 text-center">
+                        <a
+                          href={data.pyq_pdf_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-violet-600 hover:underline"
+                        >
+                          {contentLang === 'as' ? 'নতুন টেবত খোলক ↗' : 'Open in new tab ↗'}
+                        </a>
+                      </div>
                     </div>
-                  ) : (
-                    <iframe
-                      src={data.pyq_pdf_url}
-                      title={contentLang === 'as' ? `${data.title || ''} প্ৰশ্নকাকত` : `${data.title || ''} Question Paper`}
-                      className="w-full rounded-xl border border-gray-200"
-                      style={{ height: '80vh', minHeight: '500px' }}
-                      allow="fullscreen"
-                    />
                   )}
-                  <div className="mt-3 text-center">
-                    <a
-                      href={data.pyq_pdf_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-violet-600 hover:underline"
-                    >
-                      {contentLang === 'as' ? 'নতুন টেবত খোলক ↗' : 'Open in new tab ↗'}
-                    </a>
-                  </div>
                 </div>
               )}
             </div>

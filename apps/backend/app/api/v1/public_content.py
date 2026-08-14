@@ -1014,6 +1014,42 @@ async def get_topics_related(chapter_id: str, limit: int = Query(6, ge=1, le=20)
     }
 
 
+@router.get("/chapters/{chapter_id}/pyq-images")
+async def get_chapter_pyq_images(chapter_id: str):
+    """Return uploaded question-paper image records for a chapter.
+
+    Queries the raw 'pyqs' collection (admin-uploaded via PYQUploadPanel).
+    Only image records are returned — text-only records are excluded.
+    Results are sorted newest-year-first so the student sees the most
+    recent paper at the top without any frontend sorting.
+    """
+    from app.db.mongo import get_mongo_client
+    col = get_mongo_client()[settings.MONGODB_DB_NAME]["pyqs"]
+
+    docs = await col.find(
+        {"chapter_id": chapter_id, "is_image": True},
+        {"_id": 1, "file_url": 1, "file_urls": 1, "filename": 1,
+         "exam_year": 1, "page_count": 1},
+    ).sort("exam_year", -1).to_list(length=50)
+
+    papers = []
+    for d in docs:
+        file_urls = d.get("file_urls") or (
+            [d["file_url"]] if d.get("file_url") else []
+        )
+        if not file_urls:
+            continue
+        papers.append({
+            "id": str(d["_id"]),
+            "exam_year": d.get("exam_year"),
+            "filename": d.get("filename", ""),
+            "page_count": d.get("page_count", len(file_urls)),
+            "file_urls": file_urls,
+        })
+
+    return {"chapter_id": chapter_id, "papers": papers, "total": len(papers)}
+
+
 @router.get("/chapters/{chapter_id}/topic-pyqs")
 async def get_topic_pyqs(
     chapter_id: str,
