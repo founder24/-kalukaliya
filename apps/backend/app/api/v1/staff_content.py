@@ -409,11 +409,9 @@ async def staff_get_chapter(
         "qa_rag_text_as":   chapter.qa_rag_text_as  or "",
         "pyq_rag_text":     chapter.pyq_rag_text    or "",
         "pyq_rag_text_as":  chapter.pyq_rag_text_as or "",
-        # Structured RAG section fields
-        "rag_sections_en":    chapter.rag_sections_en    or [],
-        "rag_sections_as":    chapter.rag_sections_as    or [],
-        "qa_rag_sections_en": chapter.qa_rag_sections_en or [],
-        "qa_rag_sections_as": chapter.qa_rag_sections_as or [],
+        # Structured RAG sections are large blobs not editable in the staff modal.
+        # Omitting them from the GET response keeps the payload small and prevents
+        # the full-form PATCH from accidentally clearing them on every Info-tab save.
         # Timestamps + RAG sync status
         "content_saved_at":      _ts(chapter.content_saved_at),
         "rag_updated_at":        _ts(chapter.rag_updated_at),
@@ -516,34 +514,46 @@ async def staff_update_chapter(
     notes_sections_changed = qa_sections_changed = pyq_rag_changed = False
     notes_blob_changed = qa_blob_changed = False
 
+    # Fields where the user can legitimately clear the value (set to "").
+    _CLEARABLE_FIELDS = frozenset({
+        "title", "title_as", "slug", "meta_description", "meta_description_as", "keywords",
+    })
+
     for field in scalar_fields:
         val = getattr(body, field, None)
-        if val is not None:
-            setattr(chapter, field, val)
-            changed = True
-            if field in _CONTENT_FIELDS:
-                content_changed = True
-            elif field in _RAG_FIELDS:
-                rag_changed = True
-                if field in _PYQ_RAG_BLOB_FIELDS:
-                    pyq_rag_changed = True
-                # Fallback blob edits must also stamp per-scope stale timestamps
-                # so the Notes / Q&A RAG sub-tab stale indicators fire correctly.
-                if field in _NOTES_RAG_BLOB_FIELDS:
-                    notes_blob_changed = True
-                if field in _QA_RAG_BLOB_FIELDS:
-                    qa_blob_changed = True
+        # For content/RAG text fields, treat "" as "not changed" — the full GET
+        # response serialises null DB values as "" (via `or ""`), so a round-trip
+        # save must not blank fields the user never touched.
+        if val is None:
+            continue
+        if val == "" and field not in _CLEARABLE_FIELDS:
+            continue
+        setattr(chapter, field, val)
+        changed = True
+        if field in _CONTENT_FIELDS:
+            content_changed = True
+        elif field in _RAG_FIELDS:
+            rag_changed = True
+            if field in _PYQ_RAG_BLOB_FIELDS:
+                pyq_rag_changed = True
+            # Fallback blob edits must also stamp per-scope stale timestamps
+            # so the Notes / Q&A RAG sub-tab stale indicators fire correctly.
+            if field in _NOTES_RAG_BLOB_FIELDS:
+                notes_blob_changed = True
+            if field in _QA_RAG_BLOB_FIELDS:
+                qa_blob_changed = True
 
-    # List fields — only update when explicitly provided (not None)
+    # List fields — only update when explicitly provided and non-empty.
+    # An empty list [] from the GET round-trip must not clear existing sections.
     for field in ("rag_sections_en", "rag_sections_as"):
         val = getattr(body, field, None)
-        if val is not None:
+        if val is not None and val != []:
             setattr(chapter, field, val)
             changed = True
             notes_sections_changed = True
     for field in ("qa_rag_sections_en", "qa_rag_sections_as"):
         val = getattr(body, field, None)
-        if val is not None:
+        if val is not None and val != []:
             setattr(chapter, field, val)
             changed = True
             qa_sections_changed = True
@@ -585,7 +595,12 @@ async def staff_update_chapter(
         chapter.rag_updated_at = now
     # Per-scope stale tracking: blob fallbacks and structured sections both stamp
     # their respective per-scope timestamp so the sub-tab stale indicator fires.
-    if notes_sections_changed or notes_blob_changed:
+    # Editing notes_en / notes_as is the same as editing the RAG fallback source —
+    # mark the Notes RAG layer as stale so the staff panel shows the "reindex" badge.
+    notes_content_changed = any(
+        (getattr(body, f) or "") != "" for f in ("notes_en", "notes_as")
+    )
+    if notes_sections_changed or notes_blob_changed or notes_content_changed:
         chapter.notes_rag_updated_at = now
     if qa_sections_changed or qa_blob_changed:
         chapter.qa_rag_updated_at = now

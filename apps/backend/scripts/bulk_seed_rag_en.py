@@ -151,10 +151,21 @@ async def _seed_one(
                 result["chunk_errors"] = en.get("errors", [])
 
                 if not args.dry_run:
-                    now = datetime.now(timezone.utc)
-                    chapter.notes_rag_indexed_at = now
-                    chapter.rag_indexed_at = now
-                    await chapter.save()
+                    # Only stamp indexed_at when Vectorize actually accepted vectors.
+                    # A failed upsert must leave the stale flag set so staff can see
+                    # the chapter still needs reindexing on the admin RAG dashboard.
+                    chunk_errors = en.get("errors", [])
+                    vectors_written = en.get("vectorize_upserted", 0)
+                    if not chunk_errors and vectors_written > 0:
+                        now = datetime.now(timezone.utc)
+                        chapter.notes_rag_indexed_at = now
+                        chapter.rag_indexed_at = now
+                        await chapter.save()
+                    elif chunk_errors:
+                        log.warning(
+                            f"  [{counter[0]+1}/{total}] Vectorize errors for {title!r} "
+                            f"— NOT stamping indexed_at so stale flag stays set: {chunk_errors}"
+                        )
 
                 log.info(
                     f"  [{counter[0]+1}/{total}] CHUNKS OK: {title!r} "

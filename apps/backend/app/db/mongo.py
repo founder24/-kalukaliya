@@ -249,6 +249,12 @@ async def create_indexes() -> None:
         await db.streams.create_index([("class_id", ASCENDING)])
         await db.subjects.create_index([("stream_id", ASCENDING)])
         await db.chapters.create_index([("subject_id", ASCENDING), ("status", ASCENDING)])
+        # slug lookup on every chapter page load — must be fast
+        await db.chapters.create_index([("subject_id", ASCENDING), ("slug", ASCENDING)], unique=True, sparse=True)
+        # ordering chapters within a subject
+        await db.chapters.create_index([("subject_id", ASCENDING), ("chapter_number", ASCENDING)])
+        # topic lookup for chat topic-matching
+        await db.chapters.create_index([("published_topics.id", ASCENDING)], sparse=True)
     except Exception as e:
         logger.warning(f"Content hierarchy index creation failed (non-fatal): {e}")
 

@@ -2398,7 +2398,11 @@ async def save_chapter_content(
     # published_topics (Questions tab) are managed manually — ingestion does not write them
     # Merge valid_topics is intentionally disabled here.
 
-    _wc_src = chapter.notes_en or chapter.content_en or ""
+    # Word count reflects the medium being saved, not always EN.
+    if medium == "as":
+        _wc_src = chapter.notes_as or chapter.notes_en or chapter.content_en or ""
+    else:
+        _wc_src = chapter.notes_en or chapter.content_en or ""
     chapter.word_count = len(_wc_src.split()) if _wc_src.strip() else 0
     chapter.notes_generated = True
     chapter.content_saved_at = now
@@ -2596,7 +2600,8 @@ async def process_pdf_entry(
         ch_title   = ch_info["title"]
         body_text  = ch_info["body_text"]
         ex_text    = ch_info["exercises_text"]
-        progress_key = f"{pdf_url}|ch{raw_num}"
+        # Medium is part of the key so EN and AS runs don't mark each other done.
+        progress_key = f"{pdf_url}|ch{raw_num}|{medium}"
 
         if not force and progress_key in done_keys:
             log.info(f"  Ch {ch_num}: '{ch_title}' — already done, skipping")
