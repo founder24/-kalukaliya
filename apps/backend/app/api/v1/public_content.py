@@ -1030,7 +1030,7 @@ async def get_chapter_pyq_images(chapter_id: str):
         {"chapter_id": chapter_id, "is_image": True},
         {"_id": 1, "file_url": 1, "file_urls": 1, "filename": 1,
          "exam_year": 1, "page_count": 1},
-    ).sort("exam_year", -1).to_list(length=50)
+    ).sort([("exam_year", -1), ("created_at", 1)]).to_list(length=50)
 
     papers = []
     for d in docs:
