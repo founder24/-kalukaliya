@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Sparkles, ChevronRight, Mail, Globe } from 'lucide-react';
 import { LogoMark, LogoFull } from '@/components/Logo';
-import { DeveloperCredit } from '@/components/layout/DeveloperCredit';
 import Reveal from './Reveal';
 import GlowOrb from './GlowOrb';
 
@@ -231,7 +230,6 @@ export default function TestimonialsFooter({ year, contentLang = 'en' }) {
               {t.madeWith}
             </p>
           </div>
-          <DeveloperCredit className="mt-5 text-center" />
         </div>
       </footer>
     </>

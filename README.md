@@ -4,10 +4,23 @@ AI-powered study, content, and educational browsing platform for Assam Board stu
 
 Syrabit.ai helps students prepare for SEBA, AHSEC, Degree, and related board exams with curriculum-aware content, multilingual AI assistance, staff/admin publishing tools, SEO-ready learning pages, payments, analytics, and an edge-protected production architecture.
 
+<<<<<<< ours
+<<<<<<< ours
 - **Status:** Production-oriented private monorepo
 - **Primary users:** Students, staff content editors, administrators
 - **Production site:** `https://syrabit.ai`
 - **API edge:** `https://api.syrabit.ai`
+=======
+=======
+>>>>>>> theirs
+**Status:** Production-oriented private monorepo  
+**Primary users:** Students, staff content editors, administrators  
+**Production site:** `https://syrabit.ai`  
+**API edge:** `https://api.syrabit.ai`
+<<<<<<< ours
+>>>>>>> theirs
+=======
+>>>>>>> theirs
 
 ## What This Repo Contains
 
