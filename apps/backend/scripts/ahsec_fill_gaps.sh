@@ -9,6 +9,21 @@
 #   bash ahsec_fill_gaps.sh --medium as   # Assamese only
 set -euo pipefail
 
+# ── Cross-script mutex ────────────────────────────────────────────────────────
+# Prevent concurrent ingestion runs that would exhaust the MongoDB pool and
+# deadlock on the progress JSONL lock.  Uses a non-blocking flock so the script
+# exits immediately instead of queuing behind another run.
+LOCK_FILE="/tmp/syrabit_ingest.lock"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "[ahsec_fill_gaps] Another ingestion script is already running." >&2
+  echo "  Lock file: $LOCK_FILE" >&2
+  echo "  Wait for it to finish, then re-run this script." >&2
+  exit 0
+fi
+echo $$ > /tmp/syrabit_ingest.pid
+# ── Lock acquired — proceed ───────────────────────────────────────────────────
+
 cd "$(dirname "$0")/.."
 
 # ── Parse optional --medium flag ──────────────────────────────────────────────

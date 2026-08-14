@@ -119,24 +119,28 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Secret Manager startup failed (non-fatal): {e}")
 
-    # Warm up MongoDB topic embeddings cache (loads all TopicEmbedding docs
-    # from Atlas into memory so the first chat request is not cold)
-    try:
-        from app.services.ai.topic_matcher import topic_matcher
-        await topic_matcher._load_embeddings()
-        logger.info(
-            f"Topic embeddings warmed up: {len(topic_matcher._embeddings or [])} topics"
-        )
-    except Exception as e:
-        logger.warning(f"Topic embedding warm-up failed (non-fatal): {e}")
+    # Warm up topic embeddings + greeting RAG in the background so they don't
+    # delay server startup or block the first request.  Both are non-fatal —
+    # the first real request that needs them will trigger a lazy load instead.
+    async def _warm_topic_matcher() -> None:
+        try:
+            from app.services.ai.topic_matcher import topic_matcher
+            await topic_matcher._load_embeddings()
+            logger.info(
+                f"Topic embeddings warmed up: {len(topic_matcher._embeddings or [])} topics"
+            )
+        except Exception as e:
+            logger.warning(f"Topic embedding warm-up failed (non-fatal): {e}")
 
-    # Warm up Greeting RAG — pre-embed all greeting queries via CF bge-m3
-    # so casual greetings are served from memory (<5 ms) instead of calling the LLM.
-    try:
-        from app.services.ai.greeting_rag import greeting_rag
-        await greeting_rag.initialize()
-    except Exception as e:
-        logger.warning(f"Greeting RAG warm-up failed (non-fatal, fast-path still works): {e}")
+    async def _warm_greeting_rag() -> None:
+        try:
+            from app.services.ai.greeting_rag import greeting_rag
+            await greeting_rag.initialize()
+        except Exception as e:
+            logger.warning(f"Greeting RAG warm-up failed (non-fatal, fast-path still works): {e}")
+
+    asyncio.create_task(_warm_topic_matcher(), name="warm_topic_matcher")
+    asyncio.create_task(_warm_greeting_rag(), name="warm_greeting_rag")
 
     # ── Admin Bootstrap ──────────────────────────────────────────────────────
     # Creates or updates the admin user when ADMIN_EMAIL + ADMIN_PASSWORD are set.
@@ -210,7 +214,22 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
+    # ── Shutdown ─────────────────────────────────────────────────────────────
+    # Cancel all pending background tasks (asyncio.create_task calls in
+    # admin_rag.py, admin_cron.py, etc.) so that in-progress AI/DB writes are
+    # not left in a half-written state when uvicorn reloads on a file save.
+    _current = asyncio.current_task()
+    _pending = [
+        t for t in asyncio.all_tasks()
+        if t is not _current and not t.done()
+    ]
+    if _pending:
+        logger.info(f"Shutdown: cancelling {len(_pending)} background task(s)...")
+        for _t in _pending:
+            _t.cancel()
+        await asyncio.gather(*_pending, return_exceptions=True)
+        logger.info("Background tasks cancelled cleanly.")
+
     from app.services.ai.sarvam_client import sarvam_client
     from app.services.payment.razorpay_client import razorpay_client
     from app.services.comms.resend_client import close_resend_client

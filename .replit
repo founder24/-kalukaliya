@@ -35,6 +35,10 @@ args = "AHSEC Fill Partial Subjects"
 task = "workflow.run"
 args = "AHSEC Retry Blank Notes"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "AHSEC Bulk Seed RAG (EN)"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -60,7 +64,7 @@ args = "cd apps/backend && APP_ENV=development python3 -m uvicorn app.main:app -
 waitForPort = 8000
 
 [[workflows.workflow]]
-name = "AHSEC Ingestion"
+name = "AHSEC Bulk Seed RAG (EN)"
 author = "agent"
 
 [workflows.workflow.metadata]
@@ -68,7 +72,18 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd apps/backend && python3 -m scripts.ahsec_ingest --class11 --class12 --medium en --force --delay 4 && echo '=== EN INGESTION COMPLETE (AS coming soon) ==='"
+args = "cd apps/backend && python3 -m scripts.bulk_seed_rag_en --parallelism 3 --delay 0.5"
+
+[[workflows.workflow]]
+name = "AHSEC Ingestion"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd apps/backend && python3 -m scripts.ahsec_ingest --class11 --class12 --medium en --force --delay 4 && echo '=== EN INGESTION COMPLETE ==='"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [[workflows.workflow]]
 name = "AHSEC Fill Partial Subjects"
@@ -77,6 +92,9 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "cd apps/backend && bash scripts/ahsec_fill_gaps.sh --medium en"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [[workflows.workflow]]
 name = "AHSEC Retry Blank Notes"
@@ -88,17 +106,6 @@ args = "cd apps/backend && bash scripts/ahsec_retry_blank_notes.sh --medium en"
 
 [workflows.workflow.metadata]
 outputType = "console"
-
-[[workflows.workflow]]
-name = "AHSEC Bulk Seed RAG (EN)"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd apps/backend && python3 -m scripts.bulk_seed_rag_en --parallelism 3 --delay 0.5"
 
 [[ports]]
 localPort = 5000

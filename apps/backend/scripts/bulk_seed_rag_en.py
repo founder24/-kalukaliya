@@ -192,6 +192,13 @@ async def _seed_one(
 async def main() -> None:
     args = _parse_args()
 
+    # ── Cross-script mutex ────────────────────────────────────────────────────
+    if not args.dry_run:
+        from scripts.script_lock import acquire_script_lock
+        _lock_fh = acquire_script_lock("bulk_seed_rag_en")
+        if _lock_fh is None:
+            sys.exit(0)
+
     # ── Bootstrap DB ──────────────────────────────────────────────────────────
     from app.db.mongo import init_mongo
     from app.config import settings

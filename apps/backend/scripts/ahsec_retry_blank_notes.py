@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import fcntl
 import json
 import logging
 import os
@@ -38,8 +39,9 @@ logging.basicConfig(
 )
 log = logging.getLogger("retry_blank_notes")
 
-PROGRESS_FILE = Path(__file__).parent / ".ahsec_ingest_progress.jsonl"
-NOTES_MIN_CHARS = 100  # chapters shorter than this are considered "blank"
+PROGRESS_FILE      = Path(__file__).parent / ".ahsec_ingest_progress.jsonl"
+PROGRESS_LOCK_FILE = Path(__file__).parent / ".ahsec_ingest_progress.lock"
+NOTES_MIN_CHARS    = 100  # chapters shorter than this are considered "blank"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -163,7 +165,15 @@ def unlock_chapters_in_progress_file(
         new_content = "\n".join(kept_lines)
         if new_content and not new_content.endswith("\n"):
             new_content += "\n"
-        PROGRESS_FILE.write_text(new_content)
+        # Acquire the same exclusive lock used by ahsec_ingest.py so we never
+        # race with a concurrent ingest run that is also appending to the file.
+        lf = PROGRESS_LOCK_FILE.open("a+")
+        try:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            PROGRESS_FILE.write_text(new_content)
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+            lf.close()
         log.info(f"Removed {removed} 'done' entries from {PROGRESS_FILE}")
     else:
         log.info("No 'done' entries found for blank chapters in progress file "
@@ -174,6 +184,15 @@ def unlock_chapters_in_progress_file(
 
 async def main() -> None:
     args = _parse_args()
+
+    # ── Cross-script mutex ────────────────────────────────────────────────────
+    # This script only patches the progress file — it doesn't ingest.
+    # Still acquire the mutex so it doesn't run while an ingest is active.
+    if not args.dry_run:
+        from scripts.script_lock import acquire_script_lock
+        _lock_fh = acquire_script_lock("ahsec_retry_blank_notes")
+        if _lock_fh is None:
+            sys.exit(0)
 
     # ── Bootstrap MongoDB ─────────────────────────────────────────────────────
     from app.db.mongo import init_mongo

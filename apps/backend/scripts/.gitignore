@@ -1,1 +1,6 @@
+# Progress + lock files written during ingestion runs
 .ahsec_ingest_progress.jsonl
+.ahsec_ingest_progress.lock
+# Log files (now written to /tmp, but ignored here as a safety net)
+*.log
+*.lock

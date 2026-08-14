@@ -49,7 +49,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(Path(__file__).parent / ".ahsec_ingest.log"),
+        logging.FileHandler(Path("/tmp/ahsec_ingest.log")),
     ],
 )
 log = logging.getLogger("ahsec_ingest")
@@ -2696,6 +2696,15 @@ async def process_pdf_entry(
 
 async def main() -> None:
     args = _parse_args()
+
+    # ── Cross-script mutex ────────────────────────────────────────────────────
+    # Prevents multiple ingestion scripts from running simultaneously, which
+    # would exhaust the MongoDB connection pool and deadlock on the progress file.
+    if not args.dry_run:
+        from scripts.script_lock import acquire_script_lock
+        _lock_fh = acquire_script_lock("ahsec_ingest")
+        if _lock_fh is None:
+            sys.exit(0)
 
     # ── Bootstrap ─────────────────────────────────────────────────────────────
     from app.db.mongo import init_mongo
