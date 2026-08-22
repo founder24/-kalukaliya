@@ -19,7 +19,7 @@
     "test": "pnpm --recursive run test"
   },
   "devDependencies": {
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   },
   "pnpm": {
     "overrides": {
