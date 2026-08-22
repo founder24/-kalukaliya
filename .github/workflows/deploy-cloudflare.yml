@@ -1,0 +1,247 @@
+name: Deploy — Cloudflare Native Only
+
+# This path deliberately does not authenticate to GCP or read GCP
+# Secret Manager. API Worker secrets are already managed by Cloudflare, and
+# the frontend build uses the optional GitHub VITE_BACKEND_URL secret.
+on:
+  workflow_dispatch:
+    inputs:
+      activate_native:
+        description: 'Route the public edge Worker to the D1 API Worker after deployment'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  API_WORKER_URL: https://syrabit-api-prod.axomxplain.workers.dev
+  PUBLIC_EDGE_URL: https://api.syrabit.ai
+  FRONTEND_URL: https://syrabit.ai
+
+concurrency:
+  group: cloudflare-native-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Cloudflare Configuration & Quality Gates
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack + PNPM
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate D1 configuration
+        run: |
+          bash scripts/validate-d1-config.sh apps/api/wrangler.toml
+
+      - name: Verify API Worker secrets in Cloudflare
+        working-directory: apps/api
+        run: |
+          set -euo pipefail
+          secret_list="$(pnpm exec wrangler secret list --env production --format json)"
+          printf '%s' "$secret_list" | python3 -c '
+          import json
+          import sys
+
+          required = {
+              "JWT_SECRET",
+              "ADMIN_JWT_SECRET",
+              "RESET_TOKEN_SECRET",
+              "EDGE_SHARED_SECRET",
+              "RAZORPAY_KEY_ID",
+              "RAZORPAY_KEY_SECRET",
+              "RAZORPAY_WEBHOOK_SECRET",
+              "RESEND_API_KEY",
+              "INDEXNOW_API_KEY",
+              "INDEXNOW_INTERNAL_SECRET",
+              "R2_PUBLIC_URL",
+              "TRANSLATE_CRON_SECRET",
+          }
+          configured = {item["name"] for item in json.load(sys.stdin)}
+          missing = sorted(required - configured)
+          if missing:
+              print("Missing Cloudflare API Worker secrets: " + ", ".join(missing))
+              print("Set them with: pnpm exec wrangler secret put NAME --env production")
+              raise SystemExit(1)
+          print("All required API Worker secrets are present in Cloudflare.")
+          '
+
+      - name: Verify edge Worker secrets in Cloudflare
+        working-directory: apps/edge
+        run: |
+          set -euo pipefail
+          secret_list="$(pnpm exec wrangler secret list --env production --format json)"
+          printf '%s' "$secret_list" | python3 -c '
+          import json
+          import sys
+
+          required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}
+          configured = {item["name"] for item in json.load(sys.stdin)}
+          missing = sorted(required - configured)
+          if missing:
+              print("Missing Cloudflare edge Worker secrets: " + ", ".join(missing))
+              print("Set them with: pnpm exec wrangler secret put NAME --env production")
+              raise SystemExit(1)
+          print("Required edge Worker secrets are present in Cloudflare.")
+          '
+
+      - name: Test and type-check API Worker
+        run: |
+          pnpm --filter syrabit-api test
+          pnpm --filter syrabit-api run type-check
+
+      - name: Test and type-check edge Worker
+        run: |
+          pnpm --filter syrabit-edge test
+          pnpm --filter syrabit-edge exec tsc --noEmit
+
+      - name: Type-check frontend
+        run: pnpm --filter @workspace/syrabit exec tsc --noEmit
+
+  deploy-api:
+    name: Deploy API Worker + D1
+    runs-on: ubuntu-latest
+    needs: verify
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack + PNPM
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply D1 migrations
+        run: pnpm --filter syrabit-api exec wrangler d1 migrations apply syrabit-db --remote --env production
+
+      - name: Deploy API Worker
+        run: pnpm --filter syrabit-api exec wrangler deploy --env production
+
+  deploy-edge:
+    name: Deploy Edge Worker
+    runs-on: ubuntu-latest
+    needs: deploy-api
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack + PNPM
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Guard against sentinel KV IDs
+        run: |
+          if grep -v '^\s*#' apps/edge/wrangler.toml | grep -qi 'REPLACE_ME'; then
+            echo "::error::wrangler.toml contains a sentinel KV namespace ID."
+            exit 1
+          fi
+
+      - name: Deploy edge Worker
+        run: pnpm --filter syrabit-edge exec wrangler deploy --env production
+
+      - name: Activate D1 API Worker routing
+        if: ${{ github.event.inputs.activate_native == 'true' }}
+        run: |
+          printf 'true' | pnpm --filter syrabit-edge exec wrangler secret put API_WORKER_LIVE --env production
+
+  deploy-frontend:
+    name: Deploy Frontend
+    runs-on: ubuntu-latest
+    needs: verify
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack + PNPM
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm --filter @workspace/syrabit run build
+        env:
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://api.syrabit.ai' }}
+
+      - name: Deploy to Cloudflare Pages
+        run: pnpm --filter syrabit-edge exec wrangler pages deploy apps/frontend/dist --project-name=syrabitfrontend
+
+      - name: Submit URLs to IndexNow
+        if: ${{ env.INDEXNOW_SECRET != '' }}
+        run: node apps/frontend/scripts/indexnow-submit.mjs
+
+  smoke:
+    name: Cloudflare Native Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [deploy-api, deploy-edge, deploy-frontend]
+    if: |
+      always() &&
+      needs.deploy-api.result == 'success' &&
+      needs.deploy-edge.result == 'success' &&
+      needs.deploy-frontend.result == 'success'
+    steps:
+      - name: API Worker is live and Worker-native
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/api.headers -o /tmp/api.json -w '%{http_code}' \
+            "${API_WORKER_URL}/health" --max-time 30)"
+          test "$status" = "200"
+          grep -qi '^x-syrabit-route: worker-native' /tmp/api.headers
+          echo "API Worker health passed: HTTP ${status}"
+
+      - name: Public edge is reachable
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/edge.headers -o /tmp/edge.json -w '%{http_code}' \
+            "${PUBLIC_EDGE_URL}/health" --max-time 30)"
+          test "$status" = "200"
+          echo "Public edge health passed: HTTP ${status}"
+
+      - name: Confirm native routing through public edge
+        if: ${{ github.event.inputs.activate_native == 'true' }}
+        run: |
+          grep -qi '^x-syrabit-route: worker-native' /tmp/edge.headers
+          echo "Public edge is routing through the D1 API Worker."
+
+      - name: Frontend is reachable
+        run: |
+          status="$(curl -sS -o /dev/null -w '%{http_code}' "${FRONTEND_URL}" --max-time 30)"
+          test "$status" = "200"
+          echo "Frontend reachability passed: HTTP ${status}"
