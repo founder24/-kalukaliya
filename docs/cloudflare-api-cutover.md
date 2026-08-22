@@ -181,3 +181,53 @@ for this rehearsal.
   finalized the run after 120 seconds as `completed`, `processed=1`,
   `failed=0`, preserved `Atomically committed forced notes`, and cleared the
   lease. The second disposable Worker and database were then deleted as well.
+
+### Production recovery rollout — 2026-08-22
+
+- The normal GitHub deployment workflow was started from commit
+  `493f88733d8f47a967a7f11a67ae35c331c0354f` (run
+  `32554393533`). Its dependency gate and frontend deployment passed, but the
+  backend job stopped before the API Worker job because the GCP project
+  reported `BILLING_DISABLED` while creating the existing
+  `cf-worker-ai-token` Secret Manager secret. No API migration or Worker step
+  ran in that failed workflow.
+- The exact API Worker release steps from that workflow were then run
+  directly: the remote D1 migration ledger applied all pending migrations
+  through `0011_seed_run_force.sql`, and a subsequent ledger check reported
+  no migrations to apply. The matching production Worker deployed as version
+  `25571bae-f9ab-4695-a82f-38fff07133ab` at
+  `https://syrabit-api-prod.axomxplain.workers.dev`, with the
+  `*/5 * * * *` trigger registered.
+- Native Worker routing was confirmed before and after the release with
+  request IDs `task293-worker-native-status-pre-20260822` and
+  `task293-worker-native-status-post-20260822`. Both returned the expected
+  authentication response (`401`) with
+  `X-Syrabit-Route: worker-native`; neither request accessed curriculum data.
+- Disposable unpublished fixture prefix:
+  `task293-20260822T053115Z`. It contained three draft chapters and two
+  seed rows. The recovery run was
+  `task293-20260822T053115Z-recovery-run`, initially `running` with lease
+  token `task293-expired-owner` and expiry `2026-08-22T05:31:14Z`. The
+  independent control row was
+  `task293-20260822T053115Z-control-run`, with token
+  `task293-control-owner` and unexpired expiry `2026-08-22T06:01:15Z`.
+- The first production cron tick at 05:35 UTC reclaimed only the expired
+  recovery lease. It persisted chapter one without regeneration, completed
+  chapter two, and left the run queued with `processed=2`, `failed=0`. The
+  next tick at 05:40 UTC completed chapter three; the original run finished
+  at `05:41:08.289Z` with `completed`, `processed=3`, `failed=0`, and all
+  three per-chapter log entries `done`. Its lease fields were cleared. The
+  control row stayed `running` with its original token and future expiry for
+  the entire recovery proof.
+- After that control proof was captured, the control row was released and
+  follow-on run `task293-20260822T053115Z-next-run` completed at
+  `05:45:32.036Z` with `processed=1`, `failed=0`.
+- The disposable board, class, stream, subject, three chapters, and three
+  seed rows were deleted after the snapshots were retained. Independent
+  post-cleanup counts were `boards=0`, `classes=0`, `streams=0`,
+  `subjects=0`, `chapters=0`, and `seed_runs=0` for the fixture prefix.
+- Because the full workflow could not reach its API job until the unrelated
+  GCP billing condition is repaired, the production D1/Worker portion of this
+  record was completed with the workflow's exact API commands directly. The
+  Cloud Run billing condition remains an explicit deployment prerequisite for
+  future full-stack releases.
