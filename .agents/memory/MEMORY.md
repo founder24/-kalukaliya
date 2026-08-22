@@ -49,3 +49,4 @@
 - [Wrangler local integration tests](wrangler-local-integration-tests.md) — getPlatformProxy remote bindings default on; tests must opt out to remain credential-free.
 - [API Worker production deployment](api-worker-production-deployment.md) — Workers AI smoke tests use the workers.dev account slug, and direct Wrangler deploys require Node 22.
 - [Worker interruption rehearsals](worker-interruption-rehearsals.md) — Remote dev can fail CA trust; use a disposable deployed Worker and D1 for real interruption evidence.
+- [Production seed rollout caveat](syrabit-production-seed-rollout.md) — Full-stack release can stop before API Worker on GCP billing; preserve direct API rollout evidence and repair the gate.

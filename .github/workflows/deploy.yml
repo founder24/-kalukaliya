@@ -39,11 +39,78 @@ jobs:
     if: ${{ github.event.inputs.skip_dep_check != 'true' }}
     uses: ./.github/workflows/ci-deps.yml
 
+  gcp-preflight:
+    name: GCP Billing & Secret Manager Preflight
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      GCP_PROJECT: blissful-acumen-495019-t6
+    steps:
+      - name: Authenticate to GCP (Service Account Key)
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify billing and Secret Manager prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking GCP billing for project ${GCP_PROJECT}..."
+          BILLING_ENABLED="$(
+            gcloud billing projects describe "$GCP_PROJECT" \
+              --format='value(billingEnabled)' 2>/dev/null || true
+          )"
+
+          case "${BILLING_ENABLED,,}" in
+            true)
+              echo "✅ Billing is enabled for ${GCP_PROJECT}"
+              ;;
+            false)
+              echo "::error title=GCP billing disabled::Billing is disabled for GCP project ${GCP_PROJECT}. Enable billing for this project in Google Cloud Console, then rerun the release."
+              exit 1
+              ;;
+            *)
+              echo "::error title=GCP billing check failed::Could not verify billing for GCP project ${GCP_PROJECT}. Confirm the release service account can view billing status, then rerun the release."
+              exit 1
+              ;;
+          esac
+
+          if ! gcloud services list \
+              --enabled \
+              --project="$GCP_PROJECT" \
+              --filter='config.name=secretmanager.googleapis.com' \
+              --format='value(config.name)' |
+              grep -Fxq 'secretmanager.googleapis.com'; then
+            echo "::error title=Secret Manager API unavailable::Secret Manager is not enabled or is not accessible for GCP project ${GCP_PROJECT}. Enable secretmanager.googleapis.com and grant the release service account access, then rerun the release."
+            exit 1
+          fi
+          echo "✅ Secret Manager API is enabled for ${GCP_PROJECT}"
+
+          # Check metadata for a required release secret without reading or
+          # printing any secret value. The workflow can create optional
+          # secrets later, but the core runtime secret must already exist.
+          if ! gcloud secrets describe jwt-secret \
+              --project="$GCP_PROJECT" \
+              --format='value(name)' >/dev/null 2>/dev/null; then
+            echo "::error title=Secret Manager access failed::The release service account cannot access required Secret Manager metadata in GCP project ${GCP_PROJECT}. Verify the jwt-secret resource and IAM permissions, then rerun the release."
+            exit 1
+          fi
+          echo "✅ Required Secret Manager metadata is accessible for ${GCP_PROJECT}"
+
   deploy-backend:
     name: Deploy Backend (Docker → Artifact Registry → Cloud Run)
     runs-on: ubuntu-latest
-    needs: [dep-check]
-    if: always() && (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped')
+    needs: [dep-check, gcp-preflight]
+    if: |
+      always() &&
+      (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
+      needs.gcp-preflight.result == 'success'
     permissions:
       id-token: write
       contents: read
@@ -262,11 +329,12 @@ jobs:
   deploy-api:
     name: Deploy API Worker (Cloudflare D1 + Hono)
     runs-on: ubuntu-latest
-    needs: [dep-check, deploy-backend]
+    needs: [dep-check, gcp-preflight, deploy-backend]
     if: |
       always() &&
       github.event.inputs.backend_only != 'true' &&
       (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
+      needs.gcp-preflight.result == 'success' &&
       (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped')
     steps:
       - uses: actions/checkout@v4
@@ -511,10 +579,11 @@ jobs:
   deploy-edge:
     name: Deploy Edge (Cloudflare Worker)
     runs-on: ubuntu-latest
-    needs: [deploy-backend]
+    needs: [gcp-preflight, deploy-backend]
     if: |
       always() &&
       github.event.inputs.backend_only != 'true' &&
+      needs.gcp-preflight.result == 'success' &&
       (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped')
     permissions:
       id-token: write
@@ -621,7 +690,12 @@ jobs:
   deploy-frontend:
     name: Deploy Frontend (Cloudflare Pages)
     runs-on: ubuntu-latest
-    if: github.event.inputs.backend_only != 'true'
+    needs: [dep-check, gcp-preflight]
+    if: |
+      always() &&
+      github.event.inputs.backend_only != 'true' &&
+      (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
+      needs.gcp-preflight.result == 'success'
     env:
       INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
     steps:

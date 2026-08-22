@@ -22,6 +22,24 @@ content seeding permanently blocked.
 
 ## Before a traffic stage
 
+### Release prerequisite: GCP billing and Secret Manager
+
+The release workflow runs a `GCP Billing & Secret Manager Preflight` before
+starting any backend, Worker, edge, or frontend build/deploy job. It checks the
+`billingEnabled` status for GCP project `blissful-acumen-495019-t6`, confirms
+that the Secret Manager API is enabled, and verifies metadata access to the
+required `jwt-secret` resource. The check uses metadata only and never reads or
+prints secret values.
+
+If the preflight reports `GCP billing disabled`, enable billing for
+`blissful-acumen-495019-t6` in Google Cloud Console and rerun the release. If
+the billing lookup cannot be completed, grant the release service account
+permission to view billing status. Secret Manager errors should be remediated
+by enabling `secretmanager.googleapis.com` for the same project and restoring
+the required Secret Manager IAM access before rerunning. A failed preflight
+stops the release before Docker builds, Cloud Run deployment, Worker
+deployment, or smoke tests begin.
+
 1. Apply D1 migrations and run the idempotent Mongo→D1 migration.
 2. Pause writes or confirm the migration is dual-writing, then run:
 
