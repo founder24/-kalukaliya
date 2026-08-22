@@ -40,6 +40,31 @@ the required Secret Manager IAM access before rerunning. A failed preflight
 stops the release before Docker builds, Cloud Run deployment, Worker
 deployment, or smoke tests begin.
 
+### Cloudflare-only release
+
+The Cloudflare migration can be deployed without the GCP release gate by
+manually running `.github/workflows/deploy-cloudflare.yml`. This path:
+
+- validates the D1 configuration and runs the API, edge, and frontend quality
+  gates;
+- applies remote D1 migrations and deploys `syrabit-api-prod`;
+- deploys the edge Worker and Cloudflare Pages frontend; and
+- runs direct API Worker, public edge, and frontend smoke checks.
+
+It does not authenticate to GCP, deploy Cloud Run, read Secret Manager, or
+claim that the Cloud Run compatibility bridge is healthy. API and edge secrets
+are inventoried through Wrangler metadata only; their values must already be
+stored in Cloudflare. `VITE_BACKEND_URL` is read from the GitHub Actions secret
+when present and otherwise defaults to `https://api.syrabit.ai`.
+
+`activate_native` defaults to `false` so deploying code does not silently
+change public traffic. Set it to `true` only after the D1 Worker is ready; the
+workflow then writes the explicit `API_WORKER_LIVE=true` Cloudflare secret and
+requires the public edge smoke test to report a Worker-native route. The
+existing `BACKEND_URL` and `GOOGLE_SA_KEY` edge secrets remain optional for
+native traffic, but routes still covered by the documented Cloud Run
+compatibility bridge require them.
+
 1. Apply D1 migrations and run the idempotent Mongo→D1 migration.
 2. Pause writes or confirm the migration is dual-writing, then run:
 
