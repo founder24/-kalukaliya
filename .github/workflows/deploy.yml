@@ -97,7 +97,7 @@ jobs:
           # secrets later, but the core runtime secret must already exist.
           if ! gcloud secrets describe jwt-secret \
               --project="$GCP_PROJECT" \
-              --format='value(name)' >/dev/null 2>/dev/null; then
+              --format='value(name)' >/dev/null; then
             echo "::error title=Secret Manager access failed::The release service account cannot access required Secret Manager metadata in GCP project ${GCP_PROJECT}. Verify the jwt-secret resource and IAM permissions, then rerun the release."
             exit 1
           fi
