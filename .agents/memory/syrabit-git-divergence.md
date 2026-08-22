@@ -27,6 +27,18 @@ OR just keep using the Git Data API pattern for subsequent pushes.
 **Why:** Replit sandbox detects git push as potentially destructive; the only
 non-interactive way to push code from the agent is the REST API.
 
+## Reconciling a Replit “merge conflict” banner
+When GitHub `main` and local `main` have diverged after API-created commits,
+merge the remote tip locally, resolve only the genuine content conflicts, and
+publish the merged **tree** as a non-force Git Data API commit based on the
+live GitHub tip. Fetch that new commit, compare its tree hash to local `HEAD`,
+and only then reset local `main` to `origin/main`.
+
+**Why:** the API publishes a new squashed commit with different ancestry even
+when its files exactly match local `HEAD`; resetting before verifying tree
+equality could discard local work, while leaving the histories divergent keeps
+the Replit Sync UI in an error state.
+
 ## CI dep check
 The deploy workflow gates on `ci-deps.yml` which runs `bash scripts/compile-deps.sh --check`.
 Always run `bash scripts/compile-deps.sh` (not raw pip-compile) to generate requirements.txt —
