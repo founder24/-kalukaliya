@@ -1,8 +1,8 @@
 name: Deploy — Cloudflare Native Only
 
 # This path deliberately does not authenticate to GCP or read GCP
-# Secret Manager. API Worker secrets are already managed by Cloudflare, and
-# the frontend build uses the optional GitHub VITE_BACKEND_URL secret.
+# Secret Manager. Worker secrets are provisioned from GitHub Actions secrets
+# through Wrangler, and the frontend build uses the optional GitHub secret.
 on:
   workflow_dispatch:
     inputs:
@@ -32,6 +32,18 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
+      RESET_TOKEN_SECRET: ${{ secrets.RESET_TOKEN_SECRET }}
+      EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+      RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
+      RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+      RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
+      INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
+      R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+      TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,56 +61,25 @@ jobs:
         run: |
           bash scripts/validate-d1-config.sh apps/api/wrangler.toml
 
-      - name: Verify API Worker secrets in Cloudflare
-        working-directory: apps/api
+      - name: Verify required GitHub Actions secrets are supplied
         run: |
           set -euo pipefail
-          secret_list="$(pnpm exec wrangler secret list --env production --format json)"
-          printf '%s' "$secret_list" | python3 -c '
-          import json
-          import sys
-
-          required = {
-              "JWT_SECRET",
-              "ADMIN_JWT_SECRET",
-              "RESET_TOKEN_SECRET",
-              "EDGE_SHARED_SECRET",
-              "RAZORPAY_KEY_ID",
-              "RAZORPAY_KEY_SECRET",
-              "RAZORPAY_WEBHOOK_SECRET",
-              "RESEND_API_KEY",
-              "INDEXNOW_API_KEY",
-              "INDEXNOW_INTERNAL_SECRET",
-              "R2_PUBLIC_URL",
-              "TRANSLATE_CRON_SECRET",
-          }
-          configured = {item["name"] for item in json.load(sys.stdin)}
-          missing = sorted(required - configured)
-          if missing:
-              print("Missing Cloudflare API Worker secrets: " + ", ".join(missing))
-              print("Set them with: pnpm exec wrangler secret put NAME --env production")
-              raise SystemExit(1)
-          print("All required API Worker secrets are present in Cloudflare.")
-          '
-
-      - name: Verify edge Worker secrets in Cloudflare
-        working-directory: apps/edge
-        run: |
-          set -euo pipefail
-          secret_list="$(pnpm exec wrangler secret list --env production --format json)"
-          printf '%s' "$secret_list" | python3 -c '
-          import json
-          import sys
-
-          required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}
-          configured = {item["name"] for item in json.load(sys.stdin)}
-          missing = sorted(required - configured)
-          if missing:
-              print("Missing Cloudflare edge Worker secrets: " + ", ".join(missing))
-              print("Set them with: pnpm exec wrangler secret put NAME --env production")
-              raise SystemExit(1)
-          print("Required edge Worker secrets are present in Cloudflare.")
-          '
+          required=(
+            JWT_SECRET ADMIN_JWT_SECRET RESET_TOKEN_SECRET EDGE_SHARED_SECRET
+            RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET
+            RESEND_API_KEY INDEXNOW_API_KEY INDEXNOW_INTERNAL_SECRET
+            R2_PUBLIC_URL TRANSLATE_CRON_SECRET
+          )
+          missing=()
+          for name in "${required[@]}"; do
+            [[ -n "${!name:-}" ]] || missing+=("$name")
+          done
+          if ((${#missing[@]} > 0)); then
+            echo "::error::Missing GitHub Actions secrets: ${missing[*]}"
+            echo "Add these names under repository Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "All required GitHub Actions secrets are supplied."
 
       - name: Test and type-check API Worker
         run: |
@@ -133,6 +114,62 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Provision API Worker secrets from GitHub
+        working-directory: apps/api
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
+          RESET_TOKEN_SECRET: ${{ secrets.RESET_TOKEN_SECRET }}
+          EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+          RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
+          RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
+          INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+          TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          put_secret() {
+            local name="$1"
+            local value="$2"
+            printf '%s' "$value" | pnpm exec wrangler secret put "$name" --env production >/dev/null
+          }
+          put_secret JWT_SECRET "$JWT_SECRET"
+          put_secret ADMIN_JWT_SECRET "$ADMIN_JWT_SECRET"
+          put_secret RESET_TOKEN_SECRET "$RESET_TOKEN_SECRET"
+          put_secret EDGE_SHARED_SECRET "$EDGE_SHARED_SECRET"
+          put_secret RAZORPAY_KEY_ID "$RAZORPAY_KEY_ID"
+          put_secret RAZORPAY_KEY_SECRET "$RAZORPAY_KEY_SECRET"
+          put_secret RAZORPAY_WEBHOOK_SECRET "$RAZORPAY_WEBHOOK_SECRET"
+          put_secret RESEND_API_KEY "$RESEND_API_KEY"
+          put_secret INDEXNOW_API_KEY "$INDEXNOW_API_KEY"
+          put_secret INDEXNOW_INTERNAL_SECRET "$INDEXNOW_INTERNAL_SECRET"
+          put_secret R2_PUBLIC_URL "$R2_PUBLIC_URL"
+          put_secret TRANSLATE_CRON_SECRET "$TRANSLATE_CRON_SECRET"
+
+      - name: Verify API Worker secret names
+        run: |
+          set -euo pipefail
+          secret_list="$(pnpm --filter syrabit-api exec wrangler secret list --env production --format json)"
+          printf '%s' "$secret_list" | python3 -c '
+          import json
+          import sys
+          required = {
+              "JWT_SECRET", "ADMIN_JWT_SECRET", "RESET_TOKEN_SECRET",
+              "EDGE_SHARED_SECRET", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET",
+              "RAZORPAY_WEBHOOK_SECRET", "RESEND_API_KEY", "INDEXNOW_API_KEY",
+              "INDEXNOW_INTERNAL_SECRET", "R2_PUBLIC_URL", "TRANSLATE_CRON_SECRET",
+          }
+          configured = {item["name"] for item in json.load(sys.stdin)}
+          missing = sorted(required - configured)
+          if missing:
+              print("Cloudflare API Worker secret provisioning is incomplete: " + ", ".join(missing))
+              raise SystemExit(1)
+          print("All required API Worker secret names are present.")
+          '
+
       - name: Apply D1 migrations
         run: pnpm --filter syrabit-api exec wrangler d1 migrations apply syrabit-db --remote --env production
 
@@ -158,6 +195,32 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Provision shared edge secrets from GitHub
+        working-directory: apps/edge
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$JWT_SECRET" | pnpm exec wrangler secret put JWT_SECRET --env production >/dev/null
+          printf '%s' "$EDGE_SHARED_SECRET" | pnpm exec wrangler secret put EDGE_SHARED_SECRET --env production >/dev/null
+
+      - name: Verify edge Worker secret names
+        run: |
+          set -euo pipefail
+          secret_list="$(pnpm --filter syrabit-edge exec wrangler secret list --env production --format json)"
+          printf '%s' "$secret_list" | python3 -c '
+          import json
+          import sys
+          required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}
+          configured = {item["name"] for item in json.load(sys.stdin)}
+          missing = sorted(required - configured)
+          if missing:
+              print("Cloudflare edge Worker secret provisioning is incomplete: " + ", ".join(missing))
+              raise SystemExit(1)
+          print("Required edge Worker secret names are present.")
+          '
 
       - name: Guard against sentinel KV IDs
         run: |
