@@ -97,7 +97,7 @@ async def corpus_assamese_progress(request: Request):
 @router.post("/admin/corpus/assamese/backfill")
 async def corpus_assamese_backfill(request: Request):
     """
-    Trigger an Assamese content backfill pass using Sarvam AI.
+    Trigger an Assamese content backfill pass using Workers AI.
     Runs in the background. Returns immediately.
     """
 
@@ -115,13 +115,13 @@ async def corpus_assamese_backfill(request: Request):
             "preflight_warnings": [],
         }
 
-    from app.services.ai.sarvam_client import sarvam_client
+    from app.services.ai.workers_ai_client import workers_ai_client
 
     preflight_warnings = []
     preflight_ok = True
 
-    if not sarvam_client:
-        preflight_warnings.append("Sarvam AI client not available")
+    if not workers_ai_client:
+        preflight_warnings.append("Workers AI client not available")
         preflight_ok = False
 
     if not preflight_ok:

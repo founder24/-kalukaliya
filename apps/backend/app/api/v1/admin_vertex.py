@@ -1,8 +1,8 @@
 """
 Admin Vertex AI Endpoints
-Vertex AI / Gemini admin panel: health check, content gap analysis, and
-generation tools (flashcards, MCQ, NLP concepts, quality scoring, SEO meta,
-topic suggestions, semantic search, translation, OCR, provider routing).
+Content gap analysis and generation tools (flashcards, MCQ, NLP concepts,
+quality scoring, SEO meta, topic suggestions, semantic search, translation,
+OCR, provider routing) — now served by Cloudflare Workers AI.
 """
 
 from fastapi import APIRouter, Depends, Request, HTTPException
@@ -20,69 +20,48 @@ router = APIRouter(
 )
 
 
-def _vertex_ok() -> bool:
+def _workers_ai_ok() -> bool:
     return bool(
-        getattr(settings, "VERTEX_PROJECT_ID", None)
-        and getattr(settings, "GOOGLE_APPLICATION_CREDENTIALS_JSON", None)
+        getattr(settings, "EDGE_SHARED_SECRET", None)
+        and (
+            getattr(settings, "WORKERS_AI_INTERNAL_URL", None)
+            or getattr(settings, "CF_WORKER_URL", None)
+        )
     )
 
 
-async def _gemini_generate(prompt: str, max_tokens: int = 1024) -> str:
-    """Call Gemini 2.5 Flash for admin generation tasks."""
-    import asyncio, json, os, tempfile
+async def _workers_ai_generate(prompt: str, max_tokens: int = 1024) -> str:
+    """Call Cloudflare Workers AI for admin generation tasks."""
+    from app.services.ai.workers_ai_client import workers_ai_client
     try:
-        from google import genai as google_genai
-        from google.genai.types import GenerateContentConfig
-
-        creds_json = getattr(settings, "GOOGLE_APPLICATION_CREDENTIALS_JSON", "")
-        creds_data = json.loads(creds_json)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
-            json.dump(creds_data, tf)
-            creds_path = tf.name
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-
-        client = google_genai.Client(
-            vertexai=True,
-            project=settings.VERTEX_PROJECT_ID,
-            location=getattr(settings, "VERTEX_LOCATION", "us-central1"),
+        return await workers_ai_client.generate(
+            system_prompt="You are a helpful educational AI assistant for Assam board students.",
+            user_message=prompt,
+            max_tokens=max_tokens,
         )
-        resp = await asyncio.to_thread(
-            client.models.generate_content,
-            model="gemini-2.5-flash",
-            contents=[{"role": "user", "parts": [{"text": prompt}]}],
-            config=GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=max_tokens,
-                thinking_config={"thinking_budget": 0},
-            ),
-        )
-        return resp.text or ""
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Vertex AI call failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Workers AI call failed: {e}")
 
 
 @router.get("/vertex/health")
 async def vertex_health():
-    """Vertex AI / Gemini connectivity and configuration health check."""
-    configured = _vertex_ok()
+    """Cloudflare Workers AI connectivity and configuration health check."""
+    configured = _workers_ai_ok()
     if not configured:
         return {
             "ok": False,
             "configured": False,
-            "project": None,
-            "location": None,
-            "model": "gemini-2.5-flash",
-            "message": "Set VERTEX_PROJECT_ID and GOOGLE_APPLICATION_CREDENTIALS_JSON secrets.",
+            "provider": "cloudflare_workers_ai",
+            "model": settings.CF_AI_MODEL,
+            "message": "Set EDGE_SHARED_SECRET and WORKERS_AI_INTERNAL_URL (or CF_WORKER_URL) secrets.",
         }
     try:
-        import asyncio
-        text = await _gemini_generate("Reply with exactly: ok", max_tokens=10)
+        text = await _workers_ai_generate("Reply with exactly: ok", max_tokens=10)
         return {
             "ok": True,
             "configured": True,
-            "project": settings.VERTEX_PROJECT_ID,
-            "location": getattr(settings, "VERTEX_LOCATION", "us-central1"),
-            "model": "gemini-2.5-flash",
+            "provider": "cloudflare_workers_ai",
+            "model": settings.CF_AI_MODEL,
             "ping_response": text.strip()[:50],
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -90,8 +69,8 @@ async def vertex_health():
         return {
             "ok": False,
             "configured": True,
-            "project": settings.VERTEX_PROJECT_ID,
-            "model": "gemini-2.5-flash",
+            "provider": "cloudflare_workers_ai",
+            "model": settings.CF_AI_MODEL,
             "error": str(e),
         }
 
@@ -101,16 +80,14 @@ async def vertex_provider_routing():
     """Current AI provider routing table (which tasks go to which model)."""
     return {
         "routing": [
-            {"task": "chat_english", "provider": "sarvam_ai", "model": settings.SARVAM_MODEL},
-            {"task": "chat_assamese", "provider": "sarvam_ai", "model": settings.SARVAM_MODEL},
-            {"task": "notes_generation", "provider": "vertex_ai", "model": "gemini-2.5-flash"},
+            {"task": "chat_english", "provider": "cloudflare_workers_ai", "model": settings.CF_AI_MODEL},
+            {"task": "chat_assamese", "provider": "cloudflare_workers_ai", "model": settings.CF_AI_MODEL},
+            {"task": "notes_generation", "provider": "cloudflare_workers_ai", "model": settings.CF_AI_MODEL},
             {"task": "tts", "provider": "cloudflare_workers_ai", "model": settings.CF_AI_TTS_MODEL},
-            {"task": "translation", "provider": "sarvam_ai", "model": "sarvam-translate"},
+            {"task": "translation", "provider": "cloudflare_workers_ai", "model": settings.CF_AI_MODEL},
             {"task": "embeddings", "provider": "cloudflare_workers_ai", "model": settings.CF_AI_EMBED_MODEL},
         ],
         "fallbacks": {
-            "sarvam_ai": "vertex_ai",
-            "vertex_ai": None,
             "cloudflare_workers_ai": None,
         },
     }
@@ -157,19 +134,19 @@ async def vertex_content_gaps(limit: int = 20):
 
 @router.post("/vertex/flashcards")
 async def vertex_flashcards(request: Request):
-    """Generate flashcards for given content using Gemini."""
+    """Generate flashcards for given content using Cloudflare Workers AI."""
     body = await request.json()
     content = body.get("content", "")
     count = min(int(body.get("count", 10)), 20)
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
-    if not _vertex_ok():
-        raise HTTPException(status_code=503, detail="Vertex AI not configured")
+    if not _workers_ai_ok():
+        raise HTTPException(status_code=503, detail="Workers AI not configured")
     prompt = (
         f"Generate {count} flashcards (Q&A pairs) from this content. "
         f"Return JSON: {{\"flashcards\": [{{\"q\": \"...\", \"a\": \"...\"}}]}}\n\n{content[:3000]}"
     )
-    raw = await _gemini_generate(prompt, max_tokens=2048)
+    raw = await _workers_ai_generate(prompt, max_tokens=2048)
     import json, re
     try:
         clean = re.sub(r"```json?\s*|\s*```", "", raw).strip()
@@ -180,19 +157,19 @@ async def vertex_flashcards(request: Request):
 
 @router.post("/vertex/mcq-generator")
 async def vertex_mcq_generator(request: Request):
-    """Generate multiple-choice questions from content using Gemini."""
+    """Generate multiple-choice questions from content using Cloudflare Workers AI."""
     body = await request.json()
     content = body.get("content", "")
     count = min(int(body.get("count", 5)), 15)
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
-    if not _vertex_ok():
-        raise HTTPException(status_code=503, detail="Vertex AI not configured")
+    if not _workers_ai_ok():
+        raise HTTPException(status_code=503, detail="Workers AI not configured")
     prompt = (
         f"Generate {count} MCQs from this content. "
         f"Return JSON: {{\"questions\": [{{\"q\": \"...\", \"options\": [\"A\",\"B\",\"C\",\"D\"], \"answer\": \"A\"}}]}}\n\n{content[:3000]}"
     )
-    raw = await _gemini_generate(prompt, max_tokens=2048)
+    raw = await _workers_ai_generate(prompt, max_tokens=2048)
     import json, re
     try:
         clean = re.sub(r"```json?\s*|\s*```", "", raw).strip()
@@ -208,14 +185,14 @@ async def vertex_nlp_concepts(request: Request):
     content = body.get("content", "")
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
-    if not _vertex_ok():
-        raise HTTPException(status_code=503, detail="Vertex AI not configured")
+    if not _workers_ai_ok():
+        raise HTTPException(status_code=503, detail="Workers AI not configured")
     prompt = (
         "Extract key concepts, named entities, and important terms from this text. "
         "Return JSON: {\"concepts\": [{\"term\": \"...\", \"type\": \"concept|entity|term\", \"importance\": 0.9}]}\n\n"
         + content[:3000]
     )
-    raw = await _gemini_generate(prompt, max_tokens=1024)
+    raw = await _workers_ai_generate(prompt, max_tokens=1024)
     import json, re
     try:
         clean = re.sub(r"```json?\s*|\s*```", "", raw).strip()
@@ -226,28 +203,28 @@ async def vertex_nlp_concepts(request: Request):
 
 @router.post("/vertex/ocr")
 async def vertex_ocr(request: Request):
-    """OCR endpoint stub — returns not-implemented until Vertex Vision is wired."""
+    """OCR endpoint stub — returns not-implemented until vision pipeline is wired."""
     return {
         "ok": False,
-        "message": "OCR via Vertex Vision API is not yet implemented. Upload the image to the RAG pipeline instead.",
+        "message": "OCR is not yet implemented. Upload the image to the RAG pipeline instead.",
     }
 
 
 @router.post("/vertex/quality-score")
 async def vertex_quality_score(request: Request):
-    """Score the educational quality of content (0–100) using Gemini."""
+    """Score the educational quality of content (0–100) using Cloudflare Workers AI."""
     body = await request.json()
     content = body.get("content", "")
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
-    if not _vertex_ok():
-        raise HTTPException(status_code=503, detail="Vertex AI not configured")
+    if not _workers_ai_ok():
+        raise HTTPException(status_code=503, detail="Workers AI not configured")
     prompt = (
         "Rate the educational quality of this content on a scale of 0-100 for Assam board HS students. "
         "Return JSON: {\"score\": 85, \"clarity\": 90, \"accuracy\": 80, \"completeness\": 85, \"feedback\": \"...\"}\n\n"
         + content[:3000]
     )
-    raw = await _gemini_generate(prompt, max_tokens=512)
+    raw = await _workers_ai_generate(prompt, max_tokens=512)
     import json, re
     try:
         clean = re.sub(r"```json?\s*|\s*```", "", raw).strip()
@@ -291,20 +268,20 @@ async def vertex_semantic_search(request: Request):
 
 @router.post("/vertex/seo-meta")
 async def vertex_seo_meta(request: Request):
-    """Generate SEO title + description for a chapter using Gemini."""
+    """Generate SEO title + description for a chapter using Cloudflare Workers AI."""
     body = await request.json()
     title = body.get("title", "")
     content = body.get("content", "")[:1500]
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
-    if not _vertex_ok():
-        raise HTTPException(status_code=503, detail="Vertex AI not configured")
+    if not _workers_ai_ok():
+        raise HTTPException(status_code=503, detail="Workers AI not configured")
     prompt = (
         f"Generate an SEO-optimized title and meta description for this Assam board chapter. "
         f"Title: {title}\nContent preview: {content}\n"
         f"Return JSON: {{\"seo_title\": \"...\", \"meta_description\": \"...\"}}"
     )
-    raw = await _gemini_generate(prompt, max_tokens=256)
+    raw = await _workers_ai_generate(prompt, max_tokens=256)
     import json, re
     try:
         clean = re.sub(r"```json?\s*|\s*```", "", raw).strip()
@@ -315,21 +292,21 @@ async def vertex_seo_meta(request: Request):
 
 @router.post("/vertex/suggest-topics")
 async def vertex_suggest_topics(request: Request):
-    """Suggest related topics/subtopics for a chapter using Gemini."""
+    """Suggest related topics/subtopics for a chapter using Cloudflare Workers AI."""
     body = await request.json()
     chapter_title = body.get("chapter_title", "")
     existing_topics = body.get("existing_topics", [])
     if not chapter_title:
         raise HTTPException(status_code=400, detail="chapter_title is required")
-    if not _vertex_ok():
-        raise HTTPException(status_code=503, detail="Vertex AI not configured")
+    if not _workers_ai_ok():
+        raise HTTPException(status_code=503, detail="Workers AI not configured")
     existing_str = ", ".join(existing_topics) if existing_topics else "none"
     prompt = (
         f"Suggest 5-8 important topics/subtopics for the chapter: '{chapter_title}' "
         f"(Assam board). Already covered: {existing_str}. "
         f"Return JSON: {{\"topics\": [\"...\", \"...\"]}}"
     )
-    raw = await _gemini_generate(prompt, max_tokens=512)
+    raw = await _workers_ai_generate(prompt, max_tokens=512)
     import json, re
     try:
         clean = re.sub(r"```json?\s*|\s*```", "", raw).strip()
@@ -340,27 +317,23 @@ async def vertex_suggest_topics(request: Request):
 
 @router.post("/vertex/translate")
 async def vertex_translate(request: Request):
-    """Translate content to Assamese using Sarvam AI (proxies to the translation service)."""
+    """Translate content to Assamese using Cloudflare Workers AI."""
     body = await request.json()
     text = body.get("text", "")
     target_lang = body.get("target_lang", "as")
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
+    if not _workers_ai_ok():
+        raise HTTPException(status_code=503, detail="Workers AI not configured")
+    lang_names = {"as": "Assamese", "hi": "Hindi", "bn": "Bengali"}
+    target_name = lang_names.get(target_lang, target_lang)
+    prompt = (
+        f"Translate the following English text into {target_name}. "
+        f"Return only the translated text, no explanations.\n\n{text[:5000]}"
+    )
     try:
-        import httpx
-        sarvam_key = settings.SARVAM_API_KEY
-        if not sarvam_key:
-            raise HTTPException(status_code=503, detail="SARVAM_API_KEY not configured")
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://api.sarvam.ai/translate",
-                headers={"api-subscription-key": sarvam_key, "Content-Type": "application/json"},
-                json={"input": text[:5000], "source_language_code": "en-IN", "target_language_code": f"{target_lang}-IN"},
-            )
-            if resp.is_success:
-                data = resp.json()
-                return {"translated_text": data.get("translated_text", ""), "source_lang": "en", "target_lang": target_lang}
-            raise HTTPException(status_code=502, detail=f"Sarvam translate error: {resp.text[:200]}")
+        translated = await _workers_ai_generate(prompt, max_tokens=2048)
+        return {"translated_text": translated.strip(), "source_lang": "en", "target_lang": target_lang}
     except HTTPException:
         raise
     except Exception as e:
@@ -370,29 +343,20 @@ async def vertex_translate(request: Request):
 @router.get("/vertex/probe-status")
 async def vertex_probe_status():
     """
-    Light probe of Vertex AI / Sarvam availability.
+    Light probe of Workers AI availability.
     Returns status per provider without making expensive inference calls.
     """
     from app.config import settings as cfg
     results = {}
 
-    sarvam_key = getattr(cfg, "SARVAM_API_KEY", None) or ""
-    results["sarvam"] = {
-        "configured": bool(sarvam_key),
-        "model": "sarvam-30b",
-        "status": "configured" if sarvam_key else "missing_key",
-    }
-
     cf_token = getattr(cfg, "CF_WORKER_AI_TOKEN", None) or getattr(cfg, "CF_API_TOKEN", None) or ""
-    results["cloudflare_workers_ai"] = {
-        "configured": bool(cf_token),
-        "status": "configured" if cf_token else "missing_key",
-    }
+    edge_secret = getattr(cfg, "EDGE_SHARED_SECRET", None) or ""
+    worker_url = getattr(cfg, "WORKERS_AI_INTERNAL_URL", None) or getattr(cfg, "CF_WORKER_URL", None) or ""
 
-    gcp_creds = getattr(cfg, "GOOGLE_APPLICATION_CREDENTIALS_JSON", None) or ""
-    results["vertex_ai"] = {
-        "configured": bool(gcp_creds),
-        "status": "configured" if gcp_creds else "missing_key",
+    results["cloudflare_workers_ai"] = {
+        "configured": bool(cf_token or (edge_secret and worker_url)),
+        "status": "configured" if (cf_token or (edge_secret and worker_url)) else "missing_key",
+        "model": getattr(cfg, "CF_AI_MODEL", None),
     }
 
     return {

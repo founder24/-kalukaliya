@@ -2,7 +2,10 @@
 // v17 (2026-06-07): added library-bundle to CACHED_API_PATTERNS and precacheApiData
 //   so the 130ms+ round-trip for boards/classes/subjects meta on every page load
 //   is served from the SW API cache on repeat visits (stale-while-revalidate, 5min TTL).
-const CACHE_VERSION = '17';
+// v18 (2026-08-21): chapter/document navigations are network-first. Serving a
+//   cached HTML document first can reference content-hashed JS/CSS files deleted
+//   by a newer Pages deploy, breaking responsive layout until a second reload.
+const CACHE_VERSION = '18';
 const STATIC_CACHE = 'syrabit-static-v' + CACHE_VERSION;
 const RUNTIME_CACHE = 'syrabit-runtime-v' + CACHE_VERSION;
 const API_CACHE = 'syrabit-api-v' + CACHE_VERSION;
@@ -174,28 +177,12 @@ async function navigationHandler(event) {
     ? await event.preloadResponse.catch(() => null)
     : null;
 
-  if (preloadResponse && preloadResponse.ok) {
-    const cache = await caches.open(RUNTIME_CACHE);
-    cache.put(event.request, preloadResponse.clone());
-    trimCache(RUNTIME_CACHE, RUNTIME_CACHE_MAX);
-    return preloadResponse;
-  }
-
-  const cached = await caches.match(event.request);
-  if (cached) {
-    fetch(event.request).then((res) => {
-      if (res && res.ok) {
-        caches.open(RUNTIME_CACHE).then((c) => {
-          c.put(event.request, res);
-          trimCache(RUNTIME_CACHE, RUNTIME_CACHE_MAX);
-        });
-      }
-    }).catch(() => {});
-    return cached;
-  }
-
   try {
-    const response = await fetch(event.request);
+    // Documents reference content-hashed JS/CSS assets. Always prefer the
+    // current navigation response so a deployment cannot strand a visitor on
+    // an old document whose chunk URLs no longer exist. The runtime cache
+    // remains the offline fallback below.
+    const response = preloadResponse || await fetch(event.request);
     if (response.ok) {
       const cache = await caches.open(RUNTIME_CACHE);
       cache.put(event.request, response.clone());
@@ -203,7 +190,7 @@ async function navigationHandler(event) {
     }
     return response;
   } catch {
-    return caches.match('/offline.html');
+    return (await caches.match(event.request)) || caches.match('/offline.html');
   }
 }
 

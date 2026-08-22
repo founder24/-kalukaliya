@@ -32,6 +32,16 @@ const REQUIRED = {
     "learn.endOfContent",
     "learn.sidebar",
   ],
+  // ChapterPage: Notes (top/inContent/end), Q&A (inContent/end), PYQ (top/inContent)
+  "pages/ChapterPage.jsx": [
+    "chapter.notes.top",
+    "chapter.notes.inContent",
+    "chapter.notes.end",
+    "chapter.qa.inContent",
+    "chapter.qa.end",
+    "chapter.pyq.top",
+    "chapter.pyq.inContent",
+  ],
 };
 
 // Strip /* … */ block comments and // line comments so a comment that

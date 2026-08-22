@@ -42,6 +42,17 @@ import {
 
 export default function ChatWidget(props) {
   const p = props;
+  const {
+    data, load, vs,
+    ragAlert, ragAccuracy, fallbackAlert, chatFallbacks, failedSections,
+    vectorAlert, vectorStats,
+    chatSpeedups, speedupDays: rawSpeedupDays, setSpeedupDays, speedupLoading,
+    latency, latencyAlert,
+    topQueries, tokenSpend, funnel, coverage,
+  } = props;
+  const safeFailedSections = Array.isArray(failedSections) ? failedSections : [];
+  const speedupDays = [1, 7, 14, 30].includes(rawSpeedupDays) ? rawSpeedupDays : 7;
+  const fallbackDaily = Array.isArray(chatFallbacks?.daily) ? chatFallbacks.daily : [];
   return (
     <>
 
@@ -84,9 +95,9 @@ export default function ChatWidget(props) {
               </span>
               <AlertBadge alert={fallbackAlert} />
             </div>
-            {chatFallbacks?.has_data && chatFallbacks.daily.length > 0 ? (
+            {chatFallbacks?.has_data && fallbackDaily.length > 0 ? (
               <ResponsiveContainer width="100%" height={90}>
-                <LineChart data={chatFallbacks.daily}>
+                <LineChart data={fallbackDaily}>
                   <XAxis dataKey="date" tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={d => d.slice(5)} />
                   <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} domain={[0, 'auto']} />
                   <Tooltip content={<ChartTooltip />} />
@@ -94,7 +105,7 @@ export default function ChatWidget(props) {
                   <Line type="monotone" dataKey="fallback_rate" stroke="#f59e0b" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
-            ) : failedSections.includes('fallbacks') ? (
+            ) : safeFailedSections.includes('fallbacks') ? (
               <div className="flex flex-col items-center justify-center h-[90px] text-gray-400 text-xs gap-1">
                 <Activity size={20} className="opacity-30" />
                 <span className="text-amber-600">Could not load fallback data</span>

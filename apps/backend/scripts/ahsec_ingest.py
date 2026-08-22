@@ -56,13 +56,13 @@ log = logging.getLogger("ahsec_ingest")
 
 
 class NotesProviderUnavailableError(RuntimeError):
-    """Raised by generate_notes() when both Sarvam and Gemini are unable to
-    produce notes.  The caller should record the chapter with
+    """Raised when Workers AI cannot produce usable notes. The caller records
+    the chapter with
     status='notes_provider_unavailable' so staff can retry it later.
 
     Attributes:
         reason (str): Machine-readable root cause.  One of:
-            "missing_credentials" — GEMINI_API_KEY is absent; deploy a fix.
+            "missing_credentials" — internal Worker authentication is absent.
             "provider_error"      — API quota/rate-limit/network error; wait
                                     for quota reset or check API status.
     """
@@ -1649,26 +1649,20 @@ def _is_literature_subject(subject_name: str) -> bool:
 
 
 async def generate_notes(
-    sarvam,
+    generator,
     body_text: str,
     chapter_title: str,
     subject_name: str,
     medium: str,
 ) -> str:
-    """Generate chapter notes — Sarvam primary, Gemini fallback at 3× token budget.
-
-    Sarvam (sarvam-105b starter tier) caps at 4096 output tokens (~3000 words).
-    When Sarvam fails or produces < 2500 chars, Gemini 2.5 Flash is used
-    with max_output_tokens=16384 (~12000 words), giving full coverage of all topics.
-    """
+    """Generate chapter notes through the shared Workers AI generation endpoint."""
     is_as = medium == "as"
     system = _NOTES_SYSTEM_AS if is_as else _NOTES_SYSTEM_EN
 
-    # ── Pass 1: Sarvam (fast, low-latency) ───────────────────────────────────
-    # Try progressively smaller input slices if the first attempt returns too little.
-    sarvam_result = ""
-    sarvam_ok = False
-    for attempt, body_slice in enumerate([10000, 5000, 3000]):
+    # Retry with smaller source slices when a response is incomplete.  Both
+    # attempts remain within one Workers AI provider boundary.
+    best_result = ""
+    for attempt, body_slice in enumerate([15000, 10000, 5000]):
         user_msg = (
             f"Subject: {subject_name}\nChapter: {chapter_title}\n\n"
             f"--- CHAPTER CONTENT ---\n{body_text[:body_slice]}\n\n"
@@ -1676,19 +1670,18 @@ async def generate_notes(
             f"Do not write any introductory sentence before it."
         )
         try:
-            result = await sarvam.generate(
+            result = await generator.generate(
                 system_prompt=system,
                 user_message=user_msg,
                 is_assamese=is_as,
-                max_tokens=4096,   # starter tier cap for sarvam-105b
+                max_tokens=4096,
             )
-        except Exception as sarvam_err:
+        except Exception as generation_err:
             log.warning(
-                f"    Sarvam notes attempt {attempt + 1} failed "
-                f"({type(sarvam_err).__name__}: {str(sarvam_err)[:120]}) — "
-                f"will try Gemini fallback"
+                f"    Workers AI notes attempt {attempt + 1} failed "
+                f"({type(generation_err).__name__}: {str(generation_err)[:120]})"
             )
-            break  # stop retrying Sarvam; fall through to Gemini
+            continue
 
         result = _clean_notes_output(result.strip())
         # Post-generation guard: publication-page content leaked through prelim filter.
@@ -1699,95 +1692,28 @@ async def generate_notes(
             )
             return ""
         if len(result) >= 2500:
-            sarvam_result = result
-            sarvam_ok = True
-            break
+            return result
         if attempt < 2:
             log.warning(
                 f"    Notes too short ({len(result)} chars, need ≥2500), retrying with smaller slice…"
             )
-        sarvam_result = result
+        if len(result) > len(best_result):
+            best_result = result
         await asyncio.sleep(2.0)
 
-    if sarvam_ok:
-        return sarvam_result
-
-    # ── Pass 2: Gemini 2.5 Flash (3× token budget — covers all topics) ───────
-    # Activated when: (a) Sarvam threw an error (billing/quota/rate-limit), OR
-    #                 (b) Sarvam returned fewer than 300 chars after all retries.
-    log.info(
-        f"    Gemini fallback for notes "
-        f"(Sarvam gave {len(sarvam_result)} chars, below 2500-char threshold) — trying with 16384 tokens…"
-    )
-    try:
-        from app.services.ai.gemini_fallback import (
-            generate_gemini,
-            _available as gemini_available,
-        )
-        if not gemini_available():
-            log.warning(
-                "    [PROVIDER UNAVAILABLE] Both notes providers have failed for "
-                f"chapter '{chapter_title}': Sarvam gave {len(sarvam_result)} chars "
-                "and Gemini is not configured. "
-                "Remediation: add GEMINI_API_KEY to GCP Secret Manager "
-                "(secret name: gemini-api-key) so the fallback can activate. "
-                "This chapter will be flagged as 'notes_provider_unavailable' "
-                "in the progress log — re-run with --force after fixing the key."
-            )
-            raise NotesProviderUnavailableError(
-                f"Both notes providers unavailable for '{chapter_title}': "
-                "Sarvam failed/quota-exhausted and GEMINI_API_KEY is not set. "
-                "Add GEMINI_API_KEY to GCP Secret Manager (gemini-api-key).",
-                reason="missing_credentials",
-            )
-
-        gemini_user_msg = (
-            f"Subject: {subject_name}\nChapter: {chapter_title}\n\n"
-            f"--- CHAPTER CONTENT ---\n{body_text[:15000]}\n\n"
-            f"Begin your response with the first ## heading. "
-            f"Do not write any introductory sentence before it."
-        )
-        gemini_result = await generate_gemini(
-            system_prompt=system,
-            user_message=gemini_user_msg,
-            max_output_tokens=16384,  # covers all topics in the densest chapters (15–20 topics)
-            timeout=180.0,
-        )
-        gemini_result = _clean_notes_output(gemini_result.strip())
-        if _notes_start_with_prelim(gemini_result):
-            log.warning("    Gemini notes also start with prelim content — discarding")
-            return ""
-        if len(gemini_result) >= 2500:
-            log.info(
-                f"    Gemini produced {len(gemini_result)} chars — using as final notes"
-            )
-            return gemini_result
-        log.warning(
-            f"    Gemini also returned short output ({len(gemini_result)} chars, need ≥2500)"
-        )
-    except NotesProviderUnavailableError:
-        raise  # re-raise so the caller records the distinct progress state
-    except Exception as gemini_err:
-        log.warning(f"    Gemini notes fallback failed: {gemini_err}")
-
-    # Both providers failed or both returned too-short output.
     log.warning(
-        f"    [PROVIDER UNAVAILABLE] Both notes providers failed for "
-        f"chapter '{chapter_title}': Sarvam gave {len(sarvam_result)} chars "
-        "and Gemini also failed or returned insufficient output. "
-        "Remediation: check SARVAM_API_KEY quota and GEMINI_API_KEY in "
-        "GCP Secret Manager. Re-run with --force after fixing credentials."
+        f"    [PROVIDER UNAVAILABLE] Workers AI returned insufficient notes for "
+        f"chapter '{chapter_title}' (best result {len(best_result)} chars)."
     )
     raise NotesProviderUnavailableError(
-        f"Both notes providers failed for '{chapter_title}': "
-        "Sarvam and Gemini both returned insufficient output. "
-        "Check SARVAM_API_KEY quota and GEMINI_API_KEY in GCP Secret Manager.",
+        f"Workers AI failed or returned insufficient notes for '{chapter_title}'. "
+        "Check the internal Worker endpoint and Workers AI model availability.",
         reason="provider_error",
     )
 
 
 def _parse_qa_json(raw: str) -> list[dict]:
-    """Parse a JSON array of {question, answer} dicts from a Sarvam response."""
+    """Parse a JSON array of {question, answer} dicts from a model response."""
     raw = raw.strip()
     raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
     raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
@@ -1816,16 +1742,16 @@ def _parse_qa_json(raw: str) -> list[dict]:
 
 
 async def generate_qa_from_notes(
-    sarvam,
+    generator,
     notes_text: str,
     chapter_title: str,
     subject_name: str,
     medium: str,
 ) -> list[dict]:
-    """Generate Q&A pairs by asking Sarvam to create questions from chapter notes.
+    """Generate Q&A pairs from chapter notes with Workers AI.
 
     This is the primary Q&A generation path — it does not require an exercise
-    section to exist in the PDF. Sarvam invents exam-style questions AND answers
+    section to exist in the PDF. The model creates exam-style questions and answers
     them based solely on the notes content.
     """
     if not notes_text or len(notes_text) < 100:
@@ -1842,7 +1768,7 @@ async def generate_qa_from_notes(
         f"Subject: {subject_name}\nChapter: {chapter_title}\n\n"
         f"--- CHAPTER NOTES ---\n{notes_text[:5000]}"
     )
-    raw = await sarvam.generate(
+    raw = await generator.generate(
         system_prompt=system,
         user_message=user_msg,
         is_assamese=is_as,
@@ -1863,7 +1789,7 @@ async def generate_qa_from_notes(
             f"Generate 5 comprehension questions with paragraph-length answers based on these notes.\n\n"
             f"--- CHAPTER NOTES ---\n{notes_text[:4000]}"
         )
-        raw = await sarvam.generate(
+        raw = await generator.generate(
             system_prompt=system,
             user_message=retry_user_msg,
             is_assamese=False,
@@ -1875,14 +1801,14 @@ async def generate_qa_from_notes(
 
 
 async def generate_qa(
-    sarvam,
+    generator,
     exercises_text: str,
     chapter_notes: str,
     chapter_title: str,
     subject_name: str,
     medium: str,
 ) -> list[dict]:
-    """Call Sarvam to generate Q&A solutions for a chapter's exercises.
+    """Generate Q&A solutions for a chapter's exercises through Workers AI.
 
     Kept for backward compatibility; new code should prefer
     generate_qa_from_notes() which doesn't require an exercise section.
@@ -1902,7 +1828,7 @@ async def generate_qa(
         f"--- CHAPTER NOTES (context) ---\n{chapter_notes[:3000]}\n\n"
         f"--- EXERCISES ---\n{exercises_text[:4000]}"
     )
-    raw = await sarvam.generate(
+    raw = await generator.generate(
         system_prompt=system,
         user_message=user_msg,
         is_assamese=is_as,
@@ -2147,6 +2073,32 @@ async def upsert_subject(
     return subj
 
 
+async def _make_unique_slug(
+    subject_id,
+    base_slug: str,
+    exclude_id=None,
+) -> str:
+    """Return a slug that is unique among siblings in *subject_id*.
+
+    Appends a numeric suffix (``-2``, ``-3``, …) until the value is free.
+    When *exclude_id* is provided the chapter with that id is excluded from the
+    collision set — use this when correcting an existing chapter's own slug so
+    that the chapter is not compared against itself.
+    """
+    from app.models.content import Chapter  # deferred — mirrors upsert_chapter pattern
+    siblings = await Chapter.find({"subject_id": subject_id}).to_list(length=500)
+    existing_slugs = {
+        ch.slug for ch in siblings
+        if exclude_id is None or ch.id != exclude_id
+    }
+    slug = base_slug
+    counter = 2
+    while slug in existing_slugs:
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+    return slug
+
+
 async def upsert_chapter(
     subject_id,
     chapter_num: int,
@@ -2188,44 +2140,117 @@ async def upsert_chapter(
             await chapter.save()
         return chapter, False  # (chapter, created)
 
-    # 2. PDF-URL match: same subject + same source PDF (handles "Full Book" chapters
-    #    that share an identical title across multiple restarts but were stored with
-    #    different chapter_numbers before the title-match logic was in place).
+    # 2. PDF-URL match — narrowed by chapter_number OR title similarity within that PDF.
+    #
+    #    OLD behaviour was find_one({subject_id, source_pdf_url}) which returned
+    #    the *first* chapter ever stored from that PDF.  Because all chapters in a
+    #    textbook share the same PDF URL, this caused the first chapter's number to
+    #    be overwritten with the current chapter's number on every re-run, producing
+    #    corrupted rows like "Units and Measurements 568".
+    #
+    #    NEW behaviour: fetch ALL sibling chapters from the same PDF, then require a
+    #    matching chapter_number (primary) or identical title (secondary).  Only if
+    #    both discriminators fail do we fall through to step 3 or create a new row.
     if source_pdf_url:
-        chapter = await Chapter.find_one({
+        pdf_siblings = await Chapter.find({
             "subject_id": subject_id,
             "source_pdf_url": source_pdf_url,
-        })
-        if chapter:
-            log.info(
-                f"    Reusing chapter '{chapter.title}' matched by source_pdf_url "
-                f"(stored as #{chapter.chapter_number}, ingestion says #{chapter_num})"
-            )
-            if chapter.chapter_number != chapter_num:
-                chapter.chapter_number = chapter_num
-                chapter.updated_at = datetime.now(timezone.utc)
-                await chapter.save()
-            return chapter, False  # (chapter, created)
+        }).to_list(length=500)
 
-    # 3. Fallback: same subject + same chapter_number (pre-title-match rows)
+        if pdf_siblings:
+            # Primary: same chapter_number within this PDF
+            chapter = next(
+                (c for c in pdf_siblings if c.chapter_number == chapter_num), None
+            )
+            # Secondary: same title (case-insensitive) — handles minor numbering drift
+            if chapter is None:
+                title_lower = title_norm.lower()
+                chapter = next(
+                    (c for c in pdf_siblings
+                     if c.title and c.title.strip().lower() == title_lower),
+                    None,
+                )
+
+            if chapter:
+                needs_save = False
+
+                # Correct chapter_number if it drifted
+                if chapter.chapter_number != chapter_num:
+                    log.info(
+                        f"    Reusing chapter '{chapter.title}' matched by source_pdf_url "
+                        f"+ chapter_number/title (stored #{chapter.chapter_number}, "
+                        f"ingestion #{chapter_num}) — updating chapter_number"
+                    )
+                    chapter.chapter_number = chapter_num
+                    needs_save = True
+                else:
+                    log.info(
+                        f"    Reusing chapter '{chapter.title}' matched by source_pdf_url "
+                        f"+ chapter_number/title (#{chapter_num})"
+                    )
+
+                # Correct title (and slug) when the old PDF-URL bug wrote the wrong title.
+                # This runs on every --force pass so corrupted rows are healed automatically.
+                if chapter.title.strip().lower() != title_norm.lower():
+                    old_title = chapter.title
+                    chapter.title = title_norm
+                    base_slug = re.sub(
+                        r"[\s_-]+", "-",
+                        re.sub(r"[^\w\s-]", "", title_norm.lower()),
+                    ).strip("-")
+                    new_slug = await _make_unique_slug(
+                        subject_id, base_slug, exclude_id=chapter.id
+                    )
+                    chapter.slug = new_slug
+                    needs_save = True
+                    log.info(
+                        f"    Corrected corrupted title on chapter #{chapter_num} "
+                        f"(matched by PDF URL + number): "
+                        f"'{old_title}' → '{title_norm}' (slug: {new_slug})"
+                    )
+
+                if needs_save:
+                    chapter.updated_at = datetime.now(timezone.utc)
+                    await chapter.save()
+
+                return chapter, False  # (chapter, created)
+        # No discriminator matched within this PDF — fall through to step 3 / create.
+
+    # 3. Fallback: same subject + same chapter_number (pre-title-match rows, or
+    #    chapters whose source_pdf_url was not stored yet).
+    #    Also corrects the title when the stored value was corrupted by the old
+    #    PDF-URL bug — so a --force re-run repairs existing bad rows.
     chapter = await Chapter.find_one({
         "subject_id": subject_id,
         "chapter_number": chapter_num,
     })
     if chapter:
+        if chapter.title.strip().lower() != title_norm.lower():
+            # Title mismatch on a chapter_number match → the old fallback wrote the
+            # wrong title.  Correct it now so --force re-runs heal corrupted rows.
+            old_title = chapter.title
+            chapter.title = title_norm
+            # Regenerate slug from the corrected title
+            base_slug = re.sub(
+                r"[\s_-]+", "-",
+                re.sub(r"[^\w\s-]", "", title_norm.lower()),
+            ).strip("-")
+            new_slug = await _make_unique_slug(
+                subject_id, base_slug, exclude_id=chapter.id
+            )
+            chapter.slug = new_slug
+            chapter.updated_at = datetime.now(timezone.utc)
+            await chapter.save()
+            log.info(
+                f"    Corrected corrupted title on chapter #{chapter_num}: "
+                f"'{old_title}' → '{title_norm}' (slug: {new_slug})"
+            )
         return chapter, False  # (chapter, created)
 
     # 4. Create new chapter
-    slug = re.sub(r"[\s_-]+", "-", re.sub(r"[^\w\s-]", "", title_norm.lower())).strip("-")
-    # Ensure slug uniqueness within subject
-    existing_slugs = {
-        ch.slug for ch in await Chapter.find({"subject_id": subject_id}).to_list(length=500)
-    }
-    base_slug = slug
-    counter = 2
-    while slug in existing_slugs:
-        slug = f"{base_slug}-{counter}"
-        counter += 1
+    base_slug = re.sub(r"[\s_-]+", "-", re.sub(r"[^\w\s-]", "", title_norm.lower())).strip("-")
+    # Ensure slug uniqueness within subject (no exclude_id — chapter doesn't exist yet)
+    slug = await _make_unique_slug(subject_id, base_slug)
 
     chapter = Chapter(
         title=title_norm,
@@ -2530,7 +2555,7 @@ async def reindex_chapter(chapter_id_str: str, scope: str = "notes") -> None:
 
 async def process_pdf_entry(
     entry: dict,
-    sarvam,
+    generator,
     *,
     force: bool,
     dry_run: bool,
@@ -2627,10 +2652,10 @@ async def process_pdf_entry(
         notes_text = ""
         if not dry_run:
             try:
-                notes_text = await generate_notes(sarvam, body_text, ch_title, subject_name, medium)
+                notes_text = await generate_notes(generator, body_text, ch_title, subject_name, medium)
                 await asyncio.sleep(delay)
             except NotesProviderUnavailableError as e:
-                # Both Sarvam and Gemini are unavailable — record a distinct state
+                # The shared Worker generation service is unavailable — record a distinct state
                 # so staff can filter and retry these chapters without hunting
                 # through student complaints.
                 log.warning(
@@ -2726,27 +2751,8 @@ async def main() -> None:
     await init_mongo()
     log.info(f"MongoDB connected — db={settings.MONGODB_DB_NAME!r}")
 
-    # ── Load Sarvam key ───────────────────────────────────────────────────────
-    from app.services.ai.sarvam_client import sarvam_client
-    if not settings.SARVAM_API_KEY:
-        try:
-            from app.core.secret_manager import load_secrets_into_settings
-            await load_secrets_into_settings()
-        except Exception as e:
-            log.warning(f"Secret Manager fetch failed: {e}")
-
-    if settings.SARVAM_API_KEY:
-        log.info(f"Sarvam key loaded (prefix={settings.SARVAM_API_KEY[:8]}…)")
-    else:
-        # Don't abort here — Gemini may be configured as the sole provider.
-        # The pre-flight check below handles the "neither provider available" case.
-        if args.dry_run:
-            log.warning("SARVAM_API_KEY missing — proceeding in dry-run mode only")
-        else:
-            log.warning(
-                "SARVAM_API_KEY not available — will rely on Gemini fallback if configured. "
-                "Set SARVAM_API_KEY for primary notes generation."
-            )
+    # ── Workers AI generation client ──────────────────────────────────────────
+    from app.services.ai.workers_ai_client import workers_ai_client
 
     # ── Build catalogue ───────────────────────────────────────────────────────
     want_c11 = args.class11 or (not args.class11 and not args.class12)
@@ -2790,37 +2796,16 @@ async def main() -> None:
     log.info(f"Processing {len(catalogue)} entries "
              f"({'dry-run' if args.dry_run else 'live'}, delay={args.delay}s)")
 
-    # ── Pre-flight: verify at least one notes provider is reachable ───────────
-    # Prevents processing hundreds of chapters only to silently store empty notes
-    # when both Sarvam and Gemini are misconfigured.
+    # ── Pre-flight: verify the authenticated Worker generation path ───────────
+    # Prevents processing hundreds of chapters only to store empty notes when
+    # the internal API Worker or shared secret is unavailable.
     if not args.dry_run:
-        from app.services.ai.gemini_fallback import _available as gemini_available
-        _sarvam_ready = bool(settings.SARVAM_API_KEY)
-        _gemini_ready = gemini_available()
-        if not _sarvam_ready and not _gemini_ready:
+        if not settings.EDGE_SHARED_SECRET:
             log.error(
-                "PRE-FLIGHT FAILED: No notes provider is available. "
-                "SARVAM_API_KEY is missing and GEMINI_API_KEY / GOOGLE_SA_KEY are not set. "
-                "Chapters would be stored with empty notes — aborting. "
-                "Fix: set SARVAM_API_KEY (primary) and/or add GEMINI_API_KEY to "
-                "GCP Secret Manager (secret name: gemini-api-key) as fallback, "
-                "then re-run."
+                "PRE-FLIGHT FAILED: EDGE_SHARED_SECRET is missing. "
+                "The internal Workers AI generation route cannot be authenticated."
             )
             sys.exit(1)
-        elif not _sarvam_ready:
-            log.warning(
-                "PRE-FLIGHT WARNING: SARVAM_API_KEY is missing — "
-                "Gemini 2.5 Flash fallback will be used for ALL chapters. "
-                "Ingestion will be slower and may cost more API quota."
-            )
-        elif not _gemini_ready:
-            log.warning(
-                "PRE-FLIGHT WARNING: GEMINI_API_KEY is not configured — "
-                "if Sarvam hits a quota/billing error, affected chapters will be "
-                "flagged as 'notes_provider_unavailable' in the progress log. "
-                "Fix: add GEMINI_API_KEY to GCP Secret Manager (secret name: gemini-api-key) "
-                "so the fallback activates automatically."
-            )
 
     done_keys = _load_done_keys()
     log.info(f"Resuming — {len(done_keys)} chapters already done")
@@ -2832,7 +2817,7 @@ async def main() -> None:
     for entry in catalogue:
         result = await process_pdf_entry(
             entry,
-            sarvam_client,
+            workers_ai_client,
             force=args.force,
             dry_run=args.dry_run,
             delay=args.delay,

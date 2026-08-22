@@ -73,13 +73,29 @@ async def test_beanie_uninitialized_returns_503(client: AsyncClient):
 
 
 @pytest.mark.anyio
-async def test_redis_unavailable_returns_503():
-    """Login returns 503 when Redis is unavailable (rate limit fail-closed)."""
+async def test_auth_rate_limit_fails_open_when_mongo_unavailable():
+    """Login proceeds (rate-limit fails open) when the MongoDB rate-limit backend is down.
+
+    The rate limiter moved off Redis to MongoDB (auth_rate_limit collection).
+    Unlike the old Redis fail-closed 503, the MongoDB-backed limiter fails OPEN:
+    if the datastore is unavailable it logs a warning and allows the request
+    through (bcrypt cost + Cloudflare WAF provide outer protection). The request
+    therefore reaches auth logic and returns 401 for an unknown user rather than
+    a 503 from the rate limiter.
+    """
     from app.main import app
     from httpx import AsyncClient, ASGITransport
 
-    with patch(
-        "app.db.redis.get_redis", side_effect=RuntimeError("Redis not initialized")
+    with (
+        patch(
+            "app.db.mongo.get_mongo_client",
+            side_effect=RuntimeError("MongoDB not initialized"),
+        ),
+        patch(
+            "app.models.user.User.find_one",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
     ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -90,8 +106,9 @@ async def test_redis_unavailable_returns_503():
                     "password": "SomePassword123",
                 },
             )
-            assert response.status_code == 503
-            assert "Rate limiting service unavailable" in response.json()["detail"]
+            # Rate limiter did not block (would be 503/429); auth ran and rejected.
+            assert response.status_code == 401
+            assert "Invalid credentials" in response.json()["detail"]
 
 
 @pytest.mark.anyio

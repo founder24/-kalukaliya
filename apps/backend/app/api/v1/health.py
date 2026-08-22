@@ -81,33 +81,70 @@ async def mongo_vector_search_ping() -> Dict[str, Any]:
         return {"status": "unhealthy", "error": str(e)}
 
 
-async def sarvam_ping() -> Dict[str, Any]:
-    """Check Sarvam AI configuration and lightweight endpoint reachability"""
+async def workers_ai_ping() -> Dict[str, Any]:
+    """Verify the authenticated Workers AI generation route with a bounded call."""
     try:
         from app.config import settings
+        from app.services.ai.workers_ai_client import generate_with_workers_ai
 
-        if not settings.SARVAM_API_KEY:
-            return {"status": "degraded", "error": "SARVAM_API_KEY not configured"}
-
-        import httpx
+        if not settings.EDGE_SHARED_SECRET:
+            return {"status": "degraded", "error": "EDGE_SHARED_SECRET not configured"}
+        if not settings.WORKERS_AI_INTERNAL_URL:
+            return {
+                "status": "degraded",
+                "error": "WORKERS_AI_INTERNAL_URL not configured",
+            }
 
         t0 = time.monotonic()
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                settings.SARVAM_BASE_URL,
-                headers={"API-Subscription-Key": settings.SARVAM_API_KEY},
-            )
+        response_text = await asyncio.wait_for(
+            generate_with_workers_ai(
+                "Reply with exactly OK.",
+                "Health check",
+                max_tokens=256,
+            ),
+            timeout=30.0,
+        )
+        if not response_text.strip():
+            return {"status": "degraded", "error": "Workers AI returned an empty response"}
+
+        return {
+            "status": "healthy",
+            "endpoint": settings.WORKERS_AI_INTERNAL_URL,
+            "model": settings.CF_AI_MODEL,
+            "latency_ms": round((time.monotonic() - t0) * 1000, 1),
+        }
+    except Exception as e:
+        logger.warning(f"Workers AI generation check failed: {str(e)}")
+        return {"status": "degraded", "error": str(e)[:120] or type(e).__name__}
+
+
+async def workers_ai_embedding_ping() -> Dict[str, Any]:
+    """Exercise the production embedding path used by RAG and ingestion."""
+    try:
+        from app.services.ai.embedder import generate_embedding_vector
+
+        t0 = time.monotonic()
+        vector = await asyncio.wait_for(
+            generate_embedding_vector("Syrabit embedding health check"),
+            timeout=15.0,
+        )
         latency_ms = round((time.monotonic() - t0) * 1000, 1)
 
-        # Any non-connection-error response means the endpoint is reachable.
-        # The base URL (/v1) returning 404 is expected — it has no GET handler.
-        # Only 5xx responses indicate a real Sarvam infrastructure problem.
-        if resp.status_code < 500:
-            return {"status": "healthy", "latency_ms": latency_ms}
-        return {"status": "unhealthy", "error": f"HTTP {resp.status_code}", "latency_ms": latency_ms}
+        if len(vector) != 1024:
+            return {
+                "status": "degraded",
+                "error": f"Workers AI embedding returned {len(vector)} dimensions, expected 1024",
+                "latency_ms": latency_ms,
+            }
+
+        return {
+            "status": "healthy",
+            "dimensions": len(vector),
+            "latency_ms": latency_ms,
+        }
     except Exception as e:
-        logger.warning(f"Sarvam ping failed: {str(e)}")
-        return {"status": "degraded", "error": str(e)[:120]}
+        logger.warning(f"Workers AI embedding check failed: {str(e)}")
+        return {"status": "unhealthy", "error": str(e)[:120] or type(e).__name__}
 
 
 @router.get("")
@@ -194,17 +231,20 @@ async def deep_health_check():
     Checks:
     - MongoDB connection
     - MongoDB vector search (topic embeddings)
-    - Sarvam AI reachability
+    - Workers AI internal generation route
+    - Workers AI embedding route used by RAG and ingestion
     """
     results = await asyncio.gather(
         _safe_check(mongo_ping()),
         _safe_check(mongo_vector_search_ping()),
-        _safe_check(sarvam_ping()),
+        _safe_check(workers_ai_ping(), timeout=35.0),
+        _safe_check(workers_ai_embedding_ping(), timeout=20.0),
     )
     checks = {
         "mongodb": results[0],
         "mongo_vector_search": results[1],
-        "sarvam_ai": results[2],
+        "workers_ai": results[2],
+        "workers_ai_embedding": results[3],
     }
 
     CORE_SERVICES = {"mongodb"}
@@ -277,7 +317,7 @@ async def provider_health_check():
     Check all AI provider integrations in parallel.
 
     Providers checked:
-      - sarvam_ai           : Sarvam API endpoint reachability
+      - workers_ai          : authenticated Workers AI generation route
       - vector_search       : MongoDB topic embedding cache
       - cloudflare_workers_ai : CF Workers AI token validity
 
@@ -287,13 +327,13 @@ async def provider_health_check():
       unhealthy — ≥1 provider explicitly unhealthy
     """
     results = await asyncio.gather(
-        _safe_check(sarvam_ping(),               timeout=10.0),
+        _safe_check(workers_ai_ping(),           timeout=10.0),
         _safe_check(mongo_vector_search_ping(),  timeout=10.0),
         _safe_check(cloudflare_workers_ai_ping(), timeout=10.0),
     )
 
     providers = {
-        "sarvam_ai":             results[0],
+        "workers_ai":            results[0],
         "vector_search":         results[1],
         "cloudflare_workers_ai": results[2],
     }
@@ -362,53 +402,18 @@ async def chat_pipeline_health(request: Request):
 
     result: Dict[str, Any] = {}
 
-    # ── Step 1: Full AI pipeline (Sarvam → Gemini fallback) ─────────────────
-    # Uses the exact same code path as real student chat messages so this probe
-    # gives a true signal about what students actually experience.
+    # ── Step 1: Workers AI text-generation probe ─────────────────────────────
     try:
-        from app.services.ai.sarvam_client import generate_with_sarvam
-        from app.services.ai.gemini_fallback import (
-            generate_gemini,
-            _available as gemini_available,
-        )
-        from app.core.circuit_breaker import SarvamBillingExhaustedError, CircuitBreakerError
+        from app.services.ai.workers_ai_client import generate_with_workers_ai
 
         _sys = "You are a test probe. Respond with exactly the single word PONG and nothing else."
         _usr = "ping"
-        provider = "sarvam"
+        provider = settings.CF_AI_MODEL
         t0 = _time.monotonic()
-
-        # Per-step time budgets keep the total endpoint latency within the
-        # 35 s CI curl deadline:
-        #   Sarvam attempt  :  6 s  (billing-exhausted short-circuits instantly)
-        #   Gemini fallback :  8 s  (only used if Sarvam fails)
-        #   Assamese probe  : 12 s  (Step 2 below)
-        #   RAG             :  4 s  (Step 3 below)
-        #   Total worst case: 6 + 8 + 12 + 4 = 30 s  (5 s margin)
-        try:
-            response_text = await asyncio.wait_for(
-                generate_with_sarvam(
-                    system_prompt=_sys,
-                    user_message=_usr,
-                    stream=False,
-                ),
-                timeout=6.0,
-            )
-        except (SarvamBillingExhaustedError, CircuitBreakerError, asyncio.TimeoutError, Exception) as sarvam_err:
-            # Sarvam unavailable (billing exhausted, circuit open, timeout, or API error).
-            # Fall through to Gemini exactly as real chat does.
-            if not gemini_available():
-                raise RuntimeError(
-                    f"Sarvam failed ({str(sarvam_err)[:80]}) and Gemini not configured"
-                )
-            logger.info(f"chat_pipeline_probe: Sarvam failed ({sarvam_err!r:.80}), using Gemini fallback")
-            # asyncio.wait_for provides the hard deadline regardless of any
-            # internal timeout inside generate_gemini (ensures CI budget holds).
-            response_text = await asyncio.wait_for(
-                generate_gemini(_sys, _usr, timeout=8.0, max_output_tokens=20),
-                timeout=8.0,
-            )
-            provider = "gemini-2.5-flash"
+        response_text = await asyncio.wait_for(
+            generate_with_workers_ai(_sys, _usr, max_tokens=256),
+            timeout=30.0,
+        )
 
         latency_ms = round((_time.monotonic() - t0) * 1000, 1)
         result["provider"] = provider
@@ -423,48 +428,25 @@ async def chat_pipeline_health(request: Request):
 
     # ── Steps 2 & 4: Assamese quality probes (non-streaming + streaming) ────
     # Both probes run in parallel inside a single asyncio.gather() call so they
-    # share the same 12 s time window and don't add to the total CI budget.
+    # share the same 30 s time window and don't add to the total CI budget.
     #
-    # Per-step time budgets (worst-case total ≤ 35 s CI curl deadline):
-    #   Step 1 Sarvam attempt  :  6 s
-    #   Step 1 Gemini fallback :  8 s
-    #   Steps 2+4 in parallel  : 12 s  (both complete within this window)
-    #   Step 3 RAG             :  4 s
-    #   Total worst case       : 6 + 8 + 12 + 4 = 30 s  (5 s margin)
-    #
-    # Step 2 (non-streaming) — generate_gemini():
-    #   Sarvam uses complex extraction helpers because its reasoning model
-    #   embeds Assamese lines inside an English chain-of-thought.  Gemini 2.5
-    #   Flash responds directly in the requested language — no extraction needed.
-    #   This step confirms that generate_gemini() produces valid Assamese script.
-    #
-    # Step 4 (streaming) — stream_gemini():
-    #   Most student chat is streamed via stream_gemini(), which is separate code
-    #   from generate_gemini() and was not previously covered by the probe.  This
-    #   step verifies the streaming path also yields valid Assamese script and
-    #   measures TTFB (time to first chunk).
-    #
-    # When Gemini is not configured both steps are skipped (not a failure):
-    # the probes only make sense when Gemini is the active fallback.
-
-    from app.services.ai.gemini_fallback import (
-        generate_gemini,
-        stream_gemini,
-        _available as gemini_available,
+    from app.services.ai.workers_ai_client import (
+        generate_with_workers_ai,
+        workers_ai_client,
     )
 
     # ── Probe coroutines ─────────────────────────────────────────────────────
 
     async def _run_nonstreaming_probe() -> Dict[str, Any]:
-        """Step 2: non-streaming Assamese quality check via generate_gemini()."""
+        """Step 2: non-streaming Assamese quality check via Workers AI."""
         _as_sys = (
             "তুমি এটা সহায়কাৰী শিক্ষামূলক সহায়ক। সদায় চমুকৈ অসমীয়া ভাষাত উত্তৰ দিয়া।"
         )
         _as_usr = "তুমি কোন?"  # "Who are you?"
         t_as = _time.monotonic()
         as_response = await asyncio.wait_for(
-            generate_gemini(_as_sys, _as_usr, timeout=12.0, max_output_tokens=80),
-            timeout=12.0,
+            generate_with_workers_ai(_as_sys, _as_usr, is_assamese=True, max_tokens=256),
+            timeout=30.0,
         )
         latency_ms = round((_time.monotonic() - t_as) * 1000, 1)
         has_assamese = any("\u0980" <= c <= "\u09ff" for c in (as_response or ""))
@@ -475,9 +457,9 @@ async def chat_pipeline_health(request: Request):
         }
 
     async def _run_streaming_probe() -> Dict[str, Any]:
-        """Step 4: streaming Assamese quality check via stream_gemini().
+        """Step 4: streaming Assamese quality check via Workers AI.
 
-        stream_gemini() collects chunks inside a thread then yields them, so
+        The legacy Cloud Run bridge collects chunks before yielding them, so
         ``first_chunk_latency_ms`` is the wall-clock time until the generator
         produces its first chunk — equivalent to full generation TTFB from the
         student's perspective.  The probe fails CI when no Assamese script
@@ -494,12 +476,14 @@ async def chat_pipeline_health(request: Request):
 
         async def _collect() -> None:
             nonlocal first_chunk_ms
-            async for chunk in stream_gemini(_as_sys, _as_usr, timeout=12.0):
+            async for chunk in workers_ai_client.stream_generate_with_retry(
+                _as_sys, _as_usr, is_assamese=True, max_tokens=256
+            ):
                 if first_chunk_ms is None:
                     first_chunk_ms = round((_time.monotonic() - t_stream) * 1000, 1)
                 stream_chunks.append(chunk)
 
-        await asyncio.wait_for(_collect(), timeout=12.0)
+        await asyncio.wait_for(_collect(), timeout=30.0)
 
         total_ms = round((_time.monotonic() - t_stream) * 1000, 1)
         joined = "".join(stream_chunks)
@@ -514,7 +498,7 @@ async def chat_pipeline_health(request: Request):
         }
 
         # Warn (not fail) when TTFB exceeds the 10 s student-experience threshold.
-        # stream_gemini() buffers all chunks in a thread before yielding, so
+        # The legacy Cloud Run bridge buffers Worker output before yielding, so
         # first_chunk_latency_ms == total generation time.  Values above 10 s are
         # still logged so ops can spot quota-throttling or cold-start regressions.
         if first_chunk_ms is not None and first_chunk_ms > 10_000:
@@ -529,14 +513,14 @@ async def chat_pipeline_health(request: Request):
 
     # ── Execute both probes ──────────────────────────────────────────────────
 
-    if not gemini_available():
+    if not settings.EDGE_SHARED_SECRET:
         result["assamese_probe"] = {
             "status": "skipped",
-            "reason": "Gemini not configured (GEMINI_API_KEY absent)",
+            "reason": "Workers AI internal authentication is not configured",
         }
         result["streaming_assamese_probe"] = {
             "status": "skipped",
-            "reason": "Gemini not configured (GEMINI_API_KEY absent)",
+            "reason": "Workers AI internal authentication is not configured",
         }
     else:
         try:
@@ -563,7 +547,7 @@ async def chat_pipeline_health(request: Request):
                 # blocked by a brief 429 blip.  ops can see the quota_warning
                 # field in the response body.
                 logger.warning(
-                    "assamese_probe: Gemini quota exhausted (429) — marking degraded: %s",
+                    "assamese_probe: Workers AI quota exhausted (429) — marking degraded: %s",
                     str(ns_result)[:120],
                 )
                 result["assamese_probe"] = {
@@ -590,8 +574,7 @@ async def chat_pipeline_health(request: Request):
                         "status": "unhealthy",
                         "step": "assamese_probe",
                         "error": (
-                            "generate_gemini() returned no Assamese script — Assamese students "
-                            "would receive English when Sarvam is unavailable. "
+                            "Workers AI returned no Assamese script. "
                             "Verify the system-prompt language instruction."
                         ),
                     },
@@ -604,7 +587,7 @@ async def chat_pipeline_health(request: Request):
                 # blocked by a brief 429 blip.  ops can see the quota_warning
                 # field in the response body.
                 logger.warning(
-                    "streaming_assamese_probe: Gemini quota exhausted (429) — marking degraded: %s",
+                    "streaming_assamese_probe: Workers AI quota exhausted (429) — marking degraded: %s",
                     str(st_result)[:120],
                 )
                 result["streaming_assamese_probe"] = {
@@ -631,8 +614,7 @@ async def chat_pipeline_health(request: Request):
                         "status": "unhealthy",
                         "step": "streaming_assamese_probe",
                         "error": (
-                            "stream_gemini() returned no Assamese script — streaming Assamese "
-                            "chat would be broken when Sarvam is unavailable. "
+                            "Workers AI streaming returned no Assamese script. "
                             "Verify the system-prompt language instruction."
                         ),
                     },

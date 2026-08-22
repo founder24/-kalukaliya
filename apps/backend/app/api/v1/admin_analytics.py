@@ -4,6 +4,7 @@ Real-time analytics: daily breakdown, funnel, content heatmap, revenue, CF overv
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends
 import logging
@@ -17,6 +18,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     tags=["Admin Analytics"],
     dependencies=[Depends(require_admin_session), Depends(csrf_guard)],
+)
+
+_CF_ANALYTICS_HEALTH_KEY = "cloudflare_analytics_overview"
+_CF_ANALYTICS_ALERT_DEDUP_KEY = "cloudflare_analytics_overview_query"
+_CF_ANALYTICS_REMEDIATION = (
+    "Confirm CF_ANALYTICS_TOKEN has Zone Analytics:Read for CF_ZONE_ID, then "
+    "update the overview query if Cloudflare changed its GraphQL schema."
 )
 
 
@@ -360,102 +368,410 @@ async def analytics_cf_status():
     cf_token = getattr(settings, "CF_ANALYTICS_TOKEN", None)
     cf_zone = getattr(settings, "CF_ZONE_ID", None)
     configured = bool(cf_token and cf_zone)
-    return {
+    payload = {
         "configured": configured,
-        "auth_ok": configured,
+        # Configuration alone is not evidence that Cloudflare still accepts
+        # the overview query. Keep the banner visible until the first live
+        # probe records a successful result.
+        "auth_ok": False,
         "needs_rotation": False,
         "last_error": None,
         "last_check_at": None,
         "blocked_for_seconds": 0,
         "consecutive_failures": 0,
-        "rotation_hint": None if configured else "Set CF_ANALYTICS_TOKEN and CF_ZONE_ID to enable CF analytics",
+        "rotation_hint": (
+            "Cloudflare overview health check has not run yet"
+            if configured
+            else "Set CF_ANALYTICS_TOKEN and CF_ZONE_ID to enable CF analytics"
+        ),
     }
+    try:
+        db = get_mongo_client()[settings.MONGODB_DB_NAME]
+        probe = await db.service_health.find_one({"key": _CF_ANALYTICS_HEALTH_KEY})
+        if probe:
+            payload.update(
+                {
+                    "auth_ok": configured and probe.get("status") == "healthy",
+                    "needs_rotation": bool(probe.get("needs_rotation")),
+                    "last_error": probe.get("error"),
+                    "last_check_at": (
+                        probe["checked_at"].isoformat()
+                        if probe.get("checked_at")
+                        else None
+                    ),
+                    "rotation_hint": (
+                        payload["rotation_hint"]
+                        if not configured
+                        else probe.get("remediation")
+                    ),
+                    "hourly_buckets_returned": probe.get("hourly_buckets_returned"),
+                    "unique_visitors_supported": probe.get("unique_visitors_supported"),
+                }
+            )
+    except Exception as exc:
+        # The dashboard remains usable during a Mongo outage. The live overview
+        # request still reports its own Cloudflare failure separately.
+        logger.warning("Could not load Cloudflare analytics health status: %s", exc)
+    return payload
 
 
 @router.post("/analytics/cf-recheck")
 async def analytics_cf_recheck():
-    """Recheck Cloudflare analytics token."""
-    return {"status": "ok", "message": "Recheck triggered"}
+    """Run and persist the same Cloudflare overview contract probe used by cron."""
+    result = await check_cf_overview_contract()
+    try:
+        await persist_cf_overview_contract_result(result)
+    except Exception as exc:
+        # The query result remains useful to the on-screen operator even if
+        # Mongo is temporarily unavailable to save the alert/status record.
+        logger.exception("Could not persist Cloudflare analytics recheck: %s", exc)
+        result = {
+            **result,
+            "persistence_error": "Health result could not be saved to the admin alert path",
+        }
+    return _cf_status_from_probe(result)
+
+
+_CF_RANGE_OPTIONS = {
+    "24h": (24, "Previous 24 hours", "hour"),
+    "7d": (7, "Previous 7 days", "day"),
+    "30d": (30, "Previous 30 days", "day"),
+}
+
+
+def _cf_status_from_probe(probe: dict[str, Any]) -> dict[str, Any]:
+    """Shape a fresh contract probe for the existing status-banner contract."""
+    configured = bool(
+        getattr(settings, "CF_ANALYTICS_TOKEN", None)
+        and getattr(settings, "CF_ZONE_ID", None)
+    )
+    return {
+        "configured": configured,
+        "auth_ok": probe["status"] == "healthy",
+        "needs_rotation": probe.get("needs_rotation", False),
+        "last_error": probe.get("error"),
+        "last_check_at": probe.get("checked_at"),
+        "blocked_for_seconds": 0,
+        "consecutive_failures": 0,
+        "rotation_hint": probe.get("remediation"),
+        "hourly_buckets_returned": probe.get("hourly_buckets_returned"),
+        "unique_visitors_supported": probe.get("unique_visitors_supported"),
+    }
+
+
+def _cf_overview_query(range_key: str, now: datetime) -> tuple[str, str, str]:
+    """Build the overview query and return its response collection metadata."""
+    range_size, _, bucket = _CF_RANGE_OPTIONS[range_key]
+    if bucket == "hour":
+        since = now - timedelta(hours=range_size)
+        until = now
+        groups_field = "httpRequests1hGroups"
+        dimensions = "datetime"
+        group_filter = (
+            f'datetime_geq: "{since.isoformat().replace("+00:00", "Z")}", '
+            f'datetime_lt: "{until.isoformat().replace("+00:00", "Z")}"'
+        )
+    else:
+        # The chart uses calendar-day buckets, while the unique aggregate
+        # below remains a true rolling time-window value.
+        since = datetime.combine(
+            (now - timedelta(days=range_size - 1)).date(),
+            datetime.min.time(),
+            tzinfo=timezone.utc,
+        )
+        until = now
+        groups_field = "httpRequests1dGroups"
+        dimensions = "date"
+        group_filter = (
+            f'date_geq: "{since.date().isoformat()}", '
+            f'date_leq: "{now.date().isoformat()}"'
+        )
+
+    since_iso = since.isoformat().replace("+00:00", "Z")
+    until_iso = until.isoformat().replace("+00:00", "Z")
+    query = f"""
+    query ($zoneTag: string) {{
+      viewer {{
+        zones(filter: {{zoneTag: $zoneTag}}) {{
+          {groups_field}(limit: {range_size}, filter: {{{group_filter}}}) {{
+            dimensions {{ {dimensions} }}
+            sum {{ requests pageViews threats bytes }}
+            uniq {{ uniques }}
+          }}
+          uniqueVisitors: httpRequestsAdaptiveGroups(
+            limit: 1
+            filter: {{datetime_geq: "{since_iso}", datetime_lt: "{until_iso}"}}
+          ) {{
+            uniq {{ uniques }}
+          }}
+        }}
+      }}
+    }}
+    """
+    return query, groups_field, dimensions
+
+
+async def _fetch_cf_overview_data(range_key: str) -> tuple[dict[str, Any], str, str]:
+    """Execute the read-only Cloudflare overview query for a configured zone."""
+    cf_token = getattr(settings, "CF_ANALYTICS_TOKEN", None)
+    cf_zone = getattr(settings, "CF_ZONE_ID", None)
+    if not cf_token or not cf_zone:
+        raise RuntimeError(
+            "Cloudflare analytics is not configured: set CF_ANALYTICS_TOKEN and CF_ZONE_ID"
+        )
+
+    import httpx
+
+    query, groups_field, dimensions = _cf_overview_query(
+        range_key, datetime.now(timezone.utc)
+    )
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            "https://api.cloudflare.com/client/v4/graphql",
+            headers={
+                "Authorization": f"Bearer {cf_token}",
+                "Content-Type": "application/json",
+            },
+            json={"query": query, "variables": {"zoneTag": cf_zone}},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    if data.get("errors"):
+        error_message = data["errors"][0].get("message", "Unknown GraphQL error")
+        raise RuntimeError(f"Cloudflare GraphQL error: {error_message}")
+
+    zones = data.get("data", {}).get("viewer", {}).get("zones")
+    if not isinstance(zones, list) or not zones:
+        raise RuntimeError("Cloudflare GraphQL returned no configured zone")
+    zone = zones[0]
+    if not isinstance(zone, dict):
+        raise RuntimeError("Cloudflare GraphQL returned an invalid zone payload")
+    return zone, groups_field, dimensions
+
+
+def _cf_probe_failure(error: str, *, needs_rotation: bool = False) -> dict[str, Any]:
+    """Return a stable, operator-facing failed probe result."""
+    return {
+        "status": "unhealthy",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "error": error[:500],
+        "remediation": _CF_ANALYTICS_REMEDIATION,
+        "needs_rotation": needs_rotation,
+        "hourly_buckets_returned": False,
+        "unique_visitors_supported": None,
+    }
+
+
+async def check_cf_overview_contract() -> dict[str, Any]:
+    """Validate the live, read-only 24-hour Cloudflare overview query.
+
+    The check intentionally executes the same query used by the traffic
+    dashboard. It catches a provider schema rejection and guards the two
+    response shapes that would otherwise make traffic metrics quietly vanish.
+    """
+    try:
+        zone, groups_field, _ = await _fetch_cf_overview_data("24h")
+        groups = zone.get(groups_field)
+        if not isinstance(groups, list):
+            return _cf_probe_failure(
+                f"Cloudflare did not return the expected {groups_field} hourly buckets"
+            )
+
+        aggregate = zone.get("uniqueVisitors")
+        if not isinstance(aggregate, list):
+            return _cf_probe_failure(
+                "Cloudflare did not return the expected uniqueVisitors aggregate"
+            )
+
+        # Some zones/plans legitimately return the aggregate with no `uniques`
+        # value. That remains a supported response shape, so report the
+        # capability without turning a zero-data zone into a false alert.
+        unique_visitors_supported = bool(
+            aggregate
+            and isinstance(aggregate[0], dict)
+            and isinstance(aggregate[0].get("uniq"), dict)
+            and "uniques" in aggregate[0]["uniq"]
+        )
+        return {
+            "status": "healthy",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "error": None,
+            "remediation": None,
+            "needs_rotation": False,
+            "hourly_buckets_returned": True,
+            "hourly_bucket_count": len(groups),
+            "unique_visitors_supported": unique_visitors_supported,
+        }
+    except Exception as exc:
+        error = str(exc)
+        lowered = error.lower()
+        return _cf_probe_failure(
+            error,
+            needs_rotation=any(
+                term in lowered
+                for term in ("unauthorized", "forbidden", "authentication", "permission")
+            ),
+        )
+
+
+async def persist_cf_overview_contract_result(probe: dict[str, Any]) -> None:
+    """Persist probe status and one active alert for the admin health surfaces."""
+    now = datetime.now(timezone.utc)
+    checked_at = datetime.fromisoformat(probe["checked_at"].replace("Z", "+00:00"))
+    db = get_mongo_client()[settings.MONGODB_DB_NAME]
+    document = {
+        "status": probe["status"],
+        "checked_at": checked_at,
+        "error": probe.get("error"),
+        "remediation": probe.get("remediation"),
+        "needs_rotation": probe.get("needs_rotation", False),
+        "hourly_buckets_returned": probe.get("hourly_buckets_returned"),
+        "unique_visitors_supported": probe.get("unique_visitors_supported"),
+    }
+    await db.service_health.update_one(
+        {"key": _CF_ANALYTICS_HEALTH_KEY},
+        {"$set": document, "$setOnInsert": {"key": _CF_ANALYTICS_HEALTH_KEY}},
+        upsert=True,
+    )
+
+    if probe["status"] == "healthy":
+        await db.alerts.update_many(
+            {
+                "dedup_key": _CF_ANALYTICS_ALERT_DEDUP_KEY,
+                "acknowledged": {"$ne": True},
+            },
+            {"$set": {"acknowledged": True, "acknowledged_at": now, "resolved_at": now}},
+        )
+        return
+
+    await db.alerts.update_one(
+        {"dedup_key": _CF_ANALYTICS_ALERT_DEDUP_KEY, "acknowledged": {"$ne": True}},
+        {
+            "$set": {
+                "type": "cloudflare_analytics_overview",
+                "severity": "high",
+                "message": (
+                    "Cloudflare traffic analytics query failed: "
+                    f"{probe.get('error')}. {probe.get('remediation')}"
+                ),
+                "last_seen_at": now,
+            },
+            "$setOnInsert": {
+                "dedup_key": _CF_ANALYTICS_ALERT_DEDUP_KEY,
+                "acknowledged": False,
+                "created_at": now,
+            },
+        },
+        upsert=True,
+    )
+
+
+def _cf_overview_payload(
+    *,
+    connected: bool,
+    range_key: str,
+    totals: dict | None = None,
+    series: list | None = None,
+    source: str,
+    message: str | None = None,
+    error: str | None = None,
+):
+    """Keep the Cloudflare overview envelope aligned with dashboard widgets.
+
+    The legacy flat counters remain during the migration, while the nested
+    totals and series containers are the canonical dashboard contract.
+    """
+    _, period_label, bucket = _CF_RANGE_OPTIONS[range_key]
+    totals = totals or {
+        "requests": 0,
+        "bytes": 0,
+        "page_views": 0,
+        "threats": 0,
+    }
+    payload = {
+        "connected": connected,
+        "range": range_key,
+        "period_label": period_label,
+        "bucket": bucket,
+        "totals": totals,
+        "series": series or [],
+        "source": source,
+        # Backward-compatible fields for callers that have not switched to
+        # the widget-shaped totals envelope yet.
+        "requests_24h": totals.get("requests", 0),
+        "bandwidth_bytes_24h": totals.get("bytes", 0),
+        "threats_24h": totals.get("threats", 0),
+        "page_views_24h": totals.get("page_views", 0),
+    }
+    if message:
+        payload["message"] = message
+    if error:
+        payload["error"] = error
+    return payload
 
 
 @router.get("/analytics/cf-overview")
-async def analytics_cf_overview():
+async def analytics_cf_overview(range: str = "7d"):
     """
     Cloudflare traffic overview via CF GraphQL Analytics API.
     Requires CF_ANALYTICS_TOKEN and CF_ZONE_ID in settings.
     """
+    range_key = range if range in _CF_RANGE_OPTIONS else "7d"
+    _, _, bucket = _CF_RANGE_OPTIONS[range_key]
     cf_token = getattr(settings, "CF_ANALYTICS_TOKEN", None)
     cf_zone = getattr(settings, "CF_ZONE_ID", None)
 
     if not cf_token or not cf_zone:
-        return {
-            "requests_24h": 0,
-            "bandwidth_bytes_24h": 0,
-            "threats_24h": 0,
-            "page_views_24h": 0,
-            "source": "unavailable",
-            "message": "Set CF_ANALYTICS_TOKEN and CF_ZONE_ID to enable CF traffic analytics",
-        }
+        return _cf_overview_payload(
+            connected=False,
+            range_key=range_key,
+            source="unavailable",
+            message="Set CF_ANALYTICS_TOKEN and CF_ZONE_ID to enable CF traffic analytics",
+        )
 
     try:
-        import httpx
-        from datetime import date
-
-        today = date.today().isoformat()
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
-
-        query = """
-        query ($zoneTag: String!, $since: String!, $until: String!) {
-          viewer {
-            zones(filter: {zoneTag: $zoneTag}) {
-              httpRequests1dGroups(
-                limit: 2
-                filter: {date_geq: $since, date_leq: $until}
-              ) {
-                sum { requests pageViews threats bytes }
-              }
-            }
-          }
-        }
-        """
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "https://api.cloudflare.com/client/v4/graphql",
-                headers={"Authorization": f"Bearer {cf_token}", "Content-Type": "application/json"},
-                json={"query": query, "variables": {"zoneTag": cf_zone, "since": yesterday, "until": today}},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        groups = (
-            data.get("data", {})
-            .get("viewer", {})
-            .get("zones", [{}])[0]
-            .get("httpRequests1dGroups", [])
+        zone, groups_field, dimensions = await _fetch_cf_overview_data(range_key)
+        groups = zone.get(groups_field, [])
+        aggregate_visitors = (
+            (zone.get("uniqueVisitors") or [{}])[0]
+            .get("uniq", {})
+            .get("uniques")
         )
-        totals = {"requests": 0, "pageViews": 0, "threats": 0, "bytes": 0}
+        totals = {"requests": 0, "page_views": 0, "threats": 0, "bytes": 0}
+        if aggregate_visitors is not None:
+            totals["visitors"] = aggregate_visitors
+        series = []
         for g in groups:
             s = g.get("sum", {})
-            for k in totals:
-                totals[k] += s.get(k, 0)
+            uniques = g.get("uniq", {}).get("uniques")
+            row = {
+                "date": g.get("dimensions", {}).get(dimensions, ""),
+                "requests": s.get("requests", 0),
+                "bytes": s.get("bytes", 0),
+                "page_views": s.get("pageViews", 0),
+                "threats": s.get("threats", 0),
+            }
+            if uniques is not None:
+                row["visitors"] = uniques
+            series.append(row)
+            for key in ("requests", "bytes", "page_views", "threats"):
+                totals[key] += row[key]
 
-        return {
-            "requests_24h": totals["requests"],
-            "bandwidth_bytes_24h": totals["bytes"],
-            "threats_24h": totals["threats"],
-            "page_views_24h": totals["pageViews"],
-            "source": "cloudflare_graphql",
-        }
+        return _cf_overview_payload(
+            connected=True,
+            range_key=range_key,
+            totals=totals,
+            series=series,
+            source="cloudflare_graphql",
+        )
     except Exception as e:
         logger.warning(f"CF GraphQL analytics failed: {e}")
-        return {
-            "requests_24h": 0,
-            "bandwidth_bytes_24h": 0,
-            "threats_24h": 0,
-            "page_views_24h": 0,
-            "source": "unavailable",
-            "error": str(e),
-        }
+        return _cf_overview_payload(
+            connected=False,
+            range_key=range_key,
+            source="unavailable",
+            error=str(e),
+        )
 
 
 @router.get("/analytics/bot-traffic")

@@ -150,29 +150,23 @@ class TestAiOutageAlertConcurrency:
 # ---------------------------------------------------------------------------
 
 class TestCallLlmAlertWiring:
-    """call_llm() fires the outage alert when both providers fail."""
+    """call_llm() fires the outage alert when both Workers AI attempts fail."""
 
     @pytest.mark.asyncio
     async def test_call_llm_triggers_outage_alert_on_dual_failure(self):
-        """When Sarvam raises and Gemini also raises, record_ai_outage is called."""
+        """A failed Worker request and retry must record an outage."""
         from unittest.mock import AsyncMock, patch
 
-        # Patch generate_response (Sarvam path) to raise
-        sarvam_exc = RuntimeError("sarvam 503")
-        # Patch generate_gemini (Gemini path) to raise
-        gemini_exc = RuntimeError("gemini 403 quota exceeded")
+        primary_exc = RuntimeError("workers primary 503")
+        retry_exc = RuntimeError("workers retry 429")
 
         record_mock = AsyncMock()
 
         with (
-            patch("app.services.ai.router.generate_response", side_effect=sarvam_exc),
+            patch("app.services.ai.router.generate_response", side_effect=primary_exc),
             patch(
-                "app.services.ai.gemini_fallback.generate_gemini",
-                side_effect=gemini_exc,
-            ),
-            patch(
-                "app.services.ai.gemini_fallback._available",
-                return_value=True,
+                "app.services.ai.workers_ai_client.generate_with_workers_ai",
+                side_effect=retry_exc,
             ),
             patch(
                 "app.services.comms.ai_outage_alert.record_ai_outage",
@@ -185,7 +179,7 @@ class TestCallLlmAlertWiring:
                 await ChatService.call_llm(
                     system_prompt="sys",
                     sanitized_message="hello",
-                    target_model="sarvam-105b",
+                    target_model="@cf/zai-org/glm-4.7-flash",
                     detected_lang="en",
                     user_id="test-user",
                 )
@@ -193,8 +187,8 @@ class TestCallLlmAlertWiring:
         record_mock.assert_awaited_once()
         call_kwargs = record_mock.call_args.kwargs
         assert call_kwargs["user_id"] == "test-user"
-        assert "sarvam" in call_kwargs.get("sarvam_error", "").lower() or "503" in call_kwargs.get("sarvam_error", "")
-        assert call_kwargs.get("gemini_error") is not None
+        assert "503" in call_kwargs.get("sarvam_error", "")
+        assert "429" in call_kwargs.get("gemini_error", "")
 
 
 # ---------------------------------------------------------------------------
@@ -202,26 +196,29 @@ class TestCallLlmAlertWiring:
 # ---------------------------------------------------------------------------
 
 class TestStreamLlmAlertWiring:
-    """stream_llm() stores dead-letter with both_providers_down=True on dual failure."""
+    """stream_llm() stores a dead letter when Worker stream and retry both fail."""
 
     @pytest.mark.asyncio
     async def test_stream_llm_stores_dead_letter_with_both_providers_down(self):
-        """When Sarvam stream fails and Gemini stream fails, dead_letter is stored
-        with both_providers_down=True so the alert is triggered via dead_letter."""
-        sarvam_exc = RuntimeError("sarvam circuit open")
-        gemini_exc = RuntimeError("gemini stream error")
+        """The dead letter records a failed Worker stream and retry."""
+        primary_exc = RuntimeError("workers stream primary failed")
+        retry_exc = RuntimeError("workers stream retry failed")
 
         store_mock = AsyncMock()
 
+        async def _failed_primary(*_args, **_kwargs):
+            raise primary_exc
+            yield ""
+
+        async def _failed_retry(*_args, **_kwargs):
+            raise retry_exc
+            yield ""
+
         with (
-            patch("app.services.ai.router.stream_response", side_effect=sarvam_exc),
+            patch("app.services.ai.router.stream_response", new=_failed_primary),
             patch(
-                "app.services.ai.gemini_fallback.stream_gemini",
-                side_effect=gemini_exc,
-            ),
-            patch(
-                "app.services.ai.gemini_fallback._available",
-                return_value=True,
+                "app.services.ai.workers_ai_client.workers_ai_client.stream_generate_with_retry",
+                new=_failed_retry,
             ),
             patch(
                 "app.services.dead_letter.store_dead_letter",
@@ -234,7 +231,7 @@ class TestStreamLlmAlertWiring:
             async for chunk in ChatService.stream_llm(
                 system_prompt="sys",
                 sanitized_message="hello",
-                target_model="sarvam-105b",
+                target_model="@cf/zai-org/glm-4.7-flash",
                 detected_lang="en",
                 user_id="stream-user",
                 request_message="hello",

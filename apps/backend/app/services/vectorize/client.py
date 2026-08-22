@@ -208,6 +208,43 @@ class VectorizeClient:
         )
         return result
 
+    async def get_by_ids(self, vector_ids: list[str]) -> list[dict]:
+        """
+        Fetch vectors by their IDs from Cloudflare Vectorize.
+
+        Uses the POST /get-by-ids endpoint.  Returns a list of vector objects
+        (each with an "id" field) for IDs that exist in the index.  IDs that
+        do not exist are simply absent from the response — callers can diff the
+        requested list against the returned list to find missing vectors.
+
+        Args:
+            vector_ids: List of vector IDs to look up (up to 100 per call).
+
+        Returns:
+            List of dicts: [{id, values?, metadata?}, ...]  — only present IDs.
+        """
+        self._check_configured()
+        if not vector_ids:
+            return []
+
+        resp = await self._http.post(
+            f"{self._base}/get-by-ids",
+            headers=self._headers,
+            json={"ids": vector_ids},
+        )
+        resp.raise_for_status()
+        body = resp.json()
+
+        if not body.get("success"):
+            errors = body.get("errors", [])
+            raise RuntimeError(f"Vectorize get-by-ids failed: {errors}")
+
+        result = body.get("result", [])
+        # API may return a list directly or {"vectors": [...]}
+        if isinstance(result, list):
+            return result
+        return result.get("vectors", [])
+
     async def get_index_info(self) -> dict:
         """Return metadata about the Vectorize index (dimensions, metric, count)."""
         self._check_configured()

@@ -1,0 +1,3 @@
+ALTER TABLE boards ADD COLUMN status TEXT NOT NULL DEFAULT 'published';
+ALTER TABLE classes ADD COLUMN status TEXT NOT NULL DEFAULT 'published';
+ALTER TABLE streams ADD COLUMN status TEXT NOT NULL DEFAULT 'published';

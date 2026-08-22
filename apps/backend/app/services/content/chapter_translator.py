@@ -1,6 +1,6 @@
 """
 ChapterTranslator — Translates Chapter content_en → content_as and
-title → title_as using Sarvam AI.
+title → title_as using Cloudflare Workers AI.
 
 Used by the /admin/corpus/assamese/backfill endpoint.
 """
@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.models.content import Chapter
-from app.services.ai.sarvam_client import sarvam_client
+from app.services.ai.workers_ai_client import workers_ai_client
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ CHUNK_WORD_LIMIT = 700
 
 
 class ChapterTranslator:
-    """Translates Chapter documents from English to Assamese via Sarvam AI."""
+    """Translates Chapter documents from English to Assamese via Workers AI."""
 
     def _scrub_translation_artifacts(self, text: str) -> str:
         """
@@ -96,15 +96,15 @@ class ChapterTranslator:
             return text
         for attempt in range(retries):
             try:
-                result = await sarvam_client.generate(system_prompt, text, is_assamese=True)
+                result = await workers_ai_client.generate(system_prompt, text, is_assamese=True)
                 return self._scrub_translation_artifacts(result)
             except Exception as e:
                 if attempt == retries - 1:
                     raise
                 wait = 2 ** attempt
-                logger.warning(f"Sarvam attempt {attempt+1} failed: {e}. Retry in {wait}s")
+                logger.warning(f"Workers AI attempt {attempt+1} failed: {e}. Retry in {wait}s")
                 await asyncio.sleep(wait)
-        raise RuntimeError("Sarvam translation failed after all retries")
+        raise RuntimeError("Workers AI translation failed after all retries")
 
     def _chunk(self, text: str) -> list[str]:
         paragraphs = text.split("\n\n")

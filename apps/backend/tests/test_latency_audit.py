@@ -5,23 +5,26 @@ Verify that production latency optimizations are in place:
 1. Parallel execution of retrieve_context + load_conversation_history
 2. Rate limit uses Redis pipeline (reduces HTTP round-trips)
 3. Unified middleware adds all expected headers in a single pass
-4. Vertex Search warm_up is called during startup
+4. RAG search warm-up runs during startup (topic embeddings)
 """
 
 import asyncio
 import time
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 
 @pytest.fixture
-def sync_client():
-    """Synchronous TestClient for middleware/header tests."""
+async def sync_client():
+    """In-process async client that avoids app lifespan background work."""
     from app.main import app
 
     with patch("app.api.v1.auth._check_rate_limit", AsyncMock()):
-        with TestClient(app) as client:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
             yield client
 
 
@@ -108,7 +111,7 @@ async def test_chat_endpoint_uses_asyncio_gather():
 
 
 # ═══════════════════════════════════════════════════════════════
-# (b) Rate limit uses pipeline (or skips burst when edge header present)
+# (b) Rate limit uses MongoDB monthly quota in every backend request path
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -116,19 +119,19 @@ async def test_chat_endpoint_uses_asyncio_gather():
 async def test_rate_limit_skips_burst_when_edge_header_present():
     """
     When X-Rate-Limited-By: edge header is present, the backend should
-    skip the burst rate limit check (fewer Redis calls).
+    still enforce only the MongoDB monthly quota.
     """
     from app.api.deps.rate_limit import check_rate_limit
 
-    mock_redis = MagicMock()
-    mock_redis.incr = AsyncMock(return_value=1)
-    mock_redis.expire = AsyncMock()
-    mock_redis.pipeline = MagicMock()
+    mock_db = MagicMock()
+    mock_db.quota_usage.find_one_and_update = AsyncMock(return_value={"count": 1})
+    mock_client = MagicMock()
+    mock_client.__getitem__.return_value = mock_db
 
     mock_request = MagicMock()
     mock_request.headers = {"x-rate-limited-by": "edge"}
 
-    with patch("app.api.deps.rate_limit.get_redis", return_value=mock_redis):
+    with patch("app.db.mongo.get_mongo_client", return_value=mock_client):
         result = await check_rate_limit(
             "user-123", "free", "127.0.0.1", request=mock_request
         )
@@ -136,29 +139,27 @@ async def test_rate_limit_skips_burst_when_edge_header_present():
     allowed, current_count, limit, limit_type = result
     assert allowed is True
     assert limit_type == "monthly"
-    # When edge header is present, pipeline() should NOT be called
-    mock_redis.pipeline.assert_not_called()
-    # Only incr for monthly quota (no burst key)
-    mock_redis.incr.assert_called_once()
+    assert current_count == 1
+    mock_db.quota_usage.find_one_and_update.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_rate_limit_uses_incr_without_edge_header():
     """
-    Without edge header, rate_limit should still use incr for monthly quota only.
+    Without an edge header, the backend still uses the same MongoDB quota.
     Burst limiting is handled at the edge layer exclusively.
     """
     from app.api.deps.rate_limit import check_rate_limit
 
-    mock_redis = MagicMock()
-    mock_redis.incr = AsyncMock(return_value=1)
-    mock_redis.expire = AsyncMock()
-    mock_redis.pipeline = MagicMock()
+    mock_db = MagicMock()
+    mock_db.quota_usage.find_one_and_update = AsyncMock(return_value={"count": 1})
+    mock_client = MagicMock()
+    mock_client.__getitem__.return_value = mock_db
 
     mock_request = MagicMock()
     mock_request.headers = {}
 
-    with patch("app.api.deps.rate_limit.get_redis", return_value=mock_redis):
+    with patch("app.db.mongo.get_mongo_client", return_value=mock_client):
         result = await check_rate_limit(
             "user-123", "free", "127.0.0.1", request=mock_request
         )
@@ -166,9 +167,8 @@ async def test_rate_limit_uses_incr_without_edge_header():
     allowed, current_count, limit, limit_type = result
     assert allowed is True
     assert limit_type == "monthly"
-    # Only incr for monthly quota (no burst/pipeline needed)
-    mock_redis.incr.assert_called_once()
-    mock_redis.pipeline.assert_not_called()
+    assert current_count == 1
+    mock_db.quota_usage.find_one_and_update.assert_awaited_once()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -176,12 +176,13 @@ async def test_rate_limit_uses_incr_without_edge_header():
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_middleware_adds_security_headers(sync_client):
+@pytest.mark.anyio
+async def test_middleware_adds_security_headers(sync_client):
     """
     A single unified middleware should add X-Content-Type-Options,
     X-Frame-Options, X-Request-ID, and Strict-Transport-Security.
     """
-    response = sync_client.get("/health")
+    response = await sync_client.get("/health")
 
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
     assert response.headers.get("X-Frame-Options") == "DENY"
@@ -208,23 +209,44 @@ def test_middleware_is_single_pass():
 
 
 # ═══════════════════════════════════════════════════════════════
-# (d) Vertex Search warm_up is called during startup
+# (d) RAG search warm-up runs during startup (Vertex Search retired)
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_vertex_search_has_warm_up_method():
-    """Verify VertexSearchService has a warm_up method."""
-    from app.services.search.vertex_search import VertexSearchService
+def test_vertex_search_module_is_retired():
+    """Vertex Search has been retired — its module must no longer exist.
 
-    assert hasattr(VertexSearchService, "warm_up"), (
-        "VertexSearchService must have a warm_up method"
+    RAG retrieval now uses MongoVectorSearchService (MongoDB topic embeddings
+    + in-memory cosine similarity). Importing the old Vertex module must fail
+    so nothing accidentally revives the retired 800-3000ms search path.
+    """
+    import pytest as _pytest
+
+    with _pytest.raises(ModuleNotFoundError):
+        import app.services.search.vertex_search  # noqa: F401
+
+    # The replacement service is what the retrieval pipeline uses now.
+    from app.services.search.mongo_vector_search import MongoVectorSearchService
+
+    assert hasattr(MongoVectorSearchService, "search_context"), (
+        "MongoVectorSearchService must expose search_context()"
     )
 
 
-def test_lifespan_calls_warm_up():
-    """Verify the app lifespan calls search_service.warm_up()."""
+def test_lifespan_warms_up_rag_search():
+    """The app lifespan must warm the RAG search path during startup.
+
+    Vertex Search's warm_up() is retired; warm-up is now handled by preloading
+    the topic embeddings (topic_matcher._load_embeddings) used by
+    MongoVectorSearchService, so the first real request is not slowed down.
+    """
     import inspect
     from app import main
 
     source = inspect.getsource(main.lifespan)
-    assert "warm_up" in source, "Lifespan should call warm_up for Vertex Search"
+    assert "_warm_topic_matcher" in source, (
+        "Lifespan should warm the topic embeddings that back RAG search"
+    )
+    assert "_load_embeddings" in source, (
+        "Lifespan should preload topic embeddings during startup warm-up"
+    )

@@ -39,8 +39,6 @@ class TestAuthGuards:
 
     endpoints_get = [
         "/api/v1/admin/dashboard",
-        "/api/v1/admin/health",
-        "/api/v1/admin/cf-overview",
         "/api/v1/admin/users",
         "/api/v1/admin/conversations",
         "/api/v1/admin/content/boards",
@@ -155,8 +153,7 @@ class TestResponseShapes:
         assert response.status_code == 200
         data = response.json()
         assert "overall_status" in data
-        assert "vertex_ai" in data
-        assert "sarvam_ai" in data
+        assert "cf_workers_ai" in data
 
     def test_seo_entity_status_placeholder(self, client, admin_cookie):
         """SEO entity status returns entity health data."""
@@ -165,13 +162,6 @@ class TestResponseShapes:
         data = response.json()
         assert "entities_total" in data
         assert "health_score" in data
-
-    def test_cf_overview_placeholder(self, client, admin_cookie):
-        """CF overview returns placeholder data."""
-        response = client.get("/api/v1/admin/cf-overview", cookies=admin_cookie)
-        assert response.status_code == 200
-        data = response.json()
-        assert data["source"] == "placeholder"
 
     @patch("app.db.mongo.get_mongo_client")
     def test_settings_response_shape(self, mock_mongo, client, admin_cookie):

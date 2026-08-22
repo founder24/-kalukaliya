@@ -8,17 +8,31 @@ registrations that would cause deployment failures (500 errors).
 
 import pytest
 from unittest.mock import patch, AsyncMock
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from fastapi.routing import APIRoute
 
 
 @pytest.fixture
-def sync_client():
-    """Synchronous TestClient for endpoint accessibility tests."""
+async def sync_client():
+    """In-process async client that avoids app lifespan background work."""
     from app.main import app
 
-    with patch("app.api.v1.auth._check_rate_limit", AsyncMock()):
-        with TestClient(app, raise_server_exceptions=False) as client:
+    healthy = AsyncMock(return_value={"status": "healthy"})
+    with (
+        patch("app.api.v1.auth._check_rate_limit", AsyncMock()),
+        patch("app.api.v1.health.mongo_ping", healthy),
+        patch("app.api.v1.health.mongo_vector_search_ping", healthy),
+        patch("app.api.v1.health.workers_ai_ping", healthy),
+        patch("app.api.v1.health.workers_ai_embedding_ping", healthy),
+        patch(
+            "app.services.ai.greeting_rag.greeting_rag.initialize",
+            new_callable=AsyncMock,
+        ),
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://test",
+        ) as client:
             yield client
 
 
@@ -36,10 +50,11 @@ def test_all_routes_registered(app_instance):
     assert len(routes) > 10, f"Expected many routes to be registered, got {len(routes)}"
 
 
-def test_health_endpoint_returns_200(sync_client):
+@pytest.mark.anyio
+async def test_health_endpoint_returns_200(sync_client):
     """Health endpoint must return 200 when healthy, or 503 when degraded (no DB in test env).
     Either way it must NOT crash (no 500) and must return a valid JSON body."""
-    response = sync_client.get("/health")
+    response = await sync_client.get("/health")
     assert response.status_code in (200, 503), (
         f"Expected 200 (healthy) or 503 (degraded), got {response.status_code}"
     )
@@ -48,20 +63,23 @@ def test_health_endpoint_returns_200(sync_client):
     assert body["status"] in ("healthy", "degraded")
 
 
-def test_health_deep_endpoint_accessible(sync_client):
+@pytest.mark.anyio
+async def test_health_deep_endpoint_accessible(sync_client):
     """Deep health endpoint should be accessible (not 500)."""
-    response = sync_client.get("/health/deep")
+    response = await sync_client.get("/health/deep")
     # May return non-200 if DB is not connected, but should not crash
     assert response.status_code != 500
 
 
-def test_legacy_health_redirects(sync_client):
+@pytest.mark.anyio
+async def test_legacy_health_redirects(sync_client):
     """Legacy /api/health should redirect to /health."""
-    response = sync_client.get("/api/health", follow_redirects=False)
+    response = await sync_client.get("/api/health", follow_redirects=False)
     assert response.status_code == 301
 
 
-def test_get_endpoints_no_500(sync_client, app_instance):
+@pytest.mark.anyio
+async def test_get_endpoints_no_500(sync_client, app_instance):
     """
     All GET endpoints should not return 500 (internal server error).
     401, 403, 404 are acceptable (auth required, not found, etc).
@@ -82,17 +100,18 @@ def test_get_endpoints_no_500(sync_client, app_instance):
 
     failures = []
     for path in get_routes:
-        response = sync_client.get(path)
+        response = await sync_client.get(path)
         if response.status_code == 500:
             failures.append(f"{path} returned 500: {response.text[:200]}")
 
     assert not failures, "The following endpoints returned 500:\n" + "\n".join(failures)
 
 
-def test_chat_post_endpoint_exists(sync_client):
+@pytest.mark.anyio
+async def test_chat_post_endpoint_exists(sync_client):
     """Chat POST endpoint should be accessible (not 500 on validation error)."""
     # Send without body - should get 422 (validation) or 403 (CSRF), not 500
-    response = sync_client.post(
+    response = await sync_client.post(
         "/api/v1/chat/",
         json={"message": ""},
         headers={"Origin": "https://syrabit.ai"},

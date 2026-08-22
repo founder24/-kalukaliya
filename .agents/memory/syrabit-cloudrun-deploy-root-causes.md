@@ -72,3 +72,14 @@ the canonical path that both old and new Cloud Run URL formats serve correctly.
 The `--remove-secrets` line removes secrets from the service. If gcloud deploy runs BEFORE
 the optional-secrets step that re-adds them, and then the REST API patches the service,
 the patch needs to include those secrets explicitly (they won't be re-added automatically).
+
+## Cloud Build default identity can become unavailable
+`gcloud builds submit` may fail before a build starts with “Unknown service account” even
+when the active deployment identity can update Cloud Run and write to Artifact Registry.
+
+**Why:** Cloud Build uses its configured build-service identity independently of the caller.
+When that identity is deleted or misconfigured, source deployments cannot run.
+
+**How to apply:** Repair the project’s Cloud Build service-account configuration before
+relying on source deployments. Treat a missing or malformed build identity as a release
+blocker, rather than normal deployment behavior.

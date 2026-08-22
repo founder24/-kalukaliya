@@ -13,6 +13,7 @@ import { getCorsHeaders, applyCorsHeaders } from './middleware/cors';
 import { verifyJWT } from './middleware/jwt';
 import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
 import { proxyRequest } from './routes/api-proxy';
+import { proxyToApiWorker, pingApiWorkerHealth } from './routes/worker-proxy';
 import { handleContentKV } from './routes/content-kv';
 import { handleISR } from './routes/isr';
 import { handleRobots } from './routes/robots';
@@ -22,9 +23,49 @@ import { getIdentityToken } from './utils/google-auth';
 let healthCache: { backendReachable: boolean; timestamp: number } | null = null;
 const HEALTH_CACHE_TTL_MS = 10_000; // 10 seconds
 
+function isNativeStaffPath(pathname: string): boolean {
+  if (pathname.startsWith('/api/v1/admin/content/')) return true;
+  return [
+    '/api/v1/admin/login',
+    '/api/v1/admin/verify',
+    '/api/v1/admin/logout',
+    '/api/v1/admin/rag/bulk-reindex',
+    '/api/v1/admin/cron/seed-notes',
+    '/api/v1/admin/cron/seed-assamese',
+    '/api/v1/admin/cron/translate',
+    '/api/v1/admin/cron/bulk-mirror-rag',
+    '/api/v1/admin/cron/bulk-reindex',
+    '/api/v1/admin/cron/bulk-reindex/status',
+  ].includes(pathname);
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    // When API_WORKER_LIVE === 'true' the Service Binding is active and ALL API /
+    // health traffic is routed through the API Worker. Implemented routes
+    // (auth, health, chat) are served directly from D1. All other routes fall
+    // back to Cloud Run via the API Worker's fallback proxy, which uses the OIDC
+    // token forwarded in X-Cloud-Run-Token by proxyToApiWorker.
+    const isWorkerNativeStaffPath = isNativeStaffPath(url.pathname);
+    const useApiWorker = Boolean(env.API_WORKER && (env.API_WORKER_LIVE === 'true' || isWorkerNativeStaffPath));
+    if (isWorkerNativeStaffPath && !env.API_WORKER) {
+      const response = new Response(JSON.stringify({ detail: 'Native API Worker binding is required for staff content operations.' }), {
+        status: 503, headers: { 'Content-Type': 'application/json' },
+      });
+      applyCorsHeaders(response.headers, request.headers.get('Origin') || '');
+      return response;
+    }
+    // Cloud Run maintenance jobs authenticate directly to the D1 API Worker's
+    // private generation route with the shared service secret.  This is the one
+    // API path that intentionally carries a non-JWT Bearer credential.
+    const isInternalGeneration = (
+      url.pathname === '/api/v1/internal/generate' &&
+      request.method === 'POST' &&
+      Boolean(env.EDGE_SHARED_SECRET) &&
+      request.headers.get('Authorization') === `Bearer ${env.EDGE_SHARED_SECRET}`
+    );
 
     // ── 1. CORS Preflight ──
     if (request.method === 'OPTIONS') {
@@ -60,7 +101,7 @@ export default {
     }
 
     // ── 2. JWT Verification (all /api/ routes except public) ──
-    if (url.pathname.startsWith('/api/')) {
+    if (url.pathname.startsWith('/api/') && !isInternalGeneration) {
       const jwtResult = await verifyJWT(request, env.JWT_SECRET, env.JWT_PUBLIC_KEY);
 
       if (!jwtResult.valid && jwtResult.error !== 'Missing or invalid Authorization header') {
@@ -172,19 +213,27 @@ export default {
       );
     }
 
-    // Robots.txt
-    if (url.pathname === '/robots.txt') {
-      const robotsResponse = await handleRobots(env);
-      robotsResponse.headers.set('X-Request-ID', requestId);
-      return robotsResponse;
-    }
-
-    // Sitemap proxy → backend (rewrite path to /api/v1/seo prefix)
-    if (url.pathname.startsWith('/sitemap') && url.pathname.endsWith('.xml')) {
+    // Public crawler artifacts live at root URLs, but the native API Worker
+    // exposes them under /api/v1/seo. Keep the canonical public URLs stable
+    // while routing them through the Worker during a staged cutover.
+    const isRootSeoArtifact = (
+      url.pathname === '/robots.txt'
+      || url.pathname === '/feed.xml'
+      || url.pathname === '/feed.json'
+      || url.pathname === '/llms.txt'
+      || url.pathname === '/llms-full.txt'
+      || /^\/feed\/[^/]+\.xml$/.test(url.pathname)
+      || (url.pathname.startsWith('/sitemap') && url.pathname.endsWith('.xml'))
+    );
+    if (isRootSeoArtifact) {
       const rewrittenUrl = new URL(request.url);
       rewrittenUrl.pathname = `/api/v1/seo${url.pathname}`;
       const rewrittenRequest = new Request(rewrittenUrl.toString(), request);
-      const sitemapResponse = await proxyRequest(rewrittenRequest, env.BACKEND_URL, env);
+      const sitemapResponse = useApiWorker
+        ? await proxyToApiWorker(rewrittenRequest, env)
+        : url.pathname === '/robots.txt'
+          ? handleRobots(env)
+          : await proxyRequest(rewrittenRequest, env.BACKEND_URL, env);
       sitemapResponse.headers.set('X-Request-ID', requestId);
       return sitemapResponse;
     }
@@ -214,7 +263,9 @@ export default {
         backendReachable = healthCache.backendReachable;
       } else if (!env.ISR_CACHE_KV) {
         // KV not bound - skip KV layer, fetch backend directly
-        backendReachable = await fetchBackendHealth(env.BACKEND_URL, env);
+        backendReachable = useApiWorker
+          ? await pingApiWorkerHealth(env)
+          : await fetchBackendHealth(env.BACKEND_URL, env);
         healthCache = { backendReachable, timestamp: now };
       } else {
         // Layer 2: KV cache (30s TTL, globally shared across all PoPs)
@@ -227,7 +278,9 @@ export default {
             healthCache = { backendReachable, timestamp: now };
           } else {
             // Layer 3: Fresh backend fetch
-            backendReachable = await fetchBackendHealth(env.BACKEND_URL, env);
+            backendReachable = useApiWorker
+              ? await pingApiWorkerHealth(env)
+              : await fetchBackendHealth(env.BACKEND_URL, env);
             healthCache = { backendReachable, timestamp: now };
             // Store in KV for other PoPs (30s TTL)
             const kvPayload = JSON.stringify({ backend_reachable: backendReachable });
@@ -235,7 +288,9 @@ export default {
           }
         } catch {
           // KV read failed - fall back to direct fetch
-          backendReachable = await fetchBackendHealth(env.BACKEND_URL, env);
+          backendReachable = useApiWorker
+            ? await pingApiWorkerHealth(env)
+            : await fetchBackendHealth(env.BACKEND_URL, env);
           healthCache = { backendReachable, timestamp: now };
         }
       }
@@ -281,15 +336,27 @@ export default {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const headers: Record<string, string> = {};
-        const token = await getIdentityToken(env);
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
+        let res: Response;
+
+        if (useApiWorker) {
+          // Service Binding path — direct Worker-to-Worker call (no OIDC needed)
+          const deepReq = new Request(new URL('/health/deep', request.url).toString(), {
+            signal: controller.signal,
+          });
+          res = await env.API_WORKER!.fetch(deepReq);
+        } else {
+          // HTTP proxy path — Cloud Run with OIDC token
+          const headers: Record<string, string> = {};
+          const token = await getIdentityToken(env);
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+          }
+          res = await fetch(`${env.BACKEND_URL}/health/deep`, {
+            signal: controller.signal,
+            headers,
+          });
         }
-        const res = await fetch(`${env.BACKEND_URL}/health/deep`, {
-          signal: controller.signal,
-          headers,
-        });
+
         clearTimeout(timeoutId);
         backendStatus = await res.json() as Record<string, unknown>;
         if (!res.ok) {
@@ -354,8 +421,11 @@ export default {
 
           if (isStale) {
             // Background revalidation — do NOT await; user already has the response
+            const revalRequest = new Request(request.url, request);
             ctx.waitUntil(
-              proxyRequest(new Request(request.url, request), env.BACKEND_URL, env)
+              (useApiWorker
+                ? proxyToApiWorker(revalRequest, env)
+                : proxyRequest(revalRequest, env.BACKEND_URL, env))
                 .then(async r => {
                   if (r.status === 200) {
                     const freshBody = await r.text();
@@ -383,7 +453,9 @@ export default {
       }
 
       // Cache MISS — proxy to backend and populate cache on success
-      const backendResp = await proxyRequest(request, env.BACKEND_URL, env);
+      const backendResp = useApiWorker
+        ? await proxyToApiWorker(request, env)
+        : await proxyRequest(request, env.BACKEND_URL, env);
       if (backendResp.status === 200) {
         const body = await backendResp.text();
         const entry = JSON.stringify({ body, cachedAt: Math.floor(Date.now() / 1000) });
@@ -527,11 +599,16 @@ export default {
       }
     }
 
-    // API routes → proxy to backend
+    // API routes → proxy to backend (or API Worker via Service Binding in production)
     // Note: /health/full is handled above; remaining /health/ sub-paths (e.g. /health/deep)
     // are proxied to backend. /health is handled at edge above.
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/')) {
-      const response = await proxyRequest(request, env.BACKEND_URL, env);
+      // Production (D1 backend): route via Service Binding — direct Worker-to-Worker
+      // connection, no public internet hop, no OIDC token required.
+      // Dev/staging (Cloud Run backend): fall back to HTTP proxy via BACKEND_URL.
+      const response = useApiWorker
+        ? await proxyToApiWorker(request, env)
+        : await proxyRequest(request, env.BACKEND_URL, env);
       const secured = addSecurityHeaders(response);
       const origin = request.headers.get('Origin') || '';
       applyCorsHeaders(secured.headers, origin);
@@ -553,8 +630,8 @@ export default {
       const headers = new Headers();
       object.writeHttpMetadata(headers);
       headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-      // Assets are intentionally public — allow any origin to embed images/PDFs
-      headers.set('Access-Control-Allow-Origin', '*');
+      // Allow the configured frontend origin to load assets (images, PDFs, JS).
+      headers.set('Access-Control-Allow-Origin', env.ALLOWED_ORIGIN || 'https://syrabit.ai');
       headers.set('X-Request-ID', requestId);
 
       // Set content type from extension if not already present in R2 metadata
@@ -672,7 +749,20 @@ function addSecurityHeaders(response: Response): Response {
   newResponse.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   newResponse.headers.set('X-XSS-Protection', '0');
   newResponse.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  newResponse.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com https://app.posthog.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.syrabit.ai https://app.posthog.com https://*.sentry.io https://*.ingest.sentry.io; frame-ancestors 'none'");
+  newResponse.headers.set('Content-Security-Policy', [
+    "default-src 'self'",
+    // First-party + analytics + error tracking + AdSense loader
+    "script-src 'self' https://static.cloudflareinsights.com https://app.posthog.com https://browser.sentry-cdn.com https://pagead2.googlesyndication.com",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "font-src 'self' https://fonts.gstatic.com",
+    // API, analytics, error tracking + AdSense measurement endpoints
+    "connect-src 'self' https://*.syrabit.ai https://app.posthog.com https://*.sentry.io https://*.ingest.sentry.io https://*.googlesyndication.com https://www.google.com",
+    // Ad iframes served by Google's ad servers
+    "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com",
+    // Prevent this site from being embedded anywhere
+    "frame-ancestors 'none'",
+  ].join('; '));
   return newResponse;
 }
 

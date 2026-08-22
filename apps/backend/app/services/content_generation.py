@@ -1,8 +1,8 @@
 """
-ContentGenerationService - Generates educational content using Vertex AI and Sarvam AI.
+ContentGenerationService - Generates educational content using Cloudflare Workers AI.
 
 Pipeline (fully automatic):
-  generate_notes()          → Vertex AI (EN) + Sarvam AI (AS) → MongoDB
+   generate_notes()          → Workers AI (EN + AS) → MongoDB
                               → auto-calls publish_chapter()
                                  ↳ GCS upload (source of truth for CF Pages)
                                  ↳ Vertex AI Search indexing (RAG)
@@ -10,11 +10,11 @@ Pipeline (fully automatic):
                                  ↳ Topic embeddings (cosine similarity)
                                  ↳ status = "published"
 
-  generate_assamese_only()  → Sarvam AI (AS, chunked) → MongoDB
+   generate_assamese_only()  → Workers AI (AS, chunked) → MongoDB
                               → re-publishes to GCS so CF Pages gets bilingual JSON
                               → re-indexes in Vertex AI Search with updated content
 
-  ensure_topics()           → Sarvam AI → generates 4-6 topic titles for chapters
+   ensure_topics()           → Workers AI → generates 4-6 topic titles for chapters
                               that have no published_topics yet, saves to MongoDB.
 """
 
@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from beanie import PydanticObjectId
 
 from app.models.content import Chapter
-from app.services.ai.sarvam_client import sarvam_client
+from app.services.ai.workers_ai_client import workers_ai_client
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ class ContentGenerationService:
     async def ensure_topics(self, chapter: Chapter, subject_name: str = "") -> Chapter:
         """Generate 4-6 topic titles for a chapter that has no published_topics.
 
-        Uses Sarvam AI to derive a realistic topic list from the chapter title
+        Uses Workers AI to derive a realistic topic list from the chapter title
         and subject name, then saves the result to MongoDB.  Idempotent — if
         topics already exist the chapter is returned unchanged.
 
@@ -109,13 +109,13 @@ class ContentGenerationService:
             "Example:\n1. Introduction and Overview\n2. Key Concepts\n..."
         )
         try:
-            raw = await sarvam_client.generate(
+            raw = await workers_ai_client.generate(
                 "You are a curriculum designer for Indian higher education. "
                 "Output ONLY the numbered topic list, nothing else.",
                 prompt,
             )
         except Exception as e:
-            logger.warning(f"ensure_topics Sarvam call failed for {chapter.title!r}: {e}")
+            logger.warning(f"ensure_topics Workers AI call failed for {chapter.title!r}: {e}")
             return chapter
 
         # Parse numbered / bulleted lines into topic titles
@@ -152,11 +152,11 @@ class ContentGenerationService:
         """Generate English notes + Assamese translation, then auto-publish.
 
         Full pipeline on success:
-          1. Vertex AI → English study notes
-          2. Vertex AI → per-topic definitions (1–2 sentences each, soft-fail)
-          3. Sarvam AI → Assamese translation (chunked, soft-fail)
-          4. Vertex AI → SEO meta description + keywords
-          5. Vertex AI → 5-entry FAQ JSON-LD
+          1. Workers AI → English study notes
+          2. Workers AI → per-topic definitions (1–2 sentences each, soft-fail)
+          3. Workers AI → Assamese translation (chunked, soft-fail)
+          4. Workers AI → SEO meta description + keywords
+          5. Workers AI → 5-entry FAQ JSON-LD
           6. Save to MongoDB (status='generated')
           7. publish_chapter() → GCS + Vertex Search + CF prerender + embeddings
                                → status='published' in MongoDB
@@ -201,9 +201,9 @@ class ContentGenerationService:
             "Generate detailed study notes covering all topics."
         )
 
-        # ── 2. English content via Sarvam AI ───────────────────────────────────
+        # ── 2. English content via Workers AI ─────────────────────────────────
         logger.info(f"Generating English notes for {chapter.title!r}")
-        content_en = await sarvam_client.generate(system_prompt, user_message)
+        content_en = await workers_ai_client.generate(system_prompt, user_message)
         chapter.content_en = content_en
 
         # ── 3. Extract per-topic definitions from generated content ───────────
@@ -216,7 +216,7 @@ class ContentGenerationService:
                 "Only output the topic/definition pairs. No extra text."
             )
             try:
-                def_response = await sarvam_client.generate(
+                def_response = await workers_ai_client.generate(
                     "You are an educational content extractor.",
                     f"{def_prompt}\n\nNotes:\n{content_en[:4000]}",
                 )
@@ -235,7 +235,7 @@ class ContentGenerationService:
             except Exception as e:
                 logger.warning(f"Topic definition extraction failed for {chapter.title!r}: {e}")
 
-        # ── 4. Assamese translation via Sarvam AI (chunked, soft-fail) ─────────
+        # ── 4. Assamese translation via Workers AI (chunked, soft-fail) ───────
         translate_prompt = (
             "You are a professional translator. "
             "Translate the following educational content from English to Assamese. "
@@ -251,7 +251,7 @@ class ContentGenerationService:
         translated_parts = []
         for idx, chunk in enumerate(chunks):
             try:
-                part = await sarvam_client.generate(translate_prompt, chunk, is_assamese=True)
+                part = await workers_ai_client.generate(translate_prompt, chunk, is_assamese=True)
                 if part and part.strip():
                     translated_parts.append(part.strip())
             except Exception as e:
@@ -264,17 +264,17 @@ class ContentGenerationService:
         else:
             logger.warning(
                 f"Assamese translation produced no output for {chapter.title!r}. "
-                "Run /generate-notes/as once SARVAM_API_KEY is configured."
+                "Check the Workers AI internal generation configuration before retrying."
             )
 
-        # ── 4. SEO meta + keywords via Sarvam AI ───────────────────────────────
+        # ── 4. SEO meta + keywords via Workers AI ─────────────────────────────
         meta_prompt = (
             "Extract a concise meta description (max 160 chars) and "
             "comma-separated keywords from this content. "
             "Format: META: <description>\nKEYWORDS: <keywords>"
         )
         try:
-            meta_response = await sarvam_client.generate(
+            meta_response = await workers_ai_client.generate(
                 "You are an SEO specialist.",
                 f"{meta_prompt}\n\nContent:\n{content_en[:2000]}",
             )
@@ -286,7 +286,7 @@ class ContentGenerationService:
         except Exception as e:
             logger.warning(f"SEO meta generation failed for {chapter.title!r}: {e}")
 
-        # ── 5. FAQ JSON-LD via Sarvam AI ───────────────────────────────────────
+        # ── 5. FAQ JSON-LD via Workers AI ─────────────────────────────────────
         if not chapter.faq_jsonld or len(chapter.faq_jsonld) < 2:
             faq_prompt = (
                 f"Generate exactly 5 frequently asked questions and answers about: {chapter.title}. "
@@ -295,7 +295,7 @@ class ContentGenerationService:
                 "Make questions specific and educational. Answers should be 1-3 sentences."
             )
             try:
-                faq_response = await sarvam_client.generate(
+                faq_response = await workers_ai_client.generate(
                     "You are an educational FAQ writer for Indian board exam students.",
                     faq_prompt,
                 )
@@ -337,12 +337,8 @@ class ContentGenerationService:
     async def generate_assamese_only(self, chapter_id: str, force: bool = False) -> Chapter:
         """Translate existing English content to Assamese, then re-sync to GCS + Vertex Search.
 
-        The Sarvam sarvam-30b / sarvam-105b models are reasoning models with a
-        4096-token completion budget on the starter plan.  Sending ~1000-1300
-        English words in one shot exhausts that budget entirely on reasoning,
-        leaving content=null.  We chunk into ~400-word segments so each request
-        fits comfortably: ~600 prompt tokens + ~1500 reasoning + ~900 output ≈
-        3000 tokens, well within the 4096 cap.
+        We chunk at roughly 400 words to retain formulas and Markdown structure
+        while staying well inside the configured Workers AI token budget.
 
         After a successful translation the chapter JSON is re-uploaded to GCS
         and re-indexed in Vertex AI Search so that Cloudflare Pages and RAG
@@ -394,7 +390,7 @@ class ContentGenerationService:
             "Maintain the structure and formatting exactly."
         )
 
-        # Split into ~400-word chunks so reasoning + output fit in 4096 tokens
+        # Split into ~400-word chunks to protect formatting and output quality.
         words = source_en.split()
         chunk_size = 400
         chunks = [
@@ -407,7 +403,7 @@ class ContentGenerationService:
             logger.info(
                 f"Translating chunk {idx + 1}/{len(chunks)} for {chapter.title!r}"
             )
-            part = await sarvam_client.generate(translate_prompt, chunk, is_assamese=True)
+            part = await workers_ai_client.generate(translate_prompt, chunk, is_assamese=True)
             if part and part.strip():
                 translated_parts.append(part.strip())
 

@@ -58,6 +58,17 @@ interface Env {
   CONTENT_KV: KVNamespace;
   // Workers AI binding — used for TTS and OCR directly at the edge.
   AI?: Ai;
+  // Service Binding: syrabit-api-prod (production only).
+  // Declared in wrangler.toml [[env.production.services]] but only ACTIVATED
+  // when API_WORKER_LIVE === 'true'. This two-step approach lets the binding be
+  // wired up before the API Worker has full route parity — routing stays on
+  // BACKEND_URL (Cloud Run) until the operator explicitly flips the flag:
+  //   wrangler secret put API_WORKER_LIVE --env production   # enter: true
+  API_WORKER?: { fetch(request: Request): Promise<Response> };
+  // Guards activation of the API_WORKER service binding. Must be explicitly set
+  // to the string "true" to route traffic through the D1-backed API Worker.
+  // Any other value (including absent) keeps routing on BACKEND_URL.
+  API_WORKER_LIVE?: string;
 }
 
 // Minimal Cloudflare Workers AI binding type.

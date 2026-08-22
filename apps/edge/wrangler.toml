@@ -69,6 +69,15 @@ bucket_name = "syrabit-assets"
 [env.production.ai]
 binding = "AI"
 
+# ── Service Binding: syrabit-api-prod (D1-backed API Worker) ─────────────────
+# Requests to /api/ and /health/ are forwarded to the API Worker via a direct
+# Cloudflare-internal connection (no public internet hop, no OIDC auth needed).
+# BACKEND_URL secret is kept as a fallback for dev/staging environments where
+# the service binding is absent.
+[[env.production.services]]
+binding = "API_WORKER"
+service = "syrabit-api-prod"
+
 # ── Required Secrets (set via Wrangler CLI or CF Dashboard) ──────────────────
 # npx wrangler secret put <NAME> --env production
 #

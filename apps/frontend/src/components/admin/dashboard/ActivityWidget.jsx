@@ -42,6 +42,17 @@ import {
 
 export default function ActivityWidget(props) {
   const p = props;
+  const {
+    adminToken,
+    onNavigate,
+    data,
+    vs: rawVs,
+    recentEvents: rawRecentEvents,
+    quickActions: rawQuickActions,
+  } = props;
+  const vs = rawVs && typeof rawVs === 'object' ? rawVs : {};
+  const recentEvents = Array.isArray(rawRecentEvents) ? rawRecentEvents : [];
+  const quickActions = Array.isArray(rawQuickActions) ? rawQuickActions : [];
   return (
     <>
 

@@ -147,6 +147,15 @@ async def test_resolve_hierarchy_handles_missing_stream():
 
 
 @pytest.mark.anyio
+async def test_vertex_search_publish_is_explicitly_skipped():
+    """The retired Vertex backend must not be accidentally reactivated."""
+    result = await ContentPublisherService().publish_to_vertex_search(_make_chapter())
+
+    assert result == {"status": "skipped", "reason": "vertex_search_removed"}
+
+
+@pytest.mark.skip(reason="Vertex Search indexing was retired in favor of the active RAG backend")
+@pytest.mark.anyio
 async def test_publish_skips_empty_hierarchy_segments():
     """Verify hierarchy string filters out empty segments when ancestors are None."""
     # Only subject is present; stream, cls, board are all None
@@ -234,6 +243,7 @@ async def test_publish_skips_empty_hierarchy_segments():
     assert topic_structs[0]["hierarchy"] == "Biology > Cell Biology > Osmosis"
 
 
+@pytest.mark.skip(reason="Vertex Search indexing was retired in favor of the active RAG backend")
 @pytest.mark.anyio
 async def test_publish_no_content_skips_topic_micro_docs():
     """Verify topic micro-docs are NOT uploaded when content_en is empty."""
@@ -315,6 +325,7 @@ async def test_publish_no_content_skips_topic_micro_docs():
 # ---- publish_to_vertex_search tests ----
 
 
+@pytest.mark.skip(reason="Vertex Search indexing was retired in favor of the active RAG backend")
 @pytest.mark.anyio
 async def test_publish_enriches_chunks_with_hierarchy():
     """Verify publish_to_vertex_search enriches chunk struct_data with hierarchy fields."""
@@ -426,6 +437,7 @@ async def test_publish_enriches_chunks_with_hierarchy():
     )
 
 
+@pytest.mark.skip(reason="Vertex Search indexing was retired in favor of the active RAG backend")
 @pytest.mark.anyio
 async def test_publish_creates_topic_micro_documents():
     """Verify topic micro-documents are created for each published_topic."""
@@ -543,7 +555,7 @@ async def test_build_system_prompt_includes_hierarchy():
     result = ChatService.build_system_prompt("en", chunks)
 
     assert (
-        "[1] Cell Biology (AHSEC > Class 12 > Science > Biology > Cell Biology): Cells are the basic unit of life."
+        "[C1] Cell Biology (AHSEC > Class 12 > Science > Biology > Cell Biology): Cells are the basic unit of life."
         in result
     )
 
@@ -562,5 +574,5 @@ async def test_build_system_prompt_omits_empty_hierarchy():
 
     result = ChatService.build_system_prompt("en", chunks)
 
-    assert "[1] Cell Biology: Cells are the basic unit of life." in result
+    assert "[C1] Cell Biology: Cells are the basic unit of life." in result
     assert "()" not in result

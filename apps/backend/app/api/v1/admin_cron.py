@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Admin Cron"])
@@ -53,6 +54,37 @@ def _verify_cron_token(request: Request) -> None:
     if not any(h.startswith("Bearer ") for h in (x_user_jwt, x_cron_token, auth_header)):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
     raise HTTPException(status_code=403, detail="Invalid cron token")
+
+
+@router.post("/cron/cloudflare-analytics-health")
+async def cron_cloudflare_analytics_health(request: Request):
+    """Probe the live read-only Cloudflare traffic overview query.
+
+    Scheduled callers receive 503 for a failed provider/schema contract so
+    their monitoring sees the failure as well. The result is still persisted
+    to the admin health status and alerts collections before responding.
+    """
+    _verify_cron_token(request)
+
+    from app.api.v1.admin_analytics import (
+        check_cf_overview_contract,
+        persist_cf_overview_contract_result,
+    )
+
+    result = await check_cf_overview_contract()
+    try:
+        await persist_cf_overview_contract_result(result)
+    except Exception as exc:
+        logger.exception("Could not persist Cloudflare analytics health result: %s", exc)
+        result = {
+            **result,
+            "persistence_error": "Health result could not be saved to the admin alert path",
+        }
+
+    return JSONResponse(
+        status_code=200 if result["status"] == "healthy" else 503,
+        content=result,
+    )
 
 
 @router.post("/cron/expire-subscriptions")

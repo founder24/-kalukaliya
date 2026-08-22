@@ -40,27 +40,18 @@ async def main(args: argparse.Namespace) -> None:
     from app.db.mongo import init_mongo
     from app.config import settings
     from app.models.content import Chapter, Subject
-    from app.services.ai.sarvam_client import sarvam_client
+    from app.services.ai.workers_ai_client import workers_ai_client
 
     # Bootstrap DB + secrets
     mongo_url = os.environ.get("MONGODB_URL") or os.environ.get("MONGODB_URI")
     if mongo_url and not settings.MONGODB_URI:
         settings.MONGODB_URI = mongo_url  # type: ignore[attr-defined]
 
-    if not settings.SARVAM_API_KEY:
-        try:
-            from app.core.secret_manager import load_secrets_into_settings
-            await load_secrets_into_settings()
-        except Exception as e:
-            log.warning(f"Secret Manager fetch failed: {e}")
-
     await init_mongo()
     log.info(f"MongoDB connected — db={settings.MONGODB_DB_NAME!r}")
 
-    if settings.SARVAM_API_KEY:
-        log.info(f"Sarvam key loaded (prefix={settings.SARVAM_API_KEY[:8]}…)")
-    elif not args.dry_run:
-        log.error("SARVAM_API_KEY not set — run with --dry-run or set key")
+    if not settings.EDGE_SHARED_SECRET and not args.dry_run:
+        log.error("EDGE_SHARED_SECRET not set — cannot authenticate Workers AI generation")
         sys.exit(1)
 
     medium = args.medium  # "en" or "as"
@@ -114,16 +105,16 @@ async def main(args: argparse.Namespace) -> None:
 
         try:
             qa_pairs = await generate_qa_from_notes(
-                sarvam_client, notes_text, ch_title, subj.name, medium
+                workers_ai_client, notes_text, ch_title, subj.name, medium
             )
         except Exception as e:
-            log.error(f"    Sarvam failed: {e}")
+            log.error(f"    Workers AI generation failed: {e}")
             failed += 1
             await asyncio.sleep(3.0)
             continue
 
         if not qa_pairs:
-            log.warning(f"    Sarvam returned 0 Q&A pairs — skipping")
+            log.warning(f"    Workers AI returned 0 Q&A pairs — skipping")
             skipped += 1
             await asyncio.sleep(2.0)
             continue

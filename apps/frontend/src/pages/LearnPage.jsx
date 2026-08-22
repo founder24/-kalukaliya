@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -22,6 +22,7 @@ import ContinueLearning from '@/components/content/ContinueLearning';
 import AdSlot from '@/components/ads/AdSlot';
 // Quge5 multitag removed in Task #347 — AdSense is the sole monetised network.
 import useAdsenseAutoAds from '@/components/ads/useAdsenseAutoAds';
+import { adsConsentGranted } from '@/utils/adsConfig';
 
 function buildToc(headingsJson) {
   try {
@@ -406,24 +407,32 @@ export default function LearnPage() {
                               const qText = typeof q === 'string' ? q : (q.question || '');
                               const qAns  = typeof q === 'object' ? q.answer : '';
                               return (
-                                <div key={i} className="px-5 py-3.5 border-b last:border-0"
-                                  style={{ borderColor: 'rgba(245,158,11,0.06)' }}>
-                                  <div className="flex items-start gap-3">
-                                    <span className="flex-shrink-0 w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold mt-0.5"
-                                      style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24' }}>
-                                      {i + 1}
-                                    </span>
-                                    <div className="min-w-0 flex-1">
-                                      <p className="text-sm font-medium text-foreground/85 leading-relaxed">{qText}</p>
-                                      {qAns && (
-                                        <div className="mt-2 rounded-lg px-3 py-2 text-xs text-muted-foreground leading-relaxed"
-                                          style={{ background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.09)' }}>
-                                          {qAns}
-                                        </div>
-                                      )}
+                                <Fragment key={i}>
+                                  <div className="px-5 py-3.5 border-b last:border-0"
+                                    style={{ borderColor: 'rgba(245,158,11,0.06)' }}>
+                                    <div className="flex items-start gap-3">
+                                      <span className="flex-shrink-0 w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold mt-0.5"
+                                        style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24' }}>
+                                        {i + 1}
+                                      </span>
+                                      <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-medium text-foreground/85 leading-relaxed">{qText}</p>
+                                        {qAns && (
+                                          <div className="mt-2 rounded-lg px-3 py-2 text-xs text-muted-foreground leading-relaxed"
+                                            style={{ background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.09)' }}>
+                                            {qAns}
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
+                                  {/* Blueprint "reward zone" — after every 3rd Q+A pair */}
+                                  {(i + 1) % 3 === 0 && adsConsentGranted() && (
+                                    <div className="px-4 py-1">
+                                      <AdSlot placement="learn.afterQuestion" />
+                                    </div>
+                                  )}
+                                </Fragment>
                               );
                             })}
                           </div>
@@ -432,31 +441,39 @@ export default function LearnPage() {
                     })()
                   : /* Flat list fallback */
                     (showAllPyqs ? pyqs : pyqs.slice(0, 5)).map((q, i) => (
-                      <div key={q.id || i}
-                        className="px-5 py-4 border-b last:border-0"
-                        style={{ borderColor: 'rgba(245,158,11,0.07)' }}>
-                        <div className="flex items-start gap-3">
-                          <span className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-bold mt-0.5"
-                            style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24' }}>
-                            {i + 1}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-foreground/85 leading-relaxed mb-2">{q.question}</p>
-                            {q.answer && (
-                              <div className="rounded-lg px-3 py-2.5 text-sm text-muted-foreground leading-relaxed"
-                                style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.10)' }}>
-                                {q.answer}
-                              </div>
-                            )}
-                            {q.marks && (
-                              <span className="inline-block mt-1.5 text-[10px] px-1.5 py-0.5 rounded"
-                                style={{ background: 'rgba(245,158,11,0.10)', color: '#fcd34d' }}>
-                                {q.marks} marks
-                              </span>
-                            )}
+                      <Fragment key={q.id || i}>
+                        <div
+                          className="px-5 py-4 border-b last:border-0"
+                          style={{ borderColor: 'rgba(245,158,11,0.07)' }}>
+                          <div className="flex items-start gap-3">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-bold mt-0.5"
+                              style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24' }}>
+                              {i + 1}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-foreground/85 leading-relaxed mb-2">{q.question}</p>
+                              {q.answer && (
+                                <div className="rounded-lg px-3 py-2.5 text-sm text-muted-foreground leading-relaxed"
+                                  style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.10)' }}>
+                                  {q.answer}
+                                </div>
+                              )}
+                              {q.marks && (
+                                <span className="inline-block mt-1.5 text-[10px] px-1.5 py-0.5 rounded"
+                                  style={{ background: 'rgba(245,158,11,0.10)', color: '#fcd34d' }}>
+                                  {q.marks} marks
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
+                        {/* Blueprint "reward zone" — after every 3rd Q+A pair */}
+                        {(i + 1) % 3 === 0 && adsConsentGranted() && (
+                          <div className="px-4 py-1">
+                            <AdSlot placement="learn.afterQuestion" />
+                          </div>
+                        )}
+                      </Fragment>
                     ))
                 }
                 {(Object.keys(markWise).length > 0

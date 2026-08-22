@@ -1,16 +1,4 @@
-"""
-Chat routing: Sarvam-105b is the primary model for both English and Assamese.
-The system prompt instructs the model which language to respond in.
-
-Fallback: when Sarvam AI billing is exhausted (402) or the service is
-unavailable, traffic automatically falls back to Gemini 2.5 Flash via
-``app.services.ai.gemini_fallback`` (generate_gemini / stream_gemini).
-Gemini credentials are resolved from GEMINI_API_KEY (Google AI Studio) or
-GOOGLE_SA_KEY / GOOGLE_APPLICATION_CREDENTIALS_JSON (Vertex AI).
-
-Cloudflare Workers AI is NOT used for chat — it is only used for OCR endpoints
-in chat.py.
-"""
+"""Legacy FastAPI chat adapter backed exclusively by Cloudflare Workers AI."""
 
 import re
 import logging
@@ -41,30 +29,29 @@ def detect_language(text: str) -> str:
 
 def detect_language_and_route(text: str) -> tuple[str, str]:
     """
-    Detect language and route to the appropriate LLM.
-
-    Both English and Assamese now route to Sarvam AI.
-    The system prompt (built in chat_service) instructs Sarvam which language
-    to respond in.
+    Detect language and route to the shared Workers AI text model.
 
     Returns:
         tuple: (language_code, model_name)
     """
     lang = detect_language(text)
-    logger.info(f"Routing to Sarvam AI (lang={lang})")
-    return lang, settings.SARVAM_MODEL
+    logger.info("Routing to Workers AI (lang=%s)", lang)
+    return lang, settings.CF_AI_MODEL
 
 
 async def generate_response(
     system_prompt: str, user_message: str, model: str, stream: bool = False
 ) -> str:
     """
-    Generate response using Sarvam AI.
+    Generate a response through the internal Workers AI endpoint.
     """
-    from app.services.ai.sarvam_client import generate_with_sarvam
+    from app.services.ai.workers_ai_client import generate_with_workers_ai
 
-    return await generate_with_sarvam(
-        system_prompt=system_prompt, user_message=user_message, stream=stream
+    return await generate_with_workers_ai(
+        system_prompt=system_prompt,
+        user_message=user_message,
+        stream=stream,
+        is_assamese=detect_language(user_message) == "as",
     )
 
 
@@ -74,17 +61,14 @@ async def stream_response(
     model: str,
 ) -> AsyncGenerator[str, None]:
     """
-    Stream response from Sarvam AI.
-
-    All chat traffic (English and Assamese) routes here.
-    Yields text chunks as they arrive.
-    Raises RuntimeError on failure (caller handles dead-letter / error SSE).
+    Stream the compatibility FastAPI path from Workers AI.
     """
-    from app.services.ai.sarvam_client import sarvam_client
+    from app.services.ai.workers_ai_client import workers_ai_client
 
-    logger.info(f"Streaming from Sarvam AI (model={model})")
-    async for chunk in sarvam_client.stream_generate_with_retry(
+    logger.info("Streaming from Workers AI (model=%s)", model)
+    async for chunk in workers_ai_client.stream_generate_with_retry(
         system_prompt=system_prompt,
         user_message=user_message,
+        is_assamese=detect_language(user_message) == "as",
     ):
         yield chunk

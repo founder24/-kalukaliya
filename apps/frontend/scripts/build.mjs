@@ -194,21 +194,10 @@ async function main() {
     }),
   );
 
-  // 5a.2. Critical-CSS extraction (Task #856). Walks every dist/ HTML,
-  //       inlines the above-the-fold CSS rules into <head>, and rewrites
-  //       the 141 KB main stylesheet link into a non-blocking preload+swap
-  //       (with a <noscript> fallback). Runs AFTER prerender so the
-  //       prerendered route HTMLs also receive inlined critical CSS, and
-  //       BEFORE verify so verify-hydration sees the production link
-  //       pattern. Soft-fails per file — a parser failure on one HTML
-  //       degrades that page back to render-blocking CSS rather than
-  //       failing the build.
-  await record(
-    "inline:critical-css",
-    node(path.join(__dirname, "inline-critical-css.mjs"), [], {
-      budgetMs: 60_000,
-    }),
-  );
+  // 5a.2. The previous critical-CSS extraction rewrote the main stylesheet
+  //       into an async preload/swap link. Some browsers loaded the CSS but
+  //       did not activate it, breaking responsive layouts. Keep the normal
+  //       active stylesheet link until the extraction can be made reliable.
 
   // 5b. Verify — single dist/ walk + headless hydration check.
   await record(

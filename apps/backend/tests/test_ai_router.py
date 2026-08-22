@@ -1,133 +1,60 @@
 import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
-# Set required env vars before any app module imports trigger Settings()
+import pytest
+
 os.environ.setdefault("JWT_SECRET", "test-secret-at-least-32-characters-long")
 os.environ.setdefault("APP_ENV", "development")
 
-import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-
 
 @pytest.mark.anyio
-async def test_generate_response_routes_gemini_to_vertex():
-    """Test that model containing 'gemini' routes to Vertex AI"""
-    mock_generate = AsyncMock(return_value="vertex response")
+async def test_generate_response_uses_workers_ai_for_every_model_name():
+    """Compatibility model names must never route generation to a legacy SDK."""
+    generated = AsyncMock(return_value="Workers response")
 
-    with patch("app.services.ai.vertex_client.generate_with_vertex", mock_generate):
+    with patch("app.services.ai.workers_ai_client.generate_with_workers_ai", generated):
         from app.services.ai.router import generate_response
 
         result = await generate_response(
             system_prompt="You are helpful.",
             user_message="Hello",
-            model="gemini-1.5-pro",
-            stream=False,
+            model="legacy-model-name",
         )
 
-    mock_generate.assert_called_once_with(
-        system_prompt="You are helpful.",
-        user_message="Hello",
-        model="gemini-1.5-pro",
-        stream=False,
-    )
-    assert result == "vertex response"
+    assert result == "Workers response"
+    generated.assert_awaited_once()
+    assert generated.await_args.kwargs["is_assamese"] is False
 
 
 @pytest.mark.anyio
-async def test_generate_response_routes_sarvam_to_sarvam():
-    """Test that model containing 'openhathi' routes to Sarvam AI"""
-    mock_generate = AsyncMock(return_value="sarvam response")
+async def test_generate_response_marks_assamese_for_workers_ai():
+    generated = AsyncMock(return_value="অসমীয়া উত্তৰ")
 
-    with patch("app.services.ai.sarvam_client.generate_with_sarvam", mock_generate):
+    with patch("app.services.ai.workers_ai_client.generate_with_workers_ai", generated):
         from app.services.ai.router import generate_response
 
-        result = await generate_response(
-            system_prompt="You are helpful.",
-            user_message="Hello",
-            model="openhathi-7b",
-            stream=False,
-        )
+        await generate_response("সহায়ক হওক", "পোহৰ কি?", model="any-model")
 
-    mock_generate.assert_called_once_with(
-        system_prompt="You are helpful.",
-        user_message="Hello",
-        stream=False,
-    )
-    assert result == "sarvam response"
+    assert generated.await_args.kwargs["is_assamese"] is True
 
 
 @pytest.mark.anyio
-async def test_generate_response_routes_cloudflare_as_default():
-    """Test that unrecognized model raises RuntimeError (Cloudflare removed from chat)"""
-    from app.services.ai.router import generate_response
+async def test_stream_response_uses_workers_ai_stream():
+    async def stream(*_args, **_kwargs):
+        yield "Workers"
+        yield " stream"
 
-    with pytest.raises(RuntimeError, match="Unknown model"):
-        await generate_response(
-            system_prompt="You are helpful.",
-            user_message="Hello",
-            model="@cf/meta/llama-3.1-70b-instruct",
-            stream=False,
-        )
-
-
-@pytest.mark.anyio
-async def test_stream_response_routes_gemini_to_vertex():
-    """Test that streaming with model 'gemini' routes to Vertex AI"""
-
-    async def mock_stream(*args, **kwargs):
-        for chunk in ["Hello", " from", " Vertex"]:
-            yield chunk
-
-    mock_client = MagicMock()
-    mock_client.stream_generate_with_retry = mock_stream
-
-    with patch("app.services.ai.vertex_client.vertex_client", mock_client):
+    client = MagicMock()
+    client.stream_generate_with_retry = stream
+    with patch("app.services.ai.workers_ai_client.workers_ai_client", client):
         from app.services.ai.router import stream_response
 
-        chunks = []
-        async for chunk in stream_response(
-            system_prompt="You are helpful.",
-            user_message="Hello",
-            model="gemini-1.5-pro",
-        ):
-            chunks.append(chunk)
+        chunks = [
+            chunk async for chunk in stream_response(
+                system_prompt="You are helpful.",
+                user_message="Hello",
+                model="legacy-model-name",
+            )
+        ]
 
-    assert chunks == ["Hello", " from", " Vertex"]
-
-
-@pytest.mark.anyio
-async def test_stream_response_routes_sarvam_to_sarvam():
-    """Test that streaming with model containing 'sarvam' routes to Sarvam AI"""
-
-    async def mock_stream(*args, **kwargs):
-        for chunk in ["Hello", " from", " Sarvam"]:
-            yield chunk
-
-    mock_client = MagicMock()
-    mock_client.stream_generate_with_retry = mock_stream
-
-    with patch("app.services.ai.sarvam_client.sarvam_client", mock_client):
-        from app.services.ai.router import stream_response
-
-        chunks = []
-        async for chunk in stream_response(
-            system_prompt="You are helpful.",
-            user_message="Hello",
-            model="sarvam-2b-v0.25",
-        ):
-            chunks.append(chunk)
-
-    assert chunks == ["Hello", " from", " Sarvam"]
-
-
-@pytest.mark.anyio
-async def test_stream_response_routes_cloudflare_as_default():
-    """Test that streaming with unrecognized model raises RuntimeError (Cloudflare removed from chat)"""
-    from app.services.ai.router import stream_response
-
-    with pytest.raises(RuntimeError, match="Unknown model"):
-        async for _ in stream_response(
-            system_prompt="You are helpful.",
-            user_message="Hello",
-            model="@cf/meta/llama-3.1-70b-instruct",
-        ):
-            pass
+    assert chunks == ["Workers", " stream"]

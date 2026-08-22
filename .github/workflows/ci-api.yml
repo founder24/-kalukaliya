@@ -1,0 +1,38 @@
+name: CI API — D1 Round-trip Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  d1-roundtrip:
+    name: D1 Round-trip Test
+    runs-on: ubuntu-latest
+    steps:
+      # Do not persist even the read-only GitHub token into local Git config
+      # before running untrusted fork PR code.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack + PNPM
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run D1 round-trip tests
+        # Intentionally secrets-free and safe for fork PRs: the test forces
+        # getPlatformProxy() to use only local Miniflare bindings
+        # (remoteBindings: false), so Wrangler makes no remote API calls.
+        run: pnpm --filter syrabit-api test

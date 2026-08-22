@@ -10,9 +10,12 @@
   "scripts": {
     "dev:edge": "pnpm --filter syrabit-edge run dev",
     "dev:frontend": "pnpm --filter syrabit-frontend run dev",
+    "dev:api": "pnpm --filter syrabit-api run dev",
     "build:edge": "pnpm --filter syrabit-edge run build",
     "build:frontend": "pnpm --filter syrabit-frontend run build",
     "deploy:edge": "pnpm --filter syrabit-edge run deploy",
+    "deploy:api": "pnpm --filter syrabit-api run deploy",
+    "type-check:api": "pnpm --filter syrabit-api run type-check",
     "test": "pnpm --recursive run test"
   },
   "devDependencies": {

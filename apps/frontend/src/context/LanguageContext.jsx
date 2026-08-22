@@ -12,15 +12,21 @@ export function LanguageProvider({ children }) {
   // page that has any `contentLang === 'as'` ternary in the render tree
   // (ChapterPage / SubjectPage / library, etc.).
   const [contentLang, setContentLang] = useState('en');
+  // The library is the public catalog entry point and should open in English
+  // by default. Keep this check here as well as in LibraryPage so a direct
+  // prerendered load cannot briefly restore a previously saved Assamese value.
+  const isLibraryDefaultRoute = typeof window !== 'undefined'
+    && /^\/(?:library|browser)(?:\/|$)/.test(window.location.pathname || '');
 
   // After mount, hydrate from localStorage. This re-renders into the
   // user's saved language without breaking hydration.
   useEffect(() => {
+    if (isLibraryDefaultRoute) return;
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored === 'as' || stored === 'en') setContentLang(stored);
     } catch {}
-  }, []);
+  }, [isLibraryDefaultRoute]);
 
   const switchLang = useCallback((lang) => {
     const val = lang === 'as' ? 'as' : 'en';

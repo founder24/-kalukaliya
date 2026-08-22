@@ -1,0 +1,111 @@
+name = "syrabit-api"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Local dev vars ────────────────────────────────────────────────────────────
+[vars]
+ALLOWED_ORIGINS = "http://localhost:5000,http://localhost:5001"
+APP_ENV = "development"
+
+# ── D1 Database ───────────────────────────────────────────────────────────────
+# Run once to create: wrangler d1 create syrabit-db
+# Then paste the database_id below and in [env.production]
+[[d1_databases]]
+binding = "DB"
+database_name = "syrabit-db"
+database_id = "ff8e76ec-02c5-45f3-92ea-4d67d7d2a510"
+migrations_dir = "drizzle/migrations"
+
+# ── R2 Storage (same bucket as edge worker) ───────────────────────────────────
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "syrabit-assets"
+
+# ── KV Namespaces (shared with edge worker) ───────────────────────────────────
+[[kv_namespaces]]
+binding = "CONTENT_KV"
+id = "981e939bcca445c481d4be818ebefee7"
+preview_id = "981e939bcca445c481d4be818ebefee7"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "2983094e249d4094b66e4b9dacc38719"
+preview_id = "fd70db2acf7045d6a8d6ba4334316297"
+
+# ── Vectorize (same index as current pipeline) ────────────────────────────────
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "syrabit-rag"
+
+# ── Workers AI (bge-m3 embeddings + TTS) ─────────────────────────────────────
+[ai]
+binding = "AI"
+
+# ── Cron Triggers ─────────────────────────────────────────────────────────────
+[triggers]
+crons = [
+  "*/5 * * * *",  # resume bounded native seed batches and recover leases
+  "0 * * * *",    # hourly: expire TTL records
+  "0 0 * * *",    # daily: reset monthly message counts, expire subscriptions
+]
+
+# ── Production environment ────────────────────────────────────────────────────
+[env.production]
+name = "syrabit-api-prod"
+vars = { ALLOWED_ORIGINS = "https://syrabit.ai,https://api.syrabit.ai", APP_ENV = "production" }
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "syrabit-db"
+database_id = "ff8e76ec-02c5-45f3-92ea-4d67d7d2a510"
+migrations_dir = "drizzle/migrations"
+
+[[env.production.r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "syrabit-assets"
+
+[[env.production.kv_namespaces]]
+binding = "CONTENT_KV"
+id = "981e939bcca445c481d4be818ebefee7"
+preview_id = "981e939bcca445c481d4be818ebefee7"
+
+[[env.production.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "2983094e249d4094b66e4b9dacc38719"
+preview_id = "fd70db2acf7045d6a8d6ba4334316297"
+
+[[env.production.vectorize]]
+binding = "VECTORIZE"
+index_name = "syrabit-rag"
+
+[env.production.ai]
+binding = "AI"
+
+[env.production.triggers]
+crons = [
+  "*/5 * * * *",
+  "0 * * * *",
+  "0 0 * * *",
+]
+
+# ── Required Secrets (wrangler secret put <NAME> --env production) ────────────
+# JWT_SECRET           — HS256 signing key (must match edge worker)
+# ADMIN_JWT_SECRET     — Admin panel JWT signing key
+# RESET_TOKEN_SECRET   — Password reset token signing key
+# RAZORPAY_KEY_ID      — Razorpay API key ID
+# RAZORPAY_KEY_SECRET  — Razorpay API secret
+# RAZORPAY_WEBHOOK_SECRET — Razorpay webhook signature secret
+# RESEND_API_KEY       — Resend email API key
+# POSTHOG_API_KEY      — PostHog analytics
+# INDEXNOW_API_KEY     — IndexNow submission key
+# INDEXNOW_INTERNAL_SECRET — required X-IndexNow-Secret for /api/v1/indexnow/submit
+# TRUSTPILOT_*         — optional public Trustpilot values mirrored from GCP Secret Manager
+# EDGE_SHARED_SECRET   — HMAC key shared with edge worker and internal routes
+# R2_PUBLIC_URL        — Public base URL for the R2 bucket (required for PYQ image uploads).
+#                        Set to the custom domain or r2.dev public URL of syrabit-assets.
+#                        Example: https://assets.syrabit.ai
+#                        Without this the upload endpoints return 503 before writing to R2.
+#                        wrangler secret put R2_PUBLIC_URL --env production
+# TRANSLATE_CRON_SECRET — shared bearer secret for /api/v1/admin/cron/seed-*.
+#                          This is separate from admin browser sessions.

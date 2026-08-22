@@ -1,6 +1,7 @@
 /**
- * <AdSlot placement="..." /> — the only component allowed to inject a
- * third-party ad script on Syrabit.ai. All wiring lives in
+ * <AdSlot placement="..." /> — manual third-party ad unit for Syrabit.ai.
+ * Script injection is shared with page-level ad hooks through
+ * `src/utils/adScriptRegistry.js`; placement wiring lives in
  * `src/utils/adsConfig.js`.
  *
  * Behavior:
@@ -12,31 +13,31 @@
  *     ~200px of the viewport.
  *   - De-dupes scripts by URL so two slots on the same page never
  *     load the same script twice.
+ *   - De-dupes AdSense queue pushes by slot ID for this browser page
+ *     visit, so tab switches cannot re-queue an already-filled unit.
  */
 import { useEffect, useRef, useState } from 'react';
 import { getAdConfig, adsConsentGranted } from '@/utils/adsConfig';
 import Analytics from '@/utils/analytics';
+import { injectAdScript } from '@/utils/adScriptRegistry';
 
-// Scripts injected this session, keyed by URL. Survives across mounts
-// because it lives on the module, not on a component instance.
-const _injected = new Set();
+// AdSense queue pushes are also session-scoped. The module survives React
+// unmounts caused by ChapterPage tab switches, but is recreated on a full
+// browser page visit. Keying by the actual slot ID (rather than placement)
+// also protects against multiple in-content components sharing one unit.
+const _pushedAdsenseSlotIds = new Set();
 
-function injectScript(url, opts = {}) {
-  if (typeof document === 'undefined') return;
-  if (_injected.has(url)) return;
-  // Also de-dupe against any matching script already in the DOM (e.g.
-  // injected by a sibling slot before this module's Set was hydrated,
-  // or by `useAdsenseAutoAds` for the AdSense loader).
-  const existing = document.querySelector(`script[src="${url}"]`);
-  if (existing) { _injected.add(url); return; }
-  const s = document.createElement('script');
-  s.src = url;
-  s.async = true;
-  s.dataset.syrabitAd = '1';
-  if (opts.crossorigin) s.crossOrigin = opts.crossorigin;
-  if (opts.dataAdClient) s.setAttribute('data-ad-client', opts.dataAdClient);
-  document.head.appendChild(s);
-  _injected.add(url);
+function pushAdsenseSlot(slotId) {
+  if (!slotId || _pushedAdsenseSlotIds.has(slotId)) return;
+
+  try {
+    (window.adsbygoogle = window.adsbygoogle || []).push({});
+    // Only remember the ID after push succeeds. A transient or hostile
+    // replacement of the global can therefore retry safely on a later mount.
+    _pushedAdsenseSlotIds.add(slotId);
+  } catch {
+    /* ignore */
+  }
 }
 
 export default function AdSlot({ placement, className = '', style = {} }) {
@@ -81,7 +82,7 @@ export default function AdSlot({ placement, className = '', style = {} }) {
 
   useEffect(() => {
     if (!shouldLoad || !cfg.enabled) return;
-    injectScript(cfg.scriptUrl, {
+    injectAdScript(cfg.scriptUrl, {
       crossorigin: cfg.crossorigin,
       dataAdClient: cfg.network === 'adsense' ? cfg.publisherId : '',
     });
@@ -92,13 +93,9 @@ export default function AdSlot({ placement, className = '', style = {} }) {
     // safe to call before the script tag has executed. Wrapped in a
     // try/catch purely as a defensive guard against a hostile global.
     if (cfg.network === 'adsense') {
-      try {
-        (window.adsbygoogle = window.adsbygoogle || []).push({});
-      } catch {
-        /* ignore */
-      }
+      pushAdsenseSlot(cfg.slotId);
     }
-  }, [shouldLoad, cfg.enabled, cfg.scriptUrl, cfg.network, cfg.publisherId, cfg.crossorigin]);
+  }, [shouldLoad, cfg.enabled, cfg.scriptUrl, cfg.network, cfg.publisherId, cfg.slotId, cfg.crossorigin]);
 
   // Task #528: viewability ping. Fire one PostHog event the first time
   // this slot is at least 50% within the viewport. Gated on the same

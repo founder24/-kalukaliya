@@ -26,10 +26,8 @@ import QuestionPaperViewer from '@/components/chapter/QuestionPaperViewer';
 import { pushRecentChapter } from '@/utils/recentChapters';
 import { HighlightSavePopover } from '@/components/study/HighlightSavePopover';
 import { ReadAloudButton } from '@/components/study/ReadAloudButton';
-// ─────────────────────────────────────────────────────────────────────────────
-// AD POLICY: Chapter routes (/{board}/...) are intentionally AD-FREE in the
-// Task #526 rollout. Do NOT import <AdSlot /> or any ad-network script here.
-// ─────────────────────────────────────────────────────────────────────────────
+import AdSlot from '@/components/ads/AdSlot';
+import useAdsenseAutoAds from '@/components/ads/useAdsenseAutoAds';
 
 function ChapterJsonLd({ data, url, basePath }) {
   useEffect(() => {
@@ -267,6 +265,11 @@ export default function ChapterPage() {
   // legacy in-page TOC anchor) the URL is asking for. AI-notes citation
   // chips depend on this to deep-link straight to the cited section.
   useHashScroll(!loading && !!data);
+  // Inject the AdSense loader script but explicitly suppress page-level
+  // Auto Ads (autoAds: false keeps adsbygoogle.pauseAdRequests=1).
+  // Manual <AdSlot> units below control density; we never let Google's
+  // auto-discovery add placements on top of the seven configured slots.
+  useAdsenseAutoAds({ autoAds: false });
   const [error, setError] = useState(null);
   const skipFirstFetchRef = useRef(!!initialChapterData);
   const [pyqData, setPyqData] = useState(null);
@@ -1364,47 +1367,67 @@ export default function ChapterPage() {
                     </p>
                   </div>
                 ) : (
-                  <Suspense fallback={
-                    <div className="space-y-3">
-                      {[...Array(6)].map((_, i) => (
-                        <Skeleton key={i} className="h-5 w-full" style={{ width: `${65 + (i % 3) * 12}%` }} />
-                      ))}
-                    </div>
-                  }>
-                    <MarkdownRenderer components={markdownComponents}>
-                      {displayContent}
-                    </MarkdownRenderer>
-                  </Suspense>
+                  <>
+                    {!isQuestionPaper && <AdSlot placement="chapter.notes.top" />}
+                    <Suspense fallback={
+                      <div className="space-y-3">
+                        {[...Array(6)].map((_, i) => (
+                          <Skeleton key={i} className="h-5 w-full" style={{ width: `${65 + (i % 3) * 12}%` }} />
+                        ))}
+                      </div>
+                    }>
+                      <MarkdownRenderer components={markdownComponents}>
+                        {displayContent}
+                      </MarkdownRenderer>
+                    </Suspense>
+                    {!isQuestionPaper && <AdSlot placement="chapter.notes.inContent" />}
+                  </>
                 )
+              )}
+              {/* Notes end slot — appears after all note content, outside the isQuestionPaper gate */}
+              {!isQuestionPaper && contentMode === 'notes' && (
+                <AdSlot placement="chapter.notes.end" />
               )}
               {/* Q&A mode — source citation / topic definition cards */}
               {!isQuestionPaper && contentMode === 'qa' && (
                 <div data-testid="topic-answer-cards">
                   {publishedTopics.length > 0 ? (
-                    publishedTopics.map((t) => {
-                      const tSlug = t.topic_slug || t.slug || '';
-                      return (
-                        <TopicAnswerCard
-                          key={t.id || tSlug}
-                          topic={t}
-                          chapterUrl={chapterUrl}
-                          fromChat={!!(fromChatTopicSlug && fromChatTopicSlug === tSlug)}
-                        />
-                      );
-                    })
+                    <>
+                      {publishedTopics.flatMap((t, i) => {
+                        const tSlug = t.topic_slug || t.slug || '';
+                        const card = (
+                          <TopicAnswerCard
+                            key={t.id || tSlug}
+                            topic={t}
+                            chapterUrl={chapterUrl}
+                            fromChat={!!(fromChatTopicSlug && fromChatTopicSlug === tSlug)}
+                          />
+                        );
+                        // Insert a fluid in-article ad after every 3rd card (index 2, 5, 8, …),
+                        // but never after the last card — chapter.qa.end covers the bottom slot.
+                        if ((i + 1) % 3 === 0 && i < publishedTopics.length - 1) {
+                          return [card, <AdSlot key={`qa-ad-${i}`} placement="chapter.qa.inContent" />];
+                        }
+                        return [card];
+                      })}
+                      <AdSlot placement="chapter.qa.end" />
+                    </>
                   ) : (
-                    <div className="py-10 text-center space-y-3" data-testid="qa-empty-state">
-                      <p className="text-xs text-muted-foreground">
-                        {contentLang === 'as' ? 'এই অধ্যায়ৰ বাবে Q&A উপলব্ধ নহয়।' : 'No Q&A available for this chapter yet.'}
-                      </p>
-                      <button
-                        data-testid="qa-empty-view-notes"
-                        onClick={() => switchTab('notes')}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-100 transition-colors"
-                      >
-                        {contentLang === 'as' ? 'নোটছ চাওক' : 'View Notes'}
-                      </button>
-                    </div>
+                    <>
+                      <div className="py-10 text-center space-y-3" data-testid="qa-empty-state">
+                        <p className="text-xs text-muted-foreground">
+                          {contentLang === 'as' ? 'এই অধ্যায়ৰ বাবে Q&A উপলব্ধ নহয়।' : 'No Q&A available for this chapter yet.'}
+                        </p>
+                        <button
+                          data-testid="qa-empty-view-notes"
+                          onClick={() => switchTab('notes')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-100 transition-colors"
+                        >
+                          {contentLang === 'as' ? 'নোটছ চাওক' : 'View Notes'}
+                        </button>
+                      </div>
+                      <AdSlot placement="chapter.qa.end" />
+                    </>
                   )}
                 </div>
               )}
@@ -1412,8 +1435,12 @@ export default function ChapterPage() {
                   with legacy single-file fallback below when no images exist */}
               {!isQuestionPaper && contentMode === 'pyq' && (
                 <div data-testid="pyq-viewer">
+                  {/* Top display ad — shown before the viewer on every PYQ tab open */}
+                  <AdSlot placement="chapter.pyq.top" />
                   {/* Structured image viewer — one page after another */}
                   <QuestionPaperViewer papers={pyqImages} lang={contentLang} />
+                  {/* Fluid in-article ad between the viewer and any legacy fallback */}
+                  <AdSlot placement="chapter.pyq.inContent" />
 
                   {/* Legacy single-file fallback (PDF or single image via staff upload) */}
                   {!pyqImages.length && data?.pyq_pdf_url && (
@@ -1530,6 +1557,7 @@ export default function ChapterPage() {
               label={contentLang === 'as' ? 'এই পৃষ্ঠাত' : 'On this page'}
               onItemClick={(h) => Analytics.tocClick(h.text, document.title)}
             />
+            <AdSlot placement="chapter.sidebar" />
           </aside>
         </div>
 

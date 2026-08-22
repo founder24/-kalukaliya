@@ -202,6 +202,22 @@ def fake_module_file(tmp_path):
 class TestCompactProgressLogUnit:
     """_compact_progress_log() — real-file unit tests."""
 
+    @pytest.fixture(autouse=True)
+    def redirect_progress_paths(self, scripts_dir, monkeypatch):
+        """Point the module's explicit progress paths at this test's log."""
+        import app.api.v1.admin_content as admin_mod
+
+        monkeypatch.setattr(
+            admin_mod,
+            "_AHSEC_PROGRESS_FILE",
+            scripts_dir / ".ahsec_ingest_progress.jsonl",
+        )
+        monkeypatch.setattr(
+            admin_mod,
+            "_AHSEC_PROGRESS_LOCK",
+            scripts_dir / ".ahsec_ingest_progress.lock",
+        )
+
     @pytest.mark.anyio
     async def test_missing_file_returns_file_exists_false(
         self, scripts_dir, fake_module_file

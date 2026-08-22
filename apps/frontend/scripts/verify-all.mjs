@@ -551,28 +551,20 @@ console.log(
     `${ogImageUrlAbsent} absent (warn-only)`,
 );
 
-// ── Critical-CSS postcondition (Task #856) ──────────────────────────
-// scripts/inline-critical-css.mjs runs in the build pipeline ahead of
-// this verifier and is expected to leave the SPA-fallback +
-// prerendered HTMLs without a render-blocking <link rel="stylesheet">
-// to the main bundle. Two non-blocking shapes are acceptable:
-//
-//   (a) Beasties rewrote the link to preload+swap with a <noscript>
-//       fallback (the SPA fallback /index.html and most prerendered
-//       routes). Looks like:
-//         <link rel="alternate stylesheet preload" ... href="/assets/
-//              index-XYZ.css" ... onload="this.rel='stylesheet'">
-//
-//   (b) The prerender step inlined the full stylesheet body inline
-//       under a <style data-inline-css="index-XYZ.css"> wrapper
-//       (currently /library and /browser do this). Bigger HTML
-//       payload, but zero render-blocking external CSS.
-//
-// We strip <noscript>…</noscript> bodies before scanning for the
-// blocking pattern so the JS-disabled fallback link does not count.
+// ── Main stylesheet postcondition ───────────────────────────────────
+// The production build must deliver responsive utilities as either an active
+// stylesheet link or a fully inlined prerender stylesheet. Do not accept the
+// old preload/onload-swap or print-media patterns: they can load the CSS file
+// without activating it, leaving responsive classes such as `hidden` inactive.
 const NOSCRIPT_RE = /<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi;
-const ACTIVE_BLOCKING_RE =
+const ACTIVE_MAIN_STYLESHEET_RE =
   /<link[^>]+rel=["']stylesheet["'][^>]+\/assets\/index-[A-Za-z0-9_-]+\.css/;
+const INLINED_MAIN_STYLESHEET_RE =
+  /<style[^>]+data-inline-css=["']index-[A-Za-z0-9_-]+\.css["'][^>]*>/;
+const PRELOAD_SWAP_STYLESHEET_RE =
+  /<link[^>]+rel=["']alternate stylesheet preload["'][^>]+\/assets\/index-[A-Za-z0-9_-]+\.css/;
+const PRINT_MEDIA_STYLESHEET_RE =
+  /<link(?=[^>]*\/assets\/index-[A-Za-z0-9_-]+\.css)(?=[^>]*media=["']print["'])[^>]*>/;
 
 const cssRoutesToCheck = [
   { route: "/", file: "index.html" },
@@ -612,12 +604,15 @@ for (const { route, file } of cssRoutesToCheck) {
   const page = byRel.get(file);
   if (!page) continue; // missing-page failure already raised above
   const stripped = page.body.replace(NOSCRIPT_RE, "");
-  if (ACTIVE_BLOCKING_RE.test(stripped)) {
+  if (PRELOAD_SWAP_STYLESHEET_RE.test(stripped) || PRINT_MEDIA_STYLESHEET_RE.test(stripped)) {
     fail(
-      `${route}: render-blocking <link rel="stylesheet"> to /assets/index-*.css ` +
-        `survived the critical-CSS step (Task #856 regression). Check that ` +
-        `scripts/inline-critical-css.mjs ran successfully against this HTML.`,
+      `${route}: main stylesheet uses a deferred preload/print-media pattern. ` +
+        `Responsive CSS must be active at first paint.`,
     );
+    continue;
+  }
+  if (!ACTIVE_MAIN_STYLESHEET_RE.test(stripped) && !INLINED_MAIN_STYLESHEET_RE.test(stripped)) {
+    fail(`${route}: no active or fully inlined main stylesheet was found.`);
     continue;
   }
   const kb = measureInlineCssKB(page.body);

@@ -63,7 +63,7 @@ class TestGenerateAssameseOnly:
 
         with (
             patch("app.services.content_generation.Chapter") as MockChapter,
-            patch("app.services.content_generation.sarvam_client") as mock_sarvam,
+            patch("app.services.content_generation.workers_ai_client") as mock_sarvam,
         ):
             MockChapter.get = AsyncMock(return_value=ch)
             mock_sarvam.generate = AsyncMock(return_value="অসমীয়া অনুবাদ")
@@ -86,7 +86,7 @@ class TestGenerateAssameseOnly:
 
         with (
             patch("app.services.content_generation.Chapter") as MockChapter,
-            patch("app.services.content_generation.sarvam_client") as mock_sarvam,
+            patch("app.services.content_generation.workers_ai_client") as mock_sarvam,
         ):
             MockChapter.get = AsyncMock(return_value=ch)
             mock_sarvam.generate = AsyncMock(return_value="লিগেচি অনুবাদ")
@@ -106,7 +106,7 @@ class TestGenerateAssameseOnly:
 
         with (
             patch("app.services.content_generation.Chapter") as MockChapter,
-            patch("app.services.content_generation.sarvam_client") as mock_sarvam,
+            patch("app.services.content_generation.workers_ai_client") as mock_sarvam,
         ):
             MockChapter.get = AsyncMock(return_value=ch)
             mock_sarvam.generate = AsyncMock(return_value="should not be called")
@@ -125,7 +125,7 @@ class TestGenerateAssameseOnly:
 
         with (
             patch("app.services.content_generation.Chapter") as MockChapter,
-            patch("app.services.content_generation.sarvam_client") as mock_sarvam,
+            patch("app.services.content_generation.workers_ai_client") as mock_sarvam,
         ):
             MockChapter.get = AsyncMock(return_value=ch)
             mock_sarvam.generate = AsyncMock(return_value="should not be called")
@@ -144,7 +144,7 @@ class TestGenerateAssameseOnly:
 
         with (
             patch("app.services.content_generation.Chapter") as MockChapter,
-            patch("app.services.content_generation.sarvam_client") as mock_sarvam,
+            patch("app.services.content_generation.workers_ai_client") as mock_sarvam,
         ):
             MockChapter.get = AsyncMock(return_value=ch)
             mock_sarvam.generate = AsyncMock(return_value="নতুন অনুবাদ")

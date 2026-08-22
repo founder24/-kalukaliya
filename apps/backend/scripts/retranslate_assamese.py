@@ -1,5 +1,5 @@
 """
-Retranslate all chapters with content_en → content_as using Sarvam AI.
+Retranslate all chapters with content_en → content_as using Cloudflare Workers AI.
 Runs with force=True so it overwrites bad Bengali / truncated translations.
 
 Usage:
@@ -47,19 +47,8 @@ async def main():
     await init_mongo()
     log.info(f"MongoDB connected — db={db_name!r}")
 
-    # ── Load SARVAM_API_KEY from GCP Secret Manager ─────────────────────────
-    try:
-        from app.core.secret_manager import load_secrets_into_settings
-        from app.services.ai.sarvam_client import sarvam_client
-        sm_results = await load_secrets_into_settings()
-        if settings.SARVAM_API_KEY:
-            sarvam_client.api_key = settings.SARVAM_API_KEY
-            log.info(f"Sarvam key loaded (prefix={settings.SARVAM_API_KEY[:8]}...)")
-        else:
-            log.error("SARVAM_API_KEY still empty after Secret Manager fetch — aborting.")
-            return
-    except Exception as e:
-        log.error(f"Failed to load secrets: {e}")
+    if not settings.EDGE_SHARED_SECRET:
+        log.error("EDGE_SHARED_SECRET is missing — cannot authenticate Worker generation.")
         return
 
     # Import models AFTER init_mongo so Beanie is already initialised
@@ -90,10 +79,7 @@ async def main():
     log.info(f"SeedRun created — run_id={run_id}")
 
     # ── Translation worker ──────────────────────────────────────────────────
-    # Call the Sarvam API directly (same pattern as the passing smoke test)
-    # to avoid any circuit-breaker or generate() abstraction issues.
-    from app.services.ai.sarvam_client import sarvam_client
-    import httpx as _httpx
+    from app.services.ai.workers_ai_client import workers_ai_client
     from datetime import datetime as _dt, timezone as _tz
 
     TRANSLATE_SYSTEM = (
@@ -105,34 +91,10 @@ async def main():
     CHUNK_WORDS = 400
 
     async def _translate_chunk(text: str) -> str:
-        """Call Sarvam directly and return the content field."""
-        resp = await sarvam_client._client.post(
-            f"{sarvam_client.base_url}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {sarvam_client.api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": sarvam_client.model,
-                "messages": [
-                    {"role": "system", "content": TRANSLATE_SYSTEM},
-                    {"role": "user",   "content": text},
-                ],
-                "temperature": 0.1,
-                "enable_thinking": False,
-                "max_tokens": 2048,
-                "stream": False,
-            },
+        """Generate an Assamese chunk through the authenticated Worker API."""
+        return await workers_ai_client.generate(
+            TRANSLATE_SYSTEM, text, is_assamese=True, max_tokens=2048
         )
-        resp.raise_for_status()
-        msg = resp.json()["choices"][0]["message"]
-        content = (msg.get("content") or "").strip()
-        if not content:
-            # Model sometimes puts answer in reasoning_content; extract cleanly
-            from app.services.ai.sarvam_client import _extract_assamese_translation
-            rc = (msg.get("reasoning_content") or "").strip()
-            content = _extract_assamese_translation(rc) if rc else ""
-        return content
 
     sem = asyncio.Semaphore(CONCURRENCY)
     completed = failed = skipped = 0

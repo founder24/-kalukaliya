@@ -1,0 +1,50 @@
+name: Cloudflare Analytics Overview Health
+
+on:
+  schedule:
+    # Catch a Cloudflare GraphQL contract change before operators encounter an
+    # unavailable traffic widget. Staggered away from the hour for queueing.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  API_URL: https://api.syrabit.ai/api/v1/admin/cron/cloudflare-analytics-health
+
+jobs:
+  cloudflare-analytics-health:
+    name: Validate Cloudflare traffic query
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Run read-only Cloudflare overview probe
+        run: |
+          set -euo pipefail
+          HTTP_STATUS=$(curl --silent --show-error \
+            --output /tmp/cloudflare-analytics-health.json \
+            --write-out "%{http_code}" \
+            --request POST "$API_URL" \
+            --header "Authorization: Bearer ${{ secrets.TRANSLATE_CRON_SECRET }}" \
+            --header "Content-Type: application/json" \
+            --max-time 30)
+
+          echo "Cloudflare analytics health HTTP: ${HTTP_STATUS}"
+          cat /tmp/cloudflare-analytics-health.json
+
+          if [[ "$HTTP_STATUS" -lt 200 || "$HTTP_STATUS" -ge 300 ]]; then
+            echo "::error::Cloudflare analytics overview health probe failed (HTTP ${HTTP_STATUS})."
+            echo "::error::The backend recorded a remediation alert; check Admin → Alerts."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("/tmp/cloudflare-analytics-health.json") as response:
+              payload = json.load(response)
+
+          assert payload.get("status") == "healthy", payload
+          assert payload.get("hourly_buckets_returned") is True, payload
+          PY
+          echo "✔ Cloudflare Analytics overview query is healthy for the production zone"

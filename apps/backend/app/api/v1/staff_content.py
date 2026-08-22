@@ -1057,13 +1057,17 @@ async def staff_create_subject_pyq_paper(
         raise HTTPException(status_code=422, detail="name is required")
 
     paper = {
-        "id":          str(uuid4()),
-        "name":        body["name"].strip(),
-        "class_name":  (body.get("class_name") or "").strip(),
-        "year":        body.get("year"),
-        "description": (body.get("description") or "").strip(),
-        "pages":       [],
-        "created_at":  datetime.now(timezone.utc).isoformat(),
+        "id":             str(uuid4()),
+        "name":           body["name"].strip(),
+        "class_name":     (body.get("class_name") or "").strip(),
+        "year":           body.get("year"),
+        "description":    (body.get("description") or "").strip(),
+        "rag_text":       (body.get("rag_text") or "").strip(),
+        "rag_text_as":    (body.get("rag_text_as") or "").strip(),
+        "rag_updated_at": None,
+        "rag_indexed_at": None,
+        "pages":          [],
+        "created_at":     datetime.now(timezone.utc).isoformat(),
     }
     papers = list(subj.pyq_papers or [])
     papers.append(paper)
@@ -1097,6 +1101,20 @@ async def staff_update_subject_pyq_paper(
             if "class_name" in body:  p["class_name"]  = (body["class_name"] or "").strip()
             if "year" in body:        p["year"]         = body["year"]
             if "description" in body: p["description"]  = (body["description"] or "").strip()
+            # RAG text fields — stamp rag_updated_at when either changes
+            rag_changed = False
+            if "rag_text" in body:
+                new_val = (body.get("rag_text") or "").strip()
+                if new_val != (p.get("rag_text") or ""):
+                    p["rag_text"] = new_val
+                    rag_changed = True
+            if "rag_text_as" in body:
+                new_val = (body.get("rag_text_as") or "").strip()
+                if new_val != (p.get("rag_text_as") or ""):
+                    p["rag_text_as"] = new_val
+                    rag_changed = True
+            if rag_changed:
+                p["rag_updated_at"] = datetime.now(timezone.utc).isoformat()
             found = True
             break
     if not found:
@@ -1207,6 +1225,54 @@ async def staff_remove_subject_pyq_page(
     await subj.save()
     asyncio.create_task(_purge_library_bundle_cache())
     return {"ok": True, "pyq_papers": papers}
+
+
+@router.post("/content/subject/{subject_id}/pyq-papers/{paper_id}/reindex")
+async def staff_reindex_subject_pyq_paper(
+    subject_id: str,
+    paper_id: str,
+    _staff: User = Depends(require_staff_user),
+):
+    """
+    Embed and index the PYQ RAG text for a question paper into Cloudflare Vectorize.
+    Uses paper_id as the chapter_id namespace so chunks are isolated from real chapters.
+    """
+    try:
+        subj = await Subject.get(PydanticObjectId(subject_id))
+    except Exception:
+        subj = None
+    if not subj:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    papers = list(subj.pyq_papers or [])
+    paper  = next((p for p in papers if p.get("id") == paper_id), None)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    rag_text    = (paper.get("rag_text") or "").strip()
+    rag_text_as = (paper.get("rag_text_as") or "").strip()
+    if not rag_text and not rag_text_as:
+        raise HTTPException(status_code=422, detail="No RAG text to index — add text first and save")
+
+    from app.services.rag.ingestion_v2 import ingest_chapter_v2
+    result = await ingest_chapter_v2(
+        chapter_id=paper_id,           # UUID — unique namespace, not a real chapter ID
+        content_en=rag_text or None,
+        content_as=rag_text_as or None,
+        metadata={"subject_id": subject_id},
+        source_type="pyq",
+    )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for p in papers:
+        if p.get("id") == paper_id:
+            p["rag_indexed_at"] = now_iso
+            break
+
+    subj.pyq_papers = papers
+    subj.updated_at = datetime.now(timezone.utc)
+    await subj.save()
+    return {"ok": True, "result": result, "pyq_papers": papers}
 
 
 # ── File attach (RAG) ─────────────────────────────────────────────────────────

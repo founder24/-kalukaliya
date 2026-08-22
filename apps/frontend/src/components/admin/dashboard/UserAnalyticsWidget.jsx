@@ -42,6 +42,18 @@ import {
 
 export default function UserAnalyticsWidget(props) {
   const p = props;
+  const {
+    data, load, pwaStats,
+    anonQuotaWall, anonQuotaDays: rawAnonQuotaDays, setAnonQuotaDays, anonQuotaLoading,
+    anonQuotaBackfilling, anonQuotaError, loadAnonQuotaWall,
+    latency, latencyAlert,
+    topQueries, tokenSpend, funnel, coverage,
+  } = props;
+  const anonQuotaDays = [1, 7, 14].includes(rawAnonQuotaDays) ? rawAnonQuotaDays : 14;
+  const latencyDaily = Array.isArray(latency?.daily) ? latency.daily : [];
+  const topQueryRows = Array.isArray(topQueries?.top_queries) ? topQueries.top_queries : [];
+  const tokenSpendDaily = Array.isArray(tokenSpend?.daily) ? tokenSpend.daily : [];
+  const coverageSubjects = Array.isArray(coverage?.subjects) ? coverage.subjects : [];
   return (
     <>
 
@@ -383,9 +395,9 @@ export default function UserAnalyticsWidget(props) {
               <AlertBadge alert={latencyAlert} />
             </div>
           </div>
-          {latency?.has_data && latency.daily.length > 0 ? (
+          {latency?.has_data && latencyDaily.length > 0 ? (
             <ResponsiveContainer width="100%" height={110}>
-              <LineChart data={latency.daily}>
+              <LineChart data={latencyDaily}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                 <XAxis dataKey="date" tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={d => d.slice(5)} />
                 <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} domain={[0, 'auto']} />
@@ -410,10 +422,10 @@ export default function UserAnalyticsWidget(props) {
             <h3 className="text-gray-600 font-semibold text-sm">Top Queries</h3>
             <span className="text-xs text-gray-400">content gap signal</span>
           </div>
-          {topQueries?.has_data && topQueries.top_queries.length > 0 ? (
+          {topQueries?.has_data && topQueryRows.length > 0 ? (
             <div className="space-y-1.5 max-h-[150px] overflow-y-auto pr-1">
-              {topQueries.top_queries.map((q, i) => {
-                const maxCount = topQueries.top_queries[0]?.count || 1;
+              {topQueryRows.map((q, i) => {
+                const maxCount = topQueryRows[0]?.count || 1;
                 const pct = Math.round((q.count / maxCount) * 100);
                 return (
                   <div key={i} className="flex items-center gap-2">
@@ -452,9 +464,9 @@ export default function UserAnalyticsWidget(props) {
             <Cpu size={14} className="text-violet-500" />
             <h3 className="text-gray-600 font-semibold text-sm">Token Spend</h3>
           </div>
-          {tokenSpend?.has_data && tokenSpend.daily.length > 0 ? (
+          {tokenSpend?.has_data && tokenSpendDaily.length > 0 ? (
             <ResponsiveContainer width="100%" height={130}>
-              <BarChart data={tokenSpend.daily} barSize={8}>
+              <BarChart data={tokenSpendDaily} barSize={8}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                 <XAxis dataKey="date" tick={{ fontSize: 8, fill: '#9ca3af' }} tickFormatter={d => d.slice(5)} />
                 <YAxis tick={{ fontSize: 8, fill: '#9ca3af' }} />
@@ -532,13 +544,13 @@ export default function UserAnalyticsWidget(props) {
             <FileCheck size={14} className="text-violet-500" />
             <h3 className="text-gray-600 font-semibold text-sm">Assam Board Coverage</h3>
             <span className="text-xs text-gray-400">chapter × subject</span>
-            {coverage?.has_data && coverage.subjects.length > 0 && (
-              <span className="ml-auto text-xs text-gray-400">{coverage.subjects.length} subjects</span>
+            {coverage?.has_data && coverageSubjects.length > 0 && (
+              <span className="ml-auto text-xs text-gray-400">{coverageSubjects.length} subjects</span>
             )}
           </div>
-          {coverage?.has_data && coverage.subjects.length > 0 ? (
+          {coverage?.has_data && coverageSubjects.length > 0 ? (
             <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-              {coverage.subjects.map(sub => (
+              {coverageSubjects.map(sub => (
                 <div key={sub.subject_id}>
                   <div className="flex justify-between mb-1">
                     <span className="text-xs text-gray-600 truncate flex items-center gap-1.5">

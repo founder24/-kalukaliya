@@ -11,7 +11,11 @@
  *   - /chat       (ChatPage)
  *   - /library    (LibraryPage)
  *   - /browser    (LibraryPage alias)
- *   - /:board/... (ChapterPage and friends)
+ *
+ * Monetised content routes (manual per-slot units only, no auto-ads):
+ *   - /learn/:slug   (LearnPage — Notes standalone view)
+ *   - /pyq/:slug     (PYQReplicaPage — Question Paper standalone view)
+ *   - /:board/...    (ChapterPage — Notes, Q&A, and Question Paper tabs)
  *
  * Adding/removing a network or placement is a one-file change here.
  * See ADS.md for the full list of env vars per network.
@@ -40,7 +44,7 @@ const NETWORKS = {
   // `data-ad-slot` env vars are provided. The page-level script URL is
   // the AdSense loader pinned to our publisher client; same URL is used
   // by both the auto-ads hook and any per-slot `<AdSlot />` units, so
-  // the in-module dedupe Set in `<AdSlot />` keeps it loaded once.
+  // the shared ad script registry keeps it loaded once.
   adsense: {
     scriptUrl: 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8958003374183515',
     publisherId: 'ca-pub-8958003374183515',
@@ -49,11 +53,9 @@ const NETWORKS = {
 };
 
 // ── Per-placement wiring ─────────────────────────────────────────────────────
-// Notes (`/learn/...`) and PYQ (`/pyq/...`) are the *only* monetised
-// surfaces on Syrabit.ai (Task #542). Both are intentionally ad-dense:
-// top, mid and end slots on PYQ; top, mid, after-PYQs, after-flashcards,
-// end and a desktop sidebar on Notes. All other routes (chat, library,
-// browser, chapter) stay ad-free — see `scripts/verify-no-ads.mjs`.
+// Monetised surfaces: /learn/... (LearnPage), /pyq/... (PYQReplicaPage),
+// and /:board/... (ChapterPage — Notes, Q&A, PYQ tabs). All other routes
+// (chat, library, browser) stay ad-free — see `scripts/verify-no-ads.mjs`.
 //
 // ALL placements are wired to Google AdSense (the only active network).
 // adpushup, adsterra, and propellerads are hard-disabled in DISABLED_NETWORKS,
@@ -85,6 +87,17 @@ const PLACEMENTS = {
   'pyq.inContent': {
     network: 'adsense',
     slotId: env.VITE_ADS_ADSENSE_PYQ_INCONTENT_SLOT || '',
+    height: 0,
+    label: 'Advertisement',
+    adFormat: 'fluid',
+    adLayout: 'in-article',
+  },
+  // DOM-injected between paper image pages. Activated by useEffect in
+  // PYQReplicaPage after every 2nd <img> inside the server HTML body.
+  // Max 3 injections per paper — students spend 15-30 min here, highest RPM.
+  'pyq.betweenImages': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_PYQ_BETWEEN_IMAGES_SLOT || '',
     height: 0,
     label: 'Advertisement',
     adFormat: 'fluid',
@@ -145,6 +158,83 @@ const PLACEMENTS = {
     height: 600,
     label: 'Advertisement',
     adFormat: 'auto',
+  },
+  // Injected after every 3rd question in the Important Questions / Q&A section.
+  // Blueprint "reward zone" — appears after a full Q+A pair as a natural break.
+  'learn.afterQuestion': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_LEARN_AFTER_QUESTION_SLOT || '',
+    height: 0,
+    label: 'Advertisement',
+    adFormat: 'fluid',
+    adLayout: 'in-article',
+  },
+
+  // ── ChapterPage tabs ───────────────────────────────────────────────────────
+  // Notes tab — three slots: top display, in-article fluid, end display.
+  'chapter.notes.top': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_CHAPTER_NOTES_TOP_SLOT || '',
+    height: 250,
+    label: 'Advertisement',
+    adFormat: 'auto',
+  },
+  'chapter.notes.inContent': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_CHAPTER_NOTES_INCONTENT_SLOT || '',
+    height: 0,
+    label: 'Advertisement',
+    adFormat: 'fluid',
+    adLayout: 'in-article',
+  },
+  'chapter.notes.end': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_CHAPTER_NOTES_END_SLOT || '',
+    height: 250,
+    label: 'Advertisement',
+    adFormat: 'auto',
+  },
+  // Q&A tab — in-article fluid inserted after every 3rd topic card, plus end display.
+  'chapter.qa.inContent': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_CHAPTER_QA_INCONTENT_SLOT || '',
+    height: 0,
+    label: 'Advertisement',
+    adFormat: 'fluid',
+    adLayout: 'in-article',
+  },
+  'chapter.qa.end': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_CHAPTER_QA_END_SLOT || '',
+    height: 250,
+    label: 'Advertisement',
+    adFormat: 'auto',
+  },
+  // Desktop-only sidebar skyscraper — hidden on mobile via `hidden lg:flex`
+  // on the aside in ChapterPage. Mirrors the learn.sidebar placement so
+  // desktop ad density matches LearnPage.
+  'chapter.sidebar': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_CHAPTER_SIDEBAR_SLOT || '',
+    height: 600,
+    label: 'Advertisement',
+    adFormat: 'auto',
+  },
+  // Question Paper tab — top display and post-viewer fluid.
+  'chapter.pyq.top': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_CHAPTER_PYQ_TOP_SLOT || '',
+    height: 250,
+    label: 'Advertisement',
+    adFormat: 'auto',
+  },
+  'chapter.pyq.inContent': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_CHAPTER_PYQ_INCONTENT_SLOT || '',
+    height: 0,
+    label: 'Advertisement',
+    adFormat: 'fluid',
+    adLayout: 'in-article',
   },
 };
 

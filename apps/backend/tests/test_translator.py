@@ -73,14 +73,14 @@ class TestTranslateText:
 
     @pytest.mark.anyio
     async def test_translate_text_returns_translated(self):
-        """Test that translate_text calls sarvam and returns result."""
+        """Test that translate_text calls Workers AI and returns result."""
         from app.services.content.translator import ContentTranslator
 
         translator = ContentTranslator()
         fake_response = "\u09f0\u09be\u09b8\u09be\u09af\u09bc\u09a8\u09bf\u0995 \u09ac\u09bf\u0995\u09cd\u09f0\u09bf\u09af\u09bc\u09be"
 
         with patch(
-            "app.services.content.translator.sarvam_client.generate",
+            "app.services.content.translator.workers_ai_client.generate",
             new_callable=AsyncMock,
             return_value=fake_response,
         ) as mock_generate:
@@ -108,7 +108,7 @@ class TestTranslateText:
         translator = ContentTranslator()
 
         with patch(
-            "app.services.content.translator.sarvam_client.generate",
+            "app.services.content.translator.workers_ai_client.generate",
             new_callable=AsyncMock,
             return_value="translated",
         ) as mock_generate:
@@ -126,7 +126,7 @@ class TestTranslateText:
         long_text = "\n\n".join([f"Paragraph {i} " + "word " * 100 for i in range(10)])
 
         with patch(
-            "app.services.content.translator.sarvam_client.generate",
+            "app.services.content.translator.workers_ai_client.generate",
             new_callable=AsyncMock,
             return_value="chunk_translated",
         ) as mock_generate:
@@ -148,7 +148,7 @@ class TestTranslateKnowledgeObject:
 
         with (
             patch(
-                "app.services.content.translator.sarvam_client.generate",
+                "app.services.content.translator.workers_ai_client.generate",
                 new_callable=AsyncMock,
                 return_value="translated_text",
             ),
@@ -173,7 +173,7 @@ class TestTranslateKnowledgeObject:
 
         with (
             patch(
-                "app.services.content.translator.sarvam_client.generate",
+                "app.services.content.translator.workers_ai_client.generate",
                 new_callable=AsyncMock,
                 return_value="translated_text",
             ),
@@ -197,7 +197,7 @@ class TestTranslateKnowledgeObject:
 
         with (
             patch(
-                "app.services.content.translator.sarvam_client.generate",
+                "app.services.content.translator.workers_ai_client.generate",
                 new_callable=AsyncMock,
                 return_value="translated_text",
             ),
@@ -226,7 +226,7 @@ class TestTranslateKnowledgeObject:
 
         with (
             patch(
-                "app.services.content.translator.sarvam_client.generate",
+                "app.services.content.translator.workers_ai_client.generate",
                 new_callable=AsyncMock,
                 return_value="translated_text",
             ),

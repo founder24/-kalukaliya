@@ -76,7 +76,7 @@ function PublishJobCard({ jobId, adminToken, onComplete }) {
       const res = await axios.get(`${API_BASE}/admin/content/publish-jobs/${jobId}`, headers);
       errorCountRef.current = 0;
       setJob(res.data);
-      if (res.data?.status === 'done' || res.data?.status === 'failed') {
+      if (res.data?.status === 'done' || res.data?.status === 'failed' || res.data?.status === 'partial') {
         clearInterval(pollingRef.current);
         if (res.data?.status === 'done' && onComplete) onComplete(jobId);
       }
@@ -120,7 +120,7 @@ function PublishJobCard({ jobId, adminToken, onComplete }) {
 
   const statusColor = job.status === 'done'
     ? 'border-emerald-200 bg-emerald-50/60'
-    : job.status === 'failed'
+    : job.status === 'failed' || job.status === 'partial'
     ? 'border-red-200 bg-red-50/60'
     : 'border-violet-200 bg-violet-50/60';
 
@@ -128,6 +128,8 @@ function PublishJobCard({ jobId, adminToken, onComplete }) {
     ? '✓ Published'
     : job.status === 'failed'
     ? '✗ Failed'
+    : job.status === 'partial'
+    ? '⚠ Partially published'
     : job.status === 'running'
     ? `Running (${doneSteps}/${totalSteps})`
     : 'Queued…';
@@ -150,7 +152,7 @@ function PublishJobCard({ jobId, adminToken, onComplete }) {
           </span>
           <span className="text-[9px] text-gray-400 font-mono">{jobId.slice(0, 12)}…</span>
         </div>
-        {job.status === 'failed' && (
+        {(job.status === 'failed' || job.status === 'partial') && (
           <button
             onClick={(e) => { e.stopPropagation(); handleRetry(); }}
             disabled={retrying}

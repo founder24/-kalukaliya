@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import { useParams, useNavigate } from 'react-router-dom';
 import { WORKER_API } from '../utils/api';
@@ -8,6 +8,7 @@ import ContinueLearning from '@/components/content/ContinueLearning';
 import AdSlot from '@/components/ads/AdSlot';
 // Quge5 multitag removed in Task #347 — AdSense is the sole monetised network.
 import useAdsenseAutoAds from '@/components/ads/useAdsenseAutoAds';
+import { adsConsentGranted, getAdConfig } from '@/utils/adsConfig';
 import { MobileNavSwitch } from '@/components/layout/MobileNavSwitch';
 import { useLibraryBundle } from '@/hooks/useContent';
 
@@ -66,6 +67,68 @@ export default function PYQReplicaPage() {
   // Real worker-backfilled metadata (Task #338) — null until /meta resolves.
   const [serverMeta, setServerMeta] = useState(null);
   const { sharing, share } = useShare();
+  const pyqBodyRef = useRef(null);
+
+  // Inject between-image AdSense slots into the opaque server HTML.
+  // The PYQ body arrives as dangerouslySetInnerHTML so we can't splice
+  // ad containers in JSX. After HTML mounts we locate every <img> and
+  // insert an in-article slot after every 2nd image (max 3 total).
+  // Consent + slot-ID gates mirror the <AdSlot /> component, and we
+  // listen for syrabit:ads-consent-changed so mid-session revocation
+  // (paid plan hydrate, opt-out toggle) cleans up the injected nodes.
+  useEffect(() => {
+    const el = pyqBodyRef.current;
+    if (!el || !html) return;
+
+    function injectBetweenImages() {
+      // Clear existing injections before re-evaluating consent.
+      el.querySelectorAll('.syrabit-pyq-between-ad').forEach(n => n.remove());
+
+      if (!adsConsentGranted()) return;
+
+      const cfg = getAdConfig('pyq.betweenImages');
+      if (!cfg.enabled) return;
+
+      const imgs = el.querySelectorAll('img');
+      if (imgs.length < 2) return;
+
+      let injected = 0;
+      imgs.forEach((img, idx) => {
+        if ((idx + 1) % 2 !== 0) return;  // after every 2nd image
+        if (injected >= 3) return;          // cap — avoid ad density penalty
+
+        const sibling = img.nextElementSibling;
+        if (sibling?.classList.contains('syrabit-pyq-between-ad')) return;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'syrabit-pyq-between-ad';
+        wrap.style.cssText = 'margin:16px auto;max-width:580px;text-align:center;';
+
+        const lbl = document.createElement('span');
+        lbl.style.cssText = 'display:block;font-size:10px;color:#9ca3af;margin-bottom:6px;';
+        lbl.textContent = 'Advertisement';
+
+        const ins = document.createElement('ins');
+        ins.className = 'adsbygoogle';
+        ins.style.display = 'block';
+        ins.setAttribute('data-ad-client', cfg.publisherId);
+        ins.setAttribute('data-ad-slot', cfg.slotId);
+        ins.setAttribute('data-ad-format', 'fluid');
+        ins.setAttribute('data-ad-layout', 'in-article');
+
+        wrap.appendChild(lbl);
+        wrap.appendChild(ins);
+        img.parentNode?.insertBefore(wrap, img.nextSibling);
+
+        try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch (_) {}
+        injected++;
+      });
+    }
+
+    injectBetweenImages();
+    window.addEventListener('syrabit:ads-consent-changed', injectBetweenImages);
+    return () => window.removeEventListener('syrabit:ads-consent-changed', injectBetweenImages);
+  }, [html]);
 
   const pyqUrl = `https://syrabit.ai/pyq/${slug || ''}`;
   const pyqMeta = useMemo(() => {
@@ -247,7 +310,8 @@ export default function PYQReplicaPage() {
       </div>
 
       <div style={{ paddingTop: '16px' }}>
-        <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
+        {/* ref used by between-image ad injection useEffect above */}
+        <div ref={pyqBodyRef} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
       </div>
 
       {/* In-content ad — premium AdPushup/Magnite demand. The PYQ body is

@@ -7,6 +7,8 @@
  * Usage: import Analytics from '@/utils/analytics'; Analytics.signup(email);
  */
 
+import { API_BASE } from './api';
+
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 const track = (event, properties = {}) => {
@@ -46,15 +48,11 @@ const mirrorReviewPromptEvent = (event, properties) => {
   if (_reviewPromptMirrorBlocked) return;
   if (typeof window === 'undefined') return;
   try {
-    const apiBase =
-      (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_BACKEND_URL)
-        ? `${import.meta.env.VITE_BACKEND_URL.replace(/\/$/, '')}/api`
-        : '/api';
     const payload = JSON.stringify({
       event,
       reason: (properties && properties.reason) || null,
     });
-    const url = `${apiBase}/analytics/review-prompt-event`;
+    const url = `${API_BASE}/analytics/review-prompt-event`;
     const blob = new Blob([payload], { type: 'application/json' });
     if (navigator.sendBeacon && navigator.sendBeacon(url, blob)) return;
     fetch(url, {
@@ -75,10 +73,6 @@ const mirrorAdImpression = (properties) => {
   if (typeof window === 'undefined') return;
   if (!properties || !properties.placement || !properties.network) return;
   try {
-    const apiBase =
-      (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_BACKEND_URL)
-        ? `${import.meta.env.VITE_BACKEND_URL.replace(/\/$/, '')}/api`
-        : '/api';
     // ``enabled`` used to be in this payload but it was always true
     // at the AdSlot call site (the IntersectionObserver only fires
     // after a cfg.enabled gate) and the backend never read it back.
@@ -88,7 +82,7 @@ const mirrorAdImpression = (properties) => {
       placement: properties.placement,
       network: properties.network,
     });
-    const url = `${apiBase}/analytics/ad-impression`;
+    const url = `${API_BASE}/analytics/ad-impression`;
     const blob = new Blob([payload], { type: 'application/json' });
     if (navigator.sendBeacon && navigator.sendBeacon(url, blob)) return;
     fetch(url, {
@@ -112,12 +106,6 @@ const mirrorHydrateEvent = (event, properties) => {
   if (_hydrateMirrorBlocked) return;
   if (typeof window === 'undefined') return;
   try {
-    // Resolve API base from the existing axios setup if possible,
-    // else fall back to same-origin /api.
-    const apiBase =
-      (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_BACKEND_URL)
-        ? `${import.meta.env.VITE_BACKEND_URL.replace(/\/$/, '')}/api`
-        : '/api';
     const payload = JSON.stringify({
       event,
       kind: properties?.kind ?? null,
@@ -129,7 +117,7 @@ const mirrorHydrateEvent = (event, properties) => {
       elapsed_ms: properties?.elapsed_ms ?? null,
       ms_since_reload: properties?.ms_since_reload ?? null,
     });
-    const url = `${apiBase}/analytics/hydrate-event`;
+    const url = `${API_BASE}/analytics/hydrate-event`;
     const blob = new Blob([payload], { type: 'application/json' });
     if (navigator.sendBeacon && navigator.sendBeacon(url, blob)) return;
     // Fallback — keepalive lets the request survive page unload.

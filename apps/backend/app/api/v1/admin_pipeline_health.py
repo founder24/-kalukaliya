@@ -49,55 +49,29 @@ async def admin_chat_pipeline_probe():
     frontend secret.
 
     Time budget (same as the public probe):
-      Step 1 Sarvam   :  6 s (billing-exhausted short-circuits instantly)
-      Step 1 Gemini   :  8 s (fallback only)
-      Steps 2 & 4     : 12 s (run in parallel)
+      Step 1 Workers AI: 30 s
+      Steps 2 & 4     : 30 s (run in parallel)
       Step 3 RAG      :  4 s
-      Total worst case: 30 s
+      Total worst case: 64 s
 
     Returns HTTP 200 in all cases; inspect ``status`` / ``step`` for
     unhealthy detail.
     """
     result: Dict[str, Any] = {}
 
-    # ── Step 1: Provider ping (Sarvam → Gemini fallback) ─────────────────────
+    # ── Step 1: Workers AI provider ping ─────────────────────────────────────
     try:
-        from app.services.ai.sarvam_client import generate_with_sarvam
-        from app.services.ai.gemini_fallback import (
-            generate_gemini,
-            stream_gemini,
-            _available as gemini_available,
-        )
-        from app.core.circuit_breaker import (
-            SarvamBillingExhaustedError,
-            CircuitBreakerError,
-        )
+        from app.config import settings
+        from app.services.ai.workers_ai_client import generate_with_workers_ai
 
         _ping_sys = "You are a test probe. Respond with exactly the single word PONG and nothing else."
         _ping_usr = "ping"
-        provider = "sarvam"
+        provider = settings.CF_AI_MODEL
         t0 = _time.monotonic()
-
-        try:
-            ping_text = await asyncio.wait_for(
-                generate_with_sarvam(
-                    system_prompt=_ping_sys,
-                    user_message=_ping_usr,
-                    stream=False,
-                ),
-                timeout=6.0,
-            )
-        except (SarvamBillingExhaustedError, CircuitBreakerError, asyncio.TimeoutError, Exception) as sarvam_err:
-            if not gemini_available():
-                raise RuntimeError(
-                    f"Sarvam failed ({str(sarvam_err)[:80]}) and Gemini not configured"
-                )
-            logger.info("admin_pipeline_probe: Sarvam failed (%r), using Gemini", sarvam_err)
-            ping_text = await asyncio.wait_for(
-                generate_gemini(_ping_sys, _ping_usr, timeout=8.0, max_output_tokens=20),
-                timeout=8.0,
-            )
-            provider = "gemini-2.5-flash"
+        ping_text = await asyncio.wait_for(
+            generate_with_workers_ai(_ping_sys, _ping_usr, max_tokens=256),
+            timeout=30.0,
+        )
 
         result["provider"] = provider
         result["latency_ms"] = round((_time.monotonic() - t0) * 1000, 1)
@@ -110,25 +84,24 @@ async def admin_chat_pipeline_probe():
         return JSONResponse(status_code=200, content=result)
 
     # ── Steps 2 & 4: Assamese quality probes (parallel) ──────────────────────
-    from app.services.ai.gemini_fallback import (
-        generate_gemini,
-        stream_gemini,
-        _available as gemini_available,
+    from app.services.ai.workers_ai_client import (
+        generate_with_workers_ai,
+        workers_ai_client,
     )
 
-    if not gemini_available():
-        skip = {"status": "skipped", "reason": "Gemini not configured (GEMINI_API_KEY absent)"}
+    if not settings.EDGE_SHARED_SECRET:
+        skip = {"status": "skipped", "reason": "Workers AI internal authentication is not configured"}
         result["assamese_probe"] = skip
         result["streaming_assamese_probe"] = skip
     else:
         async def _ns_probe() -> Dict[str, Any]:
-            """Non-streaming Assamese probe via generate_gemini()."""
+            """Non-streaming Assamese probe via Workers AI."""
             sys_p = "তুমি এটা সহায়কাৰী শিক্ষামূলক সহায়ক। সদায় চমুকৈ অসমীয়া ভাষাত উত্তৰ দিয়া।"
             usr_p = "তুমি কোন?"  # "Who are you?"
             t = _time.monotonic()
             resp = await asyncio.wait_for(
-                generate_gemini(sys_p, usr_p, timeout=12.0, max_output_tokens=80),
-                timeout=12.0,
+                generate_with_workers_ai(sys_p, usr_p, is_assamese=True, max_tokens=256),
+                timeout=30.0,
             )
             ms = round((_time.monotonic() - t) * 1000, 1)
             return {
@@ -138,7 +111,7 @@ async def admin_chat_pipeline_probe():
             }
 
         async def _st_probe() -> Dict[str, Any]:
-            """Streaming Assamese probe via stream_gemini(); measures TTFB."""
+            """Streaming Assamese probe via Workers AI; measures TTFB."""
             sys_p = "তুমি এটা সহায়কাৰী শিক্ষামূলক সহায়ক। সদায় চমুকৈ অসমীয়া ভাষাত উত্তৰ দিয়া।"
             usr_p = "পোহৰ কি?"  # "What is light?"
             t = _time.monotonic()
@@ -147,12 +120,14 @@ async def admin_chat_pipeline_probe():
 
             async def _collect() -> None:
                 nonlocal first_ms
-                async for chunk in stream_gemini(sys_p, usr_p, timeout=12.0):
+                async for chunk in workers_ai_client.stream_generate_with_retry(
+                    sys_p, usr_p, is_assamese=True, max_tokens=256
+                ):
                     if first_ms is None:
                         first_ms = round((_time.monotonic() - t) * 1000, 1)
                     chunks.append(chunk)
 
-            await asyncio.wait_for(_collect(), timeout=12.0)
+            await asyncio.wait_for(_collect(), timeout=30.0)
             joined = "".join(chunks)
             total_ms = round((_time.monotonic() - t) * 1000, 1)
             probe: Dict[str, Any] = {

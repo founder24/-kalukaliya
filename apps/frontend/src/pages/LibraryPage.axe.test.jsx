@@ -42,6 +42,7 @@ vi.mock('@/hooks/useContent', () => ({
   useLibraryBundle:      vi.fn(),
   useLibraryBundleSlim:  vi.fn(),
   useLibraryBundleBoot:  vi.fn(),
+  useQuestionPapers:     vi.fn(() => ({ data: [], isLoading: false })),
   useSavedSubjects:      vi.fn(),
 }));
 

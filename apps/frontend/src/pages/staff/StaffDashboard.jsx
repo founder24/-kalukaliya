@@ -4,6 +4,10 @@ import { API_BASE } from '@/utils/api';
 import { getToken } from '@/hooks/useTokenManager';
 import axios from 'axios';
 import { toast } from 'sonner';
+import AdminDashboard from '@/components/admin/AdminDashboard';
+import AdminAnalytics from '@/components/admin/AdminAnalytics';
+import AdminUsers from '@/components/admin/AdminUsers';
+import AdminConversations from '@/components/admin/AdminConversations';
 
 const api = () => {
   const token = getToken();
@@ -134,7 +138,12 @@ function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        <SidebarLink active={view === 'subjects'} icon={<GridIcon />} label="Subjects" onClick={() => onViewChange('subjects')} />
+        <SidebarLink active={view === 'dashboard'} icon={<DashboardIcon />} label="Dashboard" onClick={() => onViewChange('dashboard')} />
+        <SidebarLink active={view === 'analytics'} icon={<AnalyticsIcon />} label="Analytics" onClick={() => onViewChange('analytics')} />
+        <SidebarLink active={view === 'users'} icon={<UsersIcon />} label="Users" onClick={() => onViewChange('users')} />
+        <SidebarLink active={view === 'conversations'} icon={<ConversationsIcon />} label="Conversations" onClick={() => onViewChange('conversations')} />
+        <div className="my-2 border-t border-gray-100" />
+        <SidebarLink active={view === 'subjects' || view === 'chapters'} icon={<GridIcon />} label="Subjects" onClick={() => onViewChange('subjects')} />
       </nav>
       <div className="px-4 py-4 border-t border-gray-100">
         <div className="flex items-center gap-3 mb-3">
@@ -239,6 +248,7 @@ const EDITOR_TABS = [
   { id: 'info',      label: 'Info' },
   { id: 'notes',     label: 'Notes' },
   { id: 'questions', label: 'Questions' },
+  { id: 'pyq',       label: 'PYQ Pages' },
 ];
 
 function FieldLabel({ children, chars }) {
@@ -1149,6 +1159,20 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
             </div>
           )}
 
+          {/* ── PYQ PAGES TAB ── */}
+          {tab === 'pyq' && (
+            <div className="space-y-4">
+              <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-2.5 text-xs text-amber-800">
+                <strong>PYQ page images</strong> — upload scanned question-paper pages (JPG, PNG, WEBP). Each upload is saved immediately; no "Save Chapter" needed.
+              </div>
+              <PyqPapersEditor
+                chapterId={chapterId}
+                papers={form?.pyq_papers || []}
+                onPapersChange={(papers) => setForm(f => ({ ...f, pyq_papers: papers }))}
+              />
+            </div>
+          )}
+
         </div>
 
         {/* Footer */}
@@ -1630,6 +1654,7 @@ function SubjectPYQsView({ subjectId }) {
   const [deletingId,   setDeletingId]   = useState(null);
   const [uploadingFor, setUploadingFor] = useState(null);
   const [removingPage, setRemovingPage] = useState(null);
+  const [reindexingId, setReindexingId] = useState(null);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -1716,6 +1741,19 @@ function SubjectPYQsView({ subjectId }) {
       toast.success('Page removed');
     } catch { toast.error('Remove failed'); }
     finally { setRemovingPage(null); }
+  };
+
+  const handleReindex = async (paperId) => {
+    setReindexingId(paperId);
+    try {
+      const res = await api().post(`/staff/content/subject/${subjectId}/pyq-papers/${paperId}/reindex`);
+      setPapers(res.data.pyq_papers);
+      toast.success('PYQ indexed — students can now find this paper via chat');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Reindex failed');
+    } finally {
+      setReindexingId(null);
+    }
   };
 
   if (loading) return <div className="flex justify-center py-16"><Spinner /></div>;
@@ -1832,6 +1870,12 @@ function SubjectPYQsView({ subjectId }) {
                       <span className="text-[10px] text-gray-400">
                         {pages.length} page{pages.length !== 1 ? 's' : ''}
                       </span>
+                      {(() => {
+                        const isStale = paper.rag_updated_at && (!paper.rag_indexed_at || new Date(paper.rag_updated_at) > new Date(paper.rag_indexed_at));
+                        if (isStale) return <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 font-medium border border-amber-200">RAG stale</span>;
+                        if (paper.rag_indexed_at) return <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 font-medium border border-emerald-100">RAG ✓</span>;
+                        return null;
+                      })()}
                     </div>
                     {paper.description && !isExpanded && (
                       <p className="text-[11px] text-gray-400 truncate mt-0.5">{paper.description}</p>
@@ -1842,7 +1886,7 @@ function SubjectPYQsView({ subjectId }) {
                       onClick={() => {
                         if (isEditing) { setEditingId(null); return; }
                         setEditingId(paper.id);
-                        setEditForm({ name: paper.name, class_name: paper.class_name || '', year: paper.year, description: paper.description || '' });
+                        setEditForm({ name: paper.name, class_name: paper.class_name || '', year: paper.year, description: paper.description || '', rag_text: paper.rag_text || '', rag_text_as: paper.rag_text_as || '' });
                       }}
                       className="px-2 py-1 rounded-lg text-[11px] font-semibold text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
                     >
@@ -1898,6 +1942,46 @@ function SubjectPYQsView({ subjectId }) {
                         onChange={e => setEditForm(f => ({...f, description: e.target.value}))}
                       />
                     </div>
+                    {/* PYQ RAG text */}
+                    <div className="border-t border-amber-100 pt-3 space-y-2">
+                      <div className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide">
+                        PYQ RAG Text <span className="normal-case font-normal text-gray-400">— plain text of the question paper for AI chat retrieval (not shown to students)</span>
+                      </div>
+                      <div>
+                        <textarea
+                          className={`${inputCls} resize-none font-mono`}
+                          rows={8}
+                          placeholder={"1. Define electric charge. [2]\n2. State Coulomb's law. [3]\n…"}
+                          value={editForm.rag_text || ''}
+                          onChange={e => setEditForm(f => ({ ...f, rag_text: e.target.value }))}
+                        />
+                      </div>
+                      {/* Stale / reindex banner */}
+                      {(() => {
+                        const isStale = paper.rag_updated_at && (!paper.rag_indexed_at || new Date(paper.rag_updated_at) > new Date(paper.rag_indexed_at));
+                        const hasText = (editForm.rag_text || '').trim() || (editForm.rag_text_as || '').trim();
+                        if (!hasText && !paper.rag_indexed_at) return null;
+                        return (
+                          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[11px] border ${isStale ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>
+                            <span className="flex-1">
+                              {isStale
+                                ? '⚠ RAG text saved but not indexed — save then click Reindex so chat can find this paper.'
+                                : `✓ Indexed ${new Date(paper.rag_indexed_at).toLocaleString()}`
+                              }
+                            </span>
+                            <button
+                              onClick={() => handleReindex(paper.id)}
+                              disabled={reindexingId === paper.id}
+                              className="flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold transition-colors disabled:opacity-50"
+                            >
+                              {reindexingId === paper.id ? <Spinner size={3} /> : null}
+                              {reindexingId === paper.id ? 'Indexing…' : 'Reindex'}
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleSaveEdit(paper.id)}
@@ -2372,6 +2456,22 @@ export default function StaffDashboard() {
     if (v === 'subjects') setSelectedSubject(null);
   };
 
+  // Map admin quick-link section IDs to staff panel view names
+  const ADMIN_NAV_MAP = {
+    dashboard:      'dashboard',
+    analytics:      'analytics',
+    users:          'users',
+    conversations:  'conversations',
+    feedback:       'conversations',
+    seomanager:     'dashboard',   // no dedicated view — fall back to dashboard
+    monetization:   'dashboard',
+  };
+  const handleAdminNavigate = useCallback((section) => {
+    const v = ADMIN_NAV_MAP[section] || 'dashboard';
+    handleViewChange(v);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleLogout = async () => {
     try { await logout(); } catch { /* ignore */ }
     window.location.href = '/login';
@@ -2407,7 +2507,19 @@ export default function StaffDashboard() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-hidden">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden">
+          {view === 'dashboard' && (
+            <AdminDashboard adminToken={getToken()} onNavigate={handleAdminNavigate} />
+          )}
+          {view === 'analytics' && (
+            <AdminAnalytics adminToken={getToken()} onNavigate={handleAdminNavigate} />
+          )}
+          {view === 'users' && (
+            <AdminUsers adminToken={getToken()} onNavigate={handleAdminNavigate} />
+          )}
+          {view === 'conversations' && (
+            <AdminConversations adminToken={getToken()} onNavigate={handleAdminNavigate} />
+          )}
           {view === 'subjects' && (
             <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} onSelectSubject={selectSubject} onSubjectCreated={handleSubjectCreated} />
           )}
@@ -2441,6 +2553,18 @@ function HamburgerIcon() {
 }
 function GridIcon() {
   return <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>;
+}
+function DashboardIcon() {
+  return <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>;
+}
+function AnalyticsIcon() {
+  return <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>;
+}
+function UsersIcon() {
+  return <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>;
+}
+function ConversationsIcon() {
+  return <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>;
 }
 function BookIcon() {
   return <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" /></svg>;

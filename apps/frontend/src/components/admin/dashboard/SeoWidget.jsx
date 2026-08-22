@@ -42,6 +42,37 @@ import {
 
 export default function SeoWidget(props) {
   const p = props;
+  const {
+    adminToken, onNavigate, navContext, data, loading,
+    prewarmCoverage, indexNowStats, indexNowHistory, retryingEndpoint,
+    resubmittingIndexNow, resubmitMessage, setResubmitMessage,
+    alertHistory, cooldownActiveCount,
+    alertFilter, setAlertFilter, alertReasonFilter, setAlertReasonFilter,
+    showSyntheticAlerts, setShowSyntheticAlerts,
+    alertSettingsOpen, alertSettingsDraft, setAlertSettingsDraft, alertSettingsSaving,
+    notifPrefs, notifPrefsSaving, notifPrefsOpen, setNotifPrefsOpen,
+    pushDeliverySummary, seoSummaryDispatches,
+    kvHealth, kvExpandedIsolates, setKvExpandedIsolates,
+    r2Health, r2ResettingWatchdog, setR2ResettingWatchdog, r2Reevaluating, setR2Reevaluating,
+    vertexProbe, ciStatus, ciRerunning,
+    chimeUploading, pendingChimeFile, setPendingChimeFile, chimeFileInputRef,
+    pushNotif,
+    alertSoundEnabled, chimeTone, CHIME_TONES, ALERT_SEVERITY_LABELS,
+    seoHealth, seoHealthRefreshing, setSeoHealth, setSeoHealthRefreshing,
+    seoLive, seoLiveLoading, seoLiveError, setSeoLive, setSeoLiveLoading, setSeoLiveError,
+    setR2Health,
+    seoAutoDeepScans,
+    expandedSitemap, setExpandedSitemap,
+    sitemapDeepScans, setSitemapDeepScans,
+    d1SyncRunning, setD1SyncRunning, d1SyncResult, setD1SyncResult,
+    d1SyncDurationMs, setD1SyncDurationMs, d1SyncError, setD1SyncError,
+    vs,
+    handleAcknowledgeAlert, handleAcknowledgeAll, handleOpenAlertSettings,
+    handleSaveAlertSettings, handleResetAlertSettings,
+    handleRetryEndpoint, handleCiRerun,
+    saveNotifPrefs, toggleAlertSound, playAlertChime,
+    handleChimeFileSelect, handleChimeUploadConfirm, handleDeleteCustomChime,
+  } = props;
   return (
     <>
 

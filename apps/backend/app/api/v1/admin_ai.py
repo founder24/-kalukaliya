@@ -1,7 +1,7 @@
 """
 Admin AI Endpoints
 AI provider configuration, circuit breaker management, token usage, routing table.
-Covers all 3 production AI providers: Sarvam AI, Vertex AI / Gemini, CF Workers AI.
+Production AI provider: Cloudflare Workers AI for text, embeddings, TTS and vision.
 """
 
 from fastapi import APIRouter, Depends
@@ -25,58 +25,20 @@ def _cf_configured() -> bool:
     )
 
 
-def _vertex_configured() -> bool:
+def _workers_ai_internal_configured() -> bool:
     return bool(
-        getattr(settings, "VERTEX_PROJECT_ID", None)
-        or getattr(settings, "GOOGLE_APPLICATION_CREDENTIALS_JSON", None)
+        getattr(settings, "EDGE_SHARED_SECRET", None)
+        and (
+            getattr(settings, "WORKERS_AI_INTERNAL_URL", None)
+            or getattr(settings, "CF_WORKER_URL", None)
+        )
     )
 
 
 @router.get("/ai/providers")
 async def ai_providers():
-    """AI provider config and health — all 3 production providers."""
-    from app.core.circuit_breaker import sarvam_circuit_breaker
-
-    cb_status = sarvam_circuit_breaker.get_status()
-
-    # ── 1. Sarvam AI ────────────────────────────────────────────────────────
-    sarvam = {
-        "name": "sarvam_ai",
-        "display_name": "Sarvam AI",
-        "models": {
-            "chat": settings.SARVAM_MODEL,
-            "available": ["sarvam-30b", "sarvam-105b"],
-        },
-        "base_url": settings.SARVAM_BASE_URL,
-        "configured": bool(settings.SARVAM_API_KEY),
-        "status": "configured" if settings.SARVAM_API_KEY else "not_configured",
-        "languages": ["en", "as", "hi", "bn", "ta", "te", "kn", "ml", "mr", "gu", "pa", "or"],
-        "circuit_breaker": cb_status,
-        "role": "primary — Assamese and all Indic-language responses",
-    }
-
-    # ── 2. Vertex AI / Gemini ────────────────────────────────────────────────
-    vertex_model = getattr(settings, "VERTEX_GEMINI_MODEL", "gemini-2.5-flash")
-    vertex_project = getattr(settings, "VERTEX_PROJECT_ID", None)
-    vertex_location = getattr(settings, "VERTEX_LOCATION", "us-central1")
-    vertex_ok = _vertex_configured()
-    vertex = {
-        "name": "vertex_ai",
-        "display_name": "Vertex AI / Gemini",
-        "models": {
-            "chat": vertex_model,
-            "available": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"],
-        },
-        "project_id": vertex_project,
-        "location": vertex_location,
-        "configured": vertex_ok,
-        "status": "configured" if vertex_ok else "not_configured",
-        "circuit_breaker": {"state": "unavailable"},
-        "role": "secondary — English reasoning + search grounding",
-    }
-
-    # ── 3. Cloudflare Workers AI ─────────────────────────────────────────────
-    cf_ok = _cf_configured()
+    """AI provider config and health — production providers."""
+    cf_ok = _cf_configured() or _workers_ai_internal_configured()
     cf = {
         "name": "cf_workers_ai",
         "display_name": "Cloudflare Workers AI",
@@ -84,52 +46,36 @@ async def ai_providers():
             "chat": settings.CF_AI_MODEL,
             "vision": settings.CF_AI_VISION_MODEL,
             "tts": settings.CF_AI_TTS_MODEL,
-            "embedding": "@cf/baai/bge-m3",
+            "embedding": settings.CF_AI_EMBED_MODEL,
         },
         "account_id": settings.CF_ACCOUNT_ID or settings.CLOUDFLARE_ACCOUNT_ID,
         "configured": cf_ok,
         "status": "configured" if cf_ok else "not_configured",
-        "circuit_breaker": {"state": "unavailable"},
-        "role": "embeddings (bge-m3 1024-dim) + TTS + vision",
+        "fallback_model": "@cf/qwen/qwen3-30b-a3b-fp8",
+        "role": "all text generation, embeddings, TTS, and vision",
     }
 
     overall = (
         "healthy"
-        if sarvam["configured"]
-        else ("degraded" if cf_ok or vertex_ok else "critical")
+        if cf_ok
+        else "critical"
     )
 
     return {
         "overall_status": overall,
-        "providers": [sarvam, vertex, cf],
+        "providers": [cf],
     }
 
 
 @router.get("/ai/circuit-breakers")
 async def get_circuit_breakers():
-    """State of all AI circuit breakers: CLOSED / OPEN / HALF_OPEN + failure count."""
-    from app.core.circuit_breaker import sarvam_circuit_breaker
-
-    sarvam_status = sarvam_circuit_breaker.get_status()
-
+    """Workers AI retries primary-to-fallback internally; no local breaker exists."""
     return {
         "circuit_breakers": [
             {
-                "provider": "sarvam_ai",
-                "state": sarvam_status.get("state", "unknown"),
-                "failure_count": sarvam_status.get("failure_count", 0),
-                "last_failure_at": sarvam_status.get("last_failure_at"),
-                "next_attempt_at": sarvam_status.get("next_attempt_at"),
-            },
-            {
-                "provider": "vertex_ai",
-                "state": "unavailable",
-                "note": "No circuit breaker configured for Vertex AI",
-            },
-            {
                 "provider": "cf_workers_ai",
-                "state": "unavailable",
-                "note": "No circuit breaker configured for CF Workers AI",
+                "state": "managed",
+                "note": "Primary-to-fallback retry is managed in the API Worker",
             },
         ]
     }
@@ -137,19 +83,10 @@ async def get_circuit_breakers():
 
 @router.post("/ai/reset-circuit")
 async def reset_circuit_breakers():
-    """Reset AI circuit breakers to CLOSED state."""
-    from app.core.circuit_breaker import sarvam_circuit_breaker
-
-    before = {"sarvam_ai": sarvam_circuit_breaker.get_status()["state"]}
-    sarvam_circuit_breaker.reset()
-    after = {"sarvam_ai": sarvam_circuit_breaker.get_status()["state"]}
-
-    logger.info("Circuit breakers manually reset by admin")
+    """Compatibility endpoint: API Worker retry state is per-request."""
     return {
         "status": "ok",
-        "message": "Circuit breakers reset to CLOSED",
-        "before": before,
-        "after": after,
+        "message": "Workers AI retry state is stateless; nothing to reset",
     }
 
 
@@ -214,24 +151,24 @@ async def ai_routing_pools():
             {
                 "language": "as",
                 "language_name": "Assamese",
-                "primary_provider": "sarvam_ai",
-                "primary_model": settings.SARVAM_MODEL,
-                "fallback_provider": "sarvam_ai",
-                "fallback_model": "sarvam-30b",
+                "primary_provider": "cloudflare_workers_ai",
+                "primary_model": settings.CF_AI_MODEL,
+                "fallback_provider": "cloudflare_workers_ai",
+                "fallback_model": "@cf/qwen/qwen3-30b-a3b-fp8",
             },
             {
                 "language": "en",
                 "language_name": "English",
-                "primary_provider": "sarvam_ai",
-                "primary_model": settings.SARVAM_MODEL,
-                "fallback_provider": "sarvam_ai",
-                "fallback_model": "sarvam-30b",
+                "primary_provider": "cloudflare_workers_ai",
+                "primary_model": settings.CF_AI_MODEL,
+                "fallback_provider": "cloudflare_workers_ai",
+                "fallback_model": "@cf/qwen/qwen3-30b-a3b-fp8",
             },
             {
                 "language": "embedding",
                 "language_name": "Embeddings (all languages)",
                 "primary_provider": "cf_workers_ai",
-                "primary_model": "@cf/baai/bge-m3",
+                "primary_model": settings.CF_AI_EMBED_MODEL,
             },
         ],
         "source": "config",
@@ -241,37 +178,29 @@ async def ai_routing_pools():
 @router.get("/ai/status")
 async def ai_status():
     """Current AI system status (compact)."""
-    sarvam_ok = bool(settings.SARVAM_API_KEY)
-    cf_ok = _cf_configured()
-    vertex_ok = _vertex_configured()
+    cf_ok = _cf_configured() or _workers_ai_internal_configured()
 
-    overall = "healthy" if sarvam_ok else ("degraded" if cf_ok or vertex_ok else "critical")
+    overall = "healthy" if cf_ok else "critical"
 
     return {
         "overall_status": overall,
-        "sarvam_ai": "ok" if sarvam_ok else "not_configured",
-        "vertex_ai": "ok" if vertex_ok else "not_configured",
         "cf_workers_ai": "ok" if cf_ok else "not_configured",
-        "active_chat_model": settings.SARVAM_MODEL,
-        "active_embedding_model": "@cf/baai/bge-m3",
+        "active_chat_model": settings.CF_AI_MODEL,
+        "active_embedding_model": settings.CF_AI_EMBED_MODEL,
     }
 
 
 @router.get("/ai/overview")
 async def ai_overview():
     """AI system overview — alias for /ai/status with provider detail."""
-    sarvam_ok = bool(settings.SARVAM_API_KEY)
-    cf_ok = _cf_configured()
-    vertex_ok = _vertex_configured()
-    overall = "healthy" if sarvam_ok else ("degraded" if cf_ok or vertex_ok else "critical")
+    cf_ok = _cf_configured() or _workers_ai_internal_configured()
+    overall = "healthy" if cf_ok else "critical"
     return {
         "overall_status": overall,
-        "sarvam_ai": "ok" if sarvam_ok else "not_configured",
-        "vertex_ai": "ok" if vertex_ok else "not_configured",
         "cf_workers_ai": "ok" if cf_ok else "not_configured",
-        "active_chat_model": settings.SARVAM_MODEL,
-        "active_embedding_model": "@cf/baai/bge-m3",
-        "providers_count": sum([sarvam_ok, cf_ok, vertex_ok]),
+        "active_chat_model": settings.CF_AI_MODEL,
+        "active_embedding_model": settings.CF_AI_EMBED_MODEL,
+        "providers_count": int(cf_ok),
     }
 
 
@@ -307,7 +236,7 @@ async def intelligence_overview():
             "total_attempts": total_quizzes,
         },
         "models": {
-            "chat": settings.SARVAM_MODEL,
+            "chat": settings.CF_AI_MODEL,
             "embedding": settings.CF_AI_EMBED_MODEL,
         },
     }

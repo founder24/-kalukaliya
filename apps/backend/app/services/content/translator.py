@@ -1,6 +1,6 @@
 """
 ContentTranslator - Translates English educational content to Assamese
-using the Sarvam AI client.
+using the Cloudflare Workers AI generation client.
 """
 
 import asyncio
@@ -12,7 +12,7 @@ from app.models.knowledge import (
     ContentMetadata,
     GeneratedContent,
 )
-from app.services.ai.sarvam_client import sarvam_client
+from app.services.ai.workers_ai_client import workers_ai_client
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ CHUNK_WORD_LIMIT = 800
 
 
 class ContentTranslator:
-    """Translates English KnowledgeObjects to Assamese using Sarvam AI."""
+    """Translates English KnowledgeObjects to Assamese using Workers AI."""
 
     async def _translate_with_retry(
         self, system_prompt: str, user_message: str, max_retries: int = 3
@@ -37,7 +37,9 @@ class ContentTranslator:
         """Translate with exponential backoff retry."""
         for attempt in range(max_retries):
             try:
-                return await sarvam_client.generate(system_prompt, user_message, is_assamese=True)
+                return await workers_ai_client.generate(
+                    system_prompt, user_message, is_assamese=True
+                )
             except Exception as e:
                 if attempt == max_retries - 1:
                     raise

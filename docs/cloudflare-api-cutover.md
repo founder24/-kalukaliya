@@ -1,0 +1,183 @@
+# Cloudflare API cutover runbook
+
+The Cloudflare API Worker is the primary implementation for student auth,
+library/chapter content, chat history and quota, subscriptions/payments, staff
+content editing, R2 PYQ uploads, Vectorize reindexing, D1 maintenance, and
+authenticated Workers AI generation.
+
+The API Worker natively serves student and payment flows plus public search,
+analytics beacons, public configuration, IndexNow submission, changelog, and
+all sitemap/feed/LLM crawler artifacts. Every native response is marked
+`X-Syrabit-Route: worker-native`.
+
+Staff publishing and offline seed work are now Worker-native. The compatibility
+routes retain the established `/api/v1/admin/content/*` response envelopes,
+admin-session cookie authentication, and separate `TRANSLATE_CRON_SECRET`
+authentication for schedulers. Publish jobs persist in D1 and report every
+native step; seed runs persist their per-chapter outcome in D1. Seed work is
+bounded to two chapters per invocation: the Worker cron checks every five
+minutes, resumes queued runs, and reclaims a stale in-progress lease after its
+renewable 15-minute expiry. An interrupted request therefore cannot leave
+content seeding permanently blocked.
+
+## Before a traffic stage
+
+1. Apply D1 migrations and run the idempotent Mongo→D1 migration.
+2. Pause writes or confirm the migration is dual-writing, then run:
+
+   ```bash
+   python3 scripts/migrate-mongo-to-d1.py --validate --sample-size 20
+   ```
+
+   The command fails on D1 referential errors, source/target count differences,
+   or a deterministic leading-ID sample mismatch. This is a bounded sample
+   check, not a cryptographic proof of every row, so source writes must remain
+   paused or dual-written for the validation window. Collections intentionally
+   absent from Mongo are reported as absent rather than treated as migrated.
+3. Deploy through `.github/workflows/deploy.yml`. It synchronizes the Worker
+    secrets required by native auth, payments, email, R2 upload URLs, and
+    internal generation before deploy. Optional Trustpilot display values use
+    GCP Secret Manager as their canonical source (`trustpilot-profile-url`,
+    `trustpilot-business-unit-id`, `trustpilot-rating-value`, and
+    `trustpilot-rating-count`) and are mirrored to both runtimes. When none are
+    configured, both endpoints intentionally return `null`. The API Worker
+    needs `TRANSLATE_CRON_SECRET` for scheduled seed routes. It does not need
+    `BACKEND_URL` or a Cloud Run identity token for staff publishing or seeding.
+4. Run the staged Worker and public-edge smoke test:
+
+   ```bash
+   API_WORKER_URL=https://syrabit-api-prod.axomxplain.workers.dev \
+    PUBLIC_EDGE_URL=https://api.syrabit.ai \
+    INDEXNOW_INTERNAL_SECRET=... \
+    STUDENT_TOKEN=... STAFF_TOKEN=... EDGE_SHARED_SECRET=... \
+   bash scripts/validate-cloudflare-api-cutover.sh
+   ```
+
+    Supply disposable, least-privilege test users. Do not put tokens or the
+    IndexNow submission secret in shell history or logs; use the workspace
+    secret mechanism in CI.
+   The script fails if any authenticated credential is missing. For a
+    deliberately public-only preflight, set `CUTOVER_STAGE=public`; that is not
+    sufficient evidence for a traffic stage. `PUBLIC_EDGE_URL` must point to
+    the edge deployment with `API_WORKER_LIVE=true`, so root sitemap/feed/LLM
+    artifacts are verified through their real production delivery path.
+
+## Stages and rollback
+
+Start with internal users, then a small percentage of public edge traffic, and
+increase only after the validation passes and Worker error/latency budgets are
+within normal bounds. Monitor `X-Syrabit-Route` to ensure the supported route
+set stays Worker-native.
+
+To roll back, set `API_WORKER_LIVE=false` on the edge Worker and redeploy it.
+This routes traffic to the existing Cloud Run backend without deleting D1,
+MongoDB, Cloud Run, or any deployment artifacts. Do not retire those systems
+until the separate decommission gate establishes that no route, write,
+scheduled operation, or deployment depends on them.
+
+## Retirement gate evidence
+
+This cutover does **not** by itself authorize Cloud Run, MongoDB, GCP secrets,
+or Artifact Registry retirement. Public search, site operations, staff content
+publishing, and seed job dispatch are Worker-native and are asserted by
+`scripts/validate-cloudflare-api-cutover.sh`; their requests must carry
+`X-Syrabit-Route: worker-native`. There are no Cloud Run fallback
+registrations in the API Worker route inventory.
+
+The retirement gate can be satisfied without weakening rollback safety only
+when all of the following evidence exists:
+
+1. A successful full-stage validation from
+   `scripts/validate-cloudflare-api-cutover.sh`, including its Worker-native
+   operational-route marker assertions.
+2. A clean native-route inventory, with the explicit `/api/v1/admin/*` and
+    `/api/v1/seed/*` Cloud Run compatibility bridge retained only for
+    independently-owned route families that have not yet been migrated.
+    These paths must not be treated as retirement-ready until a documented
+    Worker-native replacement is deployed.
+3. A scheduled-job and write-path audit proving publishing and seed callers
+   work with `BACKEND_URL` unset and Cloud Run OIDC unavailable.
+4. A completed rollback rehearsal using `API_WORKER_LIVE=false` while the
+   existing edge rollback path is retained; record the rehearsal timestamp,
+   request IDs, and successful restoration to `API_WORKER_LIVE=true`.
+
+## Seed-run interruption rehearsal
+
+The lease-recovery proof belongs with the rollback evidence. Do not record a
+production pass until the D1 migrations that add `seed_runs.lease_token`,
+`seed_runs.lease_expires_at`, and `seed_runs.is_forced` are applied and the
+matching API Worker version is deployed.
+
+The automated Worker/D1 rehearsal is
+`apps/api/src/routes/admin-content.contract.test.ts`. It uses the actual
+scheduled entrypoint with a three-chapter seed run in which the first chapter's
+notes have been persisted but its run-log checkpoint is deliberately missing.
+It also covers a provider response that arrives after its run lease is
+reclaimed.
+
+The guarantee is **exactly-once durable chapter completion**, not
+exactly-once Workers AI invocation. Workers AI does not support a D1
+transaction or idempotency key, so a crash after a provider receives a request
+but before its fenced D1 chapter commit can result in an at-least-once provider
+call. The stale owner cannot write its late response, and only the current
+lease owner can commit the chapter outcome. While an invocation is active, it
+renews its 15-minute lease every 60 seconds so normal long-running AI calls
+are not reclaimed by the five-minute cron. That fenced content commit and the
+per-run chapter outcome log are one D1 batch transaction for both ordinary and
+forced runs, so a recovered forced retry recognizes a committed chapter rather
+than regenerating it. An owner whose lease expires before cron observes it
+cannot revive the lease, commit its content, or write a `done` outcome; the
+cron reclaims that still-running chapter for retry.
+
+It verifies that:
+
+1. A five-minute cron tick reclaims only a lease that has passed its
+   renewable 15-minute expiry, leaving an unexpired active lease untouched.
+2. The recovered run resumes in bounded two-chapter batches.
+3. The persisted chapter is marked complete without a second provider call,
+   while a response from an expired lease is fenced from overwriting the
+   current owner's durable result; this applies to both ordinary and forced
+   retries.
+4. The original run reaches `completed`, and a subsequent staff seed run can
+   start and complete.
+
+For the staging/production record, run the same three-chapter scenario using
+disposable, unpublished chapters, interrupt the active Worker execution, and
+save the following beside the Cloud Run rollback rehearsal: the run ID,
+request IDs, lease-expiry timestamp, the two cron timestamps, final
+`processed=3`/`failed=0` status, the per-chapter log, and the successful ID of
+the next run. Delete the disposable chapters and test run only after the
+evidence is retained. Never interrupt or regenerate live curriculum chapters
+for this rehearsal.
+
+### Recorded rehearsal — 2026-08-22 (disposable Cloudflare Worker + D1)
+
+- A temporary APAC D1 database and a Worker with a one-minute cron were
+  created solely for this test. The three rehearsal chapters were unpublished.
+- The native seed request returned run
+  `04131b09-b1aa-478c-ba97-6fd035ac7595` (request ID
+  `ed65c6b7-c11e-4c47-b8a4-2378333b3964`). An immediate Worker redeploy
+  interrupted the active `waitUntil` batch. Its D1 row remained `running`
+  with `processed=0`, all three log entries queued, and a held lease.
+- After that lease was expired, the scheduled Worker claimed it while an
+  independently inserted unexpired control lease stayed `running` with its
+  original token. A second interruption was applied while the provider call
+  was active; persisted rehearsal notes then exercised the durable
+  idempotent-completion path. Cron completion timestamps in the run log were
+  `05:00:17.705Z` and `05:01:17.547Z`.
+- The original run reached `completed`, `processed=3`, `failed=0`; all three
+  chapter entries are `done`, and the lease fields were cleared. The staff
+  status poll returned the same result (request ID
+  `d5692256-8606-4687-918e-ecabfca8e82a`).
+- Once the control lease was released, a new staff seed request succeeded
+  (request ID `04515e3a-949e-40d7-9c1a-da36c66628e5`) and run
+  `bab2157d-76d3-495f-912f-df0c02a1d7bd` finished
+  `completed`, `processed=1`, `failed=0`.
+- The disposable Worker and D1 database were deleted after this record was
+  captured. No production database rows or curriculum chapters were used.
+- After the atomic forced-run hardening, a second disposable Worker/D1
+  rehearsal seeded `forced-atomic-recovery` as a forced run with an expired
+  lease and one atomically committed `done` chapter outcome. Its real cron
+  finalized the run after 120 seconds as `completed`, `processed=1`,
+  `failed=0`, preserved `Atomically committed forced notes`, and cleared the
+  lease. The second disposable Worker and database were then deleted as well.

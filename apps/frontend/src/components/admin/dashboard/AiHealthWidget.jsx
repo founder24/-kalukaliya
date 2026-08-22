@@ -42,6 +42,12 @@ import {
 
 export default function AiHealthWidget(props) {
   const p = props;
+  const {
+    adminToken, data,
+    cfOverview, cfOverviewLoading, cfRange, setCfRange,
+    vs: rawVs,
+  } = props;
+  const vs = rawVs && typeof rawVs === 'object' ? rawVs : {};
   return (
     <>
       <SectionErrorBoundary name="AI Health">
@@ -116,6 +122,7 @@ export default function AiHealthWidget(props) {
             ? (cfOverview.series || [])
             : (Array.isArray(cf.daily_visitors) ? cf.daily_visitors : []);
           const lastBucket = useOverview && series.length ? series[series.length - 1] : null;
+          const hasData = (useOverview ? series.length > 0 : (vs.cloudflare && series.length > 0));
           const lastBucketLabel = useOverview
             ? (cfOverview.bucket === 'hour' ? 'Last hour' : 'Last day')
             : 'Today';
@@ -145,10 +152,14 @@ export default function AiHealthWidget(props) {
             { key: 'visitors',   label: 'Unique Visitors',  total: totals.visitors,       today: visitorsToday,                                              fmt: fmtNum },
             { key: 'page_views', label: 'Page views',       total: totals.page_views,     today: useOverview ? lastBucket?.page_views : cf.page_views_today, fmt: fmtNum },
           ];
-          const hasData = (useOverview ? series.length > 0 : (vs.cloudflare && series.length > 0));
           return (
             <>
             <p className="text-[10px] text-gray-400 mb-2" title="Daily 'Today' buckets reset at UTC midnight (5:30 AM IST). In early IST morning the bucket only covers a few hours.">{TODAY_BUCKET_CAPTION}</p>
+            {!hasData && (
+              <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-center text-xs text-gray-500" data-testid="ai-health-empty-state">
+                No Cloudflare traffic data yet
+              </div>
+            )}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
               {tiles.map(t => (
                 <div key={t.key} className="rounded-xl p-3 bg-white border border-gray-200">

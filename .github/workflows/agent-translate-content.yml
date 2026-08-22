@@ -28,32 +28,34 @@ jobs:
     steps:
       - name: Trigger bulk translation
         env:
-          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          API_ORIGIN: ${{ vars.API_ORIGIN || 'https://api.syrabit.ai' }}
           TRANSLATE_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+          INPUT_BOARD: ${{ inputs.board }}
+          INPUT_SUBJECT: ${{ inputs.subject }}
+          INPUT_LIMIT: ${{ inputs.limit }}
         run: |
           set -euo pipefail
 
           BODY='{}'
-          if [ -n "${{ inputs.board || '' }}" ]; then
-            BODY=$(echo "$BODY" | jq --arg b "${{ inputs.board }}" '. + {board: $b}')
+          if [ -n "$INPUT_BOARD" ]; then
+            BODY=$(echo "$BODY" | jq --arg b "$INPUT_BOARD" '. + {board: $b}')
           fi
-          if [ -n "${{ inputs.subject || '' }}" ]; then
-            BODY=$(echo "$BODY" | jq --arg s "${{ inputs.subject }}" '. + {subject: $s}')
+          if [ -n "$INPUT_SUBJECT" ]; then
+            BODY=$(echo "$BODY" | jq --arg s "$INPUT_SUBJECT" '. + {subject: $s}')
           fi
-          LIMIT="${{ inputs.limit || '100' }}"
+          LIMIT="${INPUT_LIMIT:-100}"
           BODY=$(echo "$BODY" | jq --argjson l "$LIMIT" '. + {limit: $l}')
 
           echo "Request body: $BODY"
-          echo "Calling: ${BACKEND_URL}/api/v1/admin/cron/translate"
+          echo "Calling native seed route: ${API_ORIGIN}/api/v1/admin/cron/translate"
 
           # Use -s (silent) without -f so HTTP errors don't abort the script.
           # Capture both the response body and the HTTP status code separately.
-          # The translate job can take several minutes; the edge proxy may return
-          # a 504 timeout while the backend is still processing — that is still
-          # a successful "connected" result (auth worked, backend received the job).
+          # Native Workers dispatch the bounded seed run asynchronously and
+          # return a run_id immediately. No Cloud Run URL or OIDC token is used.
           HTTP_STATUS=$(curl -s -o /tmp/translate_response.json \
-            -w "%{http_code}" --max-time 3600 \
-            -X POST "${BACKEND_URL}/api/v1/admin/cron/translate" \
+            -w "%{http_code}" --max-time 60 \
+            -X POST "${API_ORIGIN}/api/v1/admin/cron/translate" \
             -H "Authorization: Bearer ${TRANSLATE_SECRET}" \
             -H "Content-Type: application/json" \
             -d "$BODY")
@@ -65,25 +67,11 @@ jobs:
           echo "HTTP status: $HTTP_STATUS"
 
           if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
-            # Full success — parse and report translation counts
-            FAILED=$(echo "$RESPONSE" | jq -r '.failed // 0')
-            TRANSLATED=$(echo "$RESPONSE" | jq -r '.translated // 0')
-            SKIPPED=$(echo "$RESPONSE" | jq -r '.skipped // 0')
-            echo "::notice::Translated: $TRANSLATED | Skipped: $SKIPPED | Failed: $FAILED"
-            if [ "$FAILED" -gt 0 ]; then
-              echo "::warning::$FAILED translations failed (check Sarvam/Gemini billing)"
-              echo "$RESPONSE" | jq -r '.errors[]' 2>/dev/null || true
-            fi
-          elif [[ "$HTTP_STATUS" == "504" ]]; then
-            # 504 = Cloudflare edge proxy timed out waiting for the backend response.
-            # /cron/translate is synchronous: a 504 means the request was cut off
-            # before the backend finished (or returned a result). The job may or may
-            # not have completed server-side — there is no way to tell without a status
-            # endpoint. This will be fixed when the endpoint is made async (task #205).
-            echo "::error::HTTP 504 — Cloudflare proxy timeout. The /cron/translate endpoint is synchronous and too slow for the edge proxy. Until it is made async (task #205), this workflow cannot confirm translation success."
-            exit 1
+            JOB=$(echo "$RESPONSE" | jq -r '.job // "unknown"')
+            RUN_ID=$(echo "$RESPONSE" | jq -r '.run_id // "none"')
+            echo "::notice::Native Assamese seed dispatch: $JOB (run: $RUN_ID)"
           elif [[ "$HTTP_STATUS" == "401" || "$HTTP_STATUS" == "403" ]]; then
-            echo "::error::Authentication failed (HTTP ${HTTP_STATUS}) — check TRANSLATE_CRON_SECRET and BACKEND_URL secrets."
+            echo "::error::Authentication failed (HTTP ${HTTP_STATUS}) — check TRANSLATE_CRON_SECRET."
             exit 1
           else
             echo "::error::Unexpected HTTP ${HTTP_STATUS} from translation endpoint — potential backend error."

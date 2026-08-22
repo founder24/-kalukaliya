@@ -239,7 +239,7 @@ async def _ahsec_stuck_retry_background(app, stuck_chapters: list[dict]) -> None
             logger.error(f"ahsec_stuck_retry: failed to import ingest module: {exc}")
             return  # finally block below still fires
 
-        from app.services.ai.sarvam_client import sarvam_client
+        from app.services.ai.workers_ai_client import workers_ai_client
         from app.models.content import Chapter as _Chapter, Subject as _Subject
         from beanie import PydanticObjectId
 
@@ -303,10 +303,10 @@ async def _ahsec_stuck_retry_background(app, stuck_chapters: list[dict]) -> None
                     logger.error(f"ahsec_stuck_retry: DB lookup failed for {chapter_id}: {exc}")
                     continue
 
-                # Run the real AHSEC generate_notes (Sarvam → Gemini)
+                # Run the shared Workers AI AHSEC notes generator.
                 try:
                     notes_text = await generate_notes(
-                        sarvam_client, body_text, ch_title, subject_name, medium
+                        workers_ai_client, body_text, ch_title, subject_name, medium
                     )
                 except NotesProviderUnavailableError as exc:
                     logger.warning(

@@ -408,7 +408,7 @@ class ChatService:
         """Resolve language and target model from message and optional override."""
         if lang_override:
             detected_lang = lang_override
-            target_model = settings.SARVAM_MODEL
+            target_model = settings.CF_AI_MODEL
         else:
             detected_lang, target_model = detect_language_and_route(message)
         return detected_lang, target_model
@@ -1022,9 +1022,7 @@ class ChatService:
         user_id: str,
     ) -> tuple[str, str]:
         """
-        Call the LLM (non-streaming). Fallback chain:
-          1. Sarvam AI (primary)
-          2. Gemini 2.5 Flash via Vertex AI (if Sarvam fails AND Google creds present)
+        Call the Workers AI generation boundary.
         Returns (response_text, actual_model_used).
         Raises on double failure.
         """
@@ -1038,25 +1036,20 @@ class ChatService:
                 stream=False,
             )
             return response_text, target_model
-        except Exception as sarvam_err:
+        except Exception as worker_error:
             logger.error(
-                f"Sarvam generate failed (lang={detected_lang}): {sarvam_err}",
-                extra={"user_id": user_id, "error": str(sarvam_err)},
+                f"Workers AI generate failed (lang={detected_lang}): {worker_error}",
+                extra={"user_id": user_id, "error": str(worker_error)},
             )
-            # ── Gemini 2.5 Flash fallback ───────────────────────────────
+            # Retry once through the shared client so transient Worker failures
+            # retain the historic resilience behavior without a second provider.
             try:
-                from app.services.ai.gemini_fallback import generate_gemini, _available as gemini_available
-                if gemini_available():
-                    logger.info(
-                        "sarvam_non_stream_fallback_to_gemini",
-                        extra={"user_id": user_id, "sarvam_error": str(sarvam_err)[:80]},
-                    )
-                    response_text = await generate_gemini(system_prompt, sanitized_message)
-                    return response_text, "gemini-2.5-flash"
-                raise RuntimeError("Gemini not configured")
-            except Exception as gemini_err:
+                from app.services.ai.workers_ai_client import generate_with_workers_ai
+                response_text = await generate_with_workers_ai(system_prompt, sanitized_message)
+                return response_text, target_model
+            except Exception as retry_error:
                 logger.error(
-                    f"Gemini non-stream fallback also failed: {gemini_err}",
+                    f"Workers AI retry also failed: {retry_error}",
                     extra={"user_id": user_id},
                 )
                 # Fire the outage alert (fire-and-forget; never crashes caller).
@@ -1064,12 +1057,12 @@ class ChatService:
                     from app.services.comms.ai_outage_alert import record_ai_outage
                     await record_ai_outage(
                         user_id=user_id,
-                        sarvam_error=str(sarvam_err),
-                        gemini_error=str(gemini_err),
+                        sarvam_error=str(worker_error),
+                        gemini_error=str(retry_error),
                     )
                 except Exception as _alert_err:
                     logger.warning(f"ai_outage_alert record failed (non-critical): {_alert_err}")
-                raise sarvam_err  # re-raise original so caller gets the real error
+                raise worker_error  # surface the original generation error
 
     @staticmethod
     async def stream_llm(
@@ -1083,10 +1076,8 @@ class ChatService:
         """
         Stream LLM response as SSE events.
 
-        Fallback chain:
-          1. Sarvam AI (primary — sarvam-30b / sarvam-105b)
-          2. Gemini 2.5 Flash via Vertex AI (if Sarvam fails AND Google creds present)
-          3. Dead-letter store + error SSE (both providers down)
+        Streams from the Workers AI generation boundary, then emits the existing
+        dead-letter/error SSE when its retry path is unavailable.
 
         Yields SSE-formatted data lines.
         """
@@ -1095,12 +1086,10 @@ class ChatService:
         full_response = ""
         actual_model = target_model
 
-        # ── Sarvam streaming with 8-second TTFB watchdog ─────────────────────
-        # If the first token hasn't arrived within _SARVAM_TTFB_DEADLINE seconds
-        # we cancel the Sarvam connection and fall through to Gemini immediately,
-        # rather than waiting up to 120 s for the httpx timeout to fire.
-        _SARVAM_TTFB_DEADLINE = 8.0
-        _sarvam_gen = stream_response(
+        # This legacy FastAPI endpoint uses buffered Worker generation while the
+        # D1 Worker delivers native token streaming to students.
+        _WORKER_TTFB_DEADLINE = 30.0
+        _worker_gen = stream_response(
             system_prompt=system_prompt,
             user_message=sanitized_message,
             model=target_model,
@@ -1109,7 +1098,7 @@ class ChatService:
             # First chunk with deadline — raises TimeoutError → Gemini fallback
             try:
                 first_chunk = await asyncio.wait_for(
-                    _sarvam_gen.__anext__(), timeout=_SARVAM_TTFB_DEADLINE
+                    _worker_gen.__anext__(), timeout=_WORKER_TTFB_DEADLINE
                 )
             except StopAsyncIteration:
                 first_chunk = None  # empty stream; proceed to sentinel
@@ -1118,43 +1107,33 @@ class ChatService:
                 full_response += first_chunk
                 yield f"data: {json.dumps({'content': first_chunk, 'done': False})}\n\n"
                 # Remaining chunks — no per-chunk deadline needed after first token
-                async for chunk in _sarvam_gen:
+                async for chunk in _worker_gen:
                     full_response += chunk
                     yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
 
-        except Exception as sarvam_err:
+        except Exception as worker_error:
             # Ensure the generator is closed so underlying connections are released
             try:
-                await _sarvam_gen.aclose()
+                await _worker_gen.aclose()
             except Exception:
                 pass
             logger.error(
-                f"Sarvam stream failed (lang={detected_lang}): {sarvam_err}",
-                extra={"user_id": user_id, "error": str(sarvam_err)},
+                f"Workers AI stream failed (lang={detected_lang}): {worker_error}",
+                extra={"user_id": user_id, "error": str(worker_error)},
             )
 
-            # ── Gemini 2.5 Flash fallback ──────────────────────────────────
-            # Activates automatically when Sarvam is down (billing exhausted,
-            # 5xx, circuit open). Requires GOOGLE_SA_KEY or
-            # GOOGLE_APPLICATION_CREDENTIALS_JSON to be present.
+            # Retry through the same Workers AI boundary.
             try:
-                from app.services.ai.gemini_fallback import stream_gemini, _available as gemini_available
-                if gemini_available():
-                    logger.info(
-                        "sarvam_fallback_to_gemini",
-                        extra={"user_id": user_id, "sarvam_error": str(sarvam_err)[:80]},
-                    )
-                    async for chunk in stream_gemini(system_prompt, sanitized_message):
-                        full_response += chunk
-                        yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
-                    actual_model = "gemini-2.5-flash"
-                    # Fall through to the sentinel emit below.
-                else:
-                    raise RuntimeError("Gemini not configured")
-            except Exception as gemini_err:
-                # Both providers failed — store dead letter and surface error card.
+                from app.services.ai.workers_ai_client import workers_ai_client
+                async for chunk in workers_ai_client.stream_generate_with_retry(
+                    system_prompt, sanitized_message, is_assamese=detected_lang == "as"
+                ):
+                    full_response += chunk
+                    yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+            except Exception as retry_error:
+                # Both retry attempts failed — store dead letter and surface error card.
                 logger.error(
-                    f"Gemini fallback also failed: {gemini_err}",
+                    f"Workers AI stream retry also failed: {retry_error}",
                     extra={"user_id": user_id},
                 )
                 try:
@@ -1163,10 +1142,10 @@ class ChatService:
                         user_id,
                         request_message,
                         detected_lang,
-                        str(sarvam_err),
+                        str(worker_error),
                         both_providers_down=True,
-                        sarvam_error=str(sarvam_err),
-                        gemini_error=str(gemini_err),
+                        sarvam_error=str(worker_error),
+                        gemini_error=str(retry_error),
                     )
                 except Exception as dl_err:
                     logger.warning(f"Dead-letter store failed: {dl_err}")

@@ -7,7 +7,7 @@ with controlled delays to produce concrete timing numbers.
 Also includes regression-detection tests that import production code to verify
 that optimizations remain in place:
 - ChatService uses asyncio.gather for retrieve_context + load_conversation_history
-- check_rate_limit uses only 1 Redis call (incr) when edge header is present
+- check_rate_limit enforces the monthly quota via a single MongoDB upsert (no Redis)
 
 Optimizations measured:
 1. Chat endpoint: asyncio.gather for parallel retrieve_context + load_conversation_history
@@ -365,37 +365,46 @@ async def test_regression_chat_service_uses_gather_for_parallel_execution():
 
 
 @pytest.mark.asyncio
-async def test_regression_rate_limit_edge_header_single_redis_call():
+async def test_regression_rate_limit_uses_mongo_single_upsert():
     """
-    Import check_rate_limit from production and verify that when the edge
-    header (X-Rate-Limited-By: edge) is present, only 1 Redis call (incr) is
-    made -- no pipeline, no burst key operations.
+    Import check_rate_limit from production and verify the monthly quota is
+    enforced via a SINGLE atomic MongoDB upsert (find_one_and_update) against
+    the quota_usage collection -- no Redis, no burst key operations.
 
-    This catches regressions where someone removes the edge-trust optimization.
+    The rate limiter moved off Redis: burst protection lives at the Cloudflare
+    edge, and the backend only enforces the monthly quota in MongoDB. This test
+    catches regressions where someone reintroduces Redis or a second round-trip.
     """
+    import app.config as config_module
     from app.api.deps.rate_limit import check_rate_limit
 
-    mock_redis = MagicMock()
-    mock_redis.incr = AsyncMock(return_value=1)
-    mock_redis.expire = AsyncMock()
-    mock_redis.pipeline = MagicMock()
+    mock_db = MagicMock()
+    mock_db.quota_usage.find_one_and_update = AsyncMock(return_value={"count": 1})
+    mock_client = MagicMock()
+    mock_client.__getitem__.return_value = mock_db
 
     mock_request = MagicMock()
     mock_request.headers = {"x-rate-limited-by": "edge"}
 
-    with patch("app.api.deps.rate_limit.get_redis", return_value=mock_redis):
+    # Force non-development so the quota path (not the dev bypass) runs.
+    with (
+        patch.object(config_module.settings, "APP_ENV", "production"),
+        patch(
+            "app.db.mongo.get_mongo_client",
+            return_value=mock_client,
+        ),
+    ):
         result = await check_rate_limit(
             "user-123", "free", "127.0.0.1", request=mock_request
         )
 
     allowed, current_count, limit, limit_type = result
     assert allowed is True
+    assert current_count == 1
     assert limit_type == "monthly"
 
-    # With edge header: only incr is called (1 Redis call for monthly quota)
-    mock_redis.incr.assert_called_once()
-    # Pipeline should NOT be used (no burst check needed)
-    mock_redis.pipeline.assert_not_called()
+    # Exactly one atomic Mongo upsert enforces the monthly quota — no Redis.
+    mock_db.quota_usage.find_one_and_update.assert_called_once()
 
 
 # ═══════════════════════════════════════════════════════════════

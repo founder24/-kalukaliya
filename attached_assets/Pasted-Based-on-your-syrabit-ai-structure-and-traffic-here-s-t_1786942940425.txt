@@ -1,0 +1,194 @@
+Based on your syrabit.ai structure and traffic, here's the **maximum revenue ad placement strategy**:
+
+---
+
+## **📊 REVENUE-OPTIMIZED PLACEMENT BLUEPRINT**
+
+### **1. PYQs (PREVIOUS YEAR QUESTIONS) - HIGHEST REVENUE SECTION**
+*Why: Students spend 15-30 minutes here during exam prep*
+
+**Ad Placements (Per Paper):**
+
+**A. Top Banner (Above Page 1)**
+- **Format:** 320x50 Mobile Leaderboard
+- **Position:** Directly above the first question paper image
+- **Revenue Impact:** High viewability, non-intrusive
+
+**B. Between Pages (Page 1 → Page 2, Page 2 → Page 3, etc.)**
+- **Format:** 320x100 Large Mobile Banner or Responsive Display
+- **Position:** Between each image with 20px buffer zones
+- **Frequency:** Every 2-3 pages (don't overdo it)
+- **Revenue Impact:** ⭐ **HIGHEST** - Natural scroll pause point
+
+**C. Sticky Anchor Ad (Global)**
+- **Format:** Auto Ads Anchor (Sticky Bottom)
+- **Position:** Fixed at bottom of screen
+- **Revenue Impact:** 100% viewability throughout the session
+
+**D. Vignette Ad (Between Page Loads)**
+- **Format:** Auto Ads Vignette (Full-screen)
+- **Trigger:** When clicking from PYQ list to open a paper
+- **Frequency Cap:** 1 per 10 minutes
+- **Revenue Impact:** Very High CPM
+
+---
+
+### **2. NOTES SECTION - HIGH REVENUE**
+*Why: Long-form content with 3-5 minute dwell time*
+
+**Ad Placements (Per Notes Page):**
+
+**A. First In-Article Ad**
+- **Position:** After **2nd paragraph** (below introduction)
+- **Format:** In-Article Ad (Responsive)
+- **Revenue Impact:** ⭐ **VERY HIGH** - Above the fold
+
+**B. Mid-Content Ads**
+- **Position:** After every **3rd or 4th paragraph**
+- **Format:** In-Article Ad (Responsive)
+- **Frequency:** 2-3 ads per long note (1000+ words)
+- **Revenue Impact:** High - Natural reading breaks
+
+**C. Before Headings**
+- **Position:** Right before H2/H3 subheadings
+- **Format:** In-Article Ad
+- **Revenue Impact:** Medium-High - Visual break point
+
+**D. End of Content**
+- **Position:** After the last paragraph, before "Related Notes"
+- **Format:** In-Feed Ad (matches note style)
+- **Revenue Impact:** Medium - Final impression
+
+---
+
+### **3. QUESTIONS SECTION - MEDIUM REVENUE**
+*Why: Quick answers, but high intent*
+
+**Ad Placements (CRITICAL RULES):**
+
+**✅ DO:**
+- Place ad **below the complete answer/solution**
+- Place ad **between Question 1 and Question 2** (if multiple on page)
+- Place ad **above "Show Answer" button** (if answer is hidden)
+
+**❌ NEVER:**
+- Place ad **between Question and Answer** (kills UX)
+- Place ad **in the middle of an explanation**
+
+**Optimal Placement:**
+```
+[Question Text]
+[Answer/Solution]
+[Explanation]
+---
+[AD: 300x250 or Responsive]  ← "Reward Zone"
+---
+[Next Question or Related Questions]
+```
+
+---
+
+## **🎯 TECHNICAL IMPLEMENTATION GUIDE**
+
+### **CSS for Layout Stability (Prevents AdSense Penalties)**
+
+```css
+/* Prevent Layout Shift */
+.ad-container {
+    min-height: 100px; /* For standard banners */
+    min-height: 250px; /* For in-article ads */
+    margin: 20px 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #f8f9fa;
+}
+
+/* Buffer Zone Between Image and Ad */
+.ad-buffer {
+    height: 20px;
+}
+
+/* Mobile Bottom Padding (For Anchor Ads) */
+@media (max-width: 768px) {
+    body {
+        padding-bottom: 80px !important;
+    }
+}
+
+/* Ad Label Styling */
+.ad-label {
+    font-size: 10px;
+    color: #999;
+    text-align: center;
+    margin-bottom: 8px;
+    display: block;
+}
+```
+
+### **HTML Structure Example (PYQs)**
+
+```html
+<!-- Page 1 -->
+<div class="pyq-page">
+    <span class="ad-label">Advertisement</span>
+    <img src="pyq-page-1.jpg" alt="Question Paper Page 1" style="width:100%">
+</div>
+
+<!-- Ad Between Pages -->
+<div class="ad-buffer"></div>
+<div class="ad-container">
+    <span class="ad-label">Advertisement</span>
+    <!-- AdSense Code Here -->
+</div>
+<div class="ad-buffer"></div>
+
+<!-- Page 2 -->
+<div class="pyq-page">
+    <img src="pyq-page-2.jpg" alt="Question Paper Page 2" style="width:100%">
+</div>
+```
+
+---
+
+## **💰 EXPECTED REVENUE BREAKDOWN**
+
+With **800,000 monthly pageviews** and optimized placements:
+
+| **Section** | **Ad Impressions/Month** | **RPM** | **Monthly Revenue** |
+|------------|------------------------|---------|-------------------|
+| **PYQs** (Between Images + Anchor) | 400,000 | ₹120 | ₹48,000 |
+| **Notes** (In-Article x3) | 300,000 | ₹100 | ₹30,000 |
+| **Questions** (Below Answer) | 100,000 | ₹80 | ₹8,000 |
+| **Vignette Ads** | 50,000 | ₹150 | ₹7,500 |
+| **TOTAL** | | | **₹93,500/month** |
+
+**Exam Season (Jan-May):** 3-4x increase = **₹3-4 Lakhs/month**
+
+---
+
+## **⚠️ CRITICAL ADSENSE POLICY RULES**
+
+1. **Never exceed 30% ad-to-content ratio**
+2. **Always add 20px buffer** between ads and interactive elements
+3. **Label all ads clearly** with "Advertisement" text
+4. **Use lazy loading** for ads below the fold
+5. **Never place ads between Q&A** (causes accidental clicks)
+6. **Never bake ads into images** (instant ban)
+
+---
+
+## ** QUICK WIN CHECKLIST**
+
+- [ ] Enable **Auto Ads** (for Anchor + Vignette)
+- [ ] Manually place **In-Article ads** in Notes (after 2nd, 5th, 8th paragraphs)
+- [ ] Manually place **Between-Image ads** in PYQs (every 2-3 pages)
+- [ ] Manually place **Below-Answer ads** in Questions
+- [ ] Add **CSS min-height** to prevent layout shift
+- [ ] Add **20px buffers** around all ads
+- [ ] Enable **lazy loading** on all ad units
+- [ ] Test on **mobile devices** (check for accidental clicks)
+
+---
+
+**With this strategy, you'll maximize revenue while maintaining your 6-minute screen time and staying 100% AdSense compliant!** 🎯

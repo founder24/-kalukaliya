@@ -1,6 +1,6 @@
 """
 Admin Syra AI Assistant Endpoints
-JARVIS-style admin voice/text assistant powered by Gemini.
+JARVIS-style admin voice/text assistant powered by Cloudflare Workers AI.
 Routes: chat, STT (Deepgram), TTS (Cloudflare), actions registry,
         execute-action, per-admin preferences, daily briefing.
 """
@@ -88,34 +88,12 @@ Rules:
 """
 
 
-async def _call_gemini(messages: list, context: dict) -> dict:
-    """Call Gemini 2.5 Flash for Syra responses."""
+async def _call_workers_ai(messages: list, context: dict) -> dict:
+    """Call Cloudflare Workers AI for Syra responses."""
     try:
-        from google import genai as google_genai
+        from app.services.ai.workers_ai_client import workers_ai_client
 
-        project = getattr(settings, "VERTEX_PROJECT_ID", None)
-        location = getattr(settings, "VERTEX_LOCATION", "us-central1")
-        creds_json = getattr(settings, "GOOGLE_APPLICATION_CREDENTIALS_JSON", None)
-
-        if not project or not creds_json:
-            raise ValueError("Vertex AI not configured")
-
-        import os, tempfile
-        creds_data = json.loads(creds_json)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
-            json.dump(creds_data, tf)
-            creds_path = tf.name
-
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-
-        client = google_genai.Client(vertexai=True, project=project, location=location)
-
-        history_parts = []
-        for msg in messages[-8:]:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            history_parts.append({"role": role, "parts": [{"text": content}]})
-
+        # Build context string
         context_str = ""
         if context:
             ctx_items = []
@@ -130,25 +108,22 @@ async def _call_gemini(messages: list, context: dict) -> dict:
             if ctx_items:
                 context_str = "\n\nContext: " + "; ".join(ctx_items)
 
-        user_content = history_parts[-1]["parts"][0]["text"] if history_parts else ""
         system_with_context = SYSTEM_PROMPT + context_str
 
-        from google.genai.types import GenerateContentConfig
+        # Flatten rolling history into a single user message
+        history_lines = []
+        for msg in messages[-8:]:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            history_lines.append(f"{role.capitalize()}: {content}")
+        user_message = "\n".join(history_lines)
 
-        model_name = "gemini-2.5-flash"
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=model_name,
-            contents=history_parts,
-            config=GenerateContentConfig(
-                system_instruction=system_with_context,
-                temperature=0.3,
-                max_output_tokens=512,
-                thinking_config={"thinking_budget": 0},
-            ),
+        raw = await workers_ai_client.generate(
+            system_prompt=system_with_context,
+            user_message=user_message,
+            max_tokens=512,
         )
 
-        raw = response.text or ""
         raw_clean = raw.strip()
         if raw_clean.startswith("```"):
             raw_clean = raw_clean.split("```")[1]
@@ -162,7 +137,7 @@ async def _call_gemini(messages: list, context: dict) -> dict:
             return {"action": "answer", "text": raw_clean, "confirm": False, "destructive": False}
 
     except Exception as e:
-        logger.error(f"Syra Gemini call failed: {e}")
+        logger.error(f"Syra Workers AI call failed: {e}")
         return {
             "action": "answer",
             "text": "I'm having trouble connecting to my AI backend right now. Please try again in a moment.",
@@ -187,7 +162,7 @@ async def syra_chat(request: Request):
         raise HTTPException(status_code=400, detail="transcript is required")
 
     messages = [*history, {"role": "user", "content": transcript}]
-    result = await _call_gemini(messages, context)
+    result = await _call_workers_ai(messages, context)
 
     result.setdefault("action", "answer")
     result.setdefault("text", "")

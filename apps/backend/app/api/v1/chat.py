@@ -153,6 +153,7 @@ async def chat(
     try:
 
         async def _process_chat():
+            nonlocal request
             # Sanitize input to prevent prompt injection
             sanitized_message = sanitize_user_input(request.message)
 

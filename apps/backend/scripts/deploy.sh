@@ -103,7 +103,9 @@ fi
 # JWT_SECRET is a plain env var (NOT in Secret Manager).
 # --remove-secrets ensures we clear any old Secret Manager reference for JWT_SECRET
 # before setting it as a literal env var (mixing types causes a Cloud Run error).
-# MONGODB_URI, GOOGLE_APPLICATION_CREDENTIALS_JSON, SENTRY_DSN live in Secret Manager.
+# MONGODB_URI, GOOGLE_APPLICATION_CREDENTIALS_JSON, SENTRY_DSN, and
+# EDGE_SHARED_SECRET live in Secret Manager. Keep EDGE_SHARED_SECRET attached
+# on every deploy so Cloud Run can call the API Worker's private generation route.
 echo "☁️  Deploying to Cloud Run ($REGION)..."
 gcloud run deploy "$SERVICE" \
   --image="$TAG" \
@@ -120,8 +122,8 @@ gcloud run deploy "$SERVICE" \
   --port=8000 \
   --timeout=30 \
   --remove-secrets="JWT_SECRET" \
-  --update-env-vars="APP_ENV=production,MONGODB_DB_NAME=${MONGODB_DB_NAME:-syrabit_prod},JWT_ALGORITHM=${JWT_ALGORITHM:-HS256},JWT_EXPIRY_MINUTES=${JWT_EXPIRY_MINUTES:-60},REFRESH_TOKEN_EXPIRY_DAYS=${REFRESH_TOKEN_EXPIRY_DAYS:-7},VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1},VERTEX_GEMINI_MODEL=${VERTEX_GEMINI_MODEL:-gemini-2.5-flash},VERTEX_PROJECT_ID=${VERTEX_PROJECT_ID:-blissful-acumen-495019-t6},JWT_SECRET=${JWT_SECRET}" \
-  --update-secrets="MONGODB_URI=MONGODB_URI:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SENTRY_DSN=SENTRY_DSN:latest" \
+  --update-env-vars="APP_ENV=production,MONGODB_DB_NAME=${MONGODB_DB_NAME:-syrabit_prod},JWT_ALGORITHM=${JWT_ALGORITHM:-HS256},JWT_EXPIRY_MINUTES=${JWT_EXPIRY_MINUTES:-60},REFRESH_TOKEN_EXPIRY_DAYS=${REFRESH_TOKEN_EXPIRY_DAYS:-7},JWT_SECRET=${JWT_SECRET}" \
+  --update-secrets="MONGODB_URI=MONGODB_URI:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SENTRY_DSN=SENTRY_DSN:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest" \
   --quiet
 
 SERVICE_URL="$(gcloud run services describe "$SERVICE" \

@@ -103,9 +103,19 @@ class TestLifespanProductionBehavior:
                     new_callable=AsyncMock,
                     side_effect=ConnectionFailure("connection refused"),
                 ),
-                patch("app.main.init_redis", new_callable=AsyncMock),
                 patch("app.main.close_mongo", new_callable=AsyncMock),
-                patch("app.main.close_redis", new_callable=AsyncMock),
+                patch(
+                    "app.services.ai.workers_ai_client.workers_ai_client.close",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.payment.razorpay_client.razorpay_client.close",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.comms.resend_client.close_resend_client",
+                    new_callable=AsyncMock,
+                ),
             ):
                 async with lifespan(mock_app):
                     pass
@@ -132,9 +142,19 @@ class TestLifespanProductionBehavior:
                     new_callable=AsyncMock,
                     side_effect=ConnectionFailure("connection refused"),
                 ),
-                patch("app.main.init_redis", new_callable=AsyncMock),
                 patch("app.main.close_mongo", new_callable=AsyncMock),
-                patch("app.main.close_redis", new_callable=AsyncMock),
+                patch(
+                    "app.services.ai.workers_ai_client.workers_ai_client.close",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.payment.razorpay_client.razorpay_client.close",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.services.comms.resend_client.close_resend_client",
+                    new_callable=AsyncMock,
+                ),
             ):
                 async with lifespan(mock_app):
                     pass
@@ -161,23 +181,9 @@ class TestLifespanProductionBehavior:
                     new_callable=AsyncMock,
                     side_effect=ConnectionFailure("connection refused"),
                 ),
-                patch("app.main.init_redis", new_callable=AsyncMock),
                 patch("app.main.close_mongo", new_callable=AsyncMock),
-                patch("app.main.close_redis", new_callable=AsyncMock),
                 patch(
-                    "app.services.search.vertex_search.search_service.warm_up",
-                    new_callable=AsyncMock,
-                ),
-                patch(
-                    "app.services.ai.vertex_client.vertex_client._get_access_token",
-                    new_callable=AsyncMock,
-                ),
-                patch(
-                    "app.services.ai.vertex_client.vertex_client.close",
-                    new_callable=AsyncMock,
-                ),
-                patch(
-                    "app.services.ai.sarvam_client.sarvam_client.close",
+                    "app.services.ai.workers_ai_client.workers_ai_client.close",
                     new_callable=AsyncMock,
                 ),
                 patch(
@@ -215,23 +221,9 @@ class TestLifespanProductionBehavior:
                     new_callable=AsyncMock,
                     side_effect=ConnectionFailure("connection refused"),
                 ),
-                patch("app.main.init_redis", new_callable=AsyncMock),
                 patch("app.main.close_mongo", new_callable=AsyncMock),
-                patch("app.main.close_redis", new_callable=AsyncMock),
                 patch(
-                    "app.services.search.vertex_search.search_service.warm_up",
-                    new_callable=AsyncMock,
-                ),
-                patch(
-                    "app.services.ai.vertex_client.vertex_client._get_access_token",
-                    new_callable=AsyncMock,
-                ),
-                patch(
-                    "app.services.ai.vertex_client.vertex_client.close",
-                    new_callable=AsyncMock,
-                ),
-                patch(
-                    "app.services.ai.sarvam_client.sarvam_client.close",
+                    "app.services.ai.workers_ai_client.workers_ai_client.close",
                     new_callable=AsyncMock,
                 ),
                 patch(

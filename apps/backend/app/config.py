@@ -20,8 +20,6 @@ logger = logging.getLogger(__name__)
 # GOOGLE_APPLICATION_CREDENTIALS_JSON | GOOGLE_APPLICATION_CREDENTIALS_JSON | GOOGLE_SA_KEY (Replit)
 # JWT_SECRET                   | jwt-secret                     | (none — no alias)
 # ADMIN_JWT_SECRET             | admin-jwt-secret               | (none — keep isolated)
-# SARVAM_API_KEY               | sarvam-api-key                 | (none)
-# GEMINI_API_KEY               | gemini-api-key                 | (none) — Google AI Studio fallback
 # RESEND_API_KEY               | resend-api-key                 | (none)
 # POSTHOG_API_KEY              | posthog-api-key                | (none)
 # RAZORPAY_KEY_ID              | razorpay-key-id                | (none)
@@ -31,6 +29,8 @@ logger = logging.getLogger(__name__)
 # EDGE_SHARED_SECRET           | edge-shared-secret             | (none)
 # INDEXNOW_API_KEY             | indexnow-api-key               | (none)
 # TRANSLATE_CRON_SECRET        | translate-cron-secret          | (none)
+# CF_ANALYTICS_TOKEN           | CF_ANALYTICS_TOKEN             | (none — scoped Zone Analytics:Read token)
+# CF_ZONE_ID                   | CF_ZONE_ID                     | (none — production zone identifier)
 #
 # GCP Build vs Runtime identity:
 #   Cloud Build uses GCP_SA_KEY (GitHub secret → gcloud auth) — build identity only.
@@ -67,9 +67,13 @@ class Settings(BaseSettings):
     # Set to e.g. https://assets.syrabit.ai in production.
     CF_R2_PUBLIC_URL: Optional[str] = None
     CF_WORKER_URL: str = "https://edge.syrabit.ai"
-    # CF_AI_MODEL: primary model for English chat + OCR + TTS via CF Workers AI REST API.
-    # AWQ quantized variant is faster and available across all CF Workers AI regions.
-    CF_AI_MODEL: str = "@cf/meta/llama-3.1-8b-instruct-awq"
+    # Direct URL for the API Worker internal generation route.  Defaults to the
+    # edge URL, which forwards this authenticated route to the API Worker.
+    WORKERS_AI_INTERNAL_URL: Optional[str] = None
+    # Shared Worker-side primary generation model. Override without a deploy.
+    CF_AI_MODEL: str = "@cf/zai-org/glm-4.7-flash"
+    CF_AI_MAX_OUTPUT_TOKENS: int = 4096
+    CF_AI_EMBED_MODEL: str = "@cf/baai/bge-m3"
     CF_AI_VISION_MODEL: str = "@cf/unum/uform-gen2-qwen-500m"
     CF_AI_TTS_MODEL: str = "@cf/myshell/melotts"
     # Cloudflare Pages deploy hook — triggers a rebuild to regenerate static content
@@ -117,20 +121,6 @@ class Settings(BaseSettings):
     # Used by CF Worker for Cloud Run OIDC auth; also used by the embedding API.
     GOOGLE_APPLICATION_CREDENTIALS_JSON: Optional[str] = None
 
-    # --- Sarvam AI (Indic + English) ---
-    SARVAM_API_KEY: Optional[str] = None
-    SARVAM_BASE_URL: str = "https://api.sarvam.ai/v1"
-
-    # --- Gemini AI fallback (Google AI Studio — no Vertex IAM needed) ---
-    # Set this to bypass Vertex AI IAM entirely.  Get a key from
-    # https://aistudio.google.com/app/apikey and store in GCP SM as
-    # "gemini-api-key" + in Replit secrets as GEMINI_API_KEY.
-    GEMINI_API_KEY: Optional[str] = None
-    # Valid Sarvam chat-completion models (as of 2026-08): sarvam-105b, sarvam-105b-conversations
-    # sarvam-30b was deprecated 2026-08. Use sarvam-105b (general) or sarvam-105b-conversations.
-    # Override via SARVAM_MODEL env var if this needs to change without a deploy.
-    SARVAM_MODEL: str = "sarvam-105b"
-
     # --- P8: Razorpay (Payments) ---
     RAZORPAY_KEY_ID: Optional[str] = None
     RAZORPAY_KEY_SECRET: Optional[str] = None
@@ -154,6 +144,13 @@ class Settings(BaseSettings):
     # --- SEO / IndexNow ---
     INDEXNOW_API_KEY: Optional[str] = None
     INDEXNOW_INTERNAL_SECRET: Optional[str] = None
+    # Public Trustpilot display configuration. GCP Secret Manager is the
+    # canonical production source; leaving all values unset intentionally hides
+    # the optional review module.
+    TRUSTPILOT_PROFILE_URL: Optional[str] = None
+    TRUSTPILOT_BUSINESS_UNIT_ID: Optional[str] = None
+    TRUSTPILOT_RATING_VALUE: Optional[float] = None
+    TRUSTPILOT_RATING_COUNT: Optional[int] = None
 
     # --- Cloudflare KV (Content Edge Cache) ---
     # SM secrets: CF_KV_API_TOKEN → CLOUDFLARE_KV_API_TOKEN
@@ -319,8 +316,8 @@ class Settings(BaseSettings):
                     logger.error(f"CONFIG ERROR: {msg}")
             if not self.MONGODB_URI:
                 logger.warning("MONGODB_URI is not set in production")
-            if not self.SARVAM_API_KEY:
-                logger.warning("Sarvam AI API key not configured in production")
+            if not self.EDGE_SHARED_SECRET:
+                logger.warning("Workers AI internal generation secret is not configured in production")
             if not self.RAZORPAY_KEY_ID or not self.RAZORPAY_KEY_SECRET:
                 logger.warning(
                     "Razorpay payment credentials not configured in production"

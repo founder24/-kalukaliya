@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from beanie import PydanticObjectId
 
 from app.models.content import Chapter
-from app.services.ai.sarvam_client import sarvam_client
+from app.services.ai.workers_ai_client import workers_ai_client
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +72,11 @@ class SEOGeneratorService:
                 important_questions,
                 examples,
             ) = await asyncio.gather(
-                sarvam_client.generate(system_prompt, notes_prompt),
-                sarvam_client.generate(system_prompt, def_prompt),
-                sarvam_client.generate(system_prompt, mcq_prompt),
-                sarvam_client.generate(system_prompt, iq_prompt),
-                sarvam_client.generate(system_prompt, examples_prompt),
+                workers_ai_client.generate(system_prompt, notes_prompt),
+                workers_ai_client.generate(system_prompt, def_prompt),
+                workers_ai_client.generate(system_prompt, mcq_prompt),
+                workers_ai_client.generate(system_prompt, iq_prompt),
+                workers_ai_client.generate(system_prompt, examples_prompt),
             )
 
             results.append(
@@ -116,7 +116,7 @@ class SEOGeneratorService:
             f"Content:\n{chapter.content_en[:4000]}"
         )
 
-        response = await sarvam_client.generate(system_prompt, user_message)
+        response = await workers_ai_client.generate(system_prompt, user_message)
 
         topics = []
         for line in response.split("\n"):

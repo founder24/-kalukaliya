@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 # Map: settings attribute name → GCP Secret Manager secret ID
 _SECRET_MAP: dict[str, str] = {
-    "SARVAM_API_KEY": "SARVAM_API_KEY",
     "JWT_SECRET": "JWT_SECRET",
     "ADMIN_JWT_SECRET": "ADMIN_JWT_SECRET",
     "RESET_TOKEN_SECRET": "RESET_TOKEN_SECRET",
@@ -32,6 +31,10 @@ _SECRET_MAP: dict[str, str] = {
     "RESEND_API_KEY": "RESEND_API_KEY",
     "POSTHOG_API_KEY": "POSTHOG_API_KEY",
     "INDEXNOW_API_KEY": "INDEXNOW_API_KEY",
+    "TRUSTPILOT_PROFILE_URL": "trustpilot-profile-url",
+    "TRUSTPILOT_BUSINESS_UNIT_ID": "trustpilot-business-unit-id",
+    "TRUSTPILOT_RATING_VALUE": "trustpilot-rating-value",
+    "TRUSTPILOT_RATING_COUNT": "trustpilot-rating-count",
     "EDGE_SHARED_SECRET": "EDGE_SHARED_SECRET",
 }
 

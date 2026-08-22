@@ -51,19 +51,18 @@ async def test_chat_error_does_not_leak_details(client: AsyncClient):
 
 @pytest.mark.anyio
 async def test_retrieve_context_returns_empty_when_search_not_initialized():
-    """Test that retrieve_context returns [] immediately when search service is not initialized."""
+    """Test that retrieval failure returns an empty v2 result without raising."""
     from app.services.chat_service import ChatService
 
-    with patch("app.services.chat_service.search_service") as mock_search:
-        mock_search.is_available.return_value = False
-        mock_search.search_context = AsyncMock(
-            side_effect=AssertionError("search_context should not be called")
-        )
+    with patch(
+        "app.services.rag.retrieval_v2.retrieve_v2",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("Vector search unavailable"),
+    ):
+        chunks, path = await ChatService.retrieve_context("test query", "free")
 
-        result = await ChatService.retrieve_context("test query", "free")
-
-        assert result == []
-        mock_search.search_context.assert_not_called()
+    assert chunks == []
+    assert path == "empty"
 
 
 @pytest.mark.anyio
@@ -107,15 +106,17 @@ async def test_retrieve_context_filters_low_scores():
         {"id": "3", "title": "OK", "content": "borderline", "score": 0.70, "url": ""},
     ]
 
-    with patch("app.services.chat_service.search_service") as mock_search:
-        mock_search.is_available.return_value = True
-        mock_search.search_context = AsyncMock(return_value=mock_chunks)
+    with patch(
+        "app.services.rag.retrieval_v2.retrieve_v2",
+        new_callable=AsyncMock,
+        return_value=(mock_chunks, "vectorize"),
+    ):
+        chunks, path = await ChatService.retrieve_context("test query", "free")
 
-        result = await ChatService.retrieve_context("test query", "free")
-
-        # Should keep score >= 0.70, filter out score 0.50
-        assert len(result) == 2
-        assert all(c["score"] >= 0.70 for c in result)
+    # Should keep score >= 0.70, filter out score 0.50
+    assert path == "vectorize"
+    assert len(chunks) == 2
+    assert all(c["score"] >= 0.70 for c in chunks)
 
 
 @pytest.mark.anyio

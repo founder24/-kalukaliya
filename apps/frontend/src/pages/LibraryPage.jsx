@@ -114,6 +114,13 @@ export default function LibraryPage() {
   const { contentLang, switchLang } = useContentLang();
   const t = _t[contentLang] || _t.en;
 
+  // Library and its /browser alias intentionally start in English, even when
+  // another page previously persisted Assamese. This runs once on route entry;
+  // a user's manual language switch afterward is still respected.
+  useEffect(() => {
+    switchLang('en');
+  }, [switchLang]);
+
   const [searchQuery, setSearchQuery]   = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const deferredQuery = useDeferredValue(searchQuery);

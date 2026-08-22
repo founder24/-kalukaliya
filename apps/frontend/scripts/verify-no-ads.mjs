@@ -17,7 +17,7 @@ const srcDir = path.resolve(__dirname, "..", "src");
 const GUARDED_FILES = [
   "pages/ChatPage.jsx",
   "pages/LibraryPage.jsx",
-  "pages/ChapterPage.jsx",
+  // ChapterPage is intentionally monetised (Notes, Q&A, PYQ tabs) — removed from deny-list.
 ];
 
 // Strip /* … */ block comments and // line comments so the AD POLICY

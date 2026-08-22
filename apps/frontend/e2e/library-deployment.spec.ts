@@ -136,6 +136,18 @@ test.describe('Library Page - Deployment Verification', () => {
     await expect(page.getByText('For Assam Board Students')).toBeVisible();
   });
 
+  test('defaults to English when Assamese was previously selected', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('syrabit:content_lang', 'as');
+    });
+
+    await page.goto('/library');
+
+    const englishToggle = page.getByRole('button', { name: 'Switch to English' }).first();
+    await expect(englishToggle).toHaveClass(/bg-violet-600/);
+    await expect(page.getByRole('button', { name: 'Switch to Assamese' }).first()).not.toHaveClass(/bg-violet-600/);
+  });
+
   test('renders subject cards with names from mock data', async ({ page }) => {
     await page.goto('/library');
     // Wait for subjects to render - use heading elements in subject cards

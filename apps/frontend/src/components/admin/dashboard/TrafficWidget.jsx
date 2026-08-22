@@ -42,6 +42,29 @@ import {
 
 export default function TrafficWidget(props) {
   const p = props;
+  const { data, metrics, vs: rawVs, cfVisitors24h, cfCrawlControl, botAnalytics } = props;
+  const vs = rawVs && typeof rawVs === 'object' ? rawVs : {};
+  const hasCfVisitorData = [
+    cfVisitors24h?.totals?.visitors,
+    cfVisitors24h?.totals?.requests,
+    cfVisitors24h?.totals?.page_views,
+    cfVisitors24h?.totals?.bytes,
+  ].some(value => value != null)
+    || (Array.isArray(cfVisitors24h?.series)
+      && cfVisitors24h.series.some(bucket => [
+        bucket?.visitors,
+        bucket?.uniques,
+        bucket?.requests,
+        bucket?.page_views,
+        bucket?.bytes,
+      ].some(value => value != null)));
+  const hasSiteTrafficData = [
+    vs.page_views_today,
+    vs.visitors_today,
+    vs.bounce_rate,
+    vs.avg_session_duration,
+  ].some(value => value != null)
+    || hasCfVisitorData;
   return (
     <>
 
@@ -78,6 +101,11 @@ export default function TrafficWidget(props) {
           <StatCard label="Bounce Rate"  value={vs.bounce_rate != null ? `${vs.bounce_rate}%` : '—'} icon={TrendingUp} color="#f59e0b" />
           <StatCard label="Avg Session"  value={vs.avg_session_duration != null ? `${vs.avg_session_duration}s` : '—'} icon={Clock} color="#a78bfa" />
         </div>
+        {!hasSiteTrafficData && (
+          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-center text-xs text-gray-500" data-testid="traffic-empty-state">
+            No traffic data yet
+          </div>
+        )}
       </div>
 
       {/* Legacy "Bot Traffic Analytics" card removed — its content

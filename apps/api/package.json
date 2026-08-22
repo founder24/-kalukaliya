@@ -1,0 +1,31 @@
+{
+  "name": "syrabit-api",
+  "version": "1.0.0",
+  "description": "Syrabit API — Cloudflare Workers + Hono + D1",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev --env development",
+    "deploy": "wrangler deploy --env production",
+    "type-check": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply syrabit-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply syrabit-db --remote",
+    "db:studio": "drizzle-kit studio",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "drizzle-orm": "^0.38.0",
+    "hono": "^4.6.0",
+    "jose": "^5.10.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.21.3",
+    "@cloudflare/workers-types": "^4.20260523.1",
+    "@types/bcryptjs": "^2.4.6",
+    "drizzle-kit": "^0.30.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.94.0"
+  }
+}

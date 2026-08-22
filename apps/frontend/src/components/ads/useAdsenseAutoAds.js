@@ -1,36 +1,38 @@
 /**
- * useAdsenseAutoAds — page-level Google AdSense Auto Ads injector.
+ * useAdsenseAutoAds — Google AdSense script loader with optional Auto Ads.
  *
- * AdSense's Auto Ads tag (`adsbygoogle.js?client=…`) is a single
- * page-level script that auto-discovers ad slots once loaded. It is
- * AdSense is the sole monetised network as of Task #347 (Quge5 removed). Lives on the only two
- * monetised routes: Notes (`/learn/:slug`) and PYQ (`/pyq/:slug`).
- * All other routes stay ad-free — see `scripts/verify-no-ads.mjs`.
+ * AdSense's tag (`adsbygoogle.js?client=…`) is a single page-level script.
+ * When loaded without suppression, it auto-discovers and fills ad slots
+ * (Auto Ads). This hook supports two modes:
  *
- * Gating mirrors `<AdSlot />`: production
- * build only AND `adsConsentGranted()` true (which also honours the
- * `syrabit_ads_optout` localStorage flag and the Task #552 paid-plan
- * gate). Dev builds, opted-out users, and paying subscribers never
- * see this script.
+ *   useAdsenseAutoAds()              — default: inject script + enable Auto Ads
+ *   useAdsenseAutoAds({ autoAds: false }) — inject script only; keep
+ *       `adsbygoogle.pauseAdRequests = 1` so Google's auto-discovery never
+ *       fires. Manual <AdSlot> units on the page still work because each
+ *       one calls `adsbygoogle.push({})` independently.
  *
- * Consent is reactive: the hook listens for
- * `syrabit:ads-consent-changed` and re-evaluates. If consent flips
- * to false mid-session (e.g. a returning paid subscriber whose
- * `/auth/me` finally resolved, or a user toggling the privacy
- * opt-out), the previously injected script tag is removed from
- * `<head>`. If consent later flips back to true, the script is
- * re-injected.
+ * Use `autoAds: false` on routes that control ad density with explicit
+ * per-slot placements (e.g. ChapterPage). Use the default on routes where
+ * Google's auto-placement is welcome (LearnPage, PYQReplicaPage).
+ *
+ * Gating mirrors `<AdSlot />`: production build only AND `adsConsentGranted()`
+ * true (honours `syrabit_ads_optout` and the paid-plan gate). Dev builds,
+ * opted-out users, and paying subscribers never see this script.
+ *
+ * Consent is reactive: the hook listens for `syrabit:ads-consent-changed`
+ * and re-evaluates. If consent flips to false mid-session the previously
+ * injected script tag is removed from `<head>`. If it flips back, the
+ * script is re-injected.
  *
  * The script is appended to <head> at most once per page (de-duped by
  * `src` against both an in-module Set and the live DOM).
  */
 import { useEffect } from 'react';
 import { adsConsentGranted } from '@/utils/adsConfig';
+import { injectAdScript, removeAdScript } from '@/utils/adScriptRegistry';
 
 const ADSENSE_CLIENT = 'ca-pub-8958003374183515';
 const ADSENSE_SRC = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`;
-
-const _injected = new Set();
 
 function pauseAutoAds() {
   try {
@@ -52,36 +54,32 @@ function resumeAutoAds() {
 function removeInjectedAdsense() {
   if (typeof document === 'undefined') return;
   pauseAutoAds();
-  const tags = document.querySelectorAll(`script[src="${ADSENSE_SRC}"]`);
-  tags.forEach((t) => {
-    try {
-      if (t.parentNode) t.parentNode.removeChild(t);
-    } catch {
-      /* ignore */
-    }
-  });
-  _injected.delete(ADSENSE_SRC);
+  removeAdScript(ADSENSE_SRC);
 }
 
-function injectAdsense() {
+function injectAdsense({ autoAds = true } = {}) {
   if (typeof document === 'undefined') return null;
-  resumeAutoAds();
-  if (_injected.has(ADSENSE_SRC)) return null;
-  if (document.querySelector(`script[src="${ADSENSE_SRC}"]`)) {
-    _injected.add(ADSENSE_SRC);
-    return null;
+  // Only resume (remove pauseAdRequests) when auto-ads are wanted.
+  // Manual-only callers keep pauseAdRequests = 1 so Google's auto-discovery
+  // never fires; individual <AdSlot> units still work via their own push({}).
+  if (autoAds) {
+    resumeAutoAds();
+  } else {
+    pauseAutoAds();
   }
-  const s = document.createElement('script');
-  s.src = ADSENSE_SRC;
-  s.async = true;
-  s.crossOrigin = 'anonymous';
-  s.setAttribute('data-ad-client', ADSENSE_CLIENT);
-  document.head.appendChild(s);
-  _injected.add(ADSENSE_SRC);
-  return s;
+  return injectAdScript(ADSENSE_SRC, {
+    crossorigin: 'anonymous',
+    dataAdClient: ADSENSE_CLIENT,
+  });
 }
 
-export default function useAdsenseAutoAds() {
+/**
+ * @param {{ autoAds?: boolean }} [options]
+ *   autoAds (default true) — when false the AdSense loader script is injected
+ *   but `adsbygoogle.pauseAdRequests` is kept set, preventing Google's
+ *   automatic ad-placement algorithm from running on this page.
+ */
+export default function useAdsenseAutoAds({ autoAds = true } = {}) {
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
     let mounted = true;
@@ -89,7 +87,7 @@ export default function useAdsenseAutoAds() {
     const apply = () => {
       if (!mounted) return;
       if (adsConsentGranted()) {
-        injectAdsense();
+        injectAdsense({ autoAds });
       } else {
         removeInjectedAdsense();
       }
@@ -103,7 +101,8 @@ export default function useAdsenseAutoAds() {
       window.removeEventListener('syrabit:ads-consent-changed', apply);
       removeInjectedAdsense();
     };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAds]);
 }
 
 ;

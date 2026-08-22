@@ -40,7 +40,7 @@ def _make_chapter(*, notes_en=None, content_en=None):
 async def test_generate_notes_skips_when_notes_en_present():
     """generate_notes(force=False) must return early when notes_en is non-empty.
 
-    The sarvam_client.generate() must never be called in this case.
+    The Workers AI client must never be called in this case.
     """
     chapter = _make_chapter(notes_en="Existing English notes content")
     service = ContentGenerationService()
@@ -52,7 +52,7 @@ async def test_generate_notes_skips_when_notes_en_present():
             return_value=chapter,
         ),
         patch(
-            "app.services.content_generation.sarvam_client.generate",
+            "app.services.content_generation.workers_ai_client.generate",
             new_callable=AsyncMock,
         ) as mock_generate,
     ):
@@ -79,7 +79,7 @@ async def test_generate_notes_skips_when_content_en_present():
             return_value=chapter,
         ),
         patch(
-            "app.services.content_generation.sarvam_client.generate",
+            "app.services.content_generation.workers_ai_client.generate",
             new_callable=AsyncMock,
         ) as mock_generate,
     ):
@@ -105,7 +105,7 @@ async def test_generate_notes_skips_when_both_fields_present():
             return_value=chapter,
         ),
         patch(
-            "app.services.content_generation.sarvam_client.generate",
+            "app.services.content_generation.workers_ai_client.generate",
             new_callable=AsyncMock,
         ) as mock_generate,
     ):
@@ -140,7 +140,7 @@ async def test_generate_notes_does_not_skip_when_notes_en_whitespace_only():
             return_value=chapter,
         ),
         patch(
-            "app.services.content_generation.sarvam_client.generate",
+            "app.services.content_generation.workers_ai_client.generate",
             new_callable=AsyncMock,
             return_value="Generated content from AI",
         ) as mock_generate,
@@ -178,7 +178,7 @@ async def test_generate_notes_force_true_overwrites_existing_notes_en():
             return_value=chapter,
         ),
         patch(
-            "app.services.content_generation.sarvam_client.generate",
+            "app.services.content_generation.workers_ai_client.generate",
             new_callable=AsyncMock,
             return_value="Fresh AI-generated content",
         ) as mock_generate,

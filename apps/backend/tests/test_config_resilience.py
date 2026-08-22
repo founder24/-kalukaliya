@@ -171,32 +171,36 @@ class TestHealthEndpointDegraded:
     async def test_health_reports_degraded_with_startup_errors(self, monkeypatch):
         """Health endpoint returns degraded when config has startup errors."""
         from app.config import settings
+        from app.db import mongo
         from app.main import app
 
         monkeypatch.setattr(
             settings, "startup_errors", ["test error 1", "test error 2"]
         )
+        monkeypatch.setattr(mongo, "get_mongo_client", lambda: object())
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.get("/health")
             data = response.json()
             assert data["status"] == "degraded"
-            assert data["config_error_count"] == 2
+            assert data["error_count"] == 2
             assert "config_errors" not in data  # Raw messages should NOT be exposed
 
     @pytest.mark.anyio
     async def test_health_reports_healthy_without_startup_errors(self, monkeypatch):
         """Health endpoint returns healthy when no startup errors."""
         from app.config import settings
+        from app.db import mongo
         from app.main import app
 
         monkeypatch.setattr(settings, "startup_errors", [])
+        monkeypatch.setattr(mongo, "get_mongo_client", lambda: object())
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.get("/health")
             data = response.json()
             assert data["status"] == "healthy"
-            assert "config_error_count" not in data
+            assert "error_count" not in data
             assert "config_errors" not in data

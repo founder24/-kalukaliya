@@ -94,28 +94,16 @@ async def lifespan(app: FastAPI):
         logger.critical(err_msg)
         settings.startup_errors.append(err_msg)
 
-    # ── Load SARVAM_API_KEY from GCP Secret Manager ───────────────────────────
-    # The service account JSON in GOOGLE_APPLICATION_CREDENTIALS_JSON is used
-    # to authenticate.  This replaces the Replit environment-variable approach
-    # with a secure, auditable GCP Secret Manager fetch at every startup.
+    # ── Load shared internal credentials from GCP Secret Manager ──────────────
     try:
         from app.core.secret_manager import load_secrets_into_settings
 
         sm_results = await load_secrets_into_settings()
         logger.info(f"Secret Manager fetch results: {sm_results}")
-        if settings.SARVAM_API_KEY:
-            # api_key is now a lazy property on SarvamAIClient — it reads from
-            # settings at call time, so no singleton patch is needed here.
-            source = 'secret_manager' if sm_results.get('SARVAM_API_KEY') == 'loaded' else 'env_var'
-            logger.info(
-                f"Sarvam AI key ready (source={source}, "
-                f"prefix={settings.SARVAM_API_KEY[:8]}...)"
-            )
+        if settings.EDGE_SHARED_SECRET:
+            logger.info("Workers AI internal generation authentication is configured")
         else:
-            logger.warning(
-                "SARVAM_API_KEY is still empty after Secret Manager fetch — "
-                "chat will fall back to Gemini if Google creds are present"
-            )
+            logger.warning("EDGE_SHARED_SECRET is empty — Worker generation jobs are unavailable")
     except Exception as e:
         logger.error(f"Secret Manager startup failed (non-fatal): {e}")
 
@@ -230,11 +218,11 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(*_pending, return_exceptions=True)
         logger.info("Background tasks cancelled cleanly.")
 
-    from app.services.ai.sarvam_client import sarvam_client
+    from app.services.ai.workers_ai_client import workers_ai_client
     from app.services.payment.razorpay_client import razorpay_client
     from app.services.comms.resend_client import close_resend_client
 
-    await sarvam_client.close()
+    await workers_ai_client.close()
     await razorpay_client.close()
     await close_resend_client()
     await close_mongo()

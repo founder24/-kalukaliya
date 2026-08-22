@@ -67,6 +67,67 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
 
+      - name: Synchronize Workers AI embedding credential
+        env:
+          # Prefer the dedicated, least-privilege Workers AI token. The
+          # fallback keeps existing deployments working until that GitHub secret
+          # has been configured with the narrower scope.
+          CF_WORKER_AI_TOKEN: ${{ secrets.CF_WORKER_AI_TOKEN || secrets.CF_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$CF_WORKER_AI_TOKEN"
+          if ! gcloud secrets describe cf-worker-ai-token --project="$PROJECT" --quiet >/dev/null 2>&1; then
+            gcloud secrets create cf-worker-ai-token \
+              --project="$PROJECT" \
+              --replication-policy=automatic
+          fi
+          for secret in CF_ACCOUNT_ID cf-worker-ai-token; do
+            gcloud secrets add-iam-policy-binding "$secret" \
+              --project="$PROJECT" \
+              --member="serviceAccount:syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com" \
+              --role="roles/secretmanager.secretAccessor" \
+              --quiet
+          done
+          printf '%s' "$CF_WORKER_AI_TOKEN" | \
+            gcloud secrets versions add cf-worker-ai-token \
+              --project="$PROJECT" \
+              --data-file=-
+
+      - name: Provision Cloudflare Analytics credentials
+        env:
+          # Both values are stored in Secret Manager and mounted only at Cloud
+          # Run runtime. Supplying the GitHub secrets rotates the active
+          # version; an empty value preserves a securely pre-provisioned one.
+          CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: |
+          set -euo pipefail
+          RUNTIME_SA="serviceAccount:syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com"
+
+          ensure_secret() {
+            local secret_name="$1"
+            local value="$2"
+            if ! gcloud secrets describe "$secret_name" --project="$PROJECT" --quiet >/dev/null 2>&1; then
+              test -n "$value"
+              gcloud secrets create "$secret_name" \
+                --project="$PROJECT" \
+                --replication-policy=automatic
+            fi
+            if [[ -n "$value" ]]; then
+              printf '%s' "$value" | gcloud secrets versions add "$secret_name" \
+                --project="$PROJECT" \
+                --data-file=-
+            fi
+            gcloud secrets add-iam-policy-binding "$secret_name" \
+              --project="$PROJECT" \
+              --member="$RUNTIME_SA" \
+              --role="roles/secretmanager.secretAccessor" \
+              --quiet
+          }
+
+          ensure_secret CF_ANALYTICS_TOKEN "$CF_ANALYTICS_TOKEN"
+          ensure_secret CF_ZONE_ID "$CF_ZONE_ID"
+
       - name: Build Docker image
         run: |
           docker build \
@@ -86,10 +147,10 @@ jobs:
             --port=8000 \
             --min-instances=1 \
             --service-account=syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com \
-            --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,SARVAM_MODEL=sarvam-105b,TRUST_EDGE_AUTH=true \
-            --remove-env-vars=VERTEX_PROJECT_ID,VERTEX_LOCATION,VERTEX_GEMINI_MODEL,VERTEX_GEMINI_FALLBACK_MODEL,VERTEX_VISION_MODEL,VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG \
-            --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,SARVAM_API_KEY=sarvam-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest\
-            --remove-secrets=CF_PAGES_DEPLOY_HOOK,CF_ACCOUNT_ID,CLOUDFLARE_ACCOUNT_ID,CLOUDFLARE_KV_API_TOKEN,CLOUDFLARE_KV_NAMESPACE_ID,GCS_CONTENT_BUCKET,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN
+            --update-env-vars=APP_ENV=production,JWT_ALGORITHM=HS256,TRUST_EDGE_AUTH=true,WORKERS_AI_INTERNAL_URL=https://syrabit-api-prod.axomxplain.workers.dev,CF_AI_MODEL=@cf/zai-org/glm-4.7-flash,CF_AI_MODEL_FALLBACK=@cf/qwen/qwen3-30b-a3b-fp8 \
+            --remove-env-vars=VERTEX_PROJECT_ID,VERTEX_LOCATION,VERTEX_GEMINI_MODEL,VERTEX_GEMINI_FALLBACK_MODEL,VERTEX_VISION_MODEL,VERTEX_SEARCH_DATASTORE_ID,VERTEX_SEARCH_LOCATION,VERTEX_SEARCH_SERVING_CONFIG,SARVAM_MODEL \
+            --update-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,EDGE_SHARED_SECRET=edge-shared-secret:latest,CF_ACCOUNT_ID=CF_ACCOUNT_ID:latest,CF_WORKER_AI_TOKEN=cf-worker-ai-token:latest,CF_ANALYTICS_TOKEN=CF_ANALYTICS_TOKEN:latest,CF_ZONE_ID=CF_ZONE_ID:latest,ADMIN_JWT_SECRET=admin-jwt-secret:latest,GOOGLE_APPLICATION_CREDENTIALS_JSON=GOOGLE_APPLICATION_CREDENTIALS_JSON:latest,RAZORPAY_KEY_ID=razorpay-key-id:latest,RAZORPAY_KEY_SECRET=razorpay-key-secret:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest,RESEND_API_KEY=resend-api-key:latest,RESET_TOKEN_SECRET=reset-token-secret:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest,TRANSLATE_CRON_SECRET=translate-cron-secret:latest\
+            --remove-secrets=CF_PAGES_DEPLOY_HOOK,CLOUDFLARE_KV_API_TOKEN,CLOUDFLARE_KV_NAMESPACE_ID,GCS_CONTENT_BUCKET,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN,SARVAM_API_KEY,GEMINI_API_KEY
 
       - name: Attach optional secrets (guarded — skips if secret missing in SM)
         run: |
@@ -111,6 +172,10 @@ jobs:
           _check POSTHOG_API_KEY             posthog-api-key
           _check INDEXNOW_API_KEY            indexnow-api-key
           _check INDEXNOW_INTERNAL_SECRET    indexnow-internal-secret
+          _check TRUSTPILOT_PROFILE_URL      trustpilot-profile-url
+          _check TRUSTPILOT_BUSINESS_UNIT_ID trustpilot-business-unit-id
+          _check TRUSTPILOT_RATING_VALUE     trustpilot-rating-value
+          _check TRUSTPILOT_RATING_COUNT     trustpilot-rating-count
           _check SENTRY_DSN                  SENTRY_DSN
           _check CF_ACCOUNT_ID               CF_ACCOUNT_ID
           _check CLOUDFLARE_ACCOUNT_ID        CF_ACCOUNT_ID
@@ -173,37 +238,275 @@ jobs:
           echo "✘ Backend failed health check after 180s"
           exit 1
 
-      - name: Prewarm CONTENT_KV (non-blocking)
+      - name: Smoke-test Cloud Run RAG embedding
         run: |
+          set -euo pipefail
           SERVICE_URL="${{ steps.get-url.outputs.service_url }}"
-          SECRET=$(gcloud secrets versions access latest \
-            --secret="translate-cron-secret" \
-            --project="$PROJECT" 2>/dev/null || echo "")
-          if [[ -z "$SECRET" ]]; then
-            echo "⚠ translate-cron-secret not found in SM — skipping KV prewarm"
-            exit 0
-          fi
-          # Cloud Run requires an OIDC identity token in Authorization.
-          # The cron secret is passed in X-Cron-Token so the backend can
-          # extract it independently of the IAM auth header.
-          ID_TOKEN=$(gcloud auth print-identity-token \
-            --audiences="${SERVICE_URL}" 2>/dev/null || echo "")
-          echo "Starting CONTENT_KV prewarm (batch push rendered HTML)..."
-          HTTP=$(curl -sf -o /tmp/kv_prewarm.json -w "%{http_code}" \
-            -X POST "${SERVICE_URL}/api/v1/admin/content/kv-prewarm" \
+          ID_TOKEN=$(gcloud auth print-identity-token --audiences="${SERVICE_URL}")
+          HTTP=$(curl -sS -o /tmp/deep-health.json -w "%{http_code}" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
-            -H "X-Cron-Token: Bearer ${SECRET}" \
-            -H "Content-Type: application/json" \
-            --max-time 300 2>/dev/null || echo "000")
-          echo "KV prewarm HTTP: ${HTTP}"
-          if [[ -f /tmp/kv_prewarm.json ]]; then
-            cat /tmp/kv_prewarm.json
-          fi
-          if [[ "$HTTP" == "200" ]]; then
-            echo "✔ CONTENT_KV prewarm complete"
+            "${SERVICE_URL}/api/v1/health/deep" \
+            --max-time 60)
+          echo "Deep health HTTP: ${HTTP}"
+          cat /tmp/deep-health.json
+          test "$HTTP" = "200"
+          python3 - <<'PY'
+          import json
+          payload = json.load(open("/tmp/deep-health.json"))
+          embedding = payload["checks"]["workers_ai_embedding"]
+          assert embedding["status"] == "healthy", embedding
+          assert embedding["dimensions"] == 1024, embedding
+          PY
+          echo "✔ Cloud Run RAG embedding path is healthy"
+
+  deploy-api:
+    name: Deploy API Worker (Cloudflare D1 + Hono)
+    runs-on: ubuntu-latest
+    needs: [dep-check, deploy-backend]
+    if: |
+      always() &&
+      github.event.inputs.backend_only != 'true' &&
+      (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
+      (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack + PNPM
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Authenticate to GCP for Worker secret synchronization
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Check D1 configuration
+        id: d1-check
+        run: |
+          if ! bash scripts/validate-d1-config.sh apps/api/wrangler.toml; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::error title=Invalid D1 configuration::D1 database IDs are missing, malformed, or placeholders. Run 'bash scripts/setup-d1.sh' and commit the configured apps/api/wrangler.toml before deploying the API Worker."
+            exit 1
           else
-            echo "⚠ KV prewarm returned HTTP ${HTTP} — non-blocking, continuing deploy"
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "✅ D1 database IDs are configured"
           fi
+
+      - name: Run D1 round-trip tests
+        run: pnpm --filter syrabit-api test
+
+      - name: TypeScript type-check
+        run: pnpm --filter syrabit-api run type-check
+
+      - name: Apply D1 migrations (remote)
+        if: steps.d1-check.outputs.configured == 'true'
+        run: pnpm --filter syrabit-api exec wrangler d1 migrations apply syrabit-db --remote --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      - name: Synchronize required API Worker secrets
+        if: steps.d1-check.outputs.configured == 'true'
+        env:
+          BACKEND_SERVICE_URL: ${{ needs.deploy-backend.outputs.service_url }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          PROJECT=blissful-acumen-495019-t6
+
+          sync_gcp_secret() {
+            local GCP_NAME="$1"
+            local WORKER_NAME="$2"
+            local VALUE
+            VALUE=$(gcloud secrets versions access latest \
+              --secret="$GCP_NAME" --project="$PROJECT")
+            test -n "$VALUE"
+            printf '%s' "$VALUE" | \
+              pnpm --filter syrabit-api exec wrangler secret put "$WORKER_NAME" --env production
+            echo "✅ ${WORKER_NAME} synchronized"
+          }
+
+          # Trustpilot is an optional public display module. Its configured
+          # values live in GCP Secret Manager so Cloud Run and the API Worker
+          # share one canonical production source; an absent secret means the
+          # established public response is null.
+          sync_optional_gcp_secret() {
+            local GCP_NAME="$1"
+            local WORKER_NAME="$2"
+            if gcloud secrets describe "$GCP_NAME" --project="$PROJECT" --quiet >/dev/null 2>&1; then
+              sync_gcp_secret "$GCP_NAME" "$WORKER_NAME"
+            else
+              local CURRENT_SECRETS
+              CURRENT_SECRETS=$(pnpm --filter syrabit-api exec wrangler secret list \
+                --env production --format json)
+              if python3 -c '
+          import json, sys
+          name = sys.argv[1]
+          secrets = json.load(sys.stdin)
+          raise SystemExit(0 if any(secret.get("name") == name for secret in secrets) else 1)
+          ' "$WORKER_NAME" <<<"$CURRENT_SECRETS"; then
+                pnpm --filter syrabit-api exec wrangler secret delete "$WORKER_NAME" --env production
+                echo "✅ Removed stale ${WORKER_NAME}; public Trustpilot response is null"
+              else
+                echo "ℹ ${WORKER_NAME} is not configured; public Trustpilot response remains null"
+              fi
+            fi
+          }
+
+          # Required for D1 auth, staff authorization, password reset, payment
+          # verification/webhooks, mail delivery, R2 PYQ upload URLs,
+          # authenticated internal Workers AI generation, and native IndexNow
+          # submission. Do not make the IndexNow pair optional: a deployed
+          # Worker must not expose a route that can only return configuration
+          # errors after the Cloud Run fallback is retired.
+          sync_gcp_secret "jwt-secret"                 "JWT_SECRET"
+          sync_gcp_secret "admin-jwt-secret"           "ADMIN_JWT_SECRET"
+          sync_gcp_secret "reset-token-secret"         "RESET_TOKEN_SECRET"
+          sync_gcp_secret "razorpay-key-id"            "RAZORPAY_KEY_ID"
+          sync_gcp_secret "razorpay-key-secret"        "RAZORPAY_KEY_SECRET"
+          sync_gcp_secret "razorpay-webhook-secret"    "RAZORPAY_WEBHOOK_SECRET"
+          sync_gcp_secret "resend-api-key"             "RESEND_API_KEY"
+          sync_gcp_secret "edge-shared-secret"         "EDGE_SHARED_SECRET"
+          sync_gcp_secret "CF_R2_PUBLIC_URL"           "R2_PUBLIC_URL"
+          sync_gcp_secret "indexnow-api-key"           "INDEXNOW_API_KEY"
+          sync_gcp_secret "indexnow-internal-secret"   "INDEXNOW_INTERNAL_SECRET"
+           sync_gcp_secret "translate-cron-secret"      "TRANSLATE_CRON_SECRET"
+          sync_optional_gcp_secret "trustpilot-profile-url"      "TRUSTPILOT_PROFILE_URL"
+          sync_optional_gcp_secret "trustpilot-business-unit-id" "TRUSTPILOT_BUSINESS_UNIT_ID"
+          sync_optional_gcp_secret "trustpilot-rating-value"     "TRUSTPILOT_RATING_VALUE"
+          sync_optional_gcp_secret "trustpilot-rating-count"     "TRUSTPILOT_RATING_COUNT"
+
+      - name: Deploy API Worker
+        if: steps.d1-check.outputs.configured == 'true'
+        run: pnpm --filter syrabit-api run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      - name: Smoke-test authenticated API Worker generation
+        if: steps.d1-check.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          sleep 5  # allow the Worker deployment and secret write to propagate
+          SECRET=$(gcloud secrets versions access latest \
+            --secret=edge-shared-secret \
+            --project=blissful-acumen-495019-t6)
+          # The workers.dev subdomain is the Cloudflare account slug, not the
+          # account ID used by Wrangler authentication.
+          API_URL="https://syrabit-api-prod.axomxplain.workers.dev/api/v1/internal/generate"
+
+          for attempt in 1 2 3; do
+            HTTP=$(curl -sS -o /tmp/api-generation.json -w "%{http_code}" \
+              --retry 2 --retry-all-errors \
+              -X POST "$API_URL" \
+              -H "Authorization: Bearer $SECRET" \
+              -H "Content-Type: application/json" \
+              --data '{"system_prompt":"Reply with exactly OK.","user_message":"Health check","max_output_tokens":256}' \
+              --max-time 45)
+            echo "Generation smoke test attempt ${attempt}/3: HTTP ${HTTP}"
+            if [[ "$HTTP" == "200" ]] && \
+              python3 -c 'import json; body=json.load(open("/tmp/api-generation.json")); assert isinstance(body.get("text"), str) and body["text"].strip(); assert isinstance(body.get("model"), str) and body["model"].startswith("@cf/")'; then
+              echo "✅ Authenticated API Worker generation succeeded"
+              exit 0
+            fi
+            cat /tmp/api-generation.json 2>/dev/null || true
+            [[ "$attempt" -lt 3 ]] && sleep 10
+          done
+
+          echo "::error::Authenticated API Worker generation smoke test failed"
+          exit 1
+
+      - name: Smoke-test native IndexNow configuration
+        if: steps.d1-check.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          PROJECT=blissful-acumen-495019-t6
+          INDEXNOW_SECRET=$(gcloud secrets versions access latest \
+            --secret=indexnow-internal-secret --project="$PROJECT")
+          API_URL="https://syrabit-api-prod.axomxplain.workers.dev/api/v1/indexnow/submit"
+          HTTP=$(curl -sS -D /tmp/api-indexnow.headers -o /tmp/api-indexnow.json -w "%{http_code}" \
+            -X POST "$API_URL" \
+            -H "X-IndexNow-Secret: ${INDEXNOW_SECRET}" \
+            -H "Content-Type: application/json" \
+            --data '{"urls":[]}' \
+            --max-time 30)
+          echo "Native IndexNow smoke test: HTTP ${HTTP}"
+          test "$HTTP" = "200"
+          grep -qi '^x-syrabit-route: worker-native' /tmp/api-indexnow.headers
+          python3 - <<'PY'
+          import json
+          payload = json.load(open("/tmp/api-indexnow.json"))
+          assert payload == {
+              "submitted": 0,
+              "failed": 0,
+              "detail": "No URLs provided",
+          }, payload
+          PY
+          echo "✅ Native IndexNow route is authenticated and configured"
+
+      - name: Smoke-test native Trustpilot configuration
+        if: steps.d1-check.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          PROJECT=blissful-acumen-495019-t6
+          read_optional_secret() {
+            gcloud secrets versions access latest \
+              --secret="$1" --project="$PROJECT" 2>/dev/null || true
+          }
+          PROFILE_URL=$(read_optional_secret trustpilot-profile-url)
+          BUSINESS_UNIT_ID=$(read_optional_secret trustpilot-business-unit-id)
+          RATING_VALUE=$(read_optional_secret trustpilot-rating-value)
+          RATING_COUNT=$(read_optional_secret trustpilot-rating-count)
+          API_BASE="https://syrabit-api-prod.axomxplain.workers.dev/api/v1/config/trustpilot"
+
+          curl -sS -D /tmp/api-trustpilot.headers -o /tmp/api-trustpilot.json \
+            "$API_BASE" --max-time 30
+          curl -sS -D /tmp/api-trustpilot-aggregate.headers -o /tmp/api-trustpilot-aggregate.json \
+            "${API_BASE}/aggregate" --max-time 30
+          grep -qi '^x-syrabit-route: worker-native' /tmp/api-trustpilot.headers
+          grep -qi '^x-syrabit-route: worker-native' /tmp/api-trustpilot-aggregate.headers
+          python3 - "$PROFILE_URL" "$BUSINESS_UNIT_ID" "$RATING_VALUE" "$RATING_COUNT" <<'PY'
+          import json
+          import math
+          import sys
+
+          profile_url, business_unit_id, rating_value, rating_count = sys.argv[1:]
+          config = json.load(open("/tmp/api-trustpilot.json"))
+          aggregate = json.load(open("/tmp/api-trustpilot-aggregate.json"))
+
+          if profile_url or business_unit_id:
+              assert config == {
+                  "profileUrl": profile_url or None,
+                  "businessUnitId": business_unit_id or None,
+              }, config
+          else:
+              assert config is None, config
+
+          try:
+              expected_value = float(rating_value)
+              expected_count = int(rating_count)
+          except ValueError:
+              expected_value = math.nan
+              expected_count = 0
+          if math.isfinite(expected_value) and expected_count > 0:
+              assert aggregate == {
+                  "ratingValue": expected_value,
+                  "ratingCount": expected_count,
+              }, aggregate
+          else:
+              assert aggregate is None, aggregate
+          PY
+          echo "✅ Native Trustpilot configuration matches GCP Secret Manager"
 
   deploy-edge:
     name: Deploy Edge (Cloudflare Worker)
@@ -427,11 +730,11 @@ jobs:
           cat /tmp/chat_pipeline.json 2>/dev/null && echo ""
 
           if [[ "$HTTP" == "200" ]]; then
-            SARVAM_MS=$(python3 -c "import json; d=json.load(open('/tmp/chat_pipeline.json')); print(d.get('sarvam_latency_ms','?'))" 2>/dev/null || echo "?")
+            WORKERS_AI_MS=$(python3 -c "import json; d=json.load(open('/tmp/chat_pipeline.json')); print(d.get('workers_ai_latency_ms','?'))" 2>/dev/null || echo "?")
             PREVIEW=$(python3 -c "import json; d=json.load(open('/tmp/chat_pipeline.json')); print(d.get('response_preview','?'))" 2>/dev/null || echo "?")
-            echo "✔ Chat pipeline healthy — Sarvam: ${SARVAM_MS}ms, response: '${PREVIEW}'"
+            echo "✔ Chat pipeline healthy — Workers AI: ${WORKERS_AI_MS}ms, response: '${PREVIEW}'"
           else
-            echo "::error title=Chat pipeline failed::HTTP ${HTTP} — Sarvam AI or MongoDB RAG is not responding correctly"
+            echo "::error title=Chat pipeline failed::HTTP ${HTTP} — Workers AI or MongoDB RAG is not responding correctly"
             exit 1
           fi
 
