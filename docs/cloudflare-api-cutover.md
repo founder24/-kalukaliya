@@ -75,7 +75,8 @@ not create placeholder values.
 `activate_native` defaults to `false` so deploying code does not silently
 change public traffic. Set it to `true` only after the D1 Worker is ready; the
 workflow then writes the explicit `API_WORKER_LIVE=true` Cloudflare secret and
-requires the public edge smoke test to report a Worker-native route. The
+requires the public edge health check to report its API Worker service-binding
+probe. The
 existing `BACKEND_URL` and `GOOGLE_SA_KEY` edge secrets remain optional for
 native traffic, but routes still covered by the documented Cloud Run
 compatibility bridge require them.
