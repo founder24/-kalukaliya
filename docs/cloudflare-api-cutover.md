@@ -52,10 +52,12 @@ manually running `.github/workflows/deploy-cloudflare.yml`. This path:
 - runs direct API Worker, public edge, and frontend smoke checks.
 
 It does not authenticate to GCP, deploy Cloud Run, read Secret Manager, or
-claim that the Cloud Run compatibility bridge is healthy. The required API
-Worker secrets are read from GitHub Actions secrets and provisioned to both
-Workers through Wrangler; only secret names are subsequently checked. Add
-these GitHub Actions secrets before running the workflow:
+claim that the Cloud Run compatibility bridge is healthy. Any API Worker
+secrets supplied through GitHub Actions are provisioned to both Workers
+through Wrangler; omitted values are not written and existing Cloudflare
+secrets are preserved. Only secret names are subsequently checked. For a
+complete native feature set, add these GitHub Actions secrets before running
+the workflow:
 
 `JWT_SECRET`, `ADMIN_JWT_SECRET`, `RESET_TOKEN_SECRET`, `EDGE_SHARED_SECRET`,
 `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`,
@@ -64,6 +66,11 @@ these GitHub Actions secrets before running the workflow:
 
 `VITE_BACKEND_URL` is read from the GitHub Actions secret when present and
 otherwise defaults to `https://api.syrabit.ai`.
+
+The workflow can intentionally run without these GitHub secrets to deploy
+code and D1 migrations. Features whose existing Cloudflare secret is absent
+will remain unavailable until that secret is configured; the workflow does
+not create placeholder values.
 
 `activate_native` defaults to `false` so deploying code does not silently
 change public traffic. Set it to `true` only after the D1 Worker is ready; the
