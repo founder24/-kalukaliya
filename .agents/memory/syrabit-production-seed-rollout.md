@@ -8,3 +8,15 @@ The seed-recovery rollout depends on the API Worker's D1 migration and Worker de
 **Why:** A backend credential-sync failure prevented the workflow from reaching the D1 migration and API Worker jobs even though the Worker and D1 could be safely rolled out independently.
 
 **How to apply:** Treat the Cloud Run billing/credential gate as a separate prerequisite. If a task explicitly authorizes the API seed-recovery rollout, run the exact API migration and Worker release commands from `.github/workflows/deploy.yml`, retain the workflow failure evidence, and do not claim the full-stack workflow passed until the GCP gate is repaired.
+
+For Cloudflare-native releases, use the separate manual release path rather
+than bypassing the combined workflow's GCP checks.
+
+**Why:** The API Worker, D1, edge Worker, and Pages can be deployed and
+smoke-tested without Cloud Run, while the combined path remains correctly
+blocked when GCP billing or Secret Manager is unavailable.
+
+**How to apply:** Keep Cloud Run out of this path, leave public native routing
+off unless explicitly requested, and only overwrite Cloudflare Worker secrets
+when a GitHub-provided value is present. Missing values must preserve the
+existing Cloudflare secret rather than being replaced with blanks.
