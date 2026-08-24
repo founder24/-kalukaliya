@@ -10,7 +10,7 @@ import { Hono, type Context } from 'hono';
 import { and, desc, eq } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, chapters, publishJobs, seedRuns, streams, subjects, users } from '../db/schema';
-import { extractBearer, signAdminToken, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
+import { extractBearer, isSessionValid, sessionIssuedAt, signAdminToken, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import { generate } from '../services/ai';
 import type { Env } from '../types';
 
@@ -52,13 +52,19 @@ async function requireAdmin(c: Context<{ Bindings: Env }>): Promise<string | Res
   const session = cookieValue(c.req.header('Cookie') ?? '', 'syrabit_admin_session');
   for (const token of [session, bearer].filter((value): value is string => Boolean(value))) {
     const payload = await verifyAdminToken(token, c.env.ADMIN_JWT_SECRET);
-    if (payload?.sub) return payload.sub;
+    if (payload?.sub) {
+      if (await isSessionValid(c.env.DB, payload.sub, payload.iat)) return payload.sub;
+      const response = c.json({ detail: 'Session expired after password change. Sign in again.' }, 401);
+      if (session) response.headers.set('Set-Cookie', 'syrabit_admin_session=; Path=/api/; Max-Age=0; HttpOnly; SameSite=Lax');
+      return response;
+    }
   }
   // Cloud Run also accepted a normal access token for a user whose role was
   // admin. Preserve that bearer-only compatibility path.
   if (bearer) {
     const access = await verifyToken(bearer, c.env.JWT_SECRET);
-    if (access?.type === 'access' && access.role === 'admin' && access.sub) return access.sub;
+    if (access?.type === 'access' && access.role === 'admin' && access.sub
+      && await isSessionValid(c.env.DB, access.sub, access.iat)) return access.sub;
   }
   return c.json({ detail: bearer || session ? 'Invalid or expired admin session' : 'Authentication required' }, 401);
 }
@@ -87,7 +93,8 @@ adminContentRouter.post('/login', async c => {
     return c.json({ detail: 'Invalid credentials' }, 401);
   }
   if (user.role !== 'admin') return c.json({ detail: 'Insufficient permissions' }, 403);
-  const token = await signAdminToken(user.id, c.env.ADMIN_JWT_SECRET);
+  const issuedAt = await sessionIssuedAt(c.env.DB, user.id);
+  const token = await signAdminToken(user.id, c.env.ADMIN_JWT_SECRET, issuedAt);
   const response = c.json({ status: 'ok', name: user.name ?? '', user_id: user.id });
   response.headers.set('Set-Cookie', adminCookie(token, c.env.APP_ENV === 'production'));
   return response;

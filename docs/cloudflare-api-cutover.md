@@ -93,33 +93,59 @@ compatibility bridge require them.
    check, not a cryptographic proof of every row, so source writes must remain
    paused or dual-written for the validation window. Collections intentionally
    absent from Mongo are reported as absent rather than treated as migrated.
+
 3. Deploy through `.github/workflows/deploy.yml`. It synchronizes the Worker
-    secrets required by native auth, payments, email, R2 upload URLs, and
-    internal generation before deploy. Optional Trustpilot display values use
-    GCP Secret Manager as their canonical source (`trustpilot-profile-url`,
-    `trustpilot-business-unit-id`, `trustpilot-rating-value`, and
-    `trustpilot-rating-count`) and are mirrored to both runtimes. When none are
-    configured, both endpoints intentionally return `null`. The API Worker
-    needs `TRANSLATE_CRON_SECRET` for scheduled seed routes. It does not need
-    `BACKEND_URL` or a Cloud Run identity token for staff publishing or seeding.
+   secrets required by native auth, payments, email, R2 upload URLs, and
+   internal generation before deploy. Optional Trustpilot display values use
+   GCP Secret Manager as their canonical source (`trustpilot-profile-url`,
+   `trustpilot-business-unit-id`, `trustpilot-rating-value`, and
+   `trustpilot-rating-count`) and are mirrored to both runtimes. When none are
+   configured, both endpoints intentionally return `null`. The API Worker
+   needs `TRANSLATE_CRON_SECRET` for scheduled seed routes. It does not need
+   `BACKEND_URL` or a Cloud Run identity token for staff publishing or seeding.
 4. Run the staged Worker and public-edge smoke test:
 
    ```bash
-   API_WORKER_URL=https://syrabit-api-prod.axomxplain.workers.dev \
-    PUBLIC_EDGE_URL=https://api.syrabit.ai \
-    INDEXNOW_INTERNAL_SECRET=... \
-    STUDENT_TOKEN=... STAFF_TOKEN=... EDGE_SHARED_SECRET=... \
+    API_WORKER_URL=https://syrabit-api-prod.axomxplain.workers.dev \
+     PUBLIC_EDGE_URL=https://api.syrabit.ai \
+     INDEXNOW_INTERNAL_SECRET=... \
+     STUDENT_TOKEN=... STAFF_TOKEN=... ADMIN_SESSION_TOKEN=... \
+     EDGE_SHARED_SECRET=... TRANSLATE_CRON_SECRET=... \
    bash scripts/validate-cloudflare-api-cutover.sh
    ```
 
-    Supply disposable, least-privilege test users. Do not put tokens or the
-    IndexNow submission secret in shell history or logs; use the workspace
-    secret mechanism in CI.
-   The script fails if any authenticated credential is missing. For a
-    deliberately public-only preflight, set `CUTOVER_STAGE=public`; that is not
-    sufficient evidence for a traffic stage. `PUBLIC_EDGE_URL` must point to
-    the edge deployment with `API_WORKER_LIVE=true`, so root sitemap/feed/LLM
-    artifacts are verified through their real production delivery path.
+   Supply disposable, least-privilege student and staff tokens plus the raw
+   value of a disposable `syrabit_admin_session` cookie for the admin test
+   user. Do not put tokens or secrets in shell history or logs; use the
+   workspace secret mechanism in CI. The full check validates public-edge
+   markers for student profile/history/credits/content/chat, staff content,
+   admin publishing/RAG/translation reads, scheduled seed status, forged
+   payment verification, and forged Razorpay webhook rejection. It creates
+   no orders, credits, content, seed runs, or publish jobs. The chat and
+   internal-generation probes intentionally consume bounded AI capacity, so
+   run them only with disposable cutover accounts and the approved worker
+   test budget.
+   The script fails if any full-stage credential is missing. For a
+   deliberately public-only preflight, set `CUTOVER_STAGE=public`; that is not
+   sufficient evidence for a traffic stage. `PUBLIC_EDGE_URL` must point to
+   the edge deployment with `API_WORKER_LIVE=true`, so root sitemap/feed/LLM
+   artifacts are verified through their real production delivery path.
+
+   The Cloudflare-only deploy workflow exposes this as an explicit safety
+   gate: choose both `activate_native=true` and
+   `validate_authenticated=true`. Configure the six GitHub secrets
+   `INDEXNOW_INTERNAL_SECRET`, `CUTOVER_STUDENT_TOKEN`,
+   `CUTOVER_STAFF_TOKEN`, `CUTOVER_ADMIN_SESSION_TOKEN`,
+   `EDGE_SHARED_SECRET`, and `TRANSLATE_CRON_SECRET` first. The authenticated
+   gate is intentionally not run for ordinary code-only deployments. Native
+   edge routing is not activated unless that validation option is selected,
+   and a failed authenticated check automatically restores
+   `API_WORKER_LIVE=false`.
+
+   The validator reports the legacy reset-password compatibility path when it
+   is unavailable, but does not make that known remediation item a permanently
+   failing native-route gate. Full student password-reset parity remains
+   blocked until the follow-up route/client repair is complete.
 
 ## Stages and rollback
 
@@ -140,8 +166,9 @@ This cutover does **not** by itself authorize Cloud Run, MongoDB, GCP secrets,
 or Artifact Registry retirement. Public search, site operations, staff content
 publishing, and seed job dispatch are Worker-native and are asserted by
 `scripts/validate-cloudflare-api-cutover.sh`; their requests must carry
-`X-Syrabit-Route: worker-native`. There are no Cloud Run fallback
-registrations in the API Worker route inventory.
+`X-Syrabit-Route: worker-native`. The route inventory deliberately retains
+catch-all Cloud Run compatibility bridges for `/api/v1/admin/*` and
+`/api/v1/seed/*`; mounted native routes take precedence.
 
 The retirement gate can be satisfied without weakening rollback safety only
 when all of the following evidence exists:
@@ -149,11 +176,12 @@ when all of the following evidence exists:
 1. A successful full-stage validation from
    `scripts/validate-cloudflare-api-cutover.sh`, including its Worker-native
    operational-route marker assertions.
-2. A clean native-route inventory, with the explicit `/api/v1/admin/*` and
-    `/api/v1/seed/*` Cloud Run compatibility bridge retained only for
-    independently-owned route families that have not yet been migrated.
-    These paths must not be treated as retirement-ready until a documented
-    Worker-native replacement is deployed.
+2. A clean native-route inventory, with the explicit catch-all
+   `/api/v1/admin/*` and `/api/v1/seed/*` Cloud Run compatibility bridge
+   retained only for independently-owned route families that have not yet
+   been migrated. Mounted native admin/staff/seed routes take precedence;
+   any unmatched route inside those families is a documented Cloud Run
+   fallback and must not be treated as retirement-ready.
 3. A scheduled-job and write-path audit proving publishing and seed callers
    work with `BACKEND_URL` unset and Cloud Run OIDC unavailable.
 4. A completed rollback rehearsal using `API_WORKER_LIVE=false` while the

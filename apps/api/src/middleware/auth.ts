@@ -103,21 +103,26 @@ export async function signAccessToken(
   userId: string,
   role: string,
   secret: string,
+  issuedAt = Math.floor(Date.now() / 1000),
 ): Promise<string> {
   return new SignJWT({ role, type: 'access' })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(userId)
-    .setIssuedAt()
+    .setIssuedAt(issuedAt)
     .setExpirationTime(`${ACCESS_TOKEN_TTL}s`)
     .sign(secretKey(secret));
 }
 
 /** Sign the httpOnly admin-session token used by the legacy admin UI. */
-export async function signAdminToken(userId: string, secret: string): Promise<string> {
+export async function signAdminToken(
+  userId: string,
+  secret: string,
+  issuedAt = Math.floor(Date.now() / 1000),
+): Promise<string> {
   return new SignJWT({ role: 'admin', type: 'admin' })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(userId)
-    .setIssuedAt()
+    .setIssuedAt(issuedAt)
     .setExpirationTime('8h')
     .sign(secretKey(secret));
 }
@@ -130,12 +135,13 @@ export async function signRefreshToken(
   userId: string,
   role: string,
   secret: string,
+  issuedAt = Math.floor(Date.now() / 1000),
 ): Promise<{ token: string; jti: string }> {
   const jti = crypto.randomUUID();
   const token = await new SignJWT({ role, type: 'refresh', jti })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(userId)
-    .setIssuedAt()
+    .setIssuedAt(issuedAt)
     .setExpirationTime(`${REFRESH_TOKEN_TTL}s`)
     .sign(secretKey(secret));
   return { token, jti };
@@ -193,3 +199,23 @@ export function revokedRtKey(jti: string): string {
 
 /** TTL (seconds) to store in KV for a revoked refresh token */
 export const REFRESH_TOKEN_TTL_S = REFRESH_TOKEN_TTL;
+
+/** Returns false when a token predates an account-wide session cutoff. */
+export async function isSessionValid(
+  db: D1Database,
+  userId: string,
+  issuedAt: number | undefined,
+): Promise<boolean> {
+  const row = await db.prepare(
+    'SELECT session_valid_after FROM users WHERE id = ?',
+  ).bind(userId).first<{ session_valid_after: number }>();
+  return (issuedAt ?? 0) >= (row?.session_valid_after ?? Number.POSITIVE_INFINITY);
+}
+
+/** Timestamp used when issuing a fresh token after a password change. */
+export async function sessionIssuedAt(db: D1Database, userId: string): Promise<number> {
+  const row = await db.prepare(
+    'SELECT session_valid_after FROM users WHERE id = ?',
+  ).bind(userId).first<{ session_valid_after: number }>();
+  return Math.max(Math.floor(Date.now() / 1000), row?.session_valid_after ?? 0);
+}

@@ -28,7 +28,7 @@ import { Hono, type Context } from 'hono';
 import { eq, and, like, sql } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { users, chats, memoryBrain } from '../db/schema';
-import { verifyToken, extractBearer } from '../middleware/auth';
+import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import type { Env } from '../types';
 
 export const usersRouter = new Hono<{ Bindings: Env }>();
@@ -52,6 +52,9 @@ async function requireUser(
   const payload = await verifyToken(token, c.env.JWT_SECRET);
   if (!payload || payload.type !== 'access') {
     return { id: '', error: c.json({ detail: 'Invalid or expired token' }, 401) as Response };
+  }
+  if (!(await isSessionValid(c.env.DB, payload.sub ?? '', payload.iat))) {
+    return { id: '', error: c.json({ detail: 'Session expired after password change. Sign in again.' }, 401) as Response };
   }
   return { id: payload.sub! };
 }
@@ -329,7 +332,8 @@ usersRouter.get('/credits', async (c) => {
 
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
-    if (payload?.type === 'access' && payload.sub) {
+    if (payload?.type === 'access' && payload.sub
+      && await isSessionValid(c.env.DB, payload.sub, payload.iat)) {
       const db = createDb(c.env.DB);
       const user = await db.select({
         subscriptionTier: users.subscriptionTier,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Syrabit Full-Stack Smoke Test
-# Usage:  bash scripts/fullstack-smoke-test.sh [--base-url https://api.syrabit.ai]
+# Usage:  bash scripts/fullstack-smoke-test.sh [--base-url https://api.syrabit.ai] [--chat-smoke]
 # =============================================================================
 set -euo pipefail
 
@@ -12,6 +12,7 @@ API_WORKER_URL="${API_WORKER_URL:-https://syrabit-api-prod.axomxplain.workers.de
 PASS=0
 FAIL=0
 SKIP=0
+CHAT_SMOKE=false
 
 # ── Colours ────────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'
@@ -46,6 +47,7 @@ while [[ $# -gt 0 ]]; do
     --base-url)   BASE_URL="$2";     shift 2 ;;
     --direct-url) DIRECT_URL="$2";  shift 2 ;;
     --frontend)   FRONTEND_URL="$2"; shift 2 ;;
+    --chat-smoke) CHAT_SMOKE=true;   shift ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -201,9 +203,42 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 9. Security Headers
+# 9. Native Workers AI Chat (opt-in; consumes one anonymous chat quota slot)
 # ═══════════════════════════════════════════════════════════════════════════
-header "9. Security Headers"
+header "9. Native Workers AI Chat"
+
+if [ "$CHAT_SMOKE" = true ]; then
+  CHAT_HEADERS=$(mktemp)
+  CHAT_RAW=$(curl -sS --no-buffer --max-time 45 \
+    -D "$CHAT_HEADERS" \
+    -w '\n__STATUS__:%{http_code}' \
+    -X POST "$BASE_URL/api/v1/chat/stream" \
+    -H "Content-Type: application/json" \
+    -d '{"message":"Reply with exactly: Worker AI is ready.","lang":"en"}' || true)
+  CHAT_STATUS=$(printf '%s' "$CHAT_RAW" | sed -n 's/.*__STATUS__://p' | tail -1)
+  CHAT_BODY=$(printf '%s' "$CHAT_RAW" | sed '$s/__STATUS__:[0-9][0-9][0-9]$//')
+  CHAT_HEADERS_TEXT=$(cat "$CHAT_HEADERS")
+  rm -f "$CHAT_HEADERS"
+
+  assert_eq "$CHAT_STATUS" "200" "POST /chat/stream → 200"
+  assert_contains "$CHAT_HEADERS_TEXT" "content-type: text/event-stream" "chat response is SSE"
+  assert_contains "$CHAT_HEADERS_TEXT" "x-syrabit-route: worker-native" "chat is served by native API Worker"
+  assert_contains "$CHAT_BODY" '"event":"source_card"' "chat emits source card before answer"
+  assert_contains "$CHAT_BODY" '"event":"syrabit_done"' "chat emits clean completion event"
+  assert_contains "$CHAT_BODY" '"content":' "chat emits answer content"
+  if printf '%s' "$CHAT_BODY" | grep -q '"error":true'; then
+    fail "chat stream contains an error event"
+  else
+    pass "chat stream contains no error event"
+  fi
+else
+  skip "Workers AI chat generation (pass --chat-smoke to run one real anonymous request)"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 10. Security Headers
+# ═══════════════════════════════════════════════════════════════════════════
+header "10. Security Headers"
 
 ALL_HEADERS=$(http_headers "$BASE_URL/api/v1/content/library-bundle")
 
@@ -213,9 +248,9 @@ assert_contains "$ALL_HEADERS" "strict-transport-security" "strict-transport-sec
 assert_contains "$ALL_HEADERS" "x-robots-tag"           "x-robots-tag (API not indexed)"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 10. CORS
+# 11. CORS
 # ═══════════════════════════════════════════════════════════════════════════
-header "10. CORS"
+header "11. CORS"
 
 CORS_HEADERS=$(http_headers -X OPTIONS "$BASE_URL/api/v1/content/library-bundle" \
   -H "Origin: https://syrabit.ai" \
@@ -225,9 +260,9 @@ assert_contains "$CORS_HEADERS" "access-control-allow-origin" "CORS allow-origin
 assert_contains "$CORS_HEADERS" "syrabit.ai"                  "CORS allows syrabit.ai origin"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 11. Frontend
+# 12. Frontend
 # ═══════════════════════════════════════════════════════════════════════════
-header "11. Frontend (${FRONTEND_URL})"
+header "12. Frontend (${FRONTEND_URL})"
 
 # Follow redirects: syrabit.ai → 301 → /library/ → 200
 FRONT_STATUS=$(http_status_follow "$FRONTEND_URL")
@@ -250,9 +285,9 @@ SAWORKER_STATUS=$(http_status "$FRONTEND_URL/api/v1/health")
 assert_eq "$SAWORKER_STATUS" "404" "syrabit.ai/api/v1/health stays off the frontend origin"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 12. Edge Worker Health
+# 13. Edge Worker Health
 # ═══════════════════════════════════════════════════════════════════════════
-header "12. Edge Worker Health"
+header "13. Edge Worker Health"
 
 EDGE_STATUS=$(http_status "$BASE_URL/health")
 assert_eq "$EDGE_STATUS" "200" "GET /health (Worker edge health)"

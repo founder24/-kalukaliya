@@ -17,7 +17,7 @@ import { Hono, type Context } from 'hono';
 import { eq, desc } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { users, payments, transactions, paymentsPending } from '../db/schema';
-import { verifyToken, extractBearer } from '../middleware/auth';
+import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import type { Env } from '../types';
 
 export const paymentsRouter = new Hono<{ Bindings: Env }>();
@@ -33,6 +33,9 @@ async function requireUser(c: Context<{ Bindings: Env }>): Promise<{ id: string;
   const payload = await verifyToken(token, c.env.JWT_SECRET);
   if (!payload || payload.type !== 'access') {
     return { id: '', error: c.json({ detail: 'Invalid or expired token' }, 401) as Response };
+  }
+  if (!(await isSessionValid(c.env.DB, payload.sub ?? '', payload.iat))) {
+    return { id: '', error: c.json({ detail: 'Session expired after password change. Sign in again.' }, 401) as Response };
   }
   return { id: payload.sub! };
 }
@@ -50,6 +53,23 @@ async function hmacSha256(secret: string, message: string): Promise<string> {
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message));
   return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
+
+// ── GET /test-mode-status ─────────────────────────────────────────────────────
+// Authenticated, non-mutating preflight for the release validator. Razorpay key
+// IDs are already returned by order creation, but this lets the validator refuse
+// live credentials before it creates any external order or D1 pending record.
+
+paymentsRouter.get('/test-mode-status', async (c) => {
+  const { error } = await requireUser(c);
+  if (error) return error;
+
+  const keyId = c.env.RAZORPAY_KEY_ID;
+  return c.json({
+    configured: Boolean(keyId && c.env.RAZORPAY_KEY_SECRET),
+    key_id: keyId || null,
+    test_mode: keyId.startsWith('rzp_test_'),
+  });
+});
 
 // ── POST /create-order ─────────────────────────────────────────────────────────
 // Create a Razorpay order for subscription plan upgrade.

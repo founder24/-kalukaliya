@@ -7,7 +7,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { extractBearer, verifyToken } from '../middleware/auth';
+import { extractBearer, isSessionValid, verifyToken } from '../middleware/auth';
 import type { Env } from '../types';
 
 export const conversationsRouter = new Hono<{ Bindings: Env }>();
@@ -42,6 +42,9 @@ async function requireUser(c: Context<{ Bindings: Env }>): Promise<{ id: string;
   const payload = await verifyToken(token, c.env.JWT_SECRET);
   if (!payload || payload.type !== 'access' || !payload.sub) {
     return { id: '', error: c.json({ detail: 'Invalid or expired token' }, 401) as Response };
+  }
+  if (!(await isSessionValid(c.env.DB, payload.sub, payload.iat))) {
+    return { id: '', error: c.json({ detail: 'Session expired after password change. Please sign in again.' }, 401) as Response };
   }
   return { id: payload.sub };
 }

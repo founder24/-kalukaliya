@@ -82,12 +82,17 @@ async function runModelStream(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const r = result as any;
 
-  // The binding returns a ReadableStream directly for streaming calls.
-  if (r instanceof ReadableStream) return r as ReadableStream<Uint8Array>;
+  // The binding returns a ReadableStream directly for streaming calls. Depending
+  // on the Workers AI model/runtime version, it can also arrive wrapped in a
+  // Response-like object or nested under response/result.
+  const stream = findReadableStream(r);
+  if (stream) return stream;
 
-  // Some runtime versions wrap it in a { readable } or { body } shape.
-  if (r?.readable instanceof ReadableStream) return r.readable as ReadableStream<Uint8Array>;
-  if (r?.body    instanceof ReadableStream) return r.body    as ReadableStream<Uint8Array>;
+  // A few Workers AI model families return a complete response object even when
+  // `stream: true` is requested. Adapt that shape to a one-event stream instead
+  // of treating a valid answer as a provider outage.
+  const text = extractResponseText(r);
+  if (text) return responseTextStream(text);
 
   throw new Error(`[ai] Unexpected streaming response shape from model ${model}`);
 }
@@ -105,18 +110,20 @@ async function runModelStream(
  * Exported for unit testing.
  */
 export function parseSseLine(line: string): string | null {
-  if (!line.startsWith('data: ')) return null;
-  const raw = line.slice(6).trim();
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith(':') || trimmed.startsWith('event:')) return null;
+
+  // Streaming bindings normally emit OpenAI-compatible `data:` lines, but some
+  // model/runtime combinations supply one JSON object per chunk without the
+  // prefix. Support both while rejecting unrelated SSE fields.
+  const raw = trimmed.startsWith('data:')
+    ? trimmed.slice(5).trimStart()
+    : trimmed;
   if (raw === '[DONE]') return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const json = JSON.parse(raw) as any;
-    // OpenAI-compatible delta shape
-    const delta: unknown = json?.choices?.[0]?.delta?.content;
-    if (typeof delta === 'string' && delta) return delta;
-    // Some Workers AI models use response at the top level (non-delta shape)
-    const resp: unknown = json?.response;
-    if (typeof resp === 'string' && resp) return resp;
+    return extractResponseText(json);
   } catch { /* malformed — skip */ }
   return null;
 }
@@ -206,40 +213,109 @@ export async function* streamGenerate(
   ai:   Ai,
   opts: GenerateOptions,
 ): AsyncGenerator<string> {
-  let stream: ReadableStream<Uint8Array>;
   let usedModel = AI_MODEL_PRIMARY;
-
-  // Attempt primary model
-  try {
-    stream = await runModelStream(ai, AI_MODEL_PRIMARY, opts);
-  } catch (primaryErr) {
-    console.warn('[ai] Primary stream model failed, trying fallback:', primaryErr);
-    usedModel = AI_MODEL_FALLBACK;
-    stream    = await runModelStream(ai, AI_MODEL_FALLBACK, opts);
-  }
-
   let tokensEmitted = 0;
 
+  // Do not mix responses: the fallback is available only when the primary
+  // fails before yielding any visible content. An empty primary stream counts
+  // as a failure, which prevents callers from receiving a successful-looking
+  // completion with an empty answer.
   try {
-    for await (const chunk of drainStream(stream)) {
+    for await (const chunk of streamModel(ai, AI_MODEL_PRIMARY, opts)) {
       tokensEmitted++;
       yield chunk;
     }
-  } catch (streamErr) {
-    if (tokensEmitted === 0 && usedModel === AI_MODEL_PRIMARY) {
-      // Primary failed mid-drain before any token reached the caller — try fallback
-      console.warn('[ai] Primary stream drain failed before tokens, trying fallback:', streamErr);
-      usedModel = AI_MODEL_FALLBACK;
-      const fallbackStream = await runModelStream(ai, AI_MODEL_FALLBACK, opts);
-      for await (const chunk of drainStream(fallbackStream)) {
-        tokensEmitted++;
-        yield chunk;
-      }
-    } else {
-      throw streamErr;
+  } catch (primaryErr) {
+    if (tokensEmitted > 0) throw primaryErr;
+    console.warn('[ai] Primary stream model failed, trying fallback:', primaryErr);
+    usedModel = AI_MODEL_FALLBACK;
+    for await (const chunk of streamModel(ai, AI_MODEL_FALLBACK, opts)) {
+      tokensEmitted++;
+      yield chunk;
     }
   }
 
+  if (tokensEmitted === 0) throw new Error('[ai] Both stream models returned an empty response');
+
   // Sentinel — callers that need the model name extract this
   yield `\x00model:${usedModel}`;
+}
+
+async function* streamModel(
+  ai: Ai,
+  model: string,
+  opts: GenerateOptions,
+): AsyncGenerator<string> {
+  const stream = await runModelStream(ai, model, opts);
+  let emitted = 0;
+  for await (const chunk of drainStream(stream)) {
+    emitted++;
+    yield chunk;
+  }
+  if (emitted === 0) {
+    throw new Error(`[ai] ${model} returned an empty streaming response`);
+  }
+}
+
+function findReadableStream(value: unknown): ReadableStream<Uint8Array> | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r = value as any;
+  const candidates = [
+    r,
+    r?.readable,
+    r?.body,
+    r?.response,
+    r?.response?.body,
+    r?.result,
+    r?.result?.body,
+  ];
+  for (const candidate of candidates) {
+    if (candidate instanceof ReadableStream) {
+      return candidate as ReadableStream<Uint8Array>;
+    }
+  }
+  return null;
+}
+
+function extractResponseText(value: unknown): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r = value as any;
+  const candidates: unknown[] = [
+    r?.choices?.[0]?.delta?.content,
+    r?.choices?.[0]?.message?.content,
+    r?.response,
+    r?.result?.response,
+    r?.message?.content,
+    r?.content,
+  ];
+  for (const candidate of candidates) {
+    const text = contentToText(candidate);
+    if (text) return text;
+  }
+  return null;
+}
+
+function contentToText(value: unknown): string | null {
+  if (typeof value === 'string') return value || null;
+  if (!Array.isArray(value)) return null;
+  const text = value
+    .map((item) => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object' && 'text' in item && typeof item.text === 'string') {
+        return item.text;
+      }
+      return '';
+    })
+    .join('');
+  return text || null;
+}
+
+function responseTextStream(text: string): ReadableStream<Uint8Array> {
+  const encoded = new TextEncoder().encode(JSON.stringify({ response: text }));
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoded);
+      controller.close();
+    },
+  });
 }

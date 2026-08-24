@@ -37,6 +37,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 import { SignJWT } from 'jose';
 import type { Env } from '../types';
+import { hashPassword, hashResetToken, verifyPassword } from '../middleware/auth';
 
 // ── Path helpers ───────────────────────────────────────────────────────────────
 
@@ -52,6 +53,36 @@ const TEST_JWT_SECRET = 'test-jwt-secret-for-unit-tests';
 /** Mint a short-lived HS256 access token with role=staff. */
 async function staffToken(): Promise<string> {
   return new SignJWT({ role: 'staff', type: 'access' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setSubject('test-staff-user')
+    .setIssuedAt()
+    .setExpirationTime('1h')
+    .sign(new TextEncoder().encode(TEST_JWT_SECRET));
+}
+
+async function studentToken(): Promise<string> {
+  return new SignJWT({ role: 'student', type: 'access' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setSubject('test-student-user')
+    .setIssuedAt()
+    .setExpirationTime('1h')
+    .sign(new TextEncoder().encode(TEST_JWT_SECRET));
+}
+
+async function adminSessionToken(
+  userId = 'test-admin-user',
+  issuedAt = Math.floor(Date.now() / 1000),
+): Promise<string> {
+  return new SignJWT({ role: 'admin', type: 'admin' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setSubject(userId)
+    .setIssuedAt(issuedAt)
+    .setExpirationTime('1h')
+    .sign(new TextEncoder().encode('test-admin-jwt-secret'));
+}
+
+async function refreshToken(): Promise<string> {
+  return new SignJWT({ role: 'staff', type: 'refresh' })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject('test-staff-user')
     .setIssuedAt()
@@ -201,12 +232,96 @@ describe('Staff chapter edit round-trip through D1', () => {
     // Seed a minimal hierarchy so the subject FK resolves.
     const sid = crypto.randomUUID();
     await sharedEnv.DB.batch([
+      sharedEnv.DB.prepare(`
+        INSERT OR IGNORE INTO users (id, email, hashed_password, role)
+        VALUES (?, 'staff@example.test', ?, 'staff')
+      `).bind('test-staff-user', await hashPassword('current-password')),
+      sharedEnv.DB.prepare(`
+        INSERT OR IGNORE INTO users (id, email, hashed_password, role)
+        VALUES ('test-admin-user', 'admin@example.test', 'unused-test-hash', 'admin')
+      `),
       sharedEnv.DB.prepare(`INSERT OR IGNORE INTO boards (id, name, slug) VALUES ('b-test','Test Board','test-board')`),
       sharedEnv.DB.prepare(`INSERT OR IGNORE INTO classes (id, board_id, name, slug) VALUES ('c-test','b-test','Class 12','class-12')`),
       sharedEnv.DB.prepare(`INSERT OR IGNORE INTO streams (id, class_id, name, slug) VALUES ('s-test','c-test','Science','science')`),
       sharedEnv.DB.prepare(`INSERT OR IGNORE INTO subjects (id, stream_id, name, slug, is_published) VALUES (?,  's-test','Physics','physics',1)`).bind(sid),
     ]);
     subjectId = sid;
+  });
+
+  it('requires a staff or admin identity for every staff content read and write route', async () => {
+    const requests = [
+      ['/api/v1/staff/content/boards', 'GET'],
+      ['/api/v1/staff/content/classes', 'GET'],
+      ['/api/v1/staff/content/streams', 'GET'],
+      ['/api/v1/staff/content/subjects', 'GET'],
+      [`/api/v1/staff/content/chapters/${subjectId}`, 'GET'],
+      ['/api/v1/staff/content/chapter/missing', 'GET'],
+      [`/api/v1/staff/content/subject/${subjectId}/pyq-papers`, 'GET'],
+      ['/api/v1/staff/content/subjects', 'POST'],
+      ['/api/v1/staff/content/subjects/missing', 'PATCH'],
+      ['/api/v1/staff/content/subjects/missing', 'DELETE'],
+      ['/api/v1/staff/content/chapters', 'POST'],
+      ['/api/v1/staff/content/chapter/missing', 'PATCH'],
+      ['/api/v1/staff/content/chapter/missing', 'DELETE'],
+      ['/api/v1/staff/content/chapter/missing/reindex', 'POST'],
+      ['/api/v1/staff/content/chapters/missing/reindex', 'POST'],
+      [`/api/v1/staff/content/kv-prewarm/${subjectId}`, 'POST'],
+      [`/api/v1/staff/content/subject/${subjectId}/pyq-papers`, 'POST'],
+      [`/api/v1/staff/content/subject/${subjectId}/pyq-papers/missing`, 'PATCH'],
+      [`/api/v1/staff/content/subject/${subjectId}/pyq-papers/missing`, 'DELETE'],
+      [`/api/v1/staff/content/subject/${subjectId}/pyq-papers/missing/reindex`, 'POST'],
+      [`/api/v1/staff/content/subject/${subjectId}/pyq-papers/missing/pages`, 'POST'],
+      [`/api/v1/staff/content/subject/${subjectId}/pyq-papers/missing/pages/missing`, 'DELETE'],
+      ['/api/v1/staff/content/chapter/missing/upload-pyq', 'POST'],
+      ['/api/v1/staff/content/chapter/missing/pyq-papers', 'POST'],
+      ['/api/v1/staff/content/chapter/missing/pyq-papers/missing', 'DELETE'],
+      ['/api/v1/staff/auth/change-password', 'POST'],
+    ] as const;
+
+    for (const [path, method] of requests) {
+      const init: RequestInit = { method };
+      if (method !== 'GET' && method !== 'DELETE') {
+        init.headers = { 'Content-Type': 'application/json' };
+        init.body = '{}';
+      }
+      const response = await workerFetch(new Request(`http://worker${path}`, init));
+      expect(response.status, `${method} ${path}`).toBe(401);
+      expect(response.headers.get('X-Syrabit-Route')).toBe('worker-native');
+    }
+  });
+
+  it('returns a clear forbidden response for a signed-in student', async () => {
+    const token = await studentToken();
+    const response = await workerFetch(new Request('http://worker/api/v1/staff/content/subjects', {
+      headers: authHeaders(token),
+    }));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ detail: 'Staff access required' });
+  });
+
+  it('rejects malformed and refresh tokens before staff content is read', async () => {
+    const malformed = await workerFetch(new Request('http://worker/api/v1/staff/content/subjects', {
+      headers: authHeaders('not-a-token'),
+    }));
+    expect(malformed.status).toBe(401);
+    expect(await malformed.json()).toMatchObject({ detail: 'Invalid or expired token' });
+
+    const refresh = await workerFetch(new Request('http://worker/api/v1/staff/content/subjects', {
+      headers: authHeaders(await refreshToken()),
+    }));
+    expect(refresh.status).toBe(401);
+    expect(await refresh.json()).toMatchObject({ detail: 'Access token required' });
+  });
+
+  it('keeps the established admin-session compatibility path and JSON streams response', async () => {
+    const session = await adminSessionToken();
+    const response = await workerFetch(new Request('http://worker/api/v1/admin/content/streams', {
+      headers: { Cookie: `syrabit_admin_session=${session}` },
+    }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toContain('application/json');
+    expect(response.headers.get('X-Syrabit-Route')).toBe('worker-native');
+    expect(await response.json()).toEqual(expect.any(Array));
   });
 
   // ── Step 1: Create chapter ──────────────────────────────────────────────────
@@ -1164,5 +1279,137 @@ describe('Staff subject-level PYQ deletion', () => {
     } finally {
       sharedEnv.VECTORIZE = originalVectorize;
     }
+  });
+});
+
+describe('Staff password change session protection', () => {
+  it('changes the password and rejects pre-change staff access and refresh tokens', async () => {
+    const oldRefreshToken = await refreshToken();
+    const oldAdminSession = await adminSessionToken('test-staff-user');
+    const response = await sharedWorkerFetch(new Request('http://worker/api/v1/staff/auth/change-password', {
+      method: 'POST',
+      headers: { ...authHeaders(sharedToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        current_password: 'current-password',
+        new_password: 'updated-password',
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true });
+    const row = await sharedEnv.DB.prepare(
+      `SELECT hashed_password FROM users WHERE id = 'test-staff-user'`,
+    ).first<{ hashed_password: string }>();
+    expect(row?.hashed_password).toBeTruthy();
+    expect(await verifyPassword('updated-password', row!.hashed_password)).toBe(true);
+
+    // Session revocation now comes from D1. A KV outage must not revive a
+    // credential issued before the password change.
+    const originalKvGet = sharedEnv.RATE_LIMIT_KV.get;
+    (sharedEnv.RATE_LIMIT_KV as unknown as {
+      get: (key: string) => Promise<string | null>;
+    }).get = async () => { throw new Error('simulated KV outage'); };
+    const staleAccess = await sharedWorkerFetch(new Request('http://worker/api/v1/staff/content/subjects', {
+      headers: authHeaders(sharedToken),
+    }));
+    (sharedEnv.RATE_LIMIT_KV as unknown as {
+      get: typeof originalKvGet;
+    }).get = originalKvGet;
+    expect(staleAccess.status).toBe(401);
+    expect(await staleAccess.json()).toMatchObject({
+      detail: 'Session expired after password change. Sign in again.',
+    });
+
+    const staleProfile = await sharedWorkerFetch(new Request('http://worker/api/v1/users/me', {
+      headers: authHeaders(sharedToken),
+    }));
+    expect(staleProfile.status).toBe(401);
+    expect(await staleProfile.json()).toMatchObject({
+      detail: 'Session expired after password change. Sign in again.',
+    });
+
+    const staleRefresh = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: oldRefreshToken }),
+    }));
+    expect(staleRefresh.status).toBe(401);
+    expect(await staleRefresh.json()).toMatchObject({
+      detail: 'Session expired after password change. Sign in again.',
+    });
+
+    const staleAdmin = await sharedWorkerFetch(new Request('http://worker/api/v1/admin/content/streams', {
+      headers: { Cookie: `syrabit_admin_session=${oldAdminSession}` },
+    }));
+    expect(staleAdmin.status).toBe(401);
+    expect(staleAdmin.headers.get('Set-Cookie')).toContain('Max-Age=0');
+    expect(await staleAdmin.json()).toMatchObject({
+      detail: 'Session expired after password change. Sign in again.',
+    });
+
+    const freshLogin = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'staff@example.test', password: 'updated-password' }),
+    }));
+    expect(freshLogin.status).toBe(200);
+    const freshTokens = await freshLogin.json() as { access_token: string; refresh_token: string };
+    const freshProfile = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/me', {
+      headers: authHeaders(freshTokens.access_token),
+    }));
+    expect(freshProfile.status).toBe(200);
+
+    const preResetState = await sharedEnv.DB.prepare(
+      `SELECT session_valid_after FROM users WHERE id = 'test-staff-user'`,
+    ).first<{ session_valid_after: number }>();
+    const preResetAdmin = await adminSessionToken(
+      'test-staff-user',
+      preResetState!.session_valid_after,
+    );
+    const resetToken = 'staff-reset-token';
+    await sharedEnv.DB.prepare(`
+      INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at)
+      VALUES ('staff-reset-token-id', 'test-staff-user', ?, ?)
+    `).bind(
+      await hashResetToken(resetToken),
+      Math.floor(Date.now() / 1000) + 3600,
+    ).run();
+
+    const reset = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: resetToken, password: 'reset-password-final' }),
+    }));
+    expect(reset.status).toBe(200);
+
+    const resetStaleAccess = await sharedWorkerFetch(new Request('http://worker/api/v1/staff/content/subjects', {
+      headers: authHeaders(freshTokens.access_token),
+    }));
+    expect(resetStaleAccess.status).toBe(401);
+
+    const resetStaleRefresh = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: freshTokens.refresh_token }),
+    }));
+    expect(resetStaleRefresh.status).toBe(401);
+
+    const resetStaleAdmin = await sharedWorkerFetch(new Request('http://worker/api/v1/admin/content/streams', {
+      headers: { Cookie: `syrabit_admin_session=${preResetAdmin}` },
+    }));
+    expect(resetStaleAdmin.status).toBe(401);
+    expect(resetStaleAdmin.headers.get('Set-Cookie')).toContain('Max-Age=0');
+
+    const postResetLogin = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'staff@example.test', password: 'reset-password-final' }),
+    }));
+    expect(postResetLogin.status).toBe(200);
+    const postResetTokens = await postResetLogin.json() as { access_token: string };
+    const postResetProfile = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/me', {
+      headers: authHeaders(postResetTokens.access_token),
+    }));
+    expect(postResetProfile.status).toBe(200);
   });
 });

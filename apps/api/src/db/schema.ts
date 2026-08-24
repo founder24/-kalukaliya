@@ -53,6 +53,8 @@ export const users = sqliteTable('users', {
   // Deletion
   deletedAt: integer('deleted_at'),
   deletionReason: text('deletion_reason'),
+  // Strongly-consistent D1 cutoff for invalidating all older JWT/cookie sessions.
+  sessionValidAfter: integer('session_valid_after').default(0),
 
   createdAt: integer('created_at').default(sql`(unixepoch())`),
   updatedAt: integer('updated_at').default(sql`(unixepoch())`),
@@ -289,6 +291,15 @@ export const paymentsPending = sqliteTable('payments_pending', {
   uniqueIndex('pp_order_idx').on(t.orderId),
   index('pp_expires_idx').on(t.expiresAt),
 ]);
+
+// Razorpay webhook event ledger. The event ID is the provider's retry-safe
+// idempotency key, so a redelivery cannot apply an entitlement twice.
+export const webhookEvents = sqliteTable('webhook_events', {
+  eventId: text('event_id').primaryKey(),
+  eventType: text('event_type').notNull(),
+  receivedAt: integer('received_at').default(sql`(unixepoch())`),
+  processedAt: integer('processed_at'),
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RAG PIPELINE

@@ -23,9 +23,8 @@ import {
   users,
   chats,
   chapters as chaptersTable,
-  quotaUsage,
 } from '../db/schema';
-import { verifyToken, extractBearer } from '../middleware/auth';
+import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import { streamGenerate, AI_MODEL_PRIMARY } from '../services/ai';
 import type { Env } from '../types';
 
@@ -58,9 +57,11 @@ interface ChatRequest {
   chapter_id?: string;
   chapter_name?: string;
   subject_id?: string;
+  subject_name?: string;
   source_type?: string;
   board_name?: string;
   class_name?: string;
+  stream_name?: string;
   board_id?: string;
   class_id?: string;
   context_messages?: { role: string; content: string }[];
@@ -528,7 +529,8 @@ chatRouter.post('/stream', async (c) => {
         .get();
 
       // Reject soft-deleted users (deletedAt non-null) as well as missing rows
-      if (row && !row.deletedAt) {
+      if (row && !row.deletedAt
+        && await isSessionValid(c.env.DB, payload.sub, payload.iat)) {
         authedUserId = payload.sub;
         userId       = payload.sub;
         userTier     = row.subscriptionTier ?? 'free';
@@ -725,6 +727,7 @@ chatRouter.post('/stream', async (c) => {
     history,
     ...(body.board_name        !== undefined && { boardName:   body.board_name }),
     ...(body.class_name        !== undefined && { className:   body.class_name }),
+    ...(body.subject_name      !== undefined && { subjectName: body.subject_name }),
     ...(chapterNameResolved    !== undefined && { chapterName: chapterNameResolved }),
     question: message,
   });
@@ -742,14 +745,18 @@ chatRouter.post('/stream', async (c) => {
     event:            'source_card',
     conversation_id:  effectiveSessionId,
     source_type:      contextChunks.length > 0 ? 'rag_chapter' : 'llm_only',
+    rag_source:       contextChunks.length > 0 ? 'rag_chapter' : 'llm_only',
     rag_path:         ragPath,
     confidence_tier:  confidenceTier,
     match_score:      topScore,
     rag_chunks:       contextChunks.length,
     rag_chapter_name: topChapterTitle,
     rag_subject_id:   topSubjectId,
+    rag_subject_name: body.subject_name,
     ctx_board_name:   body.board_name,
+    ctx_class_name:   body.class_name,
     ctx_class_level:  body.class_name,
+    ctx_stream_name:  body.stream_name,
   };
 
   // ── 8. SSE via TransformStream + waitUntil ──────────────────────────────────

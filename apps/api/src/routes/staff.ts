@@ -29,8 +29,8 @@
 import { Hono, type Context } from 'hono';
 import { eq, and } from 'drizzle-orm';
 import { createDb } from '../db/client';
-import { boards, classes, streams, subjects, chapters, chunks, contentAuditLog } from '../db/schema';
-import { extractBearer, verifyAdminToken, verifyToken } from '../middleware/auth';
+import { boards, classes, streams, subjects, chapters, chunks, contentAuditLog, users } from '../db/schema';
+import { extractBearer, hashPassword, isSessionValid, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import type { Env, JwtPayload } from '../types';
 import type { JWTPayload } from 'jose';
 
@@ -44,11 +44,11 @@ export const staffRouter = new Hono<{ Bindings: Env }>();
 //   3. payload.role is 'staff' or 'admin'
 //
 // Returns the verified payload on success, or writes the appropriate error
-// response to `c.res` and returns false so callers can `if (!auth) return c.res`.
+// response to `c.res` and returns null so callers can `if (!auth) return c.res`.
 
 type AuthPayload = JWTPayload & JwtPayload & { jti?: string };
 
-async function guard(c: Context<{ Bindings: Env }>): Promise<AuthPayload | false> {
+async function guard(c: Context<{ Bindings: Env }>): Promise<AuthPayload | null> {
   const cookie = c.req.header('Cookie') ?? '';
   const cookieToken = cookie.split(';').map(part => part.trim())
     .find(part => part.startsWith('syrabit_admin_session='))
@@ -61,22 +61,88 @@ async function guard(c: Context<{ Bindings: Env }>): Promise<AuthPayload | false
   // /api/v1/admin does not require a coordinated frontend auth migration.
   for (const adminToken of [cookieToken, bearer].filter((token): token is string => Boolean(token))) {
     const admin = await verifyAdminToken(adminToken, c.env.ADMIN_JWT_SECRET);
-    if (admin) return admin as unknown as AuthPayload;
+    if (admin) {
+      if (!(await isSessionValid(c.env.DB, admin.sub, admin.iat))) {
+        const response = c.json({ detail: 'Session expired after password change. Sign in again.' }, 401);
+        if (cookieToken) response.headers.set('Set-Cookie', 'syrabit_admin_session=; Path=/api/; Max-Age=0; HttpOnly; SameSite=Lax');
+        c.res = response;
+        return null;
+      }
+      return admin as unknown as AuthPayload;
+    }
   }
 
-  if (!bearer)
-    return (await c.json({ detail: 'Authentication required' }, 401)) as unknown as false;
+  if (!bearer) {
+    c.res = c.json({ detail: 'Authentication required' }, 401);
+    return null;
+  }
   const payload = await verifyToken(bearer, c.env.JWT_SECRET);
-  if (!payload)
-    return (await c.json({ detail: 'Invalid or expired token' }, 401)) as unknown as false;
+  if (!payload) {
+    c.res = c.json({ detail: 'Invalid or expired token' }, 401);
+    return null;
+  }
   // Reject refresh tokens — they are persisted in localStorage and must not
   // grant write access even when signed with the same secret.
-  if ((payload as { type?: string }).type !== 'access')
-    return (await c.json({ detail: 'Access token required' }, 401)) as unknown as false;
-  if (!['staff', 'admin'].includes(payload.role ?? ''))
-    return (await c.json({ detail: 'Staff access required' }, 403)) as unknown as false;
+  if ((payload as { type?: string }).type !== 'access') {
+    c.res = c.json({ detail: 'Access token required' }, 401);
+    return null;
+  }
+  if (!['staff', 'admin'].includes(payload.role ?? '')) {
+    c.res = c.json({ detail: 'Staff access required' }, 403);
+    return null;
+  }
+  if (!(await isSessionValid(c.env.DB, payload.sub ?? '', payload.iat))) {
+    c.res = c.json({ detail: 'Session expired after password change. Sign in again.' }, 401);
+    return null;
+  }
   return payload;
 }
+
+// ── Staff account actions ──────────────────────────────────────────────────────
+
+staffRouter.post('/auth/change-password', async (c) => {
+  const auth = await guard(c); if (!auth) return c.res;
+  const body = await safeBody(c);
+  const currentPassword = String(body['current_password'] ?? '');
+  const newPassword = String(body['new_password'] ?? '');
+
+  if (newPassword.length < 8) {
+    return c.json({ detail: 'Password must be at least 8 characters' }, 400);
+  }
+  if (!currentPassword) {
+    return c.json({ detail: 'Current password is required' }, 400);
+  }
+
+  const db = createDb(c.env.DB);
+  const user = await db.select({
+    id: users.id,
+    hashedPassword: users.hashedPassword,
+  }).from(users).where(eq(users.id, auth.sub ?? '')).get();
+
+  if (!user?.hashedPassword) {
+    return c.json({ detail: 'No password is set for this account' }, 400);
+  }
+  if (!(await verifyPassword(currentPassword, user.hashedPassword))) {
+    return c.json({ detail: 'Current password is incorrect' }, 400);
+  }
+
+  // Advance beyond both the current clock and any earlier cutoff. This keeps
+  // every previously issued token stale even when reset/change flows happen
+  // within the same JWT timestamp second.
+  const validAfter = Math.floor(Date.now() / 1000) + 1;
+  await c.env.DB.prepare(`
+    UPDATE users
+    SET hashed_password = ?,
+        session_valid_after = MAX(session_valid_after + 1, ?)
+    WHERE id = ?
+  `).bind(await hashPassword(newPassword), validAfter, user.id).run();
+  auditLog(c.env, auth.sub ?? '', 'change_password', 'user', user.id);
+  const response = c.json({ ok: true, message: 'Password updated' });
+  if ((c.req.header('Cookie') ?? '').includes('syrabit_admin_session=')) {
+    response.headers.set('Set-Cookie', 'syrabit_admin_session=; Path=/api/; Max-Age=0; HttpOnly; SameSite=Lax');
+  }
+  return response;
+});
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 

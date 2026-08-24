@@ -13,6 +13,8 @@ import {
   hashResetToken,
   revokedRtKey,
   REFRESH_TOKEN_TTL_S,
+  isSessionValid,
+  sessionIssuedAt,
 } from '../middleware/auth';
 import type { Env } from '../types';
 
@@ -123,8 +125,9 @@ authRouter.post('/login', async (c) => {
   }
 
   const role = user.role ?? 'student';
-  const accessToken = await signAccessToken(user.id, role, c.env.JWT_SECRET);
-  const { token: refreshToken } = await signRefreshToken(user.id, role, c.env.JWT_SECRET);
+  const issuedAt = await sessionIssuedAt(c.env.DB, user.id);
+  const accessToken = await signAccessToken(user.id, role, c.env.JWT_SECRET, issuedAt);
+  const { token: refreshToken } = await signRefreshToken(user.id, role, c.env.JWT_SECRET, issuedAt);
 
   await c.env.DB.prepare(
     'UPDATE users SET updated_at = ? WHERE id = ?'
@@ -224,10 +227,14 @@ authRouter.post('/refresh', async (c) => {
   if (!user || user.deletedAt) {
     return c.json({ detail: 'User not found' }, 401);
   }
+  if (!(await isSessionValid(c.env.DB, user.id, payload.iat))) {
+    return c.json({ detail: 'Session expired after password change. Sign in again.' }, 401);
+  }
 
   const role = user.role ?? 'student';
-  const accessToken = await signAccessToken(user.id, role, c.env.JWT_SECRET);
-  const { token: refreshToken } = await signRefreshToken(user.id, role, c.env.JWT_SECRET);
+  const issuedAt = await sessionIssuedAt(c.env.DB, user.id);
+  const accessToken = await signAccessToken(user.id, role, c.env.JWT_SECRET, issuedAt);
+  const { token: refreshToken } = await signRefreshToken(user.id, role, c.env.JWT_SECRET, issuedAt);
 
   return c.json({
     access_token: accessToken,
@@ -247,6 +254,9 @@ authRouter.get('/me', async (c) => {
   const payload = await verifyToken(token, c.env.JWT_SECRET);
   if (!payload || payload.type !== 'access') {
     return c.json({ detail: 'Invalid or expired token' }, 401);
+  }
+  if (!(await isSessionValid(c.env.DB, payload.sub ?? '', payload.iat))) {
+    return c.json({ detail: 'Session expired after password change. Sign in again.' }, 401);
   }
 
   const user = await db.select().from(users).where(eq(users.id, payload.sub!)).get();
@@ -378,9 +388,14 @@ authRouter.post('/reset-password/confirm', async (c) => {
   }
 
   const newHash = await hashPassword(password);
+  const validAfter = now + 1;
   await c.env.DB.prepare(
-    'UPDATE users SET hashed_password = ?, updated_at = ? WHERE id = ?'
-  ).bind(newHash, now, record.user_id).run();
+    `UPDATE users
+     SET hashed_password = ?,
+         updated_at = ?,
+         session_valid_after = MAX(session_valid_after + 1, ?)
+     WHERE id = ?`
+  ).bind(newHash, now, validAfter, record.user_id).run();
 
   return c.json({ message: 'Password reset successfully' });
 });

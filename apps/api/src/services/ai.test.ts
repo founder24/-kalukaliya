@@ -13,7 +13,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseSseLine, drainStream, AI_MODEL_PRIMARY, AI_MODEL_FALLBACK } from './ai';
+import {
+  parseSseLine,
+  drainStream,
+  streamGenerate,
+  AI_MODEL_PRIMARY,
+  AI_MODEL_FALLBACK,
+} from './ai';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // parseSseLine
@@ -73,6 +79,16 @@ describe('parseSseLine', () => {
   it('handles whitespace around the data value', () => {
     const line = 'data:  ' + JSON.stringify({ response: 'Trimmed' });
     expect(parseSseLine(line)).toBe('Trimmed');
+  });
+
+  it('accepts a JSON streaming chunk without an SSE data prefix', () => {
+    expect(parseSseLine(JSON.stringify({ response: 'Direct JSON chunk' }))).toBe('Direct JSON chunk');
+  });
+
+  it('extracts message content and content-part arrays', () => {
+    expect(parseSseLine('data: ' + JSON.stringify({
+      choices: [{ message: { content: [{ text: 'Array ' }, { text: 'content' }] } }],
+    }))).toBe('Array content');
   });
 });
 
@@ -212,6 +228,42 @@ describe('streamGenerate sentinel convention', () => {
   it('non-sentinel chunks do not start with \\x00model:', () => {
     const normalChunk = 'Hello, this is normal content';
     expect(normalChunk.startsWith('\x00model:')).toBe(false);
+  });
+});
+
+describe('streamGenerate fallback behavior', () => {
+  it('retries Workers AI fallback when the primary stream is empty', async () => {
+    const calls: string[] = [];
+    const ai = {
+      run: async (model: string) => {
+        calls.push(model);
+        if (model === AI_MODEL_PRIMARY) return makeStream([]);
+        return makeStream([encode('data: {"response":"Fallback answer"}\n')]);
+      },
+    } as unknown as Ai;
+
+    await expect(collect(streamGenerate(ai, {
+      systemPrompt: 'system',
+      userMessage: 'hello',
+    }))).resolves.toEqual([
+      'Fallback answer',
+      `\x00model:${AI_MODEL_FALLBACK}`,
+    ]);
+    expect(calls).toEqual([AI_MODEL_PRIMARY, AI_MODEL_FALLBACK]);
+  });
+
+  it('adapts a complete Workers AI response object to a stream', async () => {
+    const ai = {
+      run: async () => ({ response: 'Buffered but valid answer' }),
+    } as unknown as Ai;
+
+    await expect(collect(streamGenerate(ai, {
+      systemPrompt: 'system',
+      userMessage: 'hello',
+    }))).resolves.toEqual([
+      'Buffered but valid answer',
+      `\x00model:${AI_MODEL_PRIMARY}`,
+    ]);
   });
 });
 

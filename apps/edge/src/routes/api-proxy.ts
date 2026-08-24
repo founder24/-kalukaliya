@@ -12,6 +12,11 @@
 import { getCorsHeaders } from '../middleware/cors';
 import { getIdentityToken } from '../utils/google-auth';
 
+/** Only the chat stream endpoint uses an SSE response. */
+function isSseRequest(pathname: string): boolean {
+  return pathname === '/api/v1/chat/stream';
+}
+
 export async function proxyRequest(
   request: Request,
   backendUrl: string,
@@ -19,7 +24,7 @@ export async function proxyRequest(
 ): Promise<Response> {
   const url = new URL(request.url);
   const targetUrl = `${backendUrl}${url.pathname}${url.search}`;
-  const isStreamRequest = url.pathname.includes('/stream');
+  const isStreamRequest = isSseRequest(url.pathname);
 
   // Origin used for error-response CORS (main response builds its own)
 

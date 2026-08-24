@@ -1,10 +1,13 @@
 /**
  * Cloud Run fallback proxy for routes not yet ported to Workers.
  *
- * When BACKEND_URL is set the request is forwarded verbatim to Cloud Run
- * and the response is returned to the caller. This lets us enable
- * API_WORKER_LIVE on the edge Worker today: auth+health are served from D1,
- * everything else continues to work via Cloud Run until each route is ported.
+ * When BACKEND_URL is set the request is forwarded to Cloud Run and the
+ * response is returned to the caller. The edge service-binding proxy supplies
+ * an internal X-Cloud-Run-Token header containing a Google OIDC credential;
+ * this bridge converts it to Cloud Run's Authorization header. This lets us
+ * enable API_WORKER_LIVE on the edge Worker today: native routes are served
+ * from D1, while retained admin/seed routes continue to work via Cloud Run
+ * until each route is ported.
  *
  * The forwarded request strips the hop-by-hop headers that must not be
  * re-sent (connection, transfer-encoding, keep-alive) and passes all others
@@ -49,8 +52,9 @@ export async function proxyToCloudRun(c: Context<{ Bindings: Env }>): Promise<Re
   // Overwrite Host so Cloud Run accepts the request
   forwardedHeaders.set('host', target.host);
 
-  // Use the GCP OIDC token pre-fetched by the edge Worker. Without it Cloud Run
-  // returns 403 because anonymous requests are not allowed.
+  // Use the GCP OIDC token minted by the edge Worker. Without it Cloud Run
+  // returns 403 because anonymous requests are not allowed. The header is
+  // removed above so the internal credential never reaches the caller.
   const cloudRunToken = c.req.header('x-cloud-run-token');
   if (cloudRunToken) {
     forwardedHeaders.set('authorization', cloudRunToken); // already "Bearer <token>"

@@ -50,3 +50,4 @@
 - [API Worker production deployment](api-worker-production-deployment.md) — Workers AI smoke tests use the workers.dev account slug, and direct Wrangler deploys require Node 22.
 - [Worker interruption rehearsals](worker-interruption-rehearsals.md) — Remote dev can fail CA trust; use a disposable deployed Worker and D1 for real interruption evidence.
 - [Production seed rollout caveat](syrabit-production-seed-rollout.md) — Full-stack release can stop before API Worker on GCP billing; preserve direct API rollout evidence and repair the gate.
+- [Razorpay cutover validation](razorpay-cutover-validation.md) — Payment release checks must preflight sandbox keys before mutation and couple webhook claims with entitlement writes.

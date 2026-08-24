@@ -75,6 +75,30 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     expect(response.headers.get('Access-Control-Allow-Headers')).toContain('Authorization');
   });
 
+  it('allows cross-origin PATCH preflight for native staff edits', async () => {
+    const response = await worker.fetch(
+      new Request('https://syrabit.ai/api/v1/staff/content/chapter/chapter-1', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://app.syrabit.ai',
+          'Access-Control-Request-Method': 'PATCH',
+          'Access-Control-Request-Headers': 'authorization,content-type',
+        },
+      }),
+      createMockEnv({
+        API_WORKER: {
+          fetch: vi.fn(async () => new Response('{}', { status: 200 })),
+        } as unknown as { fetch(request: Request): Promise<Response> },
+      }),
+      createMockCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://app.syrabit.ai');
+    expect(response.headers.get('Access-Control-Allow-Methods')).toContain('PATCH');
+    expect(response.headers.get('Access-Control-Allow-Headers')).toContain('Authorization');
+  });
+
   it('Health endpoint returns edge status directly', async () => {
     const env = createMockEnv();
     const ctx = createMockCtx();
@@ -157,6 +181,71 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     expect(forwardedPath).toBe('/api/v1/seo/feed.json');
     expect(response.headers.get('X-Robots-Tag')).toBeNull();
     expect(response.headers.get('X-Syrabit-Route')).toBe('worker-native');
+  });
+
+  it('preserves the native-route marker on a library-bundle cache hit', async () => {
+    const apiFetch = vi.fn();
+    const env = createMockEnv({
+      API_WORKER: { fetch: apiFetch } as unknown as { fetch(r: Request): Promise<Response> },
+      API_WORKER_LIVE: 'true',
+      BACKEND_URL: 'https://cloud-run.example.com',
+      ISR_CACHE_KV: {
+        get: vi.fn(async () => JSON.stringify({
+          body: '{"subjects":[]}',
+          cachedAt: Math.floor(Date.now() / 1000),
+          route: 'worker-native',
+        })),
+        put: vi.fn(async () => {}),
+        delete: vi.fn(async () => {}),
+      } as unknown as KVNamespace,
+    });
+
+    const response = await worker.fetch(
+      new Request('https://syrabit.ai/api/v1/content/library-bundle?slim=1'),
+      env,
+      createMockCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-Cache')).toBe('HIT');
+    expect(response.headers.get('X-Syrabit-Route')).toBe('worker-native');
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('refreshes a legacy library cache entry after native activation', async () => {
+    const apiFetch = vi.fn(async () => new Response('{"subjects":[]}', {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Syrabit-Route': 'worker-native',
+      },
+    }));
+    const env = createMockEnv({
+      API_WORKER: { fetch: apiFetch } as unknown as { fetch(r: Request): Promise<Response> },
+      API_WORKER_LIVE: 'true',
+      BACKEND_URL: 'https://cloud-run.example.com',
+      ISR_CACHE_KV: {
+        get: vi.fn(async () => JSON.stringify({
+          body: '{"subjects":["legacy"]}',
+          cachedAt: Math.floor(Date.now() / 1000),
+          route: 'cloud-run-fallback',
+        })),
+        put: vi.fn(async () => {}),
+        delete: vi.fn(async () => {}),
+      } as unknown as KVNamespace,
+    });
+
+    const response = await worker.fetch(
+      new Request('https://syrabit.ai/api/v1/content/library-bundle?slim=1'),
+      env,
+      createMockCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-Cache')).toBe('MISS');
+    expect(response.headers.get('X-Syrabit-Route')).toBe('worker-native');
+    expect(await response.text()).toBe('{"subjects":[]}');
+    expect(apiFetch).toHaveBeenCalledOnce();
   });
 
   it('/assets/missing returns 404', async () => {

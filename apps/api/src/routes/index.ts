@@ -37,8 +37,9 @@ api.route('/api/v1/admin',        adminContentRouter);
 api.route('/api/v1/admin',        staffRouter);
 // Deliberately scoped compatibility bridge: publishing, content editing, RAG,
 // and scheduled seed routes above are Worker-native. Other established admin
-// operations remain on Cloud Run until their independently-owned replacements
-// are deployed, rather than failing with a Worker 404 during cutover.
+// operations, plus any retained seed routes, remain on Cloud Run until their
+// independently-owned replacements are deployed. The edge supplies OIDC for
+// this bridge when the API Worker is reached through the service binding.
 api.all('/api/v1/admin/*',        proxyToCloudRun);
 api.all('/api/v1/seed/*',         proxyToCloudRun);
 api.route('/api/v1/users',        usersRouter);       // profile, memories, onboarding, credits, stats

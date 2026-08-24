@@ -33,7 +33,7 @@ export default function ResetPasswordPage() {
     setLoading(true);
     try {
       await axios.post(
-        `${API_BASE}/auth/forgot-password`,
+        `${API_BASE}/auth/reset-password/request`,
         { email },
       );
       setStep('confirm');
@@ -50,8 +50,8 @@ export default function ResetPasswordPage() {
     setLoading(true);
     try {
       await axios.post(
-        `${API_BASE}/auth/reset-password`,
-        { token, new_password: newPassword },
+        `${API_BASE}/auth/reset-password/confirm`,
+        { token, password: newPassword },
       );
       setStep('done');
       toast.success('Password updated!');
@@ -135,7 +135,7 @@ export default function ResetPasswordPage() {
                       onChange={(e) => setNewPassword(e.target.value)}
                       className="pl-9 pr-10"
                       required
-                      minLength={6}
+                      minLength={8}
                     />
                     <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-1 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center text-muted-foreground/40 hover:text-foreground transition-colors">
                       {showPass ? <EyeOff size={16} /> : <Eye size={16} />}

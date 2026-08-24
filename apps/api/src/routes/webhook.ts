@@ -3,7 +3,7 @@
  *
  * Security:
  *   1. Verifies X-Razorpay-Signature HMAC-SHA256 against the raw request body.
- *   2. Deduplicates events via the D1 payments table (INSERT OR IGNORE).
+ *   2. Atomically claims subscription events in the D1 webhook event ledger.
  *   3. Uses RAZORPAY_WEBHOOK_SECRET env var (distinct from the API key secret).
  *
  * Events handled:
@@ -16,7 +16,7 @@
 import { Hono } from 'hono';
 import { eq, or } from 'drizzle-orm';
 import { createDb } from '../db/client';
-import { users, payments } from '../db/schema';
+import { users } from '../db/schema';
 import type { Env } from '../types';
 
 export const webhookRouter = new Hono<{ Bindings: Env }>();
@@ -41,6 +41,33 @@ async function hmacSha256(secret: string, message: string): Promise<string> {
 function isValidSubId(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   return /^(sub|order)_[A-Za-z0-9_]+$/.test(value);
+}
+
+async function applySubscriptionEvent(
+  c: import('hono').Context<{ Bindings: Env }>,
+  eventId: string,
+  eventType: string,
+  now: number,
+  effect: D1PreparedStatement,
+): Promise<boolean> {
+  const [eventClaim] = await c.env.DB.batch([
+    // A failed batch rolls back this claim too, allowing Razorpay to retry.
+    c.env.DB.prepare(
+      `INSERT OR IGNORE INTO webhook_events (event_id, event_type, received_at)
+       VALUES (?, ?, ?)`
+    ).bind(eventId, eventType, now),
+    effect,
+    c.env.DB.prepare(
+      `UPDATE webhook_events
+       SET processed_at = ?
+       WHERE event_id = ? AND processed_at IS NULL`
+    ).bind(now, eventId),
+  ]);
+
+  if (!eventClaim) {
+    throw new Error('Razorpay webhook event claim did not return a D1 result');
+  }
+  return eventClaim.meta.changes > 0;
 }
 
 // ── POST /razorpay ─────────────────────────────────────────────────────────────
@@ -81,12 +108,8 @@ webhookRouter.post('/razorpay', async (c) => {
     return c.json({ error: 'Missing event_id' }, 400);
   }
 
-  // Deduplication: check if we've already recorded a payment for this event
-  // (Cloud Run used Redis SET NX; D1 uses INSERT OR IGNORE)
   const db = createDb(c.env.DB);
   const now = Math.floor(Date.now() / 1000);
-
-  console.log(`Razorpay webhook: ${eventType} (${eventId})`);
 
   if (eventType === 'subscription.charged') {
     // User's subscription renewed — extend period + record payment
@@ -118,22 +141,61 @@ webhookRouter.post('/razorpay', async (c) => {
     }
 
     const periodEnd = now + 30 * 24 * 3600;
-    await db.update(users).set({
-      subscriptionStatus: 'active',
-      currentPeriodEnd: periodEnd,
-      cancelAtPeriodEnd: 0,
-      updatedAt: now,
-    }).where(eq(users.id, user.id));
+    const entitlementEffect = c.env.DB.prepare(
+      `UPDATE users
+       SET subscription_status = 'active', current_period_end = ?, cancel_at_period_end = 0, updated_at = ?
+       WHERE id = ?
+         AND EXISTS (
+           SELECT 1 FROM webhook_events
+           WHERE event_id = ? AND processed_at IS NULL
+         )`
+    ).bind(periodEnd, now, user.id, eventId);
+    const eventPaymentEffect = paymentId
+      ? c.env.DB.prepare(
+        `INSERT OR IGNORE INTO payments (
+           id, user_id, razorpay_payment_id, razorpay_order_id, amount, currency, status, plan, created_at
+         )
+         SELECT ?, ?, ?, ?, ?, 'INR', 'captured', ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM webhook_events
+           WHERE event_id = ? AND processed_at IS NULL
+         )`
+      ).bind(
+        crypto.randomUUID(),
+        user.id,
+        paymentId,
+        orderId ?? subId,
+        amount ?? 0,
+        user.subscriptionTier ?? 'pro',
+        now,
+        eventId,
+      )
+      : undefined;
+    const statements = [entitlementEffect];
+    if (eventPaymentEffect) statements.push(eventPaymentEffect);
 
-    // Record payment (INSERT OR IGNORE for idempotency)
-    if (paymentId) {
-      await c.env.DB.prepare(
-        `INSERT OR IGNORE INTO payments (id, user_id, razorpay_payment_id, razorpay_order_id, amount, currency, status, plan, created_at)
-         VALUES (?, ?, ?, ?, ?, 'INR', 'captured', ?, ?)`
-      ).bind(crypto.randomUUID(), user.id, paymentId, orderId ?? subId, amount ?? 0, user.subscriptionTier ?? 'pro', now).run();
+    const [eventClaim] = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT OR IGNORE INTO webhook_events (event_id, event_type, received_at)
+         VALUES (?, ?, ?)`
+      ).bind(eventId, eventType, now),
+      ...statements,
+      c.env.DB.prepare(
+        `UPDATE webhook_events
+         SET processed_at = ?
+         WHERE event_id = ? AND processed_at IS NULL`
+      ).bind(now, eventId),
+    ]);
+    if (!eventClaim) throw new Error('Razorpay webhook event claim did not return a D1 result');
+    if (eventClaim.meta.changes === 0) {
+      return c.json({ status: 'ok', duplicate: true });
     }
 
-  } else if (eventType === 'subscription.cancelled') {
+    console.log(`Razorpay webhook: ${eventType} (${eventId})`);
+    return c.json({ status: 'ok' });
+  }
+
+  if (eventType === 'subscription.cancelled') {
     const sub = (payload.subscription as Record<string, unknown> | undefined);
     const subId = sub?.id as string | undefined;
     if (!isValidSubId(subId)) return c.json({ status: 'ignored', reason: 'invalid_sub_id' });
@@ -142,7 +204,22 @@ webhookRouter.post('/razorpay', async (c) => {
       .from(users).where(eq(users.razorpaySubscriptionId, subId)).get();
 
     if (user) {
-      await db.update(users).set({ cancelAtPeriodEnd: 1, updatedAt: now }).where(eq(users.id, user.id));
+      const applied = await applySubscriptionEvent(
+        c,
+        eventId,
+        eventType,
+        now,
+        c.env.DB.prepare(
+          `UPDATE users
+           SET cancel_at_period_end = 1, updated_at = ?
+           WHERE id = ?
+             AND EXISTS (
+               SELECT 1 FROM webhook_events
+               WHERE event_id = ? AND processed_at IS NULL
+             )`
+        ).bind(now, user.id, eventId),
+      );
+      if (!applied) return c.json({ status: 'ok', duplicate: true });
     }
 
   } else if (eventType === 'subscription.completed' || eventType === 'subscription.expired') {
@@ -154,21 +231,43 @@ webhookRouter.post('/razorpay', async (c) => {
       .from(users).where(eq(users.razorpaySubscriptionId, subId)).get();
 
     if (user) {
-      await db.update(users).set({
-        subscriptionTier: 'free',
-        subscriptionStatus: 'cancelled',
-        cancelAtPeriodEnd: 0,
-        updatedAt: now,
-      }).where(eq(users.id, user.id));
+      const applied = await applySubscriptionEvent(
+        c,
+        eventId,
+        eventType,
+        now,
+        c.env.DB.prepare(
+          `UPDATE users
+           SET subscription_tier = 'free', subscription_status = 'cancelled',
+               cancel_at_period_end = 0, updated_at = ?
+           WHERE id = ?
+             AND EXISTS (
+               SELECT 1 FROM webhook_events
+               WHERE event_id = ? AND processed_at IS NULL
+             )`
+        ).bind(now, user.id, eventId),
+      );
+      if (!applied) return c.json({ status: 'ok', duplicate: true });
     } else {
       console.warn(`webhook ${eventType}: no user found for sub_id=${subId}`);
     }
 
-  } else if (eventType === 'payment.failed') {
-    // Log only — no action needed; user can retry from frontend
-    const pmt = (payload.payment as Record<string, unknown> | undefined);
-    console.log(`payment.failed: payment_id=${pmt?.id}, order_id=${pmt?.order_id}`);
+  } else {
+    // payment.failed and unknown events do not alter entitlement. Record their
+    // event ID so repeated provider deliveries are still observable as retries.
+    const eventClaim = await c.env.DB.prepare(
+      `INSERT OR IGNORE INTO webhook_events (event_id, event_type, received_at, processed_at)
+       VALUES (?, ?, ?, ?)`
+    ).bind(eventId, eventType ?? 'unknown', now, now).run();
+    if (eventClaim.meta.changes === 0) return c.json({ status: 'ok', duplicate: true });
+
+    if (eventType === 'payment.failed') {
+      // Log only — no action needed; user can retry from frontend
+      const pmt = (payload.payment as Record<string, unknown> | undefined);
+      console.log(`payment.failed: payment_id=${pmt?.id}, order_id=${pmt?.order_id}`);
+    }
   }
 
+  console.log(`Razorpay webhook: ${eventType} (${eventId})`);
   return c.json({ status: 'ok' });
 });

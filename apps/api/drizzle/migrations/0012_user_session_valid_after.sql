@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN session_valid_after INTEGER NOT NULL DEFAULT 0;

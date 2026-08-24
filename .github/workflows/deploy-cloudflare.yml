@@ -11,6 +11,11 @@ on:
         required: false
         default: false
         type: boolean
+      validate_authenticated:
+        description: 'Require disposable authenticated cutover checks after deployment'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -60,6 +65,15 @@ jobs:
       - name: Validate D1 configuration
         run: |
           bash scripts/validate-d1-config.sh apps/api/wrangler.toml
+
+      - name: Require authenticated validation for native activation
+        if: ${{ github.event.inputs.activate_native == 'true' || github.event.inputs.validate_authenticated == 'true' }}
+        env:
+          ACTIVATE_NATIVE: ${{ github.event.inputs.activate_native }}
+          VALIDATE_AUTHENTICATED: ${{ github.event.inputs.validate_authenticated }}
+        run: |
+          test "$ACTIVATE_NATIVE" = 'true'
+          test "$VALIDATE_AUTHENTICATED" = 'true'
 
       - name: Report optional GitHub Actions secrets
         run: |
@@ -245,7 +259,7 @@ jobs:
         run: pnpm --filter syrabit-edge exec wrangler deploy --env production
 
       - name: Activate D1 API Worker routing
-        if: ${{ github.event.inputs.activate_native == 'true' }}
+        if: ${{ github.event.inputs.activate_native == 'true' && github.event.inputs.validate_authenticated == 'true' }}
         run: |
           printf 'true' | pnpm --filter syrabit-edge exec wrangler secret put API_WORKER_LIVE --env production
 
@@ -294,6 +308,8 @@ jobs:
       needs.deploy-edge.result == 'success' &&
       needs.deploy-frontend.result == 'success'
     steps:
+      - uses: actions/checkout@v4
+
       - name: API Worker is live and Worker-native
         run: |
           set -euo pipefail
@@ -312,7 +328,7 @@ jobs:
           echo "Public edge health passed: HTTP ${status}"
 
       - name: Confirm service-binding health through public edge
-        if: ${{ github.event.inputs.activate_native == 'true' }}
+        if: ${{ github.event.inputs.activate_native == 'true' && github.event.inputs.validate_authenticated == 'true' }}
         run: |
           grep -qi '^x-syrabit-health-backend: api-worker' /tmp/edge.headers
           echo "Public edge health is probing the D1 API Worker through its service binding."
@@ -322,3 +338,47 @@ jobs:
           status="$(curl -sS -L -o /dev/null -w '%{http_code}' "${FRONTEND_URL}" --max-time 30)"
           test "$status" = "200"
           echo "Frontend reachability passed: HTTP ${status}"
+
+      - name: Validate authenticated Cloudflare cutover
+        if: ${{ github.event.inputs.activate_native == 'true' && github.event.inputs.validate_authenticated == 'true' }}
+        env:
+          INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
+          STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
+          STAFF_TOKEN: ${{ secrets.CUTOVER_STAFF_TOKEN }}
+          ADMIN_SESSION_TOKEN: ${{ secrets.CUTOVER_ADMIN_SESSION_TOKEN }}
+          CUTOVER_PAYMENT_TOKEN: ${{ secrets.CUTOVER_PAYMENT_TOKEN }}
+          RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+          EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+          TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          bash scripts/validate-cloudflare-api-cutover.sh
+
+  rollback-native-routing:
+    name: Restore Cloud Run routing after failed cutover validation
+    runs-on: ubuntu-latest
+    needs: [smoke]
+    if: |
+      always() &&
+      github.event.inputs.activate_native == 'true' &&
+      github.event.inputs.validate_authenticated == 'true' &&
+      needs.smoke.result != 'success'
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack + PNPM
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Disable native edge routing
+        run: printf 'false' | pnpm --filter syrabit-edge exec wrangler secret put API_WORKER_LIVE --env production

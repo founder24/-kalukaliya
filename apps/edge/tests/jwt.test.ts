@@ -52,6 +52,16 @@ describe('JWT Middleware', () => {
     expect(result.valid).toBe(true);
   });
 
+  it.each([
+    '/api/v1/auth/reset-password/request',
+    '/api/v1/auth/reset-password/confirm',
+  ])('allows native password-reset route %s without auth', async (path) => {
+    const request = new Request(`https://edge.syrabit.ai${path}`, { method: 'POST' });
+    const result = await verifyJWT(request, TEST_SECRET);
+    expect(result.valid).toBe(true);
+    expect(result.userId).toBe('anonymous');
+  });
+
   it('rejects missing Authorization header on protected paths', async () => {
     const request = new Request('https://edge.syrabit.ai/api/v1/users/me');
     const result = await verifyJWT(request, TEST_SECRET);

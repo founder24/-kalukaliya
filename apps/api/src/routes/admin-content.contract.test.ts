@@ -32,7 +32,7 @@ function migrations(): string[] {
 
 async function adminSession(): Promise<string> {
   return new SignJWT({ role: 'admin', type: 'admin' })
-    .setProtectedHeader({ alg: 'HS256' }).setSubject('contract-admin')
+    .setProtectedHeader({ alg: 'HS256' }).setSubject('native-admin')
     .setIssuedAt().setExpirationTime('1h')
     .sign(new TextEncoder().encode(ADMIN_SECRET));
 }

@@ -29,7 +29,8 @@ interface JWTHeader {
  * ── Route group auth classification (canonical reference) ──────────────────
  *
  * Group A — PUBLIC_PATHS (no JWT at edge, no auth at backend):
- *   Auth endpoints (/login, /signup, /refresh, /forgot-password, /reset-password)
+ *   Auth endpoints (/login, /signup, /refresh, /reset-password/request,
+ *   /reset-password/confirm)
  *   Public content (/boards, /classes, /subjects, /chapters, /seo/*, /sitemap/*)
  *   Analytics, config, health, webhooks
  *
@@ -71,8 +72,8 @@ const PUBLIC_PATHS = [
   '/api/v1/auth/login',
   '/api/v1/auth/signup',
   '/api/v1/auth/refresh',
-  '/api/v1/auth/forgot-password',
-  '/api/v1/auth/reset-password',
+  '/api/v1/auth/reset-password/request',
+  '/api/v1/auth/reset-password/confirm',
   // All admin routes use httponly-cookie session auth handled entirely by the
   // backend — they must NOT be JWT-gated at the edge.  Only login/logout are
   // listed explicitly for clarity; the prefix match below covers /verify,

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { API_BASE } from '@/utils/api';
-import { getToken } from '@/hooks/useTokenManager';
+import { getToken, clearTokens } from '@/hooks/useTokenManager';
+import { setAuthToken } from '@/utils/api';
 import axios from 'axios';
 import { toast } from 'sonner';
 import AdminDashboard from '@/components/admin/AdminDashboard';
@@ -11,11 +12,29 @@ import AdminConversations from '@/components/admin/AdminConversations';
 
 const api = () => {
   const token = getToken();
-  return axios.create({
+  const client = axios.create({
     baseURL: API_BASE,
     withCredentials: true,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
+  client.interceptors.response.use(
+    response => response,
+    error => {
+      const status = error?.response?.status;
+      if (status === 401) {
+        clearTokens();
+        setAuthToken(null);
+        toast.error('Your session has expired. Please sign in again.');
+        if (window.location.pathname.startsWith('/staff')) {
+          window.location.assign('/login');
+        }
+      } else if (status === 403) {
+        toast.error('Your account does not have permission for that staff action.');
+      }
+      return Promise.reject(error);
+    },
+  );
+  return client;
 };
 
 // ── Status helpers ────────────────────────────────────────────────────────────
@@ -128,6 +147,7 @@ function Dot({ filled, label }) {
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
 function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
+  const isAdmin = user?.role === 'admin';
   return (
     <aside className="flex flex-col h-full bg-white border-r border-gray-100">
       <div className="flex items-center gap-3 px-5 py-5 border-b border-gray-100">
@@ -138,11 +158,13 @@ function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        <SidebarLink active={view === 'dashboard'} icon={<DashboardIcon />} label="Dashboard" onClick={() => onViewChange('dashboard')} />
-        <SidebarLink active={view === 'analytics'} icon={<AnalyticsIcon />} label="Analytics" onClick={() => onViewChange('analytics')} />
-        <SidebarLink active={view === 'users'} icon={<UsersIcon />} label="Users" onClick={() => onViewChange('users')} />
-        <SidebarLink active={view === 'conversations'} icon={<ConversationsIcon />} label="Conversations" onClick={() => onViewChange('conversations')} />
-        <div className="my-2 border-t border-gray-100" />
+        {isAdmin && <>
+          <SidebarLink active={view === 'dashboard'} icon={<DashboardIcon />} label="Dashboard" onClick={() => onViewChange('dashboard')} />
+          <SidebarLink active={view === 'analytics'} icon={<AnalyticsIcon />} label="Analytics" onClick={() => onViewChange('analytics')} />
+          <SidebarLink active={view === 'users'} icon={<UsersIcon />} label="Users" onClick={() => onViewChange('users')} />
+          <SidebarLink active={view === 'conversations'} icon={<ConversationsIcon />} label="Conversations" onClick={() => onViewChange('conversations')} />
+          <div className="my-2 border-t border-gray-100" />
+        </>}
         <SidebarLink active={view === 'subjects' || view === 'chapters'} icon={<GridIcon />} label="Subjects" onClick={() => onViewChange('subjects')} />
       </nav>
       <div className="px-4 py-4 border-t border-gray-100">
@@ -155,7 +177,7 @@ function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
             <div className="text-xs text-gray-400 truncate">{user?.email}</div>
           </div>
         </div>
-        <span className="inline-block mb-3 px-2 py-0.5 rounded-full text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-200">Staff</span>
+        <span className="inline-block mb-3 px-2 py-0.5 rounded-full text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-200">{isAdmin ? 'Admin' : 'Staff'}</span>
         <button onClick={onChangePassword} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-violet-50 hover:text-violet-700 transition-colors mb-1">
           <KeyIcon /><span>Change password</span>
         </button>
@@ -203,8 +225,11 @@ function ChangePasswordModal({ onClose }) {
     setSaving(true);
     try {
       await api().post('/staff/auth/change-password', { current_password: form.current, new_password: form.next });
-      toast.success('Password changed');
+      clearTokens();
+      setAuthToken(null);
+      toast.success('Password changed. Please sign in again.');
       onClose();
+      window.setTimeout(() => window.location.assign('/login'), 600);
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Failed to change password');
     } finally { setSaving(false); }
@@ -2356,6 +2381,12 @@ export default function StaffDashboard() {
   const [loadingChapters, setLoadingChapters] = useState(false);
   const [editingChapterId, setEditingChapterId] = useState(null);
 
+  const handleAccessError = useCallback((error, fallbackMessage) => {
+    const status = error?.response?.status;
+    if (status === 401 || status === 403) return;
+    toast.error(error?.response?.data?.detail || fallbackMessage);
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
@@ -2369,13 +2400,13 @@ export default function StaffDashboard() {
         setClasses(cl.data);
         setStreams(st.data);
         setSubjects(su.data);
-      } catch {
-        toast.error('Failed to load content. Please refresh.');
+      } catch (error) {
+        handleAccessError(error, 'Failed to load content. Please refresh.');
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [handleAccessError]);
 
   const selectSubject = useCallback(async (subj) => {
     setSelectedSubject(subj);
@@ -2390,12 +2421,12 @@ export default function StaffDashboard() {
     try {
       const res = await api().get(`/staff/content/chapters/${subj.id}`);
       setChapters(res.data);
-    } catch {
-      toast.error('Failed to load chapters.');
+    } catch (error) {
+      handleAccessError(error, 'Failed to load chapters.');
     } finally {
       setLoadingChapters(false);
     }
-  }, [boards, classes, streams]);
+  }, [boards, classes, streams, handleAccessError]);
 
   // Refresh chapter list after save to reflect updated indicators
   const handleChapterSaved = useCallback(async (updatedData) => {
@@ -2451,6 +2482,10 @@ export default function StaffDashboard() {
   }, []);
 
   const handleViewChange = (v) => {
+    if (['dashboard', 'analytics', 'users', 'conversations'].includes(v) && user?.role !== 'admin') {
+      toast.error('Dashboard, analytics, users, and conversations are available to administrators only.');
+      return;
+    }
     setView(v);
     setSidebarOpen(false);
     if (v === 'subjects') setSelectedSubject(null);
@@ -2469,8 +2504,7 @@ export default function StaffDashboard() {
   const handleAdminNavigate = useCallback((section) => {
     const v = ADMIN_NAV_MAP[section] || 'dashboard';
     handleViewChange(v);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [handleViewChange]);
 
   const handleLogout = async () => {
     try { await logout(); } catch { /* ignore */ }

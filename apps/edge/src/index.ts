@@ -24,6 +24,11 @@ let healthCache: { backendReachable: boolean; timestamp: number } | null = null;
 const HEALTH_CACHE_TTL_MS = 10_000; // 10 seconds
 
 function isNativeStaffPath(pathname: string): boolean {
+  // Staff content is now D1-backed and must always reach the guarded API
+  // Worker, even while the broader API cutover remains staged. Sending these
+  // routes to Cloud Run would bypass the Worker-native role guard and produce
+  // inconsistent staff data.
+  if (pathname.startsWith('/api/v1/staff/')) return true;
   if (pathname.startsWith('/api/v1/admin/content/')) return true;
   return [
     '/api/v1/admin/login',
@@ -417,10 +422,15 @@ export default {
 
       const cached = await env.ISR_CACHE_KV.get(cacheKey).catch(() => null);
       if (cached) {
-        let payload: { body: string; cachedAt: number } | null = null;
+        let payload: { body: string; cachedAt: number; route?: string } | null = null;
         try { payload = JSON.parse(cached); } catch { /* corrupt — treat as miss */ }
 
-        if (payload) {
+        const expectedRoute = useApiWorker ? 'worker-native' : 'cloud-run-fallback';
+        // Entries written before route provenance existed, or written while
+        // traffic used the other backend, must not be served after a cutover.
+        // Treat them as misses so the route marker always describes the data
+        // origin rather than the current edge configuration.
+        if (payload && payload.route === expectedRoute) {
           const ageS = Math.floor(Date.now() / 1000) - payload.cachedAt;
           const isStale = ageS >= FRESH_TTL_S;
 
@@ -434,7 +444,11 @@ export default {
                 .then(async r => {
                   if (r.status === 200) {
                     const freshBody = await r.text();
-                    const entry = JSON.stringify({ body: freshBody, cachedAt: Math.floor(Date.now() / 1000) });
+                    const entry = JSON.stringify({
+                      body: freshBody,
+                      cachedAt: Math.floor(Date.now() / 1000),
+                      route: r.headers.get('X-Syrabit-Route') ?? expectedRoute,
+                    });
                     return env.ISR_CACHE_KV.put(cacheKey, entry, { expirationTtl: HARD_TTL_S });
                   }
                 })
@@ -448,6 +462,7 @@ export default {
               'Content-Type': 'application/json',
               'X-Cache': isStale ? 'STALE' : 'HIT',
               'X-Cache-Age': String(ageS),
+              'X-Syrabit-Route': expectedRoute,
             },
           });
           const secured = addSecurityHeaders(resp);
@@ -463,14 +478,20 @@ export default {
         : await proxyRequest(request, env.BACKEND_URL, env);
       if (backendResp.status === 200) {
         const body = await backendResp.text();
-        const entry = JSON.stringify({ body, cachedAt: Math.floor(Date.now() / 1000) });
+        const route = backendResp.headers.get('X-Syrabit-Route') ??
+          (useApiWorker ? 'worker-native' : 'cloud-run-fallback');
+        const entry = JSON.stringify({ body, cachedAt: Math.floor(Date.now() / 1000), route });
         ctx.waitUntil(
           env.ISR_CACHE_KV.put(cacheKey, entry, { expirationTtl: HARD_TTL_S })
             .catch(() => { /* KV write failure is non-fatal */ })
         );
         const missResp = new Response(body, {
           status: 200,
-          headers: { 'Content-Type': 'application/json', 'X-Cache': 'MISS' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Cache': 'MISS',
+            'X-Syrabit-Route': route,
+          },
         });
         const secured = addSecurityHeaders(missResp);
         applyCorsHeaders(secured.headers, origin);
