@@ -90,6 +90,28 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     expect(json.status).toBe('healthy');
     expect(json.service).toBe('syrabit-backend');
     expect(json.timestamp).toBeDefined();
+    expect(json.backend_mode).toBe('cloud-run');
+    expect(response.headers.get('X-Syrabit-Health-Backend')).toBe('cloud-run');
+  });
+
+  it('Health endpoint identifies the API Worker service-binding probe', async () => {
+    const env = createMockEnv({
+      API_WORKER: {
+        fetch: vi.fn(async () => new Response(null, { status: 200 })),
+      } as unknown as { fetch(request: Request): Promise<Response> },
+      API_WORKER_LIVE: 'true',
+    });
+
+    const response = await worker.fetch(
+      new Request('https://syrabit.ai/health', { method: 'GET' }),
+      env,
+      createMockCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    const json = await response.json() as Record<string, unknown>;
+    expect(json.backend_mode).toBe('api-worker');
+    expect(response.headers.get('X-Syrabit-Health-Backend')).toBe('api-worker');
   });
 
   it('/robots.txt returns robots content', async () => {
