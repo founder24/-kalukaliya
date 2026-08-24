@@ -7,18 +7,7 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-https://api.syrabit.ai}"
 FRONTEND_URL="${FRONTEND_URL:-https://syrabit.ai}"
-# Resolve the live Cloud Run URL dynamically; fall back to the last-known URL
-# if gcloud is unavailable (local runs without ADC, or older CI images).
-if [[ -z "${DIRECT_URL:-}" ]]; then
-  DIRECT_URL=$(gcloud run services describe syrabit-backend \
-    --region=asia-south1 \
-    --project=blissful-acumen-495019-t6 \
-    --format="value(status.url)" 2>/dev/null || echo "")
-  if [[ -z "$DIRECT_URL" ]]; then
-    DIRECT_URL="https://syrabit-backend-bl6wu3psza-el.a.run.app"
-    echo "⚠  Could not resolve Cloud Run URL via gcloud — using cached fallback"
-  fi
-fi
+API_WORKER_URL="${API_WORKER_URL:-https://syrabit-api-prod.axomxplain.workers.dev}"
 
 PASS=0
 FAIL=0
@@ -63,8 +52,8 @@ done
 
 echo -e "${BOLD}Syrabit Full-Stack Smoke Test${RESET}"
 echo    "  Base URL   : $BASE_URL"
+echo    "  API Worker : $API_WORKER_URL"
 echo    "  Frontend   : $FRONTEND_URL"
-echo    "  Direct GCR : $DIRECT_URL"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. DNS
@@ -92,112 +81,44 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════
 header "2. Cloudflare Worker"
 
-CF_RAY=$(http_headers "$BASE_URL/api/v1/health" | grep -i "^cf-ray:" || echo "")
+CF_RAY=$(http_headers "$BASE_URL/health" | grep -i "^cf-ray:" || echo "")
 assert_nonempty "$CF_RAY" "cf-ray header present (Worker is proxying)"
 
-SERVER=$(http_headers "$BASE_URL/api/v1/health" | grep -i "^server:" | tr -d '\r\n' || echo "")
+SERVER=$(http_headers "$BASE_URL/health" | grep -i "^server:" | tr -d '\r\n' || echo "")
 assert_contains "$SERVER" "cloudflare" "server: cloudflare header"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 3. Backend Health (via Worker)
+# 3. Native API Worker / D1 Health
 # ═══════════════════════════════════════════════════════════════════════════
-header "3. Backend Health (via Worker — $BASE_URL)"
+header "3. Native API Worker / D1 Health ($API_WORKER_URL)"
 
-STATUS=$(http_status "$BASE_URL/api/v1/health")
-assert_eq "$STATUS" "200" "GET /api/v1/health → 200"
+STATUS=$(http_status "$API_WORKER_URL/health")
+assert_eq "$STATUS" "200" "GET API Worker /health → 200"
 
-BODY=$(http_body "$BASE_URL/api/v1/health")
-STATUS_FIELD=$(json_field "$BODY" "d.get('status','')")
-assert_eq "$STATUS_FIELD" "healthy" "/api/v1/health status=healthy"
+BODY=$(http_body "$API_WORKER_URL/health")
+RUNTIME=$(json_field "$BODY" "d.get('runtime','')")
+assert_eq "$RUNTIME" "cloudflare-workers" "API Worker runtime is Cloudflare Workers"
 
-SERVICE=$(json_field "$BODY" "d.get('service','')")
-assert_nonempty "$SERVICE" "/api/v1/health has service field"
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 4. Backend Health (direct Cloud Run — bypasses Worker)
-# ═══════════════════════════════════════════════════════════════════════════
-header "4. Backend Health (direct Cloud Run — $DIRECT_URL)"
-
-D_STATUS=$(http_status "$DIRECT_URL/health" \
-  -H "Authorization: Bearer $(gcloud auth print-identity-token 2>/dev/null || echo 'notoken')" || echo "000")
-if [ "$D_STATUS" = "200" ]; then
-  pass "Direct Cloud Run /health → 200"
-elif [ "$D_STATUS" = "403" ] || [ "$D_STATUS" = "401" ]; then
-  skip "Direct Cloud Run requires IAM auth ($D_STATUS) — expected in production"
-else
-  fail "Direct Cloud Run /health → $D_STATUS"
-fi
+D1_STATUS=$(json_field "$BODY" "d.get('components',{}).get('d1','')")
+assert_eq "$D1_STATUS" "healthy" "API Worker D1 component is healthy"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 5. MongoDB Deep Health (must pass before content tests)
+# 4. Legacy Cloud Run verification
 # ═══════════════════════════════════════════════════════════════════════════
-header "5. MongoDB / Deep Health"
-
-DEEP_BODY=$(http_body "$BASE_URL/api/v1/health/deep")
-MONGO_STATUS=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('mongodb',{}).get('status','')")
-if [ "$MONGO_STATUS" = "healthy" ]; then
-  MONGO_LATENCY=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('mongodb',{}).get('latency_ms','')")
-  pass "MongoDB healthy (${MONGO_LATENCY}ms)"
-else
-  MONGO_ERR=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('mongodb',{}).get('error','')")
-  fail "MongoDB UNHEALTHY — $MONGO_ERR"
-  echo ""
-  echo -e "  ${RED}CRITICAL: MongoDB is not initialized in production.${RESET}"
-  echo    "  Likely causes:"
-  echo    "    1. MONGODB_URI secret not set in GCP Secret Manager (secret name: MONGODB_URI)"
-  echo    "    2. Atlas cluster IP allowlist not allowing Cloud Run outbound IPs"
-  echo    "    3. Atlas cluster paused / credentials rotated"
-  echo    "  Action: check /health/deep for full status, review Cloud Run logs for init error."
-fi
-
-skip "Redis check (Upstash Redis removed — quota tracking moved to MongoDB)"
+header "4. Legacy Cloud Run verification"
+skip "Cloud Run is validated only after a successful backend rollout; native releases do not require it"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 5b. Vector Index Verification (Atlas Search / Vector Search)
+# 5. Legacy MongoDB verification
 # ═══════════════════════════════════════════════════════════════════════════
-header "5b. Vector Index Verification"
+header "5. Legacy MongoDB verification"
+skip "Native API health verifies D1; MongoDB is retained only for the Cloud Run fallback"
 
-# Strategy A: check /health/deep for vector_index or search_index status
-VECTOR_STATUS=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('vector_index',{}).get('status','')")
-SEARCH_STATUS=$(json_field "$DEEP_BODY" "d.get('checks',{}).get('atlas_search',{}).get('status','')")
-
-if [ -n "$VECTOR_STATUS" ] && [ "$VECTOR_STATUS" != "None" ]; then
-  if [ "$VECTOR_STATUS" = "healthy" ] || [ "$VECTOR_STATUS" = "READY" ]; then
-    pass "Vector index: status=${VECTOR_STATUS} (READY)"
-  else
-    fail "Vector index: status=${VECTOR_STATUS} — RAG quality may degrade silently"
-    echo ""
-    echo -e "  ${RED}Vector index is not READY. A degraded index can still return results${RESET}"
-    echo    "  while answer quality collapses. Check Atlas Search → Indexes in the console."
-  fi
-elif [ -n "$SEARCH_STATUS" ] && [ "$SEARCH_STATUS" != "None" ]; then
-  if [ "$SEARCH_STATUS" = "healthy" ] || [ "$SEARCH_STATUS" = "READY" ]; then
-    pass "Atlas Search index: status=${SEARCH_STATUS} (READY)"
-  else
-    fail "Atlas Search index: status=${SEARCH_STATUS} (expected READY)"
-  fi
-else
-  # Strategy B: probe a RAG-dependent endpoint and validate response quality
-  # If the vector index is broken, the RAG search returns empty contexts and the
-  # answer will be generic / very short.
-  RAG_BODY=$(http_body "$BASE_URL/api/v1/chat/" \
-    -X POST \
-    -H "Content-Type: application/json" \
-    -d '{"message":"What is photosynthesis? Answer in one sentence.","lang":"en"}' 2>/dev/null || echo "{}")
-
-  RAG_RESPONSE=$(json_field "$RAG_BODY" "str(d.get('response',''))" 2>/dev/null || echo "")
-  RAG_LEN=${#RAG_RESPONSE}
-
-  if [ "$RAG_LEN" -ge 30 ]; then
-    pass "Vector index proxy check: RAG returned ${RAG_LEN}-char response (index likely READY)"
-  elif [ "$RAG_LEN" -gt 0 ]; then
-    warn "Vector index proxy check: very short RAG response (${RAG_LEN} chars) — index may be degraded"
-    echo "  Response: ${RAG_RESPONSE:0:120}"
-  else
-    warn "Vector index status not exposed in /health/deep — add 'vector_index' check to deep health endpoint"
-    echo "  Tip: add db.getCollection('chapters').getSearchIndexes() probe to /health/deep"
-  fi
-fi
+# ═══════════════════════════════════════════════════════════════════════════
+# 5b. Legacy vector index verification
+# ═══════════════════════════════════════════════════════════════════════════
+header "5b. Legacy vector index verification"
+skip "Native RAG and Vectorize coverage runs in the Cloudflare cutover validation"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 6. Library Bundle (core content test)
@@ -214,7 +135,10 @@ CHAPTERS=$(json_field "$LIB_BODY" "len(d.get('chapters',[]))")
 
 assert_gte "$BOARDS"   1   "boards count"
 assert_gte "$SUBJECTS" 50  "subjects count"
-assert_gte "$CHAPTERS" 200 "chapters count"
+# The active public catalogue has 174 chapters. Keep a meaningful floor that
+# catches an accidental content rollback without treating normal curation as an
+# outage.
+assert_gte "$CHAPTERS" 150 "chapters count"
 
 echo "     boards=$BOARDS  subjects=$SUBJECTS  chapters=$CHAPTERS"
 
@@ -281,7 +205,7 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════
 header "9. Security Headers"
 
-ALL_HEADERS=$(http_headers "$BASE_URL/api/v1/health")
+ALL_HEADERS=$(http_headers "$BASE_URL/api/v1/content/library-bundle")
 
 assert_contains "$ALL_HEADERS" "x-content-type-options" "x-content-type-options header"
 assert_contains "$ALL_HEADERS" "x-frame-options"        "x-frame-options header"
@@ -321,9 +245,9 @@ else
   fail "syrabit.ai/library → $FRONT_LIB"
 fi
 
-# ─── Worker route: syrabit.ai/api/* ───────────────────────────────────────
+# ─── Main frontend domain must not impersonate the API origin ───────────────
 SAWORKER_STATUS=$(http_status "$FRONTEND_URL/api/v1/health")
-assert_eq "$SAWORKER_STATUS" "200" "syrabit.ai/api/v1/health (Worker route on main domain)"
+assert_eq "$SAWORKER_STATUS" "404" "syrabit.ai/api/v1/health stays off the frontend origin"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 12. Edge Worker Health

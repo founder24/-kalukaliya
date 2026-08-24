@@ -31,3 +31,17 @@ look like a failed release.
 **How to apply:** Verify `X-Syrabit-Health-Backend: api-worker` and a healthy
 body when activating native routing. Do not treat the lack of
 `X-Syrabit-Route` on `/health` as a cutover failure.
+
+**Billing-state diagnostic:** A project can report `billingEnabled=true` from
+Cloud Billing while Secret Manager still rejects requests with
+`BILLING_DISABLED`.
+
+**Why:** The billing-link check only shows that an account is attached; it does
+not prove the account is active for Service Control. Once the release identity
+can list services, this error is an account-side billing state, not a
+Cloudflare deployment or Secret Manager IAM failure.
+
+**How to apply:** Keep the combined Cloud Run release blocked and repair the
+GCP billing account or wait for its state to propagate. Use the Cloudflare-only
+release with native traffic activation left off to publish and smoke-test the
+API Worker, D1, edge Worker, and Pages in the meantime.
