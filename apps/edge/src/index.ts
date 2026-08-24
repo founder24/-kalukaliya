@@ -301,6 +301,7 @@ export default {
           service: 'syrabit-backend',
           timestamp: new Date().toISOString(),
           backend_reachable: backendReachable,
+          backend_mode: useApiWorker ? 'api-worker' : 'cloud-run',
         }),
         {
           status: 200,
@@ -311,6 +312,10 @@ export default {
       const healthOrigin = request.headers.get('Origin') || '';
       applyCorsHeaders(securedHealth.headers, healthOrigin);
       securedHealth.headers.set('X-Request-ID', requestId);
+      securedHealth.headers.set(
+        'X-Syrabit-Health-Backend',
+        useApiWorker ? 'api-worker' : 'cloud-run',
+      );
       return securedHealth;
     }
 
