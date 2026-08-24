@@ -319,6 +319,6 @@ jobs:
 
       - name: Frontend is reachable
         run: |
-          status="$(curl -sS -o /dev/null -w '%{http_code}' "${FRONTEND_URL}" --max-time 30)"
+          status="$(curl -sS -L -o /dev/null -w '%{http_code}' "${FRONTEND_URL}" --max-time 30)"
           test "$status" = "200"
           echo "Frontend reachability passed: HTTP ${status}"
