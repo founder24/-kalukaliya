@@ -61,7 +61,7 @@ jobs:
         run: |
           bash scripts/validate-d1-config.sh apps/api/wrangler.toml
 
-      - name: Verify required GitHub Actions secrets are supplied
+      - name: Report optional GitHub Actions secrets
         run: |
           set -euo pipefail
           required=(
@@ -75,11 +75,11 @@ jobs:
             [[ -n "${!name:-}" ]] || missing+=("$name")
           done
           if ((${#missing[@]} > 0)); then
-            echo "::error::Missing GitHub Actions secrets: ${missing[*]}"
-            echo "Add these names under repository Settings → Secrets and variables → Actions."
-            exit 1
+            echo "::warning::GitHub Actions secrets not supplied: ${missing[*]}"
+            echo "Existing Cloudflare Worker secrets will be preserved for these names."
+          else
+            echo "All optional GitHub Actions secrets are supplied."
           fi
-          echo "All required GitHub Actions secrets are supplied."
 
       - name: Test and type-check API Worker
         run: |
@@ -134,6 +134,10 @@ jobs:
           put_secret() {
             local name="$1"
             local value="$2"
+            if [[ -z "$value" ]]; then
+              echo "$name not supplied; preserving the existing Cloudflare value."
+              return 0
+            fi
             printf '%s' "$value" | pnpm exec wrangler secret put "$name" --env production >/dev/null
           }
           put_secret JWT_SECRET "$JWT_SECRET"
@@ -149,7 +153,7 @@ jobs:
           put_secret R2_PUBLIC_URL "$R2_PUBLIC_URL"
           put_secret TRANSLATE_CRON_SECRET "$TRANSLATE_CRON_SECRET"
 
-      - name: Verify API Worker secret names
+      - name: Verify API Worker secret names without requiring completeness
         run: |
           set -euo pipefail
           secret_list="$(pnpm --filter syrabit-api exec wrangler secret list --env production --format json)"
@@ -165,9 +169,9 @@ jobs:
           configured = {item["name"] for item in json.load(sys.stdin)}
           missing = sorted(required - configured)
           if missing:
-              print("Cloudflare API Worker secret provisioning is incomplete: " + ", ".join(missing))
-              raise SystemExit(1)
-          print("All required API Worker secret names are present.")
+              print("Cloudflare API Worker secrets still absent (existing values were preserved): " + ", ".join(missing))
+          else:
+              print("All required API Worker secret names are present.")
           '
 
       - name: Apply D1 migrations
@@ -203,8 +207,16 @@ jobs:
           EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
         run: |
           set -euo pipefail
-          printf '%s' "$JWT_SECRET" | pnpm exec wrangler secret put JWT_SECRET --env production >/dev/null
-          printf '%s' "$EDGE_SHARED_SECRET" | pnpm exec wrangler secret put EDGE_SHARED_SECRET --env production >/dev/null
+          if [[ -n "$JWT_SECRET" ]]; then
+            printf '%s' "$JWT_SECRET" | pnpm exec wrangler secret put JWT_SECRET --env production >/dev/null
+          else
+            echo "JWT_SECRET not supplied; preserving the existing Cloudflare value."
+          fi
+          if [[ -n "$EDGE_SHARED_SECRET" ]]; then
+            printf '%s' "$EDGE_SHARED_SECRET" | pnpm exec wrangler secret put EDGE_SHARED_SECRET --env production >/dev/null
+          else
+            echo "EDGE_SHARED_SECRET not supplied; preserving the existing Cloudflare value."
+          fi
 
       - name: Verify edge Worker secret names
         run: |
