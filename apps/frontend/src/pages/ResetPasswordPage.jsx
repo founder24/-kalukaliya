@@ -14,6 +14,7 @@ import { formatAuthError } from '@/lib/authErrors';
 export default function ResetPasswordPage() {
   const [email, setEmail] = useState('');
   const [token, setToken] = useState('');
+  const [cutoverNonce, setCutoverNonce] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [step, setStep] = useState('request');
@@ -24,6 +25,7 @@ export default function ResetPasswordPage() {
     const urlToken = searchParams.get('token');
     if (urlToken) {
       setToken(urlToken);
+      setCutoverNonce(searchParams.get('cutover_nonce') || '');
       setStep('confirm');
     }
   }, [searchParams]);
@@ -51,7 +53,11 @@ export default function ResetPasswordPage() {
     try {
       await axios.post(
         `${API_BASE}/auth/reset-password/confirm`,
-        { token, password: newPassword },
+        {
+          token,
+          password: newPassword,
+          ...(cutoverNonce ? { cutover_nonce: cutoverNonce } : {}),
+        },
       );
       setStep('done');
       toast.success('Password updated!');

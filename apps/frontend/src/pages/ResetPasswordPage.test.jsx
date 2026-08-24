@@ -4,10 +4,12 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import ResetPasswordPage from './ResetPasswordPage';
 
+const searchParamsState = vi.hoisted(() => ({ value: '' }));
+
 vi.mock('axios');
 vi.mock('react-router-dom', () => ({
   Link: ({ to, children, ...props }) => <a href={to} {...props}>{children}</a>,
-  useSearchParams: () => [new URLSearchParams()],
+  useSearchParams: () => [new URLSearchParams(searchParamsState.value)],
 }));
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -23,6 +25,7 @@ vi.mock('@/lib/authErrors', () => ({
 describe('ResetPasswordPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    searchParamsState.value = '';
   });
 
   it('uses the native Worker password-reset request and confirmation contracts', async () => {
@@ -56,5 +59,27 @@ describe('ResetPasswordPage', () => {
       );
     });
     expect(toast.success).toHaveBeenCalledWith('Password updated!');
+  });
+
+  it('forwards a cutover nonce from a delivered reset link', async () => {
+    searchParamsState.value = 'token=reset-token&cutover_nonce=cutover_nonce_0123456789abcdef';
+    axios.post.mockResolvedValueOnce({ data: {} });
+    render(<ResetPasswordPage />);
+
+    fireEvent.change(screen.getByPlaceholderText('••••••••'), {
+      target: { value: 'new-password' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Password' }));
+
+    await waitFor(() => {
+      expect(axios.post).toHaveBeenCalledWith(
+        '/api/v1/auth/reset-password/confirm',
+        {
+          token: 'reset-token',
+          password: 'new-password',
+          cutover_nonce: 'cutover_nonce_0123456789abcdef',
+        },
+      );
+    });
   });
 });

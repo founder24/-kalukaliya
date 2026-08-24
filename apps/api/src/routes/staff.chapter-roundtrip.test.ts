@@ -1382,6 +1382,16 @@ describe('Staff password change session protection', () => {
     }));
     expect(reset.status).toBe(200);
 
+    const replayedReset = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: resetToken, password: 'reset-password-replay' }),
+    }));
+    expect(replayedReset.status).toBe(400);
+    expect(await replayedReset.json()).toMatchObject({
+      detail: 'Invalid or expired reset token',
+    });
+
     const resetStaleAccess = await sharedWorkerFetch(new Request('http://worker/api/v1/staff/content/subjects', {
       headers: authHeaders(freshTokens.access_token),
     }));
@@ -1411,5 +1421,82 @@ describe('Staff password change session protection', () => {
       headers: authHeaders(postResetTokens.access_token),
     }));
     expect(postResetProfile.status).toBe(200);
+  });
+
+  it('binds a valid cutover nonce into the reset email link without changing the public response', async () => {
+    const originalFetch = globalThis.fetch;
+    let emailPayload: { html?: string } | undefined;
+    globalThis.fetch = async (_input, init) => {
+      emailPayload = JSON.parse(String(init?.body)) as { html?: string };
+      return new Response(JSON.stringify({ id: 'test-reset-email' }), { status: 200 });
+    };
+
+    try {
+      const nonce = 'cutover_nonce_0123456789abcdef';
+      const response = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'staff@example.test', cutover_nonce: nonce }),
+      }));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        message: 'If an account exists, a reset email has been sent',
+      });
+      const href = emailPayload?.html?.match(/href="([^"]+)"/)?.[1];
+      expect(href).toBeTruthy();
+      const resetUrl = new URL(href!.replace('&amp;', '&'));
+      expect(resetUrl.origin).toBe('https://syrabit.ai');
+      expect(resetUrl.pathname).toBe('/reset-password');
+      const token = resetUrl.searchParams.get('token');
+      expect(token).toBeTruthy();
+      expect(resetUrl.searchParams.get('cutover_nonce')).toBe(nonce);
+
+      const mismatchedConfirmation = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token,
+          password: 'nonce-bound-password',
+          cutover_nonce: 'different_nonce_0123456789abcdef',
+        }),
+      }));
+      expect(mismatchedConfirmation.status).toBe(400);
+      expect(await mismatchedConfirmation.json()).toEqual({
+        detail: 'Invalid or expired reset token',
+      });
+
+      const matchingConfirmation = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token,
+          password: 'nonce-bound-password',
+          cutover_nonce: nonce,
+        }),
+      }));
+      expect(matchingConfirmation.status).toBe(200);
+
+      const legacyToken = 'legacy-reset-token';
+      await sharedEnv.DB.prepare(`
+        INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at)
+        VALUES ('legacy-reset-token-id', 'test-staff-user', ?, ?)
+      `).bind(
+        await hashResetToken(legacyToken),
+        Math.floor(Date.now() / 1000) + 3600,
+      ).run();
+      const editedLegacyLink = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: legacyToken,
+          password: 'edited-link-password',
+          cutover_nonce: nonce,
+        }),
+      }));
+      expect(editedLegacyLink.status).toBe(400);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

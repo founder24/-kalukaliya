@@ -24,17 +24,14 @@ let healthCache: { backendReachable: boolean; timestamp: number } | null = null;
 const HEALTH_CACHE_TTL_MS = 10_000; // 10 seconds
 
 function isNativeStaffPath(pathname: string): boolean {
-  // Staff content and its credential/session lifecycle are D1-backed and must
-  // always reach the guarded API Worker, even while the broader API cutover
-  // remains staged. Sending login or profile requests to Cloud Run after a
-  // D1-backed staff migration creates a split-auth failure.
+  // Staff and admin operations are D1-backed and can safely reach the guarded
+  // API Worker while the broader API cutover remains staged. Generic auth and
+  // profile routes are intentionally excluded: the edge cannot determine a
+  // user's role before login, and student accounts must stay on one backend
+  // until API_WORKER_LIVE enables the full cutover.
   if (pathname.startsWith('/api/v1/staff/')) return true;
   if (pathname.startsWith('/api/v1/admin/content/')) return true;
   return [
-    '/api/v1/auth/login',
-    '/api/v1/auth/refresh',
-    '/api/v1/auth/me',
-    '/api/v1/users/me',
     '/api/v1/admin/login',
     '/api/v1/admin/verify',
     '/api/v1/admin/logout',

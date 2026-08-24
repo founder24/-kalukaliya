@@ -296,7 +296,7 @@ authRouter.get('/me', async (c) => {
 // ── POST /v1/auth/reset-password/request ─────────────────────────────────────
 authRouter.post('/reset-password/request', async (c) => {
   const db = createDb(c.env.DB);
-  let body: { email?: string };
+  let body: { email?: string; cutover_nonce?: string };
 
   try {
     body = await c.req.json();
@@ -306,6 +306,13 @@ authRouter.post('/reset-password/request', async (c) => {
 
   const email = body.email?.toLowerCase().trim();
   if (!email) return c.json({ detail: 'email is required' }, 422);
+  // The optional nonce lets the post-deploy validator bind a delivered link to
+  // the reset request it just made. It is deliberately opaque, public-safe
+  // metadata; invalid values are ignored so the public contract stays stable.
+  const cutoverNonce = typeof body.cutover_nonce === 'string'
+    && /^[A-Za-z0-9_-]{16,128}$/.test(body.cutover_nonce)
+    ? body.cutover_nonce
+    : null;
 
   // Always return success to prevent email enumeration
   const user = await db.select({ id: users.id }).from(users)
@@ -320,8 +327,14 @@ authRouter.post('/reset-password/request', async (c) => {
       id: crypto.randomUUID(),
       userId: user.id,
       tokenHash,
+      cutoverNonce,
       expiresAt,
     });
+
+    const resetUrl = new URL('https://syrabit.ai/reset-password');
+    resetUrl.searchParams.set('token', token);
+    if (cutoverNonce) resetUrl.searchParams.set('cutover_nonce', cutoverNonce);
+    const resetHref = resetUrl.toString().replace(/&/g, '&amp;');
 
     await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -333,7 +346,7 @@ authRouter.post('/reset-password/request', async (c) => {
         from: 'Syrabit <noreply@syrabit.ai>',
         to: [email],
         subject: 'Reset your Syrabit password',
-        html: `<p>Click to reset your password: <a href="https://syrabit.ai/reset-password?token=${token}">Reset Password</a></p><p>This link expires in 1 hour.</p><p>If you did not request this, ignore this email.</p>`,
+        html: `<p>Click to reset your password: <a href="${resetHref}">Reset Password</a></p><p>This link expires in 1 hour.</p><p>If you did not request this, ignore this email.</p>`,
       }),
     }).catch(() => { /* non-blocking */ });
   }
@@ -343,7 +356,7 @@ authRouter.post('/reset-password/request', async (c) => {
 
 // ── POST /v1/auth/reset-password/confirm ─────────────────────────────────────
 authRouter.post('/reset-password/confirm', async (c) => {
-  let body: { token?: string; password?: string };
+  let body: { token?: string; password?: string; cutover_nonce?: string };
 
   try {
     body = await c.req.json();
@@ -360,6 +373,10 @@ authRouter.post('/reset-password/confirm', async (c) => {
   }
 
   const tokenHash = await hashResetToken(token);
+  const cutoverNonce = typeof body.cutover_nonce === 'string'
+    && /^[A-Za-z0-9_-]{16,128}$/.test(body.cutover_nonce)
+    ? body.cutover_nonce
+    : null;
   const now = Math.floor(Date.now() / 1000);
 
   // ── Atomic: mark token as used if (and only if) it is unused and not expired.
@@ -368,8 +385,14 @@ authRouter.post('/reset-password/confirm', async (c) => {
   const markResult = await c.env.DB.prepare(`
     UPDATE password_reset_tokens
     SET used_at = ?
-    WHERE token_hash = ? AND used_at IS NULL AND expires_at >= ?
-  `).bind(now, tokenHash, now).run();
+    WHERE token_hash = ?
+      AND used_at IS NULL
+      AND expires_at >= ?
+      AND (
+        (cutover_nonce IS NULL AND ? IS NULL)
+        OR cutover_nonce = ?
+      )
+  `).bind(now, tokenHash, now, cutoverNonce, cutoverNonce).run();
 
   if (markResult.meta.changes === 0) {
     // Either the token doesn't exist, is already used, or has expired.

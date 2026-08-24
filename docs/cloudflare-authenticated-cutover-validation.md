@@ -22,7 +22,10 @@
   non-enumerating `200` response through the public edge and checks the native
   confirmation route's invalid-token `400` response without changing password
   state.
-- API Worker unit tests passed (69 tests) and the API Worker type check passed.
+- When an opt-in disposable reset fixture is configured, it also confirms a
+  delivered reset link, one password change, token replay rejection, and login
+  with the replacement password.
+- API Worker unit tests and the API Worker type check passed.
 
 ### Password-reset route parity
 
@@ -37,6 +40,58 @@ validator checks the request route's non-enumerating `200` response and probes
 the confirmation route with an invalid token, expecting the native
 `Invalid or expired reset token` `400` response. The confirmation probe is
 deliberately non-mutating; a real reset token is never consumed.
+
+### Disposable mailbox password-reset proof
+
+The invalid-token probe is safe for every cutover, but it cannot prove that
+Resend delivered a link or that a real account can complete the reset. The
+full proof is opt-in and uses only a dedicated disposable student fixture. It
+is not enabled by default because this repository has no mailbox-reading
+service.
+
+Create a disposable account and mailbox whose address contains `cutover`
+(for example, a tagged test mailbox), and never use a student or staff
+account. Configure:
+
+- Repository secrets `CUTOVER_RESET_EMAIL` and `CUTOVER_RESET_PASSWORD` for
+  that fixture.
+- A protected GitHub Actions environment named `cutover-reset-delivery`, with
+  a required reviewer and an environment secret named `CUTOVER_RESET_LINK`.
+  The link is short-lived and must never appear in workflow logs, issues, or
+  chat.
+
+When dispatching `.github/workflows/deploy-cloudflare.yml`, choose
+`activate_native=true`, `validate_authenticated=true`, and
+`validate_reset_delivery=true`. After the native deployment and general
+authenticated smoke checks succeed, the workflow:
+
+1. Generates a new random nonce and requests the disposable reset email
+   through the just-deployed public edge.
+2. Pauses before the protected `cutover-reset-delivery` environment.
+3. Requires the reviewer to copy the newly delivered link into that
+   environment's `CUTOVER_RESET_LINK` secret, then approve the job.
+4. Accepts the link only if its `cutover_nonce` matches the nonce from the
+   preceding request, so a link from an older release cannot pass.
+5. Confirms the reset once, expects the exact same token to return
+   `Invalid or expired reset token`, and signs in with
+   `CUTOVER_RESET_PASSWORD`.
+
+The Worker adds the nonce only when the request supplies a valid opaque
+`cutover_nonce`; ordinary reset requests and their non-enumerating response
+remain unchanged. The reset page forwards that query value to the confirmation
+route, and the Worker compares it with the value stored beside the token before
+it allows a nonce-bound reset. A successful run therefore proves:
+
+1. The disposable account can request a reset through the public edge.
+2. A delivered link reaches the Worker-native confirmation contract and
+   changes the disposable account's password.
+3. The token is single-use and cannot change the password a second time.
+
+The matching nonce makes the fixture self-renewing: every release needs a new
+email link, so an already-consumed or stale environment secret fails safely
+instead of validating a later release. If the request, approval, link check,
+confirmation, replay check, or replacement-password login fails, native edge
+routing is rolled back.
 
 ### Cloud Run compatibility fallback
 

@@ -142,10 +142,15 @@ compatibility bridge require them.
    and a failed authenticated check automatically restores
    `API_WORKER_LIVE=false`.
 
-   The validator reports the legacy reset-password compatibility path when it
-   is unavailable, but does not make that known remediation item a permanently
-   failing native-route gate. Full student password-reset parity remains
-   blocked until the follow-up route/client repair is complete.
+   Native password-reset request and confirmation routes are validated through
+   the public edge. For full email-delivery and single-use-token evidence,
+   additionally choose `validate_reset_delivery=true`. That post-deploy gate
+   sends a new request for a disposable fixture, waits for a protected
+   environment approval, and accepts only a delivered link carrying the fresh
+   request nonce. It never uses a real student or staff account, rejects stale
+   links from prior releases, and rolls back native routing if the proof fails.
+   See `docs/cloudflare-authenticated-cutover-validation.md` for the protected
+   environment setup.
 
 ## Stages and rollback
 

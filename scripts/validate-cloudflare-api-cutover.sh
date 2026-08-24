@@ -10,6 +10,9 @@
 # disposable-user access token), RAZORPAY_KEY_SECRET, and
 # RAZORPAY_WEBHOOK_SECRET. The API Worker must be configured with a rzp_test_
 # key; this check refuses to run against live Razorpay credentials.
+# Set CUTOVER_RESET_ONLY=true only in the post-deploy reset job. It requires
+# CUTOVER_RESET_EMAIL, CUTOVER_RESET_LINK, CUTOVER_RESET_PASSWORD, and the
+# fresh CUTOVER_RESET_NONCE emitted by the preceding reset-request job.
 # ADMIN_SESSION_TOKEN is the raw value of a disposable admin-session cookie,
 # not a bearer token. This preserves the production admin-cookie contract
 # through the public edge without exposing the token in logs.
@@ -22,16 +25,23 @@
 # D1-backed route is expected and never uses live Razorpay credentials.
 set -euo pipefail
 
-: "${API_WORKER_URL:?Set API_WORKER_URL to the deployed API Worker URL}"
 : "${PUBLIC_EDGE_URL:?Set PUBLIC_EDGE_URL to the deployed edge API origin}"
-: "${INDEXNOW_INTERNAL_SECRET:?Set INDEXNOW_INTERNAL_SECRET for IndexNow validation}"
-BASE="${API_WORKER_URL%/}/api/v1"
+RESET_ONLY="${CUTOVER_RESET_ONLY:-false}"
+if [[ "$RESET_ONLY" != "true" && "$RESET_ONLY" != "false" ]]; then
+  echo "CUTOVER_RESET_ONLY must be true or false." >&2
+  exit 1
+fi
+if [[ "$RESET_ONLY" != "true" ]]; then
+  : "${API_WORKER_URL:?Set API_WORKER_URL to the deployed API Worker URL}"
+  : "${INDEXNOW_INTERNAL_SECRET:?Set INDEXNOW_INTERNAL_SECRET for IndexNow validation}"
+fi
+BASE="${API_WORKER_URL:-}/api/v1"
 EDGE_BASE="${PUBLIC_EDGE_URL%/}"
 TMP_FILES=()
 cleanup() { rm -f "${TMP_FILES[@]}"; }
 trap cleanup EXIT
 
-if [[ "${CUTOVER_STAGE:-full}" != "public" ]]; then
+if [[ "$RESET_ONLY" != "true" && "${CUTOVER_STAGE:-full}" != "public" ]]; then
   : "${STUDENT_TOKEN:?Set STUDENT_TOKEN for authenticated student checks}"
   : "${STAFF_TOKEN:?Set STAFF_TOKEN for staff workflow checks}"
   : "${ADMIN_SESSION_TOKEN:?Set ADMIN_SESSION_TOKEN for admin workflow checks}"
@@ -330,6 +340,78 @@ edge_native_get() {
   fi
   cat "$output"
 }
+
+run_disposable_reset_check() {
+  local reset_var reset_token reset_confirm_payload reset_login_payload
+  for reset_var in CUTOVER_RESET_EMAIL CUTOVER_RESET_LINK CUTOVER_RESET_PASSWORD CUTOVER_RESET_NONCE; do
+    : "${!reset_var:?Set ${reset_var} for the post-deploy password-reset validation}"
+  done
+  if [[ "${CUTOVER_RESET_EMAIL,,}" != *cutover* ]]; then
+    echo "CUTOVER_RESET_EMAIL must identify a disposable fixture by containing 'cutover'." >&2
+    exit 1
+  fi
+
+  # The preceding workflow job generated the nonce and requested this email.
+  # Requiring the delivered link to echo that nonce prevents an older or
+  # already-consumed link from satisfying a later release's validation.
+  reset_token=$(python3 - "$CUTOVER_RESET_LINK" "$CUTOVER_RESET_NONCE" <<'PY'
+from urllib.parse import parse_qs, urlparse
+import sys
+
+parsed = urlparse(sys.argv[1])
+expected_nonce = sys.argv[2]
+if (
+    parsed.scheme != "https"
+    or parsed.netloc != "syrabit.ai"
+    or parsed.path != "/reset-password"
+    or parsed.fragment
+):
+    raise SystemExit("CUTOVER_RESET_LINK must be an https://syrabit.ai/reset-password link")
+query = parse_qs(parsed.query, keep_blank_values=True)
+tokens = query.get("token", [])
+nonces = query.get("cutover_nonce", [])
+if len(tokens) != 1 or not tokens[0]:
+    raise SystemExit("CUTOVER_RESET_LINK must contain exactly one non-empty token")
+if len(nonces) != 1 or nonces[0] != expected_nonce:
+    raise SystemExit("CUTOVER_RESET_LINK was not issued by this release's reset request")
+print(tokens[0])
+PY
+)
+  export CUTOVER_RESET_TOKEN="$reset_token"
+
+  reset_confirm_payload=$(python3 <<'PY'
+import json, os
+print(json.dumps({
+    "token": os.environ["CUTOVER_RESET_TOKEN"],
+    "password": os.environ["CUTOVER_RESET_PASSWORD"],
+    "cutover_nonce": os.environ["CUTOVER_RESET_NONCE"],
+}))
+PY
+)
+  edge_json_status "/auth/reset-password/confirm" "200" "$reset_confirm_payload" \
+    | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p == {"message":"Password reset successfully"}, p'
+
+  # The same token must be rejected after the first successful claim.
+  edge_json_status "/auth/reset-password/confirm" "400" "$reset_confirm_payload" \
+    | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p == {"detail":"Invalid or expired reset token"}, p'
+
+  reset_login_payload=$(python3 <<'PY'
+import json, os
+print(json.dumps({
+    "email": os.environ["CUTOVER_RESET_EMAIL"],
+    "password": os.environ["CUTOVER_RESET_PASSWORD"],
+}))
+PY
+)
+  edge_json_status "/auth/login" "200" "$reset_login_payload" \
+    | python3 -c 'import json,sys; p=json.load(sys.stdin); assert isinstance(p.get("access_token"), str) and p["access_token"], p'
+  echo "Fresh disposable password-reset delivery, password change, and token replay rejection passed."
+}
+
+if [[ "$RESET_ONLY" == "true" ]]; then
+  run_disposable_reset_check
+  exit 0
+fi
 
 echo "Checking public D1-backed routes at ${BASE}"
 HEALTH_URL="${API_WORKER_URL%/}/health"

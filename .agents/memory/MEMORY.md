@@ -51,3 +51,4 @@
 - [Worker interruption rehearsals](worker-interruption-rehearsals.md) — Remote dev can fail CA trust; use a disposable deployed Worker and D1 for real interruption evidence.
 - [Production seed rollout caveat](syrabit-production-seed-rollout.md) — Full-stack release can stop before API Worker on GCP billing; preserve direct API rollout evidence and repair the gate.
 - [Razorpay cutover validation](razorpay-cutover-validation.md) — Payment release checks must preflight sandbox keys before mutation and couple webhook claims with entitlement writes.
+- [Password reset cutover proof](password-reset-cutover-proof.md) — Bind a freshly delivered disposable reset link to its post-deploy request before treating it as release evidence.

@@ -470,25 +470,39 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     expect(mockCloudRunFetch).toHaveBeenCalled();
   });
 
-  it('routes native login to the API Worker while the broader cutover is staged', async () => {
+  it('keeps student signup, reset, and login on Cloud Run while the cutover is staged', async () => {
     const mockApiFetch = vi.fn(async () =>
-      new Response(JSON.stringify({ detail: 'Invalid credentials' }), {
-        status: 401, headers: { 'Content-Type': 'application/json' },
+      new Response(JSON.stringify({ detail: 'API Worker should not receive staged student auth' }), {
+        status: 500, headers: { 'Content-Type': 'application/json' },
       })
     );
+    const mockCloudRunFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    vi.stubGlobal('fetch', mockCloudRunFetch);
     const env = createMockEnv({
       API_WORKER: { fetch: mockApiFetch } as unknown as { fetch(r: Request): Promise<Response> },
       BACKEND_URL: 'https://cloud-run.example.com',
     });
 
-    const response = await worker.fetch(new Request('https://syrabit.ai/api/v1/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'staff@example.test', password: 'wrong-password' }),
-    }), env as unknown as Env, createMockCtx());
+    const studentAuthRequests = [
+      ['/api/v1/auth/signup', { email: 'student@example.test', password: 'new-password' }],
+      ['/api/v1/auth/reset-password/request', { email: 'student@example.test' }],
+      ['/api/v1/auth/login', { email: 'student@example.test', password: 'new-password' }],
+    ] as const;
+    for (const [path, body] of studentAuthRequests) {
+      const response = await worker.fetch(new Request(`https://syrabit.ai${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }), env as unknown as Env, createMockCtx());
+      expect(response.status).toBe(200);
+    }
 
-    expect(response.status).toBe(401);
-    expect(mockApiFetch).toHaveBeenCalledOnce();
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    expect(mockCloudRunFetch).toHaveBeenCalledTimes(studentAuthRequests.length);
   });
 
   it('API Worker fallback: X-Cloud-Run-Token is not forwarded to caller', async () => {

@@ -178,6 +178,7 @@ export const passwordResetTokens = sqliteTable('password_reset_tokens', {
   id: text('id').primaryKey(),                                        // UUID
   userId: text('user_id').notNull().references(() => users.id),
   tokenHash: text('token_hash').notNull(),                            // SHA-256 of token
+  cutoverNonce: text('cutover_nonce'),                                // post-deploy reset proof binding
   expiresAt: integer('expires_at').notNull(),                         // unix epoch
   usedAt: integer('used_at'),
   createdAt: integer('created_at').default(sql`(unixepoch())`),

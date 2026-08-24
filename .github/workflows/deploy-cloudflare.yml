@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      validate_reset_delivery:
+        description: 'Require a fresh disposable password-reset email proof after deployment'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -67,13 +72,18 @@ jobs:
           bash scripts/validate-d1-config.sh apps/api/wrangler.toml
 
       - name: Require authenticated validation for native activation
-        if: ${{ github.event.inputs.activate_native == 'true' || github.event.inputs.validate_authenticated == 'true' }}
+        if: ${{ github.event.inputs.activate_native == 'true' || github.event.inputs.validate_authenticated == 'true' || github.event.inputs.validate_reset_delivery == 'true' }}
         env:
           ACTIVATE_NATIVE: ${{ github.event.inputs.activate_native }}
           VALIDATE_AUTHENTICATED: ${{ github.event.inputs.validate_authenticated }}
+          VALIDATE_RESET_DELIVERY: ${{ github.event.inputs.validate_reset_delivery }}
         run: |
           test "$ACTIVATE_NATIVE" = 'true'
           test "$VALIDATE_AUTHENTICATED" = 'true'
+          if [ "$VALIDATE_RESET_DELIVERY" = 'true' ]; then
+            test "$ACTIVATE_NATIVE" = 'true'
+            test "$VALIDATE_AUTHENTICATED" = 'true'
+          fi
 
       - name: Report optional GitHub Actions secrets
         run: |
@@ -355,15 +365,93 @@ jobs:
           set -euo pipefail
           bash scripts/validate-cloudflare-api-cutover.sh
 
-  rollback-native-routing:
-    name: Restore Cloud Run routing after failed cutover validation
+  request-reset-email:
+    name: Request fresh disposable password-reset email
     runs-on: ubuntu-latest
     needs: [smoke]
     if: |
       always() &&
       github.event.inputs.activate_native == 'true' &&
       github.event.inputs.validate_authenticated == 'true' &&
-      needs.smoke.result != 'success'
+      github.event.inputs.validate_reset_delivery == 'true' &&
+      needs.smoke.result == 'success'
+    outputs:
+      nonce: ${{ steps.request.outputs.nonce }}
+    env:
+      CUTOVER_RESET_EMAIL: ${{ secrets.CUTOVER_RESET_EMAIL }}
+    steps:
+      - id: request
+        name: Request reset through the newly deployed public edge
+        run: |
+          set -euo pipefail
+          : "${CUTOVER_RESET_EMAIL:?Set CUTOVER_RESET_EMAIL to the disposable fixture}"
+          [[ "${CUTOVER_RESET_EMAIL,,}" == *cutover* ]] || {
+            echo "CUTOVER_RESET_EMAIL must identify a disposable fixture by containing 'cutover'." >&2
+            exit 1
+          }
+          nonce="$(openssl rand -hex 32)"
+          payload="$(CUTOVER_RESET_NONCE="$nonce" python3 -c '
+          import json, os
+          print(json.dumps({
+              "email": os.environ["CUTOVER_RESET_EMAIL"],
+              "cutover_nonce": os.environ["CUTOVER_RESET_NONCE"],
+          }))
+          ')"
+          headers="$(mktemp)"
+          response="$(mktemp)"
+          trap 'rm -f "$headers" "$response"' EXIT
+          status="$(curl --silent --show-error --max-time 30 \
+            --request POST --header 'Content-Type: application/json' --data "$payload" \
+            --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
+            "${PUBLIC_EDGE_URL}/api/v1/auth/reset-password/request")"
+          test "$status" = "200" || { cat "$response"; echo "Fresh reset request failed with ${status}" >&2; exit 1; }
+          grep -qi '^x-syrabit-route: worker-native' "$headers" || {
+            cat "$headers"; echo "Fresh reset request did not use the native Worker route" >&2; exit 1;
+          }
+          python3 - "$response" <<'PY'
+          import json, sys
+          with open(sys.argv[1]) as f:
+              payload = json.load(f)
+          assert payload == {"message": "If an account exists, a reset email has been sent"}, payload
+          PY
+          echo "nonce=$nonce" >> "$GITHUB_OUTPUT"
+          echo "::notice::Fresh reset email requested. Update the protected CUTOVER_RESET_LINK environment secret with the newly delivered link, then approve the next job."
+
+  validate-reset-email:
+    name: Confirm fresh disposable password-reset email
+    runs-on: ubuntu-latest
+    needs: [request-reset-email]
+    if: ${{ needs.request-reset-email.result == 'success' }}
+    environment: cutover-reset-delivery
+    env:
+      CUTOVER_RESET_ONLY: 'true'
+      CUTOVER_RESET_EMAIL: ${{ secrets.CUTOVER_RESET_EMAIL }}
+      CUTOVER_RESET_LINK: ${{ secrets.CUTOVER_RESET_LINK }}
+      CUTOVER_RESET_PASSWORD: ${{ secrets.CUTOVER_RESET_PASSWORD }}
+      CUTOVER_RESET_NONCE: ${{ needs.request-reset-email.outputs.nonce }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm the newly delivered link exactly once
+        run: |
+          set -euo pipefail
+          bash scripts/validate-cloudflare-api-cutover.sh
+
+  rollback-native-routing:
+    name: Restore Cloud Run routing after failed cutover validation
+    runs-on: ubuntu-latest
+    needs: [smoke, validate-reset-email]
+    if: |
+      always() &&
+      github.event.inputs.activate_native == 'true' &&
+      github.event.inputs.validate_authenticated == 'true' &&
+      (
+        needs.smoke.result != 'success' ||
+        (
+          github.event.inputs.validate_reset_delivery == 'true' &&
+          needs.validate-reset-email.result != 'success'
+        )
+      )
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
