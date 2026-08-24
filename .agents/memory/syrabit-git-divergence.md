@@ -24,6 +24,16 @@ The next Replit push (if sandbox allows) will fail due to non-fast-forward.
 Fix: force-push from Replit when sandbox restrictions are lifted,
 OR just keep using the Git Data API pattern for subsequent pushes.
 
+When a task merge exists only in local history, create the reconciliation
+tree against the current GitHub tree and publish it as a new non-force commit.
+If an attachment was present only in the local merge tree and is absent from
+the GitHub base tree, omit that path from the new tree; do not send a null
+deletion entry.
+
+**Why:** the GitHub Trees API can reject a null deletion entry for a path that
+does not exist in the base tree. Omitting the local-only path preserves the
+remote state without publishing user screenshots or blocking the sync.
+
 **Why:** Replit sandbox detects git push as potentially destructive; the only
 non-interactive way to push code from the agent is the REST API.
 
