@@ -470,6 +470,27 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     expect(mockCloudRunFetch).toHaveBeenCalled();
   });
 
+  it('routes native login to the API Worker while the broader cutover is staged', async () => {
+    const mockApiFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ detail: 'Invalid credentials' }), {
+        status: 401, headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    const env = createMockEnv({
+      API_WORKER: { fetch: mockApiFetch } as unknown as { fetch(r: Request): Promise<Response> },
+      BACKEND_URL: 'https://cloud-run.example.com',
+    });
+
+    const response = await worker.fetch(new Request('https://syrabit.ai/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'staff@example.test', password: 'wrong-password' }),
+    }), env as unknown as Env, createMockCtx());
+
+    expect(response.status).toBe(401);
+    expect(mockApiFetch).toHaveBeenCalledOnce();
+  });
+
   it('API Worker fallback: X-Cloud-Run-Token is not forwarded to caller', async () => {
     const mockApiFetch = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), {
