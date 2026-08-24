@@ -311,11 +311,11 @@ jobs:
           test "$status" = "200"
           echo "Public edge health passed: HTTP ${status}"
 
-      - name: Confirm native routing through public edge
+      - name: Confirm service-binding health through public edge
         if: ${{ github.event.inputs.activate_native == 'true' }}
         run: |
-          grep -qi '^x-syrabit-route: worker-native' /tmp/edge.headers
-          echo "Public edge is routing through the D1 API Worker."
+          grep -qi '^x-syrabit-health-backend: api-worker' /tmp/edge.headers
+          echo "Public edge health is probing the D1 API Worker through its service binding."
 
       - name: Frontend is reachable
         run: |
