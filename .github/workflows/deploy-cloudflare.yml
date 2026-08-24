@@ -276,7 +276,9 @@ jobs:
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://api.syrabit.ai' }}
 
       - name: Deploy to Cloudflare Pages
-        run: pnpm --filter syrabit-edge exec wrangler pages deploy apps/frontend/dist --project-name=syrabitfrontend
+        run: |
+          cd apps/edge
+          pnpm exec wrangler pages deploy ../frontend/dist --project-name=syrabitfrontend --commit-dirty=true
 
       - name: Submit URLs to IndexNow
         if: ${{ env.INDEXNOW_SECRET != '' }}
