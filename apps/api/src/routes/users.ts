@@ -29,13 +29,14 @@ import { eq, and, like, sql } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { users, chats, memoryBrain } from '../db/schema';
 import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
+import { ANONYMOUS_MONTHLY_LIMIT, anonUserId, anonymousQuotaKey } from '../services/anonymous';
 import type { Env } from '../types';
 
 export const usersRouter = new Hono<{ Bindings: Env }>();
 
 // Credit limits — authoritative, must match billing pipeline
 const CREDITS_LIMITS: Record<string, number> = {
-  free: 30,
+  free: ANONYMOUS_MONTHLY_LIMIT,
   starter: 500,
   pro: 7000,
   premium: 9999,
@@ -323,12 +324,13 @@ usersRouter.get('/stats', async (c) => {
 // ── GET /credits ───────────────────────────────────────────────────────────────
 
 usersRouter.get('/credits', async (c) => {
-  // Optional auth — anonymous users get free tier limits
+  // Optional auth — anonymous users read the same KV quota reserved by chat.
   const authHeader = c.req.header('Authorization');
   const token = extractBearer(authHeader ?? null);
   let tier = 'free';
   let creditsRemaining = 0;
   let creditsUsed = 0;
+  let anonymousId: string | null = null;
 
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
@@ -350,10 +352,23 @@ usersRouter.get('/credits', async (c) => {
           : Math.max(0, (limit ?? 30) - creditsUsed);
       }
     }
+  } else {
+    anonymousId = anonUserId(c.req.raw);
+    const rawCount = await c.env.RATE_LIMIT_KV.get(anonymousQuotaKey(anonymousId));
+    const parsedCount = rawCount ? Number.parseInt(rawCount, 10) : 0;
+    creditsUsed = Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : 0;
+    const limit = CREDITS_LIMITS.free ?? 30;
+    creditsRemaining = Math.max(0, limit - creditsUsed);
   }
 
   const monthlyLimit = CREDITS_LIMITS[tier] ?? CREDITS_LIMITS.free;
-  return c.json({ credits_remaining: creditsRemaining, credits_used: creditsUsed, monthly_limit: monthlyLimit, tier });
+  return c.json({
+    credits_remaining: creditsRemaining,
+    credits_used: creditsUsed,
+    monthly_limit: monthlyLimit,
+    tier,
+    ...(anonymousId ? { anon_id: anonymousId } : {}),
+  });
 });
 
 // ── POST /saved-subjects/:subjectId ───────────────────────────────────────────

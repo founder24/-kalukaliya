@@ -176,7 +176,8 @@ export default function ChatPage() {
     // throwaway anonymous request first; on the very first paint
     // ``user`` is null even for them.
     if (!authChecked) return;
-    apiClient().get('/user/credits')
+    const creditHeaders = user ? undefined : { 'x-anon-id': getAnonId() };
+    apiClient().get('/user/credits', creditHeaders ? { headers: creditHeaders } : undefined)
       .then((res) => {
         const c = res.data;
         setCredits({ used: c.credits_used ?? c.used ?? 0, limit: c.monthly_limit ?? c.limit ?? null });

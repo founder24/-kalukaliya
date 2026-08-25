@@ -26,6 +26,12 @@ import {
 } from '../db/schema';
 import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import { streamGenerate, AI_MODEL_PRIMARY } from '../services/ai';
+import {
+  ANONYMOUS_MONTHLY_LIMIT,
+  anonUserId,
+  anonymousQuotaKey,
+  currentQuotaPeriod,
+} from '../services/anonymous';
 import type { Env } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -36,7 +42,7 @@ const CONFIDENCE_HIGH = 0.80;
 const CONFIDENCE_LOW  = 0.50;
 
 const MONTHLY_LIMITS: Record<string, number> = {
-  free:    20,
+  free:    ANONYMOUS_MONTHLY_LIMIT,
   starter: 100,
   pro:     500,
   premium: 10_000,
@@ -152,28 +158,9 @@ function sseEvent(payload: unknown): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
 }
 
-function currentPeriod(): string {
-  const d = new Date();
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
 function tryJson<T>(s: string | null | undefined, fallback: T): T {
   if (!s) return fallback;
   try { return JSON.parse(s) as T; } catch { return fallback; }
-}
-
-/**
- * Stable anonymous user ID derived from Cloudflare's CF-Connecting-IP header.
- * Not cryptographically secure — used only for rate-limiting.
- */
-function anonUserId(req: Request): string {
-  const ip =
-    req.headers.get('CF-Connecting-IP') ??
-    req.headers.get('X-Real-IP') ??
-    req.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ??
-    'unknown';
-  // btoa gives a stable base64 string; strip non-alphanumeric for KV key safety
-  return `anon-${btoa(ip).replace(/[^a-z0-9]/gi, '').slice(0, 20)}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -201,7 +188,7 @@ async function reserveAuthQuota(
 
   // noUncheckedIndexedAccess: Record indexing gives number | undefined; fall back to 20
   const limit: number = MONTHLY_LIMITS[tier] ?? 20;
-  const period = currentPeriod();
+  const period = currentQuotaPeriod();
   const now = Math.floor(Date.now() / 1000);
   const rowId = `${userId}:${period}`;
 
@@ -234,14 +221,13 @@ async function reserveAuthQuota(
  * shrink the race window from the full LLM latency (~3-10 s) to the KV round-trip
  * (~ms). Slight over-counting is possible but bounded and acceptable for anon users.
  */
-async function reserveAnonQuota(
+export async function reserveAnonQuota(
   kv: KVNamespace,
   anonId: string,
 ): Promise<{ allowed: boolean; count: number; limit: number }> {
   // noUncheckedIndexedAccess: use literal fallback, not MONTHLY_LIMITS['free']
   const limit: number = MONTHLY_LIMITS['free'] ?? 20;
-  const period = currentPeriod();
-  const key = `anon_quota:${anonId}:${period}`;
+  const key = anonymousQuotaKey(anonId);
   const val = await kv.get(key);
   const count = val ? parseInt(val, 10) : 0;
 
@@ -619,10 +605,10 @@ chatRouter.post('/stream', async (c) => {
   // Helper to release a reserved quota slot on failure paths.
   // The same decrement logic as in reserveAuthQuota's rollback.
   const releaseQuota = (): Promise<void> => {
-    const period = currentPeriod();
+    const period = currentQuotaPeriod();
     const now    = Math.floor(Date.now() / 1000);
     if (isAnon) {
-      const key = `anon_quota:${userId}:${period}`;
+      const key = anonymousQuotaKey(userId);
       return c.env.RATE_LIMIT_KV.get(key).then((val) => {
         const count = Math.max(0, (val ? parseInt(val, 10) : 1) - 1);
         const endOfNextMonth = new Date(
