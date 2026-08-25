@@ -73,7 +73,7 @@ export default function ChatPage() {
   const [input, setInput]                 = useState('');
   const [isLoading, setIsLoading]         = useState(false);
   const [conversationId, setConversationId] = useState(convId || null);
-  const [model, setModel]                 = useState('gemini-2.5-flash');
+  const [model, setModel]                 = useState('workers-ai-fast');
   const [subject, setSubject]             = useState(null);
   const [scopedChapters, setScopedChapters] = useState([]);
   const [credits, setCredits]             = useState({ used: user?.credits_used || 0, limit: user?.credits_limit ?? null });

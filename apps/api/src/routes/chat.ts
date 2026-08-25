@@ -42,8 +42,13 @@ const MONTHLY_LIMITS: Record<string, number> = {
   premium: 10_000,
 };
 
-const CONTEXT_CHAR_CAP = 10_000; // max characters of chapter content per request
-const HISTORY_MSG_CAP  = 10;     // last N messages to load from D1
+// Keep prompts small enough for fast prefill while retaining a useful slice of
+// curriculum content. Chapter-scoped turns bypass semantic retrieval below, so
+// these caps primarily protect the no-context and follow-up paths.
+const CONTEXT_CHAR_CAP       = 8_000;
+const HISTORY_MSG_CAP        = 6;
+const HISTORY_CHARS_PER_MSG  = 350;
+const CHAT_MAX_OUTPUT_TOKENS = 1_536;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -74,6 +79,33 @@ interface ContextChunk {
   subjectId?: string | undefined;
   content: string;
   score: number;
+}
+
+/**
+ * Direct D1 chapter content is an explicit, authoritative context selection.
+ * Empty or missing content must continue through semantic retrieval instead.
+ */
+export function shouldBypassSemanticRetrieval(
+  chapterId: string | undefined,
+  chapterContent: string | null,
+): chapterContent is string {
+  return Boolean(chapterId && chapterContent?.trim());
+}
+
+/**
+ * A failed direct D1 chapter lookup means that exact ID cannot ground the
+ * response. Keep any valid subject scope, but remove the stale chapter scope
+ * so Vectorize can recover a relevant chapter instead of returning llm_only.
+ */
+export function semanticRetrievalFilters(
+  chapterId: string | undefined,
+  subjectId: string | undefined,
+  directChapterLookupAttempted: boolean,
+): Record<string, string> {
+  const filters: Record<string, string> = {};
+  if (chapterId && !directChapterLookupAttempted) filters['chapterId'] = chapterId;
+  if (subjectId) filters['subjectId'] = subjectId;
+  return filters;
 }
 
 interface RagSection {
@@ -352,7 +384,7 @@ async function loadHistory(
 
   return rows
     .reverse()
-    .map(r => `${r.role === 'user' ? 'Student' : 'Syrabit'}: ${r.content.slice(0, 500)}`)
+    .map(r => `${r.role === 'user' ? 'Student' : 'Syrabit'}: ${r.content.slice(0, HISTORY_CHARS_PER_MSG)}`)
     .join('\n');
 }
 
@@ -489,6 +521,9 @@ export const chatRouter = new Hono<{ Bindings: Env }>();
 
 chatRouter.post('/stream', async (c) => {
   const startTime = Date.now();
+  // Durations only: diagnostic timing must never include student prompts,
+  // history, retrieved content, or generated answers.
+  const timings: Record<string, number> = {};
 
   // ── 1. Parse & validate body ────────────────────────────────────────────────
   let body: ChatRequest;
@@ -513,6 +548,7 @@ chatRouter.post('/stream', async (c) => {
   let userRole = 'student';
   let isAnon   = true;
 
+  const authStart = Date.now();
   const token = extractBearer(c.req.header('Authorization') ?? null);
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
@@ -547,6 +583,7 @@ chatRouter.post('/stream', async (c) => {
   } else {
     userId = anonUserId(c.req.raw);
   }
+  timings.auth_ms = Date.now() - authStart;
 
   // ── 3. Language detection ────────────────────────────────────────────────────
   const lang = detectLang(message, body.lang);
@@ -559,6 +596,7 @@ chatRouter.post('/stream', async (c) => {
   let quotaLimit: number;
   let quotaAllowed: boolean;
 
+  const quotaStart = Date.now();
   if (!isAnon) {
     ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
       await reserveAuthQuota(c.env.DB, userId, userTier, userRole));
@@ -576,6 +614,7 @@ chatRouter.post('/stream', async (c) => {
       429,
     );
   }
+  timings.quota_ms = Date.now() - quotaStart;
 
   // Helper to release a reserved quota slot on failure paths.
   // The same decrement logic as in reserveAuthQuota's rollback.
@@ -602,6 +641,7 @@ chatRouter.post('/stream', async (c) => {
 
   // ── 5. RAG: embed + Vectorize + D1 chapter content ─────────────────────────
   const db = createDb(c.env.DB);
+  const retrievalStart = Date.now();
 
   let contextChunks: ContextChunk[] = [];
   let confidenceTier = 'none';
@@ -612,27 +652,64 @@ chatRouter.post('/stream', async (c) => {
   let topSubjectId: string | undefined;
   let history = '';
 
+  // An Ask AI action already supplies the chapter to ground against. Load it
+  // alongside history and avoid an embedding + Vectorize round trip when it is
+  // available. Semantic retrieval remains the fallback for stale/missing IDs.
+  const directChapterId = body.chapter_id?.trim() || undefined;
+  let historyLoaded = false;
+  if (directChapterId) {
+    const [directHistoryResult, directContentResult] = await Promise.allSettled([
+      loadHistory(db, sessionId, userId),
+      fetchChapterContent(db, directChapterId, lang),
+    ]);
+    if (directHistoryResult.status === 'fulfilled') {
+      history = directHistoryResult.value;
+      historyLoaded = true;
+    }
+    const directChapterContent = directContentResult.status === 'fulfilled'
+      ? directContentResult.value
+      : null;
+    if (shouldBypassSemanticRetrieval(directChapterId, directChapterContent)) {
+      const resolvedTitle = body.chapter_name ?? directChapterId;
+      topChapterId = directChapterId;
+      topChapterTitle = resolvedTitle;
+      topSubjectId = body.subject_id ?? undefined;
+      contextChunks = [{
+        chapterId:    directChapterId,
+        chapterTitle: resolvedTitle,
+        ...(topSubjectId !== undefined && { subjectId: topSubjectId }),
+        content:      directChapterContent.slice(0, CONTEXT_CHAR_CAP),
+        // Explicit page context is stronger than a semantic cosine score.
+        score:        1,
+      }];
+      confidenceTier = 'high';
+      topScore = 1;
+      ragPath = 'chapter_direct';
+    }
+  }
+
+  if (contextChunks.length === 0) {
   // Embed + history in parallel — zero extra latency vs serial
   // Pass userId so history is scoped to its owner (session ownership enforcement)
   const [embedResult, historyResult] = await Promise.allSettled([
     embedQuery(c.env.AI, message),
-    loadHistory(db, sessionId, userId),
+    historyLoaded ? Promise.resolve(history) : loadHistory(db, sessionId, userId),
   ]);
 
-  if (historyResult.status === 'fulfilled') history = historyResult.value;
+  if (historyResult.status === 'fulfilled' && !historyLoaded) history = historyResult.value;
 
   if (embedResult.status === 'fulfilled') {
     const embedding = embedResult.value;
 
     try {
-      // Metadata filters to prevent cross-board content leakage
-      // Only filter by fields that are actually indexed in Vectorize ingestion:
-      // subjectId, chapterId, topicId, medium, sourceType, chunkType.
-      // boardId and classId are NOT in the production metadata index — adding
-      // them here would cause the query to fail or return 0 matches silently.
-      const extraFilters: Record<string, string> = {};
-      if (body.chapter_id) extraFilters['chapterId'] = body.chapter_id;
-      if (body.subject_id) extraFilters['subjectId'] = body.subject_id;
+      // A failed direct lookup deliberately drops its stale chapter ID while
+      // retaining subject scope. Vectorize metadata uses only these indexed
+      // fields; board/class metadata is not available in production.
+      const extraFilters = semanticRetrievalFilters(
+        body.chapter_id,
+        body.subject_id,
+        Boolean(directChapterId),
+      );
 
       const matches = await queryVectorize(c.env.VECTORIZE, embedding, lang, extraFilters);
 
@@ -688,18 +765,19 @@ chatRouter.post('/stream', async (c) => {
   } else {
     console.warn('[chat] Embedding failed:', embedResult.reason);
   }
+  }
 
   // Card-context fallback — when RAG missed but chapter_id provided by frontend
-  if (contextChunks.length === 0 && body.chapter_id) {
+  if (contextChunks.length === 0 && directChapterId) {
     try {
-      const content = await fetchChapterContent(db, body.chapter_id, lang);
+      const content = await fetchChapterContent(db, directChapterId, lang);
       if (content) {
-        topChapterId    = body.chapter_id;
+        topChapterId    = directChapterId;
         topChapterTitle = body.chapter_name;
         topSubjectId    = body.subject_id;
         contextChunks   = [{
-          chapterId:    body.chapter_id,
-          chapterTitle: body.chapter_name ?? body.chapter_id,
+          chapterId:    directChapterId,
+          chapterTitle: body.chapter_name ?? directChapterId,
           // exactOptionalPropertyTypes: spread only when defined
           ...(body.subject_id !== undefined && { subjectId: body.subject_id }),
           content:      content.slice(0, CONTEXT_CHAR_CAP),
@@ -714,7 +792,10 @@ chatRouter.post('/stream', async (c) => {
     }
   }
 
+  timings.retrieval_ms = Date.now() - retrievalStart;
+
   // ── 6. System prompt ────────────────────────────────────────────────────────
+  const promptStart = Date.now();
   const contextText = contextChunks
     .map((chunk, i) => `[Source ${i + 1}: ${chunk.chapterTitle}]\n${chunk.content}`)
     .join('\n\n---\n\n');
@@ -731,6 +812,7 @@ chatRouter.post('/stream', async (c) => {
     ...(chapterNameResolved    !== undefined && { chapterName: chapterNameResolved }),
     question: message,
   });
+  timings.prompt_ms = Date.now() - promptStart;
 
   // ── 7. Session ID — mint before streaming so the frontend can adopt it ───────
   // The frontend sends conversation_id: null for new conversations and adopts
@@ -770,6 +852,7 @@ chatRouter.post('/stream', async (c) => {
   const streamTask = (async () => {
     let fullResponse = '';
     let actualModel  = AI_MODEL_PRIMARY;
+    let firstTokenRecorded = false;
 
     try {
       // Always emit source_card first — client uses this to learn the conversation_id
@@ -782,12 +865,16 @@ chatRouter.post('/stream', async (c) => {
         for await (const chunk of streamGenerate(c.env.AI, {
           systemPrompt,
           userMessage: message,
-          maxTokens: 2048,
+          maxTokens: CHAT_MAX_OUTPUT_TOKENS,
         })) {
           // Sentinel chunk carries the resolved model name — do not forward to client
           if (chunk.startsWith('\x00model:')) {
             actualModel = chunk.slice(7);
             continue;
+          }
+          if (!firstTokenRecorded && chunk.length > 0) {
+            timings.first_token_ms = Date.now() - startTime;
+            firstTokenRecorded = true;
           }
           fullResponse += chunk;
           await write({ content: chunk, done: false });
@@ -807,6 +894,7 @@ chatRouter.post('/stream', async (c) => {
 
       // ── syrabit_done event ────────────────────────────────────────────────
       const latencyMs = Date.now() - startTime;
+      timings.total_ms = latencyMs;
       await write({
         content:              '',
         done:                 true,
@@ -827,6 +915,7 @@ chatRouter.post('/stream', async (c) => {
           matched_chapter:  topChapterTitle,
           matched_subject:  topSubjectId,
           web_used:         false,
+           timings_ms:       { ...timings },
         },
       });
 
