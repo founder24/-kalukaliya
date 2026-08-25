@@ -85,24 +85,24 @@ jobs:
             test "$VALIDATE_AUTHENTICATED" = 'true'
           fi
 
-      - name: Report optional GitHub Actions secrets
+      - name: Require API Worker release secrets
         run: |
           set -euo pipefail
           required=(
             JWT_SECRET ADMIN_JWT_SECRET RESET_TOKEN_SECRET EDGE_SHARED_SECRET
             RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET
-            RESEND_API_KEY INDEXNOW_API_KEY INDEXNOW_INTERNAL_SECRET
-            R2_PUBLIC_URL TRANSLATE_CRON_SECRET
+            RESEND_API_KEY
           )
           missing=()
           for name in "${required[@]}"; do
             [[ -n "${!name:-}" ]] || missing+=("$name")
           done
           if ((${#missing[@]} > 0)); then
-            echo "::warning::GitHub Actions secrets not supplied: ${missing[*]}"
-            echo "Existing Cloudflare Worker secrets will be preserved for these names."
+            echo "::error::Required Cloudflare API Worker release secrets are not supplied: ${missing[*]}"
+            echo "Refusing to deploy so native routing cannot expose a partially configured API Worker."
+            exit 1
           else
-            echo "All optional GitHub Actions secrets are supplied."
+            echo "All required Cloudflare API Worker release secrets are supplied."
           fi
 
       - name: Test and type-check API Worker
@@ -155,29 +155,38 @@ jobs:
           TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
         run: |
           set -euo pipefail
-          put_secret() {
+          put_required_secret() {
             local name="$1"
             local value="$2"
-            if [[ -z "$value" ]]; then
-              echo "$name not supplied; preserving the existing Cloudflare value."
-              return 0
-            fi
+            [[ -n "$value" ]] || {
+              echo "::error::$name is required for the native API Worker release."
+              exit 1
+            }
             printf '%s' "$value" | pnpm exec wrangler secret put "$name" --env production >/dev/null
           }
-          put_secret JWT_SECRET "$JWT_SECRET"
-          put_secret ADMIN_JWT_SECRET "$ADMIN_JWT_SECRET"
-          put_secret RESET_TOKEN_SECRET "$RESET_TOKEN_SECRET"
-          put_secret EDGE_SHARED_SECRET "$EDGE_SHARED_SECRET"
-          put_secret RAZORPAY_KEY_ID "$RAZORPAY_KEY_ID"
-          put_secret RAZORPAY_KEY_SECRET "$RAZORPAY_KEY_SECRET"
-          put_secret RAZORPAY_WEBHOOK_SECRET "$RAZORPAY_WEBHOOK_SECRET"
-          put_secret RESEND_API_KEY "$RESEND_API_KEY"
-          put_secret INDEXNOW_API_KEY "$INDEXNOW_API_KEY"
-          put_secret INDEXNOW_INTERNAL_SECRET "$INDEXNOW_INTERNAL_SECRET"
-          put_secret R2_PUBLIC_URL "$R2_PUBLIC_URL"
-          put_secret TRANSLATE_CRON_SECRET "$TRANSLATE_CRON_SECRET"
+          put_optional_secret() {
+            local name="$1"
+            local value="$2"
+            if [[ -n "$value" ]]; then
+              printf '%s' "$value" | pnpm exec wrangler secret put "$name" --env production >/dev/null
+            else
+              echo "$name not supplied; preserving the existing Cloudflare value."
+            fi
+          }
+          put_required_secret JWT_SECRET "$JWT_SECRET"
+          put_required_secret ADMIN_JWT_SECRET "$ADMIN_JWT_SECRET"
+          put_required_secret RESET_TOKEN_SECRET "$RESET_TOKEN_SECRET"
+          put_required_secret EDGE_SHARED_SECRET "$EDGE_SHARED_SECRET"
+          put_required_secret RAZORPAY_KEY_ID "$RAZORPAY_KEY_ID"
+          put_required_secret RAZORPAY_KEY_SECRET "$RAZORPAY_KEY_SECRET"
+          put_required_secret RAZORPAY_WEBHOOK_SECRET "$RAZORPAY_WEBHOOK_SECRET"
+          put_required_secret RESEND_API_KEY "$RESEND_API_KEY"
+          put_optional_secret INDEXNOW_API_KEY "$INDEXNOW_API_KEY"
+          put_optional_secret INDEXNOW_INTERNAL_SECRET "$INDEXNOW_INTERNAL_SECRET"
+          put_optional_secret R2_PUBLIC_URL "$R2_PUBLIC_URL"
+          put_optional_secret TRANSLATE_CRON_SECRET "$TRANSLATE_CRON_SECRET"
 
-      - name: Verify API Worker secret names without requiring completeness
+      - name: Verify required API Worker secret names
         run: |
           set -euo pipefail
           secret_list="$(pnpm --filter syrabit-api exec wrangler secret list --env production --format json)"
@@ -187,19 +196,45 @@ jobs:
           required = {
               "JWT_SECRET", "ADMIN_JWT_SECRET", "RESET_TOKEN_SECRET",
               "EDGE_SHARED_SECRET", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET",
-              "RAZORPAY_WEBHOOK_SECRET", "RESEND_API_KEY", "INDEXNOW_API_KEY",
-              "INDEXNOW_INTERNAL_SECRET", "R2_PUBLIC_URL", "TRANSLATE_CRON_SECRET",
+              "RAZORPAY_WEBHOOK_SECRET", "RESEND_API_KEY",
           }
           configured = {item["name"] for item in json.load(sys.stdin)}
           missing = sorted(required - configured)
           if missing:
-              print("Cloudflare API Worker secrets still absent (existing values were preserved): " + ", ".join(missing))
+              print("Cloudflare API Worker required secrets are absent: " + ", ".join(missing))
+              raise SystemExit(1)
           else:
-              print("All required API Worker secret names are present.")
+              print("All required API Worker secret names are present; values were not read.")
           '
 
       - name: Apply D1 migrations
         run: pnpm --filter syrabit-api exec wrangler d1 migrations apply syrabit-db --remote --env production
+
+      - name: Verify required D1 migration is applied
+        run: |
+          set -euo pipefail
+          applied_migrations="$(pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production --json \
+            --command "SELECT name FROM d1_migrations WHERE name = '0013_reset_token_cutover_nonce.sql'")"
+          if ! printf '%s\n' "$applied_migrations" | python3 -c '
+          import json
+          import sys
+          rows = json.load(sys.stdin)
+          found = any(
+              row.get("name") == "0013_reset_token_cutover_nonce.sql"
+              for result in rows
+              for row in result.get("results", [])
+          )
+          if not found:
+              raise SystemExit(
+                  "Production D1 is missing 0013_reset_token_cutover_nonce.sql; "
+                  "refusing API Worker deployment."
+              )
+          '
+          then
+            echo "::error::Production D1 is missing 0013_reset_token_cutover_nonce.sql; refusing API Worker deployment."
+            exit 1
+          fi
+          echo "Production D1 reset-token cutover migration is applied."
 
       - name: Deploy API Worker
         run: pnpm --filter syrabit-api exec wrangler deploy --env production
