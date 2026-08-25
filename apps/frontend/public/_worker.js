@@ -56,6 +56,10 @@ const SEARCH_BOT_UA = /googlebot|google-extended|googleother|google-inspectionto
 // the BACKEND_BOT_URL env var on the Pages project; falls back to the
 // public api.syrabit.ai hostname if unset.
 const DEFAULT_BACKEND = "https://api.syrabit.ai";
+// The native API Worker owns crawler artifacts under /api/v1/seo. Keep this
+// separate from the bot-render origin: that origin still serves /html/*, while
+// the API Worker is the reliable source for feeds, sitemaps, and LLM indexes.
+const DEFAULT_SEO_BACKEND = "https://syrabit-api-prod.axomxplain.workers.dev";
 
 // Task #640 (extended): sitemap + feed + llms XML/TXT proxy.
 //
@@ -89,33 +93,41 @@ const SEO_PASSTHROUGH_RE =
 // shell) for both root aliases (/sitemap-subjects.xml) and
 // /api/v1/seo/ sub-paths.
 
-// Map a public path to the corresponding backend path. Root sitemaps
-// (/sitemap*.xml) are rewritten to /api/v1/seo/<name>. /api/v1/seo/sitemap*.xml
-// sub-paths are already the correct backend path and need no rewrite.
-// Feeds, llms, robots and .well-known are served at the backend root unchanged.
+function isNativeSeoArtifact(pathname) {
+  return (
+    /^\/api\/v1\/seo\//i.test(pathname) ||
+    /^\/(?:sitemap[a-z0-9_-]*\.xml|feed(?:\/[a-z0-9_-]+)?\.xml|feed\.json|rss\.xml|llms(?:-full)?\.txt|robots\.txt)$/i.test(pathname)
+  );
+}
+
+// Map public aliases to the native API Worker's mounted /api/v1/seo routes.
+// This includes feeds and LLM documents, not just sitemaps. Leaving feed.xml
+// unchanged works only through the edge Worker and fails when Pages talks to
+// the native Worker directly.
 function backendPathForSeo(pathname) {
-  if (/^\/sitemap[a-z0-9_-]*\.xml$/i.test(pathname)) {
-    return "/api/v1/seo" + pathname;
-  }
-  // /api/v1/seo/sitemap*.xml — already the correct backend path, pass through.
-  if (/^\/api\/v1\/seo\/sitemap[a-z0-9_-]*\.xml$/i.test(pathname)) {
+  if (/^\/api\/v1\/seo\//i.test(pathname)) {
     return pathname;
   }
-  // /feed.xml, /feed/<name>.xml, /rss.xml, /llms.txt, /llms-full.txt,
-  // /robots.txt, /.well-known/ai-plugin.json, /<key>-indexnow-<…>.txt
-  // — backend serves all of these at the root path, no rewrite needed.
+  if (isNativeSeoArtifact(pathname)) {
+    return "/api/v1/seo" + pathname;
+  }
   return pathname;
 }
 
 function contentTypeForSeo(pathname) {
   if (/feed\.json$/i.test(pathname)) return "application/feed+json; charset=utf-8";
+  if (/feed(?:\/[a-z0-9_-]+)?\.xml$/i.test(pathname) || /rss\.xml$/i.test(pathname)) {
+    return "application/rss+xml; charset=utf-8";
+  }
   if (/\.json$/i.test(pathname)) return "application/json; charset=utf-8";
   if (/\.txt$/i.test(pathname)) return "text/plain; charset=utf-8";
   return "application/xml; charset=utf-8";
 }
 
 async function sitemapProxy(request, env, url) {
-  const backend = (env && env.BACKEND_BOT_URL) || DEFAULT_BACKEND;
+  const backend = isNativeSeoArtifact(url.pathname)
+    ? ((env && env.SEO_BACKEND_URL) || DEFAULT_SEO_BACKEND)
+    : ((env && env.BACKEND_BOT_URL) || DEFAULT_BACKEND);
   const backendPath = backendPathForSeo(url.pathname);
   const backendUrl = backend + backendPath + url.search;
   const isXml = !/\.txt$/i.test(url.pathname);
@@ -124,7 +136,7 @@ async function sitemapProxy(request, env, url) {
       method: request.method,
       headers: {
         "User-Agent": request.headers.get("User-Agent") || "",
-        "Accept": "application/xml,text/xml,*/*",
+        "Accept": "application/rss+xml,application/xml,text/xml,text/plain,*/*",
         "X-Forwarded-For": request.headers.get("CF-Connecting-IP") || "",
         "X-Sitemap-Proxy": "1",
       },

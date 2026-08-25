@@ -3,6 +3,7 @@
 #
 # Required: API_WORKER_URL, e.g. https://syrabit-api-prod.<account>.workers.dev
 # Required: PUBLIC_EDGE_URL, e.g. https://api.syrabit.ai
+# Optional: PUBLIC_SITE_URL, defaults to https://syrabit.ai
 # Required: INDEXNOW_INTERNAL_SECRET for authenticated IndexNow validation
 # Required for full validation: STUDENT_TOKEN, STAFF_TOKEN,
 # ADMIN_SESSION_TOKEN, EDGE_SHARED_SECRET, and TRANSLATE_CRON_SECRET.
@@ -37,6 +38,7 @@ if [[ "$RESET_ONLY" != "true" ]]; then
 fi
 BASE="${API_WORKER_URL:-}/api/v1"
 EDGE_BASE="${PUBLIC_EDGE_URL%/}"
+SITE_BASE="${PUBLIC_SITE_URL:-https://syrabit.ai}"
 TMP_FILES=()
 cleanup() { rm -f "${TMP_FILES[@]}"; }
 trap cleanup EXIT
@@ -341,6 +343,28 @@ edge_native_get() {
   cat "$output"
 }
 
+public_site_seo_get() {
+  local path="$1"
+  local expected_content_type="$2"
+  local output headers status
+  output=$(mktemp)
+  headers=$(mktemp)
+  TMP_FILES+=("$output" "$headers")
+  status=$(curl --silent --show-error --max-time 30 \
+    --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
+    "${SITE_BASE}${path}")
+  test "$status" = "200" || {
+    cat "$output"; echo "Expected public site 200 for ${path}, got ${status}" >&2; exit 1;
+  }
+  grep -qi "^content-type: ${expected_content_type}" "$headers" || {
+    cat "$headers"; echo "Expected ${expected_content_type} content type for ${path}" >&2; exit 1;
+  }
+  if grep -qi '^x-robots-tag:.*noindex' "$headers"; then
+    cat "$headers"; echo "Crawler artifact must not be marked noindex: ${path}" >&2; exit 1;
+  fi
+  cat "$output"
+}
+
 run_disposable_reset_check() {
   local reset_var reset_token reset_confirm_payload reset_login_payload
   for reset_var in CUTOVER_RESET_EMAIL CUTOVER_RESET_LINK CUTOVER_RESET_PASSWORD CUTOVER_RESET_NONCE; do
@@ -451,6 +475,12 @@ edge_native_get "/sitemap-index.xml" | grep -q '<sitemapindex'
 edge_native_get "/feed.xml" | grep -q '<rss'
 edge_native_get "/feed.json" | python3 -c 'import json,sys; assert json.load(sys.stdin)["version"] == "https://jsonfeed.org/version/1.1"'
 edge_native_get "/llms.txt" | grep -q 'Syrabit.ai'
+
+echo "Checking crawler documents through the public Pages host at ${SITE_BASE}"
+public_site_seo_get "/feed.xml" "application/rss+xml" | grep -q '<rss'
+public_site_seo_get "/feed/notes.xml" "application/rss+xml" | grep -q 'Study Notes'
+public_site_seo_get "/llms.txt" "text/plain" | grep -q 'Full content index'
+public_site_seo_get "/llms-full.txt" "text/plain" | grep -q 'Total indexed chapters'
 
 if [[ -n "${STUDENT_TOKEN:-}" ]]; then
   echo "Checking authenticated student routes through the public edge"
