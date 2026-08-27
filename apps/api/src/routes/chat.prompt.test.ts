@@ -14,7 +14,8 @@ describe('student chat curriculum scope', () => {
     expect(prompt).toContain('Your scope is limited to the Assamboard curriculum');
     expect(prompt).toContain('Do not answer CBSE, NCERT, ICSE');
     expect(prompt).toContain('invite the student to ask an Assam Board equivalent');
-    expect(prompt).toContain('Assamboard Degree curriculum');
+    expect(prompt).toContain('identify Class 11 and Class 12 curriculum as AHSEC');
+    expect(prompt).toContain('identify Degree courses as Assamboard');
   });
 
   it('includes the same restriction in Assamese mode', () => {
@@ -27,6 +28,7 @@ describe('student chat curriculum scope', () => {
 
     expect(prompt).toContain('Assamboard পাঠ্যক্রম');
     expect(prompt).toContain('CBSE, NCERT, ICSE');
-    expect(prompt).toContain('Assamboard Degree পাঠ্যক্রম');
+    expect(prompt).toContain('শ্ৰেণী ১১ আৰু ১২-ৰ পাঠ্যক্রমৰ ব’ৰ্ড হিচাপে AHSEC');
+    expect(prompt).toContain('Degree course-ৰ ব’ৰ্ড হিচাপে Assamboard');
   });
 });

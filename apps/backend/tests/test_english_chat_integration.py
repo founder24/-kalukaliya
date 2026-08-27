@@ -59,7 +59,8 @@ class TestBuildSystemPrompt:
         assert "response must be in English only" in prompt
         assert "only questions about the Assamboard curriculum" in prompt
         assert "Do not answer CBSE, NCERT, ICSE" in prompt
-        assert "Assamboard Degree curriculum" in prompt
+        assert "Class 11 and Class 12 curriculum as AHSEC" in prompt
+        assert "Degree courses as Assamboard" in prompt
 
     def test_english_prompt_with_context_includes_enforcement(self):
         from app.services.chat_service import ChatService
@@ -75,7 +76,8 @@ class TestBuildSystemPrompt:
         assert "student selected English mode" not in prompt
         assert "CBSE, NCERT, ICSE" in prompt
         assert "Assamboard" in prompt
-        assert "Assamboard Degree curriculum" in prompt
+        assert "শ্ৰেণী ১১ আৰু ১২-ৰ পাঠ্যক্রমক AHSEC" in prompt
+        assert "Degree course-ক Assamboard" in prompt
 
     def test_assamese_prompt_with_context_does_not_include_english_enforcement(self):
         from app.services.chat_service import ChatService
