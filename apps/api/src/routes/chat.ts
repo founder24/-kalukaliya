@@ -378,7 +378,7 @@ async function loadHistory(
 // System prompt
 // ─────────────────────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(opts: {
+export function buildSystemPrompt(opts: {
   lang: 'en' | 'as';
   contextText: string;
   history: string;
@@ -414,6 +414,8 @@ function buildSystemPrompt(opts: {
     }
     lines.push(
       '## নিৰ্দেশনা',
+      '- তোমাৰ সহায়তা কেৱল অসম ব’ৰ্ডৰ পাঠ্যক্রম (AHSEC, SEBA আৰু প্ৰসংগত থকা সমৰ্থিত অসম-ভিত্তিক পাঠ্যক্রম) লৈ সীমিত।',
+      '- CBSE, NCERT, ICSE বা অন্য কোনো ব’ৰ্ডৰ প্ৰশ্নৰ উত্তৰ নিদিবা। এনে প্ৰশ্ন আহিলে ভদ্ৰভাৱে কোৱা যে Syrabit কেৱল অসম ব’ৰ্ডৰ পাঠ্যক্রম সমৰ্থন কৰে আৰু অসম ব’ৰ্ডৰ সমতুল্য প্ৰশ্ন সুধিবলৈ কোৱা।',
       '- সম্পূৰ্ণ অসমীয়াত উত্তৰ দিয়া।',
       '- পাঠ্যক্রমৰ প্ৰসংগ থাকিলে তাৰ ওপৰত ভিত্তি কৰি উত্তৰ দিয়া।',
       '- চমু, স্পষ্ট আৰু সহজ ভাষা ব্যৱহাৰ কৰা।',
@@ -445,6 +447,8 @@ function buildSystemPrompt(opts: {
   }
   lines.push(
     '## Instructions',
+    '- Your scope is limited to the Assam Board curriculum (including AHSEC, SEBA, and supported Assam-based curricula represented in the provided context).',
+    '- Do not answer CBSE, NCERT, ICSE, or any other non-Assam-board curriculum questions. If asked, politely explain that Syrabit only supports the Assam Board curriculum and invite the student to ask an Assam Board equivalent.',
     '- Answer clearly and concisely. Use the curriculum context above when available.',
     '- Align answers with Indian board exam syllabus and expected formats.',
     '- Break complex concepts into simple, numbered steps.',
