@@ -74,6 +74,9 @@ jobs:
       - name: Validate required Cloudflare bindings and crawler routes
         run: python3 scripts/validate-cloudflare-release-config.py
 
+      - name: Validate refresh-token bridge release guard
+        run: python3 scripts/test-refresh-token-bridge-guard.py
+
       - name: Require authenticated validation for native activation
         if: ${{ github.event.inputs.activate_native == 'true' || github.event.inputs.validate_authenticated == 'true' || github.event.inputs.validate_reset_delivery == 'true' }}
         env:
@@ -213,34 +216,83 @@ jobs:
       - name: Apply D1 migrations
         run: pnpm --filter syrabit-api exec wrangler d1 migrations apply syrabit-db --remote --env production
 
-      - name: Verify required D1 migration is applied
+      - name: Verify atomic claims and rollout guard migrations are applied
         run: |
           set -euo pipefail
           applied_migrations="$(pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production --json \
-            --command "SELECT name FROM d1_migrations WHERE name = '0013_reset_token_cutover_nonce.sql'")"
+            --command "SELECT name FROM d1_migrations WHERE name IN ('0013_reset_token_cutover_nonce.sql', '0014_atomic_quota_and_refresh_claims.sql', '0015_refresh_claim_rollout_guard.sql') ORDER BY name")"
           if ! printf '%s\n' "$applied_migrations" | python3 -c '
           import json
           import sys
           rows = json.load(sys.stdin)
-          found = any(
-              row.get("name") == "0013_reset_token_cutover_nonce.sql"
+          required = {
+              "0013_reset_token_cutover_nonce.sql",
+              "0014_atomic_quota_and_refresh_claims.sql",
+              "0015_refresh_claim_rollout_guard.sql",
+          }
+          found = {
+              row.get("name")
               for result in rows
               for row in result.get("results", [])
-          )
-          if not found:
+          }
+          missing = sorted(required - found)
+          if missing:
               raise SystemExit(
-                  "Production D1 is missing 0013_reset_token_cutover_nonce.sql; "
-                  "refusing API Worker deployment."
+                  "Production D1 is missing required migrations: "
+                  + ", ".join(missing)
+                  + "; refusing API Worker deployment."
               )
           '
           then
-            echo "::error::Production D1 is missing 0013_reset_token_cutover_nonce.sql; refusing API Worker deployment."
+            echo "::error::Production D1 is missing required atomic claims or rollout guard migrations; refusing API Worker deployment."
             exit 1
           fi
-          echo "Production D1 reset-token cutover migration is applied."
+          echo "Production D1 reset-token, atomic claims, and rollout guard migrations are applied."
+
+      - name: Guard refresh-token bridge cleanup safety window
+        run: |
+          set -euo pipefail
+          rollout_evidence="$(pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production --json \
+            --command "SELECT first_deployed_at, first_version, last_deployed_at, last_version, successful_deployments FROM refresh_claim_rollout WHERE id = 1")"
+          python3 scripts/guard-refresh-token-bridge.py \
+            --auth-source apps/api/src/routes/auth.ts \
+            --evidence-json "$rollout_evidence" \
+            --now "$(date -u +%s)" \
+            --refresh-token-ttl-seconds "$((30 * 24 * 60 * 60))"
 
       - name: Deploy API Worker
         run: pnpm --filter syrabit-api exec wrangler deploy --env production
+
+      - name: Record successful D1-claims deployment
+        env:
+          RELEASE_VERSION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::GitHub did not provide a full commit SHA; refusing to write rollout evidence."
+            exit 1
+          }
+          deployed_at="$(date -u +%s)"
+          pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production \
+            --command "INSERT INTO refresh_claim_rollout
+              (id, first_deployed_at, first_version, last_deployed_at, last_version, successful_deployments)
+              VALUES (1, ${deployed_at}, '${RELEASE_VERSION}', ${deployed_at}, '${RELEASE_VERSION}', 1)
+              ON CONFLICT(id) DO UPDATE SET
+                last_deployed_at = excluded.last_deployed_at,
+                last_version = excluded.last_version,
+                successful_deployments = refresh_claim_rollout.successful_deployments + 1"
+          echo "Recorded successful D1-claims deployment ${RELEASE_VERSION} at ${deployed_at} UTC."
+
+      - name: Report refresh-token bridge cleanup eligibility
+        run: |
+          set -euo pipefail
+          rollout_evidence="$(pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production --json \
+            --command "SELECT first_deployed_at, first_version, last_deployed_at, last_version, successful_deployments FROM refresh_claim_rollout WHERE id = 1")"
+          python3 scripts/guard-refresh-token-bridge.py \
+            --auth-source apps/api/src/routes/auth.ts \
+            --evidence-json "$rollout_evidence" \
+            --now "$(date -u +%s)" \
+            --refresh-token-ttl-seconds "$((30 * 24 * 60 * 60))"
 
   deploy-edge:
     name: Deploy Edge Worker
