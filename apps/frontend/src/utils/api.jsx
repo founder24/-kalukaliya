@@ -23,6 +23,7 @@ const RENDER_API = _RENDER_URL ? `${_RENDER_URL}/api/v1` : API_BASE;
 export const WORKER_API = _WORKER_URL ? `${_WORKER_URL}/api/v1` : API_BASE;
 
 let _authToken = null;
+const ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
 
 export const setAuthToken = (token) => {
   _authToken = token;
@@ -30,7 +31,7 @@ export const setAuthToken = (token) => {
 
 export function getAnonId() {
   let id = localStorage.getItem('syrabit_anon_id');
-  if (!id) {
+  if (!ANON_ID_PATTERN.test(id || '')) {
     const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
     id = 'anon_' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');

@@ -12,6 +12,24 @@ export interface RateLimitResult {
   resetAt: number; // Unix timestamp (ms) when the window resets
 }
 
+const BROWSER_ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
+
+/**
+ * Resolve the anonymous browser identity used by the edge burst limiter.
+ * This mirrors the API Worker's anonymous identity contract so one browser
+ * does not share a global limiter bucket with every other anonymous student.
+ */
+export function anonymousRateLimitIdentity(request: Request): string {
+  const browserId = request.headers.get('x-anon-id')?.trim();
+  if (browserId && BROWSER_ANON_ID_PATTERN.test(browserId)) return browserId;
+
+  // Cloudflare overwrites this connection metadata. Do not trust forwarding
+  // headers supplied by a caller when choosing a rate-limit bucket.
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+  const normalizedIp = ip.trim().toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 55);
+  return `ip_${normalizedIp}`;
+}
+
 /**
  * Check if a request is within the rate limit for a given user + language.
  *

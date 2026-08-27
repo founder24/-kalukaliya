@@ -11,7 +11,11 @@
 
 import { getCorsHeaders, applyCorsHeaders } from './middleware/cors';
 import { verifyJWT } from './middleware/jwt';
-import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
+import {
+  anonymousRateLimitIdentity,
+  checkRateLimit,
+  rateLimitHeaders,
+} from './middleware/rate-limit';
 import { proxyRequest } from './routes/api-proxy';
 import { proxyToApiWorker, pingApiWorkerHealth } from './routes/worker-proxy';
 import { handleContentKV } from './routes/content-kv';
@@ -144,7 +148,10 @@ export default {
       console.warn('RATE_LIMIT_KV binding not available - rate limiting disabled');
     }
     if (env.RATE_LIMIT_KV && url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
-      const userId = request.headers.get('X-User-ID') || 'anonymous';
+      const authenticatedUserId = request.headers.get('X-User-ID') || 'anonymous';
+      const rateLimitIdentity = authenticatedUserId === 'anonymous'
+        ? anonymousRateLimitIdentity(request)
+        : authenticatedUserId;
 
       // Best-effort lang extraction from request body
       let lang = 'en';
@@ -161,8 +168,8 @@ export default {
       // Authenticated users get a much higher hourly limit — their usage is
       // traceable and the backend's monthly quota is the real enforcement gate.
       // Anonymous users keep the strict 30 req/hr burst-protection limit.
-      const edgeLimit = userId === 'anonymous' ? 30 : 500;
-      const rl = await checkRateLimit(env.RATE_LIMIT_KV, userId, lang, edgeLimit);
+      const edgeLimit = authenticatedUserId === 'anonymous' ? 30 : 500;
+      const rl = await checkRateLimit(env.RATE_LIMIT_KV, rateLimitIdentity, lang, edgeLimit);
       if (!rl.allowed) {
         const rlResponse = new Response(
           JSON.stringify({ error: 'Rate limit exceeded' }),

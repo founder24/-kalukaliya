@@ -331,6 +331,7 @@ usersRouter.get('/credits', async (c) => {
   let creditsRemaining = 0;
   let creditsUsed = 0;
   let anonymousId: string | null = null;
+  let authenticated = false;
 
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
@@ -344,6 +345,7 @@ usersRouter.get('/credits', async (c) => {
       }).from(users).where(eq(users.id, payload.sub)).get();
 
       if (user) {
+        authenticated = true;
         tier = user.subscriptionTier ?? 'free';
         creditsUsed = user.creditsUsed ?? 0;
         const limit = CREDITS_LIMITS[tier] ?? CREDITS_LIMITS.free;
@@ -352,7 +354,11 @@ usersRouter.get('/credits', async (c) => {
           : Math.max(0, (limit ?? 30) - creditsUsed);
       }
     }
-  } else {
+  }
+
+  // Match chat's optional-auth behavior: a stale or invalid token is treated
+  // as anonymous, and therefore still resolves the browser's persistent ID.
+  if (!authenticated) {
     anonymousId = anonUserId(c.req.raw);
     const rawCount = await c.env.RATE_LIMIT_KV.get(anonymousQuotaKey(anonymousId));
     const parsedCount = rawCount ? Number.parseInt(rawCount, 10) : 0;

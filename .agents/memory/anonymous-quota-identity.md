@@ -14,5 +14,7 @@ causes the displayed balance to diverge from enforcement.
 
 **How to apply:** Any anonymous endpoint that reads or writes a quota, chat
 history, or credit balance must accept and consistently resolve the browser's
-validated anonymous ID. Keep the edge burst limit as the separate IP-based
-abuse protection.
+validated anonymous ID. Keep the edge burst limit as separate abuse protection.
+When an IP fallback is unavoidable, trust only Cloudflare's overwritten
+`CF-Connecting-IP`; never use caller-controlled forwarding headers as ownership
+or limiter identity.

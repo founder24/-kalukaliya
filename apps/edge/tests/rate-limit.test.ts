@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { checkRateLimit } from '../src/middleware/rate-limit';
+import { anonymousRateLimitIdentity, checkRateLimit } from '../src/middleware/rate-limit';
 
 function createMockKV(store: Record<string, string> = {}) {
   return {
@@ -9,6 +9,41 @@ function createMockKV(store: Record<string, string> = {}) {
 }
 
 describe('Rate Limiting', () => {
+  it('isolates anonymous browsers by validated persistent ID', () => {
+    const request = new Request('https://syrabit.ai/api/v1/chat/stream', {
+      headers: {
+        'x-anon-id': 'anon_0123456789abcdef0123456789abcdef',
+        'CF-Connecting-IP': '203.0.113.9',
+      },
+    });
+
+    expect(anonymousRateLimitIdentity(request))
+      .toBe('anon_0123456789abcdef0123456789abcdef');
+  });
+
+  it('uses the connection IP when the browser ID is missing or malformed', () => {
+    const request = new Request('https://syrabit.ai/api/v1/chat/stream', {
+      headers: {
+        'x-anon-id': 'anon_wrong',
+        'CF-Connecting-IP': '203.0.113.9',
+      },
+    });
+
+    expect(anonymousRateLimitIdentity(request)).toBe('ip_203_0_113_9');
+  });
+
+  it('does not trust caller-controlled forwarding headers for fallback identity', () => {
+    const request = new Request('https://syrabit.ai/api/v1/chat/stream', {
+      headers: {
+        'x-anon-id': 'anon_wrong',
+        'X-Real-IP': '203.0.113.9',
+        'X-Forwarded-For': '198.51.100.44',
+      },
+    });
+
+    expect(anonymousRateLimitIdentity(request)).toBe('ip_unknown');
+  });
+
   it('allows request under limit', async () => {
     const kv = createMockKV();
     const result = await checkRateLimit(kv, 'user-1', 'en', 30);
