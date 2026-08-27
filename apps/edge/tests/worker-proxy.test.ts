@@ -144,4 +144,30 @@ describe('Worker-to-Worker fallback authentication', () => {
     expect(response.headers.get('Content-Type')).toBe('text/event-stream');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
+
+  it('returns 504 when the service binding does not respond before its deadline', async () => {
+    vi.useFakeTimers();
+    let serviceRequest: Request | undefined;
+    const env = {
+      ...createEnv((request) => {
+        serviceRequest = request;
+        return new Promise(() => undefined);
+      }),
+      SERVICE_BINDING_TIMEOUT_MS: '25',
+    } as Env;
+
+    const responsePromise = proxyToApiWorker(
+      new Request('https://syrabit.ai/api/v1/users/me'),
+      env,
+    );
+    await vi.advanceTimersByTimeAsync(26);
+    const response = await responsePromise;
+    vi.useRealTimers();
+
+    expect(response.status).toBe(504);
+    expect(serviceRequest?.signal.aborted).toBe(true);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'Backend service timed out',
+    });
+  });
 });

@@ -353,6 +353,9 @@ export default {
           // Service Binding path — direct Worker-to-Worker call (no OIDC needed)
           const deepReq = new Request(new URL('/health/deep', request.url).toString(), {
             signal: controller.signal,
+            headers: env.EDGE_SHARED_SECRET
+              ? { Authorization: `Bearer ${env.EDGE_SHARED_SECRET}` }
+              : undefined,
           });
           res = await env.API_WORKER!.fetch(deepReq);
         } else {

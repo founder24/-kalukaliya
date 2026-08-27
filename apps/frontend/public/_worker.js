@@ -254,7 +254,22 @@ async function botRender(request, env, url) {
       },
       cf: { cacheTtl: 300, cacheEverything: true },
     });
-    // Backend returns 200 with HTML on hit, non-200 on miss/error.
+    // Preserve a real backend miss as a real 404. This prevents nonexistent
+    // crawler URLs from becoming soft-200 SPA pages or misleading 503s.
+    if (resp.status === 404) {
+      const headers = new Headers({
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Robots-Tag": "noindex, nofollow",
+        "X-Source": "bot-render-not-found",
+      });
+      addSecurityHeaders(headers);
+      return new Response(
+        request.method === "HEAD" ? null : "<!doctype html><title>Not Found</title><h1>Not Found</h1>",
+        { status: 404, headers },
+      );
+    }
+    // Backend returns 200 with HTML on hit, non-200 on outage/error.
     if (resp.status === 200) {
       const ct = resp.headers.get("content-type") || "";
       if (ct.includes("text/html") || ct.includes("application/xhtml")) {

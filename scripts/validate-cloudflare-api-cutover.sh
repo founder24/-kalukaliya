@@ -441,6 +441,18 @@ echo "Checking public D1-backed routes at ${BASE}"
 HEALTH_URL="${API_WORKER_URL%/}/health"
 HEALTH=$(curl --silent --show-error --max-time 30 "$HEALTH_URL")
 printf '%s' "$HEALTH" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["runtime"] == "cloudflare-workers" and p["components"]["d1"] == "healthy", p'
+if [[ -n "${EDGE_SHARED_SECRET:-}" ]]; then
+  DEEP_HEALTH=$(curl --silent --show-error --fail --max-time 30 \
+    -H "Authorization: Bearer ${EDGE_SHARED_SECRET}" "${HEALTH_URL}/deep")
+  printf '%s' "$DEEP_HEALTH" | python3 -c '
+import json,sys
+p=json.load(sys.stdin)
+required={"d1","workers_ai","vectorize","r2","content_kv","rate_limit_kv"}
+assert p["status"] == "healthy" and p["mutation_free"] is True, p
+assert p["missing_bindings"] == [] and set(p["checks"]) == required, p
+assert all(check["status"] == "healthy" for check in p["checks"].values()), p
+'
+fi
 native_get "/content/library-bundle?slim=1" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert all(k in p for k in ("boards","classes","streams","subjects")), p'
 native_get "/content/question-papers" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), list)'
 echo "Checking Worker-native operational and crawler routes"
@@ -481,6 +493,23 @@ public_site_seo_get "/feed.xml" "application/rss+xml" | grep -q '<rss'
 public_site_seo_get "/feed/notes.xml" "application/rss+xml" | grep -q 'Study Notes'
 public_site_seo_get "/llms.txt" "text/plain" | grep -q 'Full content index'
 public_site_seo_get "/llms-full.txt" "text/plain" | grep -q 'Total indexed chapters'
+
+missing_path="/cutover-missing-$(date +%s)-${RANDOM}"
+missing_output=$(mktemp)
+missing_headers=$(mktemp)
+TMP_FILES+=("$missing_output" "$missing_headers")
+missing_status=$(curl --silent --show-error --max-time 30 \
+  -A 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' \
+  -H 'Accept: text/html' --dump-header "$missing_headers" --output "$missing_output" \
+  --write-out '%{http_code}' "${SITE_BASE}${missing_path}")
+test "$missing_status" = "404" || {
+  cat "$missing_output"; echo "Expected public Pages true 404, got ${missing_status}" >&2; exit 1;
+}
+grep -qi '^x-source: bot-render-not-found' "$missing_headers"
+if grep -q 'id="root"\|id="app"' "$missing_output"; then
+  echo "Missing crawler URL returned the SPA shell (soft 404)." >&2
+  exit 1
+fi
 
 if [[ -n "${STUDENT_TOKEN:-}" ]]; then
   echo "Checking authenticated student routes through the public edge"
