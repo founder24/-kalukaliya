@@ -18,6 +18,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { checkRateLimit } from '../src/middleware/rate-limit';
+import { createMockRateLimitNamespace } from './helpers/rate-limit-store';
 
 // Helper to create a delayed KV mock with configurable per-operation delay
 function createDelayedKV(delayMs: number) {
@@ -234,38 +235,26 @@ describe('Latency Comparison Summary', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// Regression-Detection: Import real checkRateLimit and verify 2 KV ops
+// Regression-Detection: real checkRateLimit uses one Durable Object call
 // ═══════════════════════════════════════════════════════════════
 
-describe('Regression: Real checkRateLimit uses exactly 2 KV ops', () => {
-  it('checkRateLimit performs 1 KV.get + 1 KV.put for an allowed request', async () => {
-    const kv = {
-      get: vi.fn(async () => '5'),
-      put: vi.fn(async () => {}),
-    } as unknown as KVNamespace;
-
-    const result = await checkRateLimit(kv, 'user-regression-test', 'en', 30);
+describe('Regression: Real checkRateLimit uses one atomic store call', () => {
+  it('performs one Durable Object call for an allowed request', async () => {
+    const { namespace, fetch } = await createMockRateLimitNamespace(5);
+    const result = await checkRateLimit(namespace, 'user-regression-test', 'en', 30);
 
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(24); // 30 - 5 - 1
-    // Exactly 2 KV operations: 1 get + 1 put
-    expect(kv.get).toHaveBeenCalledTimes(1);
-    expect(kv.put).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('checkRateLimit performs only 1 KV.get when limit is exceeded (no put)', async () => {
-    const kv = {
-      get: vi.fn(async () => '30'),
-      put: vi.fn(async () => {}),
-    } as unknown as KVNamespace;
-
-    const result = await checkRateLimit(kv, 'user-over-limit', 'en', 30);
+  it('performs one Durable Object call when the limit is exceeded', async () => {
+    const { namespace, fetch } = await createMockRateLimitNamespace(30);
+    const result = await checkRateLimit(namespace, 'user-over-limit', 'en', 30);
 
     expect(result.allowed).toBe(false);
     expect(result.remaining).toBe(0);
-    // Only 1 KV.get (no put since request is denied)
-    expect(kv.get).toHaveBeenCalledTimes(1);
-    expect(kv.put).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
 

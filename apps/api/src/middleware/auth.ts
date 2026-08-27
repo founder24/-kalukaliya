@@ -200,6 +200,33 @@ export function revokedRtKey(jti: string): string {
 /** TTL (seconds) to store in KV for a revoked refresh token */
 export const REFRESH_TOKEN_TTL_S = REFRESH_TOKEN_TTL;
 
+/**
+ * Atomically claim a refresh token's jti.
+ *
+ * D1 serializes writes and jti is the primary key, so exactly one concurrent
+ * caller can insert the claim. Storage errors are deliberately allowed to
+ * propagate: refresh must fail closed rather than mint tokens without rotation.
+ */
+export async function claimRefreshToken(
+  db: D1Database,
+  jti: string,
+  userId: string,
+  expiresAt: number,
+): Promise<boolean> {
+  const result = await db.prepare(`
+    INSERT INTO refresh_token_claims (jti, user_id, expires_at, claimed_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT (jti) DO NOTHING
+  `).bind(
+    jti,
+    userId,
+    expiresAt,
+    Math.floor(Date.now() / 1000),
+  ).run();
+
+  return result.meta.changes === 1;
+}
+
 /** Returns false when a token predates an account-wide session cutoff. */
 export async function isSessionValid(
   db: D1Database,

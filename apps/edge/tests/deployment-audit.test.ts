@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import worker from '../src/index';
+import { createMockRateLimitNamespace } from './helpers/rate-limit-store';
 
 // Helper: create a valid HS256 JWT (matches the JWT_SECRET in createMockEnv)
 async function createTestJWT(
@@ -32,6 +33,7 @@ function createMockEnv(overrides: Partial<Env> = {}): Env {
       put: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
     } as unknown as KVNamespace,
+    RATE_LIMIT_DO: createMockRateLimitNamespace().namespace,
     ISR_CACHE_KV: {
       get: vi.fn(async () => null),
       put: vi.fn(async () => {}),
@@ -328,7 +330,7 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     );
   });
 
-  it('Rate-limited chat POST with KV mock - allowed when under limit', async () => {
+  it('Rate-limited chat POST with atomic store - allowed when under limit', async () => {
     const env = createMockEnv();
     const ctx = createMockCtx();
 
@@ -353,19 +355,9 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
   });
 
   it('Rate-limited chat POST - blocked when over limit (returns 429)', async () => {
-    const store: Record<string, string> = {};
-
     const env = createMockEnv({
       ALLOWED_ORIGIN: 'http://localhost:3000',
-      RATE_LIMIT_KV: {
-        get: vi.fn(async (key: string) => {
-          // Return 30 (at limit) for any rate-limit key
-          if (key.startsWith('rl:')) return '30';
-          return store[key] || null;
-        }),
-        put: vi.fn(async () => {}),
-        delete: vi.fn(async () => {}),
-      } as unknown as KVNamespace,
+      RATE_LIMIT_DO: createMockRateLimitNamespace(30).namespace,
     });
     const ctx = createMockCtx();
 
@@ -755,9 +747,10 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
     expect(response.status).toBe(200);
   });
 
-  it('Request without RATE_LIMIT_KV binding skips rate limiting gracefully', async () => {
+  it('fails chat closed when the atomic rate-limit binding is missing', async () => {
     const env = createMockEnv({
-      RATE_LIMIT_KV: undefined as unknown as KVNamespace,
+      RATE_LIMIT_DO: undefined,
+      BACKEND_URL: 'https://cloud-run.example.com',
     });
     const ctx = createMockCtx();
 
@@ -777,10 +770,11 @@ describe('Deployment Audit - Full Worker Fetch Handler', () => {
       body: JSON.stringify({ message: 'hello', lang: 'en' }),
     });
 
-    // Should not throw - should skip rate limiting and proxy to backend
     const response = await worker.fetch(request, env, ctx);
 
-    expect(response.status).not.toBe(429);
-    expect(response.status).not.toBe(500);
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error_code: 'rate_limit_storage_unavailable',
+    });
   });
 });

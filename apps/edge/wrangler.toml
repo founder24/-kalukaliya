@@ -40,6 +40,14 @@ bucket_name = "syrabit-assets"
 [ai]
 binding = "AI"
 
+[[durable_objects.bindings]]
+name = "RATE_LIMIT_DO"
+class_name = "RateLimitDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimitDurableObject"]
+
 [triggers]
 crons = []
 
@@ -68,6 +76,10 @@ bucket_name = "syrabit-assets"
 
 [env.production.ai]
 binding = "AI"
+
+[[env.production.durable_objects.bindings]]
+name = "RATE_LIMIT_DO"
+class_name = "RateLimitDurableObject"
 
 # ── Service Binding: syrabit-api-prod (D1-backed API Worker) ─────────────────
 # Requests to /api/ and /health/ are forwarded to the API Worker via a direct

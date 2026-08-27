@@ -23,6 +23,8 @@ import { handleISR } from './routes/isr';
 import { handleRobots } from './routes/robots';
 import { getIdentityToken } from './utils/google-auth';
 
+export { RateLimitDurableObject } from './middleware/rate-limit';
+
 // Cached health probe state (module-level)
 let healthCache: { backendReachable: boolean; timestamp: number } | null = null;
 const HEALTH_CACHE_TTL_MS = 10_000; // 10 seconds
@@ -144,10 +146,18 @@ export default {
     }
 
     // ── 4. Per-Language Rate Limiting (chat POST only) ──
-    if (!env.RATE_LIMIT_KV && url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
-      console.warn('RATE_LIMIT_KV binding not available - rate limiting disabled');
-    }
-    if (env.RATE_LIMIT_KV && url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
+    if (url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
+      if (!env.RATE_LIMIT_DO) {
+        console.error('RATE_LIMIT_DO binding not available - failing chat closed');
+        const unavailable = jsonResponse(503, {
+          error: 'Rate limit service unavailable',
+          error_code: 'rate_limit_storage_unavailable',
+        });
+        unavailable.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(unavailable.headers, request.headers.get('Origin') || '');
+        return unavailable;
+      }
+
       const authenticatedUserId = request.headers.get('X-User-ID') || 'anonymous';
       const rateLimitIdentity = authenticatedUserId === 'anonymous'
         ? anonymousRateLimitIdentity(request)
@@ -169,7 +179,19 @@ export default {
       // traceable and the backend's monthly quota is the real enforcement gate.
       // Anonymous users keep the strict 30 req/hr burst-protection limit.
       const edgeLimit = authenticatedUserId === 'anonymous' ? 30 : 500;
-      const rl = await checkRateLimit(env.RATE_LIMIT_KV, rateLimitIdentity, lang, edgeLimit);
+      let rl;
+      try {
+        rl = await checkRateLimit(env.RATE_LIMIT_DO, rateLimitIdentity, lang, edgeLimit);
+      } catch (err) {
+        console.error('Atomic rate-limit storage unavailable:', err);
+        const unavailable = jsonResponse(503, {
+          error: 'Rate limit service unavailable',
+          error_code: 'rate_limit_storage_unavailable',
+        });
+        unavailable.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(unavailable.headers, request.headers.get('Origin') || '');
+        return unavailable;
+      }
       if (!rl.allowed) {
         const rlResponse = new Response(
           JSON.stringify({ error: 'Rate limit exceeded' }),

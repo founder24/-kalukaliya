@@ -1,15 +1,21 @@
 /**
- * Per-Language Rate Limiting via Cloudflare KV
+ * Per-Language Rate Limiting via Cloudflare Durable Objects
  *
  * Tracks request counts per (userId + lang) combination using hourly windows.
  * Prevents Assamese quota exhaustion independently from English.
- * Uses KV with TTL for automatic cleanup — no manual expiry management needed.
+ * One Durable Object instance owns each identity/language/window bucket, so
+ * concurrent requests are serialized and cannot overwrite one another.
  */
 
 export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
   resetAt: number; // Unix timestamp (ms) when the window resets
+}
+
+interface RateLimitCommand {
+  limit: number;
+  resetAt: number;
 }
 
 const BROWSER_ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
@@ -33,14 +39,14 @@ export function anonymousRateLimitIdentity(request: Request): string {
 /**
  * Check if a request is within the rate limit for a given user + language.
  *
- * @param kv - Cloudflare KV namespace binding
+ * @param namespace - Durable Object namespace for strongly-consistent counters
  * @param userId - Authenticated user ID (or "anonymous")
  * @param lang - Language code ("en" or "as")
  * @param limit - Max requests per window per language (default: 30 for free tier)
  * @returns RateLimitResult with allowed status, remaining count, and reset time
  */
 export async function checkRateLimit(
-  kv: KVNamespace,
+  namespace: DurableObjectNamespace,
   userId: string,
   lang: string,
   limit: number = 30
@@ -50,39 +56,19 @@ export async function checkRateLimit(
   const windowKey = Math.floor(now / windowMs);
   const resetAt = (windowKey + 1) * windowMs;
 
-  // Key format: rl:{userId}:{lang}:{hourWindow}
-  const key = `rl:${userId}:${lang}:${windowKey}`;
+  const bucket = `rl:${userId}:${lang}:${windowKey}`;
+  const stub = namespace.get(namespace.idFromName(bucket));
+  const response = await stub.fetch('https://rate-limit.internal/check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ limit, resetAt } satisfies RateLimitCommand),
+  });
 
-  // Read current count
-  const current = await kv.get(key);
-  const count = current ? parseInt(current, 10) : 0;
-
-  if (count >= limit) {
-    return {
-      allowed: false,
-      remaining: 0,
-      resetAt,
-    };
+  if (!response.ok) {
+    throw new Error(`Atomic rate-limit store returned ${response.status}`);
   }
 
-  // Increment counter (eventual consistency is acceptable for rate limiting)
-  // TTL of 2 hours ensures cleanup even if window rolls over
-  // Note: Read-then-write with KV eventual consistency means concurrent requests
-  // may both pass the check. This is an accepted trade-off for edge rate limiting:
-  // - KV is eventually consistent across PoPs (100-200ms propagation)
-  // - Two concurrent requests from the same user may both read count=29 and both pass
-  // - Worst case: a user sends ~2x their limit in a single burst before convergence
-  // - For strong consistency guarantees, migrate to Cloudflare Durable Objects
-  //   (single-threaded per-user actor with transactional storage)
-  // The backend's monthly quota (apps/backend/app/api/deps/rate_limit.py) is the
-  // authoritative billing enforcement; this edge limit is only burst protection.
-  await kv.put(key, String(count + 1), { expirationTtl: 7200 });
-
-  return {
-    allowed: true,
-    remaining: limit - count - 1,
-    resetAt,
-  };
+  return response.json<RateLimitResult>();
 }
 
 /**
@@ -97,4 +83,57 @@ export function rateLimitHeaders(result: RateLimitResult, limit: number = 30): R
       'Retry-After': String(Math.ceil((result.resetAt - Date.now()) / 1000)),
     }),
   };
+}
+
+/**
+ * Strongly-consistent hourly counter. A bucket name maps to one object, and a
+ * Durable Object processes requests one at a time. The alarm removes expired
+ * state after the hour rolls over.
+ */
+export class RateLimitDurableObject {
+  constructor(private readonly state: DurableObjectState) {}
+
+  async fetch(request: Request): Promise<Response> {
+    if (request.method !== 'POST') {
+      return Response.json({ error: 'Method not allowed' }, { status: 405 });
+    }
+
+    let command: RateLimitCommand;
+    try {
+      command = await request.json<RateLimitCommand>();
+    } catch {
+      return Response.json({ error: 'Invalid request' }, { status: 400 });
+    }
+
+    if (!Number.isSafeInteger(command.limit) || command.limit < 1
+      || !Number.isFinite(command.resetAt) || command.resetAt <= Date.now()) {
+      return Response.json({ error: 'Invalid rate-limit command' }, { status: 400 });
+    }
+
+    const result = await this.state.storage.transaction(async (txn) => {
+      const count = await txn.get<number>('count') ?? 0;
+      if (count >= command.limit) {
+        return {
+          allowed: false,
+          remaining: 0,
+          resetAt: command.resetAt,
+        } satisfies RateLimitResult;
+      }
+
+      const nextCount = count + 1;
+      await txn.put('count', nextCount);
+      return {
+        allowed: true,
+        remaining: command.limit - nextCount,
+        resetAt: command.resetAt,
+      } satisfies RateLimitResult;
+    });
+    await this.state.storage.setAlarm(command.resetAt);
+
+    return Response.json(result);
+  }
+
+  async alarm(): Promise<void> {
+    await this.state.storage.deleteAll();
+  }
 }

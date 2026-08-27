@@ -55,3 +55,4 @@
 - [Razorpay cutover validation](razorpay-cutover-validation.md) — Payment release checks must preflight sandbox keys before mutation and couple webhook claims with entitlement writes.
 - [Password reset cutover proof](password-reset-cutover-proof.md) — Bind a freshly delivered disposable reset link to its post-deploy request before treating it as release evidence.
 - [Secret Manager fail-closed sync](secret-manager-fail-closed-sync.md) — A blocked secret source can stream nothing into Worker provisioning; verify a non-empty value before writing.
+- [Atomic quota and refresh state](atomic-quota-refresh.md) — D1 owns quota/refresh claims; preserve legacy KV floors/markers through safe rollout windows.

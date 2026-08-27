@@ -55,6 +55,8 @@ interface Env {
   // ── Bindings ──
   R2_BUCKET: R2Bucket;
   RATE_LIMIT_KV: KVNamespace;
+  // Strongly-consistent per-bucket counters. Chat fails closed when absent.
+  RATE_LIMIT_DO?: DurableObjectNamespace;
   ISR_CACHE_KV: KVNamespace;
   // Pre-seeded content HTML store (written by backend content pipeline).
   // Keys: {board}/{class_level}/{subject}/{chapter}/{page_type}

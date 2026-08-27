@@ -13,7 +13,7 @@
  *   5. Emit source_card SSE event before LLM tokens
  *   6. Stream via Workers AI (primary: @cf/zai-org/glm-4.7-flash, fallback: @cf/qwen/qwen3-30b-a3b-fp8)
  *   7. Emit syrabit_done event (latency, model, route_trace, credits)
- *   8. waitUntil: persist user+assistant messages to D1, increment quota
+ *   8. waitUntil: persist user+assistant messages to D1 and update stats
  */
 
 import { Hono } from 'hono';
@@ -173,10 +173,12 @@ function tryJson<T>(s: string | null | undefined, fallback: T): T {
  * are a single statement — eliminates the check-then-increment race window that
  * would allow parallel requests to all pass the same count.
  *
- * If the new count exceeds the limit the increment is rolled back and the caller
- * receives allowed:false.  admin/staff bypass: always allowed without touching D1.
+ * The conditional UPSERT only increments while the current count is below the
+ * limit. This avoids an over-limit increment followed by a competing rollback,
+ * which could otherwise release another request's reservation.
+ * admin/staff bypass: always allowed without touching D1.
  */
-async function reserveAuthQuota(
+export async function reserveAuthQuota(
   d1: D1Database,
   userId: string,
   tier: string,
@@ -192,58 +194,135 @@ async function reserveAuthQuota(
   const now = Math.floor(Date.now() / 1000);
   const rowId = `${userId}:${period}`;
 
-  // Single atomic UPSERT — safe under concurrent Workers isolates
+  // Single conditional atomic UPSERT — safe under concurrent Workers isolates.
+  // When the WHERE clause is false SQLite returns no row and does not change
+  // the counter.
   const result = await d1.prepare(`
     INSERT INTO quota_usage (id, user_id, period, count, updated_at)
     VALUES (?, ?, ?, 1, ?)
     ON CONFLICT (user_id, period) DO UPDATE
       SET count = quota_usage.count + 1, updated_at = excluded.updated_at
+      WHERE quota_usage.count < ?
     RETURNING count
-  `).bind(rowId, userId, period, now).first<{ count: number }>();
+  `).bind(rowId, userId, period, now, limit).first<{ count: number }>();
 
-  const newCount = result?.count ?? 1;
-
-  if (newCount > limit) {
-    // Roll back — keep the row consistent; don't expose a slot that won't be used
-    await d1.prepare(
-      'UPDATE quota_usage SET count = count - 1, updated_at = ? WHERE user_id = ? AND period = ? AND count > 0',
-    ).bind(now, userId, period).run();
-    return { allowed: false, count: newCount - 1, limit };
+  if (!result) {
+    const current = await d1.prepare(
+      'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(userId, period).first<{ count: number }>();
+    return { allowed: false, count: current?.count ?? limit, limit };
   }
 
-  // Slot reserved; expose the pre-increment count so callers can display "messages used"
-  return { allowed: true, count: newCount - 1, limit };
+  // Slot reserved; expose the pre-increment count so callers can display
+  // "messages used".
+  return { allowed: true, count: result.count - 1, limit };
 }
 
 /**
  * Reserve one quota slot for an anonymous user before invoking the LLM.
- * KV does not support atomic CAS, so we read → write before the LLM call to
- * shrink the race window from the full LLM latency (~3-10 s) to the KV round-trip
- * (~ms). Slight over-counting is possible but bounded and acceptable for anon users.
+ * D1 performs the conditional insert/increment atomically. Anonymous users are
+ * not represented in users, so their browser identity is stored directly in a
+ * separate D1 counter.
  */
 export async function reserveAnonQuota(
-  kv: KVNamespace,
+  d1: D1Database,
+  legacyKv: KVNamespace,
   anonId: string,
 ): Promise<{ allowed: boolean; count: number; limit: number }> {
-  // noUncheckedIndexedAccess: use literal fallback, not MONTHLY_LIMITS['free']
   const limit: number = MONTHLY_LIMITS['free'] ?? 20;
-  const key = anonymousQuotaKey(anonId);
-  const val = await kv.get(key);
-  const count = val ? parseInt(val, 10) : 0;
+  const period = currentQuotaPeriod();
+  const now = Math.floor(Date.now() / 1000);
+  const legacyRaw = await legacyKv.get(anonymousQuotaKey(anonId));
+  const legacyCount = Math.min(limit, Math.max(
+    0,
+    Number.parseInt(legacyRaw ?? '0', 10) || 0,
+  ));
 
-  if (count >= limit) {
-    return { allowed: false, count, limit };
+  const result = await d1.prepare(`
+    INSERT INTO anonymous_quota_usage (anon_id, period, count, updated_at)
+    SELECT ?, ?, ? + 1, ?
+    WHERE ? < ?
+    ON CONFLICT (anon_id, period) DO UPDATE
+      SET count = MAX(anonymous_quota_usage.count, ?) + 1,
+          updated_at = excluded.updated_at
+      WHERE MAX(anonymous_quota_usage.count, ?) < ?
+    RETURNING count
+  `).bind(
+    anonId,
+    period,
+    legacyCount,
+    now,
+    legacyCount,
+    limit,
+    legacyCount,
+    legacyCount,
+    limit,
+  ).first<{ count: number }>();
+
+  if (!result) {
+    // Seed/preserve the legacy floor even when it is already at the limit.
+    const current = await d1.prepare(`
+      INSERT INTO anonymous_quota_usage (anon_id, period, count, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT (anon_id, period) DO UPDATE SET
+        count = MAX(anonymous_quota_usage.count, excluded.count),
+        updated_at = excluded.updated_at
+      RETURNING count
+    `).bind(anonId, period, legacyCount, now).first<{ count: number }>();
+    return { allowed: false, count: current?.count ?? limit, limit };
   }
 
-  // Reserve slot before LLM — expire at start of the month after next
-  const now = new Date();
-  const endOfNextMonth = new Date(now.getUTCFullYear(), now.getUTCMonth() + 2, 1);
-  const ttl = Math.max(3600, Math.floor((endOfNextMonth.getTime() - now.getTime()) / 1000));
-  await kv.put(key, String(count + 1), { expirationTtl: ttl });
-
-  return { allowed: true, count, limit };
+  return { allowed: true, count: result.count - 1, limit };
 }
 
+/** Read anonymous usage while atomically preserving legacy KV as a floor. */
+export async function getAnonQuotaUsage(
+  d1: D1Database,
+  legacyKv: KVNamespace,
+  anonId: string,
+): Promise<number> {
+  const period = currentQuotaPeriod();
+  const now = Math.floor(Date.now() / 1000);
+  const legacyRaw = await legacyKv.get(anonymousQuotaKey(anonId));
+  const legacyCount = Math.min(ANONYMOUS_MONTHLY_LIMIT, Math.max(
+    0,
+    Number.parseInt(legacyRaw ?? '0', 10) || 0,
+  ));
+  const row = await d1.prepare(`
+    INSERT INTO anonymous_quota_usage (anon_id, period, count, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT (anon_id, period) DO UPDATE SET
+      count = MAX(anonymous_quota_usage.count, excluded.count),
+      updated_at = excluded.updated_at
+    RETURNING count
+  `).bind(anonId, period, legacyCount, now).first<{ count: number }>();
+  return row?.count ?? legacyCount;
+}
+
+/** Release one previously reserved slot with a single atomic decrement. */
+export async function releaseQuotaReservation(
+  d1: D1Database,
+  userId: string,
+  isAnon: boolean,
+): Promise<void> {
+  const period = currentQuotaPeriod();
+  const now = Math.floor(Date.now() / 1000);
+
+  if (isAnon) {
+    await d1.prepare(
+      `UPDATE anonymous_quota_usage
+       SET count = count - 1, updated_at = ?
+       WHERE anon_id = ? AND period = ? AND count > 0`,
+    ).bind(now, userId, period).run();
+    return;
+  }
+
+  await d1.prepare(
+    `UPDATE quota_usage
+     SET count = count - 1, updated_at = ?
+     WHERE user_id = ? AND period = ? AND count > 0`,
+  ).bind(now, userId, period).run();
+}
 /**
  * Update per-user lifetime stats in the users table after a successful stream.
  * quota_usage was already incremented atomically in reserveAuthQuota before streaming,
@@ -546,30 +625,39 @@ chatRouter.post('/stream', async (c) => {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
     // Require an access token specifically — reject refresh tokens
     if (payload?.sub && payload.type === 'access') {
-      // Load fresh user from D1 to catch deleted/deactivated accounts.
-      // If the user row is missing we fall through to anon rather than
-      // continuing as an authenticated user with a stale token.
-      const db = createDb(c.env.DB);
-      const row = await db
-        .select({ subscriptionTier: users.subscriptionTier, role: users.role, deletedAt: users.deletedAt })
-        .from(users)
-        .where(eq(users.id, payload.sub))
-        .get();
+      let row: {
+        subscriptionTier: string | null;
+        role: string | null;
+        deletedAt: number | null;
+      } | undefined;
+      let sessionValid = false;
+      try {
+        const db = createDb(c.env.DB);
+        row = await db
+          .select({ subscriptionTier: users.subscriptionTier, role: users.role, deletedAt: users.deletedAt })
+          .from(users)
+          .where(eq(users.id, payload.sub))
+          .get();
+        sessionValid = Boolean(row)
+          && await isSessionValid(c.env.DB, payload.sub, payload.iat);
+      } catch (err) {
+        console.error('[chat] authentication storage unavailable:', err);
+        return c.json({
+          detail: 'Chat authentication service is temporarily unavailable. Please try again.',
+          error_code: 'auth_storage_unavailable',
+        }, 503);
+      }
 
-      // Reject soft-deleted users (deletedAt non-null) as well as missing rows
-      if (row && !row.deletedAt
-        && await isSessionValid(c.env.DB, payload.sub, payload.iat)) {
+      if (row && !row.deletedAt && sessionValid) {
         authedUserId = payload.sub;
         userId       = payload.sub;
         userTier     = row.subscriptionTier ?? 'free';
         userRole     = row.role ?? 'student';
         isAnon       = false;
       } else {
-        // User deleted or not found — treat as anon
         userId = anonUserId(c.req.raw);
       }
     } else {
-      // Expired / invalid / non-access token → treat as anon
       userId = anonUserId(c.req.raw);
     }
   } else {
@@ -589,12 +677,20 @@ chatRouter.post('/stream', async (c) => {
   let quotaAllowed: boolean;
 
   const quotaStart = Date.now();
-  if (!isAnon) {
-    ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-      await reserveAuthQuota(c.env.DB, userId, userTier, userRole));
-  } else {
-    ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-      await reserveAnonQuota(c.env.RATE_LIMIT_KV, userId));
+  try {
+    if (!isAnon) {
+      ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
+        await reserveAuthQuota(c.env.DB, userId, userTier, userRole));
+    } else {
+      ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
+        await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId));
+    }
+  } catch (err) {
+    console.error('[chat] quota storage unavailable:', err);
+    return c.json({
+      detail: 'Chat quota service is temporarily unavailable. Please try again.',
+      error_code: 'quota_storage_unavailable',
+    }, 503);
   }
 
   if (!quotaAllowed) {
@@ -609,27 +705,8 @@ chatRouter.post('/stream', async (c) => {
   timings.quota_ms = Date.now() - quotaStart;
 
   // Helper to release a reserved quota slot on failure paths.
-  // The same decrement logic as in reserveAuthQuota's rollback.
-  const releaseQuota = (): Promise<void> => {
-    const period = currentQuotaPeriod();
-    const now    = Math.floor(Date.now() / 1000);
-    if (isAnon) {
-      const key = anonymousQuotaKey(userId);
-      return c.env.RATE_LIMIT_KV.get(key).then((val) => {
-        const count = Math.max(0, (val ? parseInt(val, 10) : 1) - 1);
-        const endOfNextMonth = new Date(
-          new Date().getUTCFullYear(),
-          new Date().getUTCMonth() + 2,
-          1,
-        );
-        const ttl = Math.max(3600, Math.floor((endOfNextMonth.getTime() - Date.now()) / 1000));
-        return c.env.RATE_LIMIT_KV.put(key, String(count), { expirationTtl: ttl });
-      });
-    }
-    return c.env.DB.prepare(
-      'UPDATE quota_usage SET count = count - 1, updated_at = ? WHERE user_id = ? AND period = ? AND count > 0',
-    ).bind(now, userId, period).run().then(() => undefined);
-  };
+  const releaseQuota = (): Promise<void> =>
+    releaseQuotaReservation(c.env.DB, userId, isAnon);
 
   // ── 5. RAG: embed + Vectorize + D1 chapter content ─────────────────────────
   const db = createDb(c.env.DB);

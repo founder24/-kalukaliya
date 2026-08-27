@@ -29,7 +29,8 @@ import { eq, and, like, sql } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { users, chats, memoryBrain } from '../db/schema';
 import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
-import { ANONYMOUS_MONTHLY_LIMIT, anonUserId, anonymousQuotaKey } from '../services/anonymous';
+import { ANONYMOUS_MONTHLY_LIMIT, anonUserId } from '../services/anonymous';
+import { getAnonQuotaUsage } from './chat';
 import type { Env } from '../types';
 
 export const usersRouter = new Hono<{ Bindings: Env }>();
@@ -324,7 +325,7 @@ usersRouter.get('/stats', async (c) => {
 // ── GET /credits ───────────────────────────────────────────────────────────────
 
 usersRouter.get('/credits', async (c) => {
-  // Optional auth — anonymous users read the same KV quota reserved by chat.
+  // Optional auth — anonymous users read the same D1 quota reserved by chat.
   const authHeader = c.req.header('Authorization');
   const token = extractBearer(authHeader ?? null);
   let tier = 'free';
@@ -360,9 +361,10 @@ usersRouter.get('/credits', async (c) => {
   // as anonymous, and therefore still resolves the browser's persistent ID.
   if (!authenticated) {
     anonymousId = anonUserId(c.req.raw);
-    const rawCount = await c.env.RATE_LIMIT_KV.get(anonymousQuotaKey(anonymousId));
-    const parsedCount = rawCount ? Number.parseInt(rawCount, 10) : 0;
-    creditsUsed = Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : 0;
+    creditsUsed = Math.max(
+      0,
+      await getAnonQuotaUsage(c.env.DB, c.env.RATE_LIMIT_KV, anonymousId),
+    );
     const limit = CREDITS_LIMITS.free ?? 30;
     creditsRemaining = Math.max(0, limit - creditsUsed);
   }

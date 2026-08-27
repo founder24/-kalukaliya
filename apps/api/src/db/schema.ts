@@ -236,6 +236,30 @@ export const quotaUsage = sqliteTable('quota_usage', {
   uniqueIndex('quota_user_period_idx').on(t.userId, t.period),
 ]);
 
+// Anonymous quota reservations are kept in D1 so the limit check and
+// increment can be one SQLite statement. KV is intentionally not used for
+// authoritative quota state because it has no compare-and-swap operation.
+export const anonymousQuotaUsage = sqliteTable('anonymous_quota_usage', {
+  anonId: text('anon_id').notNull(),
+  period: text('period').notNull(),                                   // YYYY-MM
+  count: integer('count').default(0),
+  updatedAt: integer('updated_at').default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('anonymous_quota_period_idx').on(t.anonId, t.period),
+]);
+
+// A successful insert is the atomic single-use claim for a refresh token.
+// Rows are retained until expiry so concurrent refreshes cannot mint twice.
+export const refreshTokenClaims = sqliteTable('refresh_token_claims', {
+  jti: text('jti').primaryKey(),
+  userId: text('user_id').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  claimedAt: integer('claimed_at').default(sql`(unixepoch())`),
+}, (t) => [
+  index('rtc_expires_idx').on(t.expiresAt),
+  index('rtc_user_idx').on(t.userId),
+]);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PAYMENTS
 // ─────────────────────────────────────────────────────────────────────────────
