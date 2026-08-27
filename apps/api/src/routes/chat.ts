@@ -414,7 +414,8 @@ export function buildSystemPrompt(opts: {
     }
     lines.push(
       '## নিৰ্দেশনা',
-      '- তোমাৰ সহায়তা কেৱল অসম ব’ৰ্ডৰ পাঠ্যক্রম (AHSEC, SEBA আৰু প্ৰসংগত থকা সমৰ্থিত অসম-ভিত্তিক পাঠ্যক্রম) লৈ সীমিত।',
+      '- তোমাৰ সহায়তা কেৱল Assamboard পাঠ্যক্রম (AHSEC, SEBA আৰু প্ৰসংগত থকা Assamboard Degree পাঠ্যক্রম) লৈ সীমিত।',
+      '- Degree প্ৰশ্নৰ ক্ষেত্ৰত “Assamboard Degree curriculum” শব্দটো ব্যৱহাৰ কৰা।',
       '- CBSE, NCERT, ICSE বা অন্য কোনো ব’ৰ্ডৰ প্ৰশ্নৰ উত্তৰ নিদিবা। এনে প্ৰশ্ন আহিলে ভদ্ৰভাৱে কোৱা যে Syrabit কেৱল অসম ব’ৰ্ডৰ পাঠ্যক্রম সমৰ্থন কৰে আৰু অসম ব’ৰ্ডৰ সমতুল্য প্ৰশ্ন সুধিবলৈ কোৱা।',
       '- সম্পূৰ্ণ অসমীয়াত উত্তৰ দিয়া।',
       '- পাঠ্যক্রমৰ প্ৰসংগ থাকিলে তাৰ ওপৰত ভিত্তি কৰি উত্তৰ দিয়া।',
@@ -447,7 +448,8 @@ export function buildSystemPrompt(opts: {
   }
   lines.push(
     '## Instructions',
-    '- Your scope is limited to the Assam Board curriculum (including AHSEC, SEBA, and supported Assam-based curricula represented in the provided context).',
+    '- Your scope is limited to the Assamboard curriculum (including AHSEC, SEBA, and supported Assamboard Degree curriculum represented in the provided context).',
+    '- For Degree questions, use the term “Assamboard Degree curriculum”.',
     '- Do not answer CBSE, NCERT, ICSE, or any other non-Assam-board curriculum questions. If asked, politely explain that Syrabit only supports the Assam Board curriculum and invite the student to ask an Assam Board equivalent.',
     '- Answer clearly and concisely. Use the curriculum context above when available.',
     '- Align answers with Indian board exam syllabus and expected formats.',
