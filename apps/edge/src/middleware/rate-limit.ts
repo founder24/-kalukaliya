@@ -19,21 +19,112 @@ interface RateLimitCommand {
 }
 
 const BROWSER_ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
+const ANONYMOUS_COOKIE_NAME = 'syrabit_anon_id';
+const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/;
+const ANONYMOUS_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+
+export interface AnonymousIdentity {
+  id: string;
+  setCookie: string | null;
+}
+
+function isBrowserAnonId(value: string | null | undefined): value is string {
+  return typeof value === 'string' && BROWSER_ANON_ID_PATTERN.test(value.trim());
+}
+
+function cookieValue(cookieHeader: string, name: string): string | null {
+  const prefix = `${name}=`;
+  const part = cookieHeader.split(';')
+    .map(value => value.trim())
+    .find(value => value.startsWith(prefix));
+  return part ? part.slice(prefix.length) : null;
+}
+
+function hex(bytes: ArrayBuffer): string {
+  return Array.from(new Uint8Array(bytes))
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function timingSafeEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
+}
+
+async function signatureFor(id: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  return hex(await crypto.subtle.sign('HMAC', key, encoder.encode(id)));
+}
+
+async function readSignedCookie(request: Request, secret?: string): Promise<string | null> {
+  if (!secret) return null;
+  const encoded = cookieValue(request.headers.get('Cookie') ?? '', ANONYMOUS_COOKIE_NAME);
+  if (!encoded) return null;
+
+  let value: string;
+  try {
+    value = decodeURIComponent(encoded);
+  } catch {
+    return null;
+  }
+  const separator = value.lastIndexOf('.');
+  if (separator < 0) return null;
+  const id = value.slice(0, separator);
+  const signature = value.slice(separator + 1);
+  if (!isBrowserAnonId(id) || !SIGNATURE_PATTERN.test(signature)) return null;
+  const expected = await signatureFor(id, secret);
+  return timingSafeEqual(signature, expected) ? id : null;
+}
+
+function ipFallback(request: Request): string {
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+  const normalizedIp = ip.trim().toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 55);
+  return `ip_${normalizedIp}`;
+}
+
+export async function resolveAnonymousIdentity(
+  request: Request,
+  cookieSecret?: string,
+): Promise<AnonymousIdentity> {
+  const browserId = request.headers.get('x-anon-id')?.trim();
+  if (isBrowserAnonId(browserId)) return { id: browserId, setCookie: null };
+
+  const cookieId = await readSignedCookie(request, cookieSecret);
+  if (cookieId) return { id: cookieId, setCookie: null };
+
+  if (!cookieSecret) return { id: ipFallback(request), setCookie: null };
+
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  const id = `anon_${Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('')}`;
+  const signature = await signatureFor(id, cookieSecret);
+  return {
+    id,
+    setCookie: `${ANONYMOUS_COOKIE_NAME}=${id}.${signature}; Path=/; Max-Age=${ANONYMOUS_COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=Lax`,
+  };
+}
 
 /**
  * Resolve the anonymous browser identity used by the edge burst limiter.
  * This mirrors the API Worker's anonymous identity contract so one browser
  * does not share a global limiter bucket with every other anonymous student.
  */
-export function anonymousRateLimitIdentity(request: Request): string {
-  const browserId = request.headers.get('x-anon-id')?.trim();
-  if (browserId && BROWSER_ANON_ID_PATTERN.test(browserId)) return browserId;
-
-  // Cloudflare overwrites this connection metadata. Do not trust forwarding
-  // headers supplied by a caller when choosing a rate-limit bucket.
-  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-  const normalizedIp = ip.trim().toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 55);
-  return `ip_${normalizedIp}`;
+export async function anonymousRateLimitIdentity(
+  request: Request,
+  cookieSecret?: string,
+): Promise<string> {
+  return (await resolveAnonymousIdentity(request, cookieSecret)).id;
 }
 
 /**

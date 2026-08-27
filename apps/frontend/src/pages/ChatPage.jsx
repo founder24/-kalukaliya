@@ -176,7 +176,8 @@ export default function ChatPage() {
     // throwaway anonymous request first; on the very first paint
     // ``user`` is null even for them.
     if (!authChecked) return;
-    const creditHeaders = user ? undefined : { 'x-anon-id': getAnonId() };
+    const anonId = user ? null : getAnonId();
+    const creditHeaders = anonId ? { 'x-anon-id': anonId } : undefined;
     apiClient().get('/user/credits', creditHeaders ? { headers: creditHeaders } : undefined)
       .then((res) => {
         const c = res.data;
@@ -369,7 +370,8 @@ export default function ChatPage() {
       if (_chatToken) {
         fetchHeaders['Authorization'] = `Bearer ${_chatToken}`;
       } else {
-        fetchHeaders['x-anon-id'] = getAnonId();
+        const anonId = getAnonId();
+        if (anonId) fetchHeaders['x-anon-id'] = anonId;
       }
       const response = await fetch(`${API_BASE}/chat/stream`, {
         method: 'POST', headers: fetchHeaders,

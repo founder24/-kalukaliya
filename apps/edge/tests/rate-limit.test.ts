@@ -1,9 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
-import { anonymousRateLimitIdentity, checkRateLimit } from '../src/middleware/rate-limit';
+import {
+  anonymousRateLimitIdentity,
+  checkRateLimit,
+  resolveAnonymousIdentity,
+} from '../src/middleware/rate-limit';
 import { createMockRateLimitNamespace } from './helpers/rate-limit-store';
 
 describe('Rate Limiting', () => {
-  it('isolates anonymous browsers by validated persistent ID', () => {
+  it('isolates anonymous browsers by validated persistent ID', async () => {
     const request = new Request('https://syrabit.ai/api/v1/chat/stream', {
       headers: {
         'x-anon-id': 'anon_0123456789abcdef0123456789abcdef',
@@ -11,11 +15,11 @@ describe('Rate Limiting', () => {
       },
     });
 
-    expect(anonymousRateLimitIdentity(request))
+    await expect(anonymousRateLimitIdentity(request)).resolves
       .toBe('anon_0123456789abcdef0123456789abcdef');
   });
 
-  it('uses the connection IP when the browser ID is missing or malformed', () => {
+  it('uses the connection IP when the browser ID is missing or malformed', async () => {
     const request = new Request('https://syrabit.ai/api/v1/chat/stream', {
       headers: {
         'x-anon-id': 'anon_wrong',
@@ -23,10 +27,10 @@ describe('Rate Limiting', () => {
       },
     });
 
-    expect(anonymousRateLimitIdentity(request)).toBe('ip_203_0_113_9');
+    await expect(anonymousRateLimitIdentity(request)).resolves.toBe('ip_203_0_113_9');
   });
 
-  it('does not trust caller-controlled forwarding headers for fallback identity', () => {
+  it('does not trust caller-controlled forwarding headers for fallback identity', async () => {
     const request = new Request('https://syrabit.ai/api/v1/chat/stream', {
       headers: {
         'x-anon-id': 'anon_wrong',
@@ -35,7 +39,37 @@ describe('Rate Limiting', () => {
       },
     });
 
-    expect(anonymousRateLimitIdentity(request)).toBe('ip_unknown');
+    await expect(anonymousRateLimitIdentity(request)).resolves.toBe('ip_unknown');
+  });
+
+  it('mints and reuses separate signed cookies for browsers on one shared IP', async () => {
+    const secret = 'edge-cookie-secret-at-least-32-characters';
+    const first = await resolveAnonymousIdentity(new Request(
+      'https://syrabit.ai/api/v1/user/credits',
+      { headers: { 'CF-Connecting-IP': '203.0.113.9' } },
+    ), secret);
+    const second = await resolveAnonymousIdentity(new Request(
+      'https://syrabit.ai/api/v1/user/credits',
+      { headers: { 'CF-Connecting-IP': '203.0.113.9' } },
+    ), secret);
+
+    expect(first.id).toMatch(/^anon_[a-f0-9]{32}$/);
+    expect(second.id).toMatch(/^anon_[a-f0-9]{32}$/);
+    expect(second.id).not.toBe(first.id);
+    expect(first.setCookie).toContain('HttpOnly; Secure; SameSite=Lax');
+    expect(first.setCookie).toContain('Max-Age=31536000');
+
+    const cookie = first.setCookie!.split(';', 1)[0]!;
+    const reload = await resolveAnonymousIdentity(new Request(
+      'https://syrabit.ai/api/v1/conversations/anon',
+      {
+        headers: {
+          Cookie: cookie,
+          'CF-Connecting-IP': '198.51.100.44',
+        },
+      },
+    ), secret);
+    expect(reload).toEqual({ id: first.id, setCookie: null });
   });
 
   it('allows request under limit', async () => {

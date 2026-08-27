@@ -157,13 +157,22 @@ conversationsRouter.get('/', async c => {
   return error ?? listConversations(c, id, 100);
 });
 
-conversationsRouter.get('/anon', c => listConversations(c, anonUserId(c.req.raw), 5));
+conversationsRouter.get('/anon', async c =>
+  listConversations(c, await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET), 5));
 
-conversationsRouter.get('/anon/:sessionId', c =>
-  conversationDetail(c, anonUserId(c.req.raw), c.req.param('sessionId')));
+conversationsRouter.get('/anon/:sessionId', async c =>
+  conversationDetail(
+    c,
+    await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET),
+    c.req.param('sessionId'),
+  ));
 
-conversationsRouter.delete('/anon/:sessionId', c =>
-  deleteConversation(c, anonUserId(c.req.raw), c.req.param('sessionId')));
+conversationsRouter.delete('/anon/:sessionId', async c =>
+  deleteConversation(
+    c,
+    await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET),
+    c.req.param('sessionId'),
+  ));
 
 conversationsRouter.get('/:sessionId', async c => {
   const { id, error } = await requireUser(c);

@@ -58,7 +58,10 @@ export default function BrowsePage() {
 
     try {
       const headers = { 'Content-Type': 'application/json' };
-      if (!user) headers['x-anon-id'] = getAnonId();
+      if (!user) {
+        const anonId = getAnonId();
+        if (anonId) headers['x-anon-id'] = anonId;
+      }
       const resp = await fetch(`${API_BASE}/edu/reader/fetch`, {
         method: 'POST',
         headers,

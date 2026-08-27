@@ -15,6 +15,7 @@ import {
   anonymousRateLimitIdentity,
   checkRateLimit,
   rateLimitHeaders,
+  resolveAnonymousIdentity,
 } from './middleware/rate-limit';
 import { proxyRequest } from './routes/api-proxy';
 import { proxyToApiWorker, pingApiWorkerHealth } from './routes/worker-proxy';
@@ -54,6 +55,11 @@ function isNativeStaffPath(pathname: string): boolean {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    let anonymousCookie: string | null = null;
+    const finalize = (response: Response): Response => {
+      if (anonymousCookie) response.headers.append('Set-Cookie', anonymousCookie);
+      return response;
+    };
 
     // When API_WORKER_LIVE === 'true' the Service Binding is active and ALL API /
     // health traffic is routed through the API Worker. Implemented routes
@@ -131,6 +137,16 @@ export default {
         headers.set('X-Edge-Secret', env.EDGE_SHARED_SECRET);
       }
       request = new Request(request, { headers });
+
+      if ((jwtResult.userId || 'anonymous') === 'anonymous') {
+        const identity = await resolveAnonymousIdentity(request, env.EDGE_SHARED_SECRET);
+        anonymousCookie = identity.setCookie;
+        if (identity.id.startsWith('anon_')) {
+          const identityHeaders = new Headers(request.headers);
+          identityHeaders.set('x-anon-id', identity.id);
+          request = new Request(request, { headers: identityHeaders });
+        }
+      }
     }
 
     // ── 3. Bot Heuristic Tagging (for ISR routing and analytics) ──
@@ -155,12 +171,12 @@ export default {
         });
         unavailable.headers.set('X-Request-ID', requestId);
         applyCorsHeaders(unavailable.headers, request.headers.get('Origin') || '');
-        return unavailable;
+        return finalize(unavailable);
       }
 
       const authenticatedUserId = request.headers.get('X-User-ID') || 'anonymous';
       const rateLimitIdentity = authenticatedUserId === 'anonymous'
-        ? anonymousRateLimitIdentity(request)
+        ? await anonymousRateLimitIdentity(request, env.EDGE_SHARED_SECRET)
         : authenticatedUserId;
 
       // Best-effort lang extraction from request body
@@ -190,7 +206,7 @@ export default {
         });
         unavailable.headers.set('X-Request-ID', requestId);
         applyCorsHeaders(unavailable.headers, request.headers.get('Origin') || '');
-        return unavailable;
+        return finalize(unavailable);
       }
       if (!rl.allowed) {
         const rlResponse = new Response(
@@ -205,7 +221,7 @@ export default {
         );
         rlResponse.headers.set('X-Request-ID', requestId);
         applyCorsHeaders(rlResponse.headers, request.headers.get('Origin') || '');
-        return rlResponse;
+        return finalize(rlResponse);
       }
 
       // Signal to backend that edge already performed rate limiting
@@ -536,7 +552,7 @@ export default {
       const secured = addSecurityHeaders(backendResp);
       applyCorsHeaders(secured.headers, origin);
       secured.headers.set('X-Request-ID', requestId);
-      return secured;
+      return finalize(secured);
     }
 
     // ── Edge-handled AI routes (Workers AI binding — never hit the Python backend) ──
@@ -672,7 +688,7 @@ export default {
       const origin = request.headers.get('Origin') || '';
       applyCorsHeaders(secured.headers, origin);
       secured.headers.set('X-Request-ID', requestId);
-      return secured;
+      return finalize(secured);
     }
 
     // Static assets → serve from R2

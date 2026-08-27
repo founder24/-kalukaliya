@@ -8,12 +8,30 @@ import type { Env } from '../types';
 
 const ANON_ID = 'anon_0123456789abcdef0123456789abcdef';
 const OTHER_ANON_ID = 'anon_fedcba9876543210fedcba9876543210';
+const COOKIE_ANON_ID = 'anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const OTHER_COOKIE_ANON_ID = 'anon_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const COOKIE_SECRET = 'anonymous-cookie-flow-secret-at-least-32-characters';
 const API_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../');
 
 let env: Env;
 let disposeProxy: () => Promise<void>;
 let workerFetch: (request: Request) => Promise<Response>;
 let background: Promise<unknown>[];
+
+async function signedCookie(id: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(COOKIE_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = Array.from(new Uint8Array(
+    await crypto.subtle.sign('HMAC', key, encoder.encode(id)),
+  )).map(byte => byte.toString(16).padStart(2, '0')).join('');
+  return `syrabit_anon_id=${id}.${signature}`;
+}
 
 function migrationStatements(): string[] {
   const directory = path.join(API_ROOT, 'drizzle/migrations');
@@ -63,6 +81,7 @@ beforeAll(async () => {
       query: async () => ({ matches: [] }),
     } as unknown as VectorizeIndex,
     JWT_SECRET: 'anonymous-flow-test-secret',
+    EDGE_SHARED_SECRET: COOKIE_SECRET,
     ALLOWED_ORIGINS: '*',
     APP_ENV: 'test',
   };
@@ -185,5 +204,71 @@ describe('anonymous identity flow', () => {
       { headers: otherHeaders },
     ));
     expect(otherDetail.status).toBe(404);
+  });
+
+  it('isolates credits and history between cookie-only browsers sharing one network', async () => {
+    const browserCookie = await signedCookie(COOKIE_ANON_ID);
+    const otherBrowserCookie = await signedCookie(OTHER_COOKIE_ANON_ID);
+    const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: browserCookie,
+        'CF-Connecting-IP': '203.0.113.25',
+      },
+      body: JSON.stringify({ message: 'Explain plant cells', lang: 'en' }),
+    }));
+    expect(chat.status).toBe(200);
+    const streamText = await chat.text();
+    await Promise.all(background);
+    const events = streamText
+      .split('\n')
+      .filter(line => line.startsWith('data: '))
+      .map(line => JSON.parse(line.slice(6)) as Record<string, unknown>);
+    const sessionId = events.find(event => event.event === 'source_card')?.conversation_id;
+    expect(sessionId).toEqual(expect.any(String));
+
+    const reloadHeaders = {
+      Cookie: browserCookie,
+      'CF-Connecting-IP': '198.51.100.77',
+    };
+    const credits = await workerFetch(new Request(
+      'https://api.example/api/v1/user/credits',
+      { headers: reloadHeaders },
+    ));
+    await expect(credits.json()).resolves.toMatchObject({
+      anon_id: COOKIE_ANON_ID,
+      credits_used: 1,
+      credits_remaining: 29,
+    });
+    const history = await workerFetch(new Request(
+      'https://api.example/api/v1/conversations/anon',
+      { headers: reloadHeaders },
+    ));
+    await expect(history.json()).resolves.toMatchObject({
+      conversations: [{ id: sessionId }],
+    });
+
+    const otherHeaders = {
+      Cookie: otherBrowserCookie,
+      'CF-Connecting-IP': '203.0.113.25',
+    };
+    const otherCredits = await workerFetch(new Request(
+      'https://api.example/api/v1/user/credits',
+      { headers: otherHeaders },
+    ));
+    await expect(otherCredits.json()).resolves.toMatchObject({
+      anon_id: OTHER_COOKIE_ANON_ID,
+      credits_used: 0,
+      credits_remaining: 30,
+    });
+    const otherHistory = await workerFetch(new Request(
+      'https://api.example/api/v1/conversations/anon',
+      { headers: otherHeaders },
+    ));
+    await expect(otherHistory.json()).resolves.toMatchObject({
+      conversations: [],
+      pagination: { total: 0 },
+    });
   });
 });

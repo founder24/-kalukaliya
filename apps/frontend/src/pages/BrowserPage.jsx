@@ -37,7 +37,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useContentLang } from '@/context/LanguageContext';
 import {
   eduFetchReader, eduGetAllowlist, eduRequestSite, eduCheckUrl,
-  eduLoadState, eduSaveState, eduGroundedAnswerUrl, getAnonId,
+  eduLoadState, eduSaveState, eduGroundedAnswerUrl, anonHeaders,
   eduEducatorSubmitSite,
   eduEducatorAppealRejection,
   eduEducatorMySubmissions,
@@ -656,7 +656,7 @@ function AskSyraPanel({ activeTab, lang, onClose, onCitationsChange, onCitationC
       const resp = await fetch(eduGroundedAnswerUrl(), {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json', 'x-anon-id': getAnonId() },
+        headers: { 'Content-Type': 'application/json', ...anonHeaders() },
         body: JSON.stringify(body),
         signal: ctrl.signal,
       });

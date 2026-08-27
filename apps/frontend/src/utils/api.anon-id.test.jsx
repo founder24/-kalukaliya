@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import axios from 'axios';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getAnonId } from './api';
+import { anonHeaders, getAnonConversations, getAnonId } from './api';
 
 describe('anonymous browser identity', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     localStorage.clear();
   });
 
@@ -24,5 +26,21 @@ describe('anonymous browser identity', () => {
     expect(id).toMatch(/^anon_[a-f0-9]{32}$/);
     expect(id).not.toBe('anon_wrong');
     expect(localStorage.getItem('syrabit_anon_id')).toBe(id);
+  });
+
+  it('hands storage-disabled browsers off to the signed cookie fallback', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('Access denied', 'SecurityError');
+    });
+    const get = vi.spyOn(axios, 'get').mockResolvedValue({ data: { conversations: [] } });
+
+    expect(getAnonId()).toBeNull();
+    expect(anonHeaders()).toEqual({});
+    await getAnonConversations();
+
+    expect(get).toHaveBeenCalledWith(
+      expect.stringContaining('/conversations/anon'),
+      { headers: {}, withCredentials: true },
+    );
   });
 });

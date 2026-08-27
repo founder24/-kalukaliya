@@ -116,7 +116,8 @@ export function InputBar({
       fd.append('file', file, file.name || 'image');
       const headers = { 'Content-Type': 'multipart/form-data' };
       if (isAnon) {
-        try { headers['x-anon-id'] = getAnonId(); } catch {}
+        const anonId = getAnonId();
+        if (anonId) headers['x-anon-id'] = anonId;
       }
       const { data } = await axios.post(`${API_BASE}/chat/image`, fd, {
         withCredentials: true,

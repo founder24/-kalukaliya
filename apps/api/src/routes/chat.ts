@@ -655,13 +655,13 @@ chatRouter.post('/stream', async (c) => {
         userRole     = row.role ?? 'student';
         isAnon       = false;
       } else {
-        userId = anonUserId(c.req.raw);
+        userId = await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
       }
     } else {
-      userId = anonUserId(c.req.raw);
+      userId = await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
     }
   } else {
-    userId = anonUserId(c.req.raw);
+    userId = await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
   }
   timings.auth_ms = Date.now() - authStart;
 

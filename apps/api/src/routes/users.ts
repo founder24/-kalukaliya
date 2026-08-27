@@ -360,7 +360,7 @@ usersRouter.get('/credits', async (c) => {
   // Match chat's optional-auth behavior: a stale or invalid token is treated
   // as anonymous, and therefore still resolves the browser's persistent ID.
   if (!authenticated) {
-    anonymousId = anonUserId(c.req.raw);
+    anonymousId = await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
     creditsUsed = Math.max(
       0,
       await getAnonQuotaUsage(c.env.DB, c.env.RATE_LIMIT_KV, anonymousId),

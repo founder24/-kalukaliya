@@ -2,7 +2,7 @@
  * Study API helpers — quizzes, notebook, flashcards, settings, voice.
  * Works for both authenticated users (cookie session) and anon (x-anon-id).
  */
-import { WORKER_API, getAnonId } from '@/utils/api';
+import { WORKER_API, anonHeaders } from '@/utils/api';
 
 // Use WORKER_API (edge proxy) instead of API_BASE so study API calls
 // benefit from CF edge rate limiting and caching (M-9 fix).
@@ -10,7 +10,7 @@ const API_BASE = WORKER_API;
 
 const baseHeaders = () => ({
   'Content-Type': 'application/json',
-  'x-anon-id': getAnonId(),
+  ...anonHeaders(),
 });
 
 async function _json(res) {
@@ -147,7 +147,7 @@ export const studyApi = {
     fd.append('language', language);
     const res = await fetch(`${API_BASE}/edu/stt`, {
       method: 'POST', credentials: 'include',
-      headers: { 'x-anon-id': getAnonId() },
+      headers: anonHeaders(),
       body: fd,
     });
     return _json(res);
