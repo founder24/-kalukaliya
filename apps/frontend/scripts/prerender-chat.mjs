@@ -14,6 +14,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
+import { injectPrerenderPath } from "./_prerender-marker.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -223,7 +224,7 @@ async function main() {
   html = rewriteHead(html);
 
   fs.mkdirSync(outDir, { recursive: true });
-  fs.writeFileSync(outHtml, html);
+  fs.writeFileSync(outHtml, injectPrerenderPath(html, "/chat"));
 
   // Hard assertion: the generated file must contain `data-hydrate=
   // "chat"` and a non-empty #root, AND the noindex marker.

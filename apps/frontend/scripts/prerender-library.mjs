@@ -29,6 +29,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { loadLibraryBundle } from "./_prerender-data.mjs";
+import { injectPrerenderPath } from "./_prerender-marker.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -364,7 +365,7 @@ async function main() {
       // Seed React Query via the generic __SSR_QUERIES__ mechanism that
       // App.jsx already reads at module-load time (before hydrateRoot runs).
       // Without this, React Query starts with an empty cache on the client,
-      // fires a fresh /api/content/library-bundle?slim=1 request at ~3 s,
+      // fires a fresh /api/v1/content/library-bundle?slim=1 request at ~3 s,
       // and re-renders the subject cards — causing a 5 s LCP render delay
       // even though the cards are present in the prerendered SSR HTML.
       // window.__LIBRARY_BUNDLE__ is kept for backward compat with any
@@ -401,7 +402,7 @@ async function main() {
       );
     }
 
-    routeHtml = rewriteHead(routeHtml);
+    routeHtml = injectPrerenderPath(rewriteHead(routeHtml), route);
 
     const outHtml = path.join(outDir, "index.html");
     fs.mkdirSync(outDir, { recursive: true });

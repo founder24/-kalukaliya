@@ -230,6 +230,65 @@ function shouldBotRender(pathname) {
   return true;
 }
 
+function normalizedPathname(pathname) {
+  if (!pathname || pathname === "/") return "/";
+  return pathname.replace(/\/+$/, "");
+}
+
+const EXACT_FRONTEND_ROUTES = new Set([
+  "/", "/home", "/pricing", "/terms", "/privacy", "/about", "/technology",
+  "/status", "/exam-routine", "/payment/success", "/payment/cancel", "/login",
+  "/signup", "/reset-password", "/onboarding", "/library", "/browser",
+  "/browse", "/browser-tabs", "/curriculum", "/subscribe", "/chat", "/read",
+  "/history", "/profile", "/profile/memories", "/notebook", "/flashcards",
+  "/guardian", "/admin", "/admin/login", "/staff",
+]);
+
+function isDeclaredFrontendRoute(pathname) {
+  const normalized = normalizedPathname(pathname);
+  if (EXACT_FRONTEND_ROUTES.has(normalized)) return true;
+
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length === 2 && ["subject", "learn", "pyq"].includes(parts[0])) {
+    return true;
+  }
+  if (parts.length === 3 && parts[0] === "cms") return true;
+  if (parts[0] === "as" && parts.length >= 5 && parts.length <= 8) return true;
+
+  // The public SEO routes start with a board slug and use 3–7 segments.
+  // Their existence is resolved by the backend when no prerender exists.
+  return parts.length >= 3 && parts.length <= 7;
+}
+
+async function assetMatchesRequestedPrerender(response, pathname) {
+  try {
+    const html = await response.clone().text();
+    const metas = html.match(/<meta\b[^>]*>/gi) || [];
+    for (const tag of metas) {
+      if (!/\bname\s*=\s*["']syrabit-prerender-path["']/i.test(tag)) continue;
+      const outputPath = tag.match(/\bcontent\s*=\s*["']([^"']+)["']/i)?.[1];
+      return normalizedPathname(outputPath) === normalizedPathname(pathname);
+    }
+  } catch {
+    // Treat unreadable HTML as an asset miss and use backend bot rendering.
+  }
+  return false;
+}
+
+function botNotFoundResponse(request) {
+  const headers = new Headers({
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "X-Robots-Tag": "noindex, nofollow",
+    "X-Source": "bot-render-not-found",
+  });
+  addSecurityHeaders(headers);
+  return new Response(
+    request.method === "HEAD" ? null : "<!doctype html><title>Not Found</title><h1>Not Found</h1>",
+    { status: 404, headers },
+  );
+}
+
 async function botRender(request, env, url) {
   // Map / → /html/homepage, /home → /html/home, etc. The backend
   // exposes /html/<rest-of-path> for chapters and /html/homepage
@@ -257,17 +316,7 @@ async function botRender(request, env, url) {
     // Preserve a real backend miss as a real 404. This prevents nonexistent
     // crawler URLs from becoming soft-200 SPA pages or misleading 503s.
     if (resp.status === 404) {
-      const headers = new Headers({
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow",
-        "X-Source": "bot-render-not-found",
-      });
-      addSecurityHeaders(headers);
-      return new Response(
-        request.method === "HEAD" ? null : "<!doctype html><title>Not Found</title><h1>Not Found</h1>",
-        { status: 404, headers },
-      );
+      return botNotFoundResponse(request);
     }
     // Backend returns 200 with HTML on hit, non-200 on outage/error.
     if (resp.status === 200) {
@@ -425,7 +474,10 @@ export default {
         const assetResp = await env.ASSETS.fetch(new Request(assetFetchUrl, request));
         if (assetResp.status === 200) {
           const ct = assetResp.headers.get("content-type") || "";
-          if (ct.includes("text/html") || ct.includes("application/xhtml")) {
+          if (
+            (ct.includes("text/html") || ct.includes("application/xhtml")) &&
+            await assetMatchesRequestedPrerender(assetResp, url.pathname)
+          ) {
             const headers = new Headers(assetResp.headers);
             headers.set("X-Source", "prerender");
             headers.set("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600");
@@ -438,6 +490,11 @@ export default {
         }
       } catch {
         // Fall through to bot-render on any asset-pipeline error.
+      }
+      // Only synthesize a 404 for paths React Router does not declare. Known
+      // routes without a snapshot still fall through to backend bot rendering.
+      if (!isDeclaredFrontendRoute(url.pathname)) {
+        return botNotFoundResponse(request);
       }
       // 2) No prerendered snapshot — try the backend bot-render proxy.
       //    botRender now returns a 503 on failure (M-5 fix) so bots

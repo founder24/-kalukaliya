@@ -41,6 +41,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { injectPrerenderPath } from "./_prerender-marker.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -399,7 +400,7 @@ function main() {
     }
 
     fs.mkdirSync(outDir, { recursive: true });
-    fs.writeFileSync(outFile, html);
+    fs.writeFileSync(outFile, injectPrerenderPath(html, route.path));
     written++;
     summary.push({ path: route.path, canonical });
     console.log(
