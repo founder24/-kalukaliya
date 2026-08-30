@@ -120,6 +120,13 @@ async function main() {
           : "development fallback"
     }`,
   );
+  console.log(
+    `[build] prerender cache: ${
+      STRICT_CURRICULUM_BUILD
+        ? "release refresh (restored curriculum caches will be invalidated)"
+        : "development reuse (fresh cache entries may be reused)"
+    }`,
+  );
   const record = async (label, p) => {
     const r = await p;
     summary.push({ label, elapsed: r?.elapsed ?? 0 });

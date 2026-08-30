@@ -13,6 +13,10 @@
 // spawning the per-page scripts, the on-disk file is the only network
 // hop the build pipeline pays.
 //
+// Release builds call clearPrerenderCache() before warming this cache. That
+// removes any cache restored by the CI provider before the release's first
+// curriculum fetch, while development builds retain the fast TTL behavior.
+//
 // Soft-fails: if the backend is unreachable, the helper returns null
 // and callers should fall back to whatever they did before (SPA shell,
 // bundle-order ranking, etc). The build never hard-fails on a
@@ -407,7 +411,7 @@ export async function warmCache({ days = 30 } = {}) {
   return { bundle, traffic };
 }
 
-function clearCache() {
+export function clearPrerenderCache() {
   try {
     fs.rmSync(repoCacheDir, { recursive: true, force: true });
   } catch {

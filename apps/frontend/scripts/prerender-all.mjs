@@ -16,7 +16,10 @@
 import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
-import { warmCache } from "./_prerender-data.mjs";
+import {
+  clearPrerenderCache,
+  warmCache,
+} from "./_prerender-data.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STRICT_CURRICULUM_BUILD =
@@ -108,6 +111,19 @@ async function main() {
     process.env.PRERENDER_TRAFFIC_DAYS || "30",
     10,
   );
+  if (STRICT_CURRICULUM_BUILD) {
+    // The CI/build cache can restore a valid-looking curriculum snapshot from
+    // an earlier release. Invalidate it before warmCache() so the cache shared
+    // by all child prerender processes is populated only by this build.
+    clearPrerenderCache();
+    console.log(
+      "[prerender-all] release cache policy: invalidated restored prerender cache; fetching a fresh curriculum snapshot",
+    );
+  } else {
+    console.log(
+      "[prerender-all] development cache policy: reusing fresh prerender cache entries when available",
+    );
+  }
   console.log("[prerender-all] warming shared backend cache…");
   const cacheStart = Date.now();
   const { bundle, traffic } = await warmCache({ days: trafficDays });
