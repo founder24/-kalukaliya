@@ -282,6 +282,7 @@ for (const c of chapterSamples) checkSampleCanonical(c);
 
 // ── Cross-check prerender manifest counts vs disk ───────────────────
 const manifestPath = path.join(distDir, "prerender-manifest.json");
+const strictReleaseBuild = process.env.CLOUDFLARE_RELEASE_BUILD === "true";
 let manifestSubjects = 0;
 let manifestChapters = 0;
 if (fs.existsSync(manifestPath)) {
