@@ -14,6 +14,7 @@
 // into a helper below and test it in isolation.
 
 import { describe, it, expect } from 'vitest';
+import { LIBRARY_SEO_TITLE } from '../lib/librarySeo';
 
 // ---------------------------------------------------------------------------
 // Helper — mirrors the exact regex branches used by all four scripts for
@@ -177,13 +178,11 @@ describe('prerender twitter:image injection (Task #38)', () => {
 
   describe('per-script alt text values', () => {
     it('prerender-library: uses OG_IMAGE_ALT as twitter:image:alt', () => {
-      const OG_IMAGE_ALT =
-        'Assamboard Subject Library — Notes, MCQs, Definitions & Exam Prep';
       const result = injectTwitterImageMeta(HTML_WITH_TAGS, {
         twitterImage: PLACEHOLDER_IMAGE,
-        twitterImageAlt: OG_IMAGE_ALT,
+        twitterImageAlt: LIBRARY_SEO_TITLE,
       });
-      expect(result).toContain(OG_IMAGE_ALT);
+      expect(result).toContain(LIBRARY_SEO_TITLE);
     });
 
     it('prerender-chat: uses TITLE as twitter:image:alt', () => {

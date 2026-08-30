@@ -4,6 +4,13 @@ import { Search, Bookmark, BookOpen } from './library/icons';
 import { getRecentChapters } from '@/utils/recentChapters';
 
 import PageMeta from '@/components/seo/PageMeta';
+import {
+  getLibrarySeoDescription,
+  LIBRARY_SEO_DESCRIPTION,
+  LIBRARY_SEO_KEYWORDS,
+  LIBRARY_SEO_TITLE,
+  LIBRARY_SEO_URL,
+} from '@/lib/librarySeo';
 import { Analytics } from '@/utils/analytics';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuth } from '@/context/AuthContext';
@@ -452,17 +459,17 @@ export default function LibraryPage() {
     [rankedSubjects, renderLimit]
   );
 
-  const seoTitle = 'Assam Board Subject Library — Notes, MCQs, Definitions & Exam Prep';
-  const seoDescription = `Explore ${subjects.length || ''} Assam Board subjects (AHSEC, SEBA, Degree) with ${totalSeoTopics || ''} study topics. AI-powered notes, MCQs, definitions, important questions, and exam prep for Assam students.`.replace(/  +/g, ' ').trim();
-  const seoKeywords = 'Assam Board study material, AHSEC notes, SEBA notes, Class 11 notes Assam, Class 12 notes Assam, MCQs Assam Board, definitions, important questions, exam preparation Assam, Syrabit';
+  const seoTitle = LIBRARY_SEO_TITLE;
+  const seoDescription = getLibrarySeoDescription(subjects.length, totalSeoTopics);
+  const seoKeywords = LIBRARY_SEO_KEYWORDS;
 
   if (bundleLoading) {
     return (
       <AppLayout pageTitle="Library" hideNavbar>
         <PageMeta
           title={seoTitle}
-          description="Explore Assam Board Class 11-12 and Degree subjects. AI-powered notes, MCQs, definitions, and exam preparation for Assam students."
-          url="https://syrabit.ai/library"
+          description={LIBRARY_SEO_DESCRIPTION}
+          url={LIBRARY_SEO_URL}
           keywords={seoKeywords}
         />
         <LibrarySkeleton />
@@ -473,7 +480,12 @@ export default function LibraryPage() {
   if (bundleError && !bundle) {
     return (
       <AppLayout pageTitle="Library" hideNavbar>
-        <PageMeta title={seoTitle} url="https://syrabit.ai/library" />
+        <PageMeta
+          title={seoTitle}
+          description={LIBRARY_SEO_DESCRIPTION}
+          url={LIBRARY_SEO_URL}
+          keywords={seoKeywords}
+        />
         <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5" style={{ background: 'rgba(239,68,68,0.1)' }}>
             <BookOpen size={28} className="text-red-400" />
@@ -498,7 +510,7 @@ export default function LibraryPage() {
       <PageMeta
         title={seoTitle}
         description={seoDescription}
-        url="https://syrabit.ai/library"
+        url={LIBRARY_SEO_URL}
         keywords={seoKeywords}
         pageType="library"
         pageData={{ subjects: filteredSubjects }}

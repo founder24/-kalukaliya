@@ -22,6 +22,8 @@
  *   schema.org @types so the same type is never emitted twice.
  */
 
+import { LIBRARY_SEO_TITLE } from "./librarySeo";
+
 const SITE_ORIGIN = 'https://syrabit.ai';
 const SITE_LOGO = `${SITE_ORIGIN}/icons/icon-192x192.png`;
 const ORG_NODE = {
@@ -778,8 +780,8 @@ export function libraryLandingSchema(subjects, url) {
     '@graph': [
       {
         '@type': 'Course',
-        name: 'Syrabit.ai — Assam Board Study Library',
-        description: 'Course catalogue covering AHSEC, SEBA and FYUGP subjects with AI-generated notes, MCQs, definitions and exam prep.',
+        name: 'Syrabit.ai — Degree Study Library',
+        description: 'Course catalogue covering AHSEC, SEBA and Degree subjects with AI-generated notes, MCQs, definitions and exam prep.',
         provider: { '@type': 'Organization', name: 'Syrabit.ai', sameAs: SITE_ORIGIN },
         educationalLevel: 'Higher Secondary, Undergraduate',
         url,
@@ -793,15 +795,15 @@ export function libraryLandingSchema(subjects, url) {
       },
       {
         '@type': 'ItemList',
-        name: 'Assamboard Subject Library',
-        description: 'Complete study material library for Assam Board (AHSEC/SEBA/FYUGP) students.',
+        name: 'Degree Subject Library',
+        description: 'Complete study material library for AHSEC, SEBA, and Degree students.',
         numberOfItems: items.length,
         itemListElement: items,
       },
       {
         '@type': 'WebPage',
         '@id': url,
-        name: 'Assamboard Subject Library — Study Notes, MCQs & Exam Prep',
+        name: LIBRARY_SEO_TITLE,
         url,
         isPartOf: { '@type': 'WebSite', '@id': SITE_ORIGIN, name: 'Syrabit.ai' },
         inLanguage: 'en-IN',

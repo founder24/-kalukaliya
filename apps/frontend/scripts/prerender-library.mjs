@@ -30,6 +30,11 @@ import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { loadLibraryBundle } from "./_prerender-data.mjs";
 import { injectPrerenderPath } from "./_prerender-marker.mjs";
+import {
+  LIBRARY_SEO_DESCRIPTION,
+  LIBRARY_SEO_TITLE,
+  LIBRARY_SEO_URL,
+} from "../src/lib/librarySeo.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -50,11 +55,9 @@ const ROUTES = [
 
 const MAX_PRERENDER_CARDS = 12;
 
-const TITLE =
-  "Assamboard Subject Library — Notes, MCQs, Definitions & Exam Prep";
-const CANONICAL = "https://syrabit.ai/library";
-const DESCRIPTION =
-  "Explore Assam Board Class 11-12 and Degree subjects. AI-powered notes, MCQs, definitions, and exam preparation for Assam students.";
+const TITLE = LIBRARY_SEO_TITLE;
+const CANONICAL = LIBRARY_SEO_URL;
+const DESCRIPTION = LIBRARY_SEO_DESCRIPTION;
 
 function escapeHtml(s = "") {
   return String(s)
@@ -77,8 +80,7 @@ async function fetchBundle() {
   return data;
 }
 
-const OG_IMAGE_ALT =
-  "Assamboard Subject Library — Notes, MCQs, Definitions & Exam Prep";
+const OG_IMAGE_ALT = LIBRARY_SEO_TITLE;
 
 function rewriteHead(html) {
   html = html.replace(
