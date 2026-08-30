@@ -8,6 +8,7 @@ import {
 import { useShare } from '@/hooks/useShare';
 import { prefetchSubjectData } from '@/hooks/useContent';
 import { useContentLang } from '@/context/LanguageContext';
+import Analytics from '@/utils/analytics';
 
 const THUMB_GRADIENTS = {
   math:      ['#4f46e5', '#7c3aed'],

@@ -44,8 +44,8 @@ export default function SeoWidget(props) {
   const p = props;
   const {
     adminToken, onNavigate, navContext, data, loading,
-    prewarmCoverage, indexNowStats, indexNowHistory, retryingEndpoint,
-    resubmittingIndexNow, resubmitMessage, setResubmitMessage,
+    prewarmCoverage, indexNowStats, setIndexNowStats, indexNowHistory, retryingEndpoint,
+    resubmittingIndexNow, setResubmittingIndexNow, resubmitMessage, setResubmitMessage,
     alertHistory, cooldownActiveCount,
     alertFilter, setAlertFilter, alertReasonFilter, setAlertReasonFilter,
     showSyntheticAlerts, setShowSyntheticAlerts,

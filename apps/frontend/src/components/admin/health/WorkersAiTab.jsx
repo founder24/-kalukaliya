@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { RefreshCw, Activity, AlertTriangle, Zap, Database, TrendingUp, BarChart2, Clock, Users, MessageSquare } from 'lucide-react';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, LineChart, Line } from 'recharts';
@@ -320,7 +321,7 @@ export default function WorkersAiTab({ adminToken, waiStatus, waiToggling, toggl
                       { label: 'SEO',     testid: 'metrics-freshness-seo' },
                       { label: 'Deps',    testid: 'metrics-freshness-deps' },
                     ].map(({ label, testid }) => (
-                      <React.Fragment key={label}>
+                      <Fragment key={label}>
                         <span aria-hidden="true">•</span>
                         <span>
                           {label}:{' '}
@@ -328,7 +329,7 @@ export default function WorkersAiTab({ adminToken, waiStatus, waiToggling, toggl
                             {heavyLabel}
                           </span>
                         </span>
-                      </React.Fragment>
+                      </Fragment>
                     ))}
                   </div>
                 );

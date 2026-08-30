@@ -31,8 +31,8 @@ jobs:
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Type Check
-        run: pnpm --filter @workspace/syrabit exec tsc --noEmit
+      - name: Frontend Validation
+        run: pnpm --filter @workspace/syrabit run validate
 
   test:
     name: Run Tests

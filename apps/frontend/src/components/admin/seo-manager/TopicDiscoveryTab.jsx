@@ -370,41 +370,6 @@ export default function TopicDiscoveryTab({ adminToken }) {
         </div>
       </div>
 
-      {overrideModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="bg-white rounded-xl shadow-xl p-5 w-80 max-w-full">
-            <h4 className="text-sm font-bold text-gray-900 mb-1">Override decision</h4>
-            <p className="text-xs text-gray-500 mb-3">
-              Set to <strong>{overrideModal.decision}</strong>. Add a short note (kept as a few-shot example):
-            </p>
-            <input
-              ref={overrideReasonRef}
-              type="text"
-              value={overrideReason}
-              onChange={(e) => setOverrideReason(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') submitOverride(); }}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3 outline-none focus:border-violet-400"
-              placeholder="Reason (optional)"
-              data-testid="topic-discovery-override-reason"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setOverrideModal(null)}
-                className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={submitOverride}
-                className="px-3 py-1.5 text-xs rounded-lg bg-violet-600 text-white hover:bg-violet-700 font-semibold"
-                data-testid="topic-discovery-override-submit"
-              >
-                Submit
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

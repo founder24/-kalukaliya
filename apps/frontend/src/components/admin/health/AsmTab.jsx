@@ -1,4 +1,4 @@
-import { RefreshCw, Activity, AlertTriangle, Star, Undo2, ExternalLink, Check, Clock } from 'lucide-react';
+import { RefreshCw, Activity, AlertTriangle, Star, Undo2, ExternalLink, Check, Clock, MessageSquare, ShieldCheck, Zap } from 'lucide-react';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import SarvamHealthCard from '../SarvamHealthCard';
 import AssameseCorpusCoveragePill from '../AssameseCorpusCoveragePill';
@@ -7,7 +7,7 @@ import { buildHighlightedSegments } from '@/utils/highlightSegments';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import axios from 'axios';
 import { API_BASE } from '@/utils/api';
-import { adminHeaders } from './shared';
+import { adminHeaders, PeakBadge } from './shared';
 import { toast } from 'sonner';
 
 export default function AsmTab({ adminToken, asmStats, asmStatsLoading, asmStatsWindow, setAsmStatsWindow, loadAsmStats, asmLoading, asmDraft, setAsmDraft, asmCfg, asmSaving, asmRuns, asmRunsLoading, asmRunsActionFilter, setAsmRunsActionFilter, asmRunsExpanded, setAsmRunsExpanded, loadAsmRuns, asmAudit, asmAuditLoading, asmAuditFilters, setAsmAuditFilters, asmAuditOffset, setAsmAuditOffset, loadAsmAudit, asmRevertingId, asmRevertPreview, setAsmRevertPreview, revertAsmAuditRow, confirmAsmRevert, asmTesting, asmTestResult, setAsmTestResult, asmTestSample, setAsmTestSample, fireAsmTest, loadAsmCfg, saveAsmOverride, clearAsmOverride, ASM_AUDIT_PAGE }) {

@@ -1362,7 +1362,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
             aiCachePurging={aiCachePurging} loadAiCacheStats={loadAiCacheStats}
             purgeAiCache={purgeAiCache}
             pineconeHealth={pineconeHealth} pineconeLoading={pineconeLoading}
-            pineconeSwitch={pineconeSwitch} setPineconeSwitch={setPineconeSwitch}
+            pineconeSwitch={pineconeSwitch} switchPineconeRetriever={switchPineconeRetriever}
             loadPineconeHealth={loadPineconeHealth}
             healthUrl={healthUrl} copied={copied} handleCopy={handleCopy}
             SLACK_WEBHOOK_MISSING_ENVS={SLACK_WEBHOOK_MISSING_ENVS}
