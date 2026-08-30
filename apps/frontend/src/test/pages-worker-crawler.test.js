@@ -7,12 +7,15 @@ const BOT_HEADERS = {
   Accept: "text/html",
 };
 
-function assetResponse(canonicalHref) {
+function assetResponse({ canonicalHref = null, prerenderPath = null } = {}) {
   const canonical = canonicalHref
     ? `<link rel="canonical" href="${canonicalHref}" />`
     : '<link rel="canonical">';
+  const marker = prerenderPath
+    ? `<meta name="syrabit-prerender-path" content="${prerenderPath}" />`
+    : "";
   return new Response(
-    `<!doctype html><html><head>${canonical}</head><body><div id="root"></div></body></html>`,
+    `<!doctype html><html><head>${canonical}${marker}</head><body><div id="root"></div></body></html>`,
     { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
 }
@@ -28,7 +31,10 @@ describe("Pages worker crawler snapshots", () => {
     const env = {
       ASSETS: {
         fetch: vi.fn().mockResolvedValue(
-          assetResponse("https://syrabit.ai/library"),
+          assetResponse({
+            canonicalHref: "https://syrabit.ai/library",
+            prerenderPath: "/library",
+          }),
         ),
       },
     };
@@ -43,12 +49,58 @@ describe("Pages worker crawler snapshots", () => {
     expect(backendFetch).not.toHaveBeenCalled();
   });
 
-  it("rejects the SPA fallback and preserves the backend crawler 404", async () => {
+  it("accepts the /browser output marker even though its canonical is /library", async () => {
     const backendFetch = vi.fn();
     vi.stubGlobal("fetch", backendFetch);
     const env = {
       ASSETS: {
-        fetch: vi.fn().mockResolvedValue(assetResponse(null)),
+        fetch: vi.fn().mockResolvedValue(
+          assetResponse({
+            canonicalHref: "https://syrabit.ai/library",
+            prerenderPath: "/browser",
+          }),
+        ),
+      },
+    };
+
+    const response = await worker.fetch(
+      new Request("https://syrabit.ai/browser", { headers: BOT_HEADERS }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Source")).toBe("prerender");
+    expect(backendFetch).not.toHaveBeenCalled();
+  });
+
+  it("falls through to bot rendering for a declared route without a snapshot", async () => {
+    const backendFetch = vi.fn().mockResolvedValue(
+      new Response("<!doctype html><title>Status</title>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+    vi.stubGlobal("fetch", backendFetch);
+    const env = {
+      ASSETS: { fetch: vi.fn().mockResolvedValue(assetResponse()) },
+    };
+
+    const response = await worker.fetch(
+      new Request("https://syrabit.ai/status", { headers: BOT_HEADERS }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Source")).toBe("bot-render");
+    expect(backendFetch).toHaveBeenCalledOnce();
+  });
+
+  it("rejects the SPA fallback for an undeclared route", async () => {
+    const backendFetch = vi.fn();
+    vi.stubGlobal("fetch", backendFetch);
+    const env = {
+      ASSETS: {
+        fetch: vi.fn().mockResolvedValue(assetResponse()),
       },
     };
 

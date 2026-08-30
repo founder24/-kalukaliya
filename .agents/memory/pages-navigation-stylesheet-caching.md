@@ -14,8 +14,9 @@ served from an edge `stale-while-revalidate` cache.
 
 Pages `ASSETS.fetch()` can return the SPA fallback document with HTTP 200 for a
 missing extensionless route. A crawler worker must not treat every HTML 200 as
-a prerender hit; verify that the document's canonical path matches the request
-before accepting it.
+a prerender hit. Canonical URLs cannot identify output aliases (for example, an
+alias may intentionally canonicalize to its primary route), so each generated
+snapshot needs an explicit marker naming the output route.
 
 **Why:** A stale document combined with the deferred stylesheet transform left
 responsive utilities unapplied in browser sessions. This created visible
@@ -29,5 +30,6 @@ and bump the cache version when correcting a stale-cache incident. Use
 long-lived caching for content-hashed assets. Do not re-enable the main
 stylesheet's print-media/onload deferral unless it is verified across real
 browser contexts and deploy transitions. For crawler asset lookups, compare
-the returned canonical URL with the requested path before bypassing backend
-bot rendering.
+the snapshot's explicit output-route marker with the requested path before
+bypassing backend bot rendering. Keep declared SPA routes eligible for backend
+rendering when no snapshot exists; only synthesize a 404 for undeclared paths.

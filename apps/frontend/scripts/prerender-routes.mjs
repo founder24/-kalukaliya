@@ -49,6 +49,7 @@ import {
   BACKEND as SHARED_BACKEND,
   FETCH_TIMEOUT_MS as SHARED_TIMEOUT_MS,
 } from "./_prerender-data.mjs";
+import { injectPrerenderPath } from "./_prerender-marker.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -401,7 +402,7 @@ function writeRoute(routePath, html) {
   const outDir = path.join(distDir, routePath.replace(/^\//, ""));
   fs.mkdirSync(outDir, { recursive: true });
   const outHtml = path.join(outDir, "index.html");
-  fs.writeFileSync(outHtml, html);
+  fs.writeFileSync(outHtml, injectPrerenderPath(html, routePath));
   // Task #38: hard assertions — twitter:image and twitter:image:alt must be
   // present in every prerendered snapshot so the edge-proxy HTMLRewriter can
   // find and replace them with the route-specific subject banner.

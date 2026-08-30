@@ -235,16 +235,39 @@ function normalizedPathname(pathname) {
   return pathname.replace(/\/+$/, "");
 }
 
-async function assetMatchesRequestedCanonical(response, pathname) {
+const EXACT_FRONTEND_ROUTES = new Set([
+  "/", "/home", "/pricing", "/terms", "/privacy", "/about", "/technology",
+  "/status", "/exam-routine", "/payment/success", "/payment/cancel", "/login",
+  "/signup", "/reset-password", "/onboarding", "/library", "/browser",
+  "/browse", "/browser-tabs", "/curriculum", "/subscribe", "/chat", "/read",
+  "/history", "/profile", "/profile/memories", "/notebook", "/flashcards",
+  "/guardian", "/admin", "/admin/login", "/staff",
+]);
+
+function isDeclaredFrontendRoute(pathname) {
+  const normalized = normalizedPathname(pathname);
+  if (EXACT_FRONTEND_ROUTES.has(normalized)) return true;
+
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length === 2 && ["subject", "learn", "pyq"].includes(parts[0])) {
+    return true;
+  }
+  if (parts.length === 3 && parts[0] === "cms") return true;
+  if (parts[0] === "as" && parts.length >= 5 && parts.length <= 8) return true;
+
+  // The public SEO routes start with a board slug and use 3–7 segments.
+  // Their existence is resolved by the backend when no prerender exists.
+  return parts.length >= 3 && parts.length <= 7;
+}
+
+async function assetMatchesRequestedPrerender(response, pathname) {
   try {
     const html = await response.clone().text();
-    const links = html.match(/<link\b[^>]*>/gi) || [];
-    for (const tag of links) {
-      if (!/\brel\s*=\s*["']canonical["']/i.test(tag)) continue;
-      const href = tag.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
-      if (!href) continue;
-      const canonical = new URL(href, "https://syrabit.ai");
-      return normalizedPathname(canonical.pathname) === normalizedPathname(pathname);
+    const metas = html.match(/<meta\b[^>]*>/gi) || [];
+    for (const tag of metas) {
+      if (!/\bname\s*=\s*["']syrabit-prerender-path["']/i.test(tag)) continue;
+      const outputPath = tag.match(/\bcontent\s*=\s*["']([^"']+)["']/i)?.[1];
+      return normalizedPathname(outputPath) === normalizedPathname(pathname);
     }
   } catch {
     // Treat unreadable HTML as an asset miss and use backend bot rendering.
@@ -453,7 +476,7 @@ export default {
           const ct = assetResp.headers.get("content-type") || "";
           if (
             (ct.includes("text/html") || ct.includes("application/xhtml")) &&
-            await assetMatchesRequestedCanonical(assetResp, url.pathname)
+            await assetMatchesRequestedPrerender(assetResp, url.pathname)
           ) {
             const headers = new Headers(assetResp.headers);
             headers.set("X-Source", "prerender");
@@ -468,11 +491,9 @@ export default {
       } catch {
         // Fall through to bot-render on any asset-pipeline error.
       }
-      // Every valid public one-segment page is part of the static prerender
-      // build. If Pages returned its generic SPA fallback instead, this route
-      // does not exist. Preserve a true crawler 404 without relying on the
-      // legacy /html origin, which redirects unknown paths back to Pages.
-      if (url.pathname.split("/").filter(Boolean).length === 1) {
+      // Only synthesize a 404 for paths React Router does not declare. Known
+      // routes without a snapshot still fall through to backend bot rendering.
+      if (!isDeclaredFrontendRoute(url.pathname)) {
         return botNotFoundResponse(request);
       }
       // 2) No prerendered snapshot — try the backend bot-render proxy.

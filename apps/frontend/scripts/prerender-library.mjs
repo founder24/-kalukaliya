@@ -29,6 +29,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { loadLibraryBundle } from "./_prerender-data.mjs";
+import { injectPrerenderPath } from "./_prerender-marker.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -401,7 +402,7 @@ async function main() {
       );
     }
 
-    routeHtml = rewriteHead(routeHtml);
+    routeHtml = injectPrerenderPath(rewriteHead(routeHtml), route);
 
     const outHtml = path.join(outDir, "index.html");
     fs.mkdirSync(outDir, { recursive: true });
