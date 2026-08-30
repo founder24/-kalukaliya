@@ -20,12 +20,13 @@ import {
   clearPrerenderCache,
   warmCache,
 } from "./_prerender-data.mjs";
+import {
+  hasNonEmptyLibraryBundle,
+  isStrictCurriculumBuild,
+} from "./release-guards.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const STRICT_CURRICULUM_BUILD =
-  process.env.CLOUDFLARE_RELEASE_BUILD === "true" ||
-  (process.env.NODE_ENV === "production" &&
-    process.env.ALLOW_INCOMPLETE_CURRICULUM_BUILD !== "true");
+const STRICT_CURRICULUM_BUILD = isStrictCurriculumBuild();
 const REQUIRED_CURRICULUM_SCRIPTS = new Set([
   "prerender-library.mjs",
   "prerender-routes.mjs",
@@ -142,7 +143,7 @@ async function main() {
   );
   if (
     STRICT_CURRICULUM_BUILD &&
-    (!bundle || !Array.isArray(bundle.subjects) || bundle.subjects.length === 0)
+    !hasNonEmptyLibraryBundle(bundle)
   ) {
     throw new Error(
       "[prerender-all] release build requires a non-empty library bundle",
@@ -194,6 +195,8 @@ async function main() {
   // Development/offline builds keep the SPA fallback. Production release
   // builds propagate failures from the library and curriculum route scripts.
 }
+
+export { main };
 
 const isMainModule =
   process.argv[1] &&

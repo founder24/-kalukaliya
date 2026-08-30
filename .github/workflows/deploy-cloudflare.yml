@@ -124,6 +124,9 @@ jobs:
       - name: Type-check frontend
         run: pnpm --filter @workspace/syrabit exec tsc --noEmit
 
+      - name: Test curriculum release guards
+        run: pnpm --filter @workspace/syrabit test:release-guards
+
   deploy-api:
     name: Deploy API Worker + D1
     runs-on: ubuntu-latest

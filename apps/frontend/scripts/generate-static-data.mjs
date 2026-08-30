@@ -12,6 +12,9 @@
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  isStrictCurriculumBuild,
+} from "./release-guards.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "..", "public");
@@ -26,13 +29,9 @@ const backendUrl = (
 
 const API_BASE = `${backendUrl}/api/v1`;
 const GCS_BASE = GCS_BUCKET ? `https://storage.googleapis.com/${GCS_BUCKET}` : "";
-const IS_RELEASE_BUILD = process.env.CLOUDFLARE_RELEASE_BUILD === "true";
 const ALLOW_INCOMPLETE_CURRICULUM_BUILD =
   process.env.ALLOW_INCOMPLETE_CURRICULUM_BUILD === "true";
-const STRICT_CURRICULUM_BUILD =
-  IS_RELEASE_BUILD ||
-  (process.env.NODE_ENV === "production" &&
-    !ALLOW_INCOMPLETE_CURRICULUM_BUILD);
+const STRICT_CURRICULUM_BUILD = isStrictCurriculumBuild();
 
 // ── JSON endpoints ──────────────────────────────────────────────────────────
 const JSON_ENDPOINTS = [
@@ -56,7 +55,7 @@ const SITEMAP_ENDPOINTS = [
 const REQUIRED_JSON_FILES = new Set(JSON_ENDPOINTS.map(({ file }) => file));
 const REQUIRED_XML_FILES = new Set(SITEMAP_ENDPOINTS.map(({ file }) => file));
 
-function validateJsonPayload(file, body) {
+export function validateJsonPayload(file, body) {
   let parsed;
   try {
     parsed = JSON.parse(body);
@@ -84,7 +83,7 @@ function validateJsonPayload(file, body) {
   }
 }
 
-function validateXmlPayload(file, body) {
+export function validateXmlPayload(file, body) {
   if (!body.trim()) throw new Error("payload is empty");
   if (!/<(?:sitemapindex|urlset)\b/i.test(body)) {
     throw new Error("payload is not a sitemap document");
@@ -94,7 +93,7 @@ function validateXmlPayload(file, body) {
   }
 }
 
-function validatePayload(file, body) {
+export function validatePayload(file, body) {
   if (REQUIRED_JSON_FILES.has(file)) {
     validateJsonPayload(file, body);
   } else if (REQUIRED_XML_FILES.has(file)) {
@@ -105,13 +104,13 @@ function validatePayload(file, body) {
 async function fetchWithFallback(
   gcsPath,
   apiPath,
-  { transform, validate } = {},
+  { transform, validate, fetchImpl = fetch } = {},
 ) {
   // Try GCS first (source of truth)
   if (GCS_BASE) {
     try {
       const url = `${GCS_BASE}/${gcsPath}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+      const res = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) });
       if (res.ok) {
         let body = await res.text();
         if (transform) body = transform(body);
@@ -127,7 +126,7 @@ async function fetchWithFallback(
 
   // Fallback to backend API
   const url = `${API_BASE}${apiPath}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(30_000) });
   if (!res.ok) throw new Error(`API ${apiPath}: ${res.status}`);
   let body = await res.text();
   if (transform) body = transform(body);
@@ -210,10 +209,18 @@ async function main() {
   console.log("[static-data] Done.");
 }
 
-main().catch((err) => {
-  const prefix = STRICT_CURRICULUM_BUILD ? "FAIL" : "WARN";
-  console[STRICT_CURRICULUM_BUILD ? "error" : "warn"](
-    `[static-data] ${prefix}: ${err.message || err}`,
-  );
-  process.exit(STRICT_CURRICULUM_BUILD ? 1 : 0);
-});
+export { fetchWithFallback };
+
+const isDirectInvocation =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+
+if (isDirectInvocation) {
+  main().catch((err) => {
+    const prefix = STRICT_CURRICULUM_BUILD ? "FAIL" : "WARN";
+    console[STRICT_CURRICULUM_BUILD ? "error" : "warn"](
+      `[static-data] ${prefix}: ${err.message || err}`,
+    );
+    process.exit(STRICT_CURRICULUM_BUILD ? 1 : 0);
+  });
+}

@@ -15,16 +15,18 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { spawn } from "child_process";
+import {
+  isStrictCurriculumBuild,
+  validateLibrarySnapshot,
+  validatePrerenderManifest,
+} from "./release-guards.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
 const distSsrDir = path.resolve(__dirname, "..", "dist-ssr");
 
 const SITE = "https://syrabit.ai";
-const strictReleaseBuild =
-  process.env.CLOUDFLARE_RELEASE_BUILD === "true" ||
-  (process.env.NODE_ENV === "production" &&
-    process.env.ALLOW_INCOMPLETE_CURRICULUM_BUILD !== "true");
+const strictReleaseBuild = isStrictCurriculumBuild();
 
 const REQUIRED_CANONICAL_ROUTES = [
   { route: "/library", file: "library/index.html" },
@@ -185,33 +187,11 @@ for (const rel of LIBRARY_FILES) {
   // The library/browser snapshots must be backed by the same non-empty
   // curriculum payload that was used for SSR. A valid shell with an absent
   // or empty bundle is not a usable production snapshot.
-  const bundleMarker = "window.__LIBRARY_BUNDLE__=";
-  const bundleStart = body.indexOf(bundleMarker);
-  const bundleEnd =
-    bundleStart === -1
-      ? -1
-      : body.indexOf(";window.__SSR_QUERIES__", bundleStart);
-  if (bundleStart === -1 || bundleEnd === -1) {
-    (strictReleaseBuild ? fail : warn)(
-      `${rel}: missing inlined library bundle payload`,
-    );
-  } else {
-    try {
-      const bundle = JSON.parse(
-        body.slice(bundleStart + bundleMarker.length, bundleEnd),
-      );
-      const subjects = Array.isArray(bundle?.subjects) ? bundle.subjects : [];
-      if (subjects.length === 0) {
-        (strictReleaseBuild ? fail : warn)(
-          `${rel}: inlined library bundle contains zero subjects`,
-        );
-      }
-    } catch (err) {
-      (strictReleaseBuild ? fail : warn)(
-        `${rel}: inlined library bundle is not valid JSON (${err.message})`,
-      );
-    }
-  }
+  const snapshot = validateLibrarySnapshot(rel, body, {
+    strict: strictReleaseBuild,
+  });
+  failures.push(...snapshot.failures);
+  warnings.push(...snapshot.warnings);
 }
 
 // ── Subject / chapter prerender quality + canonical sampling ────────
@@ -304,49 +284,30 @@ for (const c of chapterSamples) checkSampleCanonical(c);
 const manifestPath = path.join(distDir, "prerender-manifest.json");
 let manifestSubjects = 0;
 let manifestChapters = 0;
-let manifestSubjectsSelected = 0;
-let manifestChaptersSelected = 0;
-let manifestSubjectsFailed = 0;
-let manifestChaptersFailed = 0;
-let manifestBudgetExceeded = false;
 if (fs.existsSync(manifestPath)) {
   try {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-    const countFields = [
-      "subjects_selected",
-      "subjects_written",
-      "subjects_failed",
-      "chapters_selected",
-      "chapters_written",
-      "chapters_failed",
-    ];
-    const counts = {};
-    for (const field of countFields) {
-      const value = Number(manifest?.counts?.[field]);
-      if (!Number.isInteger(value) || value < 0) {
-        throw new Error(`counts.${field} must be a non-negative integer`);
-      }
-      counts[field] = value;
+    const manifestResult = validatePrerenderManifest(manifest, {
+      strict: strictReleaseBuild,
+    });
+    failures.push(...manifestResult.failures);
+    warnings.push(...manifestResult.warnings);
+    const counts = manifestResult.counts;
+    if (counts) {
+      manifestSubjects = counts.subjects_written;
+      manifestChapters = counts.chapters_written;
     }
-    if (typeof manifest?.budget_exceeded !== "boolean") {
-      throw new Error("budget_exceeded must be a boolean");
-    }
-    manifestSubjectsSelected = counts.subjects_selected;
-    manifestSubjects = counts.subjects_written;
-    manifestSubjectsFailed = counts.subjects_failed;
-    manifestChaptersSelected = counts.chapters_selected;
-    manifestChapters = counts.chapters_written;
-    manifestChaptersFailed = counts.chapters_failed;
-    manifestBudgetExceeded = manifest.budget_exceeded;
   } catch (err) {
     (strictReleaseBuild ? fail : warn)(
       `prerender-manifest.json unreadable: ${err.message}`,
     );
   }
 } else {
-  (strictReleaseBuild ? fail : warn)(
-    "no prerender-manifest.json — prerender step likely soft-failed",
-  );
+  const manifestResult = validatePrerenderManifest(null, {
+    strict: strictReleaseBuild,
+  });
+  failures.push(...manifestResult.failures);
+  warnings.push(...manifestResult.warnings);
 }
 
 // Count prerendered pages on disk for reporting.
@@ -361,44 +322,6 @@ if (manifestSubjects > 0 && subjectsOnDisk === 0) {
 }
 if (manifestChapters > 0 && chaptersOnDisk === 0) {
   fail(`manifest claimed ${manifestChapters} chapters written but 0 found on disk`);
-}
-if (strictReleaseBuild && (manifestSubjects === 0 || manifestChapters === 0)) {
-  fail(
-    `release build requires non-empty subject and chapter prerenders ` +
-      `(manifest subjects=${manifestSubjects}, chapters=${manifestChapters})`,
-  );
-}
-if (
-  strictReleaseBuild &&
-  (manifestSubjectsFailed > 0 || manifestChaptersFailed > 0)
-) {
-  fail(
-    `release prerender reported failures: subjects=${manifestSubjectsFailed}, ` +
-      `chapters=${manifestChaptersFailed}`,
-  );
-}
-if (strictReleaseBuild && manifestBudgetExceeded) {
-  fail("release prerender exceeded its wall-clock budget");
-}
-if (
-  strictReleaseBuild &&
-  (manifestSubjectsSelected === 0 || manifestChaptersSelected === 0)
-) {
-  fail(
-    `release manifest requires non-zero selected coverage ` +
-      `(subjects=${manifestSubjectsSelected}, chapters=${manifestChaptersSelected})`,
-  );
-}
-if (
-  strictReleaseBuild &&
-  (manifestSubjects !== manifestSubjectsSelected ||
-    manifestChapters !== manifestChaptersSelected)
-) {
-  fail(
-    `release prerender did not complete its selected worklist: ` +
-      `subjects=${manifestSubjects}/${manifestSubjectsSelected}, ` +
-      `chapters=${manifestChapters}/${manifestChaptersSelected}`,
-  );
 }
 if (
   strictReleaseBuild &&

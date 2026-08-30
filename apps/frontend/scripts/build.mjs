@@ -22,6 +22,7 @@
 import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
+import { isStrictCurriculumBuild } from "./release-guards.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -37,13 +38,9 @@ const BUDGET_MS = (() => {
     : 1_500_000;
 })();
 
-const IS_RELEASE_BUILD = process.env.CLOUDFLARE_RELEASE_BUILD === "true";
 const ALLOW_INCOMPLETE_CURRICULUM_BUILD =
   process.env.ALLOW_INCOMPLETE_CURRICULUM_BUILD === "true";
-const STRICT_CURRICULUM_BUILD =
-  IS_RELEASE_BUILD ||
-  (process.env.NODE_ENV === "production" &&
-    !ALLOW_INCOMPLETE_CURRICULUM_BUILD);
+const STRICT_CURRICULUM_BUILD = isStrictCurriculumBuild();
 
 const overallStart = Date.now();
 let timedOut = false;
