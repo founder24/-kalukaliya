@@ -73,7 +73,7 @@ export default function ChatPage() {
   const [input, setInput]                 = useState('');
   const [isLoading, setIsLoading]         = useState(false);
   const [conversationId, setConversationId] = useState(convId || null);
-  const [model, setModel]                 = useState('gemini-2.5-flash');
+  const [model, setModel]                 = useState('workers-ai-fast');
   const [subject, setSubject]             = useState(null);
   const [scopedChapters, setScopedChapters] = useState([]);
   const [credits, setCredits]             = useState({ used: user?.credits_used || 0, limit: user?.credits_limit ?? null });
@@ -176,7 +176,9 @@ export default function ChatPage() {
     // throwaway anonymous request first; on the very first paint
     // ``user`` is null even for them.
     if (!authChecked) return;
-    apiClient().get('/user/credits')
+    const anonId = user ? null : getAnonId();
+    const creditHeaders = anonId ? { 'x-anon-id': anonId } : undefined;
+    apiClient().get('/user/credits', creditHeaders ? { headers: creditHeaders } : undefined)
       .then((res) => {
         const c = res.data;
         setCredits({ used: c.credits_used ?? c.used ?? 0, limit: c.monthly_limit ?? c.limit ?? null });
@@ -368,7 +370,8 @@ export default function ChatPage() {
       if (_chatToken) {
         fetchHeaders['Authorization'] = `Bearer ${_chatToken}`;
       } else {
-        fetchHeaders['x-anon-id'] = getAnonId();
+        const anonId = getAnonId();
+        if (anonId) fetchHeaders['x-anon-id'] = anonId;
       }
       const response = await fetch(`${API_BASE}/chat/stream`, {
         method: 'POST', headers: fetchHeaders,

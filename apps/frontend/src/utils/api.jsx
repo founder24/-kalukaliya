@@ -23,23 +23,33 @@ const RENDER_API = _RENDER_URL ? `${_RENDER_URL}/api/v1` : API_BASE;
 export const WORKER_API = _WORKER_URL ? `${_WORKER_URL}/api/v1` : API_BASE;
 
 let _authToken = null;
+const ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
 
 export const setAuthToken = (token) => {
   _authToken = token;
 };
 
 export function getAnonId() {
-  let id = localStorage.getItem('syrabit_anon_id');
-  if (!id) {
+  try {
+    let id = localStorage.getItem('syrabit_anon_id');
+    if (ANON_ID_PATTERN.test(id || '')) return id;
+
     const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
     id = 'anon_' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
     localStorage.setItem('syrabit_anon_id', id);
+    return id;
+  } catch {
+    // Storage-disabled browsers intentionally omit the header. The edge then
+    // mints a signed HttpOnly cookie, which is safer than sharing an IP identity.
+    return null;
   }
-  return id;
 }
 
-const anonHeaders = () => ({ 'x-anon-id': getAnonId() });
+export const anonHeaders = () => {
+  const id = getAnonId();
+  return id ? { 'x-anon-id': id } : {};
+};
 
 const authConfig = () => {
   const config = { withCredentials: true };
@@ -112,7 +122,7 @@ export const eduFetchReader = (url, opts = {}) =>
   });
 
 export const eduCheckUrl = (url) =>
-  axios.post(`${API_BASE}/edu/check-url`, { url }, { headers: anonHeaders() });
+  axios.post(`${API_BASE}/edu/check-url`, { url }, { headers: anonHeaders(), withCredentials: true });
 
 export const eduGetAllowlist = () =>
   axios.get(`${API_BASE}/edu/allowlist`);
@@ -170,13 +180,13 @@ export const updateConversation = (id, data) =>
   axios.patch(`${API_BASE}/conversations/${id}`, data, authConfig());
 
 export const getAnonConversations = () =>
-  axios.get(`${API_BASE}/conversations/anon`, { headers: anonHeaders() });
+  axios.get(`${API_BASE}/conversations/anon`, { headers: anonHeaders(), withCredentials: true });
 
 export const getAnonConversation = (id) =>
-  axios.get(`${API_BASE}/conversations/anon/${id}`, { headers: anonHeaders() });
+  axios.get(`${API_BASE}/conversations/anon/${id}`, { headers: anonHeaders(), withCredentials: true });
 
 export const deleteAnonConversation = (id) =>
-  axios.delete(`${API_BASE}/conversations/anon/${id}`, { headers: anonHeaders() });
+  axios.delete(`${API_BASE}/conversations/anon/${id}`, { headers: anonHeaders(), withCredentials: true });
 
 export const saveOnboarding = (data) =>
   axios.post(`${API_BASE}/user/onboarding`, data, authConfig());

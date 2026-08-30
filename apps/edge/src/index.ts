@@ -11,13 +11,20 @@
 
 import { getCorsHeaders, applyCorsHeaders } from './middleware/cors';
 import { verifyJWT } from './middleware/jwt';
-import { checkRateLimit, rateLimitHeaders } from './middleware/rate-limit';
+import {
+  anonymousRateLimitIdentity,
+  checkRateLimit,
+  rateLimitHeaders,
+  resolveAnonymousIdentity,
+} from './middleware/rate-limit';
 import { proxyRequest } from './routes/api-proxy';
 import { proxyToApiWorker, pingApiWorkerHealth } from './routes/worker-proxy';
 import { handleContentKV } from './routes/content-kv';
 import { handleISR } from './routes/isr';
 import { handleRobots } from './routes/robots';
 import { getIdentityToken } from './utils/google-auth';
+
+export { RateLimitDurableObject } from './middleware/rate-limit';
 
 // Cached health probe state (module-level)
 let healthCache: { backendReachable: boolean; timestamp: number } | null = null;
@@ -48,6 +55,11 @@ function isNativeStaffPath(pathname: string): boolean {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    let anonymousCookie: string | null = null;
+    const finalize = (response: Response): Response => {
+      if (anonymousCookie) response.headers.append('Set-Cookie', anonymousCookie);
+      return response;
+    };
 
     // When API_WORKER_LIVE === 'true' the Service Binding is active and ALL API /
     // health traffic is routed through the API Worker. Implemented routes
@@ -125,6 +137,16 @@ export default {
         headers.set('X-Edge-Secret', env.EDGE_SHARED_SECRET);
       }
       request = new Request(request, { headers });
+
+      if ((jwtResult.userId || 'anonymous') === 'anonymous') {
+        const identity = await resolveAnonymousIdentity(request, env.EDGE_SHARED_SECRET);
+        anonymousCookie = identity.setCookie;
+        if (identity.id.startsWith('anon_')) {
+          const identityHeaders = new Headers(request.headers);
+          identityHeaders.set('x-anon-id', identity.id);
+          request = new Request(request, { headers: identityHeaders });
+        }
+      }
     }
 
     // ── 3. Bot Heuristic Tagging (for ISR routing and analytics) ──
@@ -140,11 +162,22 @@ export default {
     }
 
     // ── 4. Per-Language Rate Limiting (chat POST only) ──
-    if (!env.RATE_LIMIT_KV && url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
-      console.warn('RATE_LIMIT_KV binding not available - rate limiting disabled');
-    }
-    if (env.RATE_LIMIT_KV && url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
-      const userId = request.headers.get('X-User-ID') || 'anonymous';
+    if (url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
+      if (!env.RATE_LIMIT_DO) {
+        console.error('RATE_LIMIT_DO binding not available - failing chat closed');
+        const unavailable = jsonResponse(503, {
+          error: 'Rate limit service unavailable',
+          error_code: 'rate_limit_storage_unavailable',
+        });
+        unavailable.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(unavailable.headers, request.headers.get('Origin') || '');
+        return finalize(unavailable);
+      }
+
+      const authenticatedUserId = request.headers.get('X-User-ID') || 'anonymous';
+      const rateLimitIdentity = authenticatedUserId === 'anonymous'
+        ? await anonymousRateLimitIdentity(request, env.EDGE_SHARED_SECRET)
+        : authenticatedUserId;
 
       // Best-effort lang extraction from request body
       let lang = 'en';
@@ -161,8 +194,20 @@ export default {
       // Authenticated users get a much higher hourly limit — their usage is
       // traceable and the backend's monthly quota is the real enforcement gate.
       // Anonymous users keep the strict 30 req/hr burst-protection limit.
-      const edgeLimit = userId === 'anonymous' ? 30 : 500;
-      const rl = await checkRateLimit(env.RATE_LIMIT_KV, userId, lang, edgeLimit);
+      const edgeLimit = authenticatedUserId === 'anonymous' ? 30 : 500;
+      let rl;
+      try {
+        rl = await checkRateLimit(env.RATE_LIMIT_DO, rateLimitIdentity, lang, edgeLimit);
+      } catch (err) {
+        console.error('Atomic rate-limit storage unavailable:', err);
+        const unavailable = jsonResponse(503, {
+          error: 'Rate limit service unavailable',
+          error_code: 'rate_limit_storage_unavailable',
+        });
+        unavailable.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(unavailable.headers, request.headers.get('Origin') || '');
+        return finalize(unavailable);
+      }
       if (!rl.allowed) {
         const rlResponse = new Response(
           JSON.stringify({ error: 'Rate limit exceeded' }),
@@ -176,7 +221,7 @@ export default {
         );
         rlResponse.headers.set('X-Request-ID', requestId);
         applyCorsHeaders(rlResponse.headers, request.headers.get('Origin') || '');
-        return rlResponse;
+        return finalize(rlResponse);
       }
 
       // Signal to backend that edge already performed rate limiting
@@ -353,6 +398,9 @@ export default {
           // Service Binding path — direct Worker-to-Worker call (no OIDC needed)
           const deepReq = new Request(new URL('/health/deep', request.url).toString(), {
             signal: controller.signal,
+            headers: env.EDGE_SHARED_SECRET
+              ? { Authorization: `Bearer ${env.EDGE_SHARED_SECRET}` }
+              : undefined,
           });
           res = await env.API_WORKER!.fetch(deepReq);
         } else {
@@ -504,7 +552,7 @@ export default {
       const secured = addSecurityHeaders(backendResp);
       applyCorsHeaders(secured.headers, origin);
       secured.headers.set('X-Request-ID', requestId);
-      return secured;
+      return finalize(secured);
     }
 
     // ── Edge-handled AI routes (Workers AI binding — never hit the Python backend) ──
@@ -640,7 +688,7 @@ export default {
       const origin = request.headers.get('Origin') || '';
       applyCorsHeaders(secured.headers, origin);
       secured.headers.set('X-Request-ID', requestId);
-      return secured;
+      return finalize(secured);
     }
 
     // Static assets → serve from R2

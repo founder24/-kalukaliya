@@ -13,7 +13,7 @@
  *   5. Emit source_card SSE event before LLM tokens
  *   6. Stream via Workers AI (primary: @cf/zai-org/glm-4.7-flash, fallback: @cf/qwen/qwen3-30b-a3b-fp8)
  *   7. Emit syrabit_done event (latency, model, route_trace, credits)
- *   8. waitUntil: persist user+assistant messages to D1, increment quota
+ *   8. waitUntil: persist user+assistant messages to D1 and update stats
  */
 
 import { Hono } from 'hono';
@@ -26,6 +26,12 @@ import {
 } from '../db/schema';
 import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import { streamGenerate, AI_MODEL_PRIMARY } from '../services/ai';
+import {
+  ANONYMOUS_MONTHLY_LIMIT,
+  anonUserId,
+  anonymousQuotaKey,
+  currentQuotaPeriod,
+} from '../services/anonymous';
 import type { Env } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -36,14 +42,19 @@ const CONFIDENCE_HIGH = 0.80;
 const CONFIDENCE_LOW  = 0.50;
 
 const MONTHLY_LIMITS: Record<string, number> = {
-  free:    20,
+  free:    ANONYMOUS_MONTHLY_LIMIT,
   starter: 100,
   pro:     500,
   premium: 10_000,
 };
 
-const CONTEXT_CHAR_CAP = 10_000; // max characters of chapter content per request
-const HISTORY_MSG_CAP  = 10;     // last N messages to load from D1
+// Keep prompts small enough for fast prefill while retaining a useful slice of
+// curriculum content. Chapter-scoped turns bypass semantic retrieval below, so
+// these caps primarily protect the no-context and follow-up paths.
+const CONTEXT_CHAR_CAP       = 8_000;
+const HISTORY_MSG_CAP        = 6;
+const HISTORY_CHARS_PER_MSG  = 350;
+const CHAT_MAX_OUTPUT_TOKENS = 1_536;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -74,6 +85,33 @@ interface ContextChunk {
   subjectId?: string | undefined;
   content: string;
   score: number;
+}
+
+/**
+ * Direct D1 chapter content is an explicit, authoritative context selection.
+ * Empty or missing content must continue through semantic retrieval instead.
+ */
+export function shouldBypassSemanticRetrieval(
+  chapterId: string | undefined,
+  chapterContent: string | null,
+): chapterContent is string {
+  return Boolean(chapterId && chapterContent?.trim());
+}
+
+/**
+ * A failed direct D1 chapter lookup means that exact ID cannot ground the
+ * response. Keep any valid subject scope, but remove the stale chapter scope
+ * so Vectorize can recover a relevant chapter instead of returning llm_only.
+ */
+export function semanticRetrievalFilters(
+  chapterId: string | undefined,
+  subjectId: string | undefined,
+  directChapterLookupAttempted: boolean,
+): Record<string, string> {
+  const filters: Record<string, string> = {};
+  if (chapterId && !directChapterLookupAttempted) filters['chapterId'] = chapterId;
+  if (subjectId) filters['subjectId'] = subjectId;
+  return filters;
 }
 
 interface RagSection {
@@ -120,28 +158,9 @@ function sseEvent(payload: unknown): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
 }
 
-function currentPeriod(): string {
-  const d = new Date();
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
 function tryJson<T>(s: string | null | undefined, fallback: T): T {
   if (!s) return fallback;
   try { return JSON.parse(s) as T; } catch { return fallback; }
-}
-
-/**
- * Stable anonymous user ID derived from Cloudflare's CF-Connecting-IP header.
- * Not cryptographically secure — used only for rate-limiting.
- */
-function anonUserId(req: Request): string {
-  const ip =
-    req.headers.get('CF-Connecting-IP') ??
-    req.headers.get('X-Real-IP') ??
-    req.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ??
-    'unknown';
-  // btoa gives a stable base64 string; strip non-alphanumeric for KV key safety
-  return `anon-${btoa(ip).replace(/[^a-z0-9]/gi, '').slice(0, 20)}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,10 +173,12 @@ function anonUserId(req: Request): string {
  * are a single statement — eliminates the check-then-increment race window that
  * would allow parallel requests to all pass the same count.
  *
- * If the new count exceeds the limit the increment is rolled back and the caller
- * receives allowed:false.  admin/staff bypass: always allowed without touching D1.
+ * The conditional UPSERT only increments while the current count is below the
+ * limit. This avoids an over-limit increment followed by a competing rollback,
+ * which could otherwise release another request's reservation.
+ * admin/staff bypass: always allowed without touching D1.
  */
-async function reserveAuthQuota(
+export async function reserveAuthQuota(
   d1: D1Database,
   userId: string,
   tier: string,
@@ -169,63 +190,139 @@ async function reserveAuthQuota(
 
   // noUncheckedIndexedAccess: Record indexing gives number | undefined; fall back to 20
   const limit: number = MONTHLY_LIMITS[tier] ?? 20;
-  const period = currentPeriod();
+  const period = currentQuotaPeriod();
   const now = Math.floor(Date.now() / 1000);
   const rowId = `${userId}:${period}`;
 
-  // Single atomic UPSERT — safe under concurrent Workers isolates
+  // Single conditional atomic UPSERT — safe under concurrent Workers isolates.
+  // When the WHERE clause is false SQLite returns no row and does not change
+  // the counter.
   const result = await d1.prepare(`
     INSERT INTO quota_usage (id, user_id, period, count, updated_at)
     VALUES (?, ?, ?, 1, ?)
     ON CONFLICT (user_id, period) DO UPDATE
       SET count = quota_usage.count + 1, updated_at = excluded.updated_at
+      WHERE quota_usage.count < ?
     RETURNING count
-  `).bind(rowId, userId, period, now).first<{ count: number }>();
+  `).bind(rowId, userId, period, now, limit).first<{ count: number }>();
 
-  const newCount = result?.count ?? 1;
-
-  if (newCount > limit) {
-    // Roll back — keep the row consistent; don't expose a slot that won't be used
-    await d1.prepare(
-      'UPDATE quota_usage SET count = count - 1, updated_at = ? WHERE user_id = ? AND period = ? AND count > 0',
-    ).bind(now, userId, period).run();
-    return { allowed: false, count: newCount - 1, limit };
+  if (!result) {
+    const current = await d1.prepare(
+      'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(userId, period).first<{ count: number }>();
+    return { allowed: false, count: current?.count ?? limit, limit };
   }
 
-  // Slot reserved; expose the pre-increment count so callers can display "messages used"
-  return { allowed: true, count: newCount - 1, limit };
+  // Slot reserved; expose the pre-increment count so callers can display
+  // "messages used".
+  return { allowed: true, count: result.count - 1, limit };
 }
 
 /**
  * Reserve one quota slot for an anonymous user before invoking the LLM.
- * KV does not support atomic CAS, so we read → write before the LLM call to
- * shrink the race window from the full LLM latency (~3-10 s) to the KV round-trip
- * (~ms). Slight over-counting is possible but bounded and acceptable for anon users.
+ * D1 performs the conditional insert/increment atomically. Anonymous users are
+ * not represented in users, so their browser identity is stored directly in a
+ * separate D1 counter.
  */
-async function reserveAnonQuota(
-  kv: KVNamespace,
+export async function reserveAnonQuota(
+  d1: D1Database,
+  legacyKv: KVNamespace,
   anonId: string,
 ): Promise<{ allowed: boolean; count: number; limit: number }> {
-  // noUncheckedIndexedAccess: use literal fallback, not MONTHLY_LIMITS['free']
   const limit: number = MONTHLY_LIMITS['free'] ?? 20;
-  const period = currentPeriod();
-  const key = `anon_quota:${anonId}:${period}`;
-  const val = await kv.get(key);
-  const count = val ? parseInt(val, 10) : 0;
+  const period = currentQuotaPeriod();
+  const now = Math.floor(Date.now() / 1000);
+  const legacyRaw = await legacyKv.get(anonymousQuotaKey(anonId));
+  const legacyCount = Math.min(limit, Math.max(
+    0,
+    Number.parseInt(legacyRaw ?? '0', 10) || 0,
+  ));
 
-  if (count >= limit) {
-    return { allowed: false, count, limit };
+  const result = await d1.prepare(`
+    INSERT INTO anonymous_quota_usage (anon_id, period, count, updated_at)
+    SELECT ?, ?, ? + 1, ?
+    WHERE ? < ?
+    ON CONFLICT (anon_id, period) DO UPDATE
+      SET count = MAX(anonymous_quota_usage.count, ?) + 1,
+          updated_at = excluded.updated_at
+      WHERE MAX(anonymous_quota_usage.count, ?) < ?
+    RETURNING count
+  `).bind(
+    anonId,
+    period,
+    legacyCount,
+    now,
+    legacyCount,
+    limit,
+    legacyCount,
+    legacyCount,
+    limit,
+  ).first<{ count: number }>();
+
+  if (!result) {
+    // Seed/preserve the legacy floor even when it is already at the limit.
+    const current = await d1.prepare(`
+      INSERT INTO anonymous_quota_usage (anon_id, period, count, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT (anon_id, period) DO UPDATE SET
+        count = MAX(anonymous_quota_usage.count, excluded.count),
+        updated_at = excluded.updated_at
+      RETURNING count
+    `).bind(anonId, period, legacyCount, now).first<{ count: number }>();
+    return { allowed: false, count: current?.count ?? limit, limit };
   }
 
-  // Reserve slot before LLM — expire at start of the month after next
-  const now = new Date();
-  const endOfNextMonth = new Date(now.getUTCFullYear(), now.getUTCMonth() + 2, 1);
-  const ttl = Math.max(3600, Math.floor((endOfNextMonth.getTime() - now.getTime()) / 1000));
-  await kv.put(key, String(count + 1), { expirationTtl: ttl });
-
-  return { allowed: true, count, limit };
+  return { allowed: true, count: result.count - 1, limit };
 }
 
+/** Read anonymous usage while atomically preserving legacy KV as a floor. */
+export async function getAnonQuotaUsage(
+  d1: D1Database,
+  legacyKv: KVNamespace,
+  anonId: string,
+): Promise<number> {
+  const period = currentQuotaPeriod();
+  const now = Math.floor(Date.now() / 1000);
+  const legacyRaw = await legacyKv.get(anonymousQuotaKey(anonId));
+  const legacyCount = Math.min(ANONYMOUS_MONTHLY_LIMIT, Math.max(
+    0,
+    Number.parseInt(legacyRaw ?? '0', 10) || 0,
+  ));
+  const row = await d1.prepare(`
+    INSERT INTO anonymous_quota_usage (anon_id, period, count, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT (anon_id, period) DO UPDATE SET
+      count = MAX(anonymous_quota_usage.count, excluded.count),
+      updated_at = excluded.updated_at
+    RETURNING count
+  `).bind(anonId, period, legacyCount, now).first<{ count: number }>();
+  return row?.count ?? legacyCount;
+}
+
+/** Release one previously reserved slot with a single atomic decrement. */
+export async function releaseQuotaReservation(
+  d1: D1Database,
+  userId: string,
+  isAnon: boolean,
+): Promise<void> {
+  const period = currentQuotaPeriod();
+  const now = Math.floor(Date.now() / 1000);
+
+  if (isAnon) {
+    await d1.prepare(
+      `UPDATE anonymous_quota_usage
+       SET count = count - 1, updated_at = ?
+       WHERE anon_id = ? AND period = ? AND count > 0`,
+    ).bind(now, userId, period).run();
+    return;
+  }
+
+  await d1.prepare(
+    `UPDATE quota_usage
+     SET count = count - 1, updated_at = ?
+     WHERE user_id = ? AND period = ? AND count > 0`,
+  ).bind(now, userId, period).run();
+}
 /**
  * Update per-user lifetime stats in the users table after a successful stream.
  * quota_usage was already incremented atomically in reserveAuthQuota before streaming,
@@ -352,7 +449,7 @@ async function loadHistory(
 
   return rows
     .reverse()
-    .map(r => `${r.role === 'user' ? 'Student' : 'Syrabit'}: ${r.content.slice(0, 500)}`)
+    .map(r => `${r.role === 'user' ? 'Student' : 'Syrabit'}: ${r.content.slice(0, HISTORY_CHARS_PER_MSG)}`)
     .join('\n');
 }
 
@@ -360,7 +457,7 @@ async function loadHistory(
 // System prompt
 // ─────────────────────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(opts: {
+export function buildSystemPrompt(opts: {
   lang: 'en' | 'as';
   contextText: string;
   history: string;
@@ -396,6 +493,9 @@ function buildSystemPrompt(opts: {
     }
     lines.push(
       '## নিৰ্দেশনা',
+      '- তোমাৰ সহায়তা কেৱল Assamboard পাঠ্যক্রম (AHSEC, SEBA আৰু প্ৰসংগত থকা Assamboard Degree পাঠ্যক্রম) লৈ সীমিত।',
+      '- শ্ৰেণী ১১ আৰু ১২-ৰ পাঠ্যক্রমৰ ব’ৰ্ড হিচাপে AHSEC কোৱা; Degree course-ৰ ব’ৰ্ড হিচাপে Assamboard কোৱা। Degree course-ক AHSEC, CBSE বা NCERT বুলি নক’বা।',
+      '- CBSE, NCERT, ICSE বা অন্য কোনো ব’ৰ্ডৰ প্ৰশ্নৰ উত্তৰ নিদিবা। এনে প্ৰশ্ন আহিলে ভদ্ৰভাৱে কোৱা যে Syrabit কেৱল অসম ব’ৰ্ডৰ পাঠ্যক্রম সমৰ্থন কৰে আৰু অসম ব’ৰ্ডৰ সমতুল্য প্ৰশ্ন সুধিবলৈ কোৱা।',
       '- সম্পূৰ্ণ অসমীয়াত উত্তৰ দিয়া।',
       '- পাঠ্যক্রমৰ প্ৰসংগ থাকিলে তাৰ ওপৰত ভিত্তি কৰি উত্তৰ দিয়া।',
       '- চমু, স্পষ্ট আৰু সহজ ভাষা ব্যৱহাৰ কৰা।',
@@ -427,6 +527,9 @@ function buildSystemPrompt(opts: {
   }
   lines.push(
     '## Instructions',
+    '- Your scope is limited to the Assamboard curriculum (including AHSEC, SEBA, and supported Assamboard Degree curriculum represented in the provided context).',
+    '- Board naming: identify Class 11 and Class 12 curriculum as AHSEC; identify Degree courses as Assamboard. Do not label Degree courses as AHSEC, CBSE, or NCERT.',
+    '- Do not answer CBSE, NCERT, ICSE, or any other non-Assam-board curriculum questions. If asked, politely explain that Syrabit only supports the Assam Board curriculum and invite the student to ask an Assam Board equivalent.',
     '- Answer clearly and concisely. Use the curriculum context above when available.',
     '- Align answers with Indian board exam syllabus and expected formats.',
     '- Break complex concepts into simple, numbered steps.',
@@ -489,6 +592,9 @@ export const chatRouter = new Hono<{ Bindings: Env }>();
 
 chatRouter.post('/stream', async (c) => {
   const startTime = Date.now();
+  // Durations only: diagnostic timing must never include student prompts,
+  // history, retrieved content, or generated answers.
+  const timings: Record<string, number> = {};
 
   // ── 1. Parse & validate body ────────────────────────────────────────────────
   let body: ChatRequest;
@@ -513,40 +619,51 @@ chatRouter.post('/stream', async (c) => {
   let userRole = 'student';
   let isAnon   = true;
 
+  const authStart = Date.now();
   const token = extractBearer(c.req.header('Authorization') ?? null);
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
     // Require an access token specifically — reject refresh tokens
     if (payload?.sub && payload.type === 'access') {
-      // Load fresh user from D1 to catch deleted/deactivated accounts.
-      // If the user row is missing we fall through to anon rather than
-      // continuing as an authenticated user with a stale token.
-      const db = createDb(c.env.DB);
-      const row = await db
-        .select({ subscriptionTier: users.subscriptionTier, role: users.role, deletedAt: users.deletedAt })
-        .from(users)
-        .where(eq(users.id, payload.sub))
-        .get();
+      let row: {
+        subscriptionTier: string | null;
+        role: string | null;
+        deletedAt: number | null;
+      } | undefined;
+      let sessionValid = false;
+      try {
+        const db = createDb(c.env.DB);
+        row = await db
+          .select({ subscriptionTier: users.subscriptionTier, role: users.role, deletedAt: users.deletedAt })
+          .from(users)
+          .where(eq(users.id, payload.sub))
+          .get();
+        sessionValid = Boolean(row)
+          && await isSessionValid(c.env.DB, payload.sub, payload.iat);
+      } catch (err) {
+        console.error('[chat] authentication storage unavailable:', err);
+        return c.json({
+          detail: 'Chat authentication service is temporarily unavailable. Please try again.',
+          error_code: 'auth_storage_unavailable',
+        }, 503);
+      }
 
-      // Reject soft-deleted users (deletedAt non-null) as well as missing rows
-      if (row && !row.deletedAt
-        && await isSessionValid(c.env.DB, payload.sub, payload.iat)) {
+      if (row && !row.deletedAt && sessionValid) {
         authedUserId = payload.sub;
         userId       = payload.sub;
         userTier     = row.subscriptionTier ?? 'free';
         userRole     = row.role ?? 'student';
         isAnon       = false;
       } else {
-        // User deleted or not found — treat as anon
-        userId = anonUserId(c.req.raw);
+        userId = await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
       }
     } else {
-      // Expired / invalid / non-access token → treat as anon
-      userId = anonUserId(c.req.raw);
+      userId = await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
     }
   } else {
-    userId = anonUserId(c.req.raw);
+    userId = await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
   }
+  timings.auth_ms = Date.now() - authStart;
 
   // ── 3. Language detection ────────────────────────────────────────────────────
   const lang = detectLang(message, body.lang);
@@ -559,12 +676,21 @@ chatRouter.post('/stream', async (c) => {
   let quotaLimit: number;
   let quotaAllowed: boolean;
 
-  if (!isAnon) {
-    ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-      await reserveAuthQuota(c.env.DB, userId, userTier, userRole));
-  } else {
-    ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-      await reserveAnonQuota(c.env.RATE_LIMIT_KV, userId));
+  const quotaStart = Date.now();
+  try {
+    if (!isAnon) {
+      ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
+        await reserveAuthQuota(c.env.DB, userId, userTier, userRole));
+    } else {
+      ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
+        await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId));
+    }
+  } catch (err) {
+    console.error('[chat] quota storage unavailable:', err);
+    return c.json({
+      detail: 'Chat quota service is temporarily unavailable. Please try again.',
+      error_code: 'quota_storage_unavailable',
+    }, 503);
   }
 
   if (!quotaAllowed) {
@@ -576,32 +702,15 @@ chatRouter.post('/stream', async (c) => {
       429,
     );
   }
+  timings.quota_ms = Date.now() - quotaStart;
 
   // Helper to release a reserved quota slot on failure paths.
-  // The same decrement logic as in reserveAuthQuota's rollback.
-  const releaseQuota = (): Promise<void> => {
-    const period = currentPeriod();
-    const now    = Math.floor(Date.now() / 1000);
-    if (isAnon) {
-      const key = `anon_quota:${userId}:${period}`;
-      return c.env.RATE_LIMIT_KV.get(key).then((val) => {
-        const count = Math.max(0, (val ? parseInt(val, 10) : 1) - 1);
-        const endOfNextMonth = new Date(
-          new Date().getUTCFullYear(),
-          new Date().getUTCMonth() + 2,
-          1,
-        );
-        const ttl = Math.max(3600, Math.floor((endOfNextMonth.getTime() - Date.now()) / 1000));
-        return c.env.RATE_LIMIT_KV.put(key, String(count), { expirationTtl: ttl });
-      });
-    }
-    return c.env.DB.prepare(
-      'UPDATE quota_usage SET count = count - 1, updated_at = ? WHERE user_id = ? AND period = ? AND count > 0',
-    ).bind(now, userId, period).run().then(() => undefined);
-  };
+  const releaseQuota = (): Promise<void> =>
+    releaseQuotaReservation(c.env.DB, userId, isAnon);
 
   // ── 5. RAG: embed + Vectorize + D1 chapter content ─────────────────────────
   const db = createDb(c.env.DB);
+  const retrievalStart = Date.now();
 
   let contextChunks: ContextChunk[] = [];
   let confidenceTier = 'none';
@@ -612,27 +721,64 @@ chatRouter.post('/stream', async (c) => {
   let topSubjectId: string | undefined;
   let history = '';
 
+  // An Ask AI action already supplies the chapter to ground against. Load it
+  // alongside history and avoid an embedding + Vectorize round trip when it is
+  // available. Semantic retrieval remains the fallback for stale/missing IDs.
+  const directChapterId = body.chapter_id?.trim() || undefined;
+  let historyLoaded = false;
+  if (directChapterId) {
+    const [directHistoryResult, directContentResult] = await Promise.allSettled([
+      loadHistory(db, sessionId, userId),
+      fetchChapterContent(db, directChapterId, lang),
+    ]);
+    if (directHistoryResult.status === 'fulfilled') {
+      history = directHistoryResult.value;
+      historyLoaded = true;
+    }
+    const directChapterContent = directContentResult.status === 'fulfilled'
+      ? directContentResult.value
+      : null;
+    if (shouldBypassSemanticRetrieval(directChapterId, directChapterContent)) {
+      const resolvedTitle = body.chapter_name ?? directChapterId;
+      topChapterId = directChapterId;
+      topChapterTitle = resolvedTitle;
+      topSubjectId = body.subject_id ?? undefined;
+      contextChunks = [{
+        chapterId:    directChapterId,
+        chapterTitle: resolvedTitle,
+        ...(topSubjectId !== undefined && { subjectId: topSubjectId }),
+        content:      directChapterContent.slice(0, CONTEXT_CHAR_CAP),
+        // Explicit page context is stronger than a semantic cosine score.
+        score:        1,
+      }];
+      confidenceTier = 'high';
+      topScore = 1;
+      ragPath = 'chapter_direct';
+    }
+  }
+
+  if (contextChunks.length === 0) {
   // Embed + history in parallel — zero extra latency vs serial
   // Pass userId so history is scoped to its owner (session ownership enforcement)
   const [embedResult, historyResult] = await Promise.allSettled([
     embedQuery(c.env.AI, message),
-    loadHistory(db, sessionId, userId),
+    historyLoaded ? Promise.resolve(history) : loadHistory(db, sessionId, userId),
   ]);
 
-  if (historyResult.status === 'fulfilled') history = historyResult.value;
+  if (historyResult.status === 'fulfilled' && !historyLoaded) history = historyResult.value;
 
   if (embedResult.status === 'fulfilled') {
     const embedding = embedResult.value;
 
     try {
-      // Metadata filters to prevent cross-board content leakage
-      // Only filter by fields that are actually indexed in Vectorize ingestion:
-      // subjectId, chapterId, topicId, medium, sourceType, chunkType.
-      // boardId and classId are NOT in the production metadata index — adding
-      // them here would cause the query to fail or return 0 matches silently.
-      const extraFilters: Record<string, string> = {};
-      if (body.chapter_id) extraFilters['chapterId'] = body.chapter_id;
-      if (body.subject_id) extraFilters['subjectId'] = body.subject_id;
+      // A failed direct lookup deliberately drops its stale chapter ID while
+      // retaining subject scope. Vectorize metadata uses only these indexed
+      // fields; board/class metadata is not available in production.
+      const extraFilters = semanticRetrievalFilters(
+        body.chapter_id,
+        body.subject_id,
+        Boolean(directChapterId),
+      );
 
       const matches = await queryVectorize(c.env.VECTORIZE, embedding, lang, extraFilters);
 
@@ -688,18 +834,19 @@ chatRouter.post('/stream', async (c) => {
   } else {
     console.warn('[chat] Embedding failed:', embedResult.reason);
   }
+  }
 
   // Card-context fallback — when RAG missed but chapter_id provided by frontend
-  if (contextChunks.length === 0 && body.chapter_id) {
+  if (contextChunks.length === 0 && directChapterId) {
     try {
-      const content = await fetchChapterContent(db, body.chapter_id, lang);
+      const content = await fetchChapterContent(db, directChapterId, lang);
       if (content) {
-        topChapterId    = body.chapter_id;
+        topChapterId    = directChapterId;
         topChapterTitle = body.chapter_name;
         topSubjectId    = body.subject_id;
         contextChunks   = [{
-          chapterId:    body.chapter_id,
-          chapterTitle: body.chapter_name ?? body.chapter_id,
+          chapterId:    directChapterId,
+          chapterTitle: body.chapter_name ?? directChapterId,
           // exactOptionalPropertyTypes: spread only when defined
           ...(body.subject_id !== undefined && { subjectId: body.subject_id }),
           content:      content.slice(0, CONTEXT_CHAR_CAP),
@@ -714,7 +861,10 @@ chatRouter.post('/stream', async (c) => {
     }
   }
 
+  timings.retrieval_ms = Date.now() - retrievalStart;
+
   // ── 6. System prompt ────────────────────────────────────────────────────────
+  const promptStart = Date.now();
   const contextText = contextChunks
     .map((chunk, i) => `[Source ${i + 1}: ${chunk.chapterTitle}]\n${chunk.content}`)
     .join('\n\n---\n\n');
@@ -731,6 +881,7 @@ chatRouter.post('/stream', async (c) => {
     ...(chapterNameResolved    !== undefined && { chapterName: chapterNameResolved }),
     question: message,
   });
+  timings.prompt_ms = Date.now() - promptStart;
 
   // ── 7. Session ID — mint before streaming so the frontend can adopt it ───────
   // The frontend sends conversation_id: null for new conversations and adopts
@@ -770,6 +921,7 @@ chatRouter.post('/stream', async (c) => {
   const streamTask = (async () => {
     let fullResponse = '';
     let actualModel  = AI_MODEL_PRIMARY;
+    let firstTokenRecorded = false;
 
     try {
       // Always emit source_card first — client uses this to learn the conversation_id
@@ -782,12 +934,16 @@ chatRouter.post('/stream', async (c) => {
         for await (const chunk of streamGenerate(c.env.AI, {
           systemPrompt,
           userMessage: message,
-          maxTokens: 2048,
+          maxTokens: CHAT_MAX_OUTPUT_TOKENS,
         })) {
           // Sentinel chunk carries the resolved model name — do not forward to client
           if (chunk.startsWith('\x00model:')) {
             actualModel = chunk.slice(7);
             continue;
+          }
+          if (!firstTokenRecorded && chunk.length > 0) {
+            timings.first_token_ms = Date.now() - startTime;
+            firstTokenRecorded = true;
           }
           fullResponse += chunk;
           await write({ content: chunk, done: false });
@@ -807,6 +963,7 @@ chatRouter.post('/stream', async (c) => {
 
       // ── syrabit_done event ────────────────────────────────────────────────
       const latencyMs = Date.now() - startTime;
+      timings.total_ms = latencyMs;
       await write({
         content:              '',
         done:                 true,
@@ -827,6 +984,7 @@ chatRouter.post('/stream', async (c) => {
           matched_chapter:  topChapterTitle,
           matched_subject:  topSubjectId,
           web_used:         false,
+           timings_ms:       { ...timings },
         },
       });
 

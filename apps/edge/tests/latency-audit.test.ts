@@ -4,11 +4,12 @@
  * Verifies:
  * (a) Rate limit adds X-Rate-Limited-By header to proxied requests
  * (b) Proxy request includes Connection: keep-alive
- * (c) Rate limit check is fast (no external calls beyond KV)
+ * (c) Rate limit check uses one internal Durable Object call
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { checkRateLimit } from '../src/middleware/rate-limit';
 import { proxyRequest } from '../src/routes/api-proxy';
+import { createMockRateLimitNamespace } from './helpers/rate-limit-store';
 
 // ═══════════════════════════════════════════════════════════════
 // (a) Rate limit sets X-Rate-Limited-By header on proxied request
@@ -16,24 +17,16 @@ import { proxyRequest } from '../src/routes/api-proxy';
 
 describe('Edge Rate Limit - X-Rate-Limited-By header', () => {
   it('rate limit check returns allowed=true for fresh user', async () => {
-    const kv = {
-      get: vi.fn(async () => null),
-      put: vi.fn(async () => {}),
-    } as unknown as KVNamespace;
-
-    const result = await checkRateLimit(kv, 'user-1', 'en', 30);
+    const { namespace } = await createMockRateLimitNamespace();
+    const result = await checkRateLimit(namespace, 'user-1', 'en', 30);
     expect(result.allowed).toBe(true);
   });
 
   it('after rate limit passes, edge worker sets X-Rate-Limited-By header', async () => {
     // Simulate the flow from index.ts: after checkRateLimit passes,
     // the edge worker creates a new request with X-Rate-Limited-By: edge
-    const kv = {
-      get: vi.fn(async () => null),
-      put: vi.fn(async () => {}),
-    } as unknown as KVNamespace;
-
-    const result = await checkRateLimit(kv, 'user-test', 'en', 30);
+    const { namespace } = await createMockRateLimitNamespace();
+    const result = await checkRateLimit(namespace, 'user-test', 'en', 30);
     expect(result.allowed).toBe(true);
 
     // After rate limit passes, edge injects the header
@@ -125,32 +118,23 @@ describe('Edge Proxy - Connection header', () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe('Edge Rate Limit - Performance', () => {
-  it('rate limit check completes quickly (under 10ms with mock KV)', async () => {
-    const kv = {
-      get: vi.fn(async () => null),
-      put: vi.fn(async () => {}),
-    } as unknown as KVNamespace;
+  it('rate limit check completes quickly with a mock Durable Object', async () => {
+    const { namespace } = await createMockRateLimitNamespace();
 
     const start = performance.now();
     for (let i = 0; i < 100; i++) {
-      await checkRateLimit(kv, `user-${i}`, 'en', 30);
+      await checkRateLimit(namespace, `user-${i}`, 'en', 30);
     }
     const elapsed = performance.now() - start;
 
-    // 100 rate limit checks should complete in under 100ms total
-    expect(elapsed).toBeLessThan(100);
+    // Keep the in-memory adapter comfortably below a quarter second without
+    // asserting an unrealistically tight scheduler-dependent threshold.
+    expect(elapsed).toBeLessThan(250);
   });
 
-  it('rate limit only calls KV get and put (no other external services)', async () => {
-    const kv = {
-      get: vi.fn(async () => '5'),
-      put: vi.fn(async () => {}),
-    } as unknown as KVNamespace;
-
-    await checkRateLimit(kv, 'user-perf', 'as', 30);
-
-    // Should only interact with KV
-    expect(kv.get).toHaveBeenCalledTimes(1);
-    expect(kv.put).toHaveBeenCalledTimes(1);
+  it('rate limit performs one internal Durable Object request', async () => {
+    const { namespace, fetch } = await createMockRateLimitNamespace(5);
+    await checkRateLimit(namespace, 'user-perf', 'as', 30);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

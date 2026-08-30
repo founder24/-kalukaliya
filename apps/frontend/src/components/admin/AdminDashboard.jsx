@@ -880,7 +880,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
     alertSettingsOpen, setAlertSettingsOpen,
     alertSettings, alertSettingsDraft, setAlertSettingsDraft, alertSettingsSaving,
     notifPrefs, notifPrefsSaving, notifPrefsOpen, setNotifPrefsOpen,
-    pushDeliverySummary, seoSummaryDispatches,
+    pushDeliverySummary, pushChannelStatus, seoSummaryDispatches,
     kvHealth, kvExpandedIsolates, setKvExpandedIsolates,
     r2Health, setR2Health, r2ResettingWatchdog, setR2ResettingWatchdog, r2Reevaluating, setR2Reevaluating,
     vertexProbe, ciStatus, ciRerunning,

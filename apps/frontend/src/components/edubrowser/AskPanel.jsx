@@ -129,7 +129,10 @@ export function AskPanel({ article, subject, chapter, board, className }) {
 
     try {
       const headers = { 'Content-Type': 'application/json' };
-      if (!user) headers['x-anon-id'] = getAnonId();
+      if (!user) {
+        const anonId = getAnonId();
+        if (anonId) headers['x-anon-id'] = anonId;
+      }
 
       const resp = await fetch(`${API_BASE}/edu/grounded-answer`, {
         method: 'POST',

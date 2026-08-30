@@ -197,6 +197,14 @@ ${entries.join('\n')}
 }
 
 seoRouter.get('/feed.xml', async (c) => xmlResponse(await publishedContent(c).then((rows) => rss(rows)), RSS_CONTENT_TYPE));
+// This is the public "study notes" feed linked from the frontend. It is an
+// all-subject feed, not a subject whose slug happens to be "notes".
+seoRouter.get('/feed/notes.xml', async (c) => xmlResponse(
+  await publishedContent(c).then((rows) =>
+    rss(rows, 'Syrabit.ai - Study Notes & Exam Prep', `${SITE_URL}/feed/notes.xml`),
+  ),
+  RSS_CONTENT_TYPE,
+));
 seoRouter.get('/feed/:subjectSlug.xml', async (c) => {
   const subjectSlug = c.req.param('subjectSlug') ?? '';
   const rows = await publishedContent(c, subjectSlug);

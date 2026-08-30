@@ -16,6 +16,7 @@ declare interface KVNamespace {
 
 declare interface R2Bucket {
   get(key: string): Promise<R2Object | null>;
+  head(key: string): Promise<R2Object | null>;
 }
 
 declare interface R2Object {
@@ -45,6 +46,8 @@ interface Env {
 
   // Optional: override default 30s proxy timeout (milliseconds)
   PROXY_TIMEOUT_MS?: string;
+  // Optional: bound service-to-service response-header timeout (milliseconds).
+  SERVICE_BINDING_TIMEOUT_MS?: string;
 
   // Optional: Google Service Account JSON key for Cloud Run authentication
   GOOGLE_SA_KEY?: string;
@@ -52,6 +55,8 @@ interface Env {
   // ── Bindings ──
   R2_BUCKET: R2Bucket;
   RATE_LIMIT_KV: KVNamespace;
+  // Strongly-consistent per-bucket counters. Chat fails closed when absent.
+  RATE_LIMIT_DO?: DurableObjectNamespace;
   ISR_CACHE_KV: KVNamespace;
   // Pre-seeded content HTML store (written by backend content pipeline).
   // Keys: {board}/{class_level}/{subject}/{chapter}/{page_type}

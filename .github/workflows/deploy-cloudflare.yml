@@ -71,6 +71,12 @@ jobs:
         run: |
           bash scripts/validate-d1-config.sh apps/api/wrangler.toml
 
+      - name: Validate required Cloudflare bindings and crawler routes
+        run: python3 scripts/validate-cloudflare-release-config.py
+
+      - name: Validate refresh-token bridge release guard
+        run: python3 scripts/test-refresh-token-bridge-guard.py
+
       - name: Require authenticated validation for native activation
         if: ${{ github.event.inputs.activate_native == 'true' || github.event.inputs.validate_authenticated == 'true' || github.event.inputs.validate_reset_delivery == 'true' }}
         env:
@@ -210,34 +216,83 @@ jobs:
       - name: Apply D1 migrations
         run: pnpm --filter syrabit-api exec wrangler d1 migrations apply syrabit-db --remote --env production
 
-      - name: Verify required D1 migration is applied
+      - name: Verify atomic claims and rollout guard migrations are applied
         run: |
           set -euo pipefail
           applied_migrations="$(pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production --json \
-            --command "SELECT name FROM d1_migrations WHERE name = '0013_reset_token_cutover_nonce.sql'")"
+            --command "SELECT name FROM d1_migrations WHERE name IN ('0013_reset_token_cutover_nonce.sql', '0014_atomic_quota_and_refresh_claims.sql', '0015_refresh_claim_rollout_guard.sql') ORDER BY name")"
           if ! printf '%s\n' "$applied_migrations" | python3 -c '
           import json
           import sys
           rows = json.load(sys.stdin)
-          found = any(
-              row.get("name") == "0013_reset_token_cutover_nonce.sql"
+          required = {
+              "0013_reset_token_cutover_nonce.sql",
+              "0014_atomic_quota_and_refresh_claims.sql",
+              "0015_refresh_claim_rollout_guard.sql",
+          }
+          found = {
+              row.get("name")
               for result in rows
               for row in result.get("results", [])
-          )
-          if not found:
+          }
+          missing = sorted(required - found)
+          if missing:
               raise SystemExit(
-                  "Production D1 is missing 0013_reset_token_cutover_nonce.sql; "
-                  "refusing API Worker deployment."
+                  "Production D1 is missing required migrations: "
+                  + ", ".join(missing)
+                  + "; refusing API Worker deployment."
               )
           '
           then
-            echo "::error::Production D1 is missing 0013_reset_token_cutover_nonce.sql; refusing API Worker deployment."
+            echo "::error::Production D1 is missing required atomic claims or rollout guard migrations; refusing API Worker deployment."
             exit 1
           fi
-          echo "Production D1 reset-token cutover migration is applied."
+          echo "Production D1 reset-token, atomic claims, and rollout guard migrations are applied."
+
+      - name: Guard refresh-token bridge cleanup safety window
+        run: |
+          set -euo pipefail
+          rollout_evidence="$(pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production --json \
+            --command "SELECT first_deployed_at, first_version, last_deployed_at, last_version, successful_deployments FROM refresh_claim_rollout WHERE id = 1")"
+          python3 scripts/guard-refresh-token-bridge.py \
+            --auth-source apps/api/src/routes/auth.ts \
+            --evidence-json "$rollout_evidence" \
+            --now "$(date -u +%s)" \
+            --refresh-token-ttl-seconds "$((30 * 24 * 60 * 60))"
 
       - name: Deploy API Worker
         run: pnpm --filter syrabit-api exec wrangler deploy --env production
+
+      - name: Record successful D1-claims deployment
+        env:
+          RELEASE_VERSION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::GitHub did not provide a full commit SHA; refusing to write rollout evidence."
+            exit 1
+          }
+          deployed_at="$(date -u +%s)"
+          pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production \
+            --command "INSERT INTO refresh_claim_rollout
+              (id, first_deployed_at, first_version, last_deployed_at, last_version, successful_deployments)
+              VALUES (1, ${deployed_at}, '${RELEASE_VERSION}', ${deployed_at}, '${RELEASE_VERSION}', 1)
+              ON CONFLICT(id) DO UPDATE SET
+                last_deployed_at = excluded.last_deployed_at,
+                last_version = excluded.last_version,
+                successful_deployments = refresh_claim_rollout.successful_deployments + 1"
+          echo "Recorded successful D1-claims deployment ${RELEASE_VERSION} at ${deployed_at} UTC."
+
+      - name: Report refresh-token bridge cleanup eligibility
+        run: |
+          set -euo pipefail
+          rollout_evidence="$(pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production --json \
+            --command "SELECT first_deployed_at, first_version, last_deployed_at, last_version, successful_deployments FROM refresh_claim_rollout WHERE id = 1")"
+          python3 scripts/guard-refresh-token-bridge.py \
+            --auth-source apps/api/src/routes/auth.ts \
+            --evidence-json "$rollout_evidence" \
+            --now "$(date -u +%s)" \
+            --refresh-token-ttl-seconds "$((30 * 24 * 60 * 60))"
 
   deploy-edge:
     name: Deploy Edge Worker
@@ -303,11 +358,6 @@ jobs:
       - name: Deploy edge Worker
         run: pnpm --filter syrabit-edge exec wrangler deploy --env production
 
-      - name: Activate D1 API Worker routing
-        if: ${{ github.event.inputs.activate_native == 'true' && github.event.inputs.validate_authenticated == 'true' }}
-        run: |
-          printf 'true' | pnpm --filter syrabit-edge exec wrangler secret put API_WORKER_LIVE --env production
-
   deploy-frontend:
     name: Deploy Frontend
     runs-on: ubuntu-latest
@@ -333,6 +383,7 @@ jobs:
         run: pnpm --filter @workspace/syrabit run build
         env:
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://api.syrabit.ai' }}
+          CLOUDFLARE_RELEASE_BUILD: 'true'
 
       - name: Deploy to Cloudflare Pages
         run: |
@@ -364,6 +415,29 @@ jobs:
           grep -qi '^x-syrabit-route: worker-native' /tmp/api.headers
           echo "API Worker health passed: HTTP ${status}"
 
+      - name: Critical API Worker bindings pass deep read-only probes
+        env:
+          EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/api-deep.headers -o /tmp/api-deep.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${EDGE_SHARED_SECRET}" \
+            "${API_WORKER_URL}/health/deep" --max-time 30)"
+          test "$status" = "200" || { cat /tmp/api-deep.json; exit 1; }
+          grep -qi '^x-syrabit-route: worker-native' /tmp/api-deep.headers
+          python3 - /tmp/api-deep.json <<'PY'
+          import json, sys
+          with open(sys.argv[1]) as f:
+              payload = json.load(f)
+          required = {"d1", "workers_ai", "vectorize", "r2", "content_kv", "rate_limit_kv"}
+          assert payload["status"] == "healthy", payload
+          assert payload["mutation_free"] is True, payload
+          assert payload["missing_bindings"] == [], payload
+          assert required == set(payload["checks"]), payload
+          assert all(item["status"] == "healthy" for item in payload["checks"].values()), payload
+          PY
+          echo "Deep binding probes passed without production writes."
+
       - name: Public edge is reachable
         run: |
           set -euo pipefail
@@ -372,11 +446,29 @@ jobs:
           test "$status" = "200"
           echo "Public edge health passed: HTTP ${status}"
 
-      - name: Confirm service-binding health through public edge
-        if: ${{ github.event.inputs.activate_native == 'true' && github.event.inputs.validate_authenticated == 'true' }}
+      - name: D1 content and anonymous credits work on the deployed API Worker
         run: |
-          grep -qi '^x-syrabit-health-backend: api-worker' /tmp/edge.headers
-          echo "Public edge health is probing the D1 API Worker through its service binding."
+          set -euo pipefail
+          curl -sS --max-time 20 "${API_WORKER_URL}/api/v1/content/library-bundle?slim=1" \
+            | python3 -c 'import json,sys; p=json.load(sys.stdin); assert all(k in p for k in ("boards","classes","streams","subjects")), p'
+          anon_id="anon_$(openssl rand -hex 16)"
+          curl -sS --max-time 20 -H "X-Anon-ID: ${anon_id}" \
+            "${API_WORKER_URL}/api/v1/users/credits" \
+            | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["credits_remaining"] >= 0 and p["anon_id"].startswith("anon_"), p'
+
+      - name: Public edge CORS contract is intact
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/cors.headers -o /dev/null -w '%{http_code}' --max-time 20 -X OPTIONS \
+            -H 'Origin: https://syrabit.ai' \
+            -H 'Access-Control-Request-Method: POST' \
+            -H 'Access-Control-Request-Headers: content-type,authorization,x-anon-id' \
+            "${PUBLIC_EDGE_URL}/api/v1/chat")"
+          test "$status" = "200" || test "$status" = "204"
+          grep -qi '^access-control-allow-origin: https://syrabit.ai' /tmp/cors.headers
+          grep -qi '^access-control-allow-methods:.*POST' /tmp/cors.headers
+          grep -qi '^access-control-allow-headers:.*authorization' /tmp/cors.headers
+          grep -qi '^access-control-allow-headers:.*x-anon-id' /tmp/cors.headers
 
       - name: Frontend is reachable
         run: |
@@ -384,8 +476,82 @@ jobs:
           test "$status" = "200"
           echo "Frontend reachability passed: HTTP ${status}"
 
+      - name: Pages custom Worker serves crawler HTML, feeds, and true 404s
+        run: |
+          set -euo pipefail
+          bot_ua='Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+          curl -sS -D /tmp/crawler.headers -o /tmp/crawler.html --max-time 30 \
+            -A "$bot_ua" -H 'Accept: text/html' "${FRONTEND_URL}/library"
+          grep -qi '^x-source: \(prerender\|bot-render\)' /tmp/crawler.headers
+          grep -qi '<title' /tmp/crawler.html
+          for path in sitemap-index.xml feed.xml feed/notes.xml feed.json llms.txt llms-full.txt; do
+            headers="/tmp/${path//\//-}.headers"
+            output="/tmp/${path//\//-}.body"
+            status="$(curl -sS -D "$headers" -o "$output" -w '%{http_code}' --max-time 30 \
+              "${FRONTEND_URL}/${path}")"
+            test "$status" = "200" || { echo "${path} returned ${status}"; exit 1; }
+            ! grep -qi '^x-robots-tag:.*noindex' "$headers"
+            case "$path" in
+              *.xml) grep -Eqi '^content-type: application/(rss\+)?xml' "$headers"; grep -Eq '<rss|<sitemapindex' "$output" ;;
+              *.json) grep -qi '^content-type: application/' "$headers"; python3 -m json.tool "$output" >/dev/null ;;
+              *.txt) grep -qi '^content-type: text/plain' "$headers"; test -s "$output" ;;
+            esac
+          done
+          missing="/release-health-missing-$(openssl rand -hex 12)"
+          status="$(curl -sS -D /tmp/missing.headers -o /tmp/missing.html -w '%{http_code}' \
+            --max-time 30 -A "$bot_ua" -H 'Accept: text/html' "${FRONTEND_URL}${missing}")"
+          test "$status" = "404" || { cat /tmp/missing.html; echo "Expected true 404, got ${status}"; exit 1; }
+          grep -qi '^x-source: bot-render-not-found' /tmp/missing.headers
+          ! grep -q 'id="root"\|id="app"' /tmp/missing.html
+
+  activate-native:
+    name: Activate D1 API Worker routing
+    runs-on: ubuntu-latest
+    needs: smoke
+    if: ${{ github.event.inputs.activate_native == 'true' && github.event.inputs.validate_authenticated == 'true' }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Enable Corepack + PNPM
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Activate only after pre-release smoke passes
+        run: printf 'true' | pnpm --filter syrabit-edge exec wrangler secret put API_WORKER_LIVE --env production
+
+  post-activation-smoke:
+    name: Confirm native routing after activation
+    runs-on: ubuntu-latest
+    needs: activate-native
+    env:
+      API_WORKER_URL: https://syrabit-api-prod.axomxplain.workers.dev
+      PUBLIC_EDGE_URL: https://api.syrabit.ai
+      FRONTEND_URL: https://syrabit.ai
+    steps:
+      - uses: actions/checkout@v4
+      - name: Service binding, D1 content, and anonymous credits work publicly
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/edge.headers -o /tmp/edge.json -w '%{http_code}' \
+            "${PUBLIC_EDGE_URL}/health" --max-time 30)"
+          test "$status" = "200"
+          grep -qi '^x-syrabit-health-backend: api-worker' /tmp/edge.headers
+          curl -sS -D /tmp/content.headers --max-time 20 \
+            "${PUBLIC_EDGE_URL}/api/v1/content/library-bundle?slim=1" \
+            | python3 -c 'import json,sys; p=json.load(sys.stdin); assert all(k in p for k in ("boards","classes","streams","subjects")), p'
+          grep -qi '^x-syrabit-route: worker-native' /tmp/content.headers
+          anon_id="anon_$(openssl rand -hex 16)"
+          curl -sS -D /tmp/credits.headers --max-time 20 -H "X-Anon-ID: ${anon_id}" \
+            "${PUBLIC_EDGE_URL}/api/v1/users/credits" \
+            | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["credits_remaining"] >= 0 and p["anon_id"].startswith("anon_"), p'
+          grep -qi '^x-syrabit-route: worker-native' /tmp/credits.headers
+
       - name: Validate authenticated Cloudflare cutover
-        if: ${{ github.event.inputs.activate_native == 'true' && github.event.inputs.validate_authenticated == 'true' }}
         env:
           INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
           STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
@@ -403,13 +569,13 @@ jobs:
   request-reset-email:
     name: Request fresh disposable password-reset email
     runs-on: ubuntu-latest
-    needs: [smoke]
+    needs: [post-activation-smoke]
     if: |
       always() &&
       github.event.inputs.activate_native == 'true' &&
       github.event.inputs.validate_authenticated == 'true' &&
       github.event.inputs.validate_reset_delivery == 'true' &&
-      needs.smoke.result == 'success'
+      needs.post-activation-smoke.result == 'success'
     outputs:
       nonce: ${{ steps.request.outputs.nonce }}
     env:
@@ -475,13 +641,13 @@ jobs:
   rollback-native-routing:
     name: Restore Cloud Run routing after failed cutover validation
     runs-on: ubuntu-latest
-    needs: [smoke, validate-reset-email]
+    needs: [post-activation-smoke, validate-reset-email]
     if: |
       always() &&
       github.event.inputs.activate_native == 'true' &&
       github.event.inputs.validate_authenticated == 'true' &&
       (
-        needs.smoke.result != 'success' ||
+        needs.post-activation-smoke.result != 'success' ||
         (
           github.event.inputs.validate_reset_delivery == 'true' &&
           needs.validate-reset-email.result != 'success'

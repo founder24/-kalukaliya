@@ -79,6 +79,7 @@ async function handleScheduled(controller: ScheduledController, env: Env): Promi
         'email_failure_events',
         'payments_pending',
         'password_reset_tokens',
+        'refresh_token_claims',
         'ai_usage_logs',
         'chat_feedback',
         'dead_letters',

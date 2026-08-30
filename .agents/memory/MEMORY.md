@@ -3,6 +3,8 @@
 - [Syrabit chat+auth pipeline bugs](syrabit-pipeline-bugs.md) — Fixed bugs: analytics 404s, conversation_id/session_id mismatch, logout null-token crash
 - [CF↔GCP audit](cf-gcp-audit.md) — Token perms, duplicate SM secrets, BACKEND_URL binding conflict, CF KV cache fix, bot rendering fix
 - [Syrabit chat latency fix](syrabit-chat-latency.md) — gemini-2.5-flash thinking phase (7-8s TTFB) fixed; model switch + thinkingBudget guard
+- [Worker chat retrieval speed](worker-chat-retrieval-speed.md) — known chapters use direct D1 context; stale IDs fall back to subject-scoped semantic RAG
+- [Anonymous quota identity](anonymous-quota-identity.md) — browser ID first, signed edge cookie second, trusted connection IP only as final fallback
 - [Syrabit Cloud Run deploy fixes](syrabit-cloudrun-fixes.md) — motor missing, pymongo compat, JWT RS256 degraded mode, Atlas index conflicts
 - [Syrabit Cloud Run secrets strategy](syrabit-cloudrun-envvars.md) — gcloud run deploy DROPS all Secret Manager refs every deploy; must pass --update-secrets explicitly in cloudbuild.yaml every time
 - [Syrabit content model FlexId](syrabit-flexid.md) — DB uses legacy string IDs (e.g. 's13', UUID) not ObjectIds; all reference fields must use FlexId
@@ -52,3 +54,6 @@
 - [Production seed rollout caveat](syrabit-production-seed-rollout.md) — Full-stack release can stop before API Worker on GCP billing; preserve direct API rollout evidence and repair the gate.
 - [Razorpay cutover validation](razorpay-cutover-validation.md) — Payment release checks must preflight sandbox keys before mutation and couple webhook claims with entitlement writes.
 - [Password reset cutover proof](password-reset-cutover-proof.md) — Bind a freshly delivered disposable reset link to its post-deploy request before treating it as release evidence.
+- [Secret Manager fail-closed sync](secret-manager-fail-closed-sync.md) — A blocked secret source can stream nothing into Worker provisioning; verify a non-empty value before writing.
+- [Atomic quota and refresh state](atomic-quota-refresh.md) — D1 owns quota/refresh claims; preserve legacy KV floors/markers through safe rollout windows.
+- [Frontend undefined identifiers](frontend-undefined-identifiers.md) — Vite builds do not catch unbound JSX names; extracted admin tabs need render coverage or static checks.

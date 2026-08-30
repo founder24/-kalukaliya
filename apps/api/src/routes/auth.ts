@@ -11,6 +11,7 @@ import {
   verifyToken,
   extractBearer,
   hashResetToken,
+  claimRefreshToken,
   revokedRtKey,
   REFRESH_TOKEN_TTL_S,
   isSessionValid,
@@ -19,6 +20,13 @@ import {
 import type { Env } from '../types';
 
 export const authRouter = new Hono<{ Bindings: Env }>();
+
+/**
+ * Keep this marker tied to the compatibility code below. A future cleanup
+ * changes it to false (or removes it), which makes the release workflow apply
+ * the persisted 30-day safety-window check before shipping that cleanup.
+ */
+export const REFRESH_TOKEN_KV_BRIDGE_ENABLED = true;
 
 // ── POST /v1/auth/signup ──────────────────────────────────────────────────────
 authRouter.post('/signup', async (c) => {
@@ -161,6 +169,7 @@ authRouter.post('/login', async (c) => {
 });
 
 // ── POST /v1/auth/logout ──────────────────────────────────────────────────────
+// REFRESH_TOKEN_ROLLOUT_GUARD: logout-route:start
 authRouter.post('/logout', async (c) => {
   // Revoke the refresh token's jti so it cannot be reused.
   const authHeader = c.req.header('Authorization');
@@ -168,21 +177,48 @@ authRouter.post('/logout', async (c) => {
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
     if (payload?.type === 'refresh' && payload.jti) {
-      // Mark as revoked in KV for the token's remaining TTL
-      const remainingTtl = payload.exp
-        ? Math.max(1, payload.exp - Math.floor(Date.now() / 1000))
-        : REFRESH_TOKEN_TTL_S;
-      await c.env.RATE_LIMIT_KV.put(
-        revokedRtKey(payload.jti),
-        '1',
-        { expirationTtl: remainingTtl },
-      ).catch(() => { /* non-blocking */ });
+      const expiresAt = payload.exp
+        ?? Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL_S;
+      // REFRESH_TOKEN_ROLLOUT_GUARD: logout-d1:start
+      try {
+        await claimRefreshToken(c.env.DB, payload.jti, payload.sub ?? '', expiresAt);
+      } catch (err) {
+        console.error('[auth] refresh-token D1 revocation unavailable:', err);
+        return c.json({
+          detail: 'Unable to revoke session right now. Please try again.',
+          error_code: 'auth_storage_unavailable',
+        }, 503);
+      }
+      // REFRESH_TOKEN_ROLLOUT_GUARD: logout-d1:end
+      // REFRESH_TOKEN_ROLLOUT_GUARD: logout-kv:start
+      if (REFRESH_TOKEN_KV_BRIDGE_ENABLED) {
+        try {
+          // Compatibility bridge for any old Worker isolate still serving
+          // during rollout. Keep dual-write until one refresh-token TTL after
+          // every deployment is confirmed to use D1 claims.
+          const remainingTtl = Math.max(1, expiresAt - Math.floor(Date.now() / 1000));
+          await c.env.RATE_LIMIT_KV.put(
+            revokedRtKey(payload.jti),
+            '1',
+            { expirationTtl: remainingTtl },
+          );
+        } catch (err) {
+          console.error('[auth] refresh-token KV revocation unavailable:', err);
+          return c.json({
+            detail: 'Unable to revoke session right now. Please try again.',
+            error_code: 'auth_storage_unavailable',
+          }, 503);
+        }
+      }
+      // REFRESH_TOKEN_ROLLOUT_GUARD: logout-kv:end
     }
   }
   return c.json({ message: 'Logged out successfully' });
 });
+// REFRESH_TOKEN_ROLLOUT_GUARD: logout-route:end
 
 // ── POST /v1/auth/refresh ─────────────────────────────────────────────────────
+// REFRESH_TOKEN_ROLLOUT_GUARD: refresh-route:start
 authRouter.post('/refresh', async (c) => {
   const db = createDb(c.env.DB);
   let body: { refresh_token?: string };
@@ -201,35 +237,107 @@ authRouter.post('/refresh', async (c) => {
     return c.json({ detail: 'Invalid or expired refresh token' }, 401);
   }
 
-  // Enforce single-use: check KV revocation list
-  if (payload.jti) {
-    const revoked = await c.env.RATE_LIMIT_KV.get(revokedRtKey(payload.jti));
-    if (revoked !== null) {
-      return c.json({ detail: 'Refresh token has already been used or revoked' }, 401);
-    }
-
-    // Revoke this token immediately — rotate to new one below
-    const remainingTtl = payload.exp
-      ? Math.max(1, payload.exp - Math.floor(Date.now() / 1000))
-      : REFRESH_TOKEN_TTL_S;
-    await c.env.RATE_LIMIT_KV.put(
-      revokedRtKey(payload.jti),
-      '1',
-      { expirationTtl: remainingTtl },
-    ).catch(() => { /* non-blocking if KV fails — token still valid; log only */ });
+  if (!payload.sub) {
+    return c.json({ detail: 'Invalid or expired refresh token' }, 401);
   }
 
-  const user = await db.select({ id: users.id, role: users.role, deletedAt: users.deletedAt })
-    .from(users)
-    .where(eq(users.id, payload.sub!))
-    .get();
+  let user: { id: string; role: string | null; deletedAt: number | null } | undefined;
+  let sessionValid: boolean;
+  try {
+    user = await db.select({ id: users.id, role: users.role, deletedAt: users.deletedAt })
+      .from(users)
+      .where(eq(users.id, payload.sub))
+      .get();
+    sessionValid = user
+      ? await isSessionValid(c.env.DB, user.id, payload.iat)
+      : false;
+  } catch (err) {
+    console.error('[auth] refresh validation storage unavailable:', err);
+    return c.json({
+      detail: 'Session refresh is temporarily unavailable. Please sign in again or retry later.',
+      error_code: 'auth_storage_unavailable',
+    }, 503);
+  }
 
   if (!user || user.deletedAt) {
     return c.json({ detail: 'User not found' }, 401);
   }
-  if (!(await isSessionValid(c.env.DB, user.id, payload.iat))) {
+  if (!sessionValid) {
     return c.json({ detail: 'Session expired after password change. Sign in again.' }, 401);
   }
+
+  // Every refresh token signed by this Worker has a jti. Check account/session
+  // validity first so pre-cutoff legacy tokens retain the established response.
+  if (!payload.jti) {
+    return c.json({ detail: 'Invalid or expired refresh token' }, 401);
+  }
+
+  // REFRESH_TOKEN_ROLLOUT_GUARD: legacy-read:start
+  if (REFRESH_TOKEN_KV_BRIDGE_ENABLED) {
+    // Compatibility read for revocations made before D1 claims were deployed.
+    // The release workflow blocks removal until the actual rollout has been
+    // complete for one full token TTL.
+    try {
+      const legacyRevoked = await c.env.RATE_LIMIT_KV.get(revokedRtKey(payload.jti));
+      if (legacyRevoked !== null) {
+        return c.json({ detail: 'Refresh token has already been used or revoked' }, 401);
+      }
+    } catch (err) {
+      console.error('[auth] legacy refresh revocation storage unavailable:', err);
+      return c.json({
+        detail: 'Session refresh is temporarily unavailable. Please sign in again or retry later.',
+        error_code: 'auth_storage_unavailable',
+      }, 503);
+    }
+  }
+  // REFRESH_TOKEN_ROLLOUT_GUARD: legacy-read:end
+
+  // Atomic single-use claim. If D1 is unavailable we fail closed with 503;
+  // silently continuing would let the same token mint multiple sessions.
+  // REFRESH_TOKEN_ROLLOUT_GUARD: refresh-d1:start
+  try {
+    const claimed = await claimRefreshToken(
+      c.env.DB,
+      payload.jti,
+      payload.sub,
+      payload.exp ?? Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL_S,
+    );
+    if (!claimed) {
+      return c.json({ detail: 'Refresh token has already been used or revoked' }, 401);
+    }
+  } catch (err) {
+    console.error('[auth] refresh-token D1 claim unavailable:', err);
+    return c.json({
+      detail: 'Session refresh is temporarily unavailable. Please sign in again or retry later.',
+      error_code: 'auth_storage_unavailable',
+    }, 503);
+  }
+  // REFRESH_TOKEN_ROLLOUT_GUARD: refresh-d1:end
+
+  // REFRESH_TOKEN_ROLLOUT_GUARD: refresh-kv:start
+  if (REFRESH_TOKEN_KV_BRIDGE_ENABLED) {
+    try {
+      // Dual-write during the rollout bridge so any old isolate still
+      // consulting KV observes this rotation. A KV outage consumes the D1
+      // claim and returns 503 (fail closed); retrying the old token remains
+      // impossible.
+      const expiresAt = payload.exp
+        ?? Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL_S;
+      const remainingTtl = Math.max(1, expiresAt - Math.floor(Date.now() / 1000));
+      await c.env.RATE_LIMIT_KV.put(
+        revokedRtKey(payload.jti),
+        '1',
+        { expirationTtl: remainingTtl },
+      );
+    } catch (err) {
+      console.error('[auth] refresh-token KV claim unavailable:', err);
+      return c.json({
+        detail: 'Session refresh is temporarily unavailable. Please sign in again or retry later.',
+        error_code: 'auth_storage_unavailable',
+      }, 503);
+    }
+  }
+  // REFRESH_TOKEN_ROLLOUT_GUARD: refresh-kv:end
 
   const role = user.role ?? 'student';
   const issuedAt = await sessionIssuedAt(c.env.DB, user.id);
@@ -242,6 +350,7 @@ authRouter.post('/refresh', async (c) => {
     token_type: 'bearer',
   });
 });
+// REFRESH_TOKEN_ROLLOUT_GUARD: refresh-route:end
 
 // ── GET /v1/auth/me ───────────────────────────────────────────────────────────
 authRouter.get('/me', async (c) => {

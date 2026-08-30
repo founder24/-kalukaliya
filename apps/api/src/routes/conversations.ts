@@ -8,6 +8,7 @@
 
 import { Hono, type Context } from 'hono';
 import { extractBearer, isSessionValid, verifyToken } from '../middleware/auth';
+import { anonUserId } from '../services/anonymous';
 import type { Env } from '../types';
 
 export const conversationsRouter = new Hono<{ Bindings: Env }>();
@@ -25,15 +26,6 @@ type ConversationRow = {
 
 function toIso(timestamp: number | null): string | null {
   return timestamp == null ? null : new Date(timestamp * 1000).toISOString();
-}
-
-function anonUserId(request: Request): string {
-  // CF-Connecting-IP is inserted by Cloudflare and cannot be supplied by a
-  // browser as a request header. Never fall back to X-Real-IP or
-  // X-Forwarded-For here: callers can forge those headers against a public
-  // Worker URL and otherwise impersonate anonymous history ownership.
-  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-  return `anon-${btoa(ip).replace(/[^a-z0-9]/gi, '').slice(0, 20)}`;
 }
 
 async function requireUser(c: Context<{ Bindings: Env }>): Promise<{ id: string; error?: Response }> {
@@ -165,13 +157,22 @@ conversationsRouter.get('/', async c => {
   return error ?? listConversations(c, id, 100);
 });
 
-conversationsRouter.get('/anon', c => listConversations(c, anonUserId(c.req.raw), 5));
+conversationsRouter.get('/anon', async c =>
+  listConversations(c, await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET), 5));
 
-conversationsRouter.get('/anon/:sessionId', c =>
-  conversationDetail(c, anonUserId(c.req.raw), c.req.param('sessionId')));
+conversationsRouter.get('/anon/:sessionId', async c =>
+  conversationDetail(
+    c,
+    await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET),
+    c.req.param('sessionId'),
+  ));
 
-conversationsRouter.delete('/anon/:sessionId', c =>
-  deleteConversation(c, anonUserId(c.req.raw), c.req.param('sessionId')));
+conversationsRouter.delete('/anon/:sessionId', async c =>
+  deleteConversation(
+    c,
+    await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET),
+    c.req.param('sessionId'),
+  ));
 
 conversationsRouter.get('/:sessionId', async c => {
   const { id, error } = await requireUser(c);

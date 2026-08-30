@@ -3,6 +3,7 @@
 #
 # Required: API_WORKER_URL, e.g. https://syrabit-api-prod.<account>.workers.dev
 # Required: PUBLIC_EDGE_URL, e.g. https://api.syrabit.ai
+# Optional: PUBLIC_SITE_URL, defaults to https://syrabit.ai
 # Required: INDEXNOW_INTERNAL_SECRET for authenticated IndexNow validation
 # Required for full validation: STUDENT_TOKEN, STAFF_TOKEN,
 # ADMIN_SESSION_TOKEN, EDGE_SHARED_SECRET, and TRANSLATE_CRON_SECRET.
@@ -37,6 +38,7 @@ if [[ "$RESET_ONLY" != "true" ]]; then
 fi
 BASE="${API_WORKER_URL:-}/api/v1"
 EDGE_BASE="${PUBLIC_EDGE_URL%/}"
+SITE_BASE="${PUBLIC_SITE_URL:-https://syrabit.ai}"
 TMP_FILES=()
 cleanup() { rm -f "${TMP_FILES[@]}"; }
 trap cleanup EXIT
@@ -341,6 +343,28 @@ edge_native_get() {
   cat "$output"
 }
 
+public_site_seo_get() {
+  local path="$1"
+  local expected_content_type="$2"
+  local output headers status
+  output=$(mktemp)
+  headers=$(mktemp)
+  TMP_FILES+=("$output" "$headers")
+  status=$(curl --silent --show-error --max-time 30 \
+    --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
+    "${SITE_BASE}${path}")
+  test "$status" = "200" || {
+    cat "$output"; echo "Expected public site 200 for ${path}, got ${status}" >&2; exit 1;
+  }
+  grep -qi "^content-type: ${expected_content_type}" "$headers" || {
+    cat "$headers"; echo "Expected ${expected_content_type} content type for ${path}" >&2; exit 1;
+  }
+  if grep -qi '^x-robots-tag:.*noindex' "$headers"; then
+    cat "$headers"; echo "Crawler artifact must not be marked noindex: ${path}" >&2; exit 1;
+  fi
+  cat "$output"
+}
+
 run_disposable_reset_check() {
   local reset_var reset_token reset_confirm_payload reset_login_payload
   for reset_var in CUTOVER_RESET_EMAIL CUTOVER_RESET_LINK CUTOVER_RESET_PASSWORD CUTOVER_RESET_NONCE; do
@@ -417,6 +441,18 @@ echo "Checking public D1-backed routes at ${BASE}"
 HEALTH_URL="${API_WORKER_URL%/}/health"
 HEALTH=$(curl --silent --show-error --max-time 30 "$HEALTH_URL")
 printf '%s' "$HEALTH" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["runtime"] == "cloudflare-workers" and p["components"]["d1"] == "healthy", p'
+if [[ -n "${EDGE_SHARED_SECRET:-}" ]]; then
+  DEEP_HEALTH=$(curl --silent --show-error --fail --max-time 30 \
+    -H "Authorization: Bearer ${EDGE_SHARED_SECRET}" "${HEALTH_URL}/deep")
+  printf '%s' "$DEEP_HEALTH" | python3 -c '
+import json,sys
+p=json.load(sys.stdin)
+required={"d1","workers_ai","vectorize","r2","content_kv","rate_limit_kv"}
+assert p["status"] == "healthy" and p["mutation_free"] is True, p
+assert p["missing_bindings"] == [] and set(p["checks"]) == required, p
+assert all(check["status"] == "healthy" for check in p["checks"].values()), p
+'
+fi
 native_get "/content/library-bundle?slim=1" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert all(k in p for k in ("boards","classes","streams","subjects")), p'
 native_get "/content/question-papers" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), list)'
 echo "Checking Worker-native operational and crawler routes"
@@ -451,6 +487,29 @@ edge_native_get "/sitemap-index.xml" | grep -q '<sitemapindex'
 edge_native_get "/feed.xml" | grep -q '<rss'
 edge_native_get "/feed.json" | python3 -c 'import json,sys; assert json.load(sys.stdin)["version"] == "https://jsonfeed.org/version/1.1"'
 edge_native_get "/llms.txt" | grep -q 'Syrabit.ai'
+
+echo "Checking crawler documents through the public Pages host at ${SITE_BASE}"
+public_site_seo_get "/feed.xml" "application/rss+xml" | grep -q '<rss'
+public_site_seo_get "/feed/notes.xml" "application/rss+xml" | grep -q 'Study Notes'
+public_site_seo_get "/llms.txt" "text/plain" | grep -q 'Full content index'
+public_site_seo_get "/llms-full.txt" "text/plain" | grep -q 'Total indexed chapters'
+
+missing_path="/cutover-missing-$(date +%s)-${RANDOM}"
+missing_output=$(mktemp)
+missing_headers=$(mktemp)
+TMP_FILES+=("$missing_output" "$missing_headers")
+missing_status=$(curl --silent --show-error --max-time 30 \
+  -A 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' \
+  -H 'Accept: text/html' --dump-header "$missing_headers" --output "$missing_output" \
+  --write-out '%{http_code}' "${SITE_BASE}${missing_path}")
+test "$missing_status" = "404" || {
+  cat "$missing_output"; echo "Expected public Pages true 404, got ${missing_status}" >&2; exit 1;
+}
+grep -qi '^x-source: bot-render-not-found' "$missing_headers"
+if grep -q 'id="root"\|id="app"' "$missing_output"; then
+  echo "Missing crawler URL returned the SPA shell (soft 404)." >&2
+  exit 1
+fi
 
 if [[ -n "${STUDENT_TOKEN:-}" ]]; then
   echo "Checking authenticated student routes through the public edge"

@@ -13,6 +13,8 @@
 
 import { getIdentityToken } from '../utils/google-auth';
 
+const DEFAULT_SERVICE_BINDING_TIMEOUT_MS = 10_000;
+
 /** Only the native chat endpoint is an SSE response. */
 function isSseRequest(pathname: string): boolean {
   return pathname === '/api/v1/chat/stream';
@@ -108,15 +110,36 @@ export async function proxyToApiWorker(
       ? await request.arrayBuffer()
       : undefined;
 
+  const serviceBindingAbort = new AbortController();
   const outRequest = new Request(request.url, {
     method: request.method,
     headers,
     body: bodyBuffer,
+    signal: serviceBindingAbort.signal,
   });
 
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     // env.API_WORKER is guaranteed non-null by the caller
-    const response = await env.API_WORKER!.fetch(outRequest);
+    const configuredTimeout = Number.parseInt(
+      env.SERVICE_BINDING_TIMEOUT_MS || String(DEFAULT_SERVICE_BINDING_TIMEOUT_MS),
+      10,
+    );
+    const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+      ? configuredTimeout
+      : DEFAULT_SERVICE_BINDING_TIMEOUT_MS;
+    const response = await Promise.race([
+      env.API_WORKER!.fetch(outRequest),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          serviceBindingAbort.abort();
+          const error = new Error(`Service binding timed out after ${timeoutMs}ms`);
+          error.name = 'TimeoutError';
+          reject(error);
+        }, timeoutMs);
+      }),
+    ]);
+    if (timeoutId) clearTimeout(timeoutId);
 
     const responseHeaders = new Headers(response.headers);
 
@@ -150,14 +173,16 @@ export async function proxyToApiWorker(
       headers: responseHeaders,
     });
   } catch (err) {
+    if (timeoutId) clearTimeout(timeoutId);
     console.error('[worker-proxy] Service binding fetch failed:', err);
+    const timedOut = err instanceof Error && err.name === 'TimeoutError';
     return new Response(
       JSON.stringify({
-        error: 'Backend service unavailable',
+        error: timedOut ? 'Backend service timed out' : 'Backend service unavailable',
         details: err instanceof Error ? err.message : 'Unknown error',
       }),
       {
-        status: 503,
+        status: timedOut ? 504 : 503,
         headers: { 'Content-Type': 'application/json' },
       },
     );
@@ -169,16 +194,29 @@ export async function proxyToApiWorker(
  * Returns true if the API Worker responds 2xx within 2s.
  */
 export async function pingApiWorkerHealth(env: Env): Promise<boolean> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
     const req = new Request('https://syrabit-api-prod.workers.dev/health', {
+      headers: { 'X-Health-Probe': 'edge' },
       signal: controller.signal,
     });
-    const resp = await env.API_WORKER!.fetch(req);
-    clearTimeout(timeoutId);
+    const resp = await Promise.race([
+      env.API_WORKER!.fetch(req),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => {
+            controller.abort();
+            reject(new Error('API Worker health probe timed out'));
+          },
+          2000,
+        );
+      }),
+    ]);
+    if (timeoutId) clearTimeout(timeoutId);
     return resp.ok;
   } catch {
+    if (timeoutId) clearTimeout(timeoutId);
     return false;
   }
 }

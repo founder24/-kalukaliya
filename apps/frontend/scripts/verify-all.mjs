@@ -267,6 +267,7 @@ for (const c of chapterSamples) checkSampleCanonical(c);
 
 // ── Cross-check prerender manifest counts vs disk ───────────────────
 const manifestPath = path.join(distDir, "prerender-manifest.json");
+const strictReleaseBuild = process.env.CLOUDFLARE_RELEASE_BUILD === "true";
 let manifestSubjects = 0;
 let manifestChapters = 0;
 if (fs.existsSync(manifestPath)) {
@@ -275,10 +276,14 @@ if (fs.existsSync(manifestPath)) {
     manifestSubjects = manifest?.counts?.subjects_written ?? 0;
     manifestChapters = manifest?.counts?.chapters_written ?? 0;
   } catch (err) {
-    warn(`prerender-manifest.json unreadable: ${err.message}`);
+    (strictReleaseBuild ? fail : warn)(
+      `prerender-manifest.json unreadable: ${err.message}`,
+    );
   }
 } else {
-  warn("no prerender-manifest.json — prerender step likely soft-failed");
+  (strictReleaseBuild ? fail : warn)(
+    "no prerender-manifest.json — prerender step likely soft-failed",
+  );
 }
 
 // Count prerendered pages on disk for reporting.
@@ -293,6 +298,21 @@ if (manifestSubjects > 0 && subjectsOnDisk === 0) {
 }
 if (manifestChapters > 0 && chaptersOnDisk === 0) {
   fail(`manifest claimed ${manifestChapters} chapters written but 0 found on disk`);
+}
+if (strictReleaseBuild && (manifestSubjects === 0 || manifestChapters === 0)) {
+  fail(
+    `release build requires non-empty subject and chapter prerenders ` +
+      `(manifest subjects=${manifestSubjects}, chapters=${manifestChapters})`,
+  );
+}
+if (
+  strictReleaseBuild &&
+  (subjectsOnDisk < manifestSubjects || chaptersOnDisk < manifestChapters)
+) {
+  fail(
+    `prerender output is incomplete: manifest subjects=${manifestSubjects}, ` +
+      `chapters=${manifestChapters}; disk subjects=${subjectsOnDisk}, chapters=${chaptersOnDisk}`,
+  );
 }
 
 // ── Bootstrap must wire up hydrateRoot for "library" ────────────────

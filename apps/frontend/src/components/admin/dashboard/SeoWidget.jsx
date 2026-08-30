@@ -51,7 +51,7 @@ export default function SeoWidget(props) {
     showSyntheticAlerts, setShowSyntheticAlerts,
     alertSettingsOpen, alertSettingsDraft, setAlertSettingsDraft, alertSettingsSaving,
     notifPrefs, notifPrefsSaving, notifPrefsOpen, setNotifPrefsOpen,
-    pushDeliverySummary, seoSummaryDispatches,
+    pushDeliverySummary, pushChannelStatus, seoSummaryDispatches,
     kvHealth, kvExpandedIsolates, setKvExpandedIsolates,
     r2Health, r2ResettingWatchdog, setR2ResettingWatchdog, r2Reevaluating, setR2Reevaluating,
     vertexProbe, ciStatus, ciRerunning,

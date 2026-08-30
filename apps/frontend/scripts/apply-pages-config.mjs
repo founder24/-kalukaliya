@@ -44,6 +44,10 @@ const REQUIRED_PROD_ENV = {
   // Node runtime, so this is the canonical place to pin it.
   NODE_VERSION: "22",
   VITE_BACKEND_URL: process.env.VITE_BACKEND_URL || "https://api.syrabit.ai",
+  // Runtime binding used by public/_worker.js for feeds, sitemaps, and LLM
+  // crawler documents. It intentionally targets the native API Worker rather
+  // than the bot HTML origin.
+  SEO_BACKEND_URL: process.env.SEO_BACKEND_URL || "https://syrabit-api-prod.axomxplain.workers.dev",
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1",
   PUPPETEER_SKIP_DOWNLOAD: "1",
 };

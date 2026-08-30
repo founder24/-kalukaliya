@@ -69,11 +69,15 @@ function getLangLabel(code) {
 }
 
 export function getTTSLang() {
-  return localStorage.getItem(TTS_LANG_KEY) || 'en-IN';
+  try {
+    return localStorage.getItem(TTS_LANG_KEY) || 'en-IN';
+  } catch {
+    return 'en-IN';
+  }
 }
 
 function setTTSLang(lang) {
-  localStorage.setItem(TTS_LANG_KEY, lang);
+  try { localStorage.setItem(TTS_LANG_KEY, lang); } catch {}
 }
 
 export function useTTS() {

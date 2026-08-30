@@ -7,19 +7,22 @@ export default function CookieConsent() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem(CONSENT_KEY);
-    if (!stored) {
+    try {
+      const stored = localStorage.getItem(CONSENT_KEY);
+      if (!stored) setVisible(true);
+    } catch {
+      // Privacy/storage restrictions must not prevent the application loading.
       setVisible(true);
     }
   }, []);
 
   const handleAccept = useCallback(() => {
-    localStorage.setItem(CONSENT_KEY, 'accepted');
+    try { localStorage.setItem(CONSENT_KEY, 'accepted'); } catch {}
     setVisible(false);
   }, []);
 
   const handleDecline = useCallback(() => {
-    localStorage.setItem(CONSENT_KEY, 'declined');
+    try { localStorage.setItem(CONSENT_KEY, 'declined'); } catch {}
     setVisible(false);
   }, []);
 

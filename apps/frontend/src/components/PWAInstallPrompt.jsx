@@ -38,7 +38,8 @@ export default function PWAInstallPrompt() {
     if (window.matchMedia('(display-mode: standalone)').matches) return;
     if (navigator.standalone) return;
 
-    const dismissed = localStorage.getItem(DISMISS_KEY);
+    let dismissed = null;
+    try { dismissed = localStorage.getItem(DISMISS_KEY); } catch {}
     if (dismissed && Date.now() - Number(dismissed) < DISMISS_DAYS * 24 * 60 * 60 * 1000) return;
 
     const handler = (e) => {
@@ -82,7 +83,7 @@ export default function PWAInstallPrompt() {
 
   const handleDismiss = useCallback(() => {
     setVisible(false);
-    localStorage.setItem(DISMISS_KEY, String(Date.now()));
+    try { localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch {}
     Analytics.pwaPromptDismissed();
     trackPwaEvent('dismissed');
   }, []);
