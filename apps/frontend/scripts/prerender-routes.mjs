@@ -453,7 +453,7 @@ function pickChapterPayload(c) {
     "has_assamese", "meta_description", "word_count",
     "generated_at", "updated_at", "bing_keywords",
     // P0 #1 of the AI-visibility plan — FAQPage JSON-LD seed pulled
-    // from /api/content/chapters/{id}/faq-jsonld and merged into the
+    // from /api/v1/content/chapters/{id}/faq-jsonld and merged into the
     // chapter preload below. Listed here so the keep-list filter
     // doesn't strip it.
     "faq_entries",
@@ -480,7 +480,7 @@ function pickChapterPayload(c) {
 // fetch on the client for non-prerendered routes.
 async function fetchChapterFaqEntries(chapterId) {
   if (!chapterId) return null;
-  const url = `${BACKEND.replace(/\/$/, "")}/api/content/chapters/${encodeURIComponent(chapterId)}/faq-jsonld`;
+  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/faq-jsonld`;
   try {
     const payload = await fetchJson(url);
     const entries = Array.isArray(payload?.entries) ? payload.entries : null;
@@ -501,7 +501,7 @@ async function fetchChapterFaqEntries(chapterId) {
 // SPA path.
 async function fetchChapterPublishedTopics(chapterId) {
   if (!chapterId) return null;
-  const url = `${BACKEND.replace(/\/$/, "")}/api/content/chapters/${encodeURIComponent(chapterId)}/topics-published`;
+  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/topics-published`;
   try {
     const payload = await fetchJson(url);
     const topics = Array.isArray(payload?.topics) ? payload.topics : null;
@@ -519,7 +519,7 @@ async function fetchChapterPublishedTopics(chapterId) {
 // useEffect in ChapterPage; same null-on-failure semantics.
 async function fetchChapterTopicsRelated(chapterId) {
   if (!chapterId) return null;
-  const url = `${BACKEND.replace(/\/$/, "")}/api/content/chapters/${encodeURIComponent(chapterId)}/topics-related?limit=12`;
+  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/topics-related?limit=12`;
   try {
     const payload = await fetchJson(url);
     if (!payload || typeof payload !== "object") return null;
@@ -537,7 +537,7 @@ async function fetchChapterTopicsRelated(chapterId) {
 // Same null-on-failure semantics as the chapter helpers.
 async function fetchSubjectTopicIndex(subjectId) {
   if (!subjectId) return null;
-  const url = `${BACKEND.replace(/\/$/, "")}/api/content/subjects/${encodeURIComponent(subjectId)}/topic-index`;
+  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/subjects/${encodeURIComponent(subjectId)}/topic-index`;
   try {
     const payload = await fetchJson(url);
     if (!payload || typeof payload !== "object") return null;
@@ -742,6 +742,8 @@ async function main() {
   let chaptersWritten = 0;
   let subjectsFailed = 0;
   let chaptersFailed = 0;
+  const subjectOutputPaths = new Set();
+  const chapterOutputPaths = new Set();
   let budgetExceeded = false;
 
   const startedAt = Date.now();
@@ -760,11 +762,11 @@ async function main() {
     let chapters;
     try {
       resolved = await fetchJson(
-        `${BACKEND.replace(/\/$/, "")}/api/content/resolve-subject/${board}/${classSlug}/${subjectSlug}`,
+        `${BACKEND.replace(/\/$/, "")}/api/v1/content/resolve-subject/${board}/${classSlug}/${subjectSlug}`,
       );
       const subjectId = resolved?.id || resolved?._id || subject.id;
       chapters = await fetchJson(
-        `${BACKEND.replace(/\/$/, "")}/api/content/chapters/${subjectId}`,
+        `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${subjectId}`,
       );
     } catch (err) {
       console.warn(
@@ -859,7 +861,8 @@ async function main() {
         },
       });
       const out = writeRoute(url, html);
-      subjectsWritten++;
+      subjectOutputPaths.add(out);
+      subjectsWritten = subjectOutputPaths.size;
       console.log(
         `[prerender-routes] subject ${url} → ${path.relative(distDir, out)} ` +
           `(${chaptersClean.length} chapters)`,
@@ -900,7 +903,7 @@ async function main() {
       let chapterPayload;
       try {
         chapterPayload = await fetchJson(
-          `${BACKEND.replace(/\/$/, "")}/api/content/chapter-by-slug/${board}/${classSlug}/${subjectSlug}/${chapterSlug}`,
+          `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapter-by-slug/${board}/${classSlug}/${subjectSlug}/${chapterSlug}`,
         );
       } catch (err) {
         console.warn(
@@ -995,7 +998,8 @@ async function main() {
           html = injectFaqJsonLdIntoHead(html, faqEntries);
         }
         const out = writeRoute(chapterUrl, html);
-        chaptersWritten++;
+        chapterOutputPaths.add(out);
+        chaptersWritten = chapterOutputPaths.size;
         console.log(
           `[prerender-routes] chapter ${chapterUrl} → ${path.relative(distDir, out)}`,
         );

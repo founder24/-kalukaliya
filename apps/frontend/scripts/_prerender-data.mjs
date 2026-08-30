@@ -386,7 +386,7 @@ async function fetchOnce(name, url) {
 export async function loadLibraryBundle() {
   return fetchOnce(
     "library-bundle",
-    `${BACKEND}/api/content/library-bundle?slim=1`,
+    `${BACKEND}/api/v1/content/library-bundle?slim=1`,
   );
 }
 
