@@ -44,10 +44,8 @@ describe("Pages worker crawler snapshots", () => {
   });
 
   it("rejects the SPA fallback and preserves the backend crawler 404", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response("missing", { status: 404 })),
-    );
+    const backendFetch = vi.fn();
+    vi.stubGlobal("fetch", backendFetch);
     const env = {
       ASSETS: {
         fetch: vi.fn().mockResolvedValue(assetResponse(null)),
@@ -64,5 +62,6 @@ describe("Pages worker crawler snapshots", () => {
     expect(response.status).toBe(404);
     expect(response.headers.get("X-Source")).toBe("bot-render-not-found");
     expect(response.headers.get("X-Robots-Tag")).toContain("noindex");
+    expect(backendFetch).not.toHaveBeenCalled();
   });
 });

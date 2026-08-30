@@ -252,6 +252,20 @@ async function assetMatchesRequestedCanonical(response, pathname) {
   return false;
 }
 
+function botNotFoundResponse(request) {
+  const headers = new Headers({
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "X-Robots-Tag": "noindex, nofollow",
+    "X-Source": "bot-render-not-found",
+  });
+  addSecurityHeaders(headers);
+  return new Response(
+    request.method === "HEAD" ? null : "<!doctype html><title>Not Found</title><h1>Not Found</h1>",
+    { status: 404, headers },
+  );
+}
+
 async function botRender(request, env, url) {
   // Map / → /html/homepage, /home → /html/home, etc. The backend
   // exposes /html/<rest-of-path> for chapters and /html/homepage
@@ -279,17 +293,7 @@ async function botRender(request, env, url) {
     // Preserve a real backend miss as a real 404. This prevents nonexistent
     // crawler URLs from becoming soft-200 SPA pages or misleading 503s.
     if (resp.status === 404) {
-      const headers = new Headers({
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow",
-        "X-Source": "bot-render-not-found",
-      });
-      addSecurityHeaders(headers);
-      return new Response(
-        request.method === "HEAD" ? null : "<!doctype html><title>Not Found</title><h1>Not Found</h1>",
-        { status: 404, headers },
-      );
+      return botNotFoundResponse(request);
     }
     // Backend returns 200 with HTML on hit, non-200 on outage/error.
     if (resp.status === 200) {
@@ -463,6 +467,13 @@ export default {
         }
       } catch {
         // Fall through to bot-render on any asset-pipeline error.
+      }
+      // Every valid public one-segment page is part of the static prerender
+      // build. If Pages returned its generic SPA fallback instead, this route
+      // does not exist. Preserve a true crawler 404 without relying on the
+      // legacy /html origin, which redirects unknown paths back to Pages.
+      if (url.pathname.split("/").filter(Boolean).length === 1) {
+        return botNotFoundResponse(request);
       }
       // 2) No prerendered snapshot — try the backend bot-render proxy.
       //    botRender now returns a 503 on failure (M-5 fix) so bots
