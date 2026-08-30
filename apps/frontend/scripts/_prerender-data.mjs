@@ -204,35 +204,40 @@ function contentFingerprint(value) {
 // cache TTL alone cannot catch. If the backend doesn't expose any of
 // these headers (or the probe fails), the result is null and we fall
 // back to the embedded fingerprint + content-shape defence-in-depth.
-const SIGNAL_TTL_MS = 60_000;
-const signalCache = new Map();
+// Share only an in-flight probe. Completed signals must not be reused across
+// cache reads: a backend schema can change while this Node process remains
+// alive, and the next read needs to observe that new signal.
+const signalInflight = new Map();
 async function backendSchemaSignal(url) {
-  const now = Date.now();
-  const cached = signalCache.get(url);
-  if (cached && now - cached.ts < SIGNAL_TTL_MS) return cached.signal;
-  const ctrl = new AbortController();
-  const timer = setTimeout(
-    () => ctrl.abort(),
-    Math.min(2000, FETCH_TIMEOUT_MS),
-  );
-  try {
-    const res = await fetch(url, { method: "HEAD", signal: ctrl.signal, headers: buildFetchHeaders() });
-    if (!res.ok) {
-      signalCache.set(url, { ts: now, signal: null });
+  const activeProbe = signalInflight.get(url);
+  if (activeProbe) return activeProbe;
+
+  const probe = (async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(
+      () => ctrl.abort(),
+      Math.min(2000, FETCH_TIMEOUT_MS),
+    );
+    try {
+      const res = await fetch(url, { method: "HEAD", signal: ctrl.signal, headers: buildFetchHeaders() });
+      if (!res.ok) return null;
+      return (
+        res.headers.get("x-schema-version") ||
+        res.headers.get("etag") ||
+        res.headers.get("last-modified") ||
+        null
+      );
+    } catch {
       return null;
+    } finally {
+      clearTimeout(timer);
     }
-    const sig =
-      res.headers.get("x-schema-version") ||
-      res.headers.get("etag") ||
-      res.headers.get("last-modified") ||
-      null;
-    signalCache.set(url, { ts: now, signal: sig });
-    return sig;
-  } catch {
-    signalCache.set(url, { ts: now, signal: null });
-    return null;
+  })();
+  signalInflight.set(url, probe);
+  try {
+    return await probe;
   } finally {
-    clearTimeout(timer);
+    if (signalInflight.get(url) === probe) signalInflight.delete(url);
   }
 }
 
@@ -338,7 +343,7 @@ async function fetchOnce(name, url) {
   const envelope = readCacheEnvelope(name);
   if (envelope) {
     // Cross-build invalidation hook: re-probe the backend's schema
-    // signal (cheap HEAD, capped at 2s, memoised for 60s in-process).
+    // signal (cheap HEAD, capped at 2s; concurrent probes share one request).
     // If the live signal is non-null and disagrees with the one we
     // recorded when this cache was written, the backend schema (or at
     // least its content) changed since the cache was produced — drop

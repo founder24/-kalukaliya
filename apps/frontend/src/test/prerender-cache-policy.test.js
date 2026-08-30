@@ -19,20 +19,24 @@ const currentCurriculum = {
   subjects: [{ id: "current-subject", name: "Current curriculum snapshot" }],
 };
 
-function responseFor(payload) {
+function responseFor(payload, signal) {
+  const headers = {
+    get: (name) =>
+      name.toLowerCase() === "x-schema-version" ? signal ?? null : null,
+  };
   return {
     ok: true,
     status: 200,
-    headers: { get: () => null },
+    headers,
     json: async () => payload,
   };
 }
 
-function stubBackend(payload) {
+function stubBackend(payload, signal = null) {
   const methods = [];
   const fetchMock = vi.fn(async (_url, init = {}) => {
     methods.push((init.method || "GET").toUpperCase());
-    return responseFor(payload);
+    return responseFor(payload, signal);
   });
   vi.stubGlobal("fetch", fetchMock);
   return {
@@ -79,5 +83,25 @@ describe("prerender cache policy", () => {
     // A fresh cache entry may perform the cheap HEAD schema probe, but it must
     // not issue another GET for the curriculum payload.
     expect(reused.getCount("GET")).toBe(0);
+  });
+
+  it("discards a cached curriculum snapshot when the backend schema signal changes", async () => {
+    const seed = stubBackend(oldCurriculum, "schema-v1");
+    await expect(loadLibraryBundle()).resolves.toEqual(oldCurriculum);
+    expect(seed.getCount("GET")).toBe(1);
+    expect(seed.getCount("HEAD")).toBe(1);
+
+    const changed = stubBackend(currentCurriculum, "schema-v2");
+    await expect(loadLibraryBundle()).resolves.toEqual(currentCurriculum);
+    expect(changed.getCount("GET")).toBe(1);
+    expect(changed.getCount("HEAD")).toBeGreaterThanOrEqual(1);
+
+    const unchanged = stubBackend(
+      { subjects: [{ id: "should-not-be-fetched" }] },
+      "schema-v2",
+    );
+    await expect(loadLibraryBundle()).resolves.toEqual(currentCurriculum);
+    expect(unchanged.getCount("GET")).toBe(0);
+    expect(unchanged.getCount("HEAD")).toBe(1);
   });
 });

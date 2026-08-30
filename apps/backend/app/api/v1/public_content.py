@@ -3,8 +3,11 @@ Public Content API - Unauthenticated endpoints for FAQ JSON-LD, published topics
 and the library bundle used by the frontend library page.
 """
 
+import hashlib
 import logging
+import os
 import re
+from pathlib import Path
 from typing import Optional
 
 from beanie import PydanticObjectId
@@ -16,6 +19,31 @@ from app.models.content import Board, Chapter, Class, Stream, Subject, QuestionP
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+LIBRARY_BUNDLE_CACHE_CONTROL = "public, max-age=60, s-maxage=300"
+
+
+def _build_library_bundle_schema_signal() -> str:
+    """Return a stable signal that changes whenever the deployed backend changes."""
+    revision = os.getenv("K_REVISION", "").strip()
+    if revision:
+        signal_source = revision.encode()
+    else:
+        try:
+            signal_source = Path(__file__).read_bytes()
+        except OSError:
+            signal_source = b"library-bundle-schema-v1"
+    return hashlib.sha256(signal_source).hexdigest()[:16]
+
+
+LIBRARY_BUNDLE_SCHEMA_SIGNAL = _build_library_bundle_schema_signal()
+
+
+def _library_bundle_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": LIBRARY_BUNDLE_CACHE_CONTROL,
+        "X-Schema-Version": LIBRARY_BUNDLE_SCHEMA_SIGNAL,
+    }
 
 
 def _slugify(text: str, max_length: int = 200) -> str:
@@ -129,6 +157,12 @@ async def get_subjects(
         return []
 
 
+@router.head("/library-bundle", include_in_schema=False)
+async def head_library_bundle():
+    """Expose the bundle schema signal without querying or serializing curriculum."""
+    return Response(status_code=200, headers=_library_bundle_headers())
+
+
 @router.get("/library-bundle")
 async def get_library_bundle(
     response: Response,
@@ -145,7 +179,7 @@ async def get_library_bundle(
     but chapters are scoped to only that board — a lightweight first-paint payload
     (~150-300KB vs ~1MB for the full bundle).
     """
-    response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
+    response.headers.update(_library_bundle_headers())
 
     is_boot = bool(boot)
     is_slim = bool(slim) or is_boot
