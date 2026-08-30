@@ -230,6 +230,28 @@ function shouldBotRender(pathname) {
   return true;
 }
 
+function normalizedPathname(pathname) {
+  if (!pathname || pathname === "/") return "/";
+  return pathname.replace(/\/+$/, "");
+}
+
+async function assetMatchesRequestedCanonical(response, pathname) {
+  try {
+    const html = await response.clone().text();
+    const links = html.match(/<link\b[^>]*>/gi) || [];
+    for (const tag of links) {
+      if (!/\brel\s*=\s*["']canonical["']/i.test(tag)) continue;
+      const href = tag.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+      if (!href) continue;
+      const canonical = new URL(href, "https://syrabit.ai");
+      return normalizedPathname(canonical.pathname) === normalizedPathname(pathname);
+    }
+  } catch {
+    // Treat unreadable HTML as an asset miss and use backend bot rendering.
+  }
+  return false;
+}
+
 async function botRender(request, env, url) {
   // Map / → /html/homepage, /home → /html/home, etc. The backend
   // exposes /html/<rest-of-path> for chapters and /html/homepage
@@ -425,7 +447,10 @@ export default {
         const assetResp = await env.ASSETS.fetch(new Request(assetFetchUrl, request));
         if (assetResp.status === 200) {
           const ct = assetResp.headers.get("content-type") || "";
-          if (ct.includes("text/html") || ct.includes("application/xhtml")) {
+          if (
+            (ct.includes("text/html") || ct.includes("application/xhtml")) &&
+            await assetMatchesRequestedCanonical(assetResp, url.pathname)
+          ) {
             const headers = new Headers(assetResp.headers);
             headers.set("X-Source", "prerender");
             headers.set("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600");
