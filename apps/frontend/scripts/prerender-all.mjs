@@ -9,10 +9,9 @@
 // (PRERENDER_STEP_BUDGET_MS, default 6 minutes) so a single hung
 // step cannot stall the build.
 //
-// Soft-fails when individual scripts return non-zero — prerender is
-// already designed to be advisory (the SPA-fallback Worker still
-// serves real HTML). The orchestrator only hard-fails when the
-// dist/ directory is missing or the env is wrong.
+// Development builds soft-fail when individual scripts return non-zero because
+// the SPA-fallback Worker still serves real HTML. Release builds hard-fail when
+// the required library or subject/chapter scripts fail.
 
 import { spawn } from "child_process";
 import path from "path";
@@ -20,6 +19,14 @@ import { fileURLToPath } from "url";
 import { warmCache } from "./_prerender-data.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const STRICT_CURRICULUM_BUILD =
+  process.env.CLOUDFLARE_RELEASE_BUILD === "true" ||
+  (process.env.NODE_ENV === "production" &&
+    process.env.ALLOW_INCOMPLETE_CURRICULUM_BUILD !== "true");
+const REQUIRED_CURRICULUM_SCRIPTS = new Set([
+  "prerender-library.mjs",
+  "prerender-routes.mjs",
+]);
 
 const STEP_BUDGET_MS = (() => {
   const raw = process.env.PRERENDER_STEP_BUDGET_MS;
@@ -108,6 +115,14 @@ async function main() {
   console.log(
     `[prerender-all] cache warmed in ${cacheElapsed}s — bundle=${bundle ? "ok" : "MISS"}, traffic=${traffic ? "ok" : "MISS"}`,
   );
+  if (
+    STRICT_CURRICULUM_BUILD &&
+    (!bundle || !Array.isArray(bundle.subjects) || bundle.subjects.length === 0)
+  ) {
+    throw new Error(
+      "[prerender-all] release build requires a non-empty library bundle",
+    );
+  }
 
   // Honour PRERENDER_SUBJECTS_LIMIT=0 as a kill-switch for skipping
   // the heavy subject + chapter pass. Useful when the backend is
@@ -141,10 +156,18 @@ async function main() {
         : ""),
   );
 
-  // We do NOT propagate per-step failures — each prerender script is
-  // already designed to soft-fail (SPA shell remains the safety net).
-  // verify-all enforces structural correctness for the routes that DID
-  // emit; that's the right place to hard-fail.
+  const requiredFailures = failed.filter((result) =>
+    REQUIRED_CURRICULUM_SCRIPTS.has(result.scriptName),
+  );
+  if (STRICT_CURRICULUM_BUILD && requiredFailures.length > 0) {
+    throw new Error(
+      `[prerender-all] required release prerender step(s) failed: ` +
+        requiredFailures.map(({ scriptName }) => scriptName).join(", "),
+    );
+  }
+
+  // Development/offline builds keep the SPA fallback. Production release
+  // builds propagate failures from the library and curriculum route scripts.
 }
 
 main().catch((err) => {

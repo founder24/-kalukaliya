@@ -15,8 +15,8 @@
 //
 // Cloudflare Pages serves the deepest static file match first, so the
 // new HTML is returned instantly (no SPA boot) for crawlers and
-// browsers alike. Falls back to the SPA shell when the backend is
-// unreachable so the build never hard-fails on a transient network.
+// browsers alike. Development builds can fall back to the SPA shell when the
+// backend is unreachable; release builds require non-zero curriculum output.
 //
 // Selection order (Task #388): the script asks the backend for the
 // most-visited subject + chapter routes over the last
@@ -35,8 +35,8 @@
 // the worklist under ~80 routes within the 12-min wall budget.
 // Task #2 (SEO Quick Wins): raised back to 50 subjects / 6 chapters
 // (50 + 50×6 = 350 routes). The 12-min PRERENDER_BUDGET_MS wall-clock
-// cap still applies — the build soft-fails gracefully on budget overrun,
-// serving the SPA shell for un-prerendered routes. Override via env:
+// cap still applies. Development builds soft-fail gracefully on budget
+// overrun; release verification requires non-zero output. Override via env:
 //   PRERENDER_BUDGET_MS=<ms>  (max 30 min)
 // if 350 routes exceeds 12 min on a cold Cloudflare build.
 
@@ -56,6 +56,10 @@ const distDir = path.resolve(__dirname, "..", "dist");
 const distSsrDir = path.resolve(__dirname, "..", "dist-ssr");
 const srcHtml = path.join(distDir, "index.html");
 const ssrEntry = path.join(distSsrDir, "entry-server.js");
+const STRICT_CURRICULUM_BUILD =
+  process.env.CLOUDFLARE_RELEASE_BUILD === "true" ||
+  (process.env.NODE_ENV === "production" &&
+    process.env.ALLOW_INCOMPLETE_CURRICULUM_BUILD !== "true");
 
 const BACKEND = SHARED_BACKEND;
 const SUBJECTS_LIMIT = parseInt(
@@ -626,9 +630,9 @@ async function renderOne(renderRoute, htmlTemplate, opts) {
 
 async function main() {
   if (!fs.existsSync(srcHtml)) {
-    console.warn(
-      `[prerender-routes] dist/index.html not found at ${srcHtml}; skipping`,
-    );
+    const message = `[prerender-routes] dist/index.html not found at ${srcHtml}`;
+    if (STRICT_CURRICULUM_BUILD) throw new Error(message);
+    console.warn(`${message}; skipping`);
     return;
   }
   if (!fs.existsSync(ssrEntry)) {
@@ -655,6 +659,11 @@ async function main() {
   // pays the network hop; the rest read from disk.
   const bundle = await loadLibraryBundle();
   if (!bundle) {
+    if (STRICT_CURRICULUM_BUILD) {
+      throw new Error(
+        "[prerender-routes] release build requires the library bundle; refusing to emit zero curriculum pages",
+      );
+    }
     console.warn(
       "[prerender-routes] library bundle unavailable; " +
         "skipping subject + chapter prerender (SPA shell will serve)",
@@ -663,6 +672,11 @@ async function main() {
   }
 
   const allSubjectRoutes = enumerateSubjectRoutes(bundle);
+  if (STRICT_CURRICULUM_BUILD && allSubjectRoutes.length === 0) {
+    throw new Error(
+      "[prerender-routes] library bundle produced zero valid subject routes",
+    );
+  }
 
   // Pull traffic ranking (Task #388). Each entry is `{ path, views }`
   // for the most-visited subject + chapter routes over the last
@@ -711,6 +725,8 @@ async function main() {
     const url = `/${route.board}/${route.classSlug}/${route.subjectSlug}`;
     return subjectViews.get(url) || 0;
   };
+  const subjectPath = (route) =>
+    `/${route.board}/${route.classSlug}/${route.subjectSlug}`;
   const rankedSubjectRoutes = haveTraffic
     ? [...allSubjectRoutes].sort((a, b) => {
         const sa = subjectScore(a);
@@ -719,12 +735,25 @@ async function main() {
         return allSubjectRoutes.indexOf(a) - allSubjectRoutes.indexOf(b);
       })
     : allSubjectRoutes;
-  const subjectRoutes = rankedSubjectRoutes.slice(0, SUBJECTS_LIMIT);
+  // Multiple source records can resolve to the same public route. Release
+  // coverage is measured in unique canonical output paths, not raw records.
+  const uniqueRankedSubjectRoutes = [
+    ...new Map(
+      rankedSubjectRoutes.map((route) => [subjectPath(route), route]),
+    ).values(),
+  ];
+  const subjectRoutes = uniqueRankedSubjectRoutes.slice(0, SUBJECTS_LIMIT);
   console.log(
-    `[prerender-routes] ${subjectRoutes.length}/${allSubjectRoutes.length} subjects in scope ` +
+    `[prerender-routes] ${subjectRoutes.length}/${uniqueRankedSubjectRoutes.length} unique subjects in scope ` +
       `(limit=${SUBJECTS_LIMIT}, chapters per subject=${CHAPTERS_PER_SUBJECT}, ` +
       `selection=${haveTraffic ? "traffic" : "bundle-order"})`,
   );
+  if (STRICT_CURRICULUM_BUILD && subjectRoutes.length === 0) {
+    throw new Error(
+      "[prerender-routes] release build selected zero subject routes; " +
+        "PRERENDER_SUBJECTS_LIMIT must allow curriculum coverage",
+    );
+  }
 
   const mod = await import(pathToFileURL(ssrEntry).href);
   const renderRoute = mod.renderRoute || mod.default;
@@ -743,6 +772,8 @@ async function main() {
   let chaptersWritten = 0;
   let subjectsFailed = 0;
   let chaptersFailed = 0;
+  const subjectExpectedPaths = new Set(subjectRoutes.map(subjectPath));
+  const chapterExpectedPaths = new Set();
   const subjectOutputPaths = new Set();
   const chapterOutputPaths = new Set();
   let budgetExceeded = false;
@@ -890,7 +921,12 @@ async function main() {
           return chapterCandidates.indexOf(a) - chapterCandidates.indexOf(b);
         })
       : chapterCandidates;
-    const candidateChapters = rankedChapters.slice(0, CHAPTERS_PER_SUBJECT);
+    const candidateChapters = [
+      ...new Map(rankedChapters.map((chapter) => [chapter.slug, chapter])).values(),
+    ].slice(0, CHAPTERS_PER_SUBJECT);
+    for (const chapter of candidateChapters) {
+      chapterExpectedPaths.add(`${url}/${chapter.slug}`);
+    }
 
     await pMap(candidateChapters, async (ch) => {
       if (overBudget()) {
@@ -1036,16 +1072,50 @@ async function main() {
       ranked_chapters: chapterViews.size,
     },
     counts: {
+      subjects_selected: subjectExpectedPaths.size,
       subjects_written: subjectsWritten,
       subjects_failed: subjectsFailed,
+      chapters_selected: chapterExpectedPaths.size,
       chapters_written: chaptersWritten,
       chapters_failed: chaptersFailed,
     },
+    budget_exceeded: budgetExceeded,
   };
   fs.writeFileSync(
     path.join(distDir, "prerender-manifest.json"),
     JSON.stringify(manifest, null, 2),
   );
+
+  if (STRICT_CURRICULUM_BUILD) {
+    const incomplete = [];
+    if (budgetExceeded) incomplete.push("prerender budget was exceeded");
+    if (subjectsFailed > 0) {
+      incomplete.push(`${subjectsFailed} selected subject(s) failed`);
+    }
+    if (chaptersFailed > 0) {
+      incomplete.push(`${chaptersFailed} selected chapter(s) failed`);
+    }
+    if (subjectsWritten !== subjectExpectedPaths.size) {
+      incomplete.push(
+        `subject coverage ${subjectsWritten}/${subjectExpectedPaths.size}`,
+      );
+    }
+    if (chaptersWritten !== chapterExpectedPaths.size) {
+      incomplete.push(
+        `chapter coverage ${chaptersWritten}/${chapterExpectedPaths.size}`,
+      );
+    }
+    if (subjectsWritten === 0 || chaptersWritten === 0) {
+      incomplete.push(
+        `non-zero coverage required (subjects=${subjectsWritten}, chapters=${chaptersWritten})`,
+      );
+    }
+    if (incomplete.length > 0) {
+      throw new Error(
+        `[prerender-routes] incomplete release prerender: ${incomplete.join("; ")}`,
+      );
+    }
+  }
 }
 
 main()
@@ -1060,10 +1130,11 @@ main()
     process.exit(0);
   })
   .catch((err) => {
-    // Soft-fail: a transient network blip on the build host should not
-    // break the whole deployment. Subject + chapter routes will fall
-    // back to the SPA shell on Cloudflare Pages, exactly as they did
-    // before this script existed. (Task #385 — architect review)
-    console.error("[prerender-routes] non-fatal failure:", err?.stack || err);
-    process.exit(0);
+    // Development/offline builds keep the historical SPA fallback. Release
+    // builds propagate the failure so an empty curriculum cannot deploy.
+    console.error(
+      `[prerender-routes] ${STRICT_CURRICULUM_BUILD ? "fatal release failure" : "non-fatal failure"}:`,
+      err?.stack || err,
+    );
+    process.exit(STRICT_CURRICULUM_BUILD ? 1 : 0);
   });

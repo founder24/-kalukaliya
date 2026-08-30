@@ -21,6 +21,10 @@ const distDir = path.resolve(__dirname, "..", "dist");
 const distSsrDir = path.resolve(__dirname, "..", "dist-ssr");
 
 const SITE = "https://syrabit.ai";
+const strictReleaseBuild =
+  process.env.CLOUDFLARE_RELEASE_BUILD === "true" ||
+  (process.env.NODE_ENV === "production" &&
+    process.env.ALLOW_INCOMPLETE_CURRICULUM_BUILD !== "true");
 
 const REQUIRED_CANONICAL_ROUTES = [
   { route: "/library", file: "library/index.html" },
@@ -177,6 +181,37 @@ for (const rel of LIBRARY_FILES) {
   if (/<div id="__shell"/.test(body)) {
     fail(`${rel}: still contains a #__shell overlay`);
   }
+
+  // The library/browser snapshots must be backed by the same non-empty
+  // curriculum payload that was used for SSR. A valid shell with an absent
+  // or empty bundle is not a usable production snapshot.
+  const bundleMarker = "window.__LIBRARY_BUNDLE__=";
+  const bundleStart = body.indexOf(bundleMarker);
+  const bundleEnd =
+    bundleStart === -1
+      ? -1
+      : body.indexOf(";window.__SSR_QUERIES__", bundleStart);
+  if (bundleStart === -1 || bundleEnd === -1) {
+    (strictReleaseBuild ? fail : warn)(
+      `${rel}: missing inlined library bundle payload`,
+    );
+  } else {
+    try {
+      const bundle = JSON.parse(
+        body.slice(bundleStart + bundleMarker.length, bundleEnd),
+      );
+      const subjects = Array.isArray(bundle?.subjects) ? bundle.subjects : [];
+      if (subjects.length === 0) {
+        (strictReleaseBuild ? fail : warn)(
+          `${rel}: inlined library bundle contains zero subjects`,
+        );
+      }
+    } catch (err) {
+      (strictReleaseBuild ? fail : warn)(
+        `${rel}: inlined library bundle is not valid JSON (${err.message})`,
+      );
+    }
+  }
 }
 
 // ── Subject / chapter prerender quality + canonical sampling ────────
@@ -267,14 +302,42 @@ for (const c of chapterSamples) checkSampleCanonical(c);
 
 // ── Cross-check prerender manifest counts vs disk ───────────────────
 const manifestPath = path.join(distDir, "prerender-manifest.json");
-const strictReleaseBuild = process.env.CLOUDFLARE_RELEASE_BUILD === "true";
 let manifestSubjects = 0;
 let manifestChapters = 0;
+let manifestSubjectsSelected = 0;
+let manifestChaptersSelected = 0;
+let manifestSubjectsFailed = 0;
+let manifestChaptersFailed = 0;
+let manifestBudgetExceeded = false;
 if (fs.existsSync(manifestPath)) {
   try {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-    manifestSubjects = manifest?.counts?.subjects_written ?? 0;
-    manifestChapters = manifest?.counts?.chapters_written ?? 0;
+    const countFields = [
+      "subjects_selected",
+      "subjects_written",
+      "subjects_failed",
+      "chapters_selected",
+      "chapters_written",
+      "chapters_failed",
+    ];
+    const counts = {};
+    for (const field of countFields) {
+      const value = Number(manifest?.counts?.[field]);
+      if (!Number.isInteger(value) || value < 0) {
+        throw new Error(`counts.${field} must be a non-negative integer`);
+      }
+      counts[field] = value;
+    }
+    if (typeof manifest?.budget_exceeded !== "boolean") {
+      throw new Error("budget_exceeded must be a boolean");
+    }
+    manifestSubjectsSelected = counts.subjects_selected;
+    manifestSubjects = counts.subjects_written;
+    manifestSubjectsFailed = counts.subjects_failed;
+    manifestChaptersSelected = counts.chapters_selected;
+    manifestChapters = counts.chapters_written;
+    manifestChaptersFailed = counts.chapters_failed;
+    manifestBudgetExceeded = manifest.budget_exceeded;
   } catch (err) {
     (strictReleaseBuild ? fail : warn)(
       `prerender-manifest.json unreadable: ${err.message}`,
@@ -307,7 +370,39 @@ if (strictReleaseBuild && (manifestSubjects === 0 || manifestChapters === 0)) {
 }
 if (
   strictReleaseBuild &&
-  (subjectsOnDisk < manifestSubjects || chaptersOnDisk < manifestChapters)
+  (manifestSubjectsFailed > 0 || manifestChaptersFailed > 0)
+) {
+  fail(
+    `release prerender reported failures: subjects=${manifestSubjectsFailed}, ` +
+      `chapters=${manifestChaptersFailed}`,
+  );
+}
+if (strictReleaseBuild && manifestBudgetExceeded) {
+  fail("release prerender exceeded its wall-clock budget");
+}
+if (
+  strictReleaseBuild &&
+  (manifestSubjectsSelected === 0 || manifestChaptersSelected === 0)
+) {
+  fail(
+    `release manifest requires non-zero selected coverage ` +
+      `(subjects=${manifestSubjectsSelected}, chapters=${manifestChaptersSelected})`,
+  );
+}
+if (
+  strictReleaseBuild &&
+  (manifestSubjects !== manifestSubjectsSelected ||
+    manifestChapters !== manifestChaptersSelected)
+) {
+  fail(
+    `release prerender did not complete its selected worklist: ` +
+      `subjects=${manifestSubjects}/${manifestSubjectsSelected}, ` +
+      `chapters=${manifestChapters}/${manifestChaptersSelected}`,
+  );
+}
+if (
+  strictReleaseBuild &&
+  (subjectsOnDisk !== manifestSubjects || chaptersOnDisk !== manifestChapters)
 ) {
   fail(
     `prerender output is incomplete: manifest subjects=${manifestSubjects}, ` +

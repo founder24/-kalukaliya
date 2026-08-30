@@ -12,8 +12,8 @@
 //      refs and modulepreload hints injected).
 //   2. Fetch the slim library bundle from the backend so the SSR
 //      render produces real subject cards, not a loading skeleton.
-//      Falls back to the legacy data-less shell on failure so the
-//      build never breaks.
+//      Development builds can fall back to the legacy data-less shell.
+//      Release builds require a non-empty bundle.
 //   3. Import the SSR build output (`dist-ssr/entry-server.js`),
 //      render the /library route to a string, and inject it into
 //      `#root` (replacing the empty placeholder div that the SPA
@@ -36,6 +36,10 @@ const distDir = path.resolve(__dirname, "..", "dist");
 const distSsrDir = path.resolve(__dirname, "..", "dist-ssr");
 const srcHtml = path.join(distDir, "index.html");
 const ssrEntry = path.join(distSsrDir, "entry-server.js");
+const STRICT_CURRICULUM_BUILD =
+  process.env.CLOUDFLARE_RELEASE_BUILD === "true" ||
+  (process.env.NODE_ENV === "production" &&
+    process.env.ALLOW_INCOMPLETE_CURRICULUM_BUILD !== "true");
 
 // Routes to prerender. /browser is an alias of /library — see App.jsx
 // route definitions and Task #386 (the marketing/PageSpeed URL).
@@ -180,13 +184,21 @@ function slimBundleForClient(bundle) {
 
 async function main() {
   if (!fs.existsSync(srcHtml)) {
-    console.warn(
-      `[prerender-library] dist/index.html not found at ${srcHtml}; skipping`,
-    );
+    const message = `[prerender-library] dist/index.html not found at ${srcHtml}`;
+    if (STRICT_CURRICULUM_BUILD) throw new Error(message);
+    console.warn(`${message}; skipping`);
     return;
   }
 
   const bundle = await fetchBundle();
+  if (
+    STRICT_CURRICULUM_BUILD &&
+    (!bundle || !Array.isArray(bundle.subjects) || bundle.subjects.length === 0)
+  ) {
+    throw new Error(
+      "[prerender-library] release build requires a library bundle with at least one subject",
+    );
+  }
   const slim = slimBundleForClient(bundle);
 
   let html = fs.readFileSync(srcHtml, "utf-8");

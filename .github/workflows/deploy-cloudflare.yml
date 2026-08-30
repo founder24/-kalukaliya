@@ -384,6 +384,7 @@ jobs:
         env:
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://api.syrabit.ai' }}
           CLOUDFLARE_RELEASE_BUILD: 'true'
+          ALLOW_INCOMPLETE_CURRICULUM_BUILD: 'false'
 
       - name: Deploy to Cloudflare Pages
         run: |

@@ -37,6 +37,14 @@ const BUDGET_MS = (() => {
     : 1_500_000;
 })();
 
+const IS_RELEASE_BUILD = process.env.CLOUDFLARE_RELEASE_BUILD === "true";
+const ALLOW_INCOMPLETE_CURRICULUM_BUILD =
+  process.env.ALLOW_INCOMPLETE_CURRICULUM_BUILD === "true";
+const STRICT_CURRICULUM_BUILD =
+  IS_RELEASE_BUILD ||
+  (process.env.NODE_ENV === "production" &&
+    !ALLOW_INCOMPLETE_CURRICULUM_BUILD);
+
 const overallStart = Date.now();
 let timedOut = false;
 const watchdog = setTimeout(() => {
@@ -103,6 +111,15 @@ const node = (script, extraArgs = [], opts) =>
 
 async function main() {
   const summary = [];
+  console.log(
+    `[build] curriculum validation: ${
+      STRICT_CURRICULUM_BUILD
+        ? "strict"
+        : ALLOW_INCOMPLETE_CURRICULUM_BUILD
+          ? "offline opt-out"
+          : "development fallback"
+    }`,
+  );
   const record = async (label, p) => {
     const r = await p;
     summary.push({ label, elapsed: r?.elapsed ?? 0 });
