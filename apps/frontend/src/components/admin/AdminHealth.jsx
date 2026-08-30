@@ -1360,6 +1360,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
             loadTpJsonldAlerts={loadTpJsonldAlerts}
             aiCacheStats={aiCacheStats} aiCacheLoading={aiCacheLoading}
             aiCachePurging={aiCachePurging} loadAiCacheStats={loadAiCacheStats}
+            purgeAiCache={purgeAiCache}
             pineconeHealth={pineconeHealth} pineconeLoading={pineconeLoading}
             pineconeSwitch={pineconeSwitch} setPineconeSwitch={setPineconeSwitch}
             loadPineconeHealth={loadPineconeHealth}

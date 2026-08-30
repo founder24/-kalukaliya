@@ -7,8 +7,8 @@
  *  1. A visible "Assamese not yet available" notice is shown (not a blank tab).
  *  2. The English content fallback is rendered, so the reader is never blank.
  *  3. Switching to the English tab shows full English content without any notice.
- *  4. When `has_assamese` is true and `content_as` is populated the notice
- *     is absent and the Assamese content is rendered.
+ *  4. While the Assamese reader rollout is paused, even populated Assamese
+ *     content remains behind the "coming soon" fallback.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
@@ -229,7 +229,7 @@ describe('ChapterPage — has_assamese=false reader tab', () => {
     expect(screen.getByTestId('notes-content')).toBeTruthy();
   });
 
-  it('does NOT show the unavailable notice when has_assamese is true and content_as is populated', async () => {
+  it('keeps populated Assamese content behind the coming-soon fallback while rollout is paused', async () => {
     mockContentLang = 'as';
     const chapter = makeChapter({
       has_assamese: true,
@@ -241,12 +241,13 @@ describe('ChapterPage — has_assamese=false reader tab', () => {
       render(<ChapterPage />);
     });
 
-    // Assamese content is present — notice must be absent.
-    expect(screen.queryByTestId('assamese-unavailable-notice')).toBeNull();
+    // The reader deliberately ignores has_assamese until the rollout resumes.
+    expect(screen.getByTestId('assamese-unavailable-notice')).toBeTruthy();
 
-    // Assamese content must be rendered.
+    // English remains the safe fallback; unpublished Assamese is not exposed.
     const content = screen.getByTestId('notes-content');
-    expect(content.textContent).toContain('পৰিচয়');
+    expect(content.textContent).toContain('Introduction');
+    expect(content.textContent).not.toContain('পৰিচয়');
   });
 
   it('English tab remains fully usable when has_assamese is false', async () => {

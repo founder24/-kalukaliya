@@ -56,3 +56,4 @@
 - [Password reset cutover proof](password-reset-cutover-proof.md) — Bind a freshly delivered disposable reset link to its post-deploy request before treating it as release evidence.
 - [Secret Manager fail-closed sync](secret-manager-fail-closed-sync.md) — A blocked secret source can stream nothing into Worker provisioning; verify a non-empty value before writing.
 - [Atomic quota and refresh state](atomic-quota-refresh.md) — D1 owns quota/refresh claims; preserve legacy KV floors/markers through safe rollout windows.
+- [Frontend undefined identifiers](frontend-undefined-identifiers.md) — Vite builds do not catch unbound JSX names; extracted admin tabs need render coverage or static checks.

@@ -70,7 +70,7 @@ describe('InputBar — OCR image upload', () => {
 
     await waitFor(() => {
       expect(axios.post).toHaveBeenCalledWith(
-        expect.stringContaining('/ai/ocr-image'),
+        expect.stringContaining('/chat/image'),
         expect.any(FormData),
         expect.objectContaining({ withCredentials: true }),
       );
