@@ -31,6 +31,27 @@ const REQUIRED_CURRICULUM_SCRIPTS = new Set([
   "prerender-routes.mjs",
 ]);
 
+export const RELEASE_CACHE_POLICY_MESSAGE =
+  "[prerender-all] release cache policy: invalidated restored prerender cache; fetching a fresh curriculum snapshot";
+export const DEVELOPMENT_CACHE_POLICY_MESSAGE =
+  "[prerender-all] development cache policy: reusing fresh prerender cache entries when available";
+
+export function applyPrerenderCachePolicy({
+  strict = STRICT_CURRICULUM_BUILD,
+} = {}) {
+  if (strict) {
+    // The CI/build cache can restore a valid-looking curriculum snapshot from
+    // an earlier release. Invalidate it before warmCache() so the cache shared
+    // by all child prerender processes is populated only by this build.
+    clearPrerenderCache();
+    console.log(RELEASE_CACHE_POLICY_MESSAGE);
+    return "release";
+  }
+
+  console.log(DEVELOPMENT_CACHE_POLICY_MESSAGE);
+  return "development";
+}
+
 const STEP_BUDGET_MS = (() => {
   const raw = process.env.PRERENDER_STEP_BUDGET_MS;
   const n = raw ? Number.parseInt(raw, 10) : NaN;
@@ -111,19 +132,7 @@ async function main() {
     process.env.PRERENDER_TRAFFIC_DAYS || "30",
     10,
   );
-  if (STRICT_CURRICULUM_BUILD) {
-    // The CI/build cache can restore a valid-looking curriculum snapshot from
-    // an earlier release. Invalidate it before warmCache() so the cache shared
-    // by all child prerender processes is populated only by this build.
-    clearPrerenderCache();
-    console.log(
-      "[prerender-all] release cache policy: invalidated restored prerender cache; fetching a fresh curriculum snapshot",
-    );
-  } else {
-    console.log(
-      "[prerender-all] development cache policy: reusing fresh prerender cache entries when available",
-    );
-  }
+  applyPrerenderCachePolicy();
   console.log("[prerender-all] warming shared backend cache…");
   const cacheStart = Date.now();
   const { bundle, traffic } = await warmCache({ days: trafficDays });
@@ -186,11 +195,17 @@ async function main() {
   // builds propagate failures from the library and curriculum route scripts.
 }
 
-main().catch((err) => {
-  // Code-review feedback: only soft-fail expected backend / data-fetch
-  // problems (those are already handled inside warmCache + each
-  // prerender child returning null). An exception that reaches here
-  // is an internal orchestrator bug — surface it so it gets fixed.
-  console.error("[prerender-all] unexpected failure:", err?.stack || err);
-  process.exit(1);
-});
+const isMainModule =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+
+if (isMainModule) {
+  main().catch((err) => {
+    // Code-review feedback: only soft-fail expected backend / data-fetch
+    // problems (those are already handled inside warmCache + each
+    // prerender child returning null). An exception that reaches here
+    // is an internal orchestrator bug — surface it so it gets fixed.
+    console.error("[prerender-all] unexpected failure:", err?.stack || err);
+    process.exit(1);
+  });
+}
