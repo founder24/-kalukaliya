@@ -16,16 +16,16 @@
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "drizzle-orm": "^0.38.0",
-    "hono": "^4.6.0",
+    "hono": "^4.13.5",
     "jose": "^5.10.0"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.21.3",
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@cloudflare/workers-types": "^4.20260523.1",
     "@types/bcryptjs": "^2.4.6",
     "drizzle-kit": "^0.30.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10",
-    "wrangler": "^4.94.0"
+    "wrangler": "^4.126.0"
   }
 }
