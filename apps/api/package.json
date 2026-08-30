@@ -24,7 +24,7 @@
     "@cloudflare/workers-types": "^4.20260523.1",
     "@types/bcryptjs": "^2.4.6",
     "drizzle-kit": "^0.30.0",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10",
     "wrangler": "^4.94.0"
   }
