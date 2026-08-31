@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import path from "node:path";
 import {
   hasNonEmptyLibraryBundle,
   isStrictCurriculumBuild,
@@ -9,6 +11,18 @@ import {
   fetchWithFallback,
   validateJsonPayload,
 } from "../../scripts/generate-static-data.mjs";
+
+describe("release verifier syntax", () => {
+  it("parses without duplicate declarations", () => {
+    const verifierPath = path.resolve(process.cwd(), "scripts/verify-all.mjs");
+
+    expect(() =>
+      execFileSync(process.execPath, ["--check", verifierPath], {
+        stdio: "pipe",
+      }),
+    ).not.toThrow();
+  });
+});
 
 describe("curriculum release strictness", () => {
   it.each([
