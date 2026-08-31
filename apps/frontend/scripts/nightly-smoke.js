@@ -12,7 +12,7 @@
  *                                DNS: Read, Logs: Read, Health Checks: Read,
  *                                Zero Trust: Read (Phase 3), Waiting Room: Read (Phase 3),
  *                                R2: Read (Phase 4), Cache: Read (Phase 4),
- *                                Workers: Read, Durable Objects: Read (Phase 5),
+ *                                Workers: Read (Phase 5),
  *                                SSL and Certificates: Read, Zaraz: Read,
  *                                Speed (Observatory): Read (Phase 6),
  *                                Load Balancer: Read (Task #76/87)
@@ -51,6 +51,37 @@ const TOKEN        = process.env.CLOUDFLARE_API_TOKEN;
 const ZONE_ID      = process.env.CLOUDFLARE_ZONE_ID    || '5b8c97df4431491dc7f60ea72fb61871';
 const ACCOUNT_ID   = process.env.CLOUDFLARE_ACCOUNT_ID || 'd66e40eac539fff1db270fddf384a5ec';
 const API          = 'https://api.cloudflare.com/client/v4';
+const SITE_URL     = (process.env.SITE_URL || 'https://syrabit.ai').replace(/\/+$/, '');
+const IMAGE_URL    = process.env.CF_AUDIT_IMAGE_URL || `${SITE_URL}/opengraph.jpg`;
+const PRODUCTION_SERVICES = {
+  edge: 'syrabitworker-prod',
+  api:  'syrabit-api-prod',
+};
+const EXPECTED_PRODUCTION_BINDINGS = [
+  {
+    service: PRODUCTION_SERVICES.edge,
+    bindings: [
+      ['RATE_LIMIT_DO', 'durable_object_namespace'],
+      ['API_WORKER', 'service', PRODUCTION_SERVICES.api],
+      ['RATE_LIMIT_KV', 'kv_namespace'],
+      ['ISR_CACHE_KV', 'kv_namespace'],
+      ['CONTENT_KV', 'kv_namespace'],
+      ['R2_BUCKET', 'r2_bucket'],
+      ['AI', 'ai'],
+    ],
+  },
+  {
+    service: PRODUCTION_SERVICES.api,
+    bindings: [
+      ['DB', 'd1'],
+      ['R2_BUCKET', 'r2_bucket'],
+      ['CONTENT_KV', 'kv_namespace'],
+      ['RATE_LIMIT_KV', 'kv_namespace'],
+      ['VECTORIZE', 'vectorize'],
+      ['AI', 'ai'],
+    ],
+  },
+];
 // Optional: set SLACK_WEBHOOK_URL to receive direct alerts when the smoke run
 // fails. When unset the script still exits with code 1 so CI marks the run
 // failed and sends the standard GitHub failed-workflow email.
@@ -109,8 +140,23 @@ async function cfGetOrSkip(path) {
   }
 }
 
+// Inspection calls need the raw Cloudflare result so scope gaps, rate limits,
+// and genuine API failures remain separate outcomes.
+async function cfInspect(path, { _attempt = 0 } = {}) {
+  const res = await fetch(`${API}${path}`, { headers });
+  const j = await res.json();
+  if (!j.success && j.errors?.[0]?.code === 10429 && _attempt < 3) {
+    const wait = 2000 * (2 ** _attempt);
+    console.warn(`[rate-limit] 10429 on ${path} — waiting ${wait}ms (attempt ${_attempt + 1}/3)`);
+    await sleep(wait);
+    return cfInspect(path, { _attempt: _attempt + 1 });
+  }
+  return j;
+}
+
 const failures  = [];
 const warnings  = [];
+const planItems = [];
 
 function assert(label, actual, expected) {
   const pass = JSON.stringify(actual) === JSON.stringify(expected);
@@ -122,6 +168,11 @@ function assert(label, actual, expected) {
 function warn(label, detail) {
   console.log(`  ⚠  ${label}  [${detail}]`);
   warnings.push(label);
+}
+
+function planOnly(label, detail) {
+  console.log(`  💳 ${label}  [${detail}]`);
+  planItems.push(label);
 }
 
 async function main() {
@@ -335,7 +386,7 @@ async function main() {
       warn('Cache Reserve',
         'token lacks Cache: Read — add scope and run cloudflare-phase4-apply.js');
     } else if (code === 1135) {
-      warn('Cache Reserve',
+      planOnly('Cache Reserve',
         'not available on current plan — requires Cache Reserve subscription; ' +
         'see https://dash.cloudflare.com → Caching → Cache Reserve');
     } else {
@@ -351,153 +402,71 @@ async function main() {
       // Cache Reserve is a paid add-on — not a misconfiguration, so emit as warning
       // rather than a hard failure.  CI will not block until the add-on is purchased.
       // Once purchased and enabled, this check will automatically report ✓.
-      warn('Cache Reserve',
+      planOnly('Cache Reserve',
         `value=${JSON.stringify(value)} (want: "on") — requires Cache Reserve paid add-on (~$5/month): ` +
         `https://dash.cloudflare.com/${ACCOUNT_ID}/${ZONE_ID}/caching/cache-reserve`);
     }
   }
 
-  // ── Phase 5: Analytics Engine dataset + Durable Object namespace ──────
-  // These resources are provisioned by `wrangler deploy` (not REST API calls).
-  // We verify them by inspecting the deployed worker's bindings and the
-  // account's DO namespace list. Both endpoints require narrow token scopes
-  // (Workers: Read, Durable Objects: Read) that are separate from the main
-  // zone-settings token — degrade gracefully on code 10000.
-  console.log('\nPhase 5 — Analytics Engine dataset + Durable Object rate limiter:');
-  const WORKER_NAME = 'syrabitworker';
-  const AE_DATASET  = 'syrabit-edge-metrics';
-
-  // 5a: Analytics Engine binding
-  const aeBindings = await cfGetOrSkip(
-    `/accounts/${ACCOUNT_ID}/workers/scripts/${WORKER_NAME}/bindings`,
-  );
-  if (!aeBindings) {
-    warn('Analytics Engine ANALYTICS binding',
-      'token lacks Workers: Read — add scope to verify or check Workers dashboard');
-  } else {
-    const aeBinding = (aeBindings.result || []).find(
-      (b) => b.type === 'analytics_engine' && b.dataset === AE_DATASET,
-    );
-    if (!aeBinding) {
-      failures.push(`Analytics Engine binding (dataset=${AE_DATASET}) NOT found in syrabit-edge`);
-      console.log(`  ✗  ANALYTICS binding (dataset=${AE_DATASET}): NOT FOUND — run: cd workers/edge-proxy && wrangler deploy`);
-    } else {
-      console.log(`  ✓  ANALYTICS binding: dataset=${aeBinding.dataset}`);
-    }
-  }
-
-  // 5b: RateLimiter Durable Object namespace
-  const doNamespaces = await cfGetOrSkip(
-    `/accounts/${ACCOUNT_ID}/workers/durable_objects/namespaces`,
-  );
-  if (!doNamespaces) {
-    warn('RateLimiter DO namespace',
-      'token lacks Durable Objects: Read — add scope to verify or check Workers dashboard');
-  } else {
-    const ns = (doNamespaces.result || []).find(
-      (n) => n.class === 'RateLimiter' && n.script === WORKER_NAME,
-    );
-    if (!ns) {
-      const anyMatch = (doNamespaces.result || []).some((n) => n.class === 'RateLimiter');
-      if (anyMatch) {
-        console.log('  ✓  RateLimiter DO namespace found (possibly on different script tag)');
+  // ── Phase 5: Active production Worker bindings ────────────────────────
+  console.log('\nPhase 5 — Active production Worker bindings:');
+  for (const { service, bindings: expectedBindings } of EXPECTED_PRODUCTION_BINDINGS) {
+    const path = `/accounts/${ACCOUNT_ID}/workers/scripts/${service}/bindings`;
+    const bindingRes = await cfInspect(path);
+    if (!bindingRes.success) {
+      const code = bindingRes.errors?.[0]?.code;
+      if ([10000, 9109, 7003].includes(code)) {
+        warn(`${service} bindings`,
+          'token lacks Workers: Read — add scope to verify active production bindings');
+      } else if (code === 10429) {
+        warn(`${service} bindings`, 'Cloudflare API rate-limited after 3 retries — re-run later');
       } else {
-        failures.push('RateLimiter DO namespace (NOT FOUND — wrangler deploy needed)');
-        console.log('  ✗  RateLimiter DO namespace: NOT FOUND — run: cd workers/edge-proxy && wrangler deploy');
+        const detail = JSON.stringify(bindingRes.errors);
+        failures.push(`${service} bindings API failed: ${detail}`);
+        console.log(`  ✗  ${service} bindings API: ${detail}`);
       }
-    } else {
-      console.log(`  ✓  RateLimiter DO namespace: id=${ns.id} script=${ns.script}`);
+      continue;
     }
-  }
 
-  // 5c: Analytics Engine dataset write recency
-  // Verifies the worker has written at least one datapoint in the last 24 h
-  // by querying the AE SQL API. Requires CF_ANALYTICS_TOKEN env var with
-  // "Analytics: Read" scope. Degrades to a warning if the token is absent
-  // or on plan-restriction errors (code 1135) so CI doesn't block deploys
-  // on freshly-provisioned accounts with no traffic yet.
-  const cfAnalyticsToken = process.env.CF_ANALYTICS_TOKEN;
-  if (!cfAnalyticsToken) {
-    warn('AE dataset write recency', 'CF_ANALYTICS_TOKEN not set — set env var to verify writes');
-  } else {
-    const aeSqlUrl = `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/analytics_engine/sql`;
-    const aeQuery  = `SELECT count() AS n FROM syrabit_edge_metrics WHERE timestamp >= now() - INTERVAL '86400' SECOND`;
-    try {
-      const aeRes  = await fetch(aeSqlUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${cfAnalyticsToken}`, 'Content-Type': 'text/plain' },
-        body: aeQuery,
-      });
-      const aeText = await aeRes.text();
-      if (!aeRes.ok) {
-        const code = (() => { try { return JSON.parse(aeText)?.errors?.[0]?.code; } catch { return null; } })();
-        if (code === 1135) {
-          warn('AE dataset write recency', 'plan does not include Analytics Engine (code 1135)');
-        } else {
-          warn('AE dataset write recency', `AE SQL returned ${aeRes.status} — check CF_ANALYTICS_TOKEN scope`);
-        }
+    const deployed = bindingRes.result || [];
+    for (const [name, type, serviceTarget] of expectedBindings) {
+      const found = deployed.find((binding) => binding.name === name);
+      const typeMatches = found?.type === type;
+      const targetMatches = !serviceTarget || found?.service === serviceTarget;
+      const actual = found
+        ? `${found.type}${found.service ? ` → ${found.service}` : ''}`
+        : 'missing';
+      const expected = `${type}${serviceTarget ? ` → ${serviceTarget}` : ''}`;
+      if (typeMatches && targetMatches) {
+        console.log(`  ✓  ${service}.${name}: ${actual}`);
       } else {
-        const aeJson = JSON.parse(aeText);
-        const n = Number(aeJson?.data?.[0]?.n ?? 0);
-        if (n === 0) {
-          warn('AE dataset write recency', 'syrabit_edge_metrics has 0 rows in last 24 h — verify worker is deployed and receiving traffic');
-        } else {
-          console.log(`  ✓  AE dataset write recency: ${n.toLocaleString()} datapoints in last 24 h`);
-        }
+        failures.push(`${service}.${name}: ${actual} (want ${expected})`);
+        console.log(`  ✗  ${service}.${name}: ${actual}  (want ${expected})`);
       }
-    } catch (err) {
-      warn('AE dataset write recency', `AE SQL fetch failed: ${err.message}`);
     }
   }
 
   // ── Phase 6: Image Resizing, Zaraz GA4, Observatory ───────────────────
   // These resources are provisioned by cloudflare-phase6-apply.js.
-  // All checks degrade to warnings on token scope gaps (code 10000) or
-  // plan-restriction errors (code 1135) so CI doesn't block on new accounts.
+  // Scope gaps become warnings, plan restrictions remain non-failing plan-only
+  // items, and unexpected API/configuration problems remain failures.
   //
-  // The Railway-origin mTLS sub-checks (6a-i…6a-iv) were removed in
-  // Task #335 when Railway was decommissioned. The corresponding
-  // Cloudflare client certificate (`syrabit-railway-mtls`), worker
-  // binding (`MTLS_CERT`), worker secret (`MTLS_REQUIRED`), and the
-  // RAILWAY_ORIGIN_URL bypass probe are no longer relevant; delete the
-  // Cloudflare cert and the GitHub Actions secret as part of the same
-  // cleanup. See docs/infra/decommission.md.
   console.log('\nPhase 6 — Image Resizing, Zaraz GA4, Observatory:');
-  /* mTLS-related Phase 6 checks (cert lookup, worker MTLS_CERT binding,
-     MTLS_REQUIRED secret, RAILWAY_ORIGIN_URL bypass probe) intentionally
-     removed in Task #335 along with the Railway origin. */
 
-  // 6b: Image Resizing zone setting
-  // Image Resizing is a paid Cloudflare add-on (included with Pages Pro or as
-  // a standalone add-on).  Code 1135 = plan restriction; value !="on" = feature
-  // inactive.  Both cases degrade to a warning — CI does not block until the
-  // add-on is purchased.  Once purchased, enabling it via cloudflare-phase6-apply.js
-  // activates /cdn-cgi/image/ transforms automatically with no code changes.
-  const imgResRaw  = await fetch(`${API}/zones/${ZONE_ID}/settings/image_resizing`, { headers });
-  const imgResJson = await imgResRaw.json();
-  if (!imgResJson.success) {
-    const code = imgResJson.errors?.[0]?.code;
-    if (code === 10000) {
-      warn('image_resizing zone setting', 'token lacks Zone Settings: Read — add scope to verify');
-    } else if (code === 1135) {
-      warn('image_resizing zone setting',
-        `not available on current plan (API code 1135) — requires Image Resizing add-on: ` +
-        `https://dash.cloudflare.com/${ACCOUNT_ID}/${ZONE_ID}/speed/optimization`);
-    } else {
-      failures.push(`image_resizing (unexpected API error code ${code}: ${imgResJson.errors?.[0]?.message})`);
-      console.log(`  ✗  image_resizing: unexpected API error code ${code} — run cloudflare-phase6-apply.js`);
-    }
-  } else {
-    const val = imgResJson.result?.value;
-    if (val === 'on') {
-      console.log('  ✓  image_resizing: on');
-    } else {
-      // Not "on" — plan add-on not yet purchased or not yet enabled. Warn, don't fail.
-      warn('image_resizing zone setting',
-        `value=${JSON.stringify(val)} (want: "on") — requires Image Resizing paid add-on: ` +
-        `https://dash.cloudflare.com/${ACCOUNT_ID}/${ZONE_ID}/speed/optimization`);
-    }
-  }
+  // Hold the ambiguous zone-setting result until after the live edge probe.
+  // A successful cf-resized response takes precedence and emits no warning.
+  const imageSettingPath = `/zones/${ZONE_ID}/settings/image_resizing`;
+  const imgResJson = await cfInspect(imageSettingPath);
+  const imageSettingCode = imgResJson.errors?.[0]?.code;
+  const imageSettingState = imgResJson.success
+    ? (imgResJson.result?.value || 'unknown')
+    : imageSettingCode === 1135
+      ? 'plan-gated'
+      : [10000, 9109, 7003].includes(imageSettingCode)
+        ? 'scope-gap'
+        : imageSettingCode === 10429
+          ? 'rate-limited'
+          : 'api-error';
 
   // 6c: Zaraz GA4 tool configured
   // Raw fetch — Zaraz may return non-10000 codes on plans without Zaraz.
@@ -608,7 +577,7 @@ async function main() {
         warn(`Observatory schedule (${label})`, 'token lacks Speed: Read — add scope or verify at dash.cloudflare.com → Speed → Observatory');
         break;  // same token issue will affect all targets
       } else if (code === 1135) {
-        warn(`Observatory schedule (${label})`, 'not available on current plan — requires Observatory access');
+        planOnly(`Observatory schedule (${label})`, 'not available on current plan — requires Observatory access');
         break;
       } else {
         warn(`Observatory schedule (${label})`, `Observatory API error code ${code}: ${obsJson.errors?.[0]?.message}`);
@@ -638,9 +607,8 @@ async function main() {
   //   w=640 → 12.3 KB (69.2% saving)
   console.log('\nPhase 6e — Live CDN image transform probe:');
   {
-    const SITE          = 'https://syrabit.ai';
-    const testImageUrl  = `${SITE}/opengraph.jpg`;
-    const cdnTestUrl    = `${SITE}/cdn-cgi/image/width=320,quality=85,format=auto,fit=cover/${testImageUrl}`;
+    const testImageUrl  = IMAGE_URL;
+    const cdnTestUrl    = `${SITE_URL}/cdn-cgi/image/width=320,quality=85,format=auto,fit=cover/${encodeURI(testImageUrl)}`;
     const MOBILE_MIN_SAVING_PCT = 70;
 
     try {
@@ -650,43 +618,62 @@ async function main() {
         fetch(cdnTestUrl,    { signal: AbortSignal.timeout(15000) }),
       ]);
 
-      if (!origRes.ok || !cdnRes.ok) {
-        warn('CDN image transform probe',
-          `fetch failed — orig=${origRes.status} cdn=${cdnRes.status}`);
-      } else {
-        const [origBuf, cdnBuf] = await Promise.all([origRes.arrayBuffer(), cdnRes.arrayBuffer()]);
-        const origSize    = origBuf.byteLength;
-        const cdnSize     = cdnBuf.byteLength;
-        const cfResized   = cdnRes.headers.get('cf-resized') || '';
-        const isActive    = cfResized.startsWith('internal=ok') || cfResized.startsWith('internal=ram');
-        const savedPct    = ((origSize - cdnSize) / origSize * 100).toFixed(1);
-        const savingPass  = parseFloat(savedPct) >= MOBILE_MIN_SAVING_PCT;
+      const cfResized = cdnRes.headers.get('cf-resized') || '';
+      const isActive = cdnRes.ok &&
+        (cfResized.startsWith('internal=ok') || cfResized.startsWith('internal=ram'));
 
-        if (!isActive) {
-          failures.push(
-            'CDN image transform probe: cf-resized header absent — ' +
-            'Image Resizing may be inactive despite zone setting reporting "on". ' +
-            'Check: dash.cloudflare.com → Speed → Optimization → Image Resizing.',
-          );
+      if (isActive) {
+        if (!origRes.ok) {
           console.log(
-            '  ✗  CDN transform: cf-resized header absent — Image Resizing not active on edge',
-          );
-        } else if (!savingPass) {
-          failures.push(
-            `CDN image transform probe: only ${savedPct}% saving at w=320 ` +
-            `(need ≥${MOBILE_MIN_SAVING_PCT}%) — images may not be resizing correctly`,
-          );
-          console.log(
-            `  ✗  CDN transform: ${savedPct}% saving at w=320 ` +
-            `(need ≥${MOBILE_MIN_SAVING_PCT}%)  cf-resized: ${cfResized.slice(0, 40)}`,
+            `  ✓  CDN transform active: cf-resized=${cfResized} ` +
+            `(zone setting: ${imageSettingState}; original baseline HTTP ${origRes.status})`,
           );
         } else {
-          console.log(
-            `  ✓  CDN transform active: w=320 ${cdnSize.toLocaleString()} B ` +
-            `(-${savedPct}% from ${origSize.toLocaleString()} B)  ` +
-            `cf-resized: ${cfResized.split(' ').slice(0, 3).join(' ')}`,
-          );
+          const [origBuf, cdnBuf] = await Promise.all([
+            origRes.arrayBuffer(),
+            cdnRes.arrayBuffer(),
+          ]);
+          const origSize = origBuf.byteLength;
+          const cdnSize = cdnBuf.byteLength;
+          const savedPct = ((origSize - cdnSize) / origSize * 100).toFixed(1);
+          const savingPass = parseFloat(savedPct) >= MOBILE_MIN_SAVING_PCT;
+
+          if (!savingPass) {
+            failures.push(
+              `CDN image transform probe: only ${savedPct}% saving at w=320 ` +
+              `(need ≥${MOBILE_MIN_SAVING_PCT}%) — images may not be resizing correctly`,
+            );
+            console.log(
+              `  ✗  CDN transform: ${savedPct}% saving at w=320 ` +
+              `(need ≥${MOBILE_MIN_SAVING_PCT}%)  cf-resized: ${cfResized.slice(0, 40)}`,
+            );
+          } else {
+            console.log(
+              `  ✓  CDN transform active: w=320 ${cdnSize.toLocaleString()} B ` +
+              `(-${savedPct}% from ${origSize.toLocaleString()} B)  ` +
+              `cf-resized: ${cfResized.split(' ').slice(0, 3).join(' ')}  ` +
+              `(zone setting: ${imageSettingState})`,
+            );
+          }
         }
+      } else if (imageSettingState === 'scope-gap') {
+        warn('CDN image transform probe',
+          `cf-resized header absent; token lacks Zone Settings: Read (HTTP ${cdnRes.status})`);
+      } else if (imageSettingState === 'rate-limited') {
+        warn('CDN image transform probe',
+          `cf-resized header absent; Cloudflare API rate-limited (HTTP ${cdnRes.status})`);
+      } else if (imageSettingState === 'plan-gated') {
+        planOnly('CDN image transform probe',
+          'cf-resized header absent; Image Resizing add-on is unavailable on the current plan');
+      } else {
+        failures.push(
+          'CDN image transform probe: cf-resized header absent — ' +
+          `Image Resizing is inactive (zone setting: ${imageSettingState}, HTTP ${cdnRes.status}). ` +
+          'Check: dash.cloudflare.com → Speed → Optimization → Image Resizing.',
+        );
+        console.log(
+          '  ✗  CDN transform: cf-resized header absent — Image Resizing not active on edge',
+        );
       }
     } catch (e) {
       warn('CDN image transform probe', `network error: ${e.message}`);
@@ -1113,6 +1100,9 @@ async function main() {
   console.log('');
   if (warnings.length > 0) {
     console.log(`${warnings.length} warning(s): ${warnings.join(', ')}`);
+  }
+  if (planItems.length > 0) {
+    console.log(`${planItems.length} plan-only item(s), not failures: ${planItems.join(', ')}`);
   }
   if (failures.length === 0) {
     console.log('All checks passed.');

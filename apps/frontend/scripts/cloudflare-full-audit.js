@@ -24,7 +24,7 @@
  *   CLOUDFLARE_API_TOKEN  — Zone Settings: Read, Bot Management: Read,
  *                           DNS: Read, Logs: Read, Health Checks: Read,
  *                           R2: Read, Zero Trust: Read, Waiting Room: Read,
- *                           Cache: Read, Workers: Read, Durable Objects: Read,
+ *                           Cache: Read, Workers: Read,
  *                           SSL and Certificates: Read, Zaraz: Read,
  *                           Speed (Observatory): Read
  *   CLOUDFLARE_ZONE_ID    — optional, defaults to syrabit.ai zone
@@ -759,7 +759,7 @@ async function auditItem19ZarazAndObservatory() {
     return;
   } else if (!zaraz.success) {
     // Guard: Zaraz API error → single FAIL then return (fixes the "23 rows / 5× item #19"
-    // duplicate-reporting bug: without this return the worker/secrets/Railway checks also
+    // duplicate-reporting bug: without this return the later Observatory checks also
     // emit under item #19 even when Zaraz itself is unconfigured).
     fail(19, 6, 'Zaraz GA4 + Observatory', `Zaraz: ${JSON.stringify(zaraz.errors)}`,
       'run cloudflare-phase6-apply.js → Step 3');

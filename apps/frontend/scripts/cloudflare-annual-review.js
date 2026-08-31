@@ -11,21 +11,54 @@
  *                            Logs: Read (Phase 2 Logpush), Health Checks: Read,
  *                            R2: Read (Phase 2 + 4 buckets), Zero Trust: Read (Phase 3),
  *                            Waiting Room: Read (Phase 3), Cache: Read (Phase 4),
- *                            Workers: Read, Durable Objects: Read (Phase 5),
+ *                            Workers: Read (Phase 5),
  *                            SSL and Certificates: Read, Zaraz: Read,
  *                            Speed (Observatory): Read (Phase 6)
  *   CLOUDFLARE_ZONE_ID     — optional, defaults to syrabit.ai zone
  *   CLOUDFLARE_ACCOUNT_ID  — optional, defaults to Syrabit account
  *
  * Usage:
- *   node artifacts/syrabit/scripts/cloudflare-annual-review.js
- *   CLOUDFLARE_API_TOKEN=<tok> node artifacts/syrabit/scripts/cloudflare-annual-review.js
+ *   node apps/frontend/scripts/cloudflare-annual-review.js
+ *   CLOUDFLARE_API_TOKEN=<tok> node apps/frontend/scripts/cloudflare-annual-review.js
  */
 
 const TOKEN      = process.env.CLOUDFLARE_API_TOKEN;
 const ZONE_ID    = process.env.CLOUDFLARE_ZONE_ID    || '5b8c97df4431491dc7f60ea72fb61871';
 const ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || 'd66e40eac539fff1db270fddf384a5ec';
 const API        = 'https://api.cloudflare.com/client/v4';
+const SITE_URL   = (process.env.SITE_URL || 'https://syrabit.ai').replace(/\/+$/, '');
+const IMAGE_URL  = process.env.CF_AUDIT_IMAGE_URL || `${SITE_URL}/opengraph.jpg`;
+
+const PRODUCTION_SERVICES = {
+  edge: 'syrabitworker-prod',
+  api:  'syrabit-api-prod',
+};
+
+const EXPECTED_PRODUCTION_BINDINGS = [
+  {
+    service: PRODUCTION_SERVICES.edge,
+    bindings: [
+      ['RATE_LIMIT_DO', 'durable_object_namespace'],
+      ['API_WORKER', 'service', PRODUCTION_SERVICES.api],
+      ['RATE_LIMIT_KV', 'kv_namespace'],
+      ['ISR_CACHE_KV', 'kv_namespace'],
+      ['CONTENT_KV', 'kv_namespace'],
+      ['R2_BUCKET', 'r2_bucket'],
+      ['AI', 'ai'],
+    ],
+  },
+  {
+    service: PRODUCTION_SERVICES.api,
+    bindings: [
+      ['DB', 'd1'],
+      ['R2_BUCKET', 'r2_bucket'],
+      ['CONTENT_KV', 'kv_namespace'],
+      ['RATE_LIMIT_KV', 'kv_namespace'],
+      ['VECTORIZE', 'vectorize'],
+      ['AI', 'ai'],
+    ],
+  },
+];
 
 if (!TOKEN) {
   console.error('CLOUDFLARE_API_TOKEN is not set');
@@ -56,6 +89,14 @@ function row(label, value, target, note = '') {
   const exp  = target !== undefined && !ok ? `  (want: ${JSON.stringify(target)})` : '';
   const n    = note ? `  [${note}]` : '';
   console.log(`  ${mark}${label.padEnd(40)} ${JSON.stringify(value)}${exp}${n}`);
+}
+
+function warning(label, detail) {
+  console.log(`  ⚠  ${label}  [${detail}]`);
+}
+
+function planOnly(label, detail) {
+  console.log(`  💳 ${label}  [${detail}]`);
 }
 
 async function main() {
@@ -241,7 +282,7 @@ async function main() {
       row('  enabled', room.enabled, true);
       row('  session_duration', room.session_duration, 10);
       row('  new_users_per_minute', room.new_users_per_minute, undefined,
-        'Railway plan capacity — increase on Pro plan');
+        'enable only when production origin capacity is ready');
       row('  total_active_users', room.total_active_users, undefined);
     } else {
       row('syrabit-exam-season-queue', 'NOT FOUND', 'EXISTS', 'run cloudflare-phase3-apply.js');
@@ -253,7 +294,7 @@ async function main() {
   console.log('  Targets:');
   console.log('    syrabit-assets      — student PDFs served at assets.syrabit.ai');
   console.log('    syrabit-cache-reserve — Cache Reserve backing bucket');
-  console.log('    Cache Reserve: on   — cold-cache misses resolve from R2 not Railway');
+  console.log('    Cache Reserve: on   — cold-cache misses resolve from R2');
 
   // Re-fetch R2 buckets (same endpoint used in Phase 2 check above, but re-call
   // so Phase 4 stands alone when cross-referenced in future reviews).
@@ -304,78 +345,57 @@ async function main() {
     if (code === 10000) {
       console.log('  ?  Cache Reserve  [token lacks Cache: Read — add scope at dash.cloudflare.com/profile/api-tokens]');
     } else if (code === 1135) {
-      console.log('  ⚠  Cache Reserve: not available on current plan');
-      console.log('      Requires Cache Reserve subscription: dash.cloudflare.com → Caching → Cache Reserve');
+      planOnly('Cache Reserve',
+        'not available on current plan — requires a Cache Reserve subscription');
     } else {
-      console.log(`  ?  Cache Reserve: ${JSON.stringify(cr.errors)}`);
+      row('Cache Reserve API', JSON.stringify(cr.errors), 'success');
     }
   } else {
     const value = cr.result?.value;
-    row('Cache Reserve (zone setting)', value, 'on',
-      value !== 'on' ? 'run cloudflare-phase4-apply.js → Step 4' : '');
+    if (value === 'on') {
+      row('Cache Reserve (zone setting)', value, 'on');
+    } else {
+      planOnly('Cache Reserve',
+        `value=${JSON.stringify(value)}; requires a Cache Reserve subscription`);
+    }
   }
 
-  // Worker ASSETS binding — cannot verify via API; note the check here
-  console.log('  ℹ  Worker ASSETS binding: verify via Workers dashboard or');
-  console.log('  ℹ    wrangler deployments list --name syrabit-edge');
-
-  // ── Phase 5: Analytics Engine + Durable Object rate limiter (Task #109) ─────
-  console.log('\n── Phase 5: Analytics Engine + DO Rate Limiter (Task #109) ──');
+  // ── Phase 5: Active production Worker bindings ─────────────────────────────
+  console.log('\n── Phase 5: Active Production Worker Bindings ──');
   console.log('  Targets:');
-  console.log('    ANALYTICS binding (dataset: syrabit-edge-metrics) present in syrabit-edge');
-  console.log('    RateLimiter DO namespace provisioned via [[migrations]] v1');
-  console.log('    CF_ANALYTICS_TOKEN secret set (Analytics: Read scope)');
+  console.log(`    ${PRODUCTION_SERVICES.edge}: RATE_LIMIT_DO, API_WORKER, KV, R2, Workers AI`);
+  console.log(`    ${PRODUCTION_SERVICES.api}: D1, Vectorize, KV, R2, Workers AI`);
 
-  const WORKER_NAME_P5 = 'syrabit-edge';
-  const AE_DATASET_P5  = 'syrabit-edge-metrics';
-
-  // 5a: Analytics Engine binding in deployed worker
-  const aeBindings = await cfGet(`/accounts/${ACCOUNT_ID}/workers/scripts/${WORKER_NAME_P5}/bindings`);
-  if (!aeBindings.success) {
-    const authErr = aeBindings.errors?.[0]?.code === 10000;
-    console.log(`  ?  Worker bindings${authErr
-      ? '  [token lacks Workers: Read — add scope at dash.cloudflare.com/profile/api-tokens]'
-      : ': ' + JSON.stringify(aeBindings.errors)}`);
-  } else {
-    const aeBinding = (aeBindings.result || []).find(
-      (b) => b.type === 'analytics_engine' && b.dataset === AE_DATASET_P5,
-    );
-    if (aeBinding) {
-      row(`ANALYTICS binding (${AE_DATASET_P5})`, true, true,
-        'dataset registered; writes populate on first request');
-    } else {
-      row(`ANALYTICS binding (${AE_DATASET_P5})`, 'NOT FOUND', 'EXISTS',
-        'run: cd workers/edge-proxy && wrangler deploy');
-    }
-  }
-
-  // 5b: RateLimiter DO namespace
-  const doNs = await cfGet(`/accounts/${ACCOUNT_ID}/workers/durable_objects/namespaces`);
-  if (!doNs.success) {
-    const authErr = doNs.errors?.[0]?.code === 10000;
-    console.log(`  ?  DO namespaces${authErr
-      ? '  [token lacks Durable Objects: Read]'
-      : ': ' + JSON.stringify(doNs.errors)}`);
-  } else {
-    const ns = (doNs.result || []).find(
-      (n) => n.class === 'RateLimiter' && n.script === WORKER_NAME_P5,
-    );
-    if (ns) {
-      row('RateLimiter DO namespace', true, true, `id=${ns.id}`);
-    } else {
-      const anyMatch = (doNs.result || []).some((n) => n.class === 'RateLimiter');
-      if (anyMatch) {
-        console.log('  ✓  RateLimiter DO namespace found (script tag may differ — inspect dashboard)');
+  for (const { service, bindings: expectedBindings } of EXPECTED_PRODUCTION_BINDINGS) {
+    const path = `/accounts/${ACCOUNT_ID}/workers/scripts/${service}/bindings`;
+    const bindingRes = await cfGet(path);
+    if (!bindingRes.success) {
+      const code = bindingRes.errors?.[0]?.code;
+      if ([10000, 9109, 7003].includes(code)) {
+        warning(`${service} bindings`,
+          'token lacks Workers: Read — add scope at dash.cloudflare.com/profile/api-tokens');
+      } else if (code === 10429) {
+        warning(`${service} bindings`, 'Cloudflare API rate-limited — re-run the review later');
       } else {
-        row('RateLimiter DO namespace', 'NOT FOUND', 'EXISTS',
-          'run: cd workers/edge-proxy && wrangler deploy');
+        row(`${service} bindings API`, JSON.stringify(bindingRes.errors), 'success',
+          'verify the active production service and Cloudflare API availability');
       }
+      continue;
+    }
+
+    const deployed = bindingRes.result || [];
+    for (const [name, type, serviceTarget] of expectedBindings) {
+      const found = deployed.find((binding) => binding.name === name);
+      const typeMatches = found?.type === type;
+      const targetMatches = !serviceTarget || found?.service === serviceTarget;
+      const actual = found
+        ? `${found.type}${found.service ? ` → ${found.service}` : ''}`
+        : 'missing';
+      const expected = `${type}${serviceTarget ? ` → ${serviceTarget}` : ''}`;
+      row(`${service}.${name}`, typeMatches && targetMatches, true,
+        `${actual}; expected ${expected}`);
     }
   }
-
-  // 5c: CF_ANALYTICS_TOKEN — cannot be verified via API (secret); just note
-  console.log('  ℹ  CF_ANALYTICS_TOKEN: verify via Workers dashboard → Settings → Variables');
-  console.log('  ℹ    (required for /api/edge/analytics query route; set with wrangler secret put)');
 
   // ── Phase 6: Zaraz, Image Resizing, Observatory ────────────────────────
   console.log('\n── Phase 6: Zaraz GA4, Image Resizing, Observatory (Task #110) ──');
@@ -383,22 +403,58 @@ async function main() {
   console.log('    image_resizing: on              — CF Image Resizing enabled for /cdn-cgi/image/');
   console.log('    Zaraz GA4 tool — enabled, server-side event forwarding');
   console.log('    Observatory — weekly Lighthouse for homepage + chapter page');
-  console.log('  ℹ  Railway-mTLS cert check removed in Task #335 (Railway decommissioned).');
 
-  // 6b: Image Resizing zone setting
-  const imgRes = await cfGet(`/zones/${ZONE_ID}/settings/image_resizing`);
-  if (!imgRes.success) {
-    const code = imgRes.errors?.[0]?.code;
-    if (code === 10000) {
-      console.log('  ?  image_resizing  [token lacks Zone Settings: Read]');
-    } else if (code === 1135) {
-      console.log('  ⚠  image_resizing: not available on current plan — requires Image Resizing add-on');
+  // 6b: Image Resizing — the live edge response is authoritative. Cloudflare's
+  // zone setting can report ambiguous values even while transforms are active.
+  const imageSettingPath = `/zones/${ZONE_ID}/settings/image_resizing`;
+  const imgRes = await cfGet(imageSettingPath);
+  const imageSettingCode = imgRes.errors?.[0]?.code;
+  const imageSettingState = imgRes.success
+    ? (imgRes.result?.value || 'unknown')
+    : imageSettingCode === 1135
+      ? 'plan-gated'
+      : [10000, 9109, 7003].includes(imageSettingCode)
+        ? 'scope-gap'
+        : imageSettingCode === 10429
+          ? 'rate-limited'
+          : 'api-error';
+  const transformUrl =
+    `${SITE_URL}/cdn-cgi/image/width=1,quality=1,format=webp/${encodeURI(IMAGE_URL)}`;
+  try {
+    const imageResponse = await fetch(transformUrl, {
+      signal: AbortSignal.timeout(10_000),
+      headers: { Accept: 'image/avif,image/webp,image/*,*/*;q=0.8' },
+    });
+    const cfResized = imageResponse.headers.get('cf-resized') || '';
+    const transformed = imageResponse.ok &&
+      (cfResized.startsWith('internal=ok') || cfResized.startsWith('internal=ram'));
+
+    if (transformed) {
+      row('Image Resizing live probe', true, true,
+        `cf-resized=${cfResized}; zone setting=${imageSettingState}`);
+    } else if (imageSettingState === 'scope-gap') {
+      warning('Image Resizing live probe',
+        `HTTP ${imageResponse.status}, cf-resized missing; token lacks Zone Settings: Read`);
+    } else if (imageSettingState === 'rate-limited') {
+      warning('Image Resizing live probe',
+        `HTTP ${imageResponse.status}, cf-resized missing; Cloudflare API rate-limited`);
+    } else if (imageSettingState === 'plan-gated') {
+      planOnly('Image Resizing live probe',
+        `HTTP ${imageResponse.status}, cf-resized missing; add-on not available on current plan`);
     } else {
-      console.log(`  ?  image_resizing: ${JSON.stringify(imgRes.errors)}`);
+      row('Image Resizing live probe', false, true,
+        `HTTP ${imageResponse.status}, cf-resized=${JSON.stringify(cfResized || 'missing')}`);
     }
-  } else {
-    row('image_resizing', imgRes.result.value, 'on',
-      imgRes.result.value !== 'on' ? 'run cloudflare-phase6-apply.js → Step 2' : '');
+  } catch (error) {
+    if (imageSettingState === 'scope-gap' || imageSettingState === 'rate-limited') {
+      warning('Image Resizing live probe',
+        `probe failed (${error.message}); zone setting=${imageSettingState}`);
+    } else if (imageSettingState === 'plan-gated') {
+      planOnly('Image Resizing live probe',
+        `probe failed (${error.message}); add-on not available on current plan`);
+    } else {
+      row('Image Resizing live probe', `probe failed: ${error.message}`, 'live cf-resized response');
+    }
   }
 
   // 6c: Zaraz GA4 tool
@@ -462,7 +518,7 @@ async function main() {
         console.log(`  ?  ${label}  [token lacks Speed: Read]`);
         break;  // same scope issue for all targets
       } else if (code === 1135) {
-        console.log(`  ⚠  ${label}: not available on current plan`);
+        planOnly(label, 'not available on current plan — requires Observatory access');
         break;
       } else {
         console.log(`  ?  ${label}: ${JSON.stringify(obsRes.errors)}`);
