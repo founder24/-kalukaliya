@@ -47,41 +47,17 @@
  *   1  — one or more assertions failed (details printed to stdout)
  */
 
+import {
+  EXPECTED_PRODUCTION_BINDINGS,
+  PRODUCTION_SERVICES,
+} from './cloudflare-production-contract.mjs';
+
 const TOKEN        = process.env.CLOUDFLARE_API_TOKEN;
 const ZONE_ID      = process.env.CLOUDFLARE_ZONE_ID    || '5b8c97df4431491dc7f60ea72fb61871';
 const ACCOUNT_ID   = process.env.CLOUDFLARE_ACCOUNT_ID || 'd66e40eac539fff1db270fddf384a5ec';
 const API          = 'https://api.cloudflare.com/client/v4';
 const SITE_URL     = (process.env.SITE_URL || 'https://syrabit.ai').replace(/\/+$/, '');
 const IMAGE_URL    = process.env.CF_AUDIT_IMAGE_URL || `${SITE_URL}/opengraph.jpg`;
-const PRODUCTION_SERVICES = {
-  edge: 'syrabitworker-prod',
-  api:  'syrabit-api-prod',
-};
-const EXPECTED_PRODUCTION_BINDINGS = [
-  {
-    service: PRODUCTION_SERVICES.edge,
-    bindings: [
-      ['RATE_LIMIT_DO', 'durable_object_namespace'],
-      ['API_WORKER', 'service', PRODUCTION_SERVICES.api],
-      ['RATE_LIMIT_KV', 'kv_namespace'],
-      ['ISR_CACHE_KV', 'kv_namespace'],
-      ['CONTENT_KV', 'kv_namespace'],
-      ['R2_BUCKET', 'r2_bucket'],
-      ['AI', 'ai'],
-    ],
-  },
-  {
-    service: PRODUCTION_SERVICES.api,
-    bindings: [
-      ['DB', 'd1'],
-      ['R2_BUCKET', 'r2_bucket'],
-      ['CONTENT_KV', 'kv_namespace'],
-      ['RATE_LIMIT_KV', 'kv_namespace'],
-      ['VECTORIZE', 'vectorize'],
-      ['AI', 'ai'],
-    ],
-  },
-];
 // Optional: set SLACK_WEBHOOK_URL to receive direct alerts when the smoke run
 // fails. When unset the script still exits with code 1 so CI marks the run
 // failed and sends the standard GitHub failed-workflow email.

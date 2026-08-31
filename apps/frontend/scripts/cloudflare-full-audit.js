@@ -41,6 +41,10 @@
  */
 
 import fs from 'fs';
+import {
+  EXPECTED_PRODUCTION_BINDINGS,
+  PRODUCTION_SERVICES,
+} from './cloudflare-production-contract.mjs';
 
 const TOKEN      = process.env.CLOUDFLARE_API_TOKEN;
 const ZONE_ID    = process.env.CLOUDFLARE_ZONE_ID    || '5b8c97df4431491dc7f60ea72fb61871';
@@ -49,15 +53,6 @@ const OUT_FILE   = process.env.AUDIT_OUTPUT_FILE      || '/tmp/cf-audit-report.j
 const API        = 'https://api.cloudflare.com/client/v4';
 const SITE_URL   = (process.env.SITE_URL || 'https://syrabit.ai').replace(/\/+$/, '');
 const IMAGE_URL  = process.env.CF_AUDIT_IMAGE_URL || `${SITE_URL}/opengraph.jpg`;
-
-// These are the production services that are actually serving traffic. Keep
-// this list in lockstep with apps/edge/wrangler.toml and apps/api/wrangler.toml.
-// The bindings endpoint is the source of truth for what is deployed, rather
-// than a local Wrangler file or a retired Worker name.
-const PRODUCTION_SERVICES = {
-  edge: 'syrabitworker-prod',
-  api:  'syrabit-api-prod',
-};
 
 if (!TOKEN) {
   console.error('CLOUDFLARE_API_TOKEN is not set');
@@ -508,39 +503,13 @@ async function auditItems10to13R2AndCacheReserve() {
 // ─── Phase 5 ─────────────────────────────────────────────────────────────────
 
 async function auditItems14And15WorkerBindings() {
-  const expected = [
-    {
-      service: PRODUCTION_SERVICES.edge,
-      bindings: [
-        ['RATE_LIMIT_DO', 'durable_object_namespace'],
-        ['API_WORKER', 'service', PRODUCTION_SERVICES.api],
-        ['RATE_LIMIT_KV', 'kv_namespace'],
-        ['ISR_CACHE_KV', 'kv_namespace'],
-        ['CONTENT_KV', 'kv_namespace'],
-        ['R2_BUCKET', 'r2_bucket'],
-        ['AI', 'ai'],
-      ],
-    },
-    {
-      service: PRODUCTION_SERVICES.api,
-      bindings: [
-        ['DB', 'd1'],
-        ['R2_BUCKET', 'r2_bucket'],
-        ['CONTENT_KV', 'kv_namespace'],
-        ['RATE_LIMIT_KV', 'kv_namespace'],
-        ['VECTORIZE', 'vectorize'],
-        ['AI', 'ai'],
-      ],
-    },
-  ];
-
   const missing = [];
   let scopeGap = false;
   let rateLimit = false;
   let apiFailure = false;
   let rateLimitDoState = { status: 'unknown', detail: '' };
 
-  for (const { service, bindings: expectedBindings } of expected) {
+  for (const { service, bindings: expectedBindings } of EXPECTED_PRODUCTION_BINDINGS) {
     const path = `/accounts/${ACCOUNT_ID}/workers/scripts/${service}/bindings`;
     const bindings = await cfGetOrSkip(path);
     if (bindings?._rate_limited) {
