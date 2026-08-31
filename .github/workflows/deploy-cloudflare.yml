@@ -382,12 +382,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install Playwright Chromium for hydration verification
+        run: pnpm --filter @workspace/syrabit run playwright:install:chromium
+
       - name: Build frontend
         run: pnpm --filter @workspace/syrabit run build
         env:
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://api.syrabit.ai' }}
           CLOUDFLARE_RELEASE_BUILD: 'true'
           ALLOW_INCOMPLETE_CURRICULUM_BUILD: 'false'
+          REQUIRE_HYDRATION_BROWSER: 'true'
 
       - name: Deploy to Cloudflare Pages
         run: |

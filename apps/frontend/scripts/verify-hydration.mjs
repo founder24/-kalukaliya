@@ -196,12 +196,10 @@ function serveDist(rootDir) {
 // --- Browser check ----------------------------------------------------------
 
 // Task #543: detect Playwright environment problems (missing npm package
-// OR missing browser binary) and soft-skip rather than hard-fail the
-// build. The hydration check is a quality gate, not a structural
-// correctness gate — when the build host can't run a headless browser
-// (no Playwright cache, missing system libs, etc.), the deploy should
-// still go out. The structural assertions in verify-all.mjs already
-// guarantee the prerendered HTML itself is well-formed.
+// OR missing browser binary) separately from application hydration failures.
+// Local builds retain the best-effort soft-skip, while release CI sets
+// REQUIRE_HYDRATION_BROWSER=true after provisioning Chromium and turns an
+// unavailable browser into a clear environment failure.
 function isPlaywrightEnvProblem(err) {
   const msg = String(err?.message || err || "");
   return (
@@ -211,6 +209,7 @@ function isPlaywrightEnvProblem(err) {
     /Failed to launch the browser process/i.test(msg) ||
     /libgbm\.so/i.test(msg) ||
     /libnss3\.so/i.test(msg) ||
+    /error while loading shared libraries: lib[^:]+\.so/i.test(msg) ||
     /Host system is missing dependencies/i.test(msg) ||
     /ENOENT.*chrome/i.test(msg) ||
     /MODULE_NOT_FOUND/i.test(msg) ||
@@ -218,11 +217,27 @@ function isPlaywrightEnvProblem(err) {
   );
 }
 function softSkip(reason) {
-  warn(reason);
+  warn(`ENVIRONMENT SKIP: ${reason}`);
   warn(
     "skipping headless hydration verification — structural checks in verify-all.mjs still ran",
   );
   process.exit(0);
+}
+
+function environmentFail(reason) {
+  console.error(`[verify-hydration] ENVIRONMENT ERROR: ${reason}`);
+  console.error(
+    "[verify-hydration] Chromium was required for this release; " +
+      "check the Playwright browser install and runner dependencies.",
+  );
+  process.exit(1);
+}
+
+function handlePlaywrightEnvProblem(reason) {
+  if (process.env.REQUIRE_HYDRATION_BROWSER === "true") {
+    environmentFail(reason);
+  }
+  softSkip(reason);
 }
 
 async function main() {
@@ -231,7 +246,7 @@ async function main() {
     ({ chromium } = await import("playwright"));
   } catch (err) {
     if (isPlaywrightEnvProblem(err)) {
-      softSkip(
+      handlePlaywrightEnvProblem(
         `playwright npm package not importable: ${err?.message || err}`,
       );
     }
@@ -279,11 +294,11 @@ async function main() {
         env,
       });
     } catch (launchErr) {
-      // Tear down the static server before the soft-skip so we don't
-      // leak a listening port to the rest of the build.
+      // Tear down the static server before handling the environment failure
+      // so we don't leak a listening port to the rest of the build.
       try { server.close(); } catch {}
       if (isPlaywrightEnvProblem(launchErr)) {
-        softSkip(
+        handlePlaywrightEnvProblem(
           `chromium.launch() failed in this environment: ${launchErr?.message || launchErr}`,
         );
       }
