@@ -35,6 +35,9 @@ export async function proxyToApiWorker(
   env: Env,
 ): Promise<Response> {
   const url = new URL(request.url);
+  // The edge entry point always supplies this header. Keep a deterministic
+  // fallback for direct unit calls whose crypto stub only implements SubtleCrypto.
+  const requestId = request.headers.get('X-Request-ID') ?? `service-binding-${Date.now()}`;
   const isStreamRequest = isSseRequest(url.pathname);
   const isCrawlerArtifact = url.pathname.startsWith('/api/v1/seo/');
   const needsCloudRunFallbackToken = isCloudRunFallbackFamily(url.pathname);
@@ -174,16 +177,28 @@ export async function proxyToApiWorker(
     });
   } catch (err) {
     if (timeoutId) clearTimeout(timeoutId);
-    console.error('[worker-proxy] Service binding fetch failed:', err);
     const timedOut = err instanceof Error && err.name === 'TimeoutError';
+    const failureStage = 'service_binding';
+    console.error('[worker-proxy] Service binding fetch failed', {
+      requestId,
+      failureStage,
+      timedOut,
+      errorName: err instanceof Error ? err.name : 'UnknownError',
+    });
     return new Response(
       JSON.stringify({
         error: timedOut ? 'Backend service timed out' : 'Backend service unavailable',
-        details: err instanceof Error ? err.message : 'Unknown error',
+        error_code: timedOut ? 'service_binding_timeout' : 'service_binding_unavailable',
+        request_id: requestId,
+        failure_stage: failureStage,
       }),
       {
         status: timedOut ? 504 : 503,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-ID': requestId,
+          'X-Failure-Stage': failureStage,
+        },
       },
     );
   }

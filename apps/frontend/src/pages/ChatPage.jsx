@@ -30,6 +30,17 @@ import { startTrace, makeTraceparent } from '@/utils/firebasePerf';
 import { EmptyState } from './chat/EmptyState';
 import { useHashScroll } from '@/hooks/useHashScroll';
 import { requestReviewPrompt } from '@/components/ReviewPrompt';
+
+const MAX_TRANSPORT_AUTO_RETRIES = 1;
+const TRANSPORT_RETRY_DELAY_MS = import.meta.env.MODE === 'test' ? 10 : 3000;
+
+function createChatRequestId() {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `chat_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  }
+}
 // ─────────────────────────────────────────────────────────────────────────────
 // AD POLICY: /chat is intentionally AD-FREE. Do NOT import <AdSlot /> or any
 // ad-network script here. The ad stack (Task #526) only runs on PYQ and Learn
@@ -297,18 +308,53 @@ export default function ChatPage() {
     );
   }, []);
 
-  const sendMsg = async (text) => {
+  const sendMsg = async (text, retry = null) => {
     if (!text.trim() || isLoading || isOutOfCredits) return;
     // Cancel any pending auto-retry from a previous error.
     if (autoRetryTimerRef.current) {
       clearTimeout(autoRetryTimerRef.current);
       autoRetryTimerRef.current = null;
     }
-    const msgId = Date.now().toString();
-    const userMsg = { id: msgId + '_u', role: 'user', content: text, timestamp: new Date().toISOString() };
-    const aiMsgId = msgId + '_a';
-    const aiMsg   = { id: aiMsgId, role: 'assistant', content: '', streaming: true, timestamp: new Date().toISOString() };
-    setMessages((prev) => [...prev, userMsg, aiMsg]);
+    const msgId = retry?.msgId || Date.now().toString();
+    const userMsgId = retry?.userMsgId || msgId + '_u';
+    const aiMsgId = retry?.aiMsgId || msgId + '_a';
+    const chatRequestId = retry?.chatRequestId || createChatRequestId();
+    const retryAttempt = retry?.attempt || 0;
+    const userMsg = {
+      id: userMsgId,
+      role: 'user',
+      content: text,
+      timestamp: new Date().toISOString(),
+    };
+    const aiMsg = {
+      id: aiMsgId,
+      role: 'assistant',
+      content: '',
+      streaming: true,
+      timestamp: new Date().toISOString(),
+      retryText: text,
+      userMsgId,
+      chatRequestId,
+      retryAttempt,
+    };
+    if (retry) {
+      setMessages((prev) => prev.map((message) =>
+        message.id === aiMsgId
+          ? {
+              ...message,
+              ...aiMsg,
+              isAiUnavailable: false,
+              isAssameseUnavailable: false,
+              isConnectionInterrupted: false,
+              autoRetryScheduled: false,
+              failureStage: null,
+              serverRequestId: null,
+            }
+          : message
+      ));
+    } else {
+      setMessages((prev) => [...prev, userMsg, aiMsg]);
+    }
     setInput('');
     setIsLoading(true);
     pendingSendScroll.current = true;
@@ -324,6 +370,7 @@ export default function ChatPage() {
     abortControllerRef.current = controller;
     const payload = {
       message: text, conversation_id: conversationId,
+      client_request_id: chatRequestId,
       subject_id: subjectId || null, subject_name: subject?.name || null,
       chapter_id: chapterId || null, chapter_name: activeChapter?.title || null,
       source_type: sourceSection || null,
@@ -361,6 +408,24 @@ export default function ChatPage() {
       try { _perfFirstToken.stop(); } catch {}
     };
     const _tp = makeTraceparent();
+    let failureStage = 'pre_response';
+    let serverRequestId = null;
+    let receivedHttpResponse = false;
+    const scheduleRetry = (delayMs = TRANSPORT_RETRY_DELAY_MS) => {
+      if (retryAttempt >= MAX_TRANSPORT_AUTO_RETRIES) return false;
+      if (autoRetryTimerRef.current) clearTimeout(autoRetryTimerRef.current);
+      autoRetryTimerRef.current = setTimeout(() => {
+        autoRetryTimerRef.current = null;
+        sendMsgRef.current?.(text, {
+          msgId,
+          userMsgId,
+          aiMsgId,
+          chatRequestId,
+          attempt: retryAttempt + 1,
+        });
+      }, delayMs);
+      return true;
+    };
     try {
       const fetchHeaders = { 'Content-Type': 'application/json' };
       if (_tp && _tp.traceparent) {
@@ -377,8 +442,15 @@ export default function ChatPage() {
         method: 'POST', headers: fetchHeaders,
         credentials: 'include', body: JSON.stringify(payload), signal: controller.signal,
       });
+      receivedHttpResponse = true;
+      failureStage = 'http_response';
+      serverRequestId = response.headers?.get?.('X-Request-ID') || null;
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
+        serverRequestId = serverRequestId || errData.request_id || null;
+        failureStage = response.headers?.get?.('X-Failure-Stage')
+          || errData.failure_stage
+          || 'http_response';
         if (response.status === 402) {
           toast.error('Credits exhausted — upgrade to continue.', { action: { label: 'Upgrade', onClick: () => navigate('/profile') } });
           setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
@@ -398,6 +470,11 @@ export default function ChatPage() {
                   isAiUnavailable: true,
                   isAssameseUnavailable: true,
                   retryText: text,
+                  userMsgId,
+                  chatRequestId,
+                  retryAttempt,
+                  serverRequestId,
+                  failureStage,
                   streaming: false,
                 }
               : m
@@ -432,20 +509,17 @@ export default function ChatPage() {
                   isAiUnavailable: true,
                   isAssameseUnavailable: false,
                   retryText: text,
+                  userMsgId,
+                  chatRequestId,
+                  retryAttempt,
+                  serverRequestId,
+                  failureStage,
                   streaming: false,
                   route_trace: errData.detail.route_trace || null,
                 }
               : m
           ));
-          // Auto-retry once after 8s, mirroring the in-stream
-          // error path. A second fail-loud will simply re-render
-          // the same card with the same badge, which is the
-          // intended dev signal.
-          autoRetryTimerRef.current = setTimeout(() => {
-            autoRetryTimerRef.current = null;
-            setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
-            sendMsgRef.current?.(text);
-          }, 8000);
+          scheduleRetry(8000);
           return;
         }
         if (response.status === 429) {
@@ -508,17 +582,29 @@ export default function ChatPage() {
           const infraMsg = 'Server temporarily unavailable — retrying in a moment…';
           toast.error(infraMsg, { duration: 5000 });
           setMessages((prev) => prev.map((m) =>
-            m.id === aiMsgId ? { ...m, content: '', isAiUnavailable: true, retryText: text, streaming: false } : m
+            m.id === aiMsgId
+              ? {
+                  ...m,
+                  content: '',
+                  isAiUnavailable: true,
+                  retryText: text,
+                  userMsgId,
+                  chatRequestId,
+                  retryAttempt,
+                  serverRequestId,
+                  failureStage,
+                  streaming: false,
+                }
+              : m
           ));
-          if (autoRetryTimerRef.current) clearTimeout(autoRetryTimerRef.current);
-          autoRetryTimerRef.current = setTimeout(() => {
-            autoRetryTimerRef.current = null;
-            setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
-            sendMsgRef.current?.(text);
-          }, 5000);
+          scheduleRetry(5000);
           return;
         }
         throw new Error(errData.detail || errData.error || 'Stream failed');
+      }
+      failureStage = 'stream';
+      if (!response.body) {
+        throw new TypeError('Chat stream response had no body');
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -553,6 +639,7 @@ export default function ChatPage() {
         });
       };
       let sseBuffer = '';
+      let streamCompleted = false;
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -566,6 +653,7 @@ export default function ChatPage() {
           let parsed;
           try { parsed = JSON.parse(raw); } catch { continue; }
           if (parsed.conversation_id) meta.convId = parsed.conversation_id;
+          if (parsed.request_id) serverRequestId = parsed.request_id;
           if (parsed.rag_source) meta.ragSource = parsed.rag_source;
           if (parsed.rag_chunks !== undefined) meta.ragChunks = parsed.rag_chunks;
           if (parsed.rag_subject_id) meta.ragSubjectId = parsed.rag_subject_id;
@@ -640,17 +728,17 @@ export default function ChatPage() {
                     isAiUnavailable: true,
                     isAssameseUnavailable,
                     retryText: text,
+                    userMsgId,
+                    chatRequestId,
+                    retryAttempt,
+                    serverRequestId,
+                    failureStage: parsed.failure_stage || 'provider_stream',
                     streaming: false,
                   }
                 : m
             ));
             if (!isAssameseUnavailable) {
-              // Auto-retry once after 8 seconds using the latest sendMsg closure.
-              autoRetryTimerRef.current = setTimeout(() => {
-                autoRetryTimerRef.current = null;
-                setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
-                sendMsgRef.current?.(text);
-              }, 8000);
+              scheduleRetry(8000);
             }
             continue;
           }
@@ -663,6 +751,7 @@ export default function ChatPage() {
             else if (!flushTimer) flushTimer = setTimeout(flushPending, FLUSH_INTERVAL);
           }
           if (parsed.event === 'syrabit_done') {
+            streamCompleted = true;
             if (parsed.sources) meta.libSources = parsed.sources;
             // Task #37 — capture the per-turn router trace so the
             // dev-mode QA badge can show decision/provider/namespace.
@@ -677,6 +766,9 @@ export default function ChatPage() {
             } catch {}
           }
         }
+      }
+      if (!streamCompleted && !meta.hasError) {
+        throw new TypeError('Chat stream ended before completion');
       }
       // Task #796 — anon SSE stream omits credits_used_total /
       // remaining_credits (the chat route only emits them when
@@ -718,9 +810,49 @@ export default function ChatPage() {
     } catch (err) {
       if (err.name === 'AbortError') return;
       try { _perfTotal.putAttribute('error', '1'); } catch {}
-      toast.error(err.message || 'Failed to get AI response');
-      setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
-      setSyncState('offline');
+      const isTransportFailure =
+        !receivedHttpResponse ||
+        failureStage === 'stream';
+      if (isTransportFailure) {
+        const autoRetryScheduled = scheduleRetry();
+        console.warn('[chat] transport interrupted', {
+          requestId: serverRequestId || chatRequestId,
+          failureStage,
+          retryAttempt,
+          autoRetryScheduled,
+        });
+        setMessages((prev) => prev.map((message) =>
+          message.id === aiMsgId
+            ? {
+                ...message,
+                content: '',
+                streaming: false,
+                isAiUnavailable: true,
+                isConnectionInterrupted: true,
+                isAssameseUnavailable: false,
+                retryText: text,
+                userMsgId,
+                chatRequestId,
+                retryAttempt,
+                serverRequestId: serverRequestId || chatRequestId,
+                failureStage,
+                autoRetryScheduled,
+                retryDelaySeconds: autoRetryScheduled
+                  ? Math.ceil(TRANSPORT_RETRY_DELAY_MS / 1000)
+                  : null,
+              }
+            : message
+        ));
+        setSyncState('offline');
+      } else {
+        console.warn('[chat] HTTP chat failure', {
+          requestId: serverRequestId || chatRequestId,
+          failureStage,
+          status: 'response_received',
+        });
+        toast.error(err.message || 'Failed to get AI response');
+        setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
+      }
     } finally {
       setIsLoading(false);
       // Task #610 — close any open Firebase Perf traces. Safe to call
@@ -918,8 +1050,13 @@ export default function ChatPage() {
                         onRegenerate={msg.role === 'assistant' && i === messages.length - 1 ? handleRegenerate : null}
                         onRetry={msg.isAiUnavailable && msg.retryText ? () => {
                           if (autoRetryTimerRef.current) { clearTimeout(autoRetryTimerRef.current); autoRetryTimerRef.current = null; }
-                          setMessages((prev) => prev.filter((m) => m.id !== msg.id));
-                          sendMsgRef.current?.(msg.retryText);
+                          sendMsgRef.current?.(msg.retryText, {
+                            msgId: String(msg.id || '').replace(/_a$/, ''),
+                            userMsgId: msg.userMsgId,
+                            aiMsgId: msg.id,
+                            chatRequestId: msg.chatRequestId,
+                            attempt: (msg.retryAttempt || 0) + 1,
+                          });
                         } : null}
                         // Task #370 — when the strict Assamese chat chain
                         // is exhausted, surface a one-click escape to the

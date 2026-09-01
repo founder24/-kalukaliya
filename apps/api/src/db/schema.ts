@@ -248,6 +248,23 @@ export const anonymousQuotaUsage = sqliteTable('anonymous_quota_usage', {
   uniqueIndex('anonymous_quota_period_idx').on(t.anonId, t.period),
 ]);
 
+// A stable browser request key makes a transport retry one logical turn
+// instead of charging a second quota slot.
+export const chatRequestClaims = sqliteTable('chat_request_claims', {
+  requestId: text('request_id').primaryKey(),
+  userId: text('user_id').notNull(),
+  period: text('period').notNull(),
+  isAnon: integer('is_anon').notNull().default(1),
+  status: text('status').notNull().default('reserved'),
+  sessionId: text('session_id'),
+  responseContent: text('response_content'),
+  responseMetadata: text('response_metadata'),
+  createdAt: integer('created_at').default(sql`(unixepoch())`),
+  expiresAt: integer('expires_at').notNull(),
+}, (t) => [
+  index('chat_request_claims_expiry_idx').on(t.expiresAt),
+]);
+
 // A successful insert is the atomic single-use claim for a refresh token.
 // Rows are retained until expiry so concurrent refreshes cannot mint twice.
 export const refreshTokenClaims = sqliteTable('refresh_token_claims', {

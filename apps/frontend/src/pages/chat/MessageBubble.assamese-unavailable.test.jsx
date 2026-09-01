@@ -75,4 +75,24 @@ describe('MessageBubble — Assamese chat unavailable card (Task #370)', () => {
 
     expect(screen.queryByTestId('assamese-switch-english')).toBeNull();
   });
+
+  it('renders a localized connection-interrupted card with Retry', () => {
+    renderBubble({
+      msg: {
+        id: 'a5',
+        role: 'assistant',
+        content: '',
+        isAiUnavailable: true,
+        isConnectionInterrupted: true,
+        autoRetryScheduled: false,
+        retryText: 'কি ফটোসিন্থেচিচ?',
+      },
+      responseLang: 'as',
+      onRetry: vi.fn(),
+    });
+
+    expect(screen.getByTestId('connection-interrupted-card')).toBeTruthy();
+    expect(screen.getByText(/সংযোগ সাময়িকভাৱে বিচ্ছিন্ন হৈছে/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'আকৌ চেষ্টা কৰক' })).toBeTruthy();
+  });
 });

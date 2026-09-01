@@ -62,6 +62,9 @@ const CHAT_MAX_OUTPUT_TOKENS = 1_536;
 
 interface ChatRequest {
   message: string;
+  // Stable browser-generated key for one logical send. It is never displayed
+  // and is only used to make a transport retry idempotent for quota.
+  client_request_id?: string;
   lang?: 'en' | 'as';
   session_id?: string;
   conversation_id?: string; // frontend legacy alias for session_id
@@ -161,6 +164,214 @@ function sseEvent(payload: unknown): string {
 function tryJson<T>(s: string | null | undefined, fallback: T): T {
   if (!s) return fallback;
   try { return JSON.parse(s) as T; } catch { return fallback; }
+}
+
+const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
+
+interface ChatRequestClaim {
+  user_id: string;
+  status: string;
+  session_id: string | null;
+  response_content: string | null;
+  response_metadata: string | null;
+}
+
+async function getChatRequestClaim(
+  d1: D1Database,
+  requestId: string,
+): Promise<ChatRequestClaim | null> {
+  return d1.prepare(
+    `SELECT user_id, status, session_id, response_content, response_metadata
+     FROM chat_request_claims
+     WHERE request_id = ? AND expires_at > ?`,
+  ).bind(requestId, Math.floor(Date.now() / 1000)).first<ChatRequestClaim>();
+}
+
+async function insertChatRequestClaim(
+  d1: D1Database,
+  requestId: string,
+  userId: string,
+  isAnon: boolean,
+): Promise<boolean> {
+  const now = Math.floor(Date.now() / 1000);
+  const result = await d1.prepare(`
+    INSERT OR IGNORE INTO chat_request_claims
+      (request_id, user_id, period, is_anon, status, created_at, expires_at)
+    VALUES (?, ?, ?, ?, 'reserved', ?, ?)
+  `).bind(
+    requestId,
+    userId,
+    currentQuotaPeriod(),
+    isAnon ? 1 : 0,
+    now,
+    now + 24 * 3600,
+  ).run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
+async function completeChatRequestClaim(
+  d1: D1Database,
+  requestId: string | null,
+  userId: string,
+  sessionId: string,
+  responseContent: string,
+  responseMetadata: unknown,
+): Promise<void> {
+  if (!requestId) return;
+  await d1.prepare(`
+    UPDATE chat_request_claims
+    SET status = 'completed',
+        session_id = ?,
+        response_content = ?,
+        response_metadata = ?
+    WHERE request_id = ? AND user_id = ?
+  `).bind(
+    sessionId,
+    responseContent.slice(0, 8000),
+    JSON.stringify(responseMetadata),
+    requestId,
+    userId,
+  ).run();
+}
+
+async function deleteChatRequestClaim(
+  d1: D1Database,
+  requestId: string | null,
+  userId: string,
+): Promise<void> {
+  if (!requestId) return;
+  await d1.prepare(
+    'DELETE FROM chat_request_claims WHERE request_id = ? AND user_id = ?',
+  ).bind(requestId, userId).run();
+}
+
+function replayCompletedChatRequest(
+  claim: ChatRequestClaim,
+  serverRequestId: string,
+): Response {
+  const metadata = tryJson<{
+    sourceCard?: Record<string, unknown>;
+    doneEvent?: Record<string, unknown>;
+  }>(claim.response_metadata, {});
+
+  if (!claim.session_id || !claim.response_content || !metadata.sourceCard || !metadata.doneEvent) {
+    return new Response(JSON.stringify({
+      detail: 'This chat request already completed.',
+      error_code: 'chat_request_already_completed',
+      request_id: serverRequestId,
+      failure_stage: 'idempotency_replay',
+    }), {
+      status: 409,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Request-ID': serverRequestId,
+        'X-Failure-Stage': 'idempotency_replay',
+      },
+    });
+  }
+
+  const sourceCard = {
+    ...metadata.sourceCard,
+    request_id: serverRequestId,
+    conversation_id: claim.session_id,
+    replayed: true,
+  };
+  const doneEvent = {
+    ...metadata.doneEvent,
+    request_id: serverRequestId,
+    replayed: true,
+  };
+  return new Response(
+    sseEvent(sourceCard)
+      + sseEvent({ content: claim.response_content, done: false, replayed: true })
+      + sseEvent(doneEvent),
+    {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-store',
+        'X-Accel-Buffering': 'no',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Request-ID': serverRequestId,
+        'X-Chat-Replayed': 'true',
+      },
+    },
+  );
+}
+
+function waitForInFlightChatRequest(
+  d1: D1Database,
+  requestId: string,
+  userId: string,
+  serverRequestId: string,
+): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const write = (payload: unknown) => controller.enqueue(encoder.encode(sseEvent(payload)));
+      try {
+        // The original provider request can outlive the browser connection.
+        // Wait for its atomic persistence+completion marker instead of invoking
+        // the provider again for the same logical turn.
+        for (let attempt = 0; attempt < 240; attempt += 1) {
+          const claim = await getChatRequestClaim(d1, requestId);
+          if (!claim || claim.user_id !== userId) {
+            write({
+              content: '',
+              done: true,
+              error: 'The interrupted request could not be recovered. Please retry.',
+              error_code: 'chat_request_recovery_unavailable',
+              failure_stage: 'idempotency_recovery',
+              request_id: serverRequestId,
+            });
+            controller.close();
+            return;
+          }
+          if (claim.status === 'completed') {
+            const replay = replayCompletedChatRequest(claim, serverRequestId);
+            if (replay.body) {
+              const reader = replay.body.getReader();
+              while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                controller.enqueue(value);
+              }
+            }
+            controller.close();
+            return;
+          }
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        write({
+          content: '',
+          done: true,
+          error: 'The interrupted request is still processing. Please retry shortly.',
+          error_code: 'chat_request_recovery_timeout',
+          failure_stage: 'idempotency_recovery',
+          request_id: serverRequestId,
+        });
+        controller.close();
+      } catch (error) {
+        console.error('[chat] in-flight replay failed', {
+          requestId: serverRequestId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        controller.error(error);
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-store',
+      'X-Accel-Buffering': 'no',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Request-ID': serverRequestId,
+      'X-Chat-Recovery-Wait': 'true',
+    },
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -592,6 +803,7 @@ export const chatRouter = new Hono<{ Bindings: Env }>();
 
 chatRouter.post('/stream', async (c) => {
   const startTime = Date.now();
+  const serverRequestId = c.req.header('X-Request-ID') ?? crypto.randomUUID();
   // Durations only: diagnostic timing must never include student prompts,
   // history, retrieved content, or generated answers.
   const timings: Record<string, number> = {};
@@ -601,13 +813,23 @@ chatRouter.post('/stream', async (c) => {
   try {
     body = await c.req.json<ChatRequest>();
   } catch {
+    c.header('X-Failure-Stage', 'request_validation');
     return c.json({ detail: 'Invalid JSON body' }, 400);
   }
 
   const rawMessage = (body.message ?? '').trim();
-  if (!rawMessage)           return c.json({ detail: 'message is required' }, 422);
-  if (rawMessage.length > 2000) return c.json({ detail: 'message must not exceed 2000 characters' }, 422);
+  if (!rawMessage) {
+    c.header('X-Failure-Stage', 'request_validation');
+    return c.json({ detail: 'message is required' }, 422);
+  }
+  if (rawMessage.length > 2000) {
+    c.header('X-Failure-Stage', 'request_validation');
+    return c.json({ detail: 'message must not exceed 2000 characters' }, 422);
+  }
   const message = sanitize(rawMessage);
+  const clientRequestId = CLIENT_REQUEST_ID_PATTERN.test(body.client_request_id ?? '')
+    ? body.client_request_id!
+    : null;
 
   // Coalesce session_id / conversation_id (frontend sends conversation_id)
   const sessionId = body.session_id ?? body.conversation_id ?? null;
@@ -642,9 +864,12 @@ chatRouter.post('/stream', async (c) => {
           && await isSessionValid(c.env.DB, payload.sub, payload.iat);
       } catch (err) {
         console.error('[chat] authentication storage unavailable:', err);
+        c.header('X-Failure-Stage', 'authentication');
         return c.json({
           detail: 'Chat authentication service is temporarily unavailable. Please try again.',
           error_code: 'auth_storage_unavailable',
+          request_id: serverRequestId,
+          failure_stage: 'authentication',
         }, 503);
       }
 
@@ -675,29 +900,90 @@ chatRouter.post('/stream', async (c) => {
   let quotaCount: number;
   let quotaLimit: number;
   let quotaAllowed: boolean;
+  let ownsQuotaReservation = false;
 
   const quotaStart = Date.now();
   try {
-    if (!isAnon) {
-      ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-        await reserveAuthQuota(c.env.DB, userId, userTier, userRole));
+    const existingClaim = clientRequestId
+      ? await getChatRequestClaim(c.env.DB, clientRequestId)
+      : null;
+    if (existingClaim && existingClaim.user_id !== userId) {
+      c.header('X-Failure-Stage', 'request_validation');
+      return c.json({
+        detail: 'Chat request key is already in use.',
+        error_code: 'chat_request_conflict',
+        request_id: serverRequestId,
+        failure_stage: 'request_validation',
+      }, 409);
+    }
+
+    if (existingClaim?.status === 'completed') {
+      return replayCompletedChatRequest(existingClaim, serverRequestId);
+    }
+
+    if (existingClaim) {
+      return waitForInFlightChatRequest(
+        c.env.DB,
+        clientRequestId!,
+        userId,
+        serverRequestId,
+      );
     } else {
-      ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-        await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId));
+      if (!isAnon) {
+        ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
+          await reserveAuthQuota(c.env.DB, userId, userTier, userRole));
+      } else {
+        ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
+          await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId));
+      }
+      ownsQuotaReservation = quotaAllowed && userRole !== 'admin' && userRole !== 'staff';
+
+      if (quotaAllowed && clientRequestId) {
+        const inserted = await insertChatRequestClaim(
+          c.env.DB,
+          clientRequestId,
+          userId,
+          isAnon,
+        );
+        if (!inserted) {
+          if (ownsQuotaReservation) {
+            await releaseQuotaReservation(c.env.DB, userId, isAnon);
+            ownsQuotaReservation = false;
+          }
+          const racedClaim = await getChatRequestClaim(c.env.DB, clientRequestId);
+          if (!racedClaim || racedClaim.user_id !== userId) {
+            throw new Error('Unable to establish chat request claim');
+          }
+          return racedClaim.status === 'completed'
+            ? replayCompletedChatRequest(racedClaim, serverRequestId)
+            : waitForInFlightChatRequest(
+              c.env.DB,
+              clientRequestId,
+              userId,
+              serverRequestId,
+            );
+        }
+      }
     }
   } catch (err) {
     console.error('[chat] quota storage unavailable:', err);
+    c.header('X-Failure-Stage', 'quota');
     return c.json({
       detail: 'Chat quota service is temporarily unavailable. Please try again.',
       error_code: 'quota_storage_unavailable',
+      request_id: serverRequestId,
+      failure_stage: 'quota',
     }, 503);
   }
 
   if (!quotaAllowed) {
+    c.header('X-Failure-Stage', 'quota');
     return c.json(
       {
         detail: 'Monthly message limit reached. Upgrade to Pro for more messages.',
         quota: { used: quotaCount, limit: quotaLimit },
+        request_id: serverRequestId,
+        failure_stage: 'quota',
       },
       429,
     );
@@ -705,8 +991,13 @@ chatRouter.post('/stream', async (c) => {
   timings.quota_ms = Date.now() - quotaStart;
 
   // Helper to release a reserved quota slot on failure paths.
-  const releaseQuota = (): Promise<void> =>
-    releaseQuotaReservation(c.env.DB, userId, isAnon);
+  const releaseQuota = async (): Promise<void> => {
+    if (ownsQuotaReservation) {
+      await releaseQuotaReservation(c.env.DB, userId, isAnon);
+      await deleteChatRequestClaim(c.env.DB, clientRequestId, userId);
+      ownsQuotaReservation = false;
+    }
+  };
 
   // ── 5. RAG: embed + Vectorize + D1 chapter content ─────────────────────────
   const db = createDb(c.env.DB);
@@ -894,6 +1185,7 @@ chatRouter.post('/stream', async (c) => {
   // receives conversation_id and can establish the session before any tokens.
   const sourceCard = {
     event:            'source_card',
+    request_id:       serverRequestId,
     conversation_id:  effectiveSessionId,
     source_type:      contextChunks.length > 0 ? 'rag_chapter' : 'llm_only',
     rag_source:       contextChunks.length > 0 ? 'rag_chapter' : 'llm_only',
@@ -964,7 +1256,7 @@ chatRouter.post('/stream', async (c) => {
       // ── syrabit_done event ────────────────────────────────────────────────
       const latencyMs = Date.now() - startTime;
       timings.total_ms = latencyMs;
-      await write({
+      const doneEvent = {
         content:              '',
         done:                 true,
         event:                'syrabit_done',
@@ -986,12 +1278,14 @@ chatRouter.post('/stream', async (c) => {
           web_used:         false,
            timings_ms:       { ...timings },
         },
-      });
+        request_id: serverRequestId,
+      };
+      await write(doneEvent);
 
       // ── Fire-and-forget: persist chat + update user stats ────────────────
       // quota_usage was already incremented atomically in reserveAuthQuota /
       // reserveAnonQuota before streaming — do not increment again here.
-      await Promise.allSettled([
+      const persistenceResults = await Promise.allSettled([
         saveChat(c.env.DB, {
           userId,
           sessionId:         effectiveSessionId,
@@ -1005,6 +1299,30 @@ chatRouter.post('/stream', async (c) => {
         // Anon users have no users table row to update
         ...(isAnon ? [] : [updateAuthStats(c.env.DB, userId)]),
       ]);
+      if (persistenceResults.every(result => result.status === 'fulfilled')) {
+        await completeChatRequestClaim(
+          c.env.DB,
+          clientRequestId,
+          userId,
+          effectiveSessionId,
+          fullResponse,
+          { sourceCard, doneEvent },
+        ).catch(error => {
+          // The answer and stats are already committed. Keep the reservation
+          // in place rather than releasing quota and allowing regeneration.
+          console.error('[chat] idempotency completion marker failed', {
+            requestId: serverRequestId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      } else {
+        console.error('[chat] persistence failed before idempotency completion', {
+          requestId: serverRequestId,
+          failedOperations: persistenceResults.filter(
+            result => result.status === 'rejected',
+          ).length,
+        });
+      }
 
     } catch (err) {
       console.error('[chat] Stream pipeline error:', err);
@@ -1012,6 +1330,8 @@ chatRouter.post('/stream', async (c) => {
         await write({
           error: 'AI service temporarily unavailable. Please try again.',
           done: true,
+          request_id: serverRequestId,
+          failure_stage: 'provider_stream',
         });
       } catch { /* writer may already be closed */ }
       // Release the reserved slot — provider/config errors must not consume quota

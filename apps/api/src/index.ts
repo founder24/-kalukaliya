@@ -86,6 +86,7 @@ async function handleScheduled(controller: ScheduledController, env: Env): Promi
         'content_audit_log',
         'seed_runs',
         'chats',
+        'chat_request_claims',
       ];
 
       for (const table of tables) {

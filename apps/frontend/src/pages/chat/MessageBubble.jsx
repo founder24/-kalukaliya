@@ -23,7 +23,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
   const [hiddenLinks, setHiddenLinks] = useState([]);
   const [hiddenOpen, setHiddenOpen] = useState(false);
   const [requestState, setRequestState] = useState({}); // host -> 'pending'|'sent'|'failed'
-  // Countdown for the auto-retry that fires 8 s after an AI unavailable error.
+  // Countdown for a bounded automatic retry after a recoverable failure.
   const [retryCountdown, setRetryCountdown] = useState(null);
   const retryTimerRef = useRef(null);
 
@@ -33,13 +33,18 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
   // strict 2-leg chain has no further fallback, so ChatPage disables the
   // auto-retry timer and the countdown would mislead the user.
   useEffect(() => {
-    if (!msg.isAiUnavailable || msg.isAssameseUnavailable) {
+    if (
+      !msg.isAiUnavailable ||
+      msg.isAssameseUnavailable ||
+      msg.autoRetryScheduled === false
+    ) {
       setRetryCountdown(null);
       if (retryTimerRef.current) clearInterval(retryTimerRef.current);
       return;
     }
-    setRetryCountdown(8);
-    let remaining = 8;
+    const delaySeconds = msg.retryDelaySeconds || 8;
+    setRetryCountdown(delaySeconds);
+    let remaining = delaySeconds;
     retryTimerRef.current = setInterval(() => {
       remaining -= 1;
       if (remaining <= 0) {
@@ -52,7 +57,12 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
     return () => {
       if (retryTimerRef.current) clearInterval(retryTimerRef.current);
     };
-  }, [msg.isAiUnavailable, msg.isAssameseUnavailable]);
+  }, [
+    msg.isAiUnavailable,
+    msg.isAssameseUnavailable,
+    msg.autoRetryScheduled,
+    msg.retryDelaySeconds,
+  ]);
 
   const handleHiddenLinks = useCallback((items) => {
     setHiddenLinks(items || []);
@@ -227,7 +237,13 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               */
               <div
                 role="alert"
-                data-testid={msg.isAssameseUnavailable ? 'assamese-unavailable-card' : 'ai-unavailable-card'}
+                data-testid={
+                  msg.isConnectionInterrupted
+                    ? 'connection-interrupted-card'
+                    : msg.isAssameseUnavailable
+                      ? 'assamese-unavailable-card'
+                      : 'ai-unavailable-card'
+                }
                 className="flex flex-col gap-3 rounded-2xl px-4 py-3.5 mt-1 bg-card border border-border"
                 style={{ maxWidth: '26rem' }}
               >
@@ -241,8 +257,33 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                     </svg>
                   </div>
-                  <div lang={msg.isAssameseUnavailable ? 'as' : undefined}>
-                    {msg.isAssameseUnavailable ? (
+                  <div lang={
+                    msg.isAssameseUnavailable ||
+                    (msg.isConnectionInterrupted && responseLang === 'as')
+                      ? 'as'
+                      : undefined
+                  }>
+                    {msg.isConnectionInterrupted ? (
+                      responseLang === 'as' ? (
+                        <>
+                          <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.55' }}>
+                            সংযোগ সাময়িকভাৱে বিচ্ছিন্ন হৈছে
+                          </p>
+                          <p className="text-[12.5px] text-muted-foreground mt-0.5" style={{ lineHeight: '1.55' }}>
+                            আপোনাৰ প্ৰশ্নটো সুৰক্ষিত আছে। সংযোগ ঘূৰি আহিলে আকৌ চেষ্টা কৰক।
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.45' }}>
+                            Connection interrupted
+                          </p>
+                          <p className="text-[12.5px] text-muted-foreground mt-0.5">
+                            Your question is saved. Retry when your connection is back.
+                          </p>
+                        </>
+                      )
+                    ) : msg.isAssameseUnavailable ? (
                       <>
                         <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.55' }}>
                           অসমীয়া চেট সেৱা সাময়িকভাৱে অনুপলব্ধ
@@ -268,11 +309,19 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                     type="button"
                     onClick={() => { if (onRetry) onRetry(); }}
                     className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white transition-colors"
-                    aria-label={msg.isAssameseUnavailable ? 'আকৌ চেষ্টা কৰক' : 'Retry now'}
+                    aria-label={
+                      msg.isAssameseUnavailable ||
+                      (msg.isConnectionInterrupted && responseLang === 'as')
+                        ? 'আকৌ চেষ্টা কৰক'
+                        : 'Retry now'
+                    }
                     data-testid="ai-unavailable-retry"
                   >
                     <RefreshCw size={13} />
-                    {msg.isAssameseUnavailable ? 'আকৌ চেষ্টা কৰক' : 'Retry now'}
+                    {msg.isAssameseUnavailable ||
+                    (msg.isConnectionInterrupted && responseLang === 'as')
+                      ? 'আকৌ চেষ্টা কৰক'
+                      : 'Retry now'}
                   </button>
                   {msg.isAssameseUnavailable && onSwitchToEnglish && (
                     <button

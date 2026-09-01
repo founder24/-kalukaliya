@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 
 import type { Env } from '../types';
+import { signAccessToken } from '../middleware/auth';
 
 const ANON_ID = 'anon_0123456789abcdef0123456789abcdef';
 const OTHER_ANON_ID = 'anon_fedcba9876543210fedcba9876543210';
@@ -17,6 +18,8 @@ let env: Env;
 let disposeProxy: () => Promise<void>;
 let workerFetch: (request: Request) => Promise<Response>;
 let background: Promise<unknown>[];
+let generationCalls = 0;
+let generationBarrier: Promise<void> | null = null;
 
 async function signedCookie(id: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -53,6 +56,8 @@ function aiBinding(): Ai {
       if (model === '@cf/baai/bge-m3') {
         return { data: [{ values: [0.1, 0.2, 0.3] }] };
       }
+      generationCalls += 1;
+      if (generationBarrier) await generationBarrier;
 
       const bytes = new TextEncoder().encode(
         'data: {"response":"Plants use light to make food."}\n\ndata: [DONE]\n\n',
@@ -112,6 +117,161 @@ afterAll(async () => {
 });
 
 describe('anonymous identity flow', () => {
+  it('charges one quota slot when the same logical chat request is retried', async () => {
+    const anonId = 'anon_cccccccccccccccccccccccccccccccc';
+    const clientRequestId = `chat-request-${crypto.randomUUID()}`;
+    const makeRequest = () => new Request('https://api.example/api/v1/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-anon-id': anonId,
+      },
+      body: JSON.stringify({
+        message: 'Explain gravity',
+        lang: 'en',
+        client_request_id: clientRequestId,
+      }),
+    });
+
+    const generationCallsBefore = generationCalls;
+    const first = await workerFetch(makeRequest());
+    expect(first.status).toBe(200);
+    await first.text();
+    await Promise.all(background);
+    expect(generationCalls).toBe(generationCallsBefore + 1);
+
+    const retry = await workerFetch(makeRequest());
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get('X-Chat-Replayed')).toBe('true');
+    const replayText = await retry.text();
+    await Promise.all(background);
+    expect(replayText).toContain('"replayed":true');
+    expect(generationCalls).toBe(generationCallsBefore + 1);
+
+    const quota = await env.DB.prepare(
+      'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
+    ).bind(anonId).first<{ count: number }>();
+    expect(quota?.count).toBe(1);
+
+    const claim = await env.DB.prepare(
+      'SELECT status FROM chat_request_claims WHERE request_id = ?',
+    ).bind(clientRequestId).first<{ status: string }>();
+    expect(claim?.status).toBe('completed');
+
+    const chats = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
+    ).bind(anonId).first<{ count: number }>();
+    expect(chats?.count).toBe(2);
+  });
+
+  it('replays an authenticated completed request without duplicating stats or history', async () => {
+    const userId = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO users (id, email, role, subscription_tier, session_valid_after)
+       VALUES (?, ?, 'student', 'free', 0)`,
+    ).bind(userId, `${userId}@example.test`).run();
+    const accessToken = await signAccessToken(userId, 'student', env.JWT_SECRET);
+    const clientRequestId = `chat-request-${crypto.randomUUID()}`;
+    const makeRequest = () => new Request('https://api.example/api/v1/chat/stream', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: 'Explain inertia',
+        lang: 'en',
+        client_request_id: clientRequestId,
+      }),
+    });
+
+    const generationCallsBefore = generationCalls;
+    const first = await workerFetch(makeRequest());
+    await first.text();
+    await Promise.all(background);
+
+    const replay = await workerFetch(makeRequest());
+    expect(replay.headers.get('X-Chat-Replayed')).toBe('true');
+    await replay.text();
+    await Promise.all(background);
+
+    expect(generationCalls).toBe(generationCallsBefore + 1);
+    const stats = await env.DB.prepare(
+      `SELECT monthly_message_count, total_lifetime_messages
+       FROM users WHERE id = ?`,
+    ).bind(userId).first<{
+      monthly_message_count: number;
+      total_lifetime_messages: number;
+    }>();
+    expect(stats).toEqual({
+      monthly_message_count: 1,
+      total_lifetime_messages: 1,
+    });
+    const chats = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    expect(chats?.count).toBe(2);
+  });
+
+  it('waits for an in-flight request instead of starting a second generation', async () => {
+    const anonId = 'anon_dddddddddddddddddddddddddddddddd';
+    const clientRequestId = `chat-request-${crypto.randomUUID()}`;
+    const makeRequest = () => new Request('https://api.example/api/v1/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-anon-id': anonId,
+      },
+      body: JSON.stringify({
+        message: 'Explain momentum',
+        lang: 'en',
+        client_request_id: clientRequestId,
+      }),
+    });
+    let releaseGeneration!: () => void;
+    generationBarrier = new Promise<void>(resolve => {
+      releaseGeneration = resolve;
+    });
+    const generationCallsBefore = generationCalls;
+
+    try {
+      const first = await workerFetch(makeRequest());
+      const firstTextPromise = first.text();
+      for (let attempt = 0; attempt < 50 && generationCalls === generationCallsBefore; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      expect(generationCalls).toBe(generationCallsBefore + 1);
+
+      const recovery = await workerFetch(makeRequest());
+      expect(recovery.headers.get('X-Chat-Recovery-Wait')).toBe('true');
+      const recoveryTextPromise = recovery.text();
+
+      releaseGeneration();
+      const [firstText, recoveryText] = await Promise.all([
+        firstTextPromise,
+        recoveryTextPromise,
+      ]);
+      await Promise.all(background);
+
+      expect(firstText).toContain('Plants use light to make food.');
+      expect(recoveryText).toContain('Plants use light to make food.');
+      expect(recoveryText).toContain('"replayed":true');
+      expect(generationCalls).toBe(generationCallsBefore + 1);
+
+      const quota = await env.DB.prepare(
+        'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
+      ).bind(anonId).first<{ count: number }>();
+      expect(quota?.count).toBe(1);
+      const chats = await env.DB.prepare(
+        'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
+      ).bind(anonId).first<{ count: number }>();
+      expect(chats?.count).toBe(2);
+    } finally {
+      releaseGeneration();
+      generationBarrier = null;
+    }
+  });
+
   it('keeps chat reservation, persistence, reload, credits, and history on one browser ID', async () => {
     const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
       method: 'POST',

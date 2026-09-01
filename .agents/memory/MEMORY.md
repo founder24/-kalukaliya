@@ -60,3 +60,4 @@
 - [Prerender canonical counts](prerender-canonical-counts.md) — Release manifests must count unique canonical output paths, not duplicate source records.
 - [Prerender backend signals](prerender-backend-signals.md) — Coalesce concurrent schema probes, but never TTL-cache completed signals across cache reads.
 - [Cloudflare account API contracts](cloudflare-account-api-contracts.md) — R2 custom domains and Access writes require current, resource-specific API fields and permissions.
+- [Chat transport retry identity](chat-transport-retry-identity.md) — Keep one stable logical request key across bounded transport retries so quota is reserved only once.

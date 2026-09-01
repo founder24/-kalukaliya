@@ -166,8 +166,13 @@ describe('Worker-to-Worker fallback authentication', () => {
 
     expect(response.status).toBe(504);
     expect(serviceRequest?.signal.aborted).toBe(true);
+    expect(response.headers.get('X-Request-ID')).toBeTruthy();
+    expect(response.headers.get('X-Failure-Stage')).toBe('service_binding');
     await expect(response.json()).resolves.toMatchObject({
       error: 'Backend service timed out',
+      error_code: 'service_binding_timeout',
+      failure_stage: 'service_binding',
+      request_id: expect.any(String),
     });
   });
 });
