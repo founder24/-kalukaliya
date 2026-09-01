@@ -8,8 +8,7 @@
  * What it creates / configures:
  *   1. R2 bucket: syrabit-assets  (student PDFs, syllabi, past papers)
  *   2. Custom domain: assets.syrabit.ai → syrabit-assets bucket
- *   3. R2 bucket: syrabit-cache-reserve  (Cache Reserve backing store)
- *   4. Cache Reserve: enabled on syrabit.ai zone → syrabit-cache-reserve bucket
+ *   3. Cache Reserve: enabled on the syrabit.ai zone when the plan supports it
  *
  * Worker changes (wrangler.toml + src/index.ts) are NOT applied here — they
  * require a `wrangler deploy` and are tracked in workers/edge-proxy/.
@@ -151,8 +150,8 @@ async function ensureAssetsDomain() {
     {
       domain:  'assets.syrabit.ai',
       enabled: true,
-      // minTTL 0 = use the CDN TTL from Cache-Control headers served by R2
-      minTTL: 0,
+      // Cloudflare requires the owning zone ID for R2 custom domains.
+      zoneId: ZONE_ID,
     }
   );
 
@@ -168,41 +167,9 @@ async function ensureAssetsDomain() {
   }
 }
 
-// ── Step 3: Create syrabit-cache-reserve R2 bucket ───────────────────────────
-async function ensureCacheReserveBucket() {
-  console.log('\nStep 3 — R2 bucket: syrabit-cache-reserve');
-
-  const list = await cfGet(`/accounts/${ACCOUNT_ID}/r2/buckets`);
-  if (!list.success) {
-    if (list.errors?.[0]?.code === 10000) {
-      fail('syrabit-cache-reserve bucket', authErrMsg('R2: Edit'));
-    } else {
-      fail('syrabit-cache-reserve bucket', JSON.stringify(list.errors));
-    }
-    return false;
-  }
-
-  const existing = (list.result?.buckets || []).find(b => b.name === 'syrabit-cache-reserve');
-  if (existing) {
-    ok('syrabit-cache-reserve already exists');
-    return true;
-  }
-
-  const create = await cfReq('POST', `/accounts/${ACCOUNT_ID}/r2/buckets`, {
-    name: 'syrabit-cache-reserve',
-  });
-
-  if (create.success) {
-    ok('syrabit-cache-reserve created');
-    return true;
-  }
-  fail('syrabit-cache-reserve create', JSON.stringify(create.errors));
-  return false;
-}
-
-// ── Step 4: Enable Cache Reserve on the syrabit.ai zone ──────────────────────
+// ── Step 3: Enable Cache Reserve on the syrabit.ai zone ──────────────────────
 async function ensureCacheReserve() {
-  console.log('\nStep 4 — Cache Reserve: syrabit.ai zone');
+  console.log('\nStep 3 — Cache Reserve: syrabit.ai zone');
 
   const current = await cfGet(`/zones/${ZONE_ID}/cache/cache_reserve`);
   if (!current.success) {
@@ -230,9 +197,8 @@ async function ensureCacheReserve() {
   console.log(`  Current Cache Reserve value: ${JSON.stringify(value)} — enabling`);
 
   // PATCH to enable Cache Reserve
-  // The syrabit-cache-reserve bucket is automatically linked by Cloudflare
-  // to the zone's Cache Reserve; no explicit bucket link API exists on zone-level.
-  // The bucket must exist in the same account (ensured by Step 3).
+  // Cache Reserve storage is managed by Cloudflare; no customer R2 bucket
+  // exists or needs to be linked to the zone-level setting.
   const patch = await cfReq('PATCH', `/zones/${ZONE_ID}/cache/cache_reserve`, {
     value: 'on',
   });
@@ -241,8 +207,8 @@ async function ensureCacheReserve() {
     ok('Cache Reserve enabled on syrabit.ai',
       `value=${patch.result?.value}`);
     console.log('  ℹ  Cache Reserve begins filling as origin responses are cached.');
-    console.log('  ℹ  Cold-cache misses now resolve from R2 (syrabit-cache-reserve)');
-    console.log('  ℹ  rather than forwarding to Railway.');
+    console.log('  ℹ  Cold-cache misses now resolve from Cloudflare-managed reserve storage');
+    console.log('  ℹ  rather than forwarding to the origin.');
   } else {
     fail('Cache Reserve enable', JSON.stringify(patch.errors));
     console.log('  ℹ  Cache Reserve requires a Cloudflare Cache Reserve subscription.');
@@ -276,7 +242,6 @@ async function main() {
   if (assetsBucketOk) await ensureAssetsDomain();
   else console.log('  ⚠  Skipping custom domain — bucket creation failed');
 
-  await ensureCacheReserveBucket();
   await ensureCacheReserve();
   reportWorkerNextSteps();
 

@@ -13,8 +13,8 @@
  *   Phase 2 (#106):  4. R2 logs bucket  5. Logpush HTTP  6. Logpush FW
  *                    7. Origin healthcheck
  *   Phase 3 (#107):  8. Zero Trust Access app  9. Waiting Room
- *   Phase 4 (#108): 10. R2 assets bucket  11. R2 cache-reserve  12. Cache Reserve
- *                   13. assets.syrabit.ai custom domain
+ *   Phase 4 (#108): 10. R2 assets bucket  11. Cache Reserve backing storage
+ *                    12. Cache Reserve  13. assets.syrabit.ai custom domain
  *   Phase 5:        14. Production Worker bindings  15. RateLimiter DO
  *                   16. Analytics Engine (not used by the live architecture)
  *   Phase 6 (#110): 17. mTLS client certificate  18. Image Resizing
@@ -380,8 +380,11 @@ async function auditItem8ZeroTrust() {
   }
   const sub = [];
   if (app.session_duration !== '8h') sub.push(`session=${app.session_duration} (want: 8h)`);
-  const hasWildcard = app.domain && (app.domain.endsWith('*') || app.domain.includes('admin*'));
-  if (!hasWildcard) sub.push(`domain=${app.domain} (want wildcard /*)`);
+  const hasWildcard = app.domain && (
+    app.domain === 'syrabit.ai/staff*' ||
+    app.domain.endsWith('staff*')
+  );
+  if (!hasWildcard) sub.push(`domain=${app.domain} (want syrabit.ai/staff*)`);
   if (sub.length) {
     fail(8, 3, 'Zero Trust Access app (Syrabit Admin)', sub.join(', '), 'update app config in dashboard');
   } else {
@@ -421,17 +424,19 @@ async function auditItem9WaitingRoom() {
 // ─── Phase 4 ─────────────────────────────────────────────────────────────────
 
 async function auditItems10to13R2AndCacheReserve() {
+  // Cache Reserve backing storage is managed by Cloudflare. It is not a
+  // customer-created R2 bucket, so the former syrabit-cache-reserve check was
+  // a stale expectation that could never establish the feature's health.
+  skip(11, 4, 'Cache Reserve backing storage',
+    'Cloudflare-managed; no customer R2 bucket is required');
   const r2 = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/r2/buckets`);
   if (checkRateLimit(r2, 10, 4, 'R2 bucket syrabit-assets', `/accounts/${ACCOUNT_ID}/r2/buckets`)) {
-    rateLimited(11, 4, 'R2 bucket syrabit-cache-reserve', `/accounts/${ACCOUNT_ID}/r2/buckets`);
     rateLimited(13, 4, 'assets.syrabit.ai custom domain', `/accounts/${ACCOUNT_ID}/r2/buckets`);
   } else if (!r2) {
     warn(10, 4, 'R2 bucket syrabit-assets', 'token lacks R2: Read scope');
-    warn(11, 4, 'R2 bucket syrabit-cache-reserve', 'token lacks R2: Read scope');
     warn(13, 4, 'assets.syrabit.ai custom domain', 'token lacks R2: Read scope');
   } else if (!r2.success) {
     fail(10, 4, 'R2 bucket syrabit-assets', JSON.stringify(r2.errors), 'run cloudflare-phase4-apply.js');
-    fail(11, 4, 'R2 bucket syrabit-cache-reserve', JSON.stringify(r2.errors), 'run cloudflare-phase4-apply.js');
     fail(13, 4, 'assets.syrabit.ai custom domain', JSON.stringify(r2.errors), 'run cloudflare-phase4-apply.js');
   } else {
     const buckets = r2.result?.buckets || [];
@@ -458,12 +463,6 @@ async function auditItems10to13R2AndCacheReserve() {
     } else {
       fail(10, 4, 'R2 bucket syrabit-assets', 'NOT FOUND', 'run cloudflare-phase4-apply.js → Step 1');
       fail(13, 4, 'assets.syrabit.ai custom domain', 'parent bucket missing', 'run cloudflare-phase4-apply.js → Step 1 then Step 2');
-    }
-
-    if (buckets.some(b => b.name === 'syrabit-cache-reserve')) {
-      pass(11, 4, 'R2 bucket syrabit-cache-reserve', 'bucket exists');
-    } else {
-      fail(11, 4, 'R2 bucket syrabit-cache-reserve', 'NOT FOUND', 'run cloudflare-phase4-apply.js → Step 3');
     }
   }
 

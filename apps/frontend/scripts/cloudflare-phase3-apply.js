@@ -1,23 +1,25 @@
 #!/usr/bin/env node
 /**
- * cloudflare-phase3-apply.js — Cloudflare Phase 3: Zero Trust + Waiting Room (Task #107)
+ * cloudflare-phase3-apply.js — Cloudflare Phase 3: Zero Trust Access
  *
  * Idempotent apply script for Phase 3 resources:
- *   1. Cloudflare Access application — covers api.syrabit.ai/admin/*  (8 h session)
+ *   1. Cloudflare Access application — covers syrabit.ai/staff/*  (8 h session)
  *   2. Access policy — allows only listed team email addresses
- *   3. Waiting Room — syrabit.ai/* (exam-season traffic queue, 10-min session cookie)
- *      with branded custom HTML page
+ *   3. Optional Waiting Room reconciliation when APPLY_WAITING_ROOM=true.
+ *      It is disabled by default so Access changes cannot alter traffic queues.
  *
  * Required env:
  *   CLOUDFLARE_API_TOKEN   — Zero Trust: Edit, Waiting Room: Edit
  *                            (current token lacks these scopes — add them at
  *                             https://dash.cloudflare.com/profile/api-tokens then re-run)
- *   ADMIN_EMAILS           — comma-separated list of team emails allowed through Access
+ *   STAFF_EMAILS           — comma-separated list of team emails allowed through Access
  *                            e.g. "alice@syrabit.ai,bob@syrabit.ai"
+ *                            ADMIN_EMAILS remains accepted as a legacy alias.
  *   CLOUDFLARE_ZONE_ID     — optional, defaults to syrabit.ai zone
  *   CLOUDFLARE_ACCOUNT_ID  — optional, defaults to Syrabit account
  *
  *   Optional:
+ *   APPLY_WAITING_ROOM                   — default false
  *   WAITING_ROOM_NEW_USERS_PER_MINUTE  — default 200 (tuned to Railway hobby plan)
  *   WAITING_ROOM_TOTAL_ACTIVE_USERS    — default 400
  *
@@ -42,18 +44,19 @@ const ZONE_ID    = process.env.CLOUDFLARE_ZONE_ID    || '5b8c97df4431491dc7f60ea
 const ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || 'd66e40eac539fff1db270fddf384a5ec';
 const API        = 'https://api.cloudflare.com/client/v4';
 
-const ADMIN_EMAILS_RAW = process.env.ADMIN_EMAILS || '';
-const ADMIN_EMAILS     = ADMIN_EMAILS_RAW
+const STAFF_EMAILS_RAW = process.env.STAFF_EMAILS || process.env.ADMIN_EMAILS || '';
+const STAFF_EMAILS     = STAFF_EMAILS_RAW
   .split(',')
   .map(e => e.trim())
   .filter(Boolean);
 
 const WAITING_ROOM_NEW_PER_MIN    = parseInt(process.env.WAITING_ROOM_NEW_USERS_PER_MINUTE || '200', 10);
 const WAITING_ROOM_TOTAL_ACTIVE   = parseInt(process.env.WAITING_ROOM_TOTAL_ACTIVE_USERS   || '400', 10);
+const APPLY_WAITING_ROOM          = process.env.APPLY_WAITING_ROOM === 'true';
 
 if (!TOKEN) { console.error('CLOUDFLARE_API_TOKEN is not set'); process.exit(1); }
-if (!ADMIN_EMAILS.length) {
-  console.error('ADMIN_EMAILS is not set — re-run with ADMIN_EMAILS=you@example.com');
+if (!STAFF_EMAILS.length) {
+  console.error('STAFF_EMAILS is not set — re-run with STAFF_EMAILS=you@example.com');
   process.exit(1);
 }
 
@@ -105,14 +108,14 @@ async function ensureAccessApp() {
     ok('Access application: Syrabit Admin', `id=${existing.id}`);
     // Reconcile — patch if critical security settings have drifted
     const needsPatch = (
-      existing.domain !== 'api.syrabit.ai/admin*' ||
+       existing.domain !== 'syrabit.ai/staff*' ||
       existing.session_duration !== '8h'
     );
     if (needsPatch) {
       console.log(`  ⚠  Drift detected: domain=${existing.domain} session=${existing.session_duration} — patching`);
       const patch = await cfReq('PUT', `/accounts/${ACCOUNT_ID}/access/apps/${existing.id}`, {
         ...existing,
-        domain:           'api.syrabit.ai/admin*',
+        domain:           'syrabit.ai/staff*',
         session_duration: '8h',
       });
       if (patch.success) ok('  Patched domain/session to target state');
@@ -124,9 +127,9 @@ async function ensureAccessApp() {
   const create = await cfReq('POST', `/accounts/${ACCOUNT_ID}/access/apps`, {
     name:                'Syrabit Admin',
     type:                'self_hosted',
-    // Wildcard suffix is required to cover all nested admin routes
-    // (api.syrabit.ai/admin alone would only protect the exact path)
-    domain:              'api.syrabit.ai/admin*',
+    // Wildcard suffix is required to cover all nested staff routes
+    // (syrabit.ai/staff alone would only protect the exact path)
+    domain:              'syrabit.ai/staff*',
     session_duration:    '8h',
     // Security hardening
     http_only_cookie_attribute:  true,
@@ -168,15 +171,15 @@ async function ensureAccessPolicy(appId) {
     const currentEmails = (existing.include || [])
       .filter(r => r.email)
       .map(r => r.email.email);
-    const missing = ADMIN_EMAILS.filter(e => !currentEmails.includes(e));
+    const missing = STAFF_EMAILS.filter(e => !currentEmails.includes(e));
     if (missing.length) {
       console.log(`  ⚠  Policy exists but missing emails: ${missing.join(', ')} — update via dashboard`);
     }
     return;
   }
 
-  const includeRules = ADMIN_EMAILS.map(email => ({ email: { email } }));
-  console.log(`  Creating policy for: ${ADMIN_EMAILS.join(', ')}`);
+  const includeRules = STAFF_EMAILS.map(email => ({ email: { email } }));
+  console.log(`  Creating policy for: ${STAFF_EMAILS.join(', ')}`);
 
   const create = await cfReq('POST', `/accounts/${ACCOUNT_ID}/access/apps/${appId}/policies`, {
     name:       'Team email allowlist',
@@ -188,7 +191,7 @@ async function ensureAccessPolicy(appId) {
   });
 
   if (create.success) {
-    ok('Access policy created', `id=${create.result.id} emails=${ADMIN_EMAILS.join(',')}`);
+    ok('Access policy created', `id=${create.result.id} emails=${STAFF_EMAILS.join(',')}`);
   } else {
     fail('Access policy', JSON.stringify(create.errors));
   }
@@ -300,14 +303,18 @@ async function ensureWaitingRoom() {
 
 // ── Main ──────────────────────────────────────────────────────────────────
 async function main() {
-  console.log('Cloudflare Phase 3 Apply — Zero Trust + Waiting Room (Task #107)');
+  console.log('Cloudflare Phase 3 Apply — Zero Trust Access');
   console.log(`Zone: ${ZONE_ID}  Account: ${ACCOUNT_ID}`);
-  console.log(`Admin emails: ${ADMIN_EMAILS.join(', ')}\n`);
+  console.log(`Staff emails: ${STAFF_EMAILS.join(', ')}\n`);
 
   const appId = await ensureAccessApp();
   await ensureAccessPolicy(appId);
   await checkIdentityProviders();
-  await ensureWaitingRoom();
+  if (APPLY_WAITING_ROOM) {
+    await ensureWaitingRoom();
+  } else {
+    skip('Waiting Room', 'out of scope; set APPLY_WAITING_ROOM=true for an intentional reconciliation');
+  }
 
   console.log('\n────────────────────────────────────────');
   if (errors.length === 0) {

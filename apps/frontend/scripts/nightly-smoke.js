@@ -284,9 +284,12 @@ async function main() {
     } else {
       console.log(`  ✓  Access app: Syrabit Admin id=${adminApp.id} domain=${adminApp.domain}`);
       assert('  Access app session_duration', adminApp.session_duration, '8h');
-      // Verify the wildcard path covers all nested admin routes
-      const hasWildcard = adminApp.domain && (adminApp.domain.endsWith('*') || adminApp.domain.includes('admin*'));
-      assert('  Access app domain covers admin/*', hasWildcard, true);
+      // Verify the wildcard path covers all nested staff routes
+      const hasWildcard = adminApp.domain && (
+        adminApp.domain === 'syrabit.ai/staff*' ||
+        adminApp.domain.endsWith('staff*')
+      );
+      assert('  Access app domain covers staff/*', hasWildcard, true);
 
       // Assert the email allowlist policy exists (at least one allow policy)
       const pol = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/access/apps/${adminApp.id}/policies`);
@@ -341,13 +344,7 @@ async function main() {
     } else {
       console.log('  ✓  R2 bucket syrabit-assets exists');
     }
-    const cacheReserveExists = buckets.some(b => b.name === 'syrabit-cache-reserve');
-    if (!cacheReserveExists) {
-      warnings.push('R2 bucket syrabit-cache-reserve NOT FOUND — run cloudflare-phase4-apply.js to create it');
-      console.log('  ⚠  R2 bucket syrabit-cache-reserve: NOT FOUND — run cloudflare-phase4-apply.js');
-    } else {
-      console.log('  ✓  R2 bucket syrabit-cache-reserve exists');
-    }
+    console.log('  ─  Cache Reserve backing storage: Cloudflare-managed; no customer R2 bucket required');
   }
 
   // ── Phase 4: Cache Reserve ─────────────────────────────────────────────
