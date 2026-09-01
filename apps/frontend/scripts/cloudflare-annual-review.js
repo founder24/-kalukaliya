@@ -210,7 +210,7 @@ async function main() {
 
   // ── Phase 3: Zero Trust Access ────────────────────────────────────────
   console.log('\n── Phase 3: Zero Trust Access (Task #107) ──');
-  console.log('  Target: Syrabit Admin app covers api.syrabit.ai/admin* (wildcard), session=8h');
+  console.log('  Target: one Access audience covers staff UI plus current and legacy admin API paths');
   const zt = await cfGet(`/accounts/${ACCOUNT_ID}/access/apps`);
   if (!zt.success) {
     const authErr = zt.errors?.[0]?.code === 10000;
@@ -220,11 +220,19 @@ async function main() {
   } else {
     const adminApp = zt.result.find(a => a.name === 'Syrabit Admin');
     if (adminApp) {
-      const hasWildcard = adminApp.domain && adminApp.domain.includes('admin*');
+      const destinations = (adminApp.destinations || [])
+        .filter(destination => destination.type === 'public')
+        .map(destination => destination.uri);
+      const requiredDestinations = [
+        'syrabit.ai/staff*',
+        'api.syrabit.ai/api/v1/admin*',
+        'api.syrabit.ai/admin*',
+      ];
+      const hasWildcard = requiredDestinations.every(uri => destinations.includes(uri));
       row('Syrabit Admin app exists', true, true,
-        `id=${adminApp.id} domain=${adminApp.domain}`);
-      row('  domain covers admin/* (wildcard)', hasWildcard, true,
-        hasWildcard ? '' : 'SECURITY: update domain to api.syrabit.ai/admin* to cover nested routes');
+        `id=${adminApp.id} destinations=${destinations.join(',')}`);
+      row('  destinations cover staff and admin APIs', hasWildcard, true,
+        hasWildcard ? '' : 'SECURITY: run cloudflare-phase3-apply.js to restore all destinations');
       row('  session_duration', adminApp.session_duration, '8h');
       // Check policy count
       const pol = await cfGet(`/accounts/${ACCOUNT_ID}/access/apps/${adminApp.id}/policies`);

@@ -721,7 +721,19 @@ jobs:
           status="$(curl -sS -D /tmp/edge.headers -o /tmp/edge.json -w '%{http_code}' \
             "https://api.syrabit.ai/health" --max-time 30)"
           test "$status" = "200"
-          echo "Public edge health passed: HTTP ${status}"
+          python3 - /tmp/edge.json <<'PY'
+          import json, sys
+          with open(sys.argv[1]) as f:
+              payload = json.load(f)
+          assert payload.get("status") == "healthy", payload
+          assert payload.get("backend_reachable") is True, payload
+          assert payload.get("backend_mode") in {"api-worker", "cloud-run"}, payload
+          print(
+              "Public edge health passed: "
+              f"backend_mode={payload['backend_mode']} "
+              f"backend_reachable={payload['backend_reachable']}"
+          )
+          PY
 
       - name: Frontend is reachable
         run: |

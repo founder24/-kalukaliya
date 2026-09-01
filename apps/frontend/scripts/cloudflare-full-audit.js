@@ -363,10 +363,15 @@ async function auditItem7HealthCheck() {
 // ─── Phase 3 ─────────────────────────────────────────────────────────────────
 
 async function auditItem8ZeroTrust() {
+  const requiredDestinations = [
+    'syrabit.ai/staff*',
+    'api.syrabit.ai/api/v1/admin*',
+    'api.syrabit.ai/admin*',
+  ];
   const zt = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/access/apps`);
   if (checkRateLimit(zt, 8, 3, 'Zero Trust Access app (Syrabit Admin)', `/accounts/${ACCOUNT_ID}/access/apps`)) return;
   if (!zt) {
-    warn(8, 3, 'Zero Trust Access app (Syrabit Admin)', 'token lacks Zero Trust: Read scope');
+    warn(8, 3, 'Zero Trust Access app (Syrabit Admin)', 'token lacks Access: Apps and Policies Read scope');
     return;
   }
   if (!zt.success) {
@@ -380,16 +385,35 @@ async function auditItem8ZeroTrust() {
   }
   const sub = [];
   if (app.session_duration !== '8h') sub.push(`session=${app.session_duration} (want: 8h)`);
-  const hasWildcard = app.domain && (
-    app.domain === 'syrabit.ai/staff*' ||
-    app.domain.endsWith('staff*')
-  );
-  if (!hasWildcard) sub.push(`domain=${app.domain} (want syrabit.ai/staff*)`);
+  const destinations = (app.destinations || [])
+    .filter(destination => destination.type === 'public')
+    .map(destination => destination.uri);
+  const missingDestinations = requiredDestinations.filter(uri => !destinations.includes(uri));
+  if (missingDestinations.length) sub.push(`missing destinations=${missingDestinations.join(',')}`);
+  const cronApp = zt.result.find(candidate => candidate.name === 'Syrabit Admin Cron API');
+  if (!cronApp) {
+    sub.push('cron compatibility app missing');
+  } else {
+    const cronDestinations = (cronApp.destinations || [])
+      .filter(destination => destination.type === 'public')
+      .map(destination => destination.uri);
+    if (cronDestinations.length !== 1 ||
+        cronDestinations[0] !== 'api.syrabit.ai/api/v1/admin/cron*') {
+      sub.push('cron compatibility destination drifted');
+    }
+    const cronPolicies = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/access/apps/${cronApp.id}/policies`);
+    const hasCronBypass = cronPolicies?.success && cronPolicies.result.some(policy =>
+      policy.name === 'Bearer-authenticated cron compatibility' &&
+      policy.decision === 'bypass' &&
+      (policy.include || []).some(rule => rule.everyone)
+    );
+    if (!hasCronBypass) sub.push('cron bearer-auth compatibility policy missing');
+  }
   if (sub.length) {
     fail(8, 3, 'Zero Trust Access app (Syrabit Admin)', sub.join(', '), 'update app config in dashboard');
   } else {
     pass(8, 3, 'Zero Trust Access app (Syrabit Admin)',
-      `id=${app.id} domain=${app.domain} session=8h`);
+      `id=${app.id} destinations=${destinations.join(',')} session=8h; cron bearer-auth path preserved`);
   }
 }
 
@@ -455,7 +479,10 @@ async function auditItems10to13R2AndCacheReserve() {
       } else {
         const domain = (domRes.result?.domains || []).find(d => d.domain === 'assets.syrabit.ai');
         if (domain) {
-          pass(13, 4, 'assets.syrabit.ai custom domain', `enabled=${domain.enabled} status=${domain.status || 'active'}`);
+          const status = typeof domain.status === 'object'
+            ? `ssl=${domain.status.ssl || 'unknown'},ownership=${domain.status.ownership || 'unknown'}`
+            : (domain.status || 'active');
+          pass(13, 4, 'assets.syrabit.ai custom domain', `enabled=${domain.enabled} status=${status}`);
         } else {
           fail(13, 4, 'assets.syrabit.ai custom domain', 'NOT FOUND', 'run cloudflare-phase4-apply.js → Step 2');
         }

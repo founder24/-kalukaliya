@@ -3,8 +3,11 @@
  * cloudflare-phase3-apply.js — Cloudflare Phase 3: Zero Trust Access
  *
  * Idempotent apply script for Phase 3 resources:
- *   1. Cloudflare Access application — covers syrabit.ai/staff/*  (8 h session)
+ *   1. Cloudflare Access application — one audience covering staff UI and
+ *      privileged API compatibility paths (8 h session)
  *   2. Access policy — allows only listed team email addresses
+ *   3. A narrower cron app bypasses Access only for bearer-authenticated
+ *      /api/v1/admin/cron* automation; application-level cron auth remains.
  *   3. Optional Waiting Room reconciliation when APPLY_WAITING_ROOM=true.
  *      It is disabled by default so Access changes cannot alter traffic queues.
  *
@@ -53,6 +56,12 @@ const STAFF_EMAILS     = STAFF_EMAILS_RAW
 const WAITING_ROOM_NEW_PER_MIN    = parseInt(process.env.WAITING_ROOM_NEW_USERS_PER_MINUTE || '200', 10);
 const WAITING_ROOM_TOTAL_ACTIVE   = parseInt(process.env.WAITING_ROOM_TOTAL_ACTIVE_USERS   || '400', 10);
 const APPLY_WAITING_ROOM          = process.env.APPLY_WAITING_ROOM === 'true';
+const ADMIN_DESTINATIONS = [
+  'syrabit.ai/staff*',
+  'api.syrabit.ai/api/v1/admin*',
+  'api.syrabit.ai/admin*',
+];
+const CRON_DESTINATION = 'api.syrabit.ai/api/v1/admin/cron*';
 
 if (!TOKEN) { console.error('CLOUDFLARE_API_TOKEN is not set'); process.exit(1); }
 if (!STAFF_EMAILS.length) {
@@ -98,49 +107,46 @@ async function ensureAccessApp() {
   console.log('\nStep 1: Zero Trust Access application');
   const list = await cfGet(`/accounts/${ACCOUNT_ID}/access/apps`);
   if (!list.success) {
-    if (list.errors?.[0]?.code === 10000) fail('Access application', authErrMsg('Zero Trust: Edit'));
+    if (list.errors?.[0]?.code === 10000) fail('Access application', authErrMsg('Access: Apps and Policies Edit'));
     else fail('Access application', JSON.stringify(list.errors));
     return null;
   }
 
   const existing = list.result.find(a => a.name === 'Syrabit Admin');
+  const desiredDestinations = ADMIN_DESTINATIONS.map(uri => ({ type: 'public', uri }));
+  const appPayload = {
+    name:                'Syrabit Admin',
+    type:                'self_hosted',
+    destinations:        desiredDestinations,
+    session_duration:    '8h',
+    http_only_cookie_attribute:  true,
+    same_site_cookie_attribute:  'strict',
+    enable_binding_cookie:       true,
+    app_launcher_visible:        false,
+    auto_redirect_to_identity:   false,
+    allowed_idps: [],
+  };
   if (existing) {
     ok('Access application: Syrabit Admin', `id=${existing.id}`);
     // Reconcile — patch if critical security settings have drifted
+    const currentDestinations = (existing.destinations || [])
+      .filter(destination => destination.type === 'public')
+      .map(destination => destination.uri)
+      .sort();
     const needsPatch = (
-       existing.domain !== 'syrabit.ai/staff*' ||
+      JSON.stringify(currentDestinations) !== JSON.stringify([...ADMIN_DESTINATIONS].sort()) ||
       existing.session_duration !== '8h'
     );
     if (needsPatch) {
-      console.log(`  ⚠  Drift detected: domain=${existing.domain} session=${existing.session_duration} — patching`);
-      const patch = await cfReq('PUT', `/accounts/${ACCOUNT_ID}/access/apps/${existing.id}`, {
-        ...existing,
-        domain:           'syrabit.ai/staff*',
-        session_duration: '8h',
-      });
-      if (patch.success) ok('  Patched domain/session to target state');
+      console.log(`  ⚠  Drift detected: destinations=${currentDestinations.join(',')} session=${existing.session_duration} — patching`);
+      const patch = await cfReq('PUT', `/accounts/${ACCOUNT_ID}/access/apps/${existing.id}`, appPayload);
+      if (patch.success) ok('  Patched destinations/session to target state');
       else fail(`  Patch Access app`, JSON.stringify(patch.errors));
     }
     return existing.id;
   }
 
-  const create = await cfReq('POST', `/accounts/${ACCOUNT_ID}/access/apps`, {
-    name:                'Syrabit Admin',
-    type:                'self_hosted',
-    // Wildcard suffix is required to cover all nested staff routes
-    // (syrabit.ai/staff alone would only protect the exact path)
-    domain:              'syrabit.ai/staff*',
-    session_duration:    '8h',
-    // Security hardening
-    http_only_cookie_attribute:  true,
-    same_site_cookie_attribute:  'strict',
-    enable_binding_cookie:       true,
-    // UX
-    app_launcher_visible:        false,
-    auto_redirect_to_identity:   false,
-    // Restrict to the Syrabit CF account's configured identity providers
-    allowed_idps: [],   // empty = all configured IDPs on the account
-  });
+  const create = await cfReq('POST', `/accounts/${ACCOUNT_ID}/access/apps`, appPayload);
 
   if (create.success) {
     ok('Access application created: Syrabit Admin', `id=${create.result.id}`);
@@ -160,7 +166,7 @@ async function ensureAccessPolicy(appId) {
 
   const list = await cfGet(`/accounts/${ACCOUNT_ID}/access/apps/${appId}/policies`);
   if (!list.success) {
-    if (list.errors?.[0]?.code === 10000) fail('Access policy', authErrMsg('Zero Trust: Edit'));
+    if (list.errors?.[0]?.code === 10000) fail('Access policy', authErrMsg('Access: Apps and Policies Edit'));
     else fail('Access policy', JSON.stringify(list.errors));
     return;
   }
@@ -170,10 +176,21 @@ async function ensureAccessPolicy(appId) {
     ok('Access policy: Team email allowlist', `id=${existing.id}`);
     const currentEmails = (existing.include || [])
       .filter(r => r.email)
-      .map(r => r.email.email);
-    const missing = STAFF_EMAILS.filter(e => !currentEmails.includes(e));
-    if (missing.length) {
-      console.log(`  ⚠  Policy exists but missing emails: ${missing.join(', ')} — update via dashboard`);
+      .map(r => r.email.email)
+      .sort();
+    const desiredEmails = [...STAFF_EMAILS].sort();
+    if (JSON.stringify(currentEmails) !== JSON.stringify(desiredEmails)) {
+      console.log('  ⚠  Allowlist drift detected — reconciling exact approved addresses');
+      const updated = await cfReq('PUT', `/accounts/${ACCOUNT_ID}/access/apps/${appId}/policies/${existing.id}`, {
+        name: 'Team email allowlist',
+        decision: 'allow',
+        include: STAFF_EMAILS.map(email => ({ email: { email } })),
+        exclude: [],
+        require: [],
+        precedence: 1,
+      });
+      if (updated.success) ok('Access policy allowlist reconciled');
+      else fail('Access policy allowlist reconcile', JSON.stringify(updated.errors));
     }
     return;
   }
@@ -197,9 +214,83 @@ async function ensureAccessPolicy(appId) {
   }
 }
 
-// ── Step 3: Identity provider check ──────────────────────────────────────
+async function ensureCronBypass() {
+  console.log('\nStep 3: Bearer-authenticated cron compatibility');
+  const apps = await cfGet(`/accounts/${ACCOUNT_ID}/access/apps`);
+  if (!apps.success) {
+    fail('Cron Access application', JSON.stringify(apps.errors));
+    return;
+  }
+
+  let app = apps.result.find(candidate => candidate.name === 'Syrabit Admin Cron API');
+  if (!app) {
+    const created = await cfReq('POST', `/accounts/${ACCOUNT_ID}/access/apps`, {
+      name: 'Syrabit Admin Cron API',
+      type: 'self_hosted',
+      destinations: [{ type: 'public', uri: CRON_DESTINATION }],
+      session_duration: '15m',
+      app_launcher_visible: false,
+      auto_redirect_to_identity: false,
+    });
+    if (!created.success) {
+      fail('Cron Access application', JSON.stringify(created.errors));
+      return;
+    }
+    app = created.result;
+    ok('Cron Access application created', `id=${app.id}`);
+  } else {
+    ok('Cron Access application', `id=${app.id}`);
+    const destinations = (app.destinations || [])
+      .filter(destination => destination.type === 'public')
+      .map(destination => destination.uri);
+    if (destinations.length !== 1 || destinations[0] !== CRON_DESTINATION) {
+      const updated = await cfReq('PUT', `/accounts/${ACCOUNT_ID}/access/apps/${app.id}`, {
+        name: 'Syrabit Admin Cron API',
+        type: 'self_hosted',
+        destinations: [{ type: 'public', uri: CRON_DESTINATION }],
+        session_duration: '15m',
+        app_launcher_visible: false,
+        auto_redirect_to_identity: false,
+      });
+      if (updated.success) {
+        app = updated.result;
+        ok('Cron Access destination reconciled');
+      } else {
+        fail('Cron Access destination reconcile', JSON.stringify(updated.errors));
+        return;
+      }
+    }
+  }
+
+  const policies = await cfGet(`/accounts/${ACCOUNT_ID}/access/apps/${app.id}/policies`);
+  if (!policies.success) {
+    fail('Cron bypass policy', JSON.stringify(policies.errors));
+    return;
+  }
+  const existing = policies.result.find(policy =>
+    policy.name === 'Bearer-authenticated cron compatibility' &&
+    policy.decision === 'bypass' &&
+    (policy.include || []).some(rule => rule.everyone)
+  );
+  if (existing) {
+    ok('Cron bypass policy', `id=${existing.id}`);
+    return;
+  }
+  const created = await cfReq('POST', `/accounts/${ACCOUNT_ID}/access/apps/${app.id}/policies`, {
+    name: 'Bearer-authenticated cron compatibility',
+    decision: 'bypass',
+    precedence: 1,
+    include: [{ everyone: {} }],
+    exclude: [],
+    require: [],
+  });
+  if (created.success) ok('Cron bypass policy created', `id=${created.result.id}`);
+  else fail('Cron bypass policy', JSON.stringify(created.errors));
+}
+
+// ── Step 4: Identity provider check ──────────────────────────────────────
 async function checkIdentityProviders() {
-  console.log('\nStep 3: Identity providers');
+  console.log('\nStep 4: Identity providers');
   const list = await cfGet(`/accounts/${ACCOUNT_ID}/access/identity_providers`);
   if (!list.success) {
     if (list.errors?.[0]?.code === 10000) {
@@ -309,6 +400,7 @@ async function main() {
 
   const appId = await ensureAccessApp();
   await ensureAccessPolicy(appId);
+  await ensureCronBypass();
   await checkIdentityProviders();
   if (APPLY_WAITING_ROOM) {
     await ensureWaitingRoom();

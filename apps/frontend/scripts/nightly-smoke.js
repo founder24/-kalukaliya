@@ -278,18 +278,23 @@ async function main() {
       'token lacks Zero Trust: Read — add scope and run cloudflare-phase3-apply.js');
   } else {
     const adminApp = zt.result.find(a => a.name === 'Syrabit Admin');
+    const requiredDestinations = [
+      'syrabit.ai/staff*',
+      'api.syrabit.ai/api/v1/admin*',
+      'api.syrabit.ai/admin*',
+    ];
     if (!adminApp) {
       failures.push('Access application Syrabit Admin (NOT FOUND)');
       console.log('  ✗  Access application Syrabit Admin: NOT FOUND — run cloudflare-phase3-apply.js');
     } else {
-      console.log(`  ✓  Access app: Syrabit Admin id=${adminApp.id} domain=${adminApp.domain}`);
+      const destinations = (adminApp.destinations || [])
+        .filter(destination => destination.type === 'public')
+        .map(destination => destination.uri);
+      console.log(`  ✓  Access app: Syrabit Admin id=${adminApp.id} destinations=${destinations.join(',')}`);
       assert('  Access app session_duration', adminApp.session_duration, '8h');
-      // Verify the wildcard path covers all nested staff routes
-      const hasWildcard = adminApp.domain && (
-        adminApp.domain === 'syrabit.ai/staff*' ||
-        adminApp.domain.endsWith('staff*')
-      );
-      assert('  Access app domain covers staff/*', hasWildcard, true);
+      for (const destination of requiredDestinations) {
+        assert(`  Access app covers ${destination}`, destinations.includes(destination), true);
+      }
 
       // Assert the email allowlist policy exists (at least one allow policy)
       const pol = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/access/apps/${adminApp.id}/policies`);
@@ -305,6 +310,30 @@ async function main() {
           console.log(`  ✓  Access policy: ${allowPolicy.name} (${emailCount} email rule(s))`);
           assert('  Policy has at least 1 email rule', emailCount >= 1, true);
         }
+      }
+    }
+    const cronApp = zt.result.find(a => a.name === 'Syrabit Admin Cron API');
+    if (!cronApp) {
+      failures.push('Access application Syrabit Admin Cron API (NOT FOUND)');
+      console.log('  ✗  Cron compatibility Access application: NOT FOUND');
+    } else {
+      const cronDestinations = (cronApp.destinations || [])
+        .filter(destination => destination.type === 'public')
+        .map(destination => destination.uri);
+      assert('  Cron Access destination is narrowly scoped',
+        cronDestinations.length === 1 &&
+          cronDestinations[0] === 'api.syrabit.ai/api/v1/admin/cron*',
+        true);
+      const cronPolicies = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/access/apps/${cronApp.id}/policies`);
+      if (!cronPolicies) {
+        warn('  Cron Access policies', 'token lacks Access: Apps and Policies Read');
+      } else {
+        const cronBypass = cronPolicies.result.find(policy =>
+          policy.name === 'Bearer-authenticated cron compatibility' &&
+          policy.decision === 'bypass' &&
+          (policy.include || []).some(rule => rule.everyone)
+        );
+        assert('  Bearer-authenticated cron compatibility policy exists', Boolean(cronBypass), true);
       }
     }
   }
