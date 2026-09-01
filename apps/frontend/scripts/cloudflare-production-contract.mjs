@@ -10,6 +10,16 @@ export const PRODUCTION_SERVICES = Object.freeze({
   api: 'syrabit-api-prod',
 });
 
+export const AI_PLUGIN_METADATA = Object.freeze({
+  schema_version: 'v1',
+  name_for_human: 'Syrabit.ai',
+  name_for_model: 'syrabit_ai',
+  url: 'https://syrabit.ai',
+  api_schema_url: 'https://syrabit.ai/.well-known/openapi.json',
+  api_url: 'https://api.syrabit.ai',
+  contact_email: 'founder@syrabit.ai',
+});
+
 /**
  * Each tuple is [binding name, Cloudflare binding type, optional service target].
  * The shape intentionally matches the checks in the annual review, nightly

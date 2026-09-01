@@ -740,3 +740,39 @@ jobs:
           status="$(curl -sS -L -o /dev/null -w '%{http_code}' "https://syrabit.ai" --max-time 30)"
           test "$status" = "200"
           echo "Frontend reachability passed: HTTP ${status}"
+
+      - name: AI plugin manifest is valid JSON and not the SPA shell
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/ai-plugin.headers -o /tmp/ai-plugin.json \
+            -w '%{http_code}' --max-time 30 \
+            "https://syrabit.ai/.well-known/ai-plugin.json")"
+          test "$status" = "200"
+          grep -qi '^content-type: application/json' /tmp/ai-plugin.headers
+          python3 - /tmp/ai-plugin.json <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as f:
+              plugin = json.load(f)
+          assert plugin["schema_version"] == "v1", plugin
+          assert plugin["name_for_human"] == "Syrabit.ai", plugin
+          assert plugin["name_for_model"] == "syrabit_ai", plugin
+          assert plugin["url"] == "https://syrabit.ai", plugin
+          assert plugin["api"]["url"] == "https://syrabit.ai/.well-known/openapi.json", plugin
+          assert plugin["api"]["base_url"] == "https://api.syrabit.ai", plugin
+          assert plugin["contact_email"] == "founder@syrabit.ai", plugin
+          assert "<div" not in json.dumps(plugin).lower(), plugin
+          PY
+          schema_status="$(curl -sS -D /tmp/ai-plugin-openapi.headers \
+            -o /tmp/ai-plugin-openapi.json -w '%{http_code}' --max-time 30 \
+            "https://syrabit.ai/.well-known/openapi.json")"
+          test "$schema_status" = "200"
+          grep -qi '^content-type: application/json' /tmp/ai-plugin-openapi.headers
+          python3 - /tmp/ai-plugin-openapi.json <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as f:
+              schema = json.load(f)
+          assert schema["openapi"].startswith("3."), schema
+          assert {"url": "https://api.syrabit.ai", "description": "Syrabit.ai production API"} in schema["servers"], schema
+          operation = schema["paths"]["/api/v1/content/search"]["get"]
+          assert operation["operationId"] == "searchSyrabitContent", operation
+          PY

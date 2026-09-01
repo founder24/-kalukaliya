@@ -484,7 +484,7 @@ jobs:
           test "$status" = "200"
           echo "Frontend reachability passed: HTTP ${status}"
 
-      - name: Pages custom Worker serves crawler HTML, feeds, and true 404s
+      - name: Pages serves crawler artifacts and true 404s
         run: |
           set -euo pipefail
           bot_ua='Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
@@ -505,6 +505,42 @@ jobs:
               *.txt) grep -qi '^content-type: text/plain' "$headers"; test -s "$output" ;;
             esac
           done
+          plugin_status="$(curl -sS -D /tmp/ai-plugin.headers -o /tmp/ai-plugin.json \
+            -w '%{http_code}' --max-time 30 \
+            "${FRONTEND_URL}/.well-known/ai-plugin.json")"
+          test "$plugin_status" = "200" || {
+            cat /tmp/ai-plugin.json
+            echo "AI plugin manifest returned ${plugin_status}"
+            exit 1
+          }
+          grep -qi '^content-type: application/json' /tmp/ai-plugin.headers
+          python3 - /tmp/ai-plugin.json <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as f:
+              plugin = json.load(f)
+          assert plugin["schema_version"] == "v1", plugin
+          assert plugin["name_for_human"] == "Syrabit.ai", plugin
+          assert plugin["name_for_model"] == "syrabit_ai", plugin
+          assert plugin["url"] == "https://syrabit.ai", plugin
+          assert plugin["api"]["url"] == "https://syrabit.ai/.well-known/openapi.json", plugin
+          assert plugin["api"]["base_url"] == "https://api.syrabit.ai", plugin
+          assert plugin["contact_email"] == "founder@syrabit.ai", plugin
+          assert "<div" not in json.dumps(plugin).lower(), plugin
+          PY
+          schema_status="$(curl -sS -D /tmp/ai-plugin-openapi.headers \
+            -o /tmp/ai-plugin-openapi.json -w '%{http_code}' --max-time 30 \
+            "${FRONTEND_URL}/.well-known/openapi.json")"
+          test "$schema_status" = "200"
+          grep -qi '^content-type: application/json' /tmp/ai-plugin-openapi.headers
+          python3 - /tmp/ai-plugin-openapi.json <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as f:
+              schema = json.load(f)
+          assert schema["openapi"].startswith("3."), schema
+          assert {"url": "https://api.syrabit.ai", "description": "Syrabit.ai production API"} in schema["servers"], schema
+          operation = schema["paths"]["/api/v1/content/search"]["get"]
+          assert operation["operationId"] == "searchSyrabitContent", operation
+          PY
           missing="/release-health-missing-$(openssl rand -hex 12)"
           status="$(curl -sS -D /tmp/missing.headers -o /tmp/missing.html -w '%{http_code}' \
             --max-time 30 -A "$bot_ua" -H 'Accept: text/html' "${FRONTEND_URL}${missing}")"

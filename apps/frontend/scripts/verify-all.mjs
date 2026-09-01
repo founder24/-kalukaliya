@@ -20,6 +20,7 @@ import {
   validateLibrarySnapshot,
   validatePrerenderManifest,
 } from "./release-guards.mjs";
+import { AI_PLUGIN_METADATA } from "./cloudflare-production-contract.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -71,6 +72,69 @@ const startedAt = Date.now();
 if (!fs.existsSync(distDir)) {
   console.error(`[verify-all] FAIL: dist/ missing at ${distDir}`);
   process.exit(1);
+}
+
+// ── AI plugin manifest ────────────────────────────────────────────────
+// This path is excluded from the Pages Worker in _routes.json and must
+// therefore be a real static JSON asset, never the SPA shell or a proxy
+// response. Keep the release contract aligned with the public manifest.
+const aiPluginPath = path.join(distDir, ".well-known", "ai-plugin.json");
+if (!fs.existsSync(aiPluginPath)) {
+  fail("missing static /.well-known/ai-plugin.json");
+} else {
+  try {
+    const aiPlugin = JSON.parse(fs.readFileSync(aiPluginPath, "utf-8"));
+    const expected = {
+      schema_version: AI_PLUGIN_METADATA.schema_version,
+      name_for_human: AI_PLUGIN_METADATA.name_for_human,
+      name_for_model: AI_PLUGIN_METADATA.name_for_model,
+      url: AI_PLUGIN_METADATA.url,
+      contact_email: AI_PLUGIN_METADATA.contact_email,
+    };
+    for (const [key, value] of Object.entries(expected)) {
+      if (aiPlugin[key] !== value) {
+        fail(`/.well-known/ai-plugin.json: ${key} must be ${JSON.stringify(value)}`);
+      }
+    }
+    if (aiPlugin.api?.base_url !== AI_PLUGIN_METADATA.api_url) {
+      fail(
+        `/.well-known/ai-plugin.json: api.base_url must be ${AI_PLUGIN_METADATA.api_url}`,
+      );
+    }
+    if (
+      aiPlugin.api?.type !== "openapi" ||
+      aiPlugin.api?.url !== AI_PLUGIN_METADATA.api_schema_url
+    ) {
+      fail(
+        `/.well-known/ai-plugin.json: api.url must be ${AI_PLUGIN_METADATA.api_schema_url}`,
+      );
+    }
+    if (JSON.stringify(aiPlugin).includes("<div") || JSON.stringify(aiPlugin).includes("<!doctype")) {
+      fail("/.well-known/ai-plugin.json: manifest contains SPA HTML");
+    }
+  } catch (err) {
+    fail(`/.well-known/ai-plugin.json: invalid JSON (${err.message})`);
+  }
+}
+
+const aiPluginSchemaPath = path.join(distDir, ".well-known", "openapi.json");
+if (!fs.existsSync(aiPluginSchemaPath)) {
+  fail("missing static /.well-known/openapi.json");
+} else {
+  try {
+    const schema = JSON.parse(fs.readFileSync(aiPluginSchemaPath, "utf-8"));
+    if (!/^3\.\d+\.\d+$/.test(schema.openapi || "")) {
+      fail("/.well-known/openapi.json: missing OpenAPI 3.x version");
+    }
+    if (!schema.servers?.some((server) => server.url === AI_PLUGIN_METADATA.api_url)) {
+      fail(`/.well-known/openapi.json: server must include ${AI_PLUGIN_METADATA.api_url}`);
+    }
+    if (!schema.paths?.["/api/v1/content/search"]?.get?.operationId) {
+      fail("/.well-known/openapi.json: public content search operation is missing");
+    }
+  } catch (err) {
+    fail(`/.well-known/openapi.json: invalid JSON (${err.message})`);
+  }
 }
 
 // ── Pass 1: walk dist/, gather all index.html files into memory ─────

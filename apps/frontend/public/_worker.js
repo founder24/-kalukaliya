@@ -73,13 +73,14 @@ const DEFAULT_SEO_BACKEND = "https://syrabit-api-prod.axomxplain.workers.dev";
 // Followup audit also found /feed.xml, /feed/<name>.xml, /llms.txt and
 // /llms-full.txt were excluded by `_routes.json` → bypassed the worker
 // → 404'd against the asset pipeline. Removed those exclusions and
-// extended this proxy to cover them too.
+// extended this proxy to cover them too. The AI plugin manifest is deliberately
+// excluded in _routes.json so Pages serves its static JSON file directly.
 //
 // Fix: when a request lands on any of these paths, proxy directly to
 // the matching backend route and force the correct Content-Type. Cached
 // at the edge for an hour (matches _headers s-maxage).
 const SEO_PASSTHROUGH_RE =
-  /^\/(sitemap[a-z0-9_-]*\.xml|sitemap-index\.xml|feed\.xml|feed\.json|rss\.xml|feed\/[a-z0-9_-]+\.xml|llms\.txt|llms-full\.txt|robots\.txt|\.well-known\/ai-plugin\.json|api\/v1\/seo\/sitemap[a-z0-9_-]*\.xml|api\/v1\/seo\/feed\.json)$/i;
+  /^\/(sitemap[a-z0-9_-]*\.xml|sitemap-index\.xml|feed\.xml|feed\.json|rss\.xml|feed\/[a-z0-9_-]+\.xml|llms\.txt|llms-full\.txt|robots\.txt|api\/v1\/seo\/sitemap[a-z0-9_-]*\.xml|api\/v1\/seo\/feed\.json)$/i;
 // IndexNow keyfiles (32-hex .txt or *indexnow*.txt) are intentionally
 // excluded — they're shipped as static assets in dist/ so the Pages
 // ASSETS pipeline serves them directly. Routing them through the
