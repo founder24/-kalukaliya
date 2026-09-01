@@ -1,5 +1,6 @@
 import httpx
 import logging
+from urllib.parse import quote
 
 from app.config import settings
 from app.models.user import User
@@ -22,6 +23,7 @@ class RazorpayClient:
         self.base_url = "https://api.razorpay.com/v1"
         self._client = httpx.AsyncClient(
             timeout=30.0,
+            follow_redirects=False,
             auth=(self.key_id, self.key_secret)
             if self.key_id and self.key_secret
             else None,
@@ -54,6 +56,8 @@ class RazorpayClient:
                     },
                 },
             )
+            if 300 <= response.status_code < 400:
+                raise RuntimeError("Payment gateway returned an unexpected redirect")
             response.raise_for_status()
             data = response.json()
 
@@ -78,9 +82,12 @@ class RazorpayClient:
                 "Payment service not configured - Razorpay credentials missing"
             )
         try:
+            safe_subscription_id = quote(subscription_id, safe="")
             response = await self._client.delete(
-                f"{self.base_url}/subscriptions/{subscription_id}"
+                f"{self.base_url}/subscriptions/{safe_subscription_id}"
             )
+            if 300 <= response.status_code < 400:
+                raise RuntimeError("Payment gateway returned an unexpected redirect")
             response.raise_for_status()
             return True
 

@@ -10,9 +10,11 @@ from datetime import datetime, timezone, timedelta
 
 from app.api.v1.admin import require_admin_session, csrf_guard
 from app.config import settings
+from app.core.security import is_safe_url
 from app.db.mongo import get_mongo_client
 
 logger = logging.getLogger(__name__)
+INDEXNOW_SITE_HOSTS = {"syrabit.ai"}
 
 router = APIRouter(
     tags=["Admin IndexNow"],
@@ -22,6 +24,22 @@ router = APIRouter(
 
 def _db():
     return get_mongo_client()[settings.MONGODB_DB_NAME]
+
+
+async def _require_trusted_site_url(url: object) -> str:
+    if not isinstance(url, str):
+        raise HTTPException(status_code=400, detail="Each URL must be a string")
+    candidate = url.strip()
+    if not await is_safe_url(
+        candidate,
+        allowed_schemes=["https"],
+        allowed_hosts=INDEXNOW_SITE_HOSTS,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="URLs must use HTTPS and the syrabit.ai host",
+        )
+    return candidate
 
 
 @router.get("/indexnow/status")
@@ -64,16 +82,17 @@ async def indexnow_ping(request: Request):
     Body: { "url": "https://syrabit.ai/..." }
     """
     body = await request.json()
-    url = body.get("url", "").strip()
+    url = body.get("url", "")
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
+    url = await _require_trusted_site_url(url)
     api_key = getattr(settings, "INDEXNOW_API_KEY", None)
     if not api_key:
         raise HTTPException(status_code=503, detail="INDEXNOW_API_KEY not configured")
 
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
             resp = await client.get(
                 "https://api.indexnow.org/indexnow",
                 params={"url": url, "key": api_key, "keyLocation": f"https://syrabit.ai/{api_key}.txt"},
@@ -100,16 +119,18 @@ async def indexnow_submit_urls(request: Request):
     """
     body = await request.json()
     urls = body.get("urls", [])
-    if not urls:
+    if not isinstance(urls, list) or not urls:
         raise HTTPException(status_code=400, detail="urls list is required")
-    urls = [u for u in urls if u.startswith("https://")][:10000]
+    if len(urls) > 10000:
+        raise HTTPException(status_code=400, detail="At most 10,000 URLs may be submitted")
+    urls = [await _require_trusted_site_url(url) for url in urls]
     api_key = getattr(settings, "INDEXNOW_API_KEY", None)
     if not api_key:
         raise HTTPException(status_code=503, detail="INDEXNOW_API_KEY not configured")
 
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             resp = await client.post(
                 "https://api.indexnow.org/indexnow",
                 json={
@@ -182,7 +203,7 @@ async def indexnow_backfill_all():
             batch_size = 1000
             submitted = 0
             now = datetime.now(timezone.utc)
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
                 for i in range(0, len(urls), batch_size):
                     batch = urls[i:i + batch_size]
                     resp = await client.post(

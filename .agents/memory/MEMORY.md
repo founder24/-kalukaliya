@@ -62,3 +62,4 @@
 - [Cloudflare account API contracts](cloudflare-account-api-contracts.md) — R2 custom domains and Access writes require current, resource-specific API fields and permissions.
 - [Chat transport retry identity](chat-transport-retry-identity.md) — Keep one stable logical request key across bounded transport retries so quota is reserved only once.
 - [Worker chat web egress and latency](worker-chat-web-egress-latency.md) — Wikimedia is blocked from Workers; Crossref works, and the fast Llama model meets the first-token target.
+- [Outbound URL connection pinning](outbound-url-connection-pinning.md) — URL checks must pin HTTP connections to validated public DNS answers and revalidate every redirect.

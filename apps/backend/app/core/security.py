@@ -102,19 +102,92 @@ def sanitize_user_input(text: str) -> str:
     return text.strip()
 
 
-async def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> bool:
+def _normalise_hostname(hostname: str) -> Optional[str]:
+    """Return a DNS-safe lower-case hostname, or None for malformed input."""
+    try:
+        host = hostname.rstrip(".").encode("idna").decode("ascii").lower()
+    except (UnicodeError, AttributeError):
+        return None
+    if not host or any(char in host for char in "\x00\r\n\\/%"):
+        return None
+    return host
+
+
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Reject every non-public address, including cloud metadata ranges."""
+    return (
+        not ip.is_global
+        or ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+        or ip in ipaddress.ip_network("169.254.169.254/32")
+        or ip in ipaddress.ip_network("fd00:ec2::254/128")
+    )
+
+
+async def resolve_public_ip_addresses(
+    hostname: str,
+    port: int,
+    *,
+    timeout: float = 3.0,
+) -> tuple[str, ...]:
+    """Resolve a host and return addresses only when every answer is public."""
+    import asyncio
+
+    normalised = _normalise_hostname(hostname)
+    if not normalised:
+        return ()
+
+    try:
+        literal_ip = ipaddress.ip_address(normalised)
+        addresses = [str(literal_ip)]
+    except ValueError:
+        try:
+            loop = asyncio.get_running_loop()
+            answers = await asyncio.wait_for(
+                loop.getaddrinfo(normalised, port),
+                timeout=timeout,
+            )
+            addresses = [answer[4][0] for answer in answers]
+        except (asyncio.TimeoutError, OSError, ValueError):
+            return ()
+
+    unique_addresses: list[str] = []
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            return ()
+        if _is_blocked_ip(ip):
+            return ()
+        canonical = str(ip)
+        if canonical not in unique_addresses:
+            unique_addresses.append(canonical)
+    return tuple(unique_addresses)
+
+
+async def is_safe_url(
+    url: str,
+    allowed_schemes: Optional[list[str]] = None,
+    allowed_hosts: Optional[list[str] | set[str] | tuple[str, ...]] = None,
+) -> bool:
     """
     Validate URL to prevent SSRF attacks.
 
     Checks:
     - Scheme must be http or https
     - No userinfo (user:pass@domain)
-    - Not pointing to private/internal IPs
-    - Not localhost or link-local addresses
+    - Not pointing to private/internal/reserved IPs
+    - Not localhost, link-local, or cloud metadata addresses
+    - If supplied, hostname must exactly match the allowlist
 
     Args:
         url: The URL to validate
         allowed_schemes: List of allowed schemes (default: ['http', 'https'])
+        allowed_hosts: Optional exact hostname allowlist
 
     Returns:
         True if URL is safe, False otherwise
@@ -123,10 +196,16 @@ async def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> 
         allowed_schemes = ["http", "https"]
 
     try:
+        if not isinstance(url, str) or not url or url != url.strip():
+            return False
+        if any(ord(char) < 0x20 or char == "\x7f" for char in url):
+            return False
+
         parsed = urlparse(url)
 
         # Check scheme
-        if parsed.scheme.lower() not in allowed_schemes:
+        schemes = {scheme.lower() for scheme in allowed_schemes}
+        if parsed.scheme.lower() not in schemes:
             return False
 
         # Check for userinfo (user:pass@domain)
@@ -136,40 +215,30 @@ async def is_safe_url(url: str, allowed_schemes: Optional[list[str]] = None) -> 
         # Must have a hostname
         if not parsed.hostname:
             return False
+        hostname = _normalise_hostname(parsed.hostname)
+        if not hostname:
+            return False
 
-        # Resolve hostname to IP and check if it's private
-        import asyncio
+        if allowed_hosts is not None:
+            trusted_hosts = {
+                normalised
+                for host in allowed_hosts
+                if (normalised := _normalise_hostname(host))
+            }
+            if hostname not in trusted_hosts:
+                return False
 
+        # Accessing .port validates malformed ports. HTTP(S) targets must not
+        # be redirected to an alternate service port.
         try:
-            loop = asyncio.get_event_loop()
-            ip_addresses = await asyncio.wait_for(
-                loop.getaddrinfo(parsed.hostname, None),
-                timeout=3.0,
-            )
-            for family, socktype, proto, canonname, sockaddr in ip_addresses:
-                ip_str = sockaddr[0]
-                try:
-                    ip = ipaddress.ip_address(ip_str)
-                    # Block private, loopback, link-local, and multicast IPs
-                    if (
-                        ip.is_private
-                        or ip.is_loopback
-                        or ip.is_link_local
-                        or ip.is_multicast
-                    ):
-                        return False
-                    # Block AWS metadata endpoint specifically
-                    if str(ip).startswith("169.254."):
-                        return False
-                except ValueError:
-                    continue
-        except asyncio.TimeoutError:
+            port = parsed.port
+        except ValueError:
             return False
-        except OSError:
-            # DNS resolution failed - treat as unsafe
+        expected_port = 443 if parsed.scheme.lower() == "https" else 80
+        if port is not None and port != expected_port:
             return False
 
-        return True
+        return bool(await resolve_public_ip_addresses(hostname, port or expected_port))
 
     except Exception:
         return False
@@ -181,7 +250,7 @@ def is_internal_ip(ip_str: str) -> bool:
     """
     try:
         ip = ipaddress.ip_address(ip_str)
-        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+        return _is_blocked_ip(ip)
     except ValueError:
         return True  # If we can't parse it, assume it's unsafe
 

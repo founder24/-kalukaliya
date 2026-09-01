@@ -3,9 +3,11 @@ Admin PYQ (Previous Year Question Paper) endpoints.
 Stores PYQ records in the 'pyqs' MongoDB collection via raw motor (no Beanie model needed).
 """
 import logging
+import ssl
 import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -13,8 +15,143 @@ from pydantic import BaseModel
 
 from app.api.v1.admin import require_admin_session, csrf_guard
 from app.config import settings
+from app.core.security import is_safe_url, resolve_public_ip_addresses
 
 logger = logging.getLogger(__name__)
+_PYQ_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_PYQ_MAX_REDIRECTS = 3
+
+
+class _PinnedNetworkBackend:
+    """Connect only to DNS answers that were validated as public."""
+
+    def __init__(self, hostname: str, addresses: tuple[str, ...]):
+        import httpcore
+
+        self._hostname = hostname.rstrip(".").lower()
+        self._addresses = addresses
+        self._backend = httpcore.AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options=None,
+    ):
+        import httpcore
+
+        if host.rstrip(".").lower() != self._hostname:
+            raise httpcore.ConnectError("Outbound host changed after validation")
+        last_error: Exception | None = None
+        for address in self._addresses:
+            try:
+                return await self._backend.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except Exception as exc:
+                last_error = exc
+        if last_error:
+            raise last_error
+        raise httpcore.ConnectError("No validated address available")
+
+
+class _PinnedAsyncHTTPTransport(httpx.AsyncHTTPTransport):
+    def __init__(self, hostname: str, addresses: tuple[str, ...]):
+        import httpcore
+
+        super().__init__(verify=True, trust_env=False, retries=0)
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=ssl.create_default_context(),
+            network_backend=_PinnedNetworkBackend(hostname, addresses),
+            retries=0,
+        )
+
+
+def _canonical_url_path(path: str) -> Optional[str]:
+    """Decode path escapes and reject traversal or encoded separators."""
+    decoded = path
+    for _ in range(16):
+        next_value = unquote(decoded)
+        if next_value == decoded:
+            break
+        decoded = next_value
+    else:
+        if unquote(decoded) != decoded:
+            return None
+    if "\x00" in decoded or "\\" in decoded:
+        return None
+    parts = decoded.split("/")
+    if any(part in {".", ".."} for part in parts):
+        return None
+    return decoded
+
+
+def _configured_gcs_bucket() -> Optional[str]:
+    if settings.GCS_CONTENT_BUCKET:
+        return settings.GCS_CONTENT_BUCKET
+    credentials = settings.google_credentials
+    project_id = credentials.get("project_id") if credentials else None
+    return f"{project_id}-syrabit-content" if project_id else None
+
+
+def _pyq_storage_target(url: str) -> tuple[set[str], bool]:
+    """Return exact trusted hosts and whether the path is storage-owned."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return set(), False
+
+    host = (parsed.hostname or "").rstrip(".").lower()
+    canonical_path = _canonical_url_path(parsed.path)
+    if canonical_path is None:
+        return set(), False
+    allowed_hosts: set[str] = {"storage.googleapis.com"}
+    path_allowed = False
+
+    r2_public = getattr(settings, "CF_R2_PUBLIC_URL", None)
+    if r2_public:
+        try:
+            r2 = urlparse(r2_public)
+            r2_host = (r2.hostname or "").rstrip(".").lower()
+            if r2.scheme.lower() == "https" and r2_host:
+                allowed_hosts.add(r2_host)
+                r2_prefix = f"{r2.path.rstrip('/')}/pyq-uploads/"
+                if host == r2_host and canonical_path.startswith(r2_prefix):
+                    path_allowed = True
+        except ValueError:
+            pass
+
+    # google-cloud-storage Blob.public_url has the shape
+    # https://storage.googleapis.com/<bucket>/pyq-uploads/<object>.
+    path_parts = canonical_path.split("/")
+    gcs_bucket = _configured_gcs_bucket()
+    if (
+        host == "storage.googleapis.com"
+        and gcs_bucket
+        and len(path_parts) >= 4
+        and path_parts[1] == gcs_bucket
+        and path_parts[2] == "pyq-uploads"
+        and path_parts[3]
+    ):
+        path_allowed = True
+
+    return allowed_hosts, path_allowed
+
+
+async def _trusted_pyq_file_addresses(url: str) -> tuple[str, ...]:
+    allowed_hosts, path_allowed = _pyq_storage_target(url)
+    if not path_allowed or not await is_safe_url(
+        url, allowed_schemes=["https"], allowed_hosts=allowed_hosts
+    ):
+        return ()
+    parsed = urlparse(url)
+    return await resolve_public_ip_addresses(parsed.hostname or "", 443)
 
 
 async def _upload_pyq_file(data: bytes, fname: str, ct: str, chapter_id: str) -> str:
@@ -343,10 +480,28 @@ async def _extract_text_from_pyq(doc: dict) -> str:
         return ""
 
     try:
-        import httpx
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.get(file_url)
-            r.raise_for_status()
+        current_url = file_url
+        for redirect_count in range(_PYQ_MAX_REDIRECTS + 1):
+            addresses = await _trusted_pyq_file_addresses(current_url)
+            if not addresses:
+                raise ValueError("PYQ file URL is not an approved public storage URL")
+            parsed = urlparse(current_url)
+            transport = _PinnedAsyncHTTPTransport(parsed.hostname or "", addresses)
+            async with httpx.AsyncClient(
+                timeout=30,
+                follow_redirects=False,
+                transport=transport,
+            ) as client:
+                r = await client.get(current_url)
+            if r.status_code not in _PYQ_REDIRECT_STATUSES:
+                r.raise_for_status()
+                break
+            if redirect_count == _PYQ_MAX_REDIRECTS:
+                raise ValueError("PYQ file URL exceeded the redirect limit")
+            location = r.headers.get("location")
+            if not location:
+                raise ValueError("PYQ file redirect did not include a location")
+            current_url = urljoin(current_url, location)
         import pypdf
         from io import BytesIO
         reader = pypdf.PdfReader(BytesIO(r.content))

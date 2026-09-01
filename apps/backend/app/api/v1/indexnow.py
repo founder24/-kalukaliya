@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from app.config import settings
+from app.core.security import is_safe_url
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ router = APIRouter()
 
 INDEXNOW_API_URL = "https://api.indexnow.org/indexnow"
 BATCH_SIZE = 100
+INDEXNOW_SITE_HOSTS = {"syrabit.ai"}
 
 
 class IndexNowRequest(BaseModel):
@@ -52,11 +54,23 @@ async def submit_urls(
     urls = body.urls
     if not urls:
         return IndexNowResponse(submitted=0, failed=0, detail="No URLs provided")
+    if len(urls) > 10000:
+        raise HTTPException(status_code=400, detail="At most 10,000 URLs may be submitted")
+    for url in urls:
+        if not await is_safe_url(
+            url,
+            allowed_schemes=["https"],
+            allowed_hosts=INDEXNOW_SITE_HOSTS,
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="URLs must use HTTPS and the syrabit.ai host",
+            )
 
     submitted = 0
     failed = 0
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
         for i in range(0, len(urls), BATCH_SIZE):
             batch = urls[i : i + BATCH_SIZE]
             payload = {

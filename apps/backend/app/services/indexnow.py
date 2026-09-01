@@ -45,7 +45,7 @@ async def push_indexnow(urls: list[str]) -> dict:
     }
 
     results = {}
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
         for endpoint in INDEXNOW_ENDPOINTS:
             try:
                 response = await client.post(
