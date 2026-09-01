@@ -6,7 +6,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # repository_dispatch requires contents: write. The dispatch step is still
+  # best-effort so a repository policy or token scope cannot hide probe data.
+  contents: write
   issues: write
 
 concurrency:
@@ -38,11 +40,15 @@ jobs:
 
       - name: Handle endpoint failure
         if: steps.uptime.outputs.exit_code != '0'
+        id: incident
+        continue-on-error: true
+        env:
+          CHECK_OUTPUT: ${{ steps.uptime.outputs.output }}
         uses: actions/github-script@v7
         with:
           script: |
             const timestamp = new Date().toISOString();
-            const output = `${{ steps.uptime.outputs.output }}`.replace(/`/g, "'");
+            const output = process.env.CHECK_OUTPUT || 'No probe output captured';
 
             // Search for existing open incident issue
             const { data: issues } = await github.rest.issues.listForRepo({
@@ -94,6 +100,10 @@ jobs:
 
       - name: Dispatch endpoint-down event
         if: steps.uptime.outputs.exit_code != '0'
+        id: dispatch
+        continue-on-error: true
+        env:
+          CHECK_OUTPUT: ${{ steps.uptime.outputs.output }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -103,12 +113,14 @@ jobs:
               event_type: 'endpoint-down',
               client_payload: {
                 timestamp: new Date().toISOString(),
-                check_output: '${{ steps.uptime.outputs.exit_code }}',
+                exit_code: '${{ steps.uptime.outputs.exit_code }}',
+                check_output: process.env.CHECK_OUTPUT || 'No probe output captured',
               },
             });
 
       - name: Alert via webhook
         if: steps.uptime.outputs.exit_code != '0'
+        id: webhook
         continue-on-error: true
         run: |
           curl -sf -X POST "${{ secrets.ALERT_WEBHOOK_URL }}" \
@@ -117,6 +129,8 @@ jobs:
 
       - name: Handle recovery
         if: steps.uptime.outputs.exit_code == '0'
+        id: recovery
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
@@ -152,3 +166,41 @@ jobs:
                 core.info(`Closed incident issue #${issue.number}`);
               }
             }
+
+      - name: Summarize endpoint and notification results
+        if: always()
+        env:
+          ENDPOINT_EXIT_CODE: ${{ steps.uptime.outputs.exit_code }}
+          INCIDENT_RESULT: ${{ steps.incident.outcome }}
+          DISPATCH_RESULT: ${{ steps.dispatch.outcome }}
+          WEBHOOK_RESULT: ${{ steps.webhook.outcome }}
+          RECOVERY_RESULT: ${{ steps.recovery.outcome }}
+        run: |
+          {
+            echo "## Production uptime monitor"
+            echo ""
+            echo "### Endpoint result"
+            if [[ "$ENDPOINT_EXIT_CODE" == "0" ]]; then
+              echo "- **HEALTHY** — all production endpoints responded successfully."
+            else
+              echo "- **DOWN** — one or more production endpoints failed (exit code: ${ENDPOINT_EXIT_CODE:-unknown})."
+            fi
+            echo ""
+            echo "### Notification result (non-blocking)"
+            echo "- Incident issue: ${INCIDENT_RESULT:-not run}"
+            echo "- Repository dispatch: ${DISPATCH_RESULT:-not run}"
+            echo "- Webhook: ${WEBHOOK_RESULT:-not run}"
+            echo "- Recovery issue update: ${RECOVERY_RESULT:-not run}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$ENDPOINT_EXIT_CODE" != "0" ]]; then
+            echo "::error title=Endpoint failure::Production uptime probes failed. Notification failures, if any, are reported separately above."
+            exit 1
+          fi
+
+          for result in "$INCIDENT_RESULT" "$DISPATCH_RESULT" "$WEBHOOK_RESULT" "$RECOVERY_RESULT"; do
+            if [[ "$result" == "failure" ]]; then
+              echo "::warning title=Notification failure::An escalation or recovery notification was unavailable, but endpoint health passed."
+              break
+            fi
+          done

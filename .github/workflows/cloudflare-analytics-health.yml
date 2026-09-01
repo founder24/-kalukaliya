@@ -9,7 +9,9 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  API_URL: https://api.syrabit.ai/api/v1/admin/cron/cloudflare-analytics-health
+
+permissions:
+  contents: read
 
 jobs:
   cloudflare-analytics-health:
@@ -18,35 +20,98 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Run read-only Cloudflare overview probe
+      - uses: actions/checkout@v4
+
+      - name: Run Cloudflare-native analytics contract probe
+        id: probe
+        continue-on-error: true
+        env:
+          CLOUDFLARE_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
         run: |
-          set -euo pipefail
-          HTTP_STATUS=$(curl --silent --show-error \
-            --output /tmp/cloudflare-analytics-health.json \
-            --write-out "%{http_code}" \
-            --request POST "$API_URL" \
-            --header "CF-Access-Client-Id: ${{ secrets.CF_ACCESS_CLIENT_ID }}" \
-            --header "CF-Access-Client-Secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}" \
-            --header "Authorization: Bearer ${{ secrets.TRANSLATE_CRON_SECRET }}" \
-            --header "Content-Type: application/json" \
-            --max-time 30)
+          set +e
+          node --input-type=module <<'NODE'
+          import {
+            CLOUDFLARE_ANALYTICS_CONTRACT,
+            buildCloudflareAnalyticsHealthQuery,
+          } from './apps/frontend/scripts/cloudflare-production-contract.mjs';
 
-          echo "Cloudflare analytics health HTTP: ${HTTP_STATUS}"
-          cat /tmp/cloudflare-analytics-health.json
+          const token = process.env.CLOUDFLARE_ANALYTICS_TOKEN?.trim();
+          const zoneTag = process.env.CLOUDFLARE_ZONE_ID?.trim();
+          if (!token || !zoneTag) {
+            throw new Error('CLOUDFLARE_ANALYTICS_TOKEN and CLOUDFLARE_ZONE_ID are required');
+          }
 
-          if [[ "$HTTP_STATUS" -lt 200 || "$HTTP_STATUS" -ge 300 ]]; then
-            echo "::error::Cloudflare analytics overview health probe failed (HTTP ${HTTP_STATUS})."
-            echo "::error::The backend recorded a remediation alert; check Admin → Alerts."
+          const response = await fetch(CLOUDFLARE_ANALYTICS_CONTRACT.endpoint, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              query: buildCloudflareAnalyticsHealthQuery(),
+              variables: { zoneTag },
+            }),
+            signal: AbortSignal.timeout(30_000),
+          });
+
+          let payload;
+          try {
+            payload = await response.json();
+          } catch {
+            throw new Error(`Cloudflare GraphQL returned non-JSON HTTP ${response.status}`);
+          }
+
+          console.log(`Cloudflare analytics GraphQL HTTP: ${response.status}`);
+          console.log(JSON.stringify(payload, null, 2));
+          if (!response.ok) {
+            throw new Error(`Cloudflare analytics endpoint returned HTTP ${response.status}`);
+          }
+          if (payload.errors?.length) {
+            throw new Error(
+              `Cloudflare analytics GraphQL error: ${payload.errors[0].message || 'unknown error'}`,
+            );
+          }
+
+          const zone = payload.data?.viewer?.zones?.[0];
+          const groups = zone?.[CLOUDFLARE_ANALYTICS_CONTRACT.groupsField];
+          const uniqueVisitors = zone?.uniqueVisitors;
+          if (!Array.isArray(groups)) {
+            throw new Error(
+              `Cloudflare analytics contract missing ${CLOUDFLARE_ANALYTICS_CONTRACT.groupsField}`,
+            );
+          }
+          if (!Array.isArray(uniqueVisitors)) {
+            throw new Error('Cloudflare analytics contract missing uniqueVisitors');
+          }
+          console.log(
+            `✔ Cloudflare-native analytics contract is healthy (${groups.length} hourly buckets)`,
+          );
+          NODE
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Summarize analytics endpoint result
+        if: always()
+        env:
+          ENDPOINT_EXIT_CODE: ${{ steps.probe.outputs.exit_code }}
+        run: |
+          {
+            echo "## Cloudflare analytics health"
+            echo ""
+            echo "### Endpoint result"
+            if [[ "$ENDPOINT_EXIT_CODE" == "0" ]]; then
+              echo "- **HEALTHY** — the Cloudflare GraphQL analytics contract passed."
+            else
+              echo "- **DOWN** — the Cloudflare GraphQL analytics contract failed (exit code: ${ENDPOINT_EXIT_CODE:-unknown})."
+            fi
+            echo ""
+            echo "### Notification result"
+            echo "- No notification channel is coupled to this probe; endpoint status is reported independently."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$ENDPOINT_EXIT_CODE" != "0" ]]; then
+            echo "::error title=Endpoint failure::Cloudflare-native analytics contract probe failed."
             exit 1
           fi
-
-          python3 - <<'PY'
-          import json
-
-          with open("/tmp/cloudflare-analytics-health.json") as response:
-              payload = json.load(response)
-
-          assert payload.get("status") == "healthy", payload
-          assert payload.get("hourly_buckets_returned") is True, payload
-          PY
-          echo "✔ Cloudflare Analytics overview query is healthy for the production zone"

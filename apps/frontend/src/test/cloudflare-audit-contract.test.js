@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  buildCloudflareAnalyticsHealthQuery,
+  CLOUDFLARE_ANALYTICS_CONTRACT,
   EXPECTED_PRODUCTION_BINDINGS,
+  PRODUCTION_ENDPOINTS,
   PRODUCTION_SERVICES,
   REQUIRED_PRODUCTION_BINDINGS,
 } from '../../scripts/cloudflare-production-contract.mjs';
 
 const scriptsDir = path.resolve(process.cwd(), 'scripts');
+const repoRoot = path.resolve(process.cwd(), '../..');
 const scheduledAudits = [
   'cloudflare-annual-review.js',
   'nightly-smoke.js',
@@ -49,6 +53,45 @@ describe('scheduled Cloudflare audit contract', () => {
       'kv_namespace',
     ]);
     expect(bindings.find(([name]) => name === 'AI')).toEqual(['AI', 'ai']);
+  });
+
+  it('defines the Cloudflare-native analytics endpoint and hourly query shape', () => {
+    expect(PRODUCTION_ENDPOINTS.cloudflareGraphql).toBe(
+      'https://api.cloudflare.com/client/v4/graphql',
+    );
+    expect(CLOUDFLARE_ANALYTICS_CONTRACT).toMatchObject({
+      endpoint: PRODUCTION_ENDPOINTS.cloudflareGraphql,
+      rangeHours: 24,
+      groupsField: 'httpRequests1hGroups',
+      dimensions: 'datetime',
+    });
+
+    const query = buildCloudflareAnalyticsHealthQuery('2026-09-01T12:00:00.000Z');
+    expect(query).toContain('httpRequests1hGroups');
+    expect(query).toContain('uniqueVisitors: httpRequestsAdaptiveGroups');
+    expect(query).toContain('datetime_geq: "2026-08-31T12:00:00.000Z"');
+    expect(query).toContain('datetime_lt: "2026-09-01T12:00:00.000Z"');
+  });
+
+  it('keeps scheduled health workflows on the active contract with non-blocking escalation', () => {
+    const analyticsWorkflow = fs.readFileSync(
+      path.join(repoRoot, '.github/workflows/cloudflare-analytics-health.yml'),
+      'utf8',
+    );
+    expect(analyticsWorkflow).toContain('buildCloudflareAnalyticsHealthQuery');
+    expect(analyticsWorkflow).toContain('CLOUDFLARE_ANALYTICS_CONTRACT.endpoint');
+    expect(analyticsWorkflow).not.toContain('/api/v1/admin/cron/cloudflare-analytics-health');
+
+    const uptimeWorkflow = fs.readFileSync(
+      path.join(repoRoot, '.github/workflows/agent-uptime-monitor.yml'),
+      'utf8',
+    );
+    expect(uptimeWorkflow).toMatch(/permissions:\s+[\s\S]*contents: write/);
+    expect(uptimeWorkflow).toMatch(
+      /id: dispatch\s+continue-on-error: true[\s\S]*createDispatchEvent/,
+    );
+    expect(uptimeWorkflow).toContain('Notification result (non-blocking)');
+    expect(uptimeWorkflow).toContain('Production uptime probes failed');
   });
 
   it.each(scheduledAudits)('%s consumes the shared service and binding contract', (fileName) => {
