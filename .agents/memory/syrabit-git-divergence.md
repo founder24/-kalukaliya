@@ -12,6 +12,17 @@ The Replit GitHub OAuth connector does not authenticate the workspace's normal
 Git remote. Its API proxy can also trigger Replit's Cloudflare protection during
 bulk blob uploads or on some base64 payloads.
 
+Secret requests are write/consent flows, not secret readers: the secret-request
+callback never returns the saved value to the agent. A provider check using a
+property from its return value can therefore send an empty credential and
+produce a misleading 401.
+
+**Why:** Replit intentionally withholds secret values from the agent; only
+secret existence can be inspected safely through the environment-secrets view.
+
+**How to apply:** validate Git credentials through the Git tool's own
+authenticated operation, not by treating a secret-request result as a token.
+
 **Why:** a valid OAuth connection successfully read the repository and created
 Git blobs, but the Git CLI still used the invalid workspace PAT and the connector
 proxy blocked later blob requests before any branch-reference update.
