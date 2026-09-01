@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 
 import type { Env } from '../types';
 import { signAccessToken } from '../middleware/auth';
+import { AI_MODEL_PRIMARY } from '../services/ai';
 
 const ANON_ID = 'anon_0123456789abcdef0123456789abcdef';
 const OTHER_ANON_ID = 'anon_fedcba9876543210fedcba9876543210';
@@ -117,6 +118,67 @@ afterAll(async () => {
 });
 
 describe('anonymous identity flow', () => {
+  it('emits web attribution before Workers AI tokens for eligible current queries', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({
+      message: { items: [{
+        title: ['Education in Assam'],
+        URL: 'https://doi.org/10.1000/assam-education',
+        abstract: 'Education in Assam includes state institutions and curriculum authorities.',
+      }] },
+    }));
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        },
+        body: JSON.stringify({
+          message: 'What is the latest update in Assam education?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      const events = streamText
+        .split('\n')
+        .filter(line => line.startsWith('data: '))
+        .map(line => JSON.parse(line.slice(6)) as Record<string, unknown>);
+
+      expect(events[0]).toMatchObject({
+        event: 'source_card',
+        source_type: 'web_search',
+        web_used: true,
+        web_status: 'ok',
+      });
+      expect(events[0]?.web_sources).toEqual([{
+        title: 'Education in Assam',
+        url: 'https://doi.org/10.1000/assam-education',
+        source_type: 'web_search',
+      }]);
+      expect(events[1]).toMatchObject({ done: false });
+      expect(events.at(-1)).toMatchObject({
+        event: 'syrabit_done',
+        done: true,
+        route_trace: {
+          model: AI_MODEL_PRIMARY,
+          web_used: true,
+          web_status: 'ok',
+          web_results: 1,
+        },
+      });
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
   it('charges one quota slot when the same logical chat request is retried', async () => {
     const anonId = 'anon_cccccccccccccccccccccccccccccccc';
     const clientRequestId = `chat-request-${crypto.randomUUID()}`;

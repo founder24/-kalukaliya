@@ -446,6 +446,13 @@ jobs:
           PY
           echo "Deep binding probes passed without production writes."
 
+      - name: Worker chat first-token performance gate
+        env:
+          CHAT_API_ORIGIN: ${{ env.API_WORKER_URL }}
+          CHAT_FIRST_TOKEN_TARGET_MS: '3000'
+          CHAT_PERFORMANCE_SAMPLES: '3'
+        run: node scripts/test-worker-chat-performance.mjs
+
       - name: Public edge is reachable
         run: |
           set -euo pipefail

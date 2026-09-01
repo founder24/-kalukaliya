@@ -4,7 +4,7 @@
  * Uses Cloudflare's env.AI binding exclusively — no external HTTP calls.
  *
  * Models:
- *   Primary  : @cf/zai-org/glm-4.7-flash
+ *   Primary  : @cf/meta/llama-3.1-8b-instruct-fast
  *   Fallback : @cf/qwen/qwen3-30b-a3b-fp8
  *
  * Exports:
@@ -15,7 +15,7 @@
 // Workers AI model identifiers.
 // Typed as string because @cloudflare/workers-types narrows the `model`
 // parameter to a union that may not include newer model IDs before types update.
-export const AI_MODEL_PRIMARY  = '@cf/zai-org/glm-4.7-flash';
+export const AI_MODEL_PRIMARY  = '@cf/meta/llama-3.1-8b-instruct-fast';
 export const AI_MODEL_FALLBACK = '@cf/qwen/qwen3-30b-a3b-fp8';
 
 export interface GenerateOptions {

@@ -32,6 +32,7 @@ export interface Env {
   TRUSTPILOT_BUSINESS_UNIT_ID?: string;
   TRUSTPILOT_RATING_VALUE?: string;
   TRUSTPILOT_RATING_COUNT?: string;
+  WEB_SEARCH_ENABLED?: string;
 
   // Cloud Run fallback (optional — when set, unimplemented Workers routes proxy there)
   BACKEND_URL?: string;

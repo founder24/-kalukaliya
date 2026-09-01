@@ -272,8 +272,8 @@ describe('streamGenerate fallback behavior', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('model name constants', () => {
-  it('primary model is @cf/zai-org/glm-4.7-flash', () => {
-    expect(AI_MODEL_PRIMARY).toBe('@cf/zai-org/glm-4.7-flash');
+  it('primary model is the low-latency Workers AI Llama model', () => {
+    expect(AI_MODEL_PRIMARY).toBe('@cf/meta/llama-3.1-8b-instruct-fast');
   });
 
   it('fallback model is @cf/qwen/qwen3-30b-a3b-fp8', () => {

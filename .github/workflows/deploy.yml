@@ -683,6 +683,8 @@ jobs:
       needs.deploy-edge.result == 'success' &&
       needs.deploy-frontend.result == 'success'
     steps:
+      - uses: actions/checkout@v4
+
       - name: API Worker is live and Worker-native
         run: |
           set -euo pipefail
@@ -714,6 +716,13 @@ jobs:
           assert all(item["status"] == "healthy" for item in payload["checks"].values()), payload
           PY
           echo "Deep binding probes passed without production writes."
+
+      - name: Worker chat first-token performance gate
+        env:
+          CHAT_API_ORIGIN: https://syrabit-api-prod.axomxplain.workers.dev
+          CHAT_FIRST_TOKEN_TARGET_MS: '3000'
+          CHAT_PERFORMANCE_SAMPLES: '3'
+        run: node scripts/test-worker-chat-performance.mjs
 
       - name: Public edge is reachable
         run: |
