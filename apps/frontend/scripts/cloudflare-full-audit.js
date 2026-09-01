@@ -726,6 +726,12 @@ async function auditItem19ZarazAndObservatory() {
     warn(19, 6, 'Zaraz GA4 + Observatory', 'token lacks Zaraz: Read scope — Zaraz check skipped');
     return;
   } else if (!zaraz.success) {
+    const zarazCodes = (zaraz.errors || []).map((error) => error.code);
+    if (zarazCodes.includes(7000) && zarazCodes.includes(7003)) {
+      warn(19, 6, 'Zaraz GA4 + Observatory',
+        'Cloudflare does not expose the Zaraz config route for this zone/token; verify Zaraz in the dashboard');
+      return;
+    }
     // Guard: Zaraz API error → single FAIL then return (fixes the "23 rows / 5× item #19"
     // duplicate-reporting bug: without this return the later Observatory checks also
     // emit under item #19 even when Zaraz itself is unconfigured).
