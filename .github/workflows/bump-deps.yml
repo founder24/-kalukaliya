@@ -33,7 +33,7 @@ jobs:
 
       - name: Bump Node deps
         run: |
-          pnpm --filter @workspace/syrabit add -D postcss@8.5.15
+          pnpm --filter @workspace/syrabit add -D postcss@8.5.23
           pnpm install --no-frozen-lockfile
 
       - name: Create PR with bumped deps

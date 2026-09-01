@@ -2,9 +2,10 @@
 # Test dependencies live in requirements-dev.in (pytest, pytest-asyncio, pytest-cov)
 # Run: bash scripts/compile-deps.sh   (or see that script for the full pip-compile command)
 
-aiohttp>=3.14.0
+aiohttp>=3.14.3
 bcrypt
 beanie>=2.1.0
+cryptography>=50.0.0
 fastapi
 google-auth[aiohttp]
 google-cloud-secret-manager
@@ -16,18 +17,20 @@ jinja2
 markdown
 motor>=3.7.0
 numpy
+pyasn1>=0.6.4
 posthog
 pydantic[email]
 email-validator
-pydantic-settings
+pydantic-settings>=2.14.2
 pyjwt[crypto]
 pymongo>=4.11,<5
 python-dateutil
 python-dotenv
-python-multipart
+python-multipart>=0.0.31
 razorpay
 resend
 sentry-sdk
+starlette>=1.3.1
 tenacity
 uvicorn
-pypdf
+pypdf>=6.15.0
