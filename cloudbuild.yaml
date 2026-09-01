@@ -1,3 +1,10 @@
+# LEGACY, OPT-IN CLOUD RUN PIPELINE
+# ---------------------------------
+# The main-branch release is Cloudflare-native and is defined in
+# .github/workflows/deploy.yml. Nothing in that release invokes this file.
+# Run this configuration only when intentionally maintaining the retired
+# Cloud Run stack; its billing and Secret Manager requirements are isolated
+# from API Worker, edge Worker, Pages, and Cloudflare smoke deployments.
 steps:
   # ── Step 0 (SSH setup): Configure SSH deploy key for GitHub ──────────────
   # Uses a read-only deploy key stored in Secret Manager.

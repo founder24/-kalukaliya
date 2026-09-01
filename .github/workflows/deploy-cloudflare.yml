@@ -1,8 +1,8 @@
 name: Deploy — Cloudflare Native Only
 
-# This path deliberately does not authenticate to GCP or read GCP
-# Secret Manager. Worker secrets are provisioned from GitHub Actions secrets
-# through Wrangler, and the frontend build uses the optional GitHub secret.
+# This manual path mirrors the default Cloudflare jobs in deploy.yml. It
+# deliberately does not authenticate to GCP or read GCP Secret Manager.
+# Worker secrets are provisioned from GitHub Actions secrets through Wrangler.
 on:
   workflow_dispatch:
     inputs:

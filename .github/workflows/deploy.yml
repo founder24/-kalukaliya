@@ -1,5 +1,8 @@
 name: Deploy — Backend + Edge + Frontend
 
+# Cloudflare-native release jobs are the default path. The retired Cloud Run
+# backend is retained only as an explicit workflow_dispatch opt-in.
+
 # =============================================================================
 # Triggers
 # =============================================================================
@@ -17,7 +20,12 @@ on:
         default: 'false'
         type: boolean
       backend_only:
-        description: 'Deploy backend only (skip edge + frontend)'
+        description: 'With legacy backend enabled, skip Cloudflare deployments'
+        required: false
+        default: 'false'
+        type: boolean
+      deploy_legacy_backend:
+        description: 'Opt in to the retired GCP Cloud Run deployment path'
         required: false
         default: 'false'
         type: boolean
@@ -39,9 +47,46 @@ jobs:
     if: ${{ github.event.inputs.skip_dep_check != 'true' }}
     uses: ./.github/workflows/ci-deps.yml
 
+  cloudflare-preflight:
+    name: Cloudflare Release Secret Preflight
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.backend_only != 'true' }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
+      RESET_TOKEN_SECRET: ${{ secrets.RESET_TOKEN_SECRET }}
+      EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+      RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
+      RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+      RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+    steps:
+      - name: Validate Cloudflare deployment and Worker secrets
+        run: |
+          set -euo pipefail
+          required=(
+            CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
+            JWT_SECRET ADMIN_JWT_SECRET RESET_TOKEN_SECRET EDGE_SHARED_SECRET
+            RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET
+            RESEND_API_KEY
+          )
+          missing=()
+          for name in "${required[@]}"; do
+            [[ -n "${!name:-}" ]] || missing+=("$name")
+          done
+          if ((${#missing[@]} > 0)); then
+            echo "::error::Required Cloudflare release secrets are not supplied: ${missing[*]}"
+            echo "The Cloudflare release is blocked without consulting GCP Secret Manager."
+            exit 1
+          fi
+          echo "All required Cloudflare deployment and Worker secrets are supplied."
+
   gcp-preflight:
     name: GCP Billing & Secret Manager Preflight
     runs-on: ubuntu-latest
+    if: ${{ inputs.deploy_legacy_backend == true }}
     permissions:
       id-token: write
       contents: read
@@ -109,6 +154,7 @@ jobs:
     needs: [dep-check, gcp-preflight]
     if: |
       always() &&
+      inputs.deploy_legacy_backend == true &&
       (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
       needs.gcp-preflight.result == 'success'
     permissions:
@@ -329,13 +375,15 @@ jobs:
   deploy-api:
     name: Deploy API Worker (Cloudflare D1 + Hono)
     runs-on: ubuntu-latest
-    needs: [dep-check, gcp-preflight, deploy-backend]
+    needs: [dep-check, cloudflare-preflight]
     if: |
       always() &&
       github.event.inputs.backend_only != 'true' &&
       (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
-      needs.gcp-preflight.result == 'success' &&
-      (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped')
+      needs.cloudflare-preflight.result == 'success'
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -348,14 +396,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Authenticate to GCP for Worker secret synchronization
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
 
       - name: Check D1 configuration
         id: d1-check
@@ -382,77 +422,54 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
-      - name: Synchronize required API Worker secrets
+      - name: Provision API Worker secrets from GitHub
         if: steps.d1-check.outputs.configured == 'true'
+        working-directory: apps/api
         env:
-          BACKEND_SERVICE_URL: ${{ needs.deploy-backend.outputs.service_url }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
+          RESET_TOKEN_SECRET: ${{ secrets.RESET_TOKEN_SECRET }}
+          EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+          RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
+          RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
+          INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+          TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
         run: |
           set -euo pipefail
-          PROJECT=blissful-acumen-495019-t6
-
-          sync_gcp_secret() {
-            local GCP_NAME="$1"
-            local WORKER_NAME="$2"
-            local VALUE
-            VALUE=$(gcloud secrets versions access latest \
-              --secret="$GCP_NAME" --project="$PROJECT")
-            test -n "$VALUE"
-            printf '%s' "$VALUE" | \
-              pnpm --filter syrabit-api exec wrangler secret put "$WORKER_NAME" --env production
-            echo "✅ ${WORKER_NAME} synchronized"
+          put_required_secret() {
+            local name="$1"
+            local value="$2"
+            [[ -n "$value" ]] || {
+              echo "::error::$name is required for the native API Worker release."
+              exit 1
+            }
+            printf '%s' "$value" | pnpm exec wrangler secret put "$name" --env production >/dev/null
           }
-
-          # Trustpilot is an optional public display module. Its configured
-          # values live in GCP Secret Manager so Cloud Run and the API Worker
-          # share one canonical production source; an absent secret means the
-          # established public response is null.
-          sync_optional_gcp_secret() {
-            local GCP_NAME="$1"
-            local WORKER_NAME="$2"
-            if gcloud secrets describe "$GCP_NAME" --project="$PROJECT" --quiet >/dev/null 2>&1; then
-              sync_gcp_secret "$GCP_NAME" "$WORKER_NAME"
+          put_optional_secret() {
+            local name="$1"
+            local value="$2"
+            if [[ -n "$value" ]]; then
+              printf '%s' "$value" | pnpm exec wrangler secret put "$name" --env production >/dev/null
             else
-              local CURRENT_SECRETS
-              CURRENT_SECRETS=$(pnpm --filter syrabit-api exec wrangler secret list \
-                --env production --format json)
-              if python3 -c '
-          import json, sys
-          name = sys.argv[1]
-          secrets = json.load(sys.stdin)
-          raise SystemExit(0 if any(secret.get("name") == name for secret in secrets) else 1)
-          ' "$WORKER_NAME" <<<"$CURRENT_SECRETS"; then
-                pnpm --filter syrabit-api exec wrangler secret delete "$WORKER_NAME" --env production
-                echo "✅ Removed stale ${WORKER_NAME}; public Trustpilot response is null"
-              else
-                echo "ℹ ${WORKER_NAME} is not configured; public Trustpilot response remains null"
-              fi
+              echo "$name not supplied; preserving the existing Cloudflare value."
             fi
           }
-
-          # Required for D1 auth, staff authorization, password reset, payment
-          # verification/webhooks, mail delivery, R2 PYQ upload URLs,
-          # authenticated internal Workers AI generation, and native IndexNow
-          # submission. Do not make the IndexNow pair optional: a deployed
-          # Worker must not expose a route that can only return configuration
-          # errors after the Cloud Run fallback is retired.
-          sync_gcp_secret "jwt-secret"                 "JWT_SECRET"
-          sync_gcp_secret "admin-jwt-secret"           "ADMIN_JWT_SECRET"
-          sync_gcp_secret "reset-token-secret"         "RESET_TOKEN_SECRET"
-          sync_gcp_secret "razorpay-key-id"            "RAZORPAY_KEY_ID"
-          sync_gcp_secret "razorpay-key-secret"        "RAZORPAY_KEY_SECRET"
-          sync_gcp_secret "razorpay-webhook-secret"    "RAZORPAY_WEBHOOK_SECRET"
-          sync_gcp_secret "resend-api-key"             "RESEND_API_KEY"
-          sync_gcp_secret "edge-shared-secret"         "EDGE_SHARED_SECRET"
-          sync_gcp_secret "CF_R2_PUBLIC_URL"           "R2_PUBLIC_URL"
-          sync_gcp_secret "indexnow-api-key"           "INDEXNOW_API_KEY"
-          sync_gcp_secret "indexnow-internal-secret"   "INDEXNOW_INTERNAL_SECRET"
-           sync_gcp_secret "translate-cron-secret"      "TRANSLATE_CRON_SECRET"
-          sync_optional_gcp_secret "trustpilot-profile-url"      "TRUSTPILOT_PROFILE_URL"
-          sync_optional_gcp_secret "trustpilot-business-unit-id" "TRUSTPILOT_BUSINESS_UNIT_ID"
-          sync_optional_gcp_secret "trustpilot-rating-value"     "TRUSTPILOT_RATING_VALUE"
-          sync_optional_gcp_secret "trustpilot-rating-count"     "TRUSTPILOT_RATING_COUNT"
+          put_required_secret JWT_SECRET "$JWT_SECRET"
+          put_required_secret ADMIN_JWT_SECRET "$ADMIN_JWT_SECRET"
+          put_required_secret RESET_TOKEN_SECRET "$RESET_TOKEN_SECRET"
+          put_required_secret EDGE_SHARED_SECRET "$EDGE_SHARED_SECRET"
+          put_required_secret RAZORPAY_KEY_ID "$RAZORPAY_KEY_ID"
+          put_required_secret RAZORPAY_KEY_SECRET "$RAZORPAY_KEY_SECRET"
+          put_required_secret RAZORPAY_WEBHOOK_SECRET "$RAZORPAY_WEBHOOK_SECRET"
+          put_required_secret RESEND_API_KEY "$RESEND_API_KEY"
+          put_optional_secret INDEXNOW_API_KEY "$INDEXNOW_API_KEY"
+          put_optional_secret INDEXNOW_INTERNAL_SECRET "$INDEXNOW_INTERNAL_SECRET"
+          put_optional_secret R2_PUBLIC_URL "$R2_PUBLIC_URL"
+          put_optional_secret TRANSLATE_CRON_SECRET "$TRANSLATE_CRON_SECRET"
 
       - name: Deploy API Worker
         if: steps.d1-check.outputs.configured == 'true'
@@ -461,133 +478,19 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
-      - name: Smoke-test authenticated API Worker generation
-        if: steps.d1-check.outputs.configured == 'true'
-        run: |
-          set -euo pipefail
-          sleep 5  # allow the Worker deployment and secret write to propagate
-          SECRET=$(gcloud secrets versions access latest \
-            --secret=edge-shared-secret \
-            --project=blissful-acumen-495019-t6)
-          # The workers.dev subdomain is the Cloudflare account slug, not the
-          # account ID used by Wrangler authentication.
-          API_URL="https://syrabit-api-prod.axomxplain.workers.dev/api/v1/internal/generate"
-
-          for attempt in 1 2 3; do
-            HTTP=$(curl -sS -o /tmp/api-generation.json -w "%{http_code}" \
-              --retry 2 --retry-all-errors \
-              -X POST "$API_URL" \
-              -H "Authorization: Bearer $SECRET" \
-              -H "Content-Type: application/json" \
-              --data '{"system_prompt":"Reply with exactly OK.","user_message":"Health check","max_output_tokens":256}' \
-              --max-time 45)
-            echo "Generation smoke test attempt ${attempt}/3: HTTP ${HTTP}"
-            if [[ "$HTTP" == "200" ]] && \
-              python3 -c 'import json; body=json.load(open("/tmp/api-generation.json")); assert isinstance(body.get("text"), str) and body["text"].strip(); assert isinstance(body.get("model"), str) and body["model"].startswith("@cf/")'; then
-              echo "✅ Authenticated API Worker generation succeeded"
-              exit 0
-            fi
-            cat /tmp/api-generation.json 2>/dev/null || true
-            [[ "$attempt" -lt 3 ]] && sleep 10
-          done
-
-          echo "::error::Authenticated API Worker generation smoke test failed"
-          exit 1
-
-      - name: Smoke-test native IndexNow configuration
-        if: steps.d1-check.outputs.configured == 'true'
-        run: |
-          set -euo pipefail
-          PROJECT=blissful-acumen-495019-t6
-          INDEXNOW_SECRET=$(gcloud secrets versions access latest \
-            --secret=indexnow-internal-secret --project="$PROJECT")
-          API_URL="https://syrabit-api-prod.axomxplain.workers.dev/api/v1/indexnow/submit"
-          HTTP=$(curl -sS -D /tmp/api-indexnow.headers -o /tmp/api-indexnow.json -w "%{http_code}" \
-            -X POST "$API_URL" \
-            -H "X-IndexNow-Secret: ${INDEXNOW_SECRET}" \
-            -H "Content-Type: application/json" \
-            --data '{"urls":[]}' \
-            --max-time 30)
-          echo "Native IndexNow smoke test: HTTP ${HTTP}"
-          test "$HTTP" = "200"
-          grep -qi '^x-syrabit-route: worker-native' /tmp/api-indexnow.headers
-          python3 - <<'PY'
-          import json
-          payload = json.load(open("/tmp/api-indexnow.json"))
-          assert payload == {
-              "submitted": 0,
-              "failed": 0,
-              "detail": "No URLs provided",
-          }, payload
-          PY
-          echo "✅ Native IndexNow route is authenticated and configured"
-
-      - name: Smoke-test native Trustpilot configuration
-        if: steps.d1-check.outputs.configured == 'true'
-        run: |
-          set -euo pipefail
-          PROJECT=blissful-acumen-495019-t6
-          read_optional_secret() {
-            gcloud secrets versions access latest \
-              --secret="$1" --project="$PROJECT" 2>/dev/null || true
-          }
-          PROFILE_URL=$(read_optional_secret trustpilot-profile-url)
-          BUSINESS_UNIT_ID=$(read_optional_secret trustpilot-business-unit-id)
-          RATING_VALUE=$(read_optional_secret trustpilot-rating-value)
-          RATING_COUNT=$(read_optional_secret trustpilot-rating-count)
-          API_BASE="https://syrabit-api-prod.axomxplain.workers.dev/api/v1/config/trustpilot"
-
-          curl -sS -D /tmp/api-trustpilot.headers -o /tmp/api-trustpilot.json \
-            "$API_BASE" --max-time 30
-          curl -sS -D /tmp/api-trustpilot-aggregate.headers -o /tmp/api-trustpilot-aggregate.json \
-            "${API_BASE}/aggregate" --max-time 30
-          grep -qi '^x-syrabit-route: worker-native' /tmp/api-trustpilot.headers
-          grep -qi '^x-syrabit-route: worker-native' /tmp/api-trustpilot-aggregate.headers
-          python3 - "$PROFILE_URL" "$BUSINESS_UNIT_ID" "$RATING_VALUE" "$RATING_COUNT" <<'PY'
-          import json
-          import math
-          import sys
-
-          profile_url, business_unit_id, rating_value, rating_count = sys.argv[1:]
-          config = json.load(open("/tmp/api-trustpilot.json"))
-          aggregate = json.load(open("/tmp/api-trustpilot-aggregate.json"))
-
-          if profile_url or business_unit_id:
-              assert config == {
-                  "profileUrl": profile_url or None,
-                  "businessUnitId": business_unit_id or None,
-              }, config
-          else:
-              assert config is None, config
-
-          try:
-              expected_value = float(rating_value)
-              expected_count = int(rating_count)
-          except ValueError:
-              expected_value = math.nan
-              expected_count = 0
-          if math.isfinite(expected_value) and expected_count > 0:
-              assert aggregate == {
-                  "ratingValue": expected_value,
-                  "ratingCount": expected_count,
-              }, aggregate
-          else:
-              assert aggregate is None, aggregate
-          PY
-          echo "✅ Native Trustpilot configuration matches GCP Secret Manager"
-
   deploy-edge:
     name: Deploy Edge (Cloudflare Worker)
     runs-on: ubuntu-latest
-    needs: [gcp-preflight, deploy-backend]
+    needs: [dep-check, cloudflare-preflight, deploy-api]
     if: |
       always() &&
       github.event.inputs.backend_only != 'true' &&
-      needs.gcp-preflight.result == 'success' &&
-      (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped')
-    permissions:
-      id-token: write
-      contents: read
+      (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
+      needs.cloudflare-preflight.result == 'success' &&
+      needs.deploy-api.result == 'success'
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -601,14 +504,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
       - name: Guard — reject sentinel KV namespace IDs
         run: |
           if grep -v '^\s*#' apps/edge/wrangler.toml | grep -qi 'REPLACE_ME'; then
@@ -618,84 +513,49 @@ jobs:
           fi
           echo "KV namespace IDs look configured."
 
+      - name: Provision shared edge secrets from GitHub
+        working-directory: apps/edge
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+        run: |
+          set -euo pipefail
+          [[ -n "$JWT_SECRET" ]] || { echo "::error::JWT_SECRET is required for the edge Worker release."; exit 1; }
+          [[ -n "$EDGE_SHARED_SECRET" ]] || { echo "::error::EDGE_SHARED_SECRET is required for the edge Worker release."; exit 1; }
+          printf '%s' "$JWT_SECRET" | pnpm exec wrangler secret put JWT_SECRET --env production >/dev/null
+          printf '%s' "$EDGE_SHARED_SECRET" | pnpm exec wrangler secret put EDGE_SHARED_SECRET --env production >/dev/null
+
+      - name: Verify edge Worker secret names
+        run: |
+          set -euo pipefail
+          secret_list="$(pnpm --filter syrabit-edge exec wrangler secret list --env production --format json)"
+          printf '%s' "$secret_list" | python3 -c '
+          import json
+          import sys
+          required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}
+          configured = {item["name"] for item in json.load(sys.stdin)}
+          missing = sorted(required - configured)
+          if missing:
+              print("Cloudflare edge Worker required secrets are absent: " + ", ".join(missing))
+              raise SystemExit(1)
+          print("Required edge Worker secret names are present.")
+          '
+
       - name: Deploy Worker
         run: pnpm --filter syrabit-edge exec wrangler deploy --env production
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
-      - name: Sync secrets → CF Worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          BACKEND_SERVICE_URL: ${{ needs.deploy-backend.outputs.service_url }}
-        run: |
-          PROJECT=blissful-acumen-495019-t6
-          WORKER_NAME=syrabitworker-prod
-          CF_API=https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/workers/scripts/${WORKER_NAME}/secrets
-
-          # Helper: sync a GCP Secret Manager secret → CF Worker secret
-          sync_gcp_secret() {
-            local GCP_NAME="$1"
-            local CF_VAR="$2"
-            local VAL
-            VAL=$(gcloud secrets versions access latest \
-              --secret="$GCP_NAME" --project="$PROJECT" 2>/dev/null) || {
-              echo "⚠  GCP secret '$GCP_NAME' not found — skipping $CF_VAR"
-              return 0
-            }
-            printf '%s' "$VAL" | \
-              pnpm --filter syrabit-edge exec wrangler secret put "$CF_VAR" --env production
-            echo "✅ $CF_VAR synced from GCP Secret Manager"
-          }
-
-          # Helper: set a CF Worker secret directly from a value
-          set_cf_secret() {
-            local CF_VAR="$1"
-            local VAL="$2"
-            curl -sf -X PUT "$CF_API" \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -H "Content-Type: application/json" \
-              --data "{\"name\":\"${CF_VAR}\",\"text\":\"${VAL}\",\"type\":\"secret_text\"}" \
-              | grep -q '"success":true' && echo "✅ $CF_VAR set on CF Worker" \
-              || echo "✘ Failed to set $CF_VAR"
-          }
-
-          # Sync auth secrets from GCP Secret Manager
-          sync_gcp_secret "jwt-secret"                        "JWT_SECRET"
-          sync_gcp_secret "edge-shared-secret"                "EDGE_SHARED_SECRET"
-          # Sync SA key via Python + direct CF REST API (wrangler stdin fails for large JSON blobs)
-          SA_KEY=$(gcloud secrets versions access latest --secret="GOOGLE_APPLICATION_CREDENTIALS_JSON" --project="$PROJECT" 2>/dev/null || true)
-          if [[ -n "$SA_KEY" ]]; then
-            python3 scripts/sync_cf_sa_key.py "$SA_KEY"
-          else
-            echo "⚠  GOOGLE_APPLICATION_CREDENTIALS_JSON not found in GCP SM — skipping GOOGLE_SA_KEY"
-          fi
-
-          # Auto-sync BACKEND_URL from Cloud Run output (keeps CF Worker always current)
-          if [[ -n "$BACKEND_SERVICE_URL" ]]; then
-            set_cf_secret "BACKEND_URL" "$BACKEND_SERVICE_URL"
-          else
-            # Fallback: read live URL from gcloud in case job output unavailable
-            FALLBACK_URL=$(gcloud run services describe syrabit-backend \
-              --region=asia-south1 --project="$PROJECT" \
-              --format="value(status.url)" 2>/dev/null)
-            if [[ -n "$FALLBACK_URL" ]]; then
-              set_cf_secret "BACKEND_URL" "$FALLBACK_URL"
-            else
-              echo "⚠  Could not determine Cloud Run URL — BACKEND_URL not updated"
-            fi
-          fi
-
   deploy-frontend:
     name: Deploy Frontend (Cloudflare Pages)
     runs-on: ubuntu-latest
-    needs: [dep-check, gcp-preflight]
+    needs: [dep-check, cloudflare-preflight]
     if: |
       always() &&
       github.event.inputs.backend_only != 'true' &&
       (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
-      needs.gcp-preflight.result == 'success'
+      needs.cloudflare-preflight.result == 'success'
     env:
       INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
     steps:
@@ -736,6 +596,7 @@ jobs:
     needs: [deploy-backend, deploy-edge]
     if: |
       always() &&
+      inputs.deploy_legacy_backend == true &&
       needs.deploy-backend.result == 'success' &&
       (needs.deploy-edge.result == 'success' || needs.deploy-edge.result == 'skipped')
     permissions:
@@ -813,32 +674,57 @@ jobs:
           fi
 
   smoke-test:
-    name: Smoke Tests
+    name: Cloudflare Native Smoke Tests
     runs-on: ubuntu-latest
-    needs: [deploy-backend, deploy-edge, deploy-frontend]
+    needs: [deploy-api, deploy-edge, deploy-frontend]
     if: |
       always() &&
-      needs.deploy-backend.result == 'success' &&
-      (needs.deploy-edge.result == 'success' || needs.deploy-edge.result == 'skipped') &&
-      (needs.deploy-frontend.result == 'success' || needs.deploy-frontend.result == 'skipped')
+      needs.deploy-api.result == 'success' &&
+      needs.deploy-edge.result == 'success' &&
+      needs.deploy-frontend.result == 'success'
     steps:
-      - name: Edge health + backend reachability (api.syrabit.ai)
+      - name: API Worker is live and Worker-native
         run: |
-          REACHABLE="false"
-          HTTP="000"
-          for attempt in 1 2 3 4 5; do
-            HTTP=$(curl -s -o /tmp/edge-health.json -w "%{http_code}" \
-              "https://api.syrabit.ai/health" --max-time 15 2>/dev/null || echo "000")
-            REACHABLE=$(python3 -c "import json,sys;d=json.load(open('/tmp/edge-health.json'));print(str(d.get('backend_reachable',False)).lower())" 2>/dev/null || echo "false")
-            echo "  Attempt ${attempt}/5 — HTTP ${HTTP}, backend_reachable=${REACHABLE}"
-            if [[ "$HTTP" == "200" && "$REACHABLE" == "true" ]]; then
-              echo "✔ Edge healthy, backend reachable"
-              exit 0
-            fi
-            [[ "$attempt" -lt 5 ]] && sleep 15
-          done
-          echo "✘ Edge health check failed after 5 attempts"
-          if [[ "$HTTP" == "200" && "$REACHABLE" != "true" ]]; then
-            echo "::error title=Backend unreachable via edge::Edge is up but backend_reachable=false. BACKEND_URL may be stale."
-          fi
-          exit 1
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/api.headers -o /tmp/api.json -w '%{http_code}' \
+            "https://syrabit-api-prod.axomxplain.workers.dev/health" --max-time 30)"
+          test "$status" = "200"
+          grep -qi '^x-syrabit-route: worker-native' /tmp/api.headers
+          echo "API Worker health passed: HTTP ${status}"
+
+      - name: Critical API Worker bindings pass deep read-only probes
+        env:
+          EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/api-deep.headers -o /tmp/api-deep.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${EDGE_SHARED_SECRET}" \
+            "https://syrabit-api-prod.axomxplain.workers.dev/health/deep" --max-time 30)"
+          test "$status" = "200" || { cat /tmp/api-deep.json; exit 1; }
+          grep -qi '^x-syrabit-route: worker-native' /tmp/api-deep.headers
+          python3 - /tmp/api-deep.json <<'PY'
+          import json, sys
+          with open(sys.argv[1]) as f:
+              payload = json.load(f)
+          required = {"d1", "workers_ai", "vectorize", "r2", "content_kv", "rate_limit_kv"}
+          assert payload["status"] == "healthy", payload
+          assert payload["mutation_free"] is True, payload
+          assert payload["missing_bindings"] == [], payload
+          assert required == set(payload["checks"]), payload
+          assert all(item["status"] == "healthy" for item in payload["checks"].values()), payload
+          PY
+          echo "Deep binding probes passed without production writes."
+
+      - name: Public edge is reachable
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/edge.headers -o /tmp/edge.json -w '%{http_code}' \
+            "https://api.syrabit.ai/health" --max-time 30)"
+          test "$status" = "200"
+          echo "Public edge health passed: HTTP ${status}"
+
+      - name: Frontend is reachable
+        run: |
+          status="$(curl -sS -L -o /dev/null -w '%{http_code}' "https://syrabit.ai" --max-time 30)"
+          test "$status" = "200"
+          echo "Frontend reachability passed: HTTP ${status}"
