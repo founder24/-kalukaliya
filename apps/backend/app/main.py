@@ -169,10 +169,10 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Admin bootstrap skipped (DB may not be ready): {e}")
     # ─────────────────────────────────────────────────────────────────────────
 
-    if settings.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
+    if not settings.JWT_SECRET:
         logger.warning(
-            "WARNING: Using default JWT_SECRET. "
-            "This is acceptable for local dev but MUST be changed in production."
+            "JWT_SECRET is not configured; JWT authentication will remain unavailable "
+            "until the runtime supplies it."
         )
 
     # Initialize Sentry with FastAPI integration

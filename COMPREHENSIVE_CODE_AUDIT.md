@@ -44,7 +44,7 @@ The platform demonstrates strong architectural decisions (edge-backend separatio
 
 #### SEC-C1: Dangerous Default JWT Secret in Environment Template
 - **File:** `.env.shared:89`
-- **Finding:** The template contains `JWT_SECRET=super_secret_jwt_key_32_chars_min` which, if accidentally used in production, would allow any attacker to forge valid JWTs for any user.
+- **Finding:** The template contained a known JWT placeholder which, if accidentally used in production, would allow any attacker to forge valid JWTs for any user.
 - **Impact:** Complete authentication bypass, full account takeover.
 - **Mitigation:** The backend validates JWT_SECRET length >= 32 chars in production mode (`apps/backend/app/config.py:113-115`), but the placeholder *already meets* that length requirement, meaning it would pass validation silently.
 - **Fix:** Change the validator to reject known placeholder values; use a secrets manager (Azure KeyVault is already provisioned in `infra/azure/shared-resources.bicep`).

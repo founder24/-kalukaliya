@@ -502,7 +502,7 @@ reset_link = f"https://syrabit.ai/reset-password?token={reset_token}"
 
 | # | Severity | File | Location | Issue |
 |---|----------|------|----------|-------|
-| 9.1 | **Medium** | docker-compose.yml | Line 8 | Hardcoded credentials: `MONGO_INITDB_ROOT_PASSWORD: localdevpassword`. Risk if docker-compose is accidentally used in production or committed to a public fork. |
+| 9.1 | **Medium** | docker-compose.yml | Line 8 | Historical hardcoded local credential removed; Compose now requires the password from an untracked environment. |
 | 9.2 | **Low** | docker-compose.yml | N/A | `env_file: .env` loaded without existence check. Docker Compose fails if .env is missing. |
 | 9.3 | **Medium** | docker-compose.yml | All services | No memory limits on any container. A memory leak in the backend will consume all host memory. |
 | 9.4 | **Medium** | docker-compose.yml | redis service | No volume mount for Redis data. Redis data (rate limit counters, cache) is lost on container restart. |

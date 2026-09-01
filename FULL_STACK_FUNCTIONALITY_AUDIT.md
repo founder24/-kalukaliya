@@ -433,8 +433,8 @@ if (env.EDGE_SHARED_SECRET) {
 A default JWT secret is hardcoded for development:
 
 ```python
-# apps/backend/app/config.py
-JWT_SECRET: str = "dev-only-secret-not-for-production-use-32chars"
+# apps/backend/app/config.py (historical insecure pattern, now removed)
+JWT_SECRET: str = "<redacted-placeholder>"
 ```
 
 A production validator exists that rejects known placeholder secrets. However, if `APP_ENV` is set to anything other than `"production"` (e.g., `"staging"`, `"prod"`, or left unset), the default applies.
@@ -1067,9 +1067,9 @@ Local development credentials are hardcoded:
 services:
   mongo:
     environment:
-      MONGO_INITDB_ROOT_PASSWORD: localdevpassword
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
   redis:
-    command: redis-server --requirepass localredispassword
+    command: redis-server --requirepass ${REDIS_PASSWORD}
 ```
 
 **Impact:** These are clearly labeled for local development only. The `.env.shared` file referenced in the README is not present in the repository (preventing accidental credential commits). Production uses Azure-managed secrets.

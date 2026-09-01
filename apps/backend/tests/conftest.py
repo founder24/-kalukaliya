@@ -1,6 +1,14 @@
+import os
+import secrets
+
 import pytest
 from httpx import AsyncClient, ASGITransport
 from unittest.mock import AsyncMock, MagicMock, patch
+
+
+# Tests receive a unique process-local key instead of relying on a checked-in
+# credential-like fallback.  setdefault preserves explicit CI configuration.
+os.environ.setdefault("JWT_SECRET", secrets.token_urlsafe(48))
 
 
 @pytest.fixture

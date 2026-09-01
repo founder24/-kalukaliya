@@ -66,25 +66,42 @@ pip install -r apps/backend/requirements.txt
 
 ### 2. Create Local Environment Files
 
-For Docker Compose, create a root `.env`:
+For Docker Compose, generate a root `.env`. Each developer gets fresh local
+credentials; the file is gitignored and must never be committed:
 
 ```bash
+umask 077
+mongo_password="$(openssl rand -hex 24)"
+redis_password="$(openssl rand -hex 24)"
+redis_rest_token="$(openssl rand -hex 32)"
+
+cat > .env <<EOF
 APP_ENV=development
 DEBUG=True
 
-JWT_SECRET=local-dev-jwt-secret-change-me-32chars
-ADMIN_JWT_SECRET=local-dev-admin-secret-change-me-32chars
-RESET_TOKEN_SECRET=local-dev-reset-secret-change-me-32chars
-EDGE_SHARED_SECRET=local-dev-edge-secret-change-me-32chars
+JWT_SECRET=$(openssl rand -hex 32)
+ADMIN_JWT_SECRET=$(openssl rand -hex 32)
+RESET_TOKEN_SECRET=$(openssl rand -hex 32)
+EDGE_SHARED_SECRET=$(openssl rand -hex 32)
 
-MONGODB_URI=mongodb://admin:localdevpassword@localhost:27017/syrabit?authSource=admin
+MONGO_INITDB_ROOT_USERNAME=admin
+MONGO_INITDB_ROOT_PASSWORD=${mongo_password}
+MONGODB_URI=mongodb://admin:${mongo_password}@localhost:27017/syrabit?authSource=admin
 MONGODB_DB_NAME=syrabit
 
+REDIS_PASSWORD=${redis_password}
+REDIS_REST_TOKEN=${redis_rest_token}
 UPSTASH_REDIS_REST_URL=http://localhost:8079
-UPSTASH_REDIS_REST_TOKEN=local_dev_token
+UPSTASH_REDIS_REST_TOKEN=${redis_rest_token}
 
 ALLOWED_ORIGINS=http://localhost:5000,http://127.0.0.1:5000
+EOF
+
+unset mongo_password redis_password redis_rest_token
 ```
+
+On Replit, store the same variable names in Replit Secrets instead of putting
+credential values in a tracked file.
 
 For the frontend, create `apps/frontend/.env.local`:
 
@@ -385,7 +402,7 @@ Common alert themes:
 | Frontend API calls fail locally | Confirm backend is on `:8000`, `VITE_BACKEND_URL` is set, and CORS allows `localhost:5000`. |
 | Backend starts but AI calls fail | Missing provider key or provider quota/permission issue. Check `/health/deep` and logs. |
 | Mongo errors locally | Confirm `docker compose ps`, `MONGODB_URI`, and `authSource=admin`. |
-| Redis/rate-limit errors locally | Confirm `redis-rest` is running on `:8079` with `local_dev_token`. |
+| Redis/rate-limit errors locally | Confirm `redis-rest` is running on `:8079` and `REDIS_REST_TOKEN` matches `UPSTASH_REDIS_REST_TOKEN` in the untracked `.env`. |
 | Edge proxy returns upstream errors | Confirm `BACKEND_URL` points to the backend and the backend health endpoint is green. |
 | Production docs missing | Expected when `APP_ENV=production`; use local development for `/docs`. |
 

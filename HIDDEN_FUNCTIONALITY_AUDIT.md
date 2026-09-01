@@ -1984,7 +1984,7 @@ await user.update(
 **Severity:** Critical
 
 ```python
-JWT_SECRET: str = "dev-only-secret-not-for-production-use-32chars"
+JWT_SECRET: str = "<redacted-placeholder>"
 ```
 
 **Production Impact:** The default JWT_SECRET is a known placeholder. The `validate_production_secrets` validator (line 117) only checks when `APP_ENV == "production"`. If `APP_ENV` is set to anything else (e.g., "staging", "preview", "demo"), the insecure default is used to sign JWTs. An attacker knowing this default can forge valid tokens for any user on non-production deployments.

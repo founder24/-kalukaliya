@@ -1,13 +1,12 @@
-version: '3.8'
-
 services:
   mongo:
     image: mongo:7
     container_name: syrabit-mongo
     restart: unless-stopped
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: localdevpassword
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      # Keep local credentials in the untracked .env file (or Replit Secrets).
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?Set MONGO_INITDB_ROOT_PASSWORD in .env}
     ports:
       - "27017:27017"
     volumes:
@@ -21,7 +20,10 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
-    command: redis-server --requirepass localdevpassword
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
     networks:
       - syrabit-net
 
@@ -31,8 +33,8 @@ services:
     restart: unless-stopped
     environment:
       SRH_MODE: env
-      SRH_TOKEN: local_dev_token
-      SRH_CONNECTION_STRING: redis://:localdevpassword@redis:6379
+      SRH_TOKEN: ${REDIS_REST_TOKEN:?Set REDIS_REST_TOKEN in .env}
+      SRH_CONNECTION_STRING: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@redis:6379
     ports:
       - "8079:80"
     depends_on:
@@ -49,9 +51,9 @@ services:
     env_file:
       - .env
     environment:
-      - MONGODB_URI=mongodb://admin:localdevpassword@mongo:27017/syrabit?authSource=admin
+      - MONGODB_URI=mongodb://admin:${MONGO_INITDB_ROOT_PASSWORD:?Set MONGO_INITDB_ROOT_PASSWORD in .env}@mongo:27017/syrabit?authSource=admin
       - UPSTASH_REDIS_REST_URL=http://redis-rest:80
-      - UPSTASH_REDIS_REST_TOKEN=local_dev_token
+      - UPSTASH_REDIS_REST_TOKEN=${REDIS_REST_TOKEN:?Set REDIS_REST_TOKEN in .env}
       - DEBUG=True
       - APP_ENV=development
     ports:

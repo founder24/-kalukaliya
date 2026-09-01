@@ -28,6 +28,18 @@ def clean_env(monkeypatch):
 class TestConfigResilienceProduction:
     """Settings() in production mode should not raise even with invalid secrets."""
 
+    def test_missing_jwt_secret_is_reported_without_fallback(self, monkeypatch):
+        """A missing JWT secret is explicit and never replaced by a static value."""
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.setenv("TRUST_EDGE_AUTH", "False")
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+
+        from app.config import Settings
+
+        s = Settings()
+        assert s.JWT_SECRET is None
+        assert any("JWT_SECRET is required" in e for e in s.startup_errors)
+
     def test_short_jwt_secret_no_crash(self, monkeypatch):
         """Settings with a too-short JWT_SECRET does not raise ValueError."""
         monkeypatch.setenv("APP_ENV", "production")
@@ -75,7 +87,7 @@ class TestConfigResilienceProduction:
         """Settings with a known placeholder JWT_SECRET does not raise."""
         monkeypatch.setenv("APP_ENV", "production")
         monkeypatch.setenv(
-            "JWT_SECRET", "dev-only-secret-not-for-production-use-32chars"
+            "JWT_SECRET", "dev-only-placeholder"
         )
         monkeypatch.setenv("TRUST_EDGE_AUTH", "False")
 

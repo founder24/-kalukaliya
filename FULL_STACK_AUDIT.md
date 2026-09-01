@@ -143,7 +143,7 @@ async def get_current_user_profile(user: User = Depends(get_current_user)):
 **Location:** `apps/backend/app/config.py`, line 93
 **Code:**
 ```python
-JWT_SECRET: str = "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG"
+JWT_SECRET: str = "<redacted-placeholder>"
 ```
 
 **Description:** If the `JWT_SECRET` environment variable is not set, the application uses a hardcoded, publicly visible default value. Since all config fields are Optional with graceful degradation (the app starts without env vars), a misconfigured deployment will silently use this predictable secret.
@@ -155,7 +155,7 @@ JWT_SECRET: str = "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG"
    ```python
    @model_validator(mode='after')
    def validate_critical_secrets(self):
-       if self.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
+       if is_unsafe_secret(self.JWT_SECRET):
            if self.APP_ENV == "production":
                raise ValueError("JWT_SECRET must be set in production")
        return self

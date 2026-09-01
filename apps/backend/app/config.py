@@ -6,6 +6,26 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def is_unsafe_secret(value: Optional[str]) -> bool:
+    """Return True for empty values and obvious documentation/test placeholders."""
+    if not value:
+        return True
+    normalized = value.strip().lower().replace("_", "-")
+    placeholder_markers = (
+        "change-me",
+        "changeme",
+        "dev-only",
+        "test-secret",
+        "super-secret",
+        "your-secret",
+        "jwt-secret",
+    )
+    return normalized in {"secret", "placeholder"} or any(
+        marker in normalized for marker in placeholder_markers
+    )
+
+
 # ── Canonical secret / env-var alias table ────────────────────────────────────
 # Every secret has exactly ONE canonical name used in Python code.
 # Aliases (Replit secrets, GCP SM names, Cloud Build vars) map → canonical.
@@ -176,7 +196,11 @@ class Settings(BaseSettings):
     # --- Application Logic ---
     APP_ENV: str = "production"
     DEBUG: bool = False
-    JWT_SECRET: str = "dev-only-secret-not-for-production-use-32chars"
+    # No fallback is intentional.  A checked-in value, even one labelled for
+    # development, can be reused accidentally or leak into a deployed process.
+    # The backend remains available in degraded mode and reports the missing
+    # secret through startup_errors until JWT_SECRET is supplied by the runtime.
+    JWT_SECRET: Optional[str] = None
     ADMIN_JWT_SECRET: Optional[str] = None
 
     # --- Admin Bootstrap ---
@@ -260,19 +284,16 @@ class Settings(BaseSettings):
                     "Edge auth trust is effectively disabled in this environment."
                 )
 
-        KNOWN_PLACEHOLDER_SECRETS = {
-            "super_secret_jwt_key_32_chars_min",
-            "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG",
-            "test-secret-at-least-32-characters-long",
-            "dev-only-secret-not-for-production-use-32chars",
-        }
-
         if self.APP_ENV in ("production", "staging"):
-            if self.JWT_SECRET in KNOWN_PLACEHOLDER_SECRETS:
+            if not self.JWT_SECRET:
+                msg = "JWT_SECRET is required in production"
+                self.startup_errors.append(msg)
+                logger.error(f"CONFIG ERROR: {msg}")
+            elif is_unsafe_secret(self.JWT_SECRET):
                 msg = "JWT_SECRET is a known placeholder value and must be changed in production"
                 self.startup_errors.append(msg)
                 logger.error(f"CONFIG ERROR: {msg}")
-            if len(self.JWT_SECRET) < 32:
+            elif len(self.JWT_SECRET) < 32:
                 msg = "JWT_SECRET must be at least 32 characters long in production"
                 self.startup_errors.append(msg)
                 logger.error(f"CONFIG ERROR: {msg}")

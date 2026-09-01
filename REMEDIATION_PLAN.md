@@ -140,7 +140,7 @@ git ls-files | grep '\.env'  # Should return empty (no .env files tracked)
 **Current Code:**
 
 ```python
-JWT_SECRET: str = "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG"
+JWT_SECRET: str = "<redacted-placeholder>"
 ```
 
 If `JWT_SECRET` is not set in the environment, the app silently runs with a guessable default. Any attacker can forge JWTs.
@@ -148,7 +148,7 @@ If `JWT_SECRET` is not set in the environment, the app silently runs with a gues
 **Fixed Code:**
 
 ```python
-JWT_SECRET: str = "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG"
+JWT_SECRET: str = "<redacted-placeholder>"
 
 # ... (after the class definition, add a startup validator)
 
@@ -156,7 +156,7 @@ JWT_SECRET: str = "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG"
 def validate_production_secrets(self) -> 'Settings':
     """Refuse to start in production with insecure defaults."""
     if self.APP_ENV == "production":
-        if self.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
+        if is_unsafe_secret(self.JWT_SECRET):
             raise ValueError(
                 "FATAL: JWT_SECRET must be set to a secure random value in production. "
                 "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
@@ -199,7 +199,7 @@ Extend the validator from C-5 to also check critical production dependencies:
 def validate_production_secrets(self) -> 'Settings':
     """Refuse to start in production with insecure defaults."""
     if self.APP_ENV == "production":
-        if self.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
+        if is_unsafe_secret(self.JWT_SECRET):
             raise ValueError(
                 "FATAL: JWT_SECRET must be set to a secure random value in production. "
                 "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
@@ -634,7 +634,7 @@ print(f'Body: {body.decode()}')
 
 ```python
 # In the lifespan function in main.py, after init_mongo/init_redis:
-if settings.JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG":
+if is_unsafe_secret(settings.JWT_SECRET):
     logger.warning(
         "WARNING: Using default JWT_SECRET. "
         "This is acceptable for local dev but MUST be changed in production."
@@ -2573,7 +2573,7 @@ services:
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: localdevpassword
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?Set in .env}
     ports:
       - "27017:27017"
     volumes:
@@ -2587,7 +2587,7 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
-    command: redis-server --requirepass localdevpassword
+    command: redis-server --requirepass ${REDIS_PASSWORD:?Set in .env}
     networks:
       - syrabit-net
 
@@ -2597,8 +2597,8 @@ services:
     restart: unless-stopped
     environment:
       SRH_MODE: env
-      SRH_TOKEN: local_dev_token
-      SRH_CONNECTION_STRING: redis://:localdevpassword@redis:6379
+      SRH_TOKEN: ${REDIS_REST_TOKEN:?Set in .env}
+      SRH_CONNECTION_STRING: redis://:${REDIS_PASSWORD:?Set in .env}@redis:6379
     ports:
       - "8079:80"
     depends_on:
@@ -2615,9 +2615,9 @@ services:
     env_file:
       - .env
     environment:
-      - MONGODB_URI=mongodb://admin:localdevpassword@mongo:27017/syrabit?authSource=admin
+      - MONGODB_URI=mongodb://admin:${MONGO_INITDB_ROOT_PASSWORD:?Set in .env}@mongo:27017/syrabit?authSource=admin
       - UPSTASH_REDIS_REST_URL=http://redis-rest:80
-      - UPSTASH_REDIS_REST_TOKEN=local_dev_token
+      - UPSTASH_REDIS_REST_TOKEN=${REDIS_REST_TOKEN:?Set in .env}
       - DEBUG=True
       - APP_ENV=development
     ports:
@@ -2641,14 +2641,14 @@ volumes:
 **Key Changes:**
 1. Added `redis-rest` service using `hiett/serverless-redis-http` image
 2. Changed `UPSTASH_REDIS_REST_URL` from `http://redis:6379` to `http://redis-rest:80`
-3. Added `UPSTASH_REDIS_REST_TOKEN=local_dev_token`
+3. Added `UPSTASH_REDIS_REST_TOKEN` sourced from the untracked local environment
 4. Backend now depends on `redis-rest` instead of `redis` directly
 
 **Verification:**
 ```bash
 docker compose up -d
 # Test Redis REST API directly
-curl -H "Authorization: Bearer local_dev_token" \
+curl -H "Authorization: Bearer ${REDIS_REST_TOKEN}" \
   http://localhost:8079/ping
 # Should return: {"result":"PONG"}
 

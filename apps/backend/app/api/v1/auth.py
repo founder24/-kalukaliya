@@ -11,7 +11,7 @@ import logging
 import time
 import uuid
 
-from app.config import settings
+from app.config import is_unsafe_secret, settings
 from app.models.user import User
 from app.services.comms.resend_client import (
     send_welcome_email,
@@ -128,19 +128,6 @@ class LogoutRequest(BaseModel):
 # ─── Token Helpers ───────────────────────────────────────────────────────────
 
 
-_PLACEHOLDER_SECRETS = {
-    "dev-only-secret-not-for-production-use-32chars",
-    "super_secret_jwt_key_32_chars_min",
-    "CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG",
-    "test-secret-at-least-32-characters-long",
-    "changeme",
-    "secret",
-    "your-secret-key",
-    "your-256-bit-secret",
-    "jwt-secret",
-}
-
-
 def _get_signing_key() -> tuple[str, str]:
     """Get the key and algorithm for signing JWTs.
     Returns (key, algorithm).
@@ -148,8 +135,8 @@ def _get_signing_key() -> tuple[str, str]:
     Priority order:
     1. RS256 with JWT_PRIVATE_KEY — most secure, preferred for production
     2. HS256 with JWT_SECRET — acceptable if JWT_SECRET is non-placeholder and ≥ 32 chars
-    3. HS256 with placeholder secret + CRITICAL log — degraded mode, tokens are weak
-       but the app stays up so operators can see the log and fix configuration.
+    3. No signing key — raise a configuration error rather than signing tokens
+       with a known fallback value.
     """
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PRIVATE_KEY:
         return settings.JWT_PRIVATE_KEY, "RS256"
@@ -157,17 +144,21 @@ def _get_signing_key() -> tuple[str, str]:
         logger.warning(
             "JWT_ALGORITHM is RS256 but JWT_PRIVATE_KEY is not set — falling back to HS256"
         )
-    jwt_secret = settings.JWT_SECRET.strip()
+    jwt_secret = (settings.JWT_SECRET or "").strip()
     if settings.APP_ENV == "production":
-        if not jwt_secret or jwt_secret in _PLACEHOLDER_SECRETS or len(jwt_secret) < 32:
-            # Log critical but do NOT raise — raising here crashes every auth request
-            # and fills Sentry with noise instead of one clear startup warning.
-            # Operators must set JWT_SECRET (≥32 chars) or JWT_PRIVATE_KEY in Cloud Run.
+        if is_unsafe_secret(jwt_secret) or len(jwt_secret) < 32:
             logger.critical(
                 "SECURITY: JWT_SECRET is a placeholder/weak value in production. "
                 "Set JWT_SECRET env var (≥32 random chars) in Cloud Run immediately. "
                 "Tokens signed with this key are INSECURE."
             )
+    if not jwt_secret or (
+        settings.APP_ENV in ("production", "staging")
+        and (is_unsafe_secret(jwt_secret) or len(jwt_secret) < 32)
+    ):
+        raise RuntimeError(
+            "JWT signing is unavailable: set JWT_SECRET or configure JWT_PRIVATE_KEY"
+        )
     return jwt_secret, "HS256"
 
 
@@ -178,7 +169,8 @@ def _get_verification_key() -> tuple[str, str]:
     Priority order:
     1. RS256 with JWT_PUBLIC_KEY — matches RS256 signing
     2. HS256 with JWT_SECRET — matches HS256 signing
-    3. HS256 with placeholder secret + CRITICAL log — degraded mode, see _get_signing_key.
+    3. No verification key — raise a configuration error rather than accepting
+       tokens against a known fallback value.
     """
     if settings.JWT_ALGORITHM == "RS256" and settings.JWT_PUBLIC_KEY:
         return settings.JWT_PUBLIC_KEY, "RS256"
@@ -186,13 +178,20 @@ def _get_verification_key() -> tuple[str, str]:
         logger.warning(
             "JWT_ALGORITHM is RS256 but JWT_PUBLIC_KEY is not set — falling back to HS256"
         )
-    jwt_secret = settings.JWT_SECRET.strip()
+    jwt_secret = (settings.JWT_SECRET or "").strip()
     if settings.APP_ENV == "production":
-        if not jwt_secret or jwt_secret in _PLACEHOLDER_SECRETS or len(jwt_secret) < 32:
+        if is_unsafe_secret(jwt_secret) or len(jwt_secret) < 32:
             logger.critical(
                 "SECURITY: JWT_SECRET is a placeholder/weak value in production. "
                 "Set JWT_SECRET env var (≥32 random chars) in Cloud Run immediately."
             )
+    if not jwt_secret or (
+        settings.APP_ENV in ("production", "staging")
+        and (is_unsafe_secret(jwt_secret) or len(jwt_secret) < 32)
+    ):
+        raise RuntimeError(
+            "JWT verification is unavailable: set JWT_SECRET or configure JWT_PUBLIC_KEY"
+        )
     return jwt_secret, "HS256"
 
 
@@ -480,7 +479,7 @@ async def get_current_user_optional(
 
         user = await User.get(user_id)
         return user
-    except InvalidTokenError:
+    except (InvalidTokenError, RuntimeError):
         return None
 
 

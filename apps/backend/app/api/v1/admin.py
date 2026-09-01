@@ -35,7 +35,12 @@ def _get_admin_signing_key() -> tuple:
     They intentionally do NOT use the RS256 key pair (which is for user tokens).
     This ensures compromising one key type doesn't affect the other.
     """
-    return settings.ADMIN_JWT_SECRET or settings.JWT_SECRET, "HS256"
+    key = (settings.ADMIN_JWT_SECRET or settings.JWT_SECRET or "").strip()
+    if not key:
+        raise RuntimeError(
+            "Admin JWT signing is unavailable: set ADMIN_JWT_SECRET or JWT_SECRET"
+        )
+    return key, "HS256"
 
 
 def _get_admin_verification_key() -> tuple:
@@ -44,7 +49,12 @@ def _get_admin_verification_key() -> tuple:
     Admin tokens ALWAYS use HS256 with a dedicated secret for key isolation.
     They intentionally do NOT use the RS256 key pair (which is for user tokens).
     """
-    return settings.ADMIN_JWT_SECRET or settings.JWT_SECRET, "HS256"
+    key = (settings.ADMIN_JWT_SECRET or settings.JWT_SECRET or "").strip()
+    if not key:
+        raise RuntimeError(
+            "Admin JWT verification is unavailable: set ADMIN_JWT_SECRET or JWT_SECRET"
+        )
+    return key, "HS256"
 
 
 async def _csrf_check(request: Request):

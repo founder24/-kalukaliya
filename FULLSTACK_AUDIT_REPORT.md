@@ -82,7 +82,7 @@ The single JWT secret used across all token types, the auth rate limiter silentl
 
 | # | Finding | Severity | Detail |
 |---|---------|----------|--------|
-| SEC-10 | .env.shared uses placeholder values (acceptable) | LOW | `.env.shared` contains `CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG` placeholder. Production validation in `config.py` lines 117-123 rejects known placeholders and enforces min 32 chars. |
+| SEC-10 | .env.shared used placeholder values | LOW | The historical placeholder has been removed. Production validation rejects known placeholders and enforces a minimum length. |
 
 ### 2.7 Webhook Security
 
@@ -262,7 +262,7 @@ Key untested areas:
 
 | # | Finding | Severity | Detail |
 |---|---------|----------|--------|
-| CFG-04 | docker-compose.yml uses hardcoded passwords | LOW | `localdevpassword` for MongoDB and Redis. Acceptable for local development since the compose file is not used in production. |
+| CFG-04 | docker-compose.yml used hardcoded passwords | LOW | Historical local credential literal removed; Compose now requires values from the untracked environment. |
 | CFG-05 | Upstash REST API proxy for local dev (good) | INFO | `docker-compose.yml` includes `hiett/serverless-redis-http` to simulate Upstash locally, avoiding the need for a remote Redis during development. |
 
 ### 8.4 Environment Validation

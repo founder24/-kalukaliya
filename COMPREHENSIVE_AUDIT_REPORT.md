@@ -324,7 +324,7 @@ infra/azure/
 
 | Severity | Finding | Impact | File/Location |
 |----------|---------|--------|---------------|
-| CRITICAL | JWT_SECRET defaults to `"CHANGE_ME_IN_PRODUCTION_AT_LEAST_32_CHARS_LONG"` | If `APP_ENV` is not explicitly set to `"production"`, the insecure default is used; any environment without explicit config (staging, dev deployed instances) uses a known secret | `apps/backend/app/config.py` (JWT_SECRET field) |
+| CRITICAL | JWT_SECRET had a known placeholder default | If `APP_ENV` is not explicitly set to `"production"`, the insecure default is used; any environment without explicit config (staging, dev deployed instances) uses a known secret | `apps/backend/app/config.py` (JWT_SECRET field) |
 | HIGH | JWT uses HS256 (symmetric algorithm) | Same secret shared between edge worker and backend; compromise of either component compromises both; RS256 (asymmetric) preferred for distributed systems | `apps/backend/app/core/security.py`, `apps/edge/src/middleware/jwt.ts` |
 | HIGH | No refresh token revocation mechanism | Stolen refresh tokens remain valid for 7 days with no way to invalidate them; no blocklist in Redis | `apps/backend/app/api/v1/auth.py` (refresh endpoint) |
 | HIGH | Bot detection only tags requests but does not block | `X-Bot-Detected` header is set but request proceeds; bots still get full service | `apps/edge/src/index.ts` (bot detection middleware) |
