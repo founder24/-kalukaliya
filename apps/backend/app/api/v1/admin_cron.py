@@ -87,6 +87,43 @@ async def cron_cloudflare_analytics_health(request: Request):
     )
 
 
+@router.post("/cron/cloudflare-analytics-result")
+async def record_cloudflare_analytics_result(request: Request):
+    """Persist a Cloudflare-native probe result without re-running the probe.
+
+    The scheduled workflow owns the provider request. This endpoint only
+    validates and records its result so a Cloud Run response can never replace
+    the result that CI observed directly from Cloudflare.
+    """
+    _verify_cron_token(request)
+
+    from app.api.v1.admin_analytics import (
+        normalize_cf_overview_contract_result,
+        persist_cf_overview_contract_result,
+    )
+
+    try:
+        payload = await request.json()
+        result = normalize_cf_overview_contract_result(payload)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        await persist_cf_overview_contract_result(result)
+    except Exception as exc:
+        logger.exception("Could not persist Cloudflare-native analytics result: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={
+                **result,
+                "persisted": False,
+                "persistence_error": "Health result could not be saved to the admin alert path",
+            },
+        )
+
+    return {**result, "persisted": True}
+
+
 @router.post("/cron/expire-subscriptions")
 async def cron_expire_subscriptions(request: Request):
     """Downgrade users whose paid subscription period has lapsed.

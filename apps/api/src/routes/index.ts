@@ -35,6 +35,10 @@ api.route('/api/v1/staff',        staffRouter);       // staff CRUD: chapters, s
 // native publish/seed operations first, then the shared D1 content editor.
 api.route('/api/v1/admin',        adminContentRouter);
 api.route('/api/v1/admin',        staffRouter);
+// The scheduled Cloudflare monitor probes GraphQL itself, then hands only the
+// completed result to Mongo-backed admin health persistence. Keep this route
+// explicit so it cannot be shadowed by later Worker-native admin migrations.
+api.all('/api/v1/admin/cron/cloudflare-analytics-result', proxyToCloudRun);
 // Deliberately scoped compatibility bridge: publishing, content editing, RAG,
 // and scheduled seed routes above are Worker-native. Other established admin
 // operations, plus any retained seed routes, remain on Cloud Run until their

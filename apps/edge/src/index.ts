@@ -84,6 +84,14 @@ export default {
       Boolean(env.EDGE_SHARED_SECRET) &&
       request.headers.get('Authorization') === `Bearer ${env.EDGE_SHARED_SECRET}`
     );
+    // This exact cron route carries TRANSLATE_CRON_SECRET rather than a user
+    // JWT. Cloud Run remains responsible for validating the secret; the edge
+    // only avoids misclassifying it as a malformed student access token.
+    const isCloudflareAnalyticsResultHandoff = (
+      url.pathname === '/api/v1/admin/cron/cloudflare-analytics-result'
+      && request.method === 'POST'
+      && request.headers.get('Authorization')?.startsWith('Bearer ')
+    );
 
     // ── 1. CORS Preflight ──
     if (request.method === 'OPTIONS') {
@@ -119,7 +127,11 @@ export default {
     }
 
     // ── 2. JWT Verification (all /api/ routes except public) ──
-    if (url.pathname.startsWith('/api/') && !isInternalGeneration) {
+    if (
+      url.pathname.startsWith('/api/')
+      && !isInternalGeneration
+      && !isCloudflareAnalyticsResultHandoff
+    ) {
       const jwtResult = await verifyJWT(request, env.JWT_SECRET, env.JWT_PUBLIC_KEY);
 
       if (!jwtResult.valid && jwtResult.error !== 'Missing or invalid Authorization header') {

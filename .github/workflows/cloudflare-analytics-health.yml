@@ -9,6 +9,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  STATUS_HANDOFF_URL: https://api.syrabit.ai/api/v1/admin/cron/cloudflare-analytics-result
 
 permissions:
   contents: read
@@ -31,71 +32,133 @@ jobs:
         run: |
           set +e
           node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
           import {
             CLOUDFLARE_ANALYTICS_CONTRACT,
             buildCloudflareAnalyticsHealthQuery,
           } from './apps/frontend/scripts/cloudflare-production-contract.mjs';
 
-          const token = process.env.CLOUDFLARE_ANALYTICS_TOKEN?.trim();
-          const zoneTag = process.env.CLOUDFLARE_ZONE_ID?.trim();
-          if (!token || !zoneTag) {
-            throw new Error('CLOUDFLARE_ANALYTICS_TOKEN and CLOUDFLARE_ZONE_ID are required');
-          }
-
-          const response = await fetch(CLOUDFLARE_ANALYTICS_CONTRACT.endpoint, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              query: buildCloudflareAnalyticsHealthQuery(),
-              variables: { zoneTag },
-            }),
-            signal: AbortSignal.timeout(30_000),
-          });
-
-          let payload;
+          const checkedAt = new Date().toISOString();
+          let result;
           try {
-            payload = await response.json();
-          } catch {
-            throw new Error(`Cloudflare GraphQL returned non-JSON HTTP ${response.status}`);
+            const token = process.env.CLOUDFLARE_ANALYTICS_TOKEN?.trim();
+            const zoneTag = process.env.CLOUDFLARE_ZONE_ID?.trim();
+            if (!token || !zoneTag) {
+              throw new Error('CLOUDFLARE_ANALYTICS_TOKEN and CLOUDFLARE_ZONE_ID are required');
+            }
+
+            const response = await fetch(CLOUDFLARE_ANALYTICS_CONTRACT.endpoint, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                query: buildCloudflareAnalyticsHealthQuery(),
+                variables: { zoneTag },
+              }),
+              signal: AbortSignal.timeout(30_000),
+            });
+
+            let payload;
+            try {
+              payload = await response.json();
+            } catch {
+              throw new Error(`Cloudflare GraphQL returned non-JSON HTTP ${response.status}`);
+            }
+
+            console.log(`Cloudflare analytics GraphQL HTTP: ${response.status}`);
+            console.log(JSON.stringify(payload, null, 2));
+            if (!response.ok) {
+              throw new Error(`Cloudflare analytics endpoint returned HTTP ${response.status}`);
+            }
+            if (payload.errors?.length) {
+              throw new Error(
+                `Cloudflare analytics GraphQL error: ${payload.errors[0].message || 'unknown error'}`,
+              );
+            }
+
+            const zone = payload.data?.viewer?.zones?.[0];
+            const groups = zone?.[CLOUDFLARE_ANALYTICS_CONTRACT.groupsField];
+            const uniqueVisitors = zone?.uniqueVisitors;
+            if (!Array.isArray(groups)) {
+              throw new Error(
+                `Cloudflare analytics contract missing ${CLOUDFLARE_ANALYTICS_CONTRACT.groupsField}`,
+              );
+            }
+            if (!Array.isArray(uniqueVisitors)) {
+              throw new Error('Cloudflare analytics contract missing uniqueVisitors');
+            }
+
+            result = {
+              status: 'healthy',
+              checked_at: checkedAt,
+              error: null,
+              remediation: null,
+              needs_rotation: false,
+              hourly_buckets_returned: true,
+              hourly_bucket_count: groups.length,
+              unique_visitors_supported: Boolean(
+                uniqueVisitors[0]?.uniq
+                && Object.prototype.hasOwnProperty.call(uniqueVisitors[0].uniq, 'uniques')
+              ),
+            };
+            console.log(
+              `✔ Cloudflare-native analytics contract is healthy (${groups.length} hourly buckets)`,
+            );
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            result = {
+              status: 'unhealthy',
+              checked_at: checkedAt,
+              error: message.slice(0, 500),
+              remediation: 'Confirm the analytics token can read the zone, then update the overview query if Cloudflare changed its GraphQL schema.',
+              needs_rotation: /unauthorized|forbidden|authentication|permission/i.test(message),
+              hourly_buckets_returned: false,
+              unique_visitors_supported: null,
+            };
+            console.error(`Cloudflare-native analytics contract failed: ${message}`);
           }
 
-          console.log(`Cloudflare analytics GraphQL HTTP: ${response.status}`);
-          console.log(JSON.stringify(payload, null, 2));
-          if (!response.ok) {
-            throw new Error(`Cloudflare analytics endpoint returned HTTP ${response.status}`);
-          }
-          if (payload.errors?.length) {
-            throw new Error(
-              `Cloudflare analytics GraphQL error: ${payload.errors[0].message || 'unknown error'}`,
-            );
-          }
-
-          const zone = payload.data?.viewer?.zones?.[0];
-          const groups = zone?.[CLOUDFLARE_ANALYTICS_CONTRACT.groupsField];
-          const uniqueVisitors = zone?.uniqueVisitors;
-          if (!Array.isArray(groups)) {
-            throw new Error(
-              `Cloudflare analytics contract missing ${CLOUDFLARE_ANALYTICS_CONTRACT.groupsField}`,
-            );
-          }
-          if (!Array.isArray(uniqueVisitors)) {
-            throw new Error('Cloudflare analytics contract missing uniqueVisitors');
-          }
-          console.log(
-            `✔ Cloudflare-native analytics contract is healthy (${groups.length} hourly buckets)`,
-          );
+          writeFileSync('/tmp/cloudflare-analytics-result.json', JSON.stringify(result));
+          if (result.status !== 'healthy') process.exitCode = 1;
           NODE
           EXIT_CODE=$?
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
           exit 0
 
+      - name: Hand off result to admin health status
+        id: handoff
+        if: always()
+        continue-on-error: true
+        env:
+          TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          test -s /tmp/cloudflare-analytics-result.json
+          HTTP_STATUS=$(curl --silent --show-error \
+            --output /tmp/cloudflare-analytics-handoff.json \
+            --write-out "%{http_code}" \
+            --request POST "$STATUS_HANDOFF_URL" \
+            --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+            --header "Authorization: Bearer ${TRANSLATE_CRON_SECRET}" \
+            --header "Content-Type: application/json" \
+            --data-binary @/tmp/cloudflare-analytics-result.json \
+            --max-time 30)
+          cat /tmp/cloudflare-analytics-handoff.json
+          if [[ "$HTTP_STATUS" -lt 200 || "$HTTP_STATUS" -ge 300 ]]; then
+            echo "::warning title=Admin health handoff failed::Status persistence returned HTTP ${HTTP_STATUS}; the Cloudflare probe result remains authoritative."
+            exit 1
+          fi
+
       - name: Summarize analytics endpoint result
         if: always()
         env:
           ENDPOINT_EXIT_CODE: ${{ steps.probe.outputs.exit_code }}
+          HANDOFF_OUTCOME: ${{ steps.handoff.outcome }}
         run: |
           {
             echo "## Cloudflare analytics health"
@@ -107,8 +170,12 @@ jobs:
               echo "- **DOWN** — the Cloudflare GraphQL analytics contract failed (exit code: ${ENDPOINT_EXIT_CODE:-unknown})."
             fi
             echo ""
-            echo "### Notification result"
-            echo "- No notification channel is coupled to this probe; endpoint status is reported independently."
+            echo "### Admin health handoff"
+            if [[ "$HANDOFF_OUTCOME" == "success" ]]; then
+              echo "- **SAVED** — the dashboard warning received the Cloudflare-native result."
+            else
+              echo "- **NOT SAVED** — persistence failed, but did not change the endpoint result."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [[ "$ENDPOINT_EXIT_CODE" != "0" ]]; then

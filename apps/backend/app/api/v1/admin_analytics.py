@@ -562,6 +562,59 @@ def _cf_probe_failure(error: str, *, needs_rotation: bool = False) -> dict[str, 
     }
 
 
+def normalize_cf_overview_contract_result(payload: Any) -> dict[str, Any]:
+    """Validate the result contract accepted from the Cloudflare-native monitor."""
+    if not isinstance(payload, dict):
+        raise TypeError("Cloudflare analytics result must be a JSON object")
+
+    status = payload.get("status")
+    if status not in {"healthy", "unhealthy"}:
+        raise ValueError("status must be healthy or unhealthy")
+
+    checked_at_raw = payload.get("checked_at")
+    if not isinstance(checked_at_raw, str):
+        raise ValueError("checked_at must be an ISO-8601 timestamp")
+    try:
+        checked_at = datetime.fromisoformat(checked_at_raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("checked_at must be an ISO-8601 timestamp") from exc
+    if checked_at.tzinfo is None:
+        raise ValueError("checked_at must include a timezone")
+
+    error = payload.get("error")
+    remediation = payload.get("remediation")
+    if error is not None and not isinstance(error, str):
+        raise ValueError("error must be a string or null")
+    if remediation is not None and not isinstance(remediation, str):
+        raise ValueError("remediation must be a string or null")
+
+    hourly_buckets_returned = payload.get("hourly_buckets_returned")
+    unique_visitors_supported = payload.get("unique_visitors_supported")
+    if not isinstance(hourly_buckets_returned, bool):
+        raise ValueError("hourly_buckets_returned must be a boolean")
+    if unique_visitors_supported is not None and not isinstance(
+        unique_visitors_supported, bool
+    ):
+        raise ValueError("unique_visitors_supported must be a boolean or null")
+
+    bucket_count = payload.get("hourly_bucket_count")
+    if bucket_count is not None and (
+        not isinstance(bucket_count, int) or isinstance(bucket_count, bool) or bucket_count < 0
+    ):
+        raise ValueError("hourly_bucket_count must be a non-negative integer or null")
+
+    return {
+        "status": status,
+        "checked_at": checked_at.isoformat(),
+        "error": error[:500] if error else None,
+        "remediation": remediation[:500] if remediation else None,
+        "needs_rotation": bool(payload.get("needs_rotation", False)),
+        "hourly_buckets_returned": hourly_buckets_returned,
+        "hourly_bucket_count": bucket_count,
+        "unique_visitors_supported": unique_visitors_supported,
+    }
+
+
 async def check_cf_overview_contract() -> dict[str, Any]:
     """Validate the live, read-only 24-hour Cloudflare overview query.
 

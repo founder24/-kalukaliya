@@ -96,6 +96,46 @@ describe('Worker-to-Worker fallback authentication', () => {
     expect(apiFetch).toHaveBeenCalledOnce();
   });
 
+  it('preserves the cron credential for the analytics result handoff', async () => {
+    const apiFetch = vi.fn(async (request: Request) => {
+      expect(request.headers.get('Authorization')).toBe('Bearer cron-secret');
+      expect(request.headers.get('X-User-JWT')).toBe('Bearer cron-secret');
+      expect(request.headers.get('X-Cloud-Run-Token')).toBe('Bearer cloud-run-id-token');
+      return new Response('{"persisted":true}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Syrabit-Route': 'cloud-run-fallback' },
+      });
+    });
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ id_token: 'cloud-run-id-token' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )));
+    const existingCrypto = globalThis.crypto;
+    vi.stubGlobal('crypto', {
+      ...existingCrypto,
+      subtle: {
+        importKey: vi.fn(async () => ({ type: 'private' } as CryptoKey)),
+        sign: vi.fn(async () => new ArrayBuffer(256)),
+      },
+    });
+
+    const response = await proxyToApiWorker(
+      new Request('https://syrabit.ai/api/v1/admin/cron/cloudflare-analytics-result', {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer cron-secret',
+          'Content-Type': 'application/json',
+        },
+        body: '{"status":"healthy"}',
+      }),
+      createEnv(apiFetch),
+    );
+
+    expect(response.status).toBe(200);
+    expect(apiFetch).toHaveBeenCalledOnce();
+  });
+
   it('does not attach fallback credentials to unrelated native API routes', async () => {
     const apiFetch = vi.fn(async (request: Request) => {
       expect(request.headers.get('X-Cloud-Run-Token')).toBeNull();

@@ -524,3 +524,64 @@ async def test_cf_contract_cron_returns_503_after_recording_provider_failure(mon
     assert response.status_code == 503
     assert json.loads(response.body) == probe
     persisted.assert_awaited_once_with(probe)
+
+
+@pytest.mark.asyncio
+async def test_cf_native_result_handoff_persists_without_reprobing(monkeypatch):
+    """The scheduled direct result updates the banner without another CF request."""
+    monkeypatch.setattr(settings, "TRANSLATE_CRON_SECRET", "cron-secret", raising=False)
+    probe = {
+        "status": "unhealthy",
+        "checked_at": "2026-09-01T12:00:00Z",
+        "error": "Cloudflare GraphQL error: Unknown field",
+        "remediation": "Update the overview query.",
+        "needs_rotation": False,
+        "hourly_buckets_returned": False,
+        "unique_visitors_supported": None,
+    }
+    persisted = AsyncMock()
+    provider_probe = AsyncMock()
+    monkeypatch.setattr(admin_analytics, "persist_cf_overview_contract_result", persisted)
+    monkeypatch.setattr(admin_analytics, "check_cf_overview_contract", provider_probe)
+
+    request = MagicMock()
+    request.headers = {"authorization": "Bearer cron-secret"}
+    request.json = AsyncMock(return_value=probe)
+    response = await admin_cron.record_cloudflare_analytics_result(request)
+
+    assert response["status"] == "unhealthy"
+    assert response["persisted"] is True
+    persisted.assert_awaited_once()
+    provider_probe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cf_native_result_persistence_failure_does_not_mask_probe(monkeypatch):
+    """Mongo failure is separate from the direct Cloudflare provider result."""
+    monkeypatch.setattr(settings, "TRANSLATE_CRON_SECRET", "cron-secret", raising=False)
+    probe = {
+        "status": "healthy",
+        "checked_at": "2026-09-01T12:00:00Z",
+        "error": None,
+        "remediation": None,
+        "needs_rotation": False,
+        "hourly_buckets_returned": True,
+        "hourly_bucket_count": 24,
+        "unique_visitors_supported": True,
+    }
+    monkeypatch.setattr(
+        admin_analytics,
+        "persist_cf_overview_contract_result",
+        AsyncMock(side_effect=RuntimeError("Mongo unavailable")),
+    )
+
+    request = MagicMock()
+    request.headers = {"authorization": "Bearer cron-secret"}
+    request.json = AsyncMock(return_value=probe)
+    response = await admin_cron.record_cloudflare_analytics_result(request)
+    body = json.loads(response.body)
+
+    assert response.status_code == 503
+    assert body["status"] == "healthy"
+    assert body["hourly_buckets_returned"] is True
+    assert body["persisted"] is False

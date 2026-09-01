@@ -70,6 +70,9 @@ export default function CloudflareAnalyticsBanner({
 
   useEffect(() => {
     fetchStatus();
+    if (!adminToken) return undefined;
+    const interval = window.setInterval(fetchStatus, 60_000);
+    return () => window.clearInterval(interval);
   }, [fetchStatus]);
 
   const handleRecheck = async () => {

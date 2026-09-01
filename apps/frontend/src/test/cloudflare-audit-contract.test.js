@@ -81,6 +81,12 @@ describe('scheduled Cloudflare audit contract', () => {
     expect(analyticsWorkflow).toContain('buildCloudflareAnalyticsHealthQuery');
     expect(analyticsWorkflow).toContain('CLOUDFLARE_ANALYTICS_CONTRACT.endpoint');
     expect(analyticsWorkflow).not.toContain('/api/v1/admin/cron/cloudflare-analytics-health');
+    expect(analyticsWorkflow).toContain('/api/v1/admin/cron/cloudflare-analytics-result');
+    expect(analyticsWorkflow).toContain('continue-on-error: true');
+    expect(analyticsWorkflow).toContain('the Cloudflare probe result remains authoritative');
+    expect(analyticsWorkflow).toMatch(
+      /Hand off result to admin health status[\s\S]*--data-binary @\/tmp\/cloudflare-analytics-result\.json/,
+    );
 
     const uptimeWorkflow = fs.readFileSync(
       path.join(repoRoot, '.github/workflows/agent-uptime-monitor.yml'),
