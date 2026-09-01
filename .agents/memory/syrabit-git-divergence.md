@@ -8,6 +8,19 @@ description: How to handle diverged histories between Replit local main and GitH
 ## The rule
 Replit sandbox blocks `git push` (treated as destructive). When you need to push code to trigger GitHub Actions deploys, use the **GitHub Git Data API** (blob → tree → commit → PATCH ref).
 
+The Replit GitHub OAuth connector does not authenticate the workspace's normal
+Git remote. Its API proxy can also trigger Replit's Cloudflare protection during
+bulk blob uploads or on some base64 payloads.
+
+**Why:** a valid OAuth connection successfully read the repository and created
+Git blobs, but the Git CLI still used the invalid workspace PAT and the connector
+proxy blocked later blob requests before any branch-reference update.
+
+**How to apply:** prefer a valid PAT-backed normal fast-forward push for a large
+multi-commit backlog. Use the connector Git Data API for small reconciliations;
+send text blobs as UTF-8, throttle writes, and update the ref only after every
+blob, tree, and commit has been created successfully.
+
 ## How to apply
 1. Get current GitHub main SHA via `GET /repos/{repo}/git/refs/heads/main`
 2. Get base tree SHA from `GET /repos/{repo}/git/commits/{sha}`
