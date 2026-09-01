@@ -9,9 +9,9 @@
  *      It is disabled by default so Access changes cannot alter traffic queues.
  *
  * Required env:
- *   CLOUDFLARE_API_TOKEN   — Zero Trust: Edit, Waiting Room: Edit
- *                            (current token lacks these scopes — add them at
- *                             https://dash.cloudflare.com/profile/api-tokens then re-run)
+ *   CLOUDFLARE_API_TOKEN   — Access: Apps and Policies Edit
+ *                            Access: Identity Providers Read is recommended
+ *                            so the script can report the active login method.
  *   STAFF_EMAILS           — comma-separated list of team emails allowed through Access
  *                            e.g. "alice@syrabit.ai,bob@syrabit.ai"
  *                            ADMIN_EMAILS remains accepted as a legacy alias.
@@ -324,8 +324,8 @@ async function main() {
     console.error(`${errors.length} step(s) failed:\n  ${errors.join('\n  ')}`);
     console.error('\nFix the issues above and re-run. The script is idempotent.');
     console.error('\nRequired token scopes for Phase 3:');
-    console.error('  • Zero Trust: Edit  — for Access apps and policies');
-    console.error('  • Waiting Room: Edit — for Waiting Room');
+    console.error('  • Access: Apps and Policies Edit — for Access apps and policies');
+    console.error('  • Access: Identity Providers Read — to report the login method');
     console.error('Add at: https://dash.cloudflare.com/profile/api-tokens');
     process.exit(1);
   }
