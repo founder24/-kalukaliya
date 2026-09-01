@@ -28,6 +28,7 @@ Each memory document shape:
 """
 
 import logging
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -82,6 +83,7 @@ async def write_qa_memory(
     session_id: Optional[str],
     chapter_name: Optional[str] = None,
     chapter_id: Optional[str] = None,
+    correlation_id: Optional[str] = None,
 ) -> None:
     """
     Fire-and-forget: persist a Q&A memory for authenticated users when the
@@ -121,7 +123,10 @@ async def write_qa_memory(
         if existing:
             logger.debug(
                 "memory_dedup_skip",
-                extra={"user_id": user_id, "prefix": question_prefix[:30]},
+                extra={
+                    "correlation_id": correlation_id or str(uuid.uuid4()),
+                    "question_length": len(user_message),
+                },
             )
             return
 
@@ -148,17 +153,22 @@ async def write_qa_memory(
         logger.info(
             "memory_written",
             extra={
-                "user_id": user_id,
+                "correlation_id": correlation_id or str(uuid.uuid4()),
                 "kind": "qa",
                 "lang": detected_lang,
-                "chapter": resolved_chapter,
                 "confidence_tier": confidence_tier,
             },
         )
 
     except Exception as e:
         # Never crash the caller — memory writing is best-effort.
-        logger.warning(f"write_qa_memory failed (non-fatal): {e}")
+        logger.warning(
+            "write_qa_memory_failed",
+            extra={
+                "correlation_id": correlation_id or str(uuid.uuid4()),
+                "error_class": type(e).__name__,
+            },
+        )
 
 
 def _re_escape(text: str) -> str:
@@ -192,4 +202,7 @@ async def ensure_memory_indexes() -> None:
         )
         logger.info("memory_brain indexes ensured")
     except Exception as e:
-        logger.warning(f"memory_brain index creation failed (non-fatal): {e}")
+        logger.warning(
+            "memory_brain_index_creation_failed",
+            extra={"error_class": type(e).__name__},
+        )

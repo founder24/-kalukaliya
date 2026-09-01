@@ -366,7 +366,9 @@ def create_app() -> FastAPI:
                     )
 
         # Request ID
-        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        # Always generate this server-side. Public headers are untrusted and a
+        # syntactically valid UUID can still be a caller's stable identifier.
+        request_id = str(uuid.uuid4())
         request.state.request_id = request_id
 
         start_time = time.time()

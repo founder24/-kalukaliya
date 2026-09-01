@@ -106,7 +106,7 @@ class TestAiOutageAlertDedup:
 
         assert captured_counts == [1]  # only one send happened
         # Both users are in the set
-        assert len(mod._affected_user_ids) == 2
+        assert len(mod._affected_correlation_ids) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -186,9 +186,9 @@ class TestCallLlmAlertWiring:
 
         record_mock.assert_awaited_once()
         call_kwargs = record_mock.call_args.kwargs
-        assert call_kwargs["user_id"] == "test-user"
-        assert "503" in call_kwargs.get("sarvam_error", "")
-        assert "429" in call_kwargs.get("gemini_error", "")
+        assert "user_id" not in call_kwargs
+        assert call_kwargs.get("sarvam_error") == "upstream_runtime"
+        assert call_kwargs.get("gemini_error") == "upstream_runtime"
 
 
 # ---------------------------------------------------------------------------

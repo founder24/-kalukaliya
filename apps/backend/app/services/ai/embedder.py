@@ -139,7 +139,8 @@ async def embed_batch(texts: list[str]) -> list[list[float]]:
 
     if response.status_code != 200:
         logger.error(
-            f"CF bge-m3 API error: {response.status_code} — {response.text[:300]}"
+            "cf_embedding_api_error",
+            extra={"status": response.status_code},
         )
         raise RuntimeError(
             f"CF Workers AI embedding API returned HTTP {response.status_code}"

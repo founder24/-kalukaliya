@@ -26,22 +26,37 @@ _DEDUP_WINDOW_SECONDS = 10 * 60  # 10 minutes between alert emails
 _state_lock = asyncio.Lock()
 _last_alert_sent_at: float = 0.0          # epoch seconds of the last email send
 _window_start: float = 0.0                # start of the current accumulation window
-_affected_user_ids: set[str] = set()
+_affected_correlation_ids: set[str] = set()
 _sarvam_errors: list[str] = []
 _gemini_errors: list[str] = []
 
 
+_SAFE_ERROR_CATEGORIES = {
+    "timeout",
+    "validation",
+    "upstream_runtime",
+    "upstream_http",
+    "internal",
+}
+
+
+def _safe_error_category(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    return value if value in _SAFE_ERROR_CATEGORIES else "provider_failure"
+
+
 def _reset_window(now: float) -> None:
     """Reset accumulation state for a fresh window. Must be called under _state_lock."""
-    global _window_start, _affected_user_ids, _sarvam_errors, _gemini_errors
+    global _window_start, _affected_correlation_ids, _sarvam_errors, _gemini_errors
     _window_start = now
-    _affected_user_ids = set()
+    _affected_correlation_ids = set()
     _sarvam_errors = []
     _gemini_errors = []
 
 
 async def record_ai_outage(
-    user_id: str,
+    correlation_id: str,
     sarvam_error: Optional[str] = None,
     gemini_error: Optional[str] = None,
 ) -> None:
@@ -57,7 +72,7 @@ async def record_ai_outage(
         sarvam_error: String description of the Sarvam failure (truncated to 200 chars).
         gemini_error: String description of the Gemini failure (truncated to 200 chars).
     """
-    global _last_alert_sent_at, _window_start, _affected_user_ids, _sarvam_errors, _gemini_errors
+    global _last_alert_sent_at, _window_start, _affected_correlation_ids, _sarvam_errors, _gemini_errors
 
     now = _time.time()
     snapshot_count = 0
@@ -71,11 +86,13 @@ async def record_ai_outage(
             _reset_window(now)
 
         # Accumulate this event.
-        _affected_user_ids.add(user_id)
-        if sarvam_error:
-            _sarvam_errors.append(sarvam_error[:200])
-        if gemini_error:
-            _gemini_errors.append(gemini_error[:200])
+        _affected_correlation_ids.add(correlation_id)
+        safe_sarvam_error = _safe_error_category(sarvam_error)
+        safe_gemini_error = _safe_error_category(gemini_error)
+        if safe_sarvam_error:
+            _sarvam_errors.append(safe_sarvam_error)
+        if safe_gemini_error:
+            _gemini_errors.append(safe_gemini_error)
 
         # Decide whether to send an alert.
         # Condition: no alert has been sent in the last _DEDUP_WINDOW_SECONDS.
@@ -83,13 +100,13 @@ async def record_ai_outage(
             # Already alerted in this window — just accumulate silently.
             logger.debug(
                 "ai_outage_alert: skipping email (already sent in dedup window), "
-                f"affected_users={len(_affected_user_ids)}"
+                f"affected_requests={len(_affected_correlation_ids)}"
             )
             return
 
         # Snapshot state for the email (sent outside the lock to avoid blocking
         # other coroutines during the HTTP call).
-        snapshot_count = len(_affected_user_ids)
+        snapshot_count = len(_affected_correlation_ids)
         snapshot_sarvam = list(_sarvam_errors)
         snapshot_gemini = list(_gemini_errors)
 
@@ -137,10 +154,8 @@ async def _send_outage_alert(
             # No admin email configured — log prominently so the alert is visible
             # in Cloud Logging even without email.
             logger.error(
-                "AI_OUTAGE_ALERT: Both AI providers are down! "
-                f"affected_users={affected_count} "
-                f"sarvam_errors={sarvam_errors[:3]} "
-                f"gemini_errors={gemini_errors[:3]}"
+                "ai_outage_alert_no_email",
+                extra={"affected_users": affected_count},
             )
             return True  # logged; suppress further retries this window
 
@@ -203,5 +218,8 @@ async def _send_outage_alert(
         )
 
     except Exception as exc:
-        logger.error(f"ai_outage_alert: failed to send alert email: {exc}")
+        logger.error(
+            "ai_outage_alert_send_failed",
+            extra={"error_class": type(exc).__name__},
+        )
         return False

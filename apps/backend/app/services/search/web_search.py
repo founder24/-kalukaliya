@@ -49,7 +49,7 @@ def _ddgs_sync(query: str, max_results: int) -> list[dict]:
         with DDGS() as ddgs:
             return list(ddgs.text(query, max_results=max_results))
     except Exception as e:
-        logger.warning(f"_ddgs_sync error: {type(e).__name__}: {e}")
+        logger.warning("ddgs_search_failed", extra={"error_class": type(e).__name__})
         return []
 
 
@@ -75,7 +75,7 @@ async def web_search(
         logger.warning("web_search: timed out (%.1fs)", timeout)
         return []
     except Exception as e:
-        logger.warning(f"web_search: failed ({type(e).__name__}: {e})")
+        logger.warning("web_search_failed", extra={"error_class": type(e).__name__})
         return []
 
     chunks: list[dict] = []

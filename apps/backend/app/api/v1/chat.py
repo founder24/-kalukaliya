@@ -3,7 +3,6 @@ from beanie.exceptions import CollectionWasNotInitialized
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Literal
-import hashlib
 import io
 import logging
 import re
@@ -11,6 +10,7 @@ import time
 import json
 import asyncio
 import httpx
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import File, UploadFile, Form
@@ -34,13 +34,52 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Chat"])
 
 
-def _log_task_exception(task: asyncio.Task) -> None:
+def _chat_correlation_id(http_request: Optional[Request]) -> str:
+    """Return a non-user-derived identifier for chat observability."""
+    request_id = getattr(getattr(http_request, "state", None), "request_id", None)
+    try:
+        return str(uuid.UUID(str(request_id)))
+    except (AttributeError, TypeError, ValueError):
+        return str(uuid.uuid4())
+
+
+def _classify_chat_error(exc: BaseException) -> str:
+    """Map an exception to a safe operational category without logging text."""
+    if exc.__class__.__name__ == "CircuitBreakerError":
+        return "circuit_breaker"
+    if isinstance(exc, asyncio.TimeoutError):
+        return "timeout"
+    if isinstance(exc, httpx.HTTPStatusError):
+        return "upstream_http"
+    if isinstance(exc, ValueError):
+        return "validation"
+    if isinstance(exc, RuntimeError):
+        message = str(exc).lower()
+        if "embedding" in message:
+            return "embedding_service"
+        if "search" in message:
+            return "search_service"
+        if "timeout" in message:
+            return "timeout"
+        return "upstream_runtime"
+    return "internal"
+
+
+def _log_task_exception(
+    task: asyncio.Task, correlation_id: Optional[str] = None
+) -> None:
     """Log unhandled exceptions from fire-and-forget background tasks."""
     if task.cancelled():
         return
     exc = task.exception()
     if exc:
-        logger.error(f"Background task failed: {type(exc).__name__}: {exc}")
+        logger.error(
+            "background_task_failed",
+            extra={
+                "correlation_id": correlation_id or str(uuid.uuid4()),
+                "error_class": _classify_chat_error(exc),
+            },
+        )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -142,6 +181,7 @@ async def chat(
     # User tier and anonymous identity resolution
     user_tier = getattr(user, "subscription_tier", "free") if user else "free"
     user_id = str(user.id) if user else resolve_anon_id(http_request)
+    correlation_id = _chat_correlation_id(http_request)
 
     # client_ip for legacy rate_limit signature (rate_limit now uses user_id key)
     client_ip = (
@@ -165,7 +205,7 @@ async def chat(
             logger.info(
                 "chat_started",
                 extra={
-                    "user_id": user_id,
+                    "correlation_id": correlation_id,
                     "lang": detected_lang,
                     "model": target_model,
                 },
@@ -230,7 +270,13 @@ async def chat(
                             sources=[],
                         )
                 except Exception as _qp_err:
-                    logger.warning(f"QP pre-fetch failed: {_qp_err}")
+                    logger.warning(
+                        "qp_prefetch_failed",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "error_class": _classify_chat_error(_qp_err),
+                        },
+                    )
 
             async def _maybe_retrieve():
                 """
@@ -248,7 +294,10 @@ async def chat(
                 if skip_rag:
                     logger.info(
                         "generic_query_detected",
-                        extra={"user_id": user_id, "query": sanitized_message[:30]},
+                        extra={
+                            "correlation_id": correlation_id,
+                            "message_length": len(sanitized_message),
+                        },
                     )
                     return ([], 0.0)
 
@@ -262,14 +311,17 @@ async def chat(
                 if not topic_match or match_score < CONFIDENCE_LOW:
                     logger.info(
                         "no_topic_match",
-                        extra={"user_id": user_id, "query": sanitized_message[:30]},
+                        extra={
+                            "correlation_id": correlation_id,
+                            "message_length": len(sanitized_message),
+                        },
                     )
                     return ([], match_score)
 
                 logger.info(
                     "topic_matched",
                     extra={
-                        "user_id": user_id,
+                        "correlation_id": correlation_id,
                         "topic": topic_match.get("topic_title"),
                         "score": match_score,
                     },
@@ -300,7 +352,13 @@ async def chat(
             # Unpack results, treating exceptions as safe defaults
             raw_retrieve = results[0] if not isinstance(results[0], Exception) else ([], 0.0)
             if isinstance(results[0], Exception):
-                logger.error(f"RAG retrieval failed: {results[0]}")
+                logger.error(
+                    "rag_retrieval_failed",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "error_class": _classify_chat_error(results[0]),
+                    },
+                )
                 raw_retrieve = ([], 0.0)
             context_chunks, match_score = raw_retrieve
 
@@ -320,7 +378,13 @@ async def chat(
 
             history = results[1] if not isinstance(results[1], Exception) else ""
             if isinstance(results[1], Exception):
-                logger.error(f"History load failed: {results[1]}")
+                logger.error(
+                    "conversation_history_load_failed",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "error_class": _classify_chat_error(results[1]),
+                    },
+                )
 
             # Inherit chapter/subject/board context from the previous turn.
             # When a student follows up ("explain more") the frontend sends session_id
@@ -347,12 +411,19 @@ async def chat(
                     request = request.model_copy(update=_patched)
                     logger.info(
                         "card_ctx_inherited",
-                        extra={"user_id": user_id, "inherited_fields": list(_patched.keys())},
+                        extra={
+                            "correlation_id": correlation_id,
+                            "inherited_fields": list(_patched.keys()),
+                        },
                     )
 
             if isinstance(results[2], Exception):
                 logger.warning(
-                    f"Rate limit check failed: {results[2]} - allowing request"
+                    "rate_limit_check_failed",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "error_class": _classify_chat_error(results[2]),
+                    },
                 )
                 rate_result = (True, 0, 100, "monthly")
             else:
@@ -381,7 +452,10 @@ async def chat(
                 if _canned:
                     logger.info(
                         "greeting_rag_canned_hit",
-                        extra={"user_id": user_id, "query": sanitized_message[:30]},
+                        extra={
+                            "correlation_id": correlation_id,
+                            "message_length": len(sanitized_message),
+                        },
                     )
                     return ChatResponse(
                         response=_canned,
@@ -408,7 +482,10 @@ async def chat(
                 latency_ms = int((time.time() - start_time) * 1000)
                 logger.info(
                     "chat_cache_hit",
-                    extra={"user_id": user_id, "latency_ms": latency_ms},
+                    extra={
+                        "correlation_id": correlation_id,
+                        "latency_ms": latency_ms,
+                    },
                 )
                 return ChatResponse(
                     response=cached["response"],
@@ -429,7 +506,10 @@ async def chat(
                 if not context_chunks and web_chunks:
                     logger.info(
                         "rag_empty_using_web_fallback",
-                        extra={"user_id": user_id, "web_chunks": len(web_chunks)},
+                        extra={
+                            "correlation_id": correlation_id,
+                            "web_chunks": len(web_chunks),
+                        },
                     )
 
             # 2d. Syllabus intent override — mirrors streaming path.
@@ -450,10 +530,20 @@ async def chat(
                         confidence_tier = "high"
                         logger.info(
                             "syllabus_intent_hit",
-                            extra={"user_id": user_id, "subject": syl_name, "chapters": syl_count},
+                            extra={
+                                "correlation_id": correlation_id,
+                                "subject": syl_name,
+                                "chapters": syl_count,
+                            },
                         )
                 except Exception as _syl_err:
-                    logger.warning(f"Syllabus intent fetch failed: {_syl_err}")
+                    logger.warning(
+                        "syllabus_context_load_failed",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "error_class": _classify_chat_error(_syl_err),
+                        },
+                    )
 
             # 2e. QP intent override — inject pyq_rag_text as direct context.
             if is_qp and _qp_pyq_text and not context_chunks:
@@ -474,7 +564,7 @@ async def chat(
                 confidence_tier = "high"
                 logger.info(
                     "qp_direct_hit",
-                    extra={"user_id": user_id, "chapter_id": getattr(request, "chapter_id", None)},
+                    extra={"correlation_id": correlation_id},
                 )
 
             # 3. Build system prompt with weighted RAG 50% / Web 20% / LLM 30%
@@ -517,6 +607,7 @@ async def chat(
                 target_model=target_model,
                 detected_lang=detected_lang,
                 user_id=user_id,
+                correlation_id=correlation_id,
             )
 
             # Calculate latency
@@ -541,9 +632,12 @@ async def chat(
                     latency_ms=latency_ms,
                     context_chunks=context_chunks,
                     detected_lang=detected_lang,
+                    correlation_id=correlation_id,
                 )
             )
-            task.add_done_callback(_log_task_exception)
+            task.add_done_callback(
+                lambda completed: _log_task_exception(completed, correlation_id)
+            )
 
             # 5b. Write Q&A memory (fire-and-forget, authenticated users only)
             if user:
@@ -558,9 +652,12 @@ async def chat(
                         session_id=request.session_id,
                         chapter_name=getattr(request, "chapter_name", None),
                         chapter_id=getattr(request, "chapter_id", None),
+                        correlation_id=correlation_id,
                     )
                 )
-                mem_task.add_done_callback(_log_task_exception)
+                mem_task.add_done_callback(
+                    lambda completed: _log_task_exception(completed, correlation_id)
+                )
 
             # 6. Update usage counter
             # NOTE: Redis is the authoritative source for rate limiting.
@@ -577,12 +674,18 @@ async def chat(
                         }
                     )
                 except Exception as e:
-                    logger.error(f"Failed to update user usage counter: {e}")
+                    logger.error(
+                        "user_usage_counter_update_failed",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "error_class": _classify_chat_error(e),
+                        },
+                    )
 
             logger.info(
                 "chat_completed",
                 extra={
-                    "user_id": user_id,
+                    "correlation_id": correlation_id,
                     "lang": detected_lang,
                     "provider": "sarvam",
                     "latency_ms": latency_ms,
@@ -593,7 +696,7 @@ async def chat(
             # Track in PostHog
             await track_chat_completed(
                 request=http_request,
-                user_id=user_id,
+                correlation_id=correlation_id,
                 lang=detected_lang,
                 model=actual_model,
                 latency_ms=latency_ms,
@@ -624,10 +727,15 @@ async def chat(
         from app.core.circuit_breaker import CircuitBreakerError
 
         error_msg = str(e)
+        error_class = _classify_chat_error(e)
 
         if isinstance(e, CircuitBreakerError):
             logger.warning(
-                "chat_circuit_open", extra={"user_id": user_id, "error": error_msg}
+                "chat_circuit_open",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_class": error_class,
+                },
             )
             raise HTTPException(
                 status_code=503,
@@ -635,7 +743,13 @@ async def chat(
                 headers={"Retry-After": "30"},
             )
         elif isinstance(e, asyncio.TimeoutError):
-            logger.error("chat_timeout", extra={"user_id": user_id})
+            logger.error(
+                "chat_timeout",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_class": error_class,
+                },
+            )
             raise HTTPException(
                 status_code=504,
                 detail="Request timed out. Please try a shorter question.",
@@ -644,7 +758,11 @@ async def chat(
             upstream_status = e.response.status_code
             logger.error(
                 "chat_upstream_http_error",
-                extra={"user_id": user_id, "status": upstream_status},
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_class": error_class,
+                    "status": upstream_status,
+                },
             )
             if upstream_status == 429:
                 raise HTTPException(
@@ -655,13 +773,20 @@ async def chat(
             raise HTTPException(status_code=502, detail="Upstream service error")
         elif isinstance(e, ValueError):
             logger.warning(
-                "chat_value_error", extra={"user_id": user_id, "error": error_msg}
+                "chat_value_error",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_class": error_class,
+                },
             )
             raise HTTPException(status_code=400, detail=error_msg)
         elif isinstance(e, RuntimeError):
             logger.error(
                 "chat_upstream_failure",
-                extra={"user_id": user_id, "error": error_msg},
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_class": error_class,
+                },
             )
             if "embedding" in error_msg.lower():
                 raise HTTPException(
@@ -681,7 +806,10 @@ async def chat(
         else:
             logger.error(
                 "chat_unexpected_error",
-                extra={"user_id": user_id, "error": error_msg},
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_class": error_class,
+                },
             )
             raise HTTPException(
                 status_code=500,
@@ -720,6 +848,7 @@ async def chat_stream(
     # -- Auth & rate limit --
     user_tier = getattr(user, "subscription_tier", "free") if user else "free"
     user_id = str(user.id) if user else resolve_anon_id(http_request)
+    correlation_id = _chat_correlation_id(http_request)
 
     client_ip = (
         http_request.client.host
@@ -746,10 +875,12 @@ async def chat_stream(
     sanitized_message = sanitize_user_input(request.message)
 
     if sanitized_message != request.message:
-        raw_hash = hashlib.sha256(request.message.encode()).hexdigest()[:16]
         logger.info(
             "input_sanitized",
-            extra={"user_id": user_id, "raw_hash": raw_hash},
+            extra={
+                "correlation_id": correlation_id,
+                "message_length": len(sanitized_message),
+            },
         )
 
     # -- Resolve language & model --
@@ -831,12 +962,15 @@ async def chat_stream(
             rag_span.set_attribute("chat.lang", detected_lang)
             rag_span.set_attribute("chat.model", target_model)
             rag_span.set_attribute("user.tier", user_tier)
-            rag_span.set_attribute("user.id", user_id)
+            rag_span.set_attribute("chat.correlation_id", correlation_id)
 
             if is_generic:
                 logger.info(
                     "generic_query_skip_rag",
-                    extra={"user_id": user_id, "query": sanitized_message[:30]},
+                    extra={
+                        "correlation_id": correlation_id,
+                        "message_length": len(sanitized_message),
+                    },
                 )
                 history = await ChatService.load_conversation_history(request.session_id)
                 source_card = await ChatService.build_source_card(None, [], [], "none", "generic")
@@ -848,7 +982,10 @@ async def chat_stream(
                 if _canned:
                     logger.info(
                         "greeting_rag_canned_hit_stream",
-                        extra={"user_id": user_id, "query": sanitized_message[:30]},
+                        extra={
+                            "correlation_id": correlation_id,
+                            "message_length": len(sanitized_message),
+                        },
                     )
 
                     async def _canned_event_stream():
@@ -892,7 +1029,13 @@ async def chat_stream(
                 last_ctx_result = phase1_results[2]
 
                 if isinstance(match_result, Exception):
-                    logger.warning(f"topic_match_with_embedding failed: {match_result}")
+                    logger.warning(
+                        "topic_match_failed",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "error_class": _classify_chat_error(match_result),
+                        },
+                    )
                     topic_match, query_embedding = None, None
                 elif isinstance(match_result, tuple):
                     topic_match, query_embedding = match_result
@@ -900,7 +1043,13 @@ async def chat_stream(
                     topic_match, query_embedding = None, None
 
                 if isinstance(history_result, Exception):
-                    logger.warning(f"history load failed: {history_result}")
+                    logger.warning(
+                        "conversation_history_load_failed",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "error_class": _classify_chat_error(history_result),
+                        },
+                    )
                     history = ""
                 else:
                     history = history_result or ""
@@ -934,7 +1083,7 @@ async def chat_stream(
                         logger.info(
                             "card_ctx_inherited",
                             extra={
-                                "user_id": user_id,
+                                "correlation_id": correlation_id,
                                 "inherited_fields": list(_patched.keys()),
                             },
                         )
@@ -956,12 +1105,21 @@ async def chat_stream(
                             is_syllabus = True
                             logger.info(
                                 "syllabus_embed_gate_hit",
-                                extra={"user_id": user_id, "query": sanitized_message[:40]},
+                                extra={
+                                    "correlation_id": correlation_id,
+                                    "message_length": len(sanitized_message),
+                                },
                             )
                     except asyncio.TimeoutError:
                         pass
                     except Exception as _e:
-                        logger.debug(f"syllabus_embed_gate error: {_e}")
+                        logger.debug(
+                            "syllabus_embed_gate_failed",
+                            extra={
+                                "correlation_id": correlation_id,
+                                "error_class": _classify_chat_error(_e),
+                            },
+                        )
 
                 # ── Card-context retrieval filters ────────────────────────────────────
                 # Built from the frontend's URL params (?subject=, ?chapter=, ?section=).
@@ -1013,7 +1171,7 @@ async def chat_stream(
                         logger.info(
                             "syllabus_intent_hit",
                             extra={
-                                "user_id": user_id,
+                                "correlation_id": correlation_id,
                                 "subject": syl_name,
                                 "chapters": syl_count,
                             },
@@ -1050,7 +1208,7 @@ async def chat_stream(
                     web_chunks = []
                     logger.info(
                         "qp_direct_hit",
-                        extra={"user_id": user_id, "chapter_id": request.chapter_id},
+                        extra={"correlation_id": correlation_id},
                     )
                     from app.models.source_card import SourceCard as _SC
                     source_card = _SC(
@@ -1072,7 +1230,7 @@ async def chat_stream(
                         logger.info(
                             "confidence_high",
                             extra={
-                                "user_id": user_id,
+                                "correlation_id": correlation_id,
                                 "score": round(match_score, 3),
                                 "topic": topic_match.get("topic_title"),
                             },
@@ -1109,7 +1267,7 @@ async def chat_stream(
                         logger.info(
                             "confidence_mid",
                             extra={
-                                "user_id": user_id,
+                                "correlation_id": correlation_id,
                                 "score": round(match_score, 3),
                                 "topic": topic_match.get("topic_title"),
                             },
@@ -1135,7 +1293,7 @@ async def chat_stream(
                         confidence_tier = "low"
                         logger.info(
                             "confidence_low",
-                            extra={"user_id": user_id, "score": round(match_score, 3)},
+                            extra={"correlation_id": correlation_id, "score": round(match_score, 3)},
                         )
                         v2_result, web_result = await asyncio.gather(
                             ChatService.retrieve_context(
@@ -1151,7 +1309,13 @@ async def chat_stream(
                             return_exceptions=True,
                         )
                         if isinstance(v2_result, Exception):
-                            logger.warning(f"retrieve_context failed: {v2_result}")
+                            logger.warning(
+                                "retrieve_context_failed",
+                                extra={
+                                    "correlation_id": correlation_id,
+                                    "error_class": _classify_chat_error(v2_result),
+                                },
+                            )
                             context_chunks, rag_path = [], "empty"
                         else:
                             context_chunks, rag_path = v2_result
@@ -1163,7 +1327,10 @@ async def chat_stream(
                         confidence_tier = "none"
                         logger.info(
                             "no_topic_match_stream",
-                            extra={"user_id": user_id, "query": sanitized_message[:30]},
+                            extra={
+                                "correlation_id": correlation_id,
+                                "message_length": len(sanitized_message),
+                            },
                         )
                         if request.chapter_id:
                             rag_result, web_result = await asyncio.gather(
@@ -1183,8 +1350,7 @@ async def chat_stream(
                             logger.info(
                                 "card_context_rag_fallback",
                                 extra={
-                                    "user_id": user_id,
-                                    "chapter_id": request.chapter_id,
+                                    "correlation_id": correlation_id,
                                     "chunks": len(context_chunks),
                                     "web_chunks": len(web_chunks),
                                 },
@@ -1198,12 +1364,18 @@ async def chat_stream(
                     if not context_chunks and not web_chunks:
                         logger.warning(
                             "rag_and_web_empty",
-                            extra={"user_id": user_id, "query": sanitized_message[:50]},
+                            extra={
+                                "correlation_id": correlation_id,
+                                "message_length": len(sanitized_message),
+                            },
                         )
                     elif not context_chunks:
                         logger.info(
                             "rag_empty_using_web_fallback_stream",
-                            extra={"user_id": user_id, "web_chunks": len(web_chunks)},
+                            extra={
+                                "correlation_id": correlation_id,
+                                "web_chunks": len(web_chunks),
+                            },
                         )
 
                     source_card = await ChatService.build_source_card(
@@ -1238,7 +1410,13 @@ async def chat_stream(
                                     source_card.subject_id   = request.subject_id
                                     source_card.subject_slug = getattr(_s, "slug", None)
                             except Exception as _se:
-                                logger.debug(f"source_card subject lookup: {_se}")
+                                logger.debug(
+                                    "source_card_subject_lookup_failed",
+                                    extra={
+                                        "correlation_id": correlation_id,
+                                        "error_class": _classify_chat_error(_se),
+                                    },
+                                )
 
             rag_span.set_attribute("rag.chunks_returned", len(context_chunks))
             rag_span.set_attribute(
@@ -1249,7 +1427,13 @@ async def chat_stream(
             rag_span.set_attribute("chat.topic_score", round(match_score, 4))
 
     except Exception as e:
-        logger.error(f"RAG retrieval failed in stream: {e}")
+        logger.error(
+            "rag_retrieval_failed_stream",
+            extra={
+                "correlation_id": correlation_id,
+                "error_class": _classify_chat_error(e),
+            },
+        )
         context_chunks = []
         history = ""
         web_chunks = []
@@ -1320,12 +1504,17 @@ async def chat_stream(
             detected_lang=detected_lang,
             user_id=user_id,
             request_message=sanitized_message,
+            correlation_id=correlation_id,
         ):
             # Check stream timeout
             elapsed = time.time() - stream_start
             if elapsed > MAX_STREAM_DURATION:
                 logger.warning(
-                    f"Stream timeout after {elapsed:.1f}s for user {user_id}"
+                    "chat_stream_timeout",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "elapsed_seconds": round(elapsed, 1),
+                    },
                 )
                 yield f"data: {json.dumps({'error': 'Stream timeout exceeded', 'done': True})}\n\n"
                 return
@@ -1396,7 +1585,7 @@ async def chat_stream(
         # Track in PostHog
         await track_chat_completed(
             request=http_request,
-            user_id=user_id,
+            correlation_id=correlation_id,
             lang=detected_lang,
             model=actual_model,
             latency_ms=latency_ms,
@@ -1420,7 +1609,13 @@ async def chat_stream(
                     }
                 )
             except Exception as _ue:
-                logger.error(f"Failed to update user usage counter (stream): {_ue}")
+                logger.error(
+                    "user_usage_counter_update_failed_stream",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "error_class": _classify_chat_error(_ue),
+                    },
+                )
 
         # -- Persist chat (fire-and-forget) --
         task = asyncio.create_task(
@@ -1437,9 +1632,12 @@ async def chat_stream(
                 # Raw IDs stored for multi-turn curriculum context inheritance
                 chapter_id=request.chapter_id,
                 subject_id=request.subject_id,
+                correlation_id=correlation_id,
             )
         )
-        task.add_done_callback(_log_task_exception)
+        task.add_done_callback(
+            lambda completed: _log_task_exception(completed, correlation_id)
+        )
 
         # -- Write Q&A memory (fire-and-forget, authenticated users only) --
         if user:
@@ -1454,9 +1652,12 @@ async def chat_stream(
                     session_id=request.session_id,
                     chapter_name=request.chapter_name,
                     chapter_id=request.chapter_id,
+                    correlation_id=correlation_id,
                 )
             )
-            mem_task.add_done_callback(_log_task_exception)
+            mem_task.add_done_callback(
+                lambda completed: _log_task_exception(completed, correlation_id)
+            )
 
     return StreamingResponse(
         event_stream(),
@@ -1636,6 +1837,7 @@ async def analyze_image(
     http_request: Request = None,
 ):
     """Analyze an image using Cloudflare Workers AI vision model (OCR)."""
+    correlation_id = _chat_correlation_id(http_request)
     user_id = str(user.id)
     user_tier = getattr(user, "subscription_tier", "free")
     client_ip = (
@@ -1670,7 +1872,13 @@ async def analyze_image(
     try:
         extracted_text = await cloudflare_client.vision_analyze(image_bytes, sanitized_prompt)
     except Exception as exc:
-        logger.error(f"OCR via Cloudflare Workers AI failed: {exc}")
+        logger.error(
+            "chat_image_analysis_failed",
+            extra={
+                "correlation_id": correlation_id,
+                "error_class": _classify_chat_error(exc),
+            },
+        )
         raise HTTPException(status_code=502, detail="Image analysis failed. Please try again.")
 
     return ImageAnalysisResponse(
@@ -1696,6 +1904,7 @@ async def text_to_speech(
     http_request: Request = None,
 ):
     """Convert text to speech using Cloudflare Workers AI TTS model."""
+    correlation_id = _chat_correlation_id(http_request)
     user_id = str(user.id)
     user_tier = getattr(user, "subscription_tier", "free")
     client_ip = (
@@ -1715,7 +1924,13 @@ async def text_to_speech(
     try:
         audio_bytes = await cloudflare_client.text_to_speech(request.text, request.lang)
     except Exception as exc:
-        logger.error(f"TTS via Cloudflare Workers AI failed: {exc}")
+        logger.error(
+            "chat_text_to_speech_failed",
+            extra={
+                "correlation_id": correlation_id,
+                "error_class": _classify_chat_error(exc),
+            },
+        )
         raise HTTPException(status_code=502, detail="Text-to-speech failed. Please try again.")
 
     return FastAPIResponse(content=audio_bytes, media_type="audio/mpeg")

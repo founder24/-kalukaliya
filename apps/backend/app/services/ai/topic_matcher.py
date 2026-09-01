@@ -152,10 +152,7 @@ class TopicMatcher:
                 use_vectors = self._vectors[np.array(scoped_indices)]
             else:
                 # No topics for this board/class yet — graceful fallback to full corpus
-                logger.debug(
-                    f"match_topic: no topics for board_slug={board_slug!r} "
-                    f"class_level={class_level!r} — using full corpus"
-                )
+                logger.debug("topic_match_scope_empty_using_full_corpus")
                 use_embeddings = self._embeddings
                 use_vectors = self._vectors
         else:

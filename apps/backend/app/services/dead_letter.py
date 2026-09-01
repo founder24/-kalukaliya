@@ -1,6 +1,7 @@
-"""Dead Letter Storage: Persists failed chat attempts for later analysis and replay."""
+"""Privacy-safe incident records for failed chat attempts."""
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -17,9 +18,10 @@ async def store_dead_letter(
     both_providers_down: bool = False,
     sarvam_error: Optional[str] = None,
     gemini_error: Optional[str] = None,
+    correlation_id: Optional[str] = None,
 ) -> None:
     """
-    Store a failed chat attempt to MongoDB 'dead_letters' collection.
+    Store non-identifying failure metadata in the 'dead_letters' collection.
 
     Called when both Sarvam AND Vertex AI fail for a user message.
     Silently logs failures to avoid cascading errors.
@@ -29,10 +31,10 @@ async def store_dead_letter(
     team is notified before users start reporting issues.
 
     Args:
-        user_id:             Affected user's ID.
-        message:             The user's original message (truncated to 200 chars).
+        user_id:             Accepted for compatibility; never persisted.
+        message:             Accepted for compatibility; never persisted.
         lang:                Detected language code.
-        error:               Primary error string used for the dead-letter record.
+        error:               Safe error category; raw text is never persisted.
         both_providers_down: Set True only when BOTH providers failed on this request.
         sarvam_error:        Sarvam-specific error string (forwarded to the alert).
         gemini_error:        Gemini-specific error string (forwarded to the alert).
@@ -46,10 +48,19 @@ async def store_dead_letter(
         collection = db["dead_letters"]
 
         document = {
-            "user_id": user_id,
-            "message": message[:200],
+            "correlation_id": correlation_id or str(uuid.uuid4()),
             "lang": lang,
-            "error": error,
+            "error_class": (
+                error
+                if error in {
+                    "timeout",
+                    "validation",
+                    "upstream_runtime",
+                    "upstream_http",
+                    "internal",
+                }
+                else "provider_failure"
+            ),
             "timestamp": datetime.now(timezone.utc),
             "status": "pending",
             "retry_count": 0,
@@ -58,9 +69,21 @@ async def store_dead_letter(
             document["both_providers_down"] = True
 
         await collection.insert_one(document)
-        logger.info(f"Dead letter stored for user {user_id}, lang={lang}")
+        logger.info(
+            "dead_letter_stored",
+            extra={
+                "correlation_id": correlation_id or str(uuid.uuid4()),
+                "lang": lang,
+            },
+        )
     except Exception as e:
-        logger.warning(f"Failed to store dead letter (non-critical): {e}")
+        logger.warning(
+            "dead_letter_store_failed",
+            extra={
+                "correlation_id": correlation_id or str(uuid.uuid4()),
+                "error_class": type(e).__name__,
+            },
+        )
 
     # Fire the outage alert outside the try block so a MongoDB failure doesn't
     # suppress the notification (the alert itself is fire-and-forget).
@@ -69,12 +92,18 @@ async def store_dead_letter(
             from app.services.comms.ai_outage_alert import record_ai_outage
 
             await record_ai_outage(
-                user_id=user_id,
+                correlation_id=correlation_id or str(uuid.uuid4()),
                 sarvam_error=sarvam_error,
                 gemini_error=gemini_error,
             )
         except Exception as alert_err:
-            logger.warning(f"ai_outage_alert record failed (non-critical): {alert_err}")
+            logger.warning(
+                "ai_outage_alert_record_failed",
+                extra={
+                    "correlation_id": correlation_id or str(uuid.uuid4()),
+                    "error_class": type(alert_err).__name__,
+                },
+            )
 
 
 async def list_dead_letters(
@@ -130,6 +159,11 @@ async def replay_dead_letter(dead_letter_id: str) -> dict:
     doc = await collection.find_one({"_id": ObjectId(dead_letter_id)})
     if not doc:
         raise ValueError("Dead letter not found")
+
+    # Privacy-safe incident records intentionally omit replayable user payloads.
+    # Reject them before changing status or incrementing retry_count.
+    if not doc.get("user_id") or not doc.get("message"):
+        raise ValueError("This privacy-safe incident record is not replayable")
 
     # Refuse replay if max retries exceeded
     if doc.get("retry_count", 0) >= 3:

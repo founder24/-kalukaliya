@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 async def track_chat_completed(
     request: Optional[Request],
-    user_id: str,
+    correlation_id: str,
     lang: str,
     model: str,
     latency_ms: int,
@@ -38,9 +38,12 @@ async def track_chat_completed(
         if streaming:
             properties["streaming"] = True
         posthog.capture(
-            distinct_id=user_id,
+            distinct_id=correlation_id,
             event="chat_completed",
             properties=properties,
         )
     except Exception as e:
-        logger.debug(f"PostHog tracking failed: {e}")
+        logger.debug(
+            "posthog_tracking_failed",
+            extra={"error_class": type(e).__name__},
+        )

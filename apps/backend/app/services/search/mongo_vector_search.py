@@ -96,7 +96,10 @@ class MongoVectorSearchService:
             except (ValueError, RuntimeError) as exc:
                 # ValueError = empty text; config RuntimeError = not transient
                 if isinstance(exc, ValueError) or "not configured" in str(exc):
-                    logger.error(f"MongoVectorSearch: embedding non-retryable error: {exc}")
+                    logger.error(
+                        "mongo_vector_embedding_non_retryable",
+                        extra={"error_class": type(exc).__name__},
+                    )
                     return [], 0.0
                 last_exc = exc
             except Exception as exc:
@@ -104,34 +107,46 @@ class MongoVectorSearchService:
 
             if attempt < _EMBED_MAX_ATTEMPTS:
                 delay = _EMBED_BACKOFF_DELAYS[attempt - 1]
+                error_class = type(last_exc).__name__ if last_exc else "UnknownError"
                 sentry_sdk.add_breadcrumb(
                     category="search",
-                    message=(
-                        f"MongoVectorSearch embedding attempt {attempt} failed "
-                        f"({last_exc!r}); retrying in {delay}s"
-                    ),
+                    message="MongoVectorSearch embedding attempt failed; retrying",
                     level="warning",
+                    data={
+                        "attempt": attempt,
+                        "max_attempts": _EMBED_MAX_ATTEMPTS,
+                        "retry_delay_seconds": delay,
+                        "error_class": error_class,
+                    },
                 )
                 logger.warning(
-                    "MongoVectorSearch: embedding attempt %d/%d failed (%s); "
-                    "retrying in %.0fs",
-                    attempt, _EMBED_MAX_ATTEMPTS, last_exc, delay,
+                    "mongo_vector_embedding_retry",
+                    extra={
+                        "attempt": attempt,
+                        "max_attempts": _EMBED_MAX_ATTEMPTS,
+                        "retry_delay_seconds": delay,
+                        "error_class": error_class,
+                    },
                 )
                 await asyncio.sleep(delay)
 
         if query_embedding is None:
+            error_class = type(last_exc).__name__ if last_exc else "UnknownError"
             sentry_sdk.add_breadcrumb(
                 category="search",
-                message=(
-                    f"MongoVectorSearch embedding failed after "
-                    f"{_EMBED_MAX_ATTEMPTS} attempts: {last_exc!r}"
-                ),
+                message="MongoVectorSearch embedding failed after retries",
                 level="error",
+                data={
+                    "attempts": _EMBED_MAX_ATTEMPTS,
+                    "error_class": error_class,
+                },
             )
             logger.error(
-                "MongoVectorSearch: embedding failed after %d attempts, "
-                "returning 503-equivalent empty result. Last error: %s",
-                _EMBED_MAX_ATTEMPTS, last_exc,
+                "mongo_vector_embedding_failed",
+                extra={
+                    "attempts": _EMBED_MAX_ATTEMPTS,
+                    "error_class": error_class,
+                },
             )
             return [], 0.0
 
@@ -215,7 +230,10 @@ class MongoVectorSearchService:
             return results
 
         except Exception as e:
-            logger.error(f"MongoVectorSearch._match_top_k: {e}")
+            logger.error(
+                "mongo_vector_match_failed",
+                extra={"error_class": type(e).__name__},
+            )
             return []
 
     async def _fetch_chapter_chunks(
@@ -272,7 +290,8 @@ class MongoVectorSearchService:
                 ]
             except Exception as e:
                 logger.warning(
-                    f"MongoVectorSearch._fetch_one chapter={chapter_id!r}: {e}"
+                    "mongo_vector_chapter_fetch_failed",
+                    extra={"error_class": type(e).__name__},
                 )
                 return []
 

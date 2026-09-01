@@ -29,6 +29,20 @@ from app.services.search.web_search import web_search as _web_search
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_error_class(exc: BaseException) -> str:
+    if isinstance(exc, asyncio.TimeoutError):
+        return "timeout"
+    if isinstance(exc, ValueError):
+        return "validation"
+    if isinstance(exc, RuntimeError):
+        return "upstream_runtime"
+    return "internal"
+
+
+def _safe_correlation_id(correlation_id: Optional[str]) -> str:
+    return correlation_id or str(uuid.uuid4())
+
 # Redis cache TTL for conversation history (30 minutes)
 _HISTORY_CACHE_TTL = 30 * 60
 
@@ -135,7 +149,10 @@ class SyllabusIntentMatcher:
                     f"SyllabusIntentMatcher: warmed {len(vecs)} seed phrases"
                 )
             except Exception as e:
-                logger.warning(f"SyllabusIntentMatcher warmup failed: {e}")
+                logger.warning(
+                    "syllabus_intent_warmup_failed",
+                    extra={"error_class": _safe_error_class(e)},
+                )
                 # Mark as attempted with empty array so we don't retry forever
                 self._seed_vectors = np.zeros((0, 1), dtype=np.float32)
 
@@ -156,7 +173,7 @@ class SyllabusIntentMatcher:
                 np.dot(self._seed_vectors[valid], q) / (seed_norms[valid] * q_norm)
             )
         best = float(np.max(sims)) if sims.size > 0 else 0.0
-        logger.debug(f"SyllabusIntentMatcher: best_sim={best:.3f}")
+        logger.debug("syllabus_intent_scored", extra={"score": round(best, 3)})
         return best >= self.THRESHOLD
 
 
@@ -327,12 +344,16 @@ class ChatService:
                 "source": "syllabus_intent",
             }
             logger.info(
-                f"fetch_syllabus_context: subject={subject_name!r} chapters={len(chapters)}"
+                "syllabus_context_fetched",
+                extra={"chapters": len(chapters)},
             )
             return [chunk], subject_name, resolved_slug, len(chapters)
 
         except Exception as e:
-            logger.warning(f"fetch_syllabus_context error: {e}")
+            logger.warning(
+                "syllabus_context_fetch_failed",
+                extra={"error_class": _safe_error_class(e)},
+            )
             return [], None, None, 0
 
     @staticmethod
@@ -370,7 +391,10 @@ class ChatService:
             return pyq_text, has_pdf
 
         except Exception as e:
-            logger.warning(f"fetch_qp_context error: {e}")
+            logger.warning(
+                "question_paper_context_fetch_failed",
+                extra={"error_class": _safe_error_class(e)},
+            )
             return None, False
 
     # ------------------------------------------------------------------
@@ -435,7 +459,10 @@ class ChatService:
             if cached:
                 return json.loads(cached)
         except (RuntimeError, Exception) as e:
-            logger.debug(f"Response cache lookup failed: {e}")
+            logger.debug(
+                "response_cache_lookup_failed",
+                extra={"error_class": _safe_error_class(e)},
+            )
         return None
 
     @staticmethod
@@ -447,7 +474,10 @@ class ChatService:
             payload = json.dumps({"response": response, "model": model})
             await redis.set(cache_key, payload, ex=_RESPONSE_CACHE_TTL)
         except (RuntimeError, Exception) as e:
-            logger.debug(f"Response cache write failed: {e}")
+            logger.debug(
+                "response_cache_write_failed",
+                extra={"error_class": _safe_error_class(e)},
+            )
 
     # ------------------------------------------------------------------
     # Topic embedding match
@@ -500,7 +530,10 @@ class ChatService:
             logger.warning("Topic match embedding call timed out (1.0s) — falling back to web")
             return None, None
         except Exception as e:
-            logger.warning(f"Topic match check failed: {e}")
+            logger.warning(
+                "topic_match_check_failed",
+                extra={"error_class": _safe_error_class(e)},
+            )
             return None, None
 
     @staticmethod
@@ -547,7 +580,10 @@ class ChatService:
                     if subj:
                         subject_name = subj.name
                 except Exception as e:
-                    logger.debug(f"build_source_card: subject lookup failed: {e}")
+                    logger.debug(
+                        "source_card_subject_lookup_failed",
+                        extra={"error_class": _safe_error_class(e)},
+                    )
 
             # Derive board_name from slug for display: "ahsec" → "AHSEC"
             board_name = board_slug.upper() if board_slug else None
@@ -629,7 +665,7 @@ class ChatService:
                 chapter = await Chapter.find_one({"_id": chapter_id})
 
             if not chapter:
-                logger.debug(f"mongo_fast_path: chapter {chapter_id!r} not found")
+                logger.debug("mongo_fast_path_chapter_not_found")
                 return []
 
             # Content priority (mirrors bulk_seed_rag_en.py _get_chapter_text()):
@@ -701,7 +737,10 @@ class ChatService:
                 for i, chunk in enumerate(chunks[:5])
             ]
         except Exception as e:
-            logger.warning(f"mongo_fast_path error: {e}")
+            logger.warning(
+                "mongo_fast_path_failed",
+                extra={"error_class": _safe_error_class(e)},
+            )
             return []
 
     @staticmethod
@@ -720,13 +759,19 @@ class ChatService:
                 _web_search(query, lang=lang),
                 timeout=1.5,
             )
-            logger.info(f"web_context: {len(chunks)} snippets for lang={lang}")
+            logger.info(
+                "web_context_fetched",
+                extra={"chunks": len(chunks), "lang": lang},
+            )
             return chunks
         except asyncio.TimeoutError:
             logger.warning("retrieve_web_context timed out (1.5s) — skipping web fallback")
             return []
         except Exception as e:
-            logger.warning(f"retrieve_web_context failed: {e}")
+            logger.warning(
+                "web_context_retrieval_failed",
+                extra={"error_class": _safe_error_class(e)},
+            )
             return []
 
     @staticmethod
@@ -777,7 +822,10 @@ class ChatService:
             logger.warning("retrieve_context timed out after 3s — falling back to web")
             return [], "empty"
         except Exception as e:
-            logger.error(f"retrieve_context failed: {e}")
+            logger.error(
+                "context_retrieval_failed",
+                extra={"error_class": _safe_error_class(e)},
+            )
             return [], "empty"
 
     # ------------------------------------------------------------------
@@ -1028,6 +1076,7 @@ class ChatService:
         target_model: str,
         detected_lang: str,
         user_id: str,
+        correlation_id: Optional[str] = None,
     ) -> tuple[str, str]:
         """
         Call the Workers AI generation boundary.
@@ -1046,8 +1095,12 @@ class ChatService:
             return response_text, target_model
         except Exception as worker_error:
             logger.error(
-                f"Workers AI generate failed (lang={detected_lang}): {worker_error}",
-                extra={"user_id": user_id, "error": str(worker_error)},
+                "workers_ai_generate_failed",
+                extra={
+                    "correlation_id": _safe_correlation_id(correlation_id),
+                    "error_class": _safe_error_class(worker_error),
+                    "lang": detected_lang,
+                },
             )
             # Retry once through the shared client so transient Worker failures
             # retain the historic resilience behavior without a second provider.
@@ -1057,19 +1110,28 @@ class ChatService:
                 return response_text, target_model
             except Exception as retry_error:
                 logger.error(
-                    f"Workers AI retry also failed: {retry_error}",
-                    extra={"user_id": user_id},
+                    "workers_ai_generate_retry_failed",
+                    extra={
+                        "correlation_id": _safe_correlation_id(correlation_id),
+                        "error_class": _safe_error_class(retry_error),
+                    },
                 )
                 # Fire the outage alert (fire-and-forget; never crashes caller).
                 try:
                     from app.services.comms.ai_outage_alert import record_ai_outage
                     await record_ai_outage(
-                        user_id=user_id,
-                        sarvam_error=str(worker_error),
-                        gemini_error=str(retry_error),
+                        correlation_id=_safe_correlation_id(correlation_id),
+                        sarvam_error=_safe_error_class(worker_error),
+                        gemini_error=_safe_error_class(retry_error),
                     )
                 except Exception as _alert_err:
-                    logger.warning(f"ai_outage_alert record failed (non-critical): {_alert_err}")
+                    logger.warning(
+                        "ai_outage_alert_record_failed",
+                        extra={
+                            "correlation_id": _safe_correlation_id(correlation_id),
+                            "error_class": _safe_error_class(_alert_err),
+                        },
+                    )
                 raise worker_error  # surface the original generation error
 
     @staticmethod
@@ -1080,6 +1142,7 @@ class ChatService:
         detected_lang: str,
         user_id: str,
         request_message: str,
+        correlation_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream LLM response as SSE events.
@@ -1126,8 +1189,12 @@ class ChatService:
             except Exception:
                 pass
             logger.error(
-                f"Workers AI stream failed (lang={detected_lang}): {worker_error}",
-                extra={"user_id": user_id, "error": str(worker_error)},
+                "workers_ai_stream_failed",
+                extra={
+                    "correlation_id": _safe_correlation_id(correlation_id),
+                    "error_class": _safe_error_class(worker_error),
+                    "lang": detected_lang,
+                },
             )
 
             # Retry through the same Workers AI boundary.
@@ -1141,8 +1208,11 @@ class ChatService:
             except Exception as retry_error:
                 # Both retry attempts failed — store dead letter and surface error card.
                 logger.error(
-                    f"Workers AI stream retry also failed: {retry_error}",
-                    extra={"user_id": user_id},
+                    "workers_ai_stream_retry_failed",
+                    extra={
+                        "correlation_id": _safe_correlation_id(correlation_id),
+                        "error_class": _safe_error_class(retry_error),
+                    },
                 )
                 try:
                     from app.services.dead_letter import store_dead_letter
@@ -1150,13 +1220,20 @@ class ChatService:
                         user_id,
                         request_message,
                         detected_lang,
-                        str(worker_error),
+                        _safe_error_class(worker_error),
                         both_providers_down=True,
-                        sarvam_error=str(worker_error),
-                        gemini_error=str(retry_error),
+                        sarvam_error=_safe_error_class(worker_error),
+                        gemini_error=_safe_error_class(retry_error),
+                        correlation_id=correlation_id,
                     )
                 except Exception as dl_err:
-                    logger.warning(f"Dead-letter store failed: {dl_err}")
+                    logger.warning(
+                        "dead_letter_store_failed",
+                        extra={
+                            "correlation_id": _safe_correlation_id(correlation_id),
+                            "error_class": _safe_error_class(dl_err),
+                        },
+                    )
                 yield f"data: {json.dumps({'error': 'Service temporarily unavailable. Please try again.'})}\n\n"
                 return
 
@@ -1206,6 +1283,7 @@ class ChatService:
         source_card=None,
         chapter_id: Optional[str] = None,   # stored for multi-turn context inheritance
         subject_id: Optional[str] = None,   # stored for multi-turn context inheritance
+        correlation_id: Optional[str] = None,
     ) -> None:
         """Persist chat to MongoDB. Designed to be called via asyncio.create_task."""
         rag_sources = ChatService._serialize_messages([
@@ -1276,7 +1354,14 @@ class ChatService:
                 await ChatService._invalidate_history_cache(session_id)
 
         except Exception as e:
-            logger.error(f"Failed to save chat (attempt 1): {e}")
+            logger.error(
+                "chat_save_failed",
+                extra={
+                    "correlation_id": _safe_correlation_id(correlation_id),
+                    "error_class": _safe_error_class(e),
+                    "attempt": 1,
+                },
+            )
             # Retry once
             try:
                 from app.models.chat import Chat
@@ -1299,22 +1384,23 @@ class ChatService:
                 if session_id:
                     await ChatService._invalidate_history_cache(session_id)
             except Exception as retry_err:
-                logger.error(f"Failed to save chat (attempt 2): {retry_err}")
-                # Log the lost message payload (truncated) for manual recovery
                 logger.error(
                     "chat_message_lost",
                     extra={
-                        "user_id": user_id,
-                        "session_id": session_id,
-                        "user_message_truncated": user_message[:200],
-                        "error": str(retry_err),
+                        "correlation_id": _safe_correlation_id(correlation_id),
+                        "error_class": _safe_error_class(retry_err),
+                        "attempt": 2,
                     },
                 )
                 # Store dead letter for later recovery
                 from app.services.dead_letter import store_dead_letter
 
                 await store_dead_letter(
-                    user_id, user_message, detected_lang, str(retry_err)
+                    user_id,
+                    user_message,
+                    detected_lang,
+                    _safe_error_class(retry_err),
+                    correlation_id=correlation_id,
                 )
 
     # ------------------------------------------------------------------
