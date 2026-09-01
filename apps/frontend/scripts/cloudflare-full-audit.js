@@ -390,6 +390,18 @@ async function auditItem8ZeroTrust() {
     .map(destination => destination.uri);
   const missingDestinations = requiredDestinations.filter(uri => !destinations.includes(uri));
   if (missingDestinations.length) sub.push(`missing destinations=${missingDestinations.join(',')}`);
+  const adminPolicies = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/access/apps/${app.id}/policies`);
+  const serviceTokens = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/access/service_tokens`);
+  const automationToken = serviceTokens?.success && serviceTokens.result.find(token =>
+    token.name === 'Syrabit GitHub Cron' && token.enabled !== false
+  );
+  const hasCutoverServiceAuth = adminPolicies?.success && automationToken &&
+    adminPolicies.result.some(policy =>
+      policy.name === 'GitHub cutover service authentication' &&
+      policy.decision === 'non_identity' &&
+      (policy.include || []).some(rule => rule.service_token?.token_id === automationToken.id)
+    );
+  if (!hasCutoverServiceAuth) sub.push('cutover CI Service Auth policy missing');
   const cronApp = zt.result.find(candidate => candidate.name === 'Syrabit Admin Cron API');
   if (!cronApp) {
     sub.push('cron compatibility app missing');
@@ -402,18 +414,21 @@ async function auditItem8ZeroTrust() {
       sub.push('cron compatibility destination drifted');
     }
     const cronPolicies = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/access/apps/${cronApp.id}/policies`);
-    const hasCronBypass = cronPolicies?.success && cronPolicies.result.some(policy =>
-      policy.name === 'Bearer-authenticated cron compatibility' &&
-      policy.decision === 'bypass' &&
-      (policy.include || []).some(rule => rule.everyone)
+    const hasCronBypass = cronPolicies?.success &&
+      cronPolicies.result.some(policy => policy.decision === 'bypass');
+    if (hasCronBypass) sub.push('unsafe cron bypass policy exists');
+    const hasCronServiceAuth = cronPolicies?.success && automationToken && cronPolicies.result.some(policy =>
+      policy.name === 'GitHub cron service authentication' &&
+      policy.decision === 'non_identity' &&
+      (policy.include || []).some(rule => rule.service_token?.token_id === automationToken.id)
     );
-    if (!hasCronBypass) sub.push('cron bearer-auth compatibility policy missing');
+    if (!hasCronServiceAuth) sub.push('cron Service Auth policy or service token missing');
   }
   if (sub.length) {
     fail(8, 3, 'Zero Trust Access app (Syrabit Admin)', sub.join(', '), 'update app config in dashboard');
   } else {
     pass(8, 3, 'Zero Trust Access app (Syrabit Admin)',
-      `id=${app.id} destinations=${destinations.join(',')} session=8h; cron bearer-auth path preserved`);
+      `id=${app.id} destinations=${destinations.join(',')} session=8h; cron requires Access service token + app auth`);
   }
 }
 
@@ -482,7 +497,16 @@ async function auditItems10to13R2AndCacheReserve() {
           const status = typeof domain.status === 'object'
             ? `ssl=${domain.status.ssl || 'unknown'},ownership=${domain.status.ownership || 'unknown'}`
             : (domain.status || 'active');
-          pass(13, 4, 'assets.syrabit.ai custom domain', `enabled=${domain.enabled} status=${status}`);
+          const ready = domain.enabled === true &&
+            domain.status?.ssl === 'active' &&
+            domain.status?.ownership === 'active';
+          if (ready) {
+            pass(13, 4, 'assets.syrabit.ai custom domain', `enabled=true status=${status}`);
+          } else {
+            fail(13, 4, 'assets.syrabit.ai custom domain',
+              `not ready: enabled=${domain.enabled} status=${status}`,
+              'run cloudflare-phase4-apply.js → Step 2 and wait for ownership/SSL activation');
+          }
         } else {
           fail(13, 4, 'assets.syrabit.ai custom domain', 'NOT FOUND', 'run cloudflare-phase4-apply.js → Step 2');
         }

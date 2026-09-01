@@ -30,6 +30,8 @@ jobs:
         env:
           API_ORIGIN: ${{ vars.API_ORIGIN || 'https://api.syrabit.ai' }}
           TRANSLATE_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           INPUT_BOARD: ${{ inputs.board }}
           INPUT_SUBJECT: ${{ inputs.subject }}
           INPUT_LIMIT: ${{ inputs.limit }}
@@ -56,6 +58,8 @@ jobs:
           HTTP_STATUS=$(curl -s -o /tmp/translate_response.json \
             -w "%{http_code}" --max-time 60 \
             -X POST "${API_ORIGIN}/api/v1/admin/cron/translate" \
+            -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
             -H "Authorization: Bearer ${TRANSLATE_SECRET}" \
             -H "Content-Type: application/json" \
             -d "$BODY")
@@ -71,7 +75,7 @@ jobs:
             RUN_ID=$(echo "$RESPONSE" | jq -r '.run_id // "none"')
             echo "::notice::Native Assamese seed dispatch: $JOB (run: $RUN_ID)"
           elif [[ "$HTTP_STATUS" == "401" || "$HTTP_STATUS" == "403" ]]; then
-            echo "::error::Authentication failed (HTTP ${HTTP_STATUS}) — check TRANSLATE_CRON_SECRET."
+            echo "::error::Authentication failed (HTTP ${HTTP_STATUS}) — check Access and cron secrets."
             exit 1
           else
             echo "::error::Unexpected HTTP ${HTTP_STATUS} from translation endpoint — potential backend error."

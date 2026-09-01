@@ -106,6 +106,46 @@ async function ensureAssetsBucket() {
 }
 
 // ── Step 2: Configure assets.syrabit.ai custom domain → syrabit-assets ───────
+function assetsDomainReady(domain) {
+  return Boolean(
+    domain?.enabled === true &&
+    domain?.status?.ownership === 'active' &&
+    domain?.status?.ssl === 'active'
+  );
+}
+
+async function waitForAssetsDomainReady(maxAttempts = 12, delayMs = 5000) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = await cfGet(
+      `/accounts/${ACCOUNT_ID}/r2/buckets/syrabit-assets/domains/custom`,
+    );
+    if (!result.success) {
+      fail('assets.syrabit.ai readiness check', JSON.stringify(result.errors));
+      return false;
+    }
+    const domain = (result.result?.domains || [])
+      .find(candidate => candidate.domain === 'assets.syrabit.ai');
+    if (assetsDomainReady(domain)) {
+      ok('assets.syrabit.ai ready', 'enabled=true ownership=active ssl=active');
+      return true;
+    }
+    const ownership = domain?.status?.ownership || 'pending';
+    const ssl = domain?.status?.ssl || 'pending';
+    console.log(
+      `  … readiness ${attempt}/${maxAttempts}: enabled=${domain?.enabled === true} ` +
+      `ownership=${ownership} ssl=${ssl}`,
+    );
+    if (attempt < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  fail(
+    'assets.syrabit.ai readiness',
+    'domain did not reach enabled=true ownership=active ssl=active within 60 seconds',
+  );
+  return false;
+}
+
 async function ensureAssetsDomain() {
   console.log('\nStep 2 — Custom domain: assets.syrabit.ai → syrabit-assets');
 
@@ -133,13 +173,13 @@ async function ensureAssetsDomain() {
         `/accounts/${ACCOUNT_ID}/r2/buckets/syrabit-assets/domains/custom/assets.syrabit.ai`,
         { enabled: true }
       );
-      if (patch.success) ok('assets.syrabit.ai re-enabled');
-      else fail('assets.syrabit.ai enable', JSON.stringify(patch.errors));
-    } else {
-      ok('assets.syrabit.ai already configured',
-        `status=${existing.status || 'active'} enabled=${existing.enabled}`);
+      if (!patch.success) {
+        fail('assets.syrabit.ai enable', JSON.stringify(patch.errors));
+        return false;
+      }
+      console.log('  ✓  assets.syrabit.ai re-enabled; waiting for readiness');
     }
-    return;
+    return waitForAssetsDomainReady();
   }
 
   // Create the custom domain
@@ -156,14 +196,13 @@ async function ensureAssetsDomain() {
   );
 
   if (create.success) {
-    ok('assets.syrabit.ai custom domain created',
-      `status=${create.result?.status || 'pending'}`);
-    console.log('  ℹ  DNS will propagate within 5–60 minutes.');
-    console.log('  ℹ  Verify at: https://dash.cloudflare.com — R2 → syrabit-assets → Settings → Custom domains');
+    console.log('  ✓  assets.syrabit.ai custom domain created; waiting for readiness');
+    return waitForAssetsDomainReady();
   } else {
     fail('assets.syrabit.ai custom domain create', JSON.stringify(create.errors));
     console.log('  ℹ  If the error is "domain already in use", check the R2 dashboard — the domain');
     console.log('  ℹ  may be registered in a different bucket or under the Pages custom-domains panel.');
+    return false;
   }
 }
 
@@ -216,9 +255,9 @@ async function ensureCacheReserve() {
   }
 }
 
-// ── Step 5: Report worker action items ───────────────────────────────────────
+// ── Step 4: Report worker action items ───────────────────────────────────────
 function reportWorkerNextSteps() {
-  console.log('\nStep 5 — Worker ASSETS binding (manual deploy required)');
+  console.log('\nStep 4 — Worker ASSETS binding (manual deploy required)');
   console.log('  ℹ  The ASSETS R2 binding and POST /admin/assets/upload route are');
   console.log('  ℹ  configured in workers/edge-proxy/wrangler.toml and src/index.ts.');
   console.log('  ℹ  To deploy:');

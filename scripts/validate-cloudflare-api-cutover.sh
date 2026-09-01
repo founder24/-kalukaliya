@@ -6,7 +6,8 @@
 # Optional: PUBLIC_SITE_URL, defaults to https://syrabit.ai
 # Required: INDEXNOW_INTERNAL_SECRET for authenticated IndexNow validation
 # Required for full validation: STUDENT_TOKEN, STAFF_TOKEN,
-# ADMIN_SESSION_TOKEN, EDGE_SHARED_SECRET, and TRANSLATE_CRON_SECRET.
+# ADMIN_SESSION_TOKEN, EDGE_SHARED_SECRET, TRANSLATE_CRON_SECRET,
+# CF_ACCESS_CLIENT_ID, and CF_ACCESS_CLIENT_SECRET.
 # Payment validation additionally requires CUTOVER_PAYMENT_TOKEN (a dedicated
 # disposable-user access token), RAZORPAY_KEY_SECRET, and
 # RAZORPAY_WEBHOOK_SECRET. The API Worker must be configured with a rzp_test_
@@ -49,6 +50,8 @@ if [[ "$RESET_ONLY" != "true" && "${CUTOVER_STAGE:-full}" != "public" ]]; then
   : "${ADMIN_SESSION_TOKEN:?Set ADMIN_SESSION_TOKEN for admin workflow checks}"
   : "${EDGE_SHARED_SECRET:?Set EDGE_SHARED_SECRET for authenticated generation}"
   : "${TRANSLATE_CRON_SECRET:?Set TRANSLATE_CRON_SECRET for scheduled-operation checks}"
+  : "${CF_ACCESS_CLIENT_ID:?Set CF_ACCESS_CLIENT_ID for public-edge admin checks}"
+  : "${CF_ACCESS_CLIENT_SECRET:?Set CF_ACCESS_CLIENT_SECRET for public-edge admin checks}"
   : "${CUTOVER_PAYMENT_TOKEN:?Set CUTOVER_PAYMENT_TOKEN for the disposable payment user}"
   : "${RAZORPAY_KEY_SECRET:?Set RAZORPAY_KEY_SECRET for test payment verification}"
   : "${RAZORPAY_WEBHOOK_SECRET:?Set RAZORPAY_WEBHOOK_SECRET for signed webhook validation}"
@@ -153,6 +156,8 @@ edge_admin_get() {
   TMP_FILES+=("$output" "$headers")
   status=$(curl --silent --show-error --max-time 30 \
     --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
+    -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     -H "Cookie: syrabit_admin_session=${ADMIN_SESSION_TOKEN}" "${EDGE_BASE}/api/v1${path}")
   test "$status" = "200" || { cat "$output"; echo "Expected public-edge admin 200 for ${path}, got ${status}" >&2; exit 1; }
   grep -qi '^x-syrabit-route: worker-native' "$headers" || {
@@ -169,6 +174,8 @@ edge_admin_fallback_get() {
   TMP_FILES+=("$output" "$headers")
   status=$(curl --silent --show-error --max-time 30 \
     --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
+    -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     -H "Cookie: syrabit_admin_session=${ADMIN_SESSION_TOKEN}" "${EDGE_BASE}/api/v1${path}")
   test "$status" = "200" || {
     cat "$output"; echo "Expected public-edge Cloud Run fallback 200 for ${path}, got ${status}" >&2; exit 1;
@@ -233,6 +240,8 @@ edge_admin_json_status() {
   TMP_FILES+=("$output" "$headers")
   status=$(curl --silent --show-error --max-time 30 \
     --request POST --header 'Content-Type: application/json' \
+    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     --header "Cookie: syrabit_admin_session=${ADMIN_SESSION_TOKEN}" --data "$data" \
     --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1${path}")
@@ -749,6 +758,8 @@ if [[ -n "${TRANSLATE_CRON_SECRET:-}" ]]; then
   for cron_path in /admin/cron/seed-notes/status /admin/cron/seed-assamese/status; do
     status=$(curl --silent --show-error --max-time 30 \
       --dump-header "$cron_headers" --output "$cron_output" --write-out '%{http_code}' \
+      -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+      -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
       -H "Authorization: Bearer ${TRANSLATE_CRON_SECRET}" "${EDGE_BASE}/api/v1${cron_path}")
     test "$status" = "200" || { cat "$cron_output"; echo "Native scheduled status failed for ${cron_path}" >&2; exit 1; }
     grep -qi '^x-syrabit-route: worker-native' "$cron_headers" || {

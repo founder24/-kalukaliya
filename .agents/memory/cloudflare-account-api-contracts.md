@@ -25,3 +25,14 @@ was granted.
 **How to apply:** Request `Access: Apps and Policies Edit` for app and policy
 automation, plus `Access: Identity Providers Read` when login-provider checks
 are part of the audit.
+
+Scheduled callers behind Access must use a Service Auth policy bound to a
+Cloudflare service token; an `Everyone` bypass is not a bearer-token check.
+
+**Why:** Access evaluates bypass before the application sees the request, so a
+bypass removes that defense-in-depth layer even when the application has its
+own cron secret.
+
+**How to apply:** Store the Access client ID/secret only in the scheduler's
+secret store, send both Access headers and the application's cron credential,
+and make reconciliation remove any bypass policy that appears on the cron app.

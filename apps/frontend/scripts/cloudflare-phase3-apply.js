@@ -6,13 +6,14 @@
  *   1. Cloudflare Access application — one audience covering staff UI and
  *      privileged API compatibility paths (8 h session)
  *   2. Access policy — allows only listed team email addresses
- *   3. A narrower cron app bypasses Access only for bearer-authenticated
+ *   3. A narrower cron app requires a Cloudflare Access service token for
  *      /api/v1/admin/cron* automation; application-level cron auth remains.
  *   3. Optional Waiting Room reconciliation when APPLY_WAITING_ROOM=true.
  *      It is disabled by default so Access changes cannot alter traffic queues.
  *
  * Required env:
  *   CLOUDFLARE_API_TOKEN   — Access: Apps and Policies Edit
+ *                            Access: Service Tokens Read
  *                            Access: Identity Providers Read is recommended
  *                            so the script can report the active login method.
  *   STAFF_EMAILS           — comma-separated list of team emails allowed through Access
@@ -214,8 +215,52 @@ async function ensureAccessPolicy(appId) {
   }
 }
 
-async function ensureCronBypass() {
-  console.log('\nStep 3: Bearer-authenticated cron compatibility');
+async function ensureAdminCiServiceAuth(appId) {
+  console.log('\nStep 3: Cutover CI service authentication');
+  if (!appId) {
+    skip('Cutover CI Service Auth policy', 'admin app not created');
+    return;
+  }
+  const serviceTokens = await cfGet(`/accounts/${ACCOUNT_ID}/access/service_tokens`);
+  if (!serviceTokens.success) {
+    fail('Cutover CI service token lookup', JSON.stringify(serviceTokens.errors));
+    return;
+  }
+  const serviceToken = serviceTokens.result.find(token =>
+    token.name === 'Syrabit GitHub Cron' && token.enabled !== false
+  );
+  if (!serviceToken) {
+    fail('Cutover CI service token', 'Syrabit GitHub Cron is missing or disabled');
+    return;
+  }
+  const policies = await cfGet(`/accounts/${ACCOUNT_ID}/access/apps/${appId}/policies`);
+  if (!policies.success) {
+    fail('Cutover CI Service Auth policy', JSON.stringify(policies.errors));
+    return;
+  }
+  const existing = policies.result.find(policy =>
+    policy.name === 'GitHub cutover service authentication' &&
+    policy.decision === 'non_identity' &&
+    (policy.include || []).some(rule => rule.service_token?.token_id === serviceToken.id)
+  );
+  if (existing) {
+    ok('Cutover CI Service Auth policy', `id=${existing.id}`);
+    return;
+  }
+  const created = await cfReq('POST', `/accounts/${ACCOUNT_ID}/access/apps/${appId}/policies`, {
+    name: 'GitHub cutover service authentication',
+    decision: 'non_identity',
+    precedence: 2,
+    include: [{ service_token: { token_id: serviceToken.id } }],
+    exclude: [],
+    require: [],
+  });
+  if (created.success) ok('Cutover CI Service Auth policy created', `id=${created.result.id}`);
+  else fail('Cutover CI Service Auth policy', JSON.stringify(created.errors));
+}
+
+async function ensureCronServiceAuth() {
+  console.log('\nStep 4: Two-layer cron service authentication');
   const apps = await cfGet(`/accounts/${ACCOUNT_ID}/access/apps`);
   if (!apps.success) {
     fail('Cron Access application', JSON.stringify(apps.errors));
@@ -262,35 +307,59 @@ async function ensureCronBypass() {
     }
   }
 
-  const policies = await cfGet(`/accounts/${ACCOUNT_ID}/access/apps/${app.id}/policies`);
-  if (!policies.success) {
-    fail('Cron bypass policy', JSON.stringify(policies.errors));
+  const serviceTokens = await cfGet(`/accounts/${ACCOUNT_ID}/access/service_tokens`);
+  if (!serviceTokens.success) {
+    fail('Cron service token lookup', JSON.stringify(serviceTokens.errors));
     return;
   }
+  const serviceToken = serviceTokens.result.find(token =>
+    token.name === 'Syrabit GitHub Cron' && token.enabled !== false
+  );
+  if (!serviceToken) {
+    fail('Cron service token', 'Syrabit GitHub Cron is missing or disabled');
+    return;
+  }
+
+  const policies = await cfGet(`/accounts/${ACCOUNT_ID}/access/apps/${app.id}/policies`);
+  if (!policies.success) {
+    fail('Cron Service Auth policy', JSON.stringify(policies.errors));
+    return;
+  }
+  for (const unsafePolicy of policies.result.filter(policy => policy.decision === 'bypass')) {
+    const removed = await cfReq(
+      'DELETE',
+      `/accounts/${ACCOUNT_ID}/access/apps/${app.id}/policies/${unsafePolicy.id}`,
+    );
+    if (!removed.success) {
+      fail('Unsafe cron bypass removal', JSON.stringify(removed.errors));
+      return;
+    }
+    ok('Removed unsafe cron bypass policy', `id=${unsafePolicy.id}`);
+  }
   const existing = policies.result.find(policy =>
-    policy.name === 'Bearer-authenticated cron compatibility' &&
-    policy.decision === 'bypass' &&
-    (policy.include || []).some(rule => rule.everyone)
+    policy.name === 'GitHub cron service authentication' &&
+    policy.decision === 'non_identity' &&
+    (policy.include || []).some(rule => rule.service_token?.token_id === serviceToken.id)
   );
   if (existing) {
-    ok('Cron bypass policy', `id=${existing.id}`);
+    ok('Cron Service Auth policy', `id=${existing.id}`);
     return;
   }
   const created = await cfReq('POST', `/accounts/${ACCOUNT_ID}/access/apps/${app.id}/policies`, {
-    name: 'Bearer-authenticated cron compatibility',
-    decision: 'bypass',
+    name: 'GitHub cron service authentication',
+    decision: 'non_identity',
     precedence: 1,
-    include: [{ everyone: {} }],
+    include: [{ service_token: { token_id: serviceToken.id } }],
     exclude: [],
     require: [],
   });
-  if (created.success) ok('Cron bypass policy created', `id=${created.result.id}`);
-  else fail('Cron bypass policy', JSON.stringify(created.errors));
+  if (created.success) ok('Cron Service Auth policy created', `id=${created.result.id}`);
+  else fail('Cron Service Auth policy', JSON.stringify(created.errors));
 }
 
-// ── Step 4: Identity provider check ──────────────────────────────────────
+// ── Step 5: Identity provider check ──────────────────────────────────────
 async function checkIdentityProviders() {
-  console.log('\nStep 4: Identity providers');
+  console.log('\nStep 5: Identity providers');
   const list = await cfGet(`/accounts/${ACCOUNT_ID}/access/identity_providers`);
   if (!list.success) {
     if (list.errors?.[0]?.code === 10000) {
@@ -400,7 +469,8 @@ async function main() {
 
   const appId = await ensureAccessApp();
   await ensureAccessPolicy(appId);
-  await ensureCronBypass();
+  await ensureAdminCiServiceAuth(appId);
+  await ensureCronServiceAuth();
   await checkIdentityProviders();
   if (APPLY_WAITING_ROOM) {
     await ensureWaitingRoom();
@@ -417,6 +487,7 @@ async function main() {
     console.error('\nFix the issues above and re-run. The script is idempotent.');
     console.error('\nRequired token scopes for Phase 3:');
     console.error('  • Access: Apps and Policies Edit — for Access apps and policies');
+    console.error('  • Access: Service Tokens Read — to bind the GitHub cron token');
     console.error('  • Access: Identity Providers Read — to report the login method');
     console.error('Add at: https://dash.cloudflare.com/profile/api-tokens');
     process.exit(1);

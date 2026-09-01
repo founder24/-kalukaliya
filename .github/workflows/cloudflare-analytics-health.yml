@@ -25,6 +25,8 @@ jobs:
             --output /tmp/cloudflare-analytics-health.json \
             --write-out "%{http_code}" \
             --request POST "$API_URL" \
+            --header "CF-Access-Client-Id: ${{ secrets.CF_ACCESS_CLIENT_ID }}" \
+            --header "CF-Access-Client-Secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}" \
             --header "Authorization: Bearer ${{ secrets.TRANSLATE_CRON_SECRET }}" \
             --header "Content-Type: application/json" \
             --max-time 30)

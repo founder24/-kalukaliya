@@ -310,6 +310,16 @@ async function main() {
           console.log(`  ✓  Access policy: ${allowPolicy.name} (${emailCount} email rule(s))`);
           assert('  Policy has at least 1 email rule', emailCount >= 1, true);
         }
+        const serviceTokens = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/access/service_tokens`);
+        const serviceToken = serviceTokens?.result?.find(token =>
+          token.name === 'Syrabit GitHub Cron' && token.enabled !== false
+        );
+        const cutoverServiceAuth = pol.result.find(policy =>
+          policy.name === 'GitHub cutover service authentication' &&
+          policy.decision === 'non_identity' &&
+          (policy.include || []).some(rule => rule.service_token?.token_id === serviceToken?.id)
+        );
+        assert('  Cutover CI Service Auth policy exists', Boolean(cutoverServiceAuth), true);
       }
     }
     const cronApp = zt.result.find(a => a.name === 'Syrabit Admin Cron API');
@@ -328,12 +338,19 @@ async function main() {
       if (!cronPolicies) {
         warn('  Cron Access policies', 'token lacks Access: Apps and Policies Read');
       } else {
-        const cronBypass = cronPolicies.result.find(policy =>
-          policy.name === 'Bearer-authenticated cron compatibility' &&
-          policy.decision === 'bypass' &&
-          (policy.include || []).some(rule => rule.everyone)
+        assert('  Cron Access has no bypass policy',
+          !cronPolicies.result.some(policy => policy.decision === 'bypass'),
+          true);
+        const serviceTokens = await cfGetOrSkip(`/accounts/${ACCOUNT_ID}/access/service_tokens`);
+        const serviceToken = serviceTokens?.result?.find(token =>
+          token.name === 'Syrabit GitHub Cron' && token.enabled !== false
         );
-        assert('  Bearer-authenticated cron compatibility policy exists', Boolean(cronBypass), true);
+        const cronServiceAuth = cronPolicies.result.find(policy =>
+          policy.name === 'GitHub cron service authentication' &&
+          policy.decision === 'non_identity' &&
+          (policy.include || []).some(rule => rule.service_token?.token_id === serviceToken?.id)
+        );
+        assert('  Cron Service Auth policy and token exist', Boolean(cronServiceAuth), true);
       }
     }
   }
@@ -372,6 +389,22 @@ async function main() {
       console.log('  ✗  R2 bucket syrabit-assets: NOT FOUND — run cloudflare-phase4-apply.js');
     } else {
       console.log('  ✓  R2 bucket syrabit-assets exists');
+      const domains = await cfGetOrSkip(
+        `/accounts/${ACCOUNT_ID}/r2/buckets/syrabit-assets/domains/custom`,
+      );
+      if (!domains) {
+        warn('assets.syrabit.ai custom domain', 'token lacks R2 domain read scope');
+      } else if (!domains.success) {
+        failures.push('assets.syrabit.ai custom domain query failed');
+        console.log(`  ✗  assets.syrabit.ai custom domain query: ${JSON.stringify(domains.errors)}`);
+      } else {
+        const domain = (domains.result?.domains || [])
+          .find(candidate => candidate.domain === 'assets.syrabit.ai');
+        const ready = domain?.enabled === true &&
+          domain?.status?.ownership === 'active' &&
+          domain?.status?.ssl === 'active';
+        assert('  assets.syrabit.ai enabled with active ownership and SSL', ready, true);
+      }
     }
     console.log('  ─  Cache Reserve backing storage: Cloudflare-managed; no customer R2 bucket required');
   }

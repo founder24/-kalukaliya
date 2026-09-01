@@ -6,10 +6,15 @@ Cloudflare Access normally protects `https://syrabit.ai/staff*`,
 application, an eight-hour session, and an email allowlist. Cloudflare One-Time
 PIN is the default identity provider.
 
-The separate, more-specific `Syrabit Admin Cron API` application bypasses
-Access only for `/api/v1/admin/cron*`; those routes retain their application
-bearer-token checks so scheduled automation does not depend on an interactive
-OTP session.
+The separate, more-specific `Syrabit Admin Cron API` application requires the
+`Syrabit GitHub Cron` Cloudflare service token for `/api/v1/admin/cron*`.
+Those routes also retain their application bearer-token checks, so scheduled
+requests must pass both independent authentication layers.
+
+The parent `Syrabit Admin` application accepts the same token only through the
+`GitHub cutover service authentication` Service Auth policy. Cutover requests
+must additionally present the disposable application admin-session cookie;
+the Access token alone does not grant staff or API authorization.
 
 Use this procedure only when an approved staff member cannot complete the
 normal Access login and urgent staff work cannot wait for the identity incident
