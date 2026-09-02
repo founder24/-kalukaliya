@@ -171,9 +171,21 @@ authRouter.post('/login', async (c) => {
 // ── POST /v1/auth/logout ──────────────────────────────────────────────────────
 // REFRESH_TOKEN_ROLLOUT_GUARD: logout-route:start
 authRouter.post('/logout', async (c) => {
-  // Revoke the refresh token's jti so it cannot be reused.
+  // The web client authenticates this request with its access token and sends
+  // the refresh token to revoke in the JSON body. Keep the Bearer fallback for
+  // older clients that sent the refresh token in the Authorization header.
   const authHeader = c.req.header('Authorization');
-  const token = extractBearer(authHeader ?? null);
+  const bearerToken = extractBearer(authHeader ?? null);
+  let bodyToken: string | undefined;
+  try {
+    const body = await c.req.json<{ refresh_token?: unknown }>();
+    if (typeof body.refresh_token === 'string' && body.refresh_token) {
+      bodyToken = body.refresh_token;
+    }
+  } catch {
+    // Logout remains idempotent when the client has no refresh token/body.
+  }
+  const token = bodyToken ?? bearerToken;
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
     if (payload?.type === 'refresh' && payload.jti) {

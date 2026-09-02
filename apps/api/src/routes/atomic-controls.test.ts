@@ -358,6 +358,42 @@ describe('atomic quota controls', () => {
 });
 
 describe('atomic refresh-token rotation', () => {
+  it('revokes the body refresh token when logout is authenticated with an access token', async () => {
+    const userId = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO users (id, email, role, subscription_tier, session_valid_after)
+       VALUES (?, ?, 'student', 'free', 0)`,
+    ).bind(userId, `${userId}@example.test`).run();
+
+    const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
+    const { token: refreshToken } = await signRefreshToken(userId, 'student', JWT_SECRET);
+    const logout = await authRouter.fetch(
+      new Request('https://api.example/logout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      }),
+      env,
+    );
+    expect(logout.status).toBe(200);
+
+    const replay = await authRouter.fetch(
+      new Request('https://api.example/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      }),
+      env,
+    );
+    expect(replay.status).toBe(401);
+    await expect(replay.json()).resolves.toMatchObject({
+      detail: 'Refresh token has already been used or revoked',
+    });
+  });
+
   it('mints only one token pair from concurrent refresh requests', async () => {
     const userId = crypto.randomUUID();
     await env.DB.prepare(
