@@ -22,8 +22,8 @@ import type { Env } from '../types';
 
 export const paymentsRouter = new Hono<{ Bindings: Env }>();
 
-// Plan price map (paise): must stay in sync with subscription.ts and billing pipeline
-const PLAN_PRICES: Record<string, number> = { starter: 9900, pro: 9900 };
+// One-time plan prices (paise), matching the public pricing contract.
+const PLAN_PRICES: Record<string, number> = { starter: 9900, pro: 99900 };
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
 
@@ -102,7 +102,7 @@ paymentsRouter.post('/create-order', async (c) => {
       amount,
       currency: 'INR',
       receipt: `user_${id}_${plan}`,
-      notes: { user_id: id, plan },
+      notes: { user_id: id, plan, purchase_type: 'one_time_plan' },
     }),
   });
 
@@ -231,14 +231,14 @@ paymentsRouter.post('/verify', async (c) => {
   }
 
   // This request won the race — update user subscription in D1
-  const periodEnd = now + 30 * 24 * 3600; // 30 days
   await db.update(users).set({
     subscriptionTier: purchasedPlan,
     subscriptionStatus: 'active',
     razorpaySubscriptionId: razorpay_order_id,
     razorpayCustomerId: razorpay_payment_id,
+    // Plans are paid once, not Razorpay recurring subscriptions.
     currentPeriodStart: now,
-    currentPeriodEnd: periodEnd,
+    currentPeriodEnd: null,
     cancelAtPeriodEnd: 0,
     updatedAt: now,
   }).where(eq(users.id, userId));
@@ -285,8 +285,8 @@ paymentsRouter.post('/recover', async (c) => {
 
 const CREDIT_PACKS: Record<number, number> = {
   100: 4900,   // 100 credits for ₹49
-  250: 9900,   // 250 credits for ₹99
-  500: 17900,  // 500 credits for ₹179
+  500: 19900,  // 500 credits for ₹199
+  1000: 34900, // 1,000 credits for ₹349
 };
 
 paymentsRouter.post('/credit-topup', async (c) => {
@@ -455,17 +455,65 @@ paymentsRouter.get('/history', async (c) => {
     .limit(limit)
     .offset((page - 1) * limit);
 
+  const refundRows = await c.env.DB.prepare(
+    `SELECT payment_id, status, created_at FROM refund_requests
+     WHERE user_id = ? AND payment_id IS NOT NULL`
+  ).bind(userId).all<{ payment_id: string; status: string; created_at: number }>();
+  const refunds = new Map((refundRows.results ?? []).map(refund => [refund.payment_id, refund]));
+
   return c.json({
-    payments: rows.map(p => ({
+    payments: rows.map(p => {
+      const refund = refunds.get(p.id);
+      return ({
       id: p.id,
       amount: p.amount,
       currency: p.currency,
-      status: p.status,
+      status: p.status === 'captured' ? 'completed' : p.status,
       plan: p.plan,
+      description: p.plan === 'credit_topup' ? 'Credit top-up' : `${(p.plan ?? 'Plan').replace(/^./, char => char.toUpperCase())} Plan`,
+      refund_status: refund ? (refund.status === 'pending' ? 'requested' : refund.status) : null,
+      refund_requested_at: refund?.created_at ? new Date(refund.created_at * 1000).toISOString() : null,
       razorpay_payment_id: p.razorpayPaymentId,
       razorpay_order_id: p.razorpayOrderId,
       created_at: p.createdAt ? new Date(p.createdAt * 1000).toISOString() : null,
-    })),
+      });
+    }),
     page,
   });
+});
+
+// ── POST /refund-request ───────────────────────────────────────────────────────
+// Requests are recorded for staff review only. This endpoint never calls
+// Razorpay, so a user request cannot trigger a live refund automatically.
+
+paymentsRouter.post('/refund-request', async (c) => {
+  const { id: userId, error } = await requireUser(c);
+  if (error) return error;
+
+  let body: { payment_id?: unknown; reason?: unknown };
+  try { body = await c.req.json() as typeof body; } catch { return c.json({ detail: 'Invalid JSON' }, 400); }
+
+  if (typeof body.payment_id !== 'string' || !body.payment_id.trim() || body.payment_id.length > 128) {
+    return c.json({ detail: 'A valid payment_id is required' }, 422);
+  }
+  if (body.reason !== undefined && (typeof body.reason !== 'string' || body.reason.length > 1000)) {
+    return c.json({ detail: 'Reason must be a string of at most 1000 characters' }, 422);
+  }
+
+  const paymentId = body.payment_id.trim();
+  const payment = await c.env.DB.prepare(
+    `SELECT id FROM payments WHERE id = ? AND user_id = ? AND status = 'captured' LIMIT 1`
+  ).bind(paymentId, userId).first<{ id: string }>();
+  if (!payment) return c.json({ detail: 'Eligible payment not found' }, 404);
+
+  const now = Math.floor(Date.now() / 1000);
+  const result = await c.env.DB.prepare(
+    `INSERT OR IGNORE INTO refund_requests (id, user_id, payment_id, reason, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'pending', ?, ?)`
+  ).bind(crypto.randomUUID(), userId, paymentId, typeof body.reason === 'string' ? body.reason.trim() || null : null, now, now).run();
+
+  if (result.meta.changes === 0) {
+    return c.json({ status: 'already_requested', message: 'A refund request already exists for this payment' });
+  }
+  return c.json({ status: 'submitted', message: 'Refund request submitted' }, 201);
 });

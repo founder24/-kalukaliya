@@ -43,6 +43,18 @@ function isValidSubId(value: unknown): value is string {
   return /^(sub|order)_[A-Za-z0-9_]+$/.test(value);
 }
 
+/**
+ * Razorpay sends webhook resources as `{ entity: { ... } }`.  Keeping the
+ * direct-object branch makes existing fixtures and older deliveries work too.
+ */
+function webhookEntity(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const resource = value as Record<string, unknown>;
+  return resource.entity && typeof resource.entity === 'object'
+    ? resource.entity as Record<string, unknown>
+    : resource;
+}
+
 async function applySubscriptionEvent(
   c: import('hono').Context<{ Bindings: Env }>,
   eventId: string,
@@ -113,8 +125,8 @@ webhookRouter.post('/razorpay', async (c) => {
 
   if (eventType === 'subscription.charged') {
     // User's subscription renewed — extend period + record payment
-    const sub = (payload.subscription as Record<string, unknown> | undefined);
-    const pmt = (payload.payment as Record<string, unknown> | undefined);
+    const sub = webhookEntity(payload.subscription);
+    const pmt = webhookEntity(payload.payment);
     const subId  = sub?.id as string | undefined;
     const amount = pmt?.amount as number | undefined;
     const paymentId = pmt?.id as string | undefined;
@@ -196,7 +208,7 @@ webhookRouter.post('/razorpay', async (c) => {
   }
 
   if (eventType === 'subscription.cancelled') {
-    const sub = (payload.subscription as Record<string, unknown> | undefined);
+    const sub = webhookEntity(payload.subscription);
     const subId = sub?.id as string | undefined;
     if (!isValidSubId(subId)) return c.json({ status: 'ignored', reason: 'invalid_sub_id' });
 
@@ -223,7 +235,7 @@ webhookRouter.post('/razorpay', async (c) => {
     }
 
   } else if (eventType === 'subscription.completed' || eventType === 'subscription.expired') {
-    const sub = (payload.subscription as Record<string, unknown> | undefined);
+    const sub = webhookEntity(payload.subscription);
     const subId = sub?.id as string | undefined;
     if (!isValidSubId(subId)) return c.json({ status: 'ignored', reason: 'invalid_sub_id' });
 
@@ -263,7 +275,7 @@ webhookRouter.post('/razorpay', async (c) => {
 
     if (eventType === 'payment.failed') {
       // Log only — no action needed; user can retry from frontend
-      const pmt = (payload.payment as Record<string, unknown> | undefined);
+      const pmt = webhookEntity(payload.payment);
       console.log(`payment.failed: payment_id=${pmt?.id}, order_id=${pmt?.order_id}`);
     }
   }

@@ -4,7 +4,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { isDegreeBoard } from '@/utils/courseTypes';
 import { useAuth } from '@/context/AuthContext';
 import { PageTitle } from '@/components/PageTitle';
-import { apiClient, createPaymentOrder, verifyPayment, createCreditTopUp, verifyCreditTopUp } from '@/utils/api';
+import { apiClient, createSubscriptionOrder, verifyPayment, createCreditTopUp, verifyCreditTopUp } from '@/utils/api';
 import { toast } from 'sonner';
 import { Analytics } from '@/utils/analytics';
 import { PLANS, loadRazorpay } from './profile/planConfig';
@@ -208,7 +208,7 @@ export default function ProfilePage() {
       const loaded = await loadRazorpay();
       if (!loaded) { toast.error('Failed to load payment gateway. Check your internet connection.'); setPaymentLoading(false); return; }
       let orderData;
-      try { orderData = (await createPaymentOrder(paymentPlan)).data; }
+      try { orderData = (await createSubscriptionOrder(paymentPlan)).data; }
       catch (err) { toast.error(err?.response?.data?.detail || 'Payment gateway not configured. Contact admin@syrabit.ai.'); setPaymentLoading(false); return; }
       Analytics.upgradeInitiated(paymentPlan, orderData.amount);
       orderData._desc = `${orderData.plan_label} Plan — ${PLANS[paymentPlan]?.credits.toLocaleString()} AI credits`;

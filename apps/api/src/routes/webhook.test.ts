@@ -140,12 +140,13 @@ describe('Razorpay webhook event ledger', () => {
       event: 'subscription.charged',
       id: 'evt_test_subscription_charge',
       payload: {
-        subscription: { id: 'order_test_subscription_charge' },
-        payment: {
+        // Razorpay production deliveries wrap each resource in `entity`.
+        subscription: { entity: { id: 'order_test_subscription_charge' } },
+        payment: { entity: {
           id: 'pay_test_subscription_charge',
           order_id: 'order_test_subscription_charge',
-          amount: 9900,
-        },
+          amount: 99900,
+        } },
       },
     });
     const { db, state } = chargedEventDb();
@@ -169,16 +170,22 @@ describe('Razorpay webhook event ledger', () => {
     });
   });
 
-  it.each([
-    'subscription.cancelled',
-    'subscription.completed',
-    'subscription.expired',
-  ])('applies %s only once', async (event) => {
+  const nestedSubscriptionEvents: Array<[string, boolean]> = [
+    ['subscription.cancelled', true],
+    ['subscription.completed', false],
+    ['subscription.expired', true],
+  ];
+
+  it.each(nestedSubscriptionEvents)('applies nested %s only once', async (event, nested) => {
     const secret = 'webhook-test-secret';
     const body = JSON.stringify({
       event,
       id: `evt_test_${event.replace('.', '_')}`,
-      payload: { subscription: { id: 'order_test_subscription_state' } },
+      payload: {
+        subscription: nested
+          ? { entity: { id: 'order_test_subscription_state' } }
+          : { id: 'order_test_subscription_state' },
+      },
     });
     const { db, state } = chargedEventDb();
     const env = { DB: db, RAZORPAY_WEBHOOK_SECRET: secret } as unknown as Env;

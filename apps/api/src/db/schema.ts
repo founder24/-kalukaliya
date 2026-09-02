@@ -319,6 +319,7 @@ export const refundRequests = sqliteTable('refund_requests', {
   updatedAt: integer('updated_at').default(sql`(unixepoch())`),
 }, (t) => [
   index('refund_user_idx').on(t.userId),
+  uniqueIndex('refund_payment_idx').on(t.paymentId),
 ]);
 
 // Pending payment fallback (replaces MongoDB payments_pending with TTL)

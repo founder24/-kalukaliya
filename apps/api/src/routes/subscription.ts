@@ -3,8 +3,8 @@
  *
  * GET  /plans     — public, returns plan tiers (static data)
  * GET  /status    — auth required, reads D1 users table
- * POST /create-order — auth required, creates Razorpay subscription order
- * POST /cancel    — auth required, cancels via Razorpay API
+ * POST /create-order — auth required, creates a one-time Razorpay Order
+ * POST /cancel    — retained for compatibility; one-time plans cannot cancel
  *
  * The cron /cron/downgrade-expired is intentionally excluded; it runs
  * server-side and is mounted in the admin/cron router (Cloud Run, Phase 7).
@@ -19,9 +19,10 @@ import type { Env } from '../types';
 
 export const subscriptionRouter = new Hono<{ Bindings: Env }>();
 
-// Rate limits — must match billing pipeline
+// Daily credit limits — must match the public pricing contract.
 const RATE_LIMIT_FREE_TIER = 30;
-const RATE_LIMIT_PRO_TIER  = 9999;
+const RATE_LIMIT_STARTER_TIER = 500;
+const RATE_LIMIT_PRO_TIER  = 4000;
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
 
@@ -39,8 +40,8 @@ async function requireUser(c: Context<{ Bindings: Env }>): Promise<{ id: string;
 }
 
 // ── GET /plans ─────────────────────────────────────────────────────────────────
-// Public. Returns the two subscription tiers (Free + Pro) matching the
-// exact Cloud Run PlansResponse shape.
+// Public one-time plan offers. Razorpay Orders are used; no recurring product
+// is advertised or created.
 
 subscriptionRouter.get('/plans', (c) => {
   return c.json({
@@ -52,12 +53,12 @@ subscriptionRouter.get('/plans', (c) => {
         price_label: '₹0',
         billing: 'forever',
         message_limit: RATE_LIMIT_FREE_TIER,
-        message_label: `${RATE_LIMIT_FREE_TIER} messages/month`,
+        message_label: `${RATE_LIMIT_FREE_TIER} credits/day`,
         cta: 'Get started free',
         popular: false,
         features: [
           { label: 'AHSEC & SEBA content',          included: true },
-          { label: `${RATE_LIMIT_FREE_TIER} AI messages/month`, included: true },
+          { label: `${RATE_LIMIT_FREE_TIER} AI credits/day`, included: true },
           { label: 'English & Assamese chat',         included: true },
           { label: 'Study library access',            included: true },
           { label: 'Priority AI responses',           included: false },
@@ -65,18 +66,34 @@ subscriptionRouter.get('/plans', (c) => {
         ],
       },
       {
-        id: 'pro',
-        name: 'Pro',
+        id: 'starter',
+        name: 'Starter',
         price_inr: 99,
         price_label: '₹99',
-        billing: 'per month',
+        billing: 'one-time',
+        message_limit: RATE_LIMIT_STARTER_TIER,
+        message_label: `${RATE_LIMIT_STARTER_TIER} credits/day`,
+        cta: 'Buy Starter',
+        popular: true,
+        features: [
+          { label: `${RATE_LIMIT_STARTER_TIER} AI credits/day`, included: true },
+          { label: 'Priority AI responses', included: true },
+          { label: 'Limited document access', included: true },
+        ],
+      },
+      {
+        id: 'pro',
+        name: 'Pro',
+        price_inr: 999,
+        price_label: '₹999',
+        billing: 'one-time',
         message_limit: RATE_LIMIT_PRO_TIER,
-        message_label: 'Unlimited messages',
+        message_label: `${RATE_LIMIT_PRO_TIER.toLocaleString()} credits/day`,
         cta: 'Upgrade to Pro',
         popular: true,
         features: [
           { label: 'AHSEC & SEBA content',           included: true },
-          { label: 'Unlimited AI messages',           included: true },
+          { label: `${RATE_LIMIT_PRO_TIER.toLocaleString()} AI credits/day`, included: true },
           { label: 'English & Assamese chat',         included: true },
           { label: 'Study library access',            included: true },
           { label: 'Priority AI responses',           included: true },
@@ -105,7 +122,8 @@ subscriptionRouter.get('/status', async (c) => {
 
   if (!user) return c.json({ detail: 'User not found' }, 404);
 
-  const isPro = (user.subscriptionTier ?? 'free') !== 'free';
+  const tier = user.subscriptionTier ?? 'free';
+  const dailyLimit = tier === 'pro' ? RATE_LIMIT_PRO_TIER : tier === 'starter' ? RATE_LIMIT_STARTER_TIER : RATE_LIMIT_FREE_TIER;
   const periodEnd = user.currentPeriodEnd
     ? new Date(user.currentPeriodEnd * 1000).toISOString()
     : '';
@@ -115,17 +133,17 @@ subscriptionRouter.get('/status', async (c) => {
     status: user.subscriptionStatus ?? 'active',
     current_period_end: periodEnd,
     monthly_message_count: user.monthlyMessageCount ?? 0,
-    monthly_limit: isPro ? RATE_LIMIT_PRO_TIER : RATE_LIMIT_FREE_TIER,
+    monthly_limit: dailyLimit,
   });
 });
 
 // ── POST /create-order ─────────────────────────────────────────────────────────
 // Auth required. Creates a Razorpay order and stores plan metadata in D1
 // payments_pending for idempotent verification at /payments/verify.
-// Plan prices (paise): pro = 9900 (₹99), starter = 9900.
+// One-time plan prices (paise): starter = ₹99, pro = ₹999.
 
-const PLAN_PRICES: Record<string, number> = { starter: 9900, pro: 9900 };
-const PLAN_LABELS: Record<string, string>  = { starter: 'Pro', pro: 'Pro' };
+const PLAN_PRICES: Record<string, number> = { starter: 9900, pro: 99900 };
+const PLAN_LABELS: Record<string, string>  = { starter: 'Starter', pro: 'Pro' };
 
 subscriptionRouter.post('/create-order', async (c) => {
   const { id, error } = await requireUser(c);
@@ -135,8 +153,10 @@ subscriptionRouter.post('/create-order', async (c) => {
     return c.json({ detail: 'Payment service not configured' }, 503);
   }
 
-  // For subscription upgrades, always use the 'pro' plan
-  const plan = 'pro';
+  let body: { plan?: unknown };
+  try { body = await c.req.json() as typeof body; } catch { return c.json({ detail: 'Invalid JSON' }, 400); }
+  const plan = typeof body.plan === 'string' ? body.plan.toLowerCase() : '';
+  if (!PLAN_PRICES[plan]) return c.json({ detail: 'Invalid plan' }, 400);
   const amount = PLAN_PRICES[plan];
 
   // Create order via Razorpay REST API (no SDK needed — pure fetch)
@@ -150,7 +170,7 @@ subscriptionRouter.post('/create-order', async (c) => {
       amount,
       currency: 'INR',
       receipt: `user_${id}_${plan}`,
-      notes: { user_id: id, plan },
+      notes: { user_id: id, plan, purchase_type: 'one_time_plan' },
     }),
   });
 
@@ -187,49 +207,11 @@ subscriptionRouter.post('/create-order', async (c) => {
 });
 
 // ── POST /cancel ───────────────────────────────────────────────────────────────
-// Auth required. Cancels the user's Razorpay subscription at period end.
+// The commercial product is a one-time purchase. Do not send an order ID to
+// Razorpay's subscriptions API: it is neither a subscription nor cancellable.
 
 subscriptionRouter.post('/cancel', async (c) => {
-  const { id, error } = await requireUser(c);
+  const { error } = await requireUser(c);
   if (error) return error;
-
-  const db = createDb(c.env.DB);
-  const user = await db.select({
-    razorpaySubscriptionId: users.razorpaySubscriptionId,
-  }).from(users).where(eq(users.id, id)).get();
-
-  if (!user?.razorpaySubscriptionId) {
-    return c.json({ detail: 'No active subscription found' }, 400);
-  }
-
-  if (!c.env.RAZORPAY_KEY_ID || !c.env.RAZORPAY_KEY_SECRET) {
-    return c.json({ detail: 'Payment service not configured' }, 503);
-  }
-
-  // Cancel via Razorpay API
-  const cancelRes = await fetch(
-    `https://api.razorpay.com/v1/subscriptions/${user.razorpaySubscriptionId}/cancel`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${btoa(`${c.env.RAZORPAY_KEY_ID}:${c.env.RAZORPAY_KEY_SECRET}`)}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ cancel_at_cycle_end: 1 }),
-    }
-  );
-
-  if (!cancelRes.ok && cancelRes.status !== 400) {
-    // 400 = already cancelled; treat as success
-    console.error('Razorpay cancel error:', await cancelRes.text());
-    return c.json({ detail: 'Payment gateway error' }, 502);
-  }
-
-  // Mark in D1
-  await db.update(users).set({
-    cancelAtPeriodEnd: 1,
-    updatedAt: Math.floor(Date.now() / 1000),
-  }).where(eq(users.id, id));
-
-  return c.json({ status: 'success', message: 'Subscription will end at period end' });
+  return c.json({ detail: 'One-time plans have no recurring subscription to cancel' }, 400);
 });

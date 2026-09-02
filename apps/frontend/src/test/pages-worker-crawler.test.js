@@ -39,6 +39,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+
 describe("Pages worker crawler snapshots", () => {
   it.each([
     ["/library", "crawler", BOT_HEADERS],
@@ -109,6 +110,54 @@ describe("Pages worker crawler snapshots", () => {
     expect(backendFetch).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["Googlebot", BOT_HEADERS],
+    ["GPTBot", { "User-Agent": "GPTBot/1.0", Accept: "text/html" }],
+  ])("serves a static chapter snapshot to %s without backend rendering", async (_bot, headers) => {
+    const backendFetch = vi.fn();
+    vi.stubGlobal("fetch", backendFetch);
+    const chapterPath = "/ahsec/hs-2nd-year/economics/forms-of-market-and-price-determination";
+    const env = {
+      ASSETS: {
+        fetch: vi.fn().mockResolvedValue(
+          assetResponse({ prerenderPath: chapterPath }),
+        ),
+      },
+    };
+
+    const response = await worker.fetch(
+      new Request(`https://syrabit.ai${chapterPath}`, {
+        headers,
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Source")).toBe("prerender");
+    expect(backendFetch).not.toHaveBeenCalled();
+  });
+
+  it("uses explicit chapter index.html when directory lookup would redirect", async () => {
+    const backendFetch = vi.fn();
+    vi.stubGlobal("fetch", backendFetch);
+    const chapterPath = "/ahsec/hs-2nd-year/economics/forms-of-market-and-price-determination";
+    const assetFetch = vi.fn()
+      .mockResolvedValueOnce(assetResponse({ prerenderPath: chapterPath }))
+      .mockResolvedValueOnce(new Response(null, { status: 308 }));
+    const response = await worker.fetch(
+      new Request(`https://syrabit.ai${chapterPath}`, { headers: BOT_HEADERS }),
+      { ASSETS: { fetch: assetFetch } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Source")).toBe("prerender");
+    expect(assetFetch.mock.calls[0][0].url).toBe(
+      `https://syrabit.ai${chapterPath}/index.html`,
+    );
+    expect(assetFetch).toHaveBeenCalledOnce();
+    expect(backendFetch).not.toHaveBeenCalled();
+  });
+
   it("accepts the /browser output marker even though its canonical is /library", async () => {
     const backendFetch = vi.fn();
     vi.stubGlobal("fetch", backendFetch);
@@ -175,5 +224,24 @@ describe("Pages worker crawler snapshots", () => {
     expect(response.headers.get("X-Source")).toBe("bot-render-not-found");
     expect(response.headers.get("X-Robots-Tag")).toContain("noindex");
     expect(backendFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns a real 404 when a declared chapter is missing upstream", async () => {
+    const backendFetch = vi.fn().mockResolvedValue(
+      new Response("not found", { status: 404 }),
+    );
+    vi.stubGlobal("fetch", backendFetch);
+    const env = { ASSETS: { fetch: vi.fn().mockResolvedValue(assetResponse()) } };
+
+    const response = await worker.fetch(
+      new Request("https://syrabit.ai/ahsec/hs-2nd-year/economics/not-a-chapter", {
+        headers: BOT_HEADERS,
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("X-Source")).toBe("bot-render-not-found");
+    expect(response.headers.get("X-Robots-Tag")).toContain("noindex");
   });
 });

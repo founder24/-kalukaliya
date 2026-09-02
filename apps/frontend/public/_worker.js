@@ -468,12 +468,19 @@ export default {
       //    like /library. Normalize the URL to include a trailing slash
       //    for extension-less paths so the prerendered snapshot is found.
       try {
-        const assetFetchUrl = (
-          !url.pathname.endsWith("/") &&
-          !url.pathname.match(/\.[a-z0-9]{1,10}$/i)
-        ) ? new URL(url.pathname + "/", url.origin) : url;
-        const assetResp = await env.ASSETS.fetch(new Request(assetFetchUrl, request));
-        if (assetResp.status === 200) {
+        const extensionless = !url.pathname.match(/\.[a-z0-9]{1,10}$/i);
+        // Pages' directory redirect behaviour is not consistent for Worker
+        // ASSETS.fetch. Ask for the emitted file directly first; only then
+        // try the directory URL for compatibility with older deployments.
+        const assetUrls = extensionless
+          ? [
+              new URL(`${url.pathname.replace(/\/+$/, "")}/index.html`, url.origin),
+              new URL(`${url.pathname.replace(/\/+$/, "")}/`, url.origin),
+            ]
+          : [url];
+        for (const assetFetchUrl of assetUrls) {
+          const assetResp = await env.ASSETS.fetch(new Request(assetFetchUrl, request));
+          if (assetResp.status !== 200) continue;
           const ct = assetResp.headers.get("content-type") || "";
           if (
             (ct.includes("text/html") || ct.includes("application/xhtml")) &&

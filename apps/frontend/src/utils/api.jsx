@@ -851,6 +851,9 @@ export const seoRelatedByChapter = (chapterId, excludeTopicId = null, limit = 5)
 export const createPaymentOrder = (plan) =>
   axios.post(`${API_BASE}/payments/create-order`, { plan }, authConfig());
 
+export const createSubscriptionOrder = (plan) =>
+  axios.post(`${API_BASE}/subscription/create-order`, { plan }, authConfig());
+
 export const verifyPayment = (data) =>
   axios.post(`${API_BASE}/payments/verify`, data, authConfig());
 

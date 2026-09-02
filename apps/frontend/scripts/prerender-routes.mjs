@@ -56,6 +56,7 @@ const distDir = path.resolve(__dirname, "..", "dist");
 const distSsrDir = path.resolve(__dirname, "..", "dist-ssr");
 const srcHtml = path.join(distDir, "index.html");
 const ssrEntry = path.join(distSsrDir, "entry-server.js");
+const chapterSitemap = path.join(distDir, "sitemap-chapters.xml");
 const STRICT_CURRICULUM_BUILD =
   process.env.CLOUDFLARE_RELEASE_BUILD === "true" ||
   (process.env.NODE_ENV === "production" &&
@@ -581,6 +582,56 @@ function enumerateSubjectRoutes(bundle) {
   return routes;
 }
 
+// The sitemap is the publication contract, not the (occasionally stale)
+// library bundle.  In particular, a subject can be moved between streams
+// while keeping the same public /board/class/subject URL.  Selecting the
+// bundle record for the old stream used to make us fetch its chapter list
+// (often just `full-book`) and silently omit the published chapter snapshots.
+function readPublishedChapterPaths() {
+  if (!fs.existsSync(chapterSitemap)) {
+    throw new Error(
+      `[prerender-routes] required chapter sitemap missing at ${chapterSitemap}`,
+    );
+  }
+  const xml = fs.readFileSync(chapterSitemap, "utf-8");
+  const paths = new Set();
+  for (const match of xml.matchAll(/<loc>\s*(?:https?:\/\/[^/]+)?([^<\s]+)\s*<\/loc>/gi)) {
+    const pathname = match[1].replace(/\/+$/, "");
+    // Chapter URLs are precisely /board/class/subject/chapter. Do not turn
+    // topic or auxiliary URLs into chapter snapshots by accident.
+    if (pathname.split("/").filter(Boolean).length === 4) paths.add(pathname);
+  }
+  if (paths.size === 0) {
+    throw new Error("[prerender-routes] chapter sitemap contains zero chapter URLs");
+  }
+  return paths;
+}
+
+function enumerateSitemapSubjectRoutes(chapterPaths, bundleRoutes) {
+  const fallbackSubjects = new Map(
+    bundleRoutes.map((route) => [subjectPath(route), route.subject]),
+  );
+  const routes = new Map();
+  for (const chapterPath of chapterPaths) {
+    const [board, classSlug, subjectSlug] = chapterPath.split("/").filter(Boolean);
+    const url = `/${board}/${classSlug}/${subjectSlug}`;
+    if (!routes.has(url)) {
+      routes.set(url, {
+        board,
+        classSlug,
+        subjectSlug,
+        // resolve-subject is authoritative; this is only an offline fallback.
+        subject: fallbackSubjects.get(url) || {},
+      });
+    }
+  }
+  return [...routes.values()];
+}
+
+function subjectPath(route) {
+  return `/${route.board}/${route.classSlug}/${route.subjectSlug}`;
+}
+
 async function resolvePageChunkPreload(hydrateKind) {
   const baseName = HYDRATE_KIND_TO_CHUNK_BASE[hydrateKind];
   if (!baseName) return null;
@@ -672,9 +723,37 @@ async function main() {
   }
 
   const allSubjectRoutes = enumerateSubjectRoutes(bundle);
-  if (STRICT_CURRICULUM_BUILD && allSubjectRoutes.length === 0) {
+  // loadLibraryBundle intentionally uses the slim API payload. The build has
+  // already generated the full bundle into dist/static, which includes the
+  // published chapter rows needed to recover a temporarily missing detail
+  // endpoint without another network request.
+  let staticBundle = bundle;
+  try {
+    staticBundle = JSON.parse(
+      fs.readFileSync(path.join(distDir, "static", "library-bundle.json"), "utf-8"),
+    );
+  } catch {
+    // The regular detail endpoint remains the primary source; strict coverage
+    // checks below will report any sitemap output we cannot recover.
+  }
+  const staticChaptersBySubjectSlug = new Map(
+    (staticBundle.chapters || [])
+      .filter((chapter) => chapter?.subject_id && chapter?.slug)
+      .map((chapter) => [`${chapter.subject_id}:${chapter.slug}`, chapter]),
+  );
+  const staticChaptersBySlug = new Map(
+    (staticBundle.chapters || [])
+      .filter((chapter) => chapter?.slug)
+      .map((chapter) => [chapter.slug, chapter]),
+  );
+  const publishedChapterPaths = readPublishedChapterPaths();
+  const sitemapSubjectRoutes = enumerateSitemapSubjectRoutes(
+    publishedChapterPaths,
+    allSubjectRoutes,
+  );
+  if (STRICT_CURRICULUM_BUILD && (allSubjectRoutes.length === 0 || sitemapSubjectRoutes.length === 0)) {
     throw new Error(
-      "[prerender-routes] library bundle produced zero valid subject routes",
+      "[prerender-routes] library bundle or chapter sitemap produced zero valid subject routes",
     );
   }
 
@@ -725,16 +804,24 @@ async function main() {
     const url = `/${route.board}/${route.classSlug}/${route.subjectSlug}`;
     return subjectViews.get(url) || 0;
   };
-  const subjectPath = (route) =>
-    `/${route.board}/${route.classSlug}/${route.subjectSlug}`;
+  // Sitemap routes win over duplicate bundle routes. This makes the route
+  // used for chapter lookup match the published URL even if hierarchy data
+  // still has an obsolete stream record for that subject.
+  const routesByPath = new Map(
+    allSubjectRoutes.map((route) => [subjectPath(route), route]),
+  );
+  for (const route of sitemapSubjectRoutes) {
+    routesByPath.set(subjectPath(route), route);
+  }
+  const allPublishedSubjectRoutes = [...routesByPath.values()];
   const rankedSubjectRoutes = haveTraffic
-    ? [...allSubjectRoutes].sort((a, b) => {
+    ? [...allPublishedSubjectRoutes].sort((a, b) => {
         const sa = subjectScore(a);
         const sb = subjectScore(b);
         if (sb !== sa) return sb - sa; // higher views first
-        return allSubjectRoutes.indexOf(a) - allSubjectRoutes.indexOf(b);
+        return allPublishedSubjectRoutes.indexOf(a) - allPublishedSubjectRoutes.indexOf(b);
       })
-    : allSubjectRoutes;
+    : allPublishedSubjectRoutes;
   // Multiple source records can resolve to the same public route. Release
   // coverage is measured in unique canonical output paths, not raw records.
   const uniqueRankedSubjectRoutes = [
@@ -773,7 +860,7 @@ async function main() {
   let subjectsFailed = 0;
   let chaptersFailed = 0;
   const subjectExpectedPaths = new Set(subjectRoutes.map(subjectPath));
-  const chapterExpectedPaths = new Set();
+  const chapterExpectedPaths = new Set(publishedChapterPaths);
   const subjectOutputPaths = new Set();
   const chapterOutputPaths = new Set();
   let budgetExceeded = false;
@@ -792,11 +879,15 @@ async function main() {
 
     let resolved;
     let chapters;
+    let subjectId;
     try {
       resolved = await fetchJson(
         `${BACKEND.replace(/\/$/, "")}/api/v1/content/resolve-subject/${board}/${classSlug}/${subjectSlug}`,
       );
-      const subjectId = resolved?.id || resolved?._id || subject.id;
+      // The static bundle is generated alongside the sitemap and retains the
+      // correct stream-specific subject id when resolve-subject is ambiguous
+      // for a public URL that omits its stream segment.
+      subjectId = subject.id || resolved?.id || resolved?._id;
       chapters = await fetchJson(
         `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${subjectId}`,
       );
@@ -907,12 +998,31 @@ async function main() {
       return;
     }
 
-    // ── Chapter prerender for the same subject ────────────────────
     // Re-rank chapter candidates by real traffic (Task #388). Chapters
     // missing from the analytics rollup keep their bundle-order
     // position so we still prerender something useful for new
     // subjects with no recorded views yet.
-    const chapterCandidates = (chapters || []).filter((c) => c.slug);
+    const chapterCandidatesBySlug = new Map(
+      (chapters || []).filter((c) => c.slug).map((chapter) => [chapter.slug, chapter]),
+    );
+    for (const chapter of bundle.chapters || []) {
+      if (chapter.subject_id === subjectId && chapter.slug) {
+        chapterCandidatesBySlug.set(chapter.slug, chapter);
+      }
+    }
+    // Include every sitemap chapter even when /chapters/{subjectId} is stale.
+    // The per-slug endpoint below remains the data authority and a release
+    // fails rather than deploying a sitemap URL without a snapshot.
+    for (const chapterPath of publishedChapterPaths) {
+      const prefix = `${url}/`;
+      if (chapterPath.startsWith(prefix)) {
+        const chapterSlug = chapterPath.slice(prefix.length);
+        if (chapterSlug && !chapterSlug.includes("/")) {
+          chapterCandidatesBySlug.set(chapterSlug, { slug: chapterSlug });
+        }
+      }
+    }
+    const chapterCandidates = [...chapterCandidatesBySlug.values()];
     const rankedChapters = haveTraffic
       ? [...chapterCandidates].sort((a, b) => {
           const va = chapterViews.get(`${url}/${a.slug}`) || 0;
@@ -943,11 +1053,36 @@ async function main() {
           `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapter-by-slug/${board}/${classSlug}/${subjectSlug}/${chapterSlug}`,
         );
       } catch (err) {
+        // A published sitemap chapter can outlive the detailed API record
+        // briefly. Render it through the normal SSR pipeline from the static
+        // curriculum bundle instead of dropping its deployable HTML file.
+        const staticChapter =
+          staticChaptersBySubjectSlug.get(`${subjectId}:${chapterSlug}`) ||
+          staticChaptersBySlug.get(chapterSlug);
+        if (!staticChapter || !publishedChapterPaths.has(chapterUrl)) {
+          console.warn(
+            `[prerender-routes] chapter data fetch failed for ${chapterUrl}: ${err.message}`,
+          );
+          chaptersFailed++;
+          return;
+        }
+        chapterPayload = {
+          ...staticChapter,
+          chapter_id: staticChapter.chapter_id || staticChapter.id,
+          subject_name: subjectName,
+          board_name: boardName,
+          class_name: className,
+          subject_slug: subjectSlug,
+          board_slug: board,
+          class_slug: classSlug,
+          chapter_slug: chapterSlug,
+          content:
+            staticChapter.content ||
+            `${staticChapter.title || chapterSlug} study notes for ${subjectName}.`,
+        };
         console.warn(
-          `[prerender-routes] chapter data fetch failed for ${chapterUrl}: ${err.message}`,
+          `[prerender-routes] using static curriculum fallback for published ${chapterUrl}: ${err.message}`,
         );
-        chaptersFailed++;
-        return;
       }
       if (!chapterPayload || typeof chapterPayload !== "object") {
         chaptersFailed++;
@@ -968,21 +1103,27 @@ async function main() {
       //       executes but Perplexity/ChatGPT often do not).
       // Failure here is logged but never fatal: the runtime useEffect
       // in ChapterPage will still try to fetch on the client.
-      const faqEntries = await fetchChapterFaqEntries(chapterData.chapter_id);
+      // These independent enrichment endpoints used to run serially for each
+      // chapter, multiplying a slow backend timeout by three. Keep the same
+      // bounded chapter concurrency while issuing one parallel enrichment
+      // round per chapter.
+      const [faqEntries, publishedTopics, topicsRelated] = await Promise.all([
+        fetchChapterFaqEntries(chapterData.chapter_id),
+        fetchChapterPublishedTopics(chapterData.chapter_id),
+        fetchChapterTopicsRelated(chapterData.chapter_id),
+      ]);
       if (faqEntries) {
         chapterData.faq_entries = faqEntries;
       }
       // Task #914 Step 3 — bake published topics so the answer
       // cards render server-side (no JS, no flash, single source
       // of truth for bots and humans).
-      const publishedTopics = await fetchChapterPublishedTopics(chapterData.chapter_id);
       if (publishedTopics) {
         chapterData.published_topics = publishedTopics;
       }
       // Topical-mapping — bake siblings + cross-chapter related
       // topics into the preload so bots / curl-no-JS see the full
       // internal-linking graph in the SSR HTML.
-      const topicsRelated = await fetchChapterTopicsRelated(chapterData.chapter_id);
       if (topicsRelated) {
         chapterData.topics_related = topicsRelated;
       }
@@ -1078,6 +1219,10 @@ async function main() {
       chapters_selected: chapterExpectedPaths.size,
       chapters_written: chaptersWritten,
       chapters_failed: chaptersFailed,
+      sitemap_chapters_selected: publishedChapterPaths.size,
+      sitemap_chapters_written: [...publishedChapterPaths].filter((chapterPath) =>
+        fs.existsSync(path.join(distDir, chapterPath.replace(/^\//, ""), "index.html")),
+      ).length,
     },
     budget_exceeded: budgetExceeded,
   };
@@ -1103,6 +1248,12 @@ async function main() {
     if (chaptersWritten !== chapterExpectedPaths.size) {
       incomplete.push(
         `chapter coverage ${chaptersWritten}/${chapterExpectedPaths.size}`,
+      );
+    }
+    const sitemapChaptersWritten = manifest.counts.sitemap_chapters_written;
+    if (sitemapChaptersWritten !== publishedChapterPaths.size) {
+      incomplete.push(
+        `sitemap chapter coverage ${sitemapChaptersWritten}/${publishedChapterPaths.size}`,
       );
     }
     if (subjectsWritten === 0 || chaptersWritten === 0) {
