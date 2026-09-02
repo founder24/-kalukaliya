@@ -9,7 +9,7 @@ import { apiClient } from '@/utils/api';
 //
 // The individual /content/boards, /content/classes, /content/streams,
 // /content/subjects endpoints share a prefix with the /{slug} catch-all in
-// content.py, causing a router conflict on Cloud Run. Instead, we extract all
+// content.py, causing a legacy router conflict. Instead, we extract all
 // four collections from the already-working /content/library-bundle?slim=1
 // endpoint. React Query deduplicates the fetch so only one HTTP request is
 // made even when multiple hooks are used on the same page.

@@ -1523,10 +1523,9 @@ def main() -> None:
             print("     cd apps/api && wrangler deploy --env production")
             print("  3. Validate API Worker health:")
             print("     curl https://syrabit-api-prod.<account>.workers.dev/health")
-            print("  4. Set API_WORKER_LIVE=true secret on the edge worker to activate")
-            print("     the service binding (only after API Worker route parity is confirmed):")
-            print("     cd apps/edge && wrangler secret put API_WORKER_LIVE --env production")
-            print("     (enter: true)")
+            print("  4. Validate production edge routing:")
+            print("     curl -i https://api.syrabit.ai/health")
+            print("     Confirm X-Syrabit-Health-Backend: api-worker.")
     print("=" * 64)
 
 

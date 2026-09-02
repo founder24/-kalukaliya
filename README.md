@@ -16,8 +16,9 @@ This is a full-stack monorepo with three main runtime surfaces:
 | App | Path | Stack | Purpose |
 | --- | --- | --- | --- |
 | Frontend | `apps/frontend` | React 18, Vite, Tailwind, React Router | Student app, public pages, library, chat, profile, admin, staff UI |
-| Backend | `apps/backend` | FastAPI, MongoDB, Redis, AI providers | Auth, chat/RAG, content APIs, payments, admin/staff services |
-| Edge | `apps/edge` | Cloudflare Workers, TypeScript | API shield, rate limiting, caching, ISR/content routes, origin proxy |
+| API | `apps/api` | Cloudflare Workers, Hono, D1 | Production auth, chat/RAG, content, payments, admin/staff services |
+| Backend tools | `apps/backend` | FastAPI/Python utilities | Local ingestion, migration, and retained offline reporting tools |
+| Edge | `apps/edge` | Cloudflare Workers, TypeScript | API shield, rate limiting, caching, ISR/content routes, API service binding |
 
 Local support services are defined in `docker-compose.yml`:
 
@@ -34,8 +35,8 @@ Local support services are defined in `docker-compose.yml`:
 - Admin dashboard for health, users, billing, SEO, analytics, logs, AI routing, and infrastructure controls.
 - Public library, chapter, learn, PYQ, pricing, terms, privacy, status, and marketing pages.
 - SEO/GEO/AEO infrastructure: sitemaps, feeds, structured data, crawler-friendly prerendering, and IndexNow hooks.
-- Cloudflare Worker edge layer for API proxying, KV-backed limits/cache, R2 assets, and bot/crawler routing.
-- Production integrations for Cloudflare, Google Cloud, MongoDB Atlas, Sarvam AI, Gemini, Razorpay, Resend, Sentry, and PostHog.
+- Cloudflare Worker edge layer for API service-binding routing, KV-backed limits/cache, R2 assets, and bot/crawler routing.
+- Production integrations for Cloudflare, Sarvam AI, Gemini, Razorpay, Resend, Sentry, and PostHog.
 
 ## Quick Start
 
@@ -45,7 +46,7 @@ Local support services are defined in `docker-compose.yml`:
 - pnpm 10+
 - Python 3.12+
 - Docker and Docker Compose
-- Optional for deploys: Cloudflare Wrangler, Google Cloud CLI
+- Optional for deploys: Cloudflare Wrangler
 
 Enable pnpm with Corepack if it is not already available:
 
@@ -178,18 +179,17 @@ Browser
   |      -> Cloudflare Pages / Vite build
   |
   |-- API requests
-         -> Cloudflare Worker
+         -> Cloudflare edge Worker
               |-- CORS
               |-- JWT / edge auth checks
               |-- KV rate limiting
               |-- ISR and content cache routes
-              |-- API proxy
-                   -> FastAPI backend
-                        |-- MongoDB / Beanie models
-                        |-- Redis / Upstash-compatible cache and limits
-                        |-- AI routing and RAG services
-                        |-- Payment webhooks and subscriptions
-                        |-- Staff/admin content workflows
+               |-- API_WORKER service binding
+                    -> Cloudflare API Worker
+                         |-- D1 application data
+                         |-- R2, KV, and Vectorize
+                         |-- Workers AI and provider integrations
+                         |-- Auth, payments, staff/admin workflows
 ```
 
 ### Production Pillars
@@ -197,13 +197,13 @@ Browser
 | Area | Main provider/service | Role |
 | --- | --- | --- |
 | Edge and static delivery | Cloudflare Workers, Pages, KV, R2, Turnstile | Global delivery, API protection, caching, assets |
-| Backend compute | Google Cloud Run | FastAPI runtime and orchestration |
-| Data | MongoDB Atlas | Users, content, chat, CMS, subscriptions, analytics snapshots |
-| Cache and limits | Redis / Upstash-compatible REST | Burst limits, counters, ephemeral state |
+| API compute | Cloudflare Workers | Hono runtime and orchestration |
+| Data | Cloudflare D1, R2, Vectorize | Users, content, chat, CMS, subscriptions, assets, RAG |
+| Cache and limits | Cloudflare KV and D1 | Burst limits, counters, ephemeral state |
 | AI | Sarvam AI, Gemini, Cloudflare Workers AI | Assamese/English responses, fallback, embeddings/media helpers |
 | Payments | Razorpay | INR plans, orders, subscriptions, webhooks |
 | Email | Resend | Transactional email |
-| Observability | Sentry, PostHog, Cloud Logging, GitHub Actions | Errors, analytics, logs, scheduled monitors |
+| Observability | Sentry, PostHog, Cloudflare analytics, GitHub Actions | Errors, analytics, logs, scheduled monitors |
 
 ## Content Model
 
@@ -253,21 +253,21 @@ Major user-facing areas:
 
 Shared layouts live in `apps/frontend/src/components/layout`.
 
-## Backend Overview
+## API Worker Overview
 
-Backend entrypoint:
+Production API entrypoint:
 
-- `apps/backend/app/main.py`
+- `apps/api/src/index.ts`
 
 Core areas:
 
-- `api/v1` - REST routers for public, authenticated, admin, staff, SEO, content, payment, and health flows
-- `services` - AI, chat, SEO, publishing, memory, content generation, dead-letter handling
-- `models` - Pydantic/Beanie data models
-- `db` - MongoDB and Redis clients
-- `core` - auth, security, rate limiting, telemetry, secrets, circuit breakers
-- `scripts` - ingestion, publishing, admin, migration, translation, and repair tasks
-- `tests` - backend unit/integration coverage
+- `routes` - public, authenticated, admin, staff, SEO, content, payment, and health flows
+- `services` - AI, chat, search, publishing, email, and payment integrations
+- `drizzle` - D1 schema and migrations
+- `middleware` - authentication, CORS, and request controls
+
+`apps/backend` remains available for local/offline ingestion and the retained
+MongoDB-dependent accuracy report; it is not a production request runtime.
 
 ## Edge Worker Overview
 
@@ -286,11 +286,11 @@ Important areas:
 - `routes/isr.ts`
 - `routes/robots.ts`
 
-Production secrets are documented in `apps/edge/wrangler.toml`. Set them with Wrangler:
+Production secrets are documented in the Worker Wrangler configurations. Set
+them directly on the relevant Worker:
 
 ```bash
 cd apps/edge
-npx wrangler secret put BACKEND_URL --env production
 npx wrangler secret put JWT_SECRET --env production
 npx wrangler secret put EDGE_SHARED_SECRET --env production
 ```
@@ -307,18 +307,16 @@ pnpm --filter @workspace/syrabit run build
 
 Production delivery is designed for Cloudflare Pages with `VITE_BACKEND_URL=https://api.syrabit.ai`.
 
-### Backend
+### API Worker
 
-The backend Docker image is defined in `apps/backend/Dockerfile`.
+The production API is the D1-backed Cloudflare Worker in `apps/api`.
 
 ```bash
-gcloud run deploy syrabit-backend \
-  --source=apps/backend \
-  --region=asia-south1 \
-  --min-instances=1
+pnpm --filter syrabit-api run deploy
 ```
 
-Cloud Run should receive secrets through environment variables or Secret Manager. Production docs are disabled automatically when `APP_ENV=production`.
+The retired Google Cloud backend must not be recreated. See
+`docs/gcp-backend-decommission.md`.
 
 ### Edge
 
@@ -333,7 +331,7 @@ Production worker configuration lives in `apps/edge/wrangler.toml`.
 
 GitHub Actions workflows live in `.github/workflows`, including:
 
-- Frontend, backend, and edge CI
+- Frontend, API Worker, and edge CI
 - Full deploy workflows
 - Smoke tests
 - Uptime monitoring
@@ -368,9 +366,9 @@ Recommended checks before shipping:
 
 - Never commit real secrets, service-account JSON, webhook secrets, or production tokens.
 - Keep `JWT_SECRET`, `ADMIN_JWT_SECRET`, and `EDGE_SHARED_SECRET` distinct in production.
-- Keep Cloud Run private when using the Worker as the public API edge.
+- Do not add a public-backend fallback around the `API_WORKER` service binding.
 - Treat payment, auth, admin, and staff routes as high-risk surfaces.
-- Use Secret Manager, Wrangler secrets, and CI secrets rather than checked-in env files.
+- Use Wrangler, Replit, and CI secrets rather than checked-in env files.
 
 ## Observability
 
@@ -382,7 +380,6 @@ Operational signals come from:
 - Admin health panels
 - Sentry
 - PostHog
-- Cloud Run logs
 - Cloudflare analytics
 - GitHub scheduled monitors
 
@@ -399,11 +396,11 @@ Common alert themes:
 
 | Symptom | First checks |
 | --- | --- |
-| Frontend API calls fail locally | Confirm backend is on `:8000`, `VITE_BACKEND_URL` is set, and CORS allows `localhost:5000`. |
-| Backend starts but AI calls fail | Missing provider key or provider quota/permission issue. Check `/health/deep` and logs. |
+| Frontend API calls fail locally | Confirm the local API Worker is running, `VITE_BACKEND_URL` is set, and CORS allows `localhost:5000`. |
+| API Worker starts but AI calls fail | Missing provider key or provider quota/permission issue. Check `/health` and logs. |
 | Mongo errors locally | Confirm `docker compose ps`, `MONGODB_URI`, and `authSource=admin`. |
 | Redis/rate-limit errors locally | Confirm `redis-rest` is running on `:8079` and `REDIS_REST_TOKEN` matches `UPSTASH_REDIS_REST_TOKEN` in the untracked `.env`. |
-| Edge proxy returns upstream errors | Confirm `BACKEND_URL` points to the backend and the backend health endpoint is green. |
+| Edge proxy returns upstream errors | Confirm the `API_WORKER` service binding targets `syrabit-api-prod` and `/health` is green. |
 | Production docs missing | Expected when `APP_ENV=production`; use local development for `/docs`. |
 
 More operational details:
@@ -411,7 +408,7 @@ More operational details:
 - `docs/architecture.md`
 - `docs/RUNBOOK.md`
 - `docs/KEY_ROTATION.md`
-- `docs/architecture-audit.md`
+- `docs/gcp-backend-decommission.md`
 
 ## Project Map
 

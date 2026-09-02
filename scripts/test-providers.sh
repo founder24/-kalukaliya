@@ -15,7 +15,7 @@
 #   # Production:
 #   BASE_URL=https://api.syrabit.ai bash scripts/test-providers.sh
 #
-#   # Direct Cloud Run (bypass CF Worker):
+#   # Direct API Worker:
 #   BASE_URL=https://syrabit-backend-851687450401.asia-south1.run.app \
 #     bash scripts/test-providers.sh
 #
@@ -85,7 +85,7 @@ if [[ "$HTTP_CODE" == "404" ]]; then
   skip "Endpoint not found (HTTP 404)"
   echo ""
   echo -e "  ${Y}The /health/providers endpoint may not be deployed yet.${N}"
-  echo    "  Test locally: BASE_URL=http://localhost:8000 bash scripts/test-providers.sh"
+  echo    "  Test locally against the API Worker dev URL with BASE_URL set."
   exit 0
 fi
 

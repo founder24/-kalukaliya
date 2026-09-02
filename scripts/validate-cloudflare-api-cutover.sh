@@ -166,26 +166,6 @@ edge_admin_get() {
   cat "$output"
 }
 
-edge_admin_fallback_get() {
-  local path="$1"
-  local output headers status
-  output=$(mktemp)
-  headers=$(mktemp)
-  TMP_FILES+=("$output" "$headers")
-  status=$(curl --silent --show-error --max-time 30 \
-    --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
-    -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-    -H "Cookie: syrabit_admin_session=${ADMIN_SESSION_TOKEN}" "${EDGE_BASE}/api/v1${path}")
-  test "$status" = "200" || {
-    cat "$output"; echo "Expected public-edge Cloud Run fallback 200 for ${path}, got ${status}" >&2; exit 1;
-  }
-  grep -qi '^x-syrabit-route: cloud-run-fallback' "$headers" || {
-    cat "$headers"; echo "Expected intentional Cloud Run fallback route for ${path}" >&2; exit 1;
-  }
-  cat "$output"
-}
-
 edge_auth_json_status() {
   local path="$1"
   local expected_status="$2"
@@ -477,18 +457,15 @@ native_get "/seo/llms.txt" | grep -q 'Syrabit.ai'
 native_status "/indexnow/submit" "403" "POST" | python3 -c 'import json,sys; assert json.load(sys.stdin)["detail"] == "Missing IndexNow secret"'
 native_indexnow_empty_submit | python3 -c 'import json,sys; assert json.load(sys.stdin) == {"submitted":0,"failed":0,"detail":"No URLs provided"}'
 
-# Publishing, content editing, RAG, and scheduled seed routes are native. The
-# explicit compatibility bridge intentionally preserves unrelated, independently
-# owned admin/seed operations until their Worker replacements are ready.
+# Publishing, content editing, RAG, and scheduled seed routes are native.
+# No catch-all compatibility bridge may reintroduce Cloud Run.
 rg -q "api\.route\\('/api/v1/admin', +adminContentRouter\\)" apps/api/src/routes/index.ts || {
   echo "Native admin content router is not mounted." >&2; exit 1;
 }
-rg -q "api\.all\\('/api/v1/admin/\\*', +proxyToCloudRun\\)" apps/api/src/routes/index.ts || {
-  echo "Explicit admin compatibility bridge is missing." >&2; exit 1;
-}
-rg -q "api\.all\\('/api/v1/seed/\\*', +proxyToCloudRun\\)" apps/api/src/routes/index.ts || {
-  echo "Explicit seed compatibility bridge is missing." >&2; exit 1;
-}
+if rg -q 'proxyToCloudRun|cloud-run-fallback|X-Cloud-Run-Token' apps/api/src apps/edge/src; then
+  echo "Cloud Run compatibility code is present in the active Worker sources." >&2
+  exit 1
+fi
 
 echo "Checking published crawler artifacts through the edge Worker"
 edge_native_get "/robots.txt" | grep -q 'User-agent:'
@@ -735,17 +712,6 @@ if [[ -n "${ADMIN_SESSION_TOKEN:-}" ]]; then
   edge_admin_json_status "/admin/content/chapters/cutover-nonexistent/publish" "404" '{}' \
     | python3 -c 'import json,sys; assert json.load(sys.stdin)["detail"] == "Chapter not found"'
 
-  # /admin/users is intentionally not yet ported to D1. This bounded,
-  # read-only request proves the edge obtains Cloud Run OIDC before the API
-  # Worker's explicit compatibility bridge forwards the disposable session.
-  echo "Checking one retained admin route through the authenticated Cloud Run fallback"
-  edge_admin_fallback_get "/admin/users?limit=1" \
-    | python3 -c '
-import json,sys
-p=json.load(sys.stdin)
-assert {"users","total","offset","limit","has_more"} <= set(p), p
-assert p["limit"] == 1, p
-'
 else
   echo "ADMIN_SESSION_TOKEN not set: authenticated admin checks skipped."
 fi

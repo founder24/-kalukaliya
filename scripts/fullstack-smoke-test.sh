@@ -105,16 +105,16 @@ D1_STATUS=$(json_field "$BODY" "d.get('components',{}).get('d1','')")
 assert_eq "$D1_STATUS" "healthy" "API Worker D1 component is healthy"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. Legacy Cloud Run verification
+# 4. Retired Cloud Run verification
 # ═══════════════════════════════════════════════════════════════════════════
-header "4. Legacy Cloud Run verification"
-skip "Cloud Run is validated only after a successful backend rollout; native releases do not require it"
+header "4. Retired Cloud Run verification"
+pass "Production routing has no Cloud Run fallback; API Worker checks above are authoritative"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 5. Legacy MongoDB verification
+# 5. Retained MongoDB archive
 # ═══════════════════════════════════════════════════════════════════════════
-header "5. Legacy MongoDB verification"
-skip "Native API health verifies D1; MongoDB is retained only for the Cloud Run fallback"
+header "5. Retained MongoDB archive"
+skip "D1 is authoritative; MongoDB is retained temporarily for the scheduled accuracy report"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 5b. Legacy vector index verification

@@ -1211,7 +1211,7 @@ export default function InfraTab({ adminToken, onNavigate, health, loading, deps
                       {low && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-300 uppercase tracking-wide">Credits Low</span>}
                       {d?.configured && (
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-blue-50 text-blue-600 border-blue-200">
-                          Cloud Run · Vertex AI · Secret Manager
+                          Retired Google Cloud services
                         </span>
                       )}
                     </div>
@@ -1499,7 +1499,6 @@ export default function InfraTab({ adminToken, onNavigate, health, loading, deps
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
             {[
-              { label: 'GCP Activate', amount: '$100 000', expiry: 'Mar 2027', color: 'text-emerald-600', covers: 'Cloud Run · CDN · Storage · Logging' },
               { label: 'AWS Activate', amount: '$100 000', expiry: 'Jan 2027', color: 'text-orange-600', covers: 'Lambda · SES · Route 53 · CloudFront · Bedrock' },
               { label: 'Azure Startups', amount: '$5 000', expiry: 'Jan 2027', color: 'text-blue-600', covers: 'Front Door · Cosmos DB · DDoS · Monitor' },
               { label: 'Axiom + Sentry', amount: 'Free tiers', expiry: 'Ongoing', color: 'text-violet-600', covers: 'Logs · Errors · Perf · Replays' },

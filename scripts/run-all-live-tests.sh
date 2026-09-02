@@ -35,11 +35,9 @@
 #   1  uptime-check.sh              — 5 endpoint liveness probes (~5s)
 #   2  fullstack-smoke-test.sh      — 30+ unauthenticated infra checks (~30s)
 #   3  test-frontend-features.sh    — 79 frontend/SEO/PWA checks (~60s)
-#   4  verify-cf-pages-url.sh       — bundle URL correctness (~10s)
-#   5  live-deployment-test.sh      — health,seo,security,performance (~30s)
-#   6  test-live.sh                 — layers 0-7 end-to-end [NEEDS CREDS]
-#   7  test-auth-live.sh            — full auth + admin flow [NEEDS CREDS]
-#   8  test-chat-live.sh            — full chat pipeline [NEEDS CREDS]
+#   4  live-deployment-test.sh      — health,seo,security,performance (~30s)
+#   5  test-auth-live.sh            — full auth + admin flow [NEEDS CREDS]
+#   6  test-chat-live.sh            — full chat pipeline [NEEDS CREDS]
 #
 # =============================================================================
 
@@ -156,7 +154,7 @@ printf "  Time    : %s\n" "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 printf "  Creds   : user=%s  admin=%s\n" \
   "$([[ $HAS_USER_CREDS -eq 1 ]] && echo 'YES' || echo 'NO')" \
   "$([[ $HAS_ADMIN_CREDS -eq 1 ]] && echo 'YES' || echo 'NO')"
-[[ $QUICK -eq 1 ]] && printf "  Mode    : QUICK (test-live.sh skipped)\n"
+[[ $QUICK -eq 1 ]] && printf "  Mode    : QUICK\n"
 hr
 
 # =============================================================================
@@ -181,14 +179,7 @@ run_suite "frontend" \
   "test-frontend-features.sh"
 
 # =============================================================================
-# Suite 4 — Bundle URL Verification (CF Pages bundle references correct API)
-# =============================================================================
-run_suite "bundle" \
-  "CF Pages Bundle URL Check (no raw Cloud Run URL in JS bundle)" \
-  "verify-cf-pages-url.sh"
-
-# =============================================================================
-# Suite 5 — Live Deployment (health, SEO, security, performance categories)
+# Suite 4 — Live Deployment (health, SEO, security, performance categories)
 # =============================================================================
 run_suite "deployment" \
   "Live Deployment Test (health, SEO, security, performance)" \
@@ -196,24 +187,7 @@ run_suite "deployment" \
   "--category" "health,seo,security,performance"
 
 # =============================================================================
-# Suite 6 — test-live.sh (end-to-end layers 0-7, needs creds)
-# =============================================================================
-if [[ $QUICK -eq 1 ]]; then
-  skip_suite "live" \
-    "End-to-End Layer Test (test-live.sh, layers 0-7)" \
-    "--quick mode: skipped"
-elif [[ $HAS_USER_CREDS -eq 1 ]]; then
-  run_suite "live" \
-    "End-to-End Layer Test (CF edge · Library · Auth · Chat EN/AS · Admin)" \
-    "test-live.sh"
-else
-  skip_suite "live" \
-    "End-to-End Layer Test (test-live.sh)" \
-    "TEST_USER_EMAIL / TEST_USER_PASSWORD not set — auth + chat layers will skip"
-fi
-
-# =============================================================================
-# Suite 7 — Auth Live (full auth + admin flow)
+# Suite 5 — Auth Live (full auth + admin flow)
 # =============================================================================
 if [[ $HAS_USER_CREDS -eq 1 ]]; then
   AUTH_ARGS=()

@@ -65,3 +65,4 @@
 - [Outbound URL connection pinning](outbound-url-connection-pinning.md) — URL checks must pin HTTP connections to validated public DNS answers and revalidate every redirect.
 - [GitHub Actions secret repair](github-actions-secret-repair.md) — If shell tokens lack secret-admin scope, use the GitHub connector public key and sealed-box encrypted secret writes.
 - [Cloudflare-only production boundary](cloudflare-only-production.md) — Local and production traffic must use the API Worker service binding; Cloud Run is disconnected, not an allowed fallback.
+- [GCP decommission billing block](gcp-decommission-billing-block.md) — Cloud Run deletion works with billing disabled, but Artifact Registry cleanup is blocked until billing is briefly enabled.

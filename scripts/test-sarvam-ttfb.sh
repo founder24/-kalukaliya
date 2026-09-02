@@ -202,7 +202,7 @@ measure_ttfb() {
     pass "TTFB: ${ttfb}ms (threshold: <${TTFB_THRESHOLD_MS}ms)"
   else
     fail "TTFB: ${ttfb}ms EXCEEDS threshold ${TTFB_THRESHOLD_MS}ms — streaming fix may not be active"
-    info "If running against local dev, the fix is in the deployed Cloud Run image."
+    info "If running against local dev, confirm the matching API Worker version is deployed."
   fi
 
   # First content preview

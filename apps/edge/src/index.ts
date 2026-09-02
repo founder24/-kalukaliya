@@ -323,7 +323,7 @@ export default {
       const healthResponse = new Response(
         JSON.stringify({
           status: 'healthy',
-          service: 'syrabit-backend',
+          service: 'syrabit-edge',
           timestamp: new Date().toISOString(),
           backend_reachable: backendReachable,
           backend_mode: 'api-worker',
@@ -345,9 +345,9 @@ export default {
     }
 
     /**
-     * Full health check: Edge + full backend dependency health.
-     * Calls backend /health/deep which checks MongoDB, Redis, Vertex AI Search.
-     * Returns aggregated status: "healthy" if all pass, "degraded" if backend unreachable.
+     * Full health check: edge + API Worker binding health.
+     * Calls the API Worker /health/deep endpoint for bound Cloudflare services.
+     * Returns "healthy" if all pass and "degraded" if the API Worker is unreachable.
      */
     if (url.pathname === '/health/full') {
       if (request.method !== 'GET' && request.method !== 'HEAD') {

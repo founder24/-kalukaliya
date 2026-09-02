@@ -32,18 +32,6 @@ type = "text"
 title = "Syrabit Admin Panel — End-to-End Checklist"
 
 [[outputs]]
-id = "Qhw70fDBJdwPFLJCydWcq"
-uri = "file://FULLSTACK_ARCHITECTURE.md"
-type = "text"
-title = "Syrabit — Full-Stack End-to-End Architecture"
-
-[[outputs]]
-id = "ll3J5kDYQj-yRvVy02QSb"
-uri = "file://docs/architecture-audit.md"
-type = "text"
-title = "Syrabit — Fullstack Architecture Audit"
-
-[[outputs]]
 id = "esyWHDUy7C2EVs9-J4d9O"
 uri = "file://attached_assets/syrabit_diagram_hq.png"
 type = "image"

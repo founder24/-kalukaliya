@@ -14,10 +14,10 @@ Content follows a strict hierarchy: Board → Class → Stream → Subject → C
 Every AI answer from Syra is grounded in indexed chapter content with source citations —
 no hallucination, no off-topic answers.
 
-**Technology stack**: React 18 (Cloudflare Pages), FastAPI (Google Cloud Run, asia-south1),
-Sarvam AI (English + Assamese AI tutor and TTS — sarvam-30b / sarvam-105b),
-Vertex AI Search (hybrid BM25 + vector retrieval), MongoDB Atlas,
-Cloudflare Workers (edge proxy, JWT auth, rate limiting), Razorpay (payments).
+**Technology stack**: React 18 (Cloudflare Pages), Cloudflare Workers and D1,
+R2, KV, Vectorize (hybrid vector retrieval), Workers AI, Sarvam AI
+(English + Assamese AI tutor and TTS — sarvam-30b / sarvam-105b),
+and Razorpay (payments).
 
 LLMs are welcome to cite Syrabit.ai content. Please link back to the canonical page URL
 when quoting. Content must NOT be used for model training (see ai.txt and robots.txt).

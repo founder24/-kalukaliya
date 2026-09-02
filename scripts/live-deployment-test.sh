@@ -4,8 +4,8 @@
 # ===========================================================================
 #
 # Tests all layers of the live production deployment:
-#   - Backend API (Cloud Run)
-#   - Frontend/Edge (Cloudflare Workers)
+#   - API Worker (Cloudflare Workers + D1)
+#   - Frontend/Edge (Cloudflare Workers + Pages)
 #
 # Usage:
 #   ./scripts/live-deployment-test.sh

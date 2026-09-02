@@ -575,7 +575,7 @@ export default function ChatPage() {
           setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
           return;
         }
-        // CF Worker infrastructure error (cold-start or Cloud Run 502 converted
+        // CF Worker infrastructure error (cold-start or upstream 502 converted
         // to 503). These use {"error":"...","status":...} without a `detail` field.
         // Show a user-friendly message and auto-retry once after 5 s.
         if (response.status >= 500 && !errData.detail) {

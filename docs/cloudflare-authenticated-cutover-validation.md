@@ -93,28 +93,13 @@ instead of validating a later release. If the request, approval, link check,
 confirmation, replay check, or replacement-password login fails, native edge
 routing is rolled back.
 
-### Cloud Run compatibility fallback
+### Worker-native boundary
 
-The route inventory intentionally retains catch-all Cloud Run bridges for
-unmatched `/api/v1/admin/*` and `/api/v1/seed/*` routes. Native publishing,
-content editing, RAG, and scheduled seed routes take precedence over those
-bridges.
-
-For a retained route, the public edge obtains a Google OIDC identity token from
-its `GOOGLE_SA_KEY` secret and carries it as the internal
-`X-Cloud-Run-Token` header over the API Worker's service binding. The API
-Worker strips that internal header and uses it as Cloud Run's
-`Authorization: Bearer …` credential. The caller's admin cookie, cron token,
-and other application headers remain available to the Cloud Run application.
-Only the explicit compatibility bridge emits
-`X-Syrabit-Route: cloud-run-fallback`; native replacements continue to emit
-`worker-native`.
-
-The full-stage cutover validator includes the bounded, read-only
-`GET /api/v1/admin/users?limit=1` check with the disposable admin session.
-It requires the fallback marker and the established users-list response shape,
-proving that a retained admin operation remains available after native
-activation without creating or changing production data.
+Cloud Run was retired on 2026-09-02. The route inventory has no catch-all
+backend bridge, Google OIDC token exchange, or `cloud-run-fallback` response.
+The validator rejects active Worker source that reintroduces any of those
+paths. All supported authenticated routes must emit
+`X-Syrabit-Route: worker-native`.
 
 ### Authenticated full-stage gate
 
@@ -134,15 +119,13 @@ public-edge Worker-native markers for:
   generation; and
 - forged payment-verification and Razorpay-webhook rejection paths.
 
-The Cloudflare deployment workflow exposes the same full check only when both
-`activate_native` and `validate_authenticated` are selected. Supply the
-documented disposable GitHub secrets before using that gate. A successful
-public-only smoke test is not evidence of full authenticated parity. Chat and
-internal generation are bounded usage probes against these disposable
-credentials; all other added checks avoid creating orders, payment credits,
-content, seed runs, or publish jobs.
+The Cloudflare deployment workflow exposes the same full check when
+`validate_authenticated` is selected. Supply the documented disposable GitHub
+secrets before using that gate. A successful public-only smoke test is not
+evidence of full authenticated parity. Chat and internal generation are
+bounded usage probes against these disposable credentials; all other added
+checks avoid creating orders, payment credits, content, seed runs, or publish
+jobs.
 
-The deployment workflow requires `activate_native` and
-`validate_authenticated` together, and restores `API_WORKER_LIVE=false` when
-the downstream smoke job does not succeed, including when it is skipped or
-cancelled.
+A failed, skipped, or cancelled downstream smoke job blocks the release. It
+does not switch production traffic to another backend.

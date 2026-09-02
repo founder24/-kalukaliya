@@ -4,7 +4,7 @@ import {
   LayoutDashboard, BookOpen, Users,
   MessageSquare, TrendingUp, Bell, Settings, HeartPulse, LogOut,
   ChevronLeft, ChevronRight, Loader2, Globe,
-  Crown, Cpu, Activity, ShieldAlert, Cloud,
+  Crown, Cpu, Activity, ShieldAlert,
   ExternalLink, Gauge, Bug, FileText,
 } from 'lucide-react';
 import axios from 'axios';
@@ -27,7 +27,6 @@ const AdminAiHub           = lazy(() => import('@/components/admin/AdminAiHub'))
 const AdminRevenueHub      = lazy(() => import('@/components/admin/AdminRevenueHub'));
 const AdminAccessSecurity  = lazy(() => import('@/components/admin/AdminAccessSecurity'));
 const AdminLogsExplorer    = lazy(() => import('@/components/admin/AdminLogsExplorer'));
-const AdminGcpPanel        = lazy(() => import('@/components/admin/AdminGcpPanel'));
 const AdminOpsConsole      = lazy(() => import('@/components/admin/AdminOpsConsole'));
 const SyraAssistant        = lazy(() => import('@/components/admin/SyraAssistant'));
 import { SyraProvider, useSyraContext } from '@/components/admin/syra/SyraContext';
@@ -50,7 +49,6 @@ const SECTIONS = [
   { id: 'logs',          icon: Activity,        label: 'Logs',              group: 'system'     },
   { id: 'health',        icon: HeartPulse,      label: 'Health / Uptime',   group: 'system'     },
   { id: 'ops',           icon: Gauge,           label: 'Ops Console',       group: 'system'     },
-  { id: 'gcp',           icon: Cloud,           label: 'GCP Integrations',  group: 'system'     },
   { id: 'settings',      icon: Settings,        label: 'Site Settings',     group: 'system'     },
 ];
 
@@ -77,7 +75,6 @@ const SECTION_COMPONENTS = {
   logs:          AdminLogsExplorer,
   health:        AdminHealth,
   ops:           AdminOpsConsole,
-  gcp:           AdminGcpPanel,
   settings:      AdminSettings,
   roadmap:       AdminRoadmap,
 };

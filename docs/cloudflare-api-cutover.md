@@ -20,27 +20,7 @@ minutes, resumes queued runs, and reclaims a stale in-progress lease after its
 renewable 15-minute expiry. An interrupted request therefore cannot leave
 content seeding permanently blocked.
 
-## Before a traffic stage
-
-### Release prerequisite: GCP billing and Secret Manager
-
-The release workflow runs a `GCP Billing & Secret Manager Preflight` before
-starting any backend, Worker, edge, or frontend build/deploy job. It checks the
-`billingEnabled` status for GCP project `blissful-acumen-495019-t6`, confirms
-that the Secret Manager API is enabled, and verifies metadata access to the
-required `jwt-secret` resource. The check uses metadata only and never reads or
-prints secret values.
-
-If the preflight reports `GCP billing disabled`, enable billing for
-`blissful-acumen-495019-t6` in Google Cloud Console and rerun the release. If
-the billing lookup cannot be completed, grant the release service account
-permission to view billing status. Secret Manager errors should be remediated
-by enabling `secretmanager.googleapis.com` for the same project and restoring
-the required Secret Manager IAM access before rerunning. A failed preflight
-stops the release before Docker builds, Cloud Run deployment, Worker
-deployment, or smoke tests begin.
-
-### Cloudflare-only release
+## Cloudflare-native release
 
 The Cloudflare migration can be deployed without the GCP release gate by
 manually running `.github/workflows/deploy-cloudflare.yml`. This path:
@@ -51,8 +31,8 @@ manually running `.github/workflows/deploy-cloudflare.yml`. This path:
 - deploys the edge Worker and Cloudflare Pages frontend; and
 - runs direct API Worker, public edge, and frontend smoke checks.
 
-It does not authenticate to GCP, deploy Cloud Run, read Secret Manager, or
-claim that the Cloud Run compatibility bridge is healthy. Any API Worker
+It does not authenticate to GCP, deploy Cloud Run, or read Secret Manager.
+Any API Worker
 secrets supplied through GitHub Actions are provisioned to both Workers
 through Wrangler; omitted values are not written and existing Cloudflare
 secrets are preserved. Only secret names are subsequently checked. For a
@@ -73,14 +53,10 @@ code and D1 migrations. Features whose existing Cloudflare secret is absent
 will remain unavailable until that secret is configured; the workflow does
 not create placeholder values.
 
-`activate_native` defaults to `false` so deploying code does not silently
-change public traffic. Set it to `true` only after the D1 Worker is ready; the
-workflow then writes the explicit `API_WORKER_LIVE=true` Cloudflare secret and
-requires the public edge health check to report its API Worker service-binding
-probe. The
-existing `BACKEND_URL` and `GOOGLE_SA_KEY` edge secrets remain optional for
-native traffic, but routes still covered by the documented Cloud Run
-compatibility bridge require them.
+The production edge Worker always uses its `API_WORKER` service binding.
+There is no activation secret or alternate backend URL. The release smoke
+test requires the public edge health check to report its API Worker
+service-binding probe.
 
 1. Apply D1 migrations and run the idempotent Mongo→D1 migration.
 2. Pause writes or confirm the migration is dual-writing, then run:
@@ -97,13 +73,10 @@ compatibility bridge require them.
 
 3. Deploy through `.github/workflows/deploy.yml`. It synchronizes the Worker
    secrets required by native auth, payments, email, R2 upload URLs, and
-   internal generation before deploy. Optional Trustpilot display values use
-   GCP Secret Manager as their canonical source (`trustpilot-profile-url`,
-   `trustpilot-business-unit-id`, `trustpilot-rating-value`, and
-   `trustpilot-rating-count`) and are mirrored to both runtimes. When none are
-   configured, both endpoints intentionally return `null`. The API Worker
-   needs `TRANSLATE_CRON_SECRET` for scheduled seed routes. It does not need
-   `BACKEND_URL` or a Cloud Run identity token for staff publishing or seeding.
+   internal generation before deploy. Optional Trustpilot display values are
+   supplied directly to the Cloudflare release environment. When none are
+   configured, the endpoint intentionally returns `null`. The API Worker
+   needs `TRANSLATE_CRON_SECRET` for scheduled seed routes.
 4. Run the staged Worker and public-edge smoke test:
 
    ```bash
@@ -128,20 +101,16 @@ compatibility bridge require them.
    test budget.
    The script fails if any full-stage credential is missing. For a
    deliberately public-only preflight, set `CUTOVER_STAGE=public`; that is not
-   sufficient evidence for a traffic stage. `PUBLIC_EDGE_URL` must point to
-   the edge deployment with `API_WORKER_LIVE=true`, so root sitemap/feed/LLM
-   artifacts are verified through their real production delivery path.
+   sufficient evidence for a production release. `PUBLIC_EDGE_URL` must point
+   to the production edge deployment, so root sitemap/feed/LLM artifacts are
+   verified through their real delivery path.
 
    The Cloudflare-only deploy workflow exposes this as an explicit safety
-   gate: choose both `activate_native=true` and
-   `validate_authenticated=true`. Configure the six GitHub secrets
+   gate: choose `validate_authenticated=true`. Configure the six GitHub secrets
    `INDEXNOW_INTERNAL_SECRET`, `CUTOVER_STUDENT_TOKEN`,
    `CUTOVER_STAFF_TOKEN`, `CUTOVER_ADMIN_SESSION_TOKEN`,
    `EDGE_SHARED_SECRET`, and `TRANSLATE_CRON_SECRET` first. The authenticated
-   gate is intentionally not run for ordinary code-only deployments. Native
-   edge routing is not activated unless that validation option is selected,
-   and a failed authenticated check automatically restores
-   `API_WORKER_LIVE=false`.
+   gate is intentionally not run for ordinary code-only deployments.
 
    Native password-reset request and confirmation routes are validated through
    the public edge. For full email-delivery and single-use-token evidence,
@@ -149,50 +118,20 @@ compatibility bridge require them.
    sends a new request for a disposable fixture, waits for a protected
    environment approval, and accepts only a delivered link carrying the fresh
    request nonce. It never uses a real student or staff account, rejects stale
-   links from prior releases, and rolls back native routing if the proof fails.
+   links from prior releases, and fails the release if the proof fails.
    See `docs/cloudflare-authenticated-cutover-validation.md` for the protected
    environment setup.
 
-## Stages and rollback
+## Rollback boundary
 
-Start with internal users, then a small percentage of public edge traffic, and
-increase only after the validation passes and Worker error/latency budgets are
-within normal bounds. Monitor `X-Syrabit-Route` to ensure the supported route
-set stays Worker-native.
+Cloud Run was retired on 2026-09-02. A release rollback means redeploying a
+known-good API Worker, edge Worker, and Pages build; it must never restore a
+Google backend or an `API_WORKER_LIVE` activation toggle.
 
-To roll back, set `API_WORKER_LIVE=false` on the edge Worker and redeploy it.
-This routes traffic to the existing Cloud Run backend without deleting D1,
-MongoDB, Cloud Run, or any deployment artifacts. Do not retire those systems
-until the separate decommission gate establishes that no route, write,
-scheduled operation, or deployment depends on them.
-
-## Retirement gate evidence
-
-This cutover does **not** by itself authorize Cloud Run, MongoDB, GCP secrets,
-or Artifact Registry retirement. Public search, site operations, staff content
-publishing, and seed job dispatch are Worker-native and are asserted by
-`scripts/validate-cloudflare-api-cutover.sh`; their requests must carry
-`X-Syrabit-Route: worker-native`. The route inventory deliberately retains
-catch-all Cloud Run compatibility bridges for `/api/v1/admin/*` and
-`/api/v1/seed/*`; mounted native routes take precedence.
-
-The retirement gate can be satisfied without weakening rollback safety only
-when all of the following evidence exists:
-
-1. A successful full-stage validation from
-   `scripts/validate-cloudflare-api-cutover.sh`, including its Worker-native
-   operational-route marker assertions.
-2. A clean native-route inventory, with the explicit catch-all
-   `/api/v1/admin/*` and `/api/v1/seed/*` Cloud Run compatibility bridge
-   retained only for independently-owned route families that have not yet
-   been migrated. Mounted native admin/staff/seed routes take precedence;
-   any unmatched route inside those families is a documented Cloud Run
-   fallback and must not be treated as retirement-ready.
-3. A scheduled-job and write-path audit proving publishing and seed callers
-   work with `BACKEND_URL` unset and Cloud Run OIDC unavailable.
-4. A completed rollback rehearsal using `API_WORKER_LIVE=false` while the
-   existing edge rollback path is retained; record the rehearsal timestamp,
-   request IDs, and successful restoration to `API_WORKER_LIVE=true`.
+All API, staff, publishing, seed, search, and scheduled-operation routes must
+carry `X-Syrabit-Route: worker-native`. Missing service bindings fail closed.
+The decommission record and retained-data plan are in
+`docs/gcp-backend-decommission.md`.
 
 ## Seed-run interruption rehearsal
 
@@ -319,8 +258,7 @@ for this rehearsal.
   seed rows were deleted after the snapshots were retained. Independent
   post-cleanup counts were `boards=0`, `classes=0`, `streams=0`,
   `subjects=0`, `chapters=0`, and `seed_runs=0` for the fixture prefix.
-- Because the full workflow could not reach its API job until the unrelated
-  GCP billing condition is repaired, the production D1/Worker portion of this
-  record was completed with the workflow's exact API commands directly. The
-  Cloud Run billing condition remains an explicit deployment prerequisite for
-  future full-stack releases.
+- At that time, the legacy workflow could not reach its API job because an
+  unrelated GCP billing check failed. The production D1/Worker portion was
+  therefore completed with the workflow's exact API commands directly.
+  Current releases are Cloudflare-native and must not require GCP billing.

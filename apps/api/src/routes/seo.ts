@@ -241,10 +241,19 @@ seoRouter.get('/llms.txt', async (c) => {
   const count = (await publishedContent(c)).length;
   return c.text(`# Syrabit.ai
 
-> Syrabit.ai is the educational browser for Assam Board students.
+> Syrabit.ai is the educational browser for AHSEC, SEBA, Degree, FYUGP, and NEP students in Assam.
+
+Technology stack: Cloudflare Workers, D1, R2, KV, Vectorize, Workers AI, and Cloudflare Pages.
 
 Total published chapters: ${count}
 Full content index: ${SITE_URL}/llms-full.txt
+
+Explore:
+- ${SITE_URL}/library
+- ${SITE_URL}/technology
+- ${SITE_URL}/about
+
+Contact: founder@syrabit.ai
 `, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=600, s-maxage=600' });
 });
 

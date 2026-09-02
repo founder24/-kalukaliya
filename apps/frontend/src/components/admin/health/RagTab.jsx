@@ -11,10 +11,10 @@ import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 const REQUIRED_INDEXES = ['subjectId', 'chapterId', 'topicId', 'medium', 'sourceType', 'chunkType'];
 
 const DISABLE_CMD =
-  'gcloud run services update syrabit-backend \\\n  --update-env-vars RAG_LEGACY_FALLBACK_ENABLED=false \\\n  --region asia-south1';
+  'Legacy Atlas fallback is retired. Use Reindex All to repair Vectorize coverage.';
 
 const ROLLBACK_CMD =
-  'gcloud run services update syrabit-backend \\\n  --update-env-vars RAG_LEGACY_FALLBACK_ENABLED=true \\\n  --region asia-south1';
+  'Reindex affected chapters in Vectorize; do not restore the retired Google backend.';
 
 function CodeBlock({ code }) {
   const [copied, setCopied] = useState(false);
@@ -398,7 +398,7 @@ export default function RagTab({ adminToken }) {
             />
             <ChecklistRow
               done={!flagEnabled && flagEnabled !== undefined}
-              label="Flag disabled on Cloud Run (RAG_LEGACY_FALLBACK_ENABLED=false)"
+              label="Legacy Atlas fallback remains retired"
               sub={flagEnabled ? 'Use the command below once the checklist is complete' : undefined}
             />
           </div>
@@ -446,7 +446,7 @@ export default function RagTab({ adminToken }) {
               <CodeBlock code={ROLLBACK_CMD} />
               <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 space-y-1.5 text-[11px] text-gray-600">
                 <p className="font-semibold text-gray-700">Post-rollback steps</p>
-                <p>1. Filter Cloud Logging on <code className="bg-gray-200 px-1 rounded">rag_path=empty</code> — that's the failure signal.</p>
+                <p>1. Filter Worker logs on <code className="bg-gray-200 px-1 rounded">rag_path=empty</code> — that's the failure signal.</p>
                 <p>2. Identify which chapters produce empty results (look for <code className="bg-gray-200 px-1 rounded">chapterId</code> in log context).</p>
                 <p>3. Trigger a targeted reindex: <code className="bg-gray-200 px-1 rounded">POST /admin/rag/reindex/chapter/{'<id>'}</code>.</p>
                 <p>4. Verify coverage reaches 100%, then attempt to disable the flag again.</p>

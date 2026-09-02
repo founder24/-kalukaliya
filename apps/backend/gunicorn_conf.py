@@ -1,6 +1,6 @@
 import os
 
-# Cloud Run injects PORT env var (set by --port flag in gcloud run deploy).
+# Hosting environments may inject a PORT value; local development defaults to 8000.
 # Fall back to 8000 for local dev and Docker builds without --port.
 bind = f"0.0.0.0:{os.environ.get('PORT', '8000')}"
 # Default 2 workers suitable for 1Gi memory container (0.5 vCPU).
