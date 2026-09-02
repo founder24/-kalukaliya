@@ -1,10 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { handleISR } from '../src/routes/isr';
 
 function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
     JWT_SECRET: 'test-secret-for-unit-tests-at-least-32-characters',
-    BACKEND_URL: 'http://localhost:8000',
     ALLOWED_ORIGIN: 'https://syrabit.ai',
     R2_BUCKET: { get: vi.fn(async () => null) } as unknown as R2Bucket,
     RATE_LIMIT_KV: {
@@ -29,17 +28,6 @@ function createMockCtx(): ExecutionContext {
 }
 
 describe('ISR - handleISR', () => {
-  let originalFetch: typeof globalThis.fetch;
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    vi.restoreAllMocks();
-  });
-
   it('Non-bot UA returns null (no ISR handling)', async () => {
     const env = createMockEnv();
     const ctx = createMockCtx();
@@ -76,8 +64,7 @@ describe('ISR - handleISR', () => {
     expect(body).toBe(cachedHtml);
   });
 
-  it('Bot UA with cache miss proxies to backend, caches result, returns with X-ISR-Cache: MISS', async () => {
-    const backendHtml = '<html><body>Fresh Page</body></html>';
+  it('Bot UA with cache miss falls through without an external backend request', async () => {
     const kvPutMock = vi.fn(async () => {});
     const env = createMockEnv({
       ISR_CACHE_KV: {
@@ -88,10 +75,8 @@ describe('ISR - handleISR', () => {
     });
     const ctx = createMockCtx();
 
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(backendHtml, {
-      status: 200,
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
-    })));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
 
     const request = new Request('https://syrabit.ai/about', {
       headers: { 'User-Agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)' },
@@ -99,38 +84,9 @@ describe('ISR - handleISR', () => {
 
     const result = await handleISR(request, env, ctx);
 
-    expect(result).not.toBeNull();
-    expect(result!.status).toBe(200);
-    expect(result!.headers.get('X-ISR-Cache')).toBe('MISS');
-    const body = await result!.text();
-    expect(body).toBe(backendHtml);
-
-    // Verify caching was triggered via waitUntil
-    expect(ctx.waitUntil).toHaveBeenCalled();
-  });
-
-  it('Bot UA when backend returns non-200 returns null', async () => {
-    const env = createMockEnv({
-      ISR_CACHE_KV: {
-        get: vi.fn(async () => null),
-        put: vi.fn(async () => {}),
-        delete: vi.fn(async () => {}),
-      } as unknown as KVNamespace,
-    });
-    const ctx = createMockCtx();
-
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('Not Found', {
-      status: 404,
-      headers: { 'Content-Type': 'text/plain' },
-    })));
-
-    const request = new Request('https://syrabit.ai/missing-page', {
-      headers: { 'User-Agent': 'bingbot/2.0' },
-    });
-
-    const result = await handleISR(request, env, ctx);
-
     expect(result).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(kvPutMock).not.toHaveBeenCalled();
   });
 
   it('Missing ISR_CACHE_KV binding returns null', async () => {

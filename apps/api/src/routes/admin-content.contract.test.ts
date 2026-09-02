@@ -1,7 +1,7 @@
 /**
  * Native admin publish/seed contract checks.
  *
- * Uses a local D1 binding and deliberately omits BACKEND_URL. The checks prove
+ * Uses a local D1 binding. The checks prove
  * that legacy admin-session cookies and cron tokens reach Worker-native routes,
  * and that D1 conditional inserts reject duplicate queue launches.
  */
@@ -72,7 +72,6 @@ beforeAll(async () => {
           : { response: 'Generated contract-test notes.' }
       ),
     } as unknown as Ai,
-    // Intentionally no BACKEND_URL.
   };
   for (const statement of migrations()) await env.DB.prepare(statement).run();
   await env.DB.batch([
@@ -138,7 +137,7 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     expect(logout.headers.get('Set-Cookie')).toContain('Max-Age=0');
   });
 
-  it('queues a publish job through the existing admin-session cookie without BACKEND_URL', async () => {
+  it('queues a publish job through the existing admin-session cookie', async () => {
     const response = await workerFetch(adminRequest(
       `/api/v1/admin/content/chapters/${chapterId}/publish`, 'POST',
     ));

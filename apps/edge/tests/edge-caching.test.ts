@@ -3,14 +3,13 @@
  *
  * Verifies:
  * (a) CF Cache API is called for frontend GET redirect responses
- * (b) /health reads from ISR_CACHE_KV and falls back to backend fetch
+ * (b) /health reads from ISR_CACHE_KV and probes the API Worker binding
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
     JWT_SECRET: 'test-secret-for-unit-tests-at-least-32-characters',
-    BACKEND_URL: 'http://localhost:8000',
     ALLOWED_ORIGIN: 'https://syrabit.ai',
     EDGE_SHARED_SECRET: 'test-edge-secret',
     R2_BUCKET: { get: vi.fn(async () => null) } as unknown as R2Bucket,
@@ -24,6 +23,9 @@ function createMockEnv(overrides: Partial<Env> = {}): Env {
       put: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
     } as unknown as KVNamespace,
+    API_WORKER: {
+      fetch: vi.fn(async () => new Response(null, { status: 200 })),
+    } as unknown as { fetch(request: Request): Promise<Response> },
     ...overrides,
   };
 }
@@ -219,18 +221,21 @@ describe('/health - ISR_CACHE_KV Cache Layer', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('falls back to backend fetch when KV cache is empty', async () => {
+  it('probes the API Worker binding when KV cache is empty', async () => {
     const mockKV = {
       get: vi.fn(async () => null),
       put: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
     } as unknown as KVNamespace;
 
-    // Mock a successful backend health check
+    const apiWorkerFetch = vi.fn(async () => new Response(null, { status: 200 }));
     const fetchSpy = vi.fn(async () => new Response('OK', { status: 200 }));
     vi.stubGlobal('fetch', fetchSpy);
 
-    const env = createMockEnv({ ISR_CACHE_KV: mockKV });
+    const env = createMockEnv({
+      ISR_CACHE_KV: mockKV,
+      API_WORKER: { fetch: apiWorkerFetch } as unknown as { fetch(request: Request): Promise<Response> },
+    });
     const ctx = createMockCtx();
     const request = new Request('https://api.syrabit.ai/health', {
       method: 'GET',
@@ -244,8 +249,8 @@ describe('/health - ISR_CACHE_KV Cache Layer', () => {
     expect(body.backend_reachable).toBe(true);
     // KV was checked but empty
     expect(mockKV.get).toHaveBeenCalledWith('edge:health');
-    // Backend was fetched
-    expect(fetchSpy).toHaveBeenCalled();
+    expect(apiWorkerFetch).toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('stores health result in ISR_CACHE_KV with 30s TTL after fresh fetch', async () => {
@@ -255,9 +260,12 @@ describe('/health - ISR_CACHE_KV Cache Layer', () => {
       delete: vi.fn(async () => {}),
     } as unknown as KVNamespace;
 
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('OK', { status: 200 })));
+    const apiWorkerFetch = vi.fn(async () => new Response(null, { status: 200 }));
 
-    const env = createMockEnv({ ISR_CACHE_KV: mockKV });
+    const env = createMockEnv({
+      ISR_CACHE_KV: mockKV,
+      API_WORKER: { fetch: apiWorkerFetch } as unknown as { fetch(request: Request): Promise<Response> },
+    });
     const ctx = createMockCtx();
     const request = new Request('https://api.syrabit.ai/health', {
       method: 'GET',
@@ -279,16 +287,19 @@ describe('/health - ISR_CACHE_KV Cache Layer', () => {
     expect(parsed.backend_reachable).toBe(true);
   });
 
-  it('handles KV read failure gracefully and falls back to backend', async () => {
+  it('handles KV read failure gracefully and probes the API Worker binding', async () => {
     const mockKV = {
       get: vi.fn(async () => { throw new Error('KV unavailable'); }),
       put: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
     } as unknown as KVNamespace;
 
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('OK', { status: 200 })));
+    const apiWorkerFetch = vi.fn(async () => new Response(null, { status: 200 }));
 
-    const env = createMockEnv({ ISR_CACHE_KV: mockKV });
+    const env = createMockEnv({
+      ISR_CACHE_KV: mockKV,
+      API_WORKER: { fetch: apiWorkerFetch } as unknown as { fetch(request: Request): Promise<Response> },
+    });
     const ctx = createMockCtx();
     const request = new Request('https://api.syrabit.ai/health', {
       method: 'GET',
@@ -302,16 +313,19 @@ describe('/health - ISR_CACHE_KV Cache Layer', () => {
     expect(body.backend_reachable).toBe(true);
   });
 
-  it('returns backend_reachable=false when backend is unreachable', async () => {
+  it('returns backend_reachable=false when the API Worker is unreachable', async () => {
     const mockKV = {
       get: vi.fn(async () => null),
       put: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
     } as unknown as KVNamespace;
 
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('Connection refused'); }));
+    const apiWorkerFetch = vi.fn(async () => { throw new Error('service binding unavailable'); });
 
-    const env = createMockEnv({ ISR_CACHE_KV: mockKV });
+    const env = createMockEnv({
+      ISR_CACHE_KV: mockKV,
+      API_WORKER: { fetch: apiWorkerFetch } as unknown as { fetch(request: Request): Promise<Response> },
+    });
     const ctx = createMockCtx();
     const request = new Request('https://api.syrabit.ai/health', {
       method: 'GET',

@@ -12,9 +12,7 @@ function env(apiFetch: (request: Request) => Promise<Response>): Env {
   return {
     JWT_SECRET: 'edge-jwt-test-secret-at-least-32-characters',
     EDGE_SHARED_SECRET: 'edge-cookie-test-secret-at-least-32-characters',
-    BACKEND_URL: 'https://cloud-run.example.com',
     ALLOWED_ORIGIN: 'https://syrabit.ai',
-    API_WORKER_LIVE: 'true',
     API_WORKER: { fetch: apiFetch },
   } as unknown as Env;
 }

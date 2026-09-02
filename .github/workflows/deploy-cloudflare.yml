@@ -1,18 +1,12 @@
 name: Deploy — Cloudflare Native Only
 
-# This manual path mirrors the default Cloudflare jobs in deploy.yml. It
-# deliberately does not authenticate to GCP or read GCP Secret Manager.
+# This manual path mirrors the Cloudflare-native jobs in deploy.yml.
 # Worker secrets are provisioned from GitHub Actions secrets through Wrangler.
 on:
   workflow_dispatch:
     inputs:
-      activate_native:
-        description: 'Route the public edge Worker to the D1 API Worker after deployment'
-        required: false
-        default: false
-        type: boolean
       validate_authenticated:
-        description: 'Require disposable authenticated cutover checks after deployment'
+        description: 'Require disposable authenticated API checks after deployment'
         required: false
         default: false
         type: boolean
@@ -77,20 +71,6 @@ jobs:
       - name: Validate refresh-token bridge release guard
         run: python3 scripts/test-refresh-token-bridge-guard.py
 
-      - name: Require authenticated validation for native activation
-        if: ${{ github.event.inputs.activate_native == 'true' || github.event.inputs.validate_authenticated == 'true' || github.event.inputs.validate_reset_delivery == 'true' }}
-        env:
-          ACTIVATE_NATIVE: ${{ github.event.inputs.activate_native }}
-          VALIDATE_AUTHENTICATED: ${{ github.event.inputs.validate_authenticated }}
-          VALIDATE_RESET_DELIVERY: ${{ github.event.inputs.validate_reset_delivery }}
-        run: |
-          test "$ACTIVATE_NATIVE" = 'true'
-          test "$VALIDATE_AUTHENTICATED" = 'true'
-          if [ "$VALIDATE_RESET_DELIVERY" = 'true' ]; then
-            test "$ACTIVATE_NATIVE" = 'true'
-            test "$VALIDATE_AUTHENTICATED" = 'true'
-          fi
-
       - name: Require API Worker release secrets
         run: |
           set -euo pipefail
@@ -105,7 +85,7 @@ jobs:
           done
           if ((${#missing[@]} > 0)); then
             echo "::error::Required Cloudflare API Worker release secrets are not supplied: ${missing[*]}"
-            echo "Refusing to deploy so native routing cannot expose a partially configured API Worker."
+            echo "Refusing to deploy a partially configured API Worker."
             exit 1
           else
             echo "All required Cloudflare API Worker release secrets are supplied."
@@ -555,30 +535,10 @@ jobs:
           grep -qi '^x-source: bot-render-not-found' /tmp/missing.headers
           ! grep -q 'id="root"\|id="app"' /tmp/missing.html
 
-  activate-native:
-    name: Activate D1 API Worker routing
+  post-native-smoke:
+    name: Confirm native routing
     runs-on: ubuntu-latest
     needs: smoke
-    if: ${{ github.event.inputs.activate_native == 'true' && github.event.inputs.validate_authenticated == 'true' }}
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Enable Corepack + PNPM
-        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Activate only after pre-release smoke passes
-        run: printf 'true' | pnpm --filter syrabit-edge exec wrangler secret put API_WORKER_LIVE --env production
-
-  post-activation-smoke:
-    name: Confirm native routing after activation
-    runs-on: ubuntu-latest
-    needs: activate-native
     env:
       API_WORKER_URL: https://syrabit-api-prod.axomxplain.workers.dev
       PUBLIC_EDGE_URL: https://api.syrabit.ai
@@ -602,7 +562,7 @@ jobs:
             | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["credits_remaining"] >= 0 and p["anon_id"].startswith("anon_"), p'
           grep -qi '^x-syrabit-route: worker-native' /tmp/credits.headers
 
-      - name: Validate authenticated Cloudflare cutover
+      - name: Validate authenticated Cloudflare API routing
         env:
           INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
           STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
@@ -622,13 +582,12 @@ jobs:
   request-reset-email:
     name: Request fresh disposable password-reset email
     runs-on: ubuntu-latest
-    needs: [post-activation-smoke]
+    needs: [post-native-smoke]
     if: |
       always() &&
-      github.event.inputs.activate_native == 'true' &&
       github.event.inputs.validate_authenticated == 'true' &&
       github.event.inputs.validate_reset_delivery == 'true' &&
-      needs.post-activation-smoke.result == 'success'
+      needs.post-native-smoke.result == 'success'
     outputs:
       nonce: ${{ steps.request.outputs.nonce }}
     env:
@@ -690,37 +649,3 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/validate-cloudflare-api-cutover.sh
-
-  rollback-native-routing:
-    name: Restore Cloud Run routing after failed cutover validation
-    runs-on: ubuntu-latest
-    needs: [post-activation-smoke, validate-reset-email]
-    if: |
-      always() &&
-      github.event.inputs.activate_native == 'true' &&
-      github.event.inputs.validate_authenticated == 'true' &&
-      (
-        needs.post-activation-smoke.result != 'success' ||
-        (
-          github.event.inputs.validate_reset_delivery == 'true' &&
-          needs.validate-reset-email.result != 'success'
-        )
-      )
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Enable Corepack + PNPM
-        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Disable native edge routing
-        run: printf 'false' | pnpm --filter syrabit-edge exec wrangler secret put API_WORKER_LIVE --env production

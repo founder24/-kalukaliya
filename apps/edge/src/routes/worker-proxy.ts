@@ -3,31 +3,17 @@
  *
  * When env.API_WORKER is present (production with D1 backend), requests are
  * forwarded directly over Cloudflare's internal network without a public HTTP
- * hop. Native routes stay Worker-native. The retained admin and seed
- * compatibility families also travel through this hop, so those requests carry
- * a Cloud Run OIDC token for the API Worker's explicit fallback bridge.
+ * hop. All API routes stay Worker-native.
  *
  * Edge middleware (JWT verification, rate-limiting, HMAC signing) all run
  * before this function is called — headers are already set on the request.
  */
-
-import { getIdentityToken } from '../utils/google-auth';
 
 const DEFAULT_SERVICE_BINDING_TIMEOUT_MS = 10_000;
 
 /** Only the native chat endpoint is an SSE response. */
 function isSseRequest(pathname: string): boolean {
   return pathname === '/api/v1/chat/stream';
-}
-
-/**
- * These families contain both native routes and deliberate compatibility
- * fallbacks. Supplying the token to all requests in the families is safe:
- * native handlers ignore the internal header, while any unmatched route can
- * authenticate its Cloud Run hop without another edge round trip.
- */
-function isCloudRunFallbackFamily(pathname: string): boolean {
-  return pathname.startsWith('/api/v1/admin/') || pathname.startsWith('/api/v1/seed/');
 }
 
 export async function proxyToApiWorker(
@@ -40,30 +26,16 @@ export async function proxyToApiWorker(
   const requestId = request.headers.get('X-Request-ID') ?? `service-binding-${Date.now()}`;
   const isStreamRequest = isSseRequest(url.pathname);
   const isCrawlerArtifact = url.pathname.startsWith('/api/v1/seo/');
-  const needsCloudRunFallbackToken = isCloudRunFallbackFamily(url.pathname);
 
   // Clone and clean headers for the internal hop.
-  // - Drop caller-supplied Cloud Run-specific auth headers; only the edge may
-  //   mint and attach the internal fallback token below.
   // - Keep X-User-ID, X-Edge-Secret, X-Edge-Timestamp, X-Edge-Signature
   //   that the API Worker uses to verify edge trust
   const headers = new Headers(request.headers);
   headers.delete('Host');
   headers.delete('Connection');
-  headers.delete('X-Cloud-Run-Token');
-
-  if (needsCloudRunFallbackToken) {
-    // The API Worker's fallback bridge cannot mint a Google identity token
-    // itself. Fetch it at the edge, where GOOGLE_SA_KEY is configured, and
-    // pass it only over the private service-binding request.
-    const cloudRunToken = await getIdentityToken(env);
-    if (cloudRunToken) {
-      headers.set('X-Cloud-Run-Token', `Bearer ${cloudRunToken}`);
-    }
-  }
 
   // Inject per-request HMAC signature so the API Worker can verify this
-  // request came from the trusted edge worker (same as the Cloud Run path).
+  // request came from the trusted edge worker.
   if (env.EDGE_SHARED_SECRET) {
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const userId = headers.get('X-User-ID') || 'anonymous';

@@ -21,10 +21,6 @@ args = "Start application"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Backend API"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "AHSEC Ingestion"
 
 [[workflows.workflow.tasks]]
@@ -50,18 +46,6 @@ outputType = "webview"
 task = "shell.exec"
 args = "pnpm --filter @workspace/syrabit run dev"
 waitForPort = 5000
-
-[[workflows.workflow]]
-name = "Backend API"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd apps/backend && APP_ENV=development python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
-waitForPort = 8000
 
 [[workflows.workflow]]
 name = "AHSEC Bulk Seed RAG (EN)"

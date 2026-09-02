@@ -1,6 +1,6 @@
 /**
  * Contract tests for site-operation routes that must remain available without
- * the Cloud Run fallback. These use a small D1 double to exercise the public
+ * the retired external fallback. These use a small D1 double to exercise the public
  * response envelopes and cache-friendly artifact types without remote bindings.
  */
 

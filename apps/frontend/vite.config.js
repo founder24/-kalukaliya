@@ -10,11 +10,10 @@ import preloadHeadersInjectPlugin from './vite-plugins/preload-headers-inject.js
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
-const BACKEND_TARGET = process.env.VITE_BACKEND_URL || process.env.BACKEND_PROXY_URL || 'http://localhost:8000';
-// The local FastAPI service intentionally remains available for compatibility
-// work, but student chat in the preview must exercise the same native Workers
-// AI route as production. Set VITE_CHAT_API_ORIGIN to override this for an
-// isolated staging Worker.
+const BACKEND_TARGET = process.env.VITE_BACKEND_URL || process.env.BACKEND_PROXY_URL || 'https://api.syrabit.ai';
+// Local previews use the production-native API Worker by default. Set
+// VITE_BACKEND_URL, BACKEND_PROXY_URL, or VITE_CHAT_API_ORIGIN only when
+// deliberately targeting an isolated staging Worker.
 const CHAT_WORKER_TARGET = process.env.VITE_CHAT_API_ORIGIN || 'https://api.syrabit.ai';
 
 // ─── CANONICAL BOT REGEX — DO NOT DRIFT ─────────────────────────────────────

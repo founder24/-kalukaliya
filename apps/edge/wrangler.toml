@@ -9,9 +9,6 @@ compatibility_flags = ["nodejs_compat"]
 command = "npx tsc --noEmit"
 
 [vars]
-# Local dev only. In production, set as a Wrangler secret:
-#   npx wrangler secret put BACKEND_URL --env production
-BACKEND_URL = "http://localhost:8000"
 ALLOWED_ORIGIN = "https://syrabit.ai"
 
 # Top-level bindings (used by default env / Cloudflare Git integration)
@@ -82,10 +79,8 @@ name = "RATE_LIMIT_DO"
 class_name = "RateLimitDurableObject"
 
 # ── Service Binding: syrabit-api-prod (D1-backed API Worker) ─────────────────
-# Requests to /api/ and /health/ are forwarded to the API Worker via a direct
-# Cloudflare-internal connection (no public internet hop, no OIDC auth needed).
-# BACKEND_URL secret is kept as a fallback for dev/staging environments where
-# the service binding is absent.
+# Requests to /api/ and /health/ are forwarded to the API Worker through a
+# direct Cloudflare-internal connection.
 [[env.production.services]]
 binding = "API_WORKER"
 service = "syrabit-api-prod"
@@ -94,18 +89,12 @@ service = "syrabit-api-prod"
 # npx wrangler secret put <NAME> --env production
 #
 # REQUIRED:
-#   BACKEND_URL         — Cloud Run service URL (never a [vars] binding!)
-#                         Set: npx wrangler secret put BACKEND_URL --env production
-#   JWT_SECRET          — must exactly match backend JWT_SECRET (>=32 chars)
-#   EDGE_SHARED_SECRET  — HMAC signing key; must match backend EDGE_SHARED_SECRET
+#   JWT_SECRET          — must exactly match the API Worker JWT_SECRET (>=32 chars)
+#   EDGE_SHARED_SECRET  — HMAC signing key; must match the API Worker secret
 #
 # OPTIONAL:
-#   GOOGLE_SA_KEY       — SA JSON for Cloud Run OIDC auth (private Cloud Run only)
 #   JWT_PUBLIC_KEY      — RSA public key (PEM) for RS256 (not needed for HS256)
 # ──────────────────────────────────────────────────────────────────────────────
 
 [env.production.vars]
 ALLOWED_ORIGIN = "https://syrabit.ai"
-# NOTE: BACKEND_URL is intentionally absent here.
-# It must be set as a Wrangler secret to avoid CF API error 10053
-# (binding name already in use when trying to set it as a secret).

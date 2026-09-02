@@ -34,9 +34,6 @@ export interface Env {
   TRUSTPILOT_RATING_COUNT?: string;
   WEB_SEARCH_ENABLED?: string;
 
-  // Cloud Run fallback (optional — when set, unimplemented Workers routes proxy there)
-  BACKEND_URL?: string;
-
   // R2 public URL base (e.g. https://assets.syrabit.ai) — required for file upload routes
   R2_PUBLIC_URL?: string;
 

@@ -17,40 +17,15 @@ import {
   rateLimitHeaders,
   resolveAnonymousIdentity,
 } from './middleware/rate-limit';
-import { proxyRequest } from './routes/api-proxy';
 import { proxyToApiWorker, pingApiWorkerHealth } from './routes/worker-proxy';
 import { handleContentKV } from './routes/content-kv';
 import { handleISR } from './routes/isr';
-import { handleRobots } from './routes/robots';
-import { getIdentityToken } from './utils/google-auth';
 
 export { RateLimitDurableObject } from './middleware/rate-limit';
 
 // Cached health probe state (module-level)
 let healthCache: { backendReachable: boolean; timestamp: number } | null = null;
 const HEALTH_CACHE_TTL_MS = 10_000; // 10 seconds
-
-function isNativeStaffPath(pathname: string): boolean {
-  // Staff and admin operations are D1-backed and can safely reach the guarded
-  // API Worker while the broader API cutover remains staged. Generic auth and
-  // profile routes are intentionally excluded: the edge cannot determine a
-  // user's role before login, and student accounts must stay on one backend
-  // until API_WORKER_LIVE enables the full cutover.
-  if (pathname.startsWith('/api/v1/staff/')) return true;
-  if (pathname.startsWith('/api/v1/admin/content/')) return true;
-  return [
-    '/api/v1/admin/login',
-    '/api/v1/admin/verify',
-    '/api/v1/admin/logout',
-    '/api/v1/admin/rag/bulk-reindex',
-    '/api/v1/admin/cron/seed-notes',
-    '/api/v1/admin/cron/seed-assamese',
-    '/api/v1/admin/cron/translate',
-    '/api/v1/admin/cron/bulk-mirror-rag',
-    '/api/v1/admin/cron/bulk-reindex',
-    '/api/v1/admin/cron/bulk-reindex/status',
-  ].includes(pathname);
-}
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -61,21 +36,7 @@ export default {
       return response;
     };
 
-    // When API_WORKER_LIVE === 'true' the Service Binding is active and ALL API /
-    // health traffic is routed through the API Worker. Implemented routes
-    // (auth, health, chat) are served directly from D1. All other routes fall
-    // back to Cloud Run via the API Worker's fallback proxy, which uses the OIDC
-    // token forwarded in X-Cloud-Run-Token by proxyToApiWorker.
-    const isWorkerNativeStaffPath = isNativeStaffPath(url.pathname);
-    const useApiWorker = Boolean(env.API_WORKER && (env.API_WORKER_LIVE === 'true' || isWorkerNativeStaffPath));
-    if (isWorkerNativeStaffPath && !env.API_WORKER) {
-      const response = new Response(JSON.stringify({ detail: 'Native API Worker binding is required for staff content operations.' }), {
-        status: 503, headers: { 'Content-Type': 'application/json' },
-      });
-      applyCorsHeaders(response.headers, request.headers.get('Origin') || '');
-      return response;
-    }
-    // Cloud Run maintenance jobs authenticate directly to the D1 API Worker's
+    // Internal generation jobs authenticate directly to the API Worker's
     // private generation route with the shared service secret.  This is the one
     // API path that intentionally carries a non-JWT Bearer credential.
     const isInternalGeneration = (
@@ -85,7 +46,7 @@ export default {
       request.headers.get('Authorization') === `Bearer ${env.EDGE_SHARED_SECRET}`
     );
     // This exact cron route carries TRANSLATE_CRON_SECRET rather than a user
-    // JWT. Cloud Run remains responsible for validating the secret; the edge
+    // JWT. The API Worker validates the secret; the edge
     // only avoids misclassifying it as a malformed student access token.
     const isCloudflareAnalyticsResultHandoff = (
       url.pathname === '/api/v1/admin/cron/cloudflare-analytics-result'
@@ -113,17 +74,19 @@ export default {
     reqIdHeaders.set('X-Request-ID', requestId);
     request = new Request(request, { headers: reqIdHeaders });
 
-    // ── Production safety: reject if backend URL is localhost in production ──
-    const isProduction = !env.ALLOWED_ORIGIN?.includes('localhost');
-    const isLocalBackend = env.BACKEND_URL?.includes('localhost') || env.BACKEND_URL?.includes('127.0.0.1');
-    if (isProduction && isLocalBackend && (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/'))) {
-      const errResponse = new Response(JSON.stringify({ error: 'Backend URL misconfiguration detected' }), {
-        status: 503,
-        headers: { 'Content-Type': 'application/json' },
+    // API and backend health traffic is available only through the private
+    // service binding. Never fall back to a public backend URL.
+    const requiresApiWorker = url.pathname.startsWith('/api/')
+      || url.pathname === '/health'
+      || url.pathname.startsWith('/health/');
+    if (requiresApiWorker && !env.API_WORKER) {
+      const unavailable = jsonResponse(503, {
+        error: 'API Worker service binding unavailable',
+        error_code: 'api_worker_binding_unavailable',
       });
-      errResponse.headers.set('X-Request-ID', requestId);
-      applyCorsHeaders(errResponse.headers, request.headers.get('Origin') || '');
-      return errResponse;
+      unavailable.headers.set('X-Request-ID', requestId);
+      applyCorsHeaders(unavailable.headers, request.headers.get('Origin') || '');
+      return unavailable;
     }
 
     // ── 2. JWT Verification (all /api/ routes except public) ──
@@ -292,11 +255,16 @@ export default {
       const rewrittenUrl = new URL(request.url);
       rewrittenUrl.pathname = `/api/v1/seo${url.pathname}`;
       const rewrittenRequest = new Request(rewrittenUrl.toString(), request);
-      const sitemapResponse = useApiWorker
-        ? await proxyToApiWorker(rewrittenRequest, env)
-        : url.pathname === '/robots.txt'
-          ? handleRobots(env)
-          : await proxyRequest(rewrittenRequest, env.BACKEND_URL, env);
+      if (!env.API_WORKER) {
+        const unavailable = jsonResponse(503, {
+          error: 'API Worker service binding unavailable',
+          error_code: 'api_worker_binding_unavailable',
+        });
+        unavailable.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(unavailable.headers, request.headers.get('Origin') || '');
+        return unavailable;
+      }
+      const sitemapResponse = await proxyToApiWorker(rewrittenRequest, env);
       sitemapResponse.headers.set('X-Request-ID', requestId);
       return sitemapResponse;
     }
@@ -326,9 +294,7 @@ export default {
         backendReachable = healthCache.backendReachable;
       } else if (!env.ISR_CACHE_KV) {
         // KV not bound - skip KV layer, fetch backend directly
-        backendReachable = useApiWorker
-          ? await pingApiWorkerHealth(env)
-          : await fetchBackendHealth(env.BACKEND_URL, env);
+        backendReachable = await pingApiWorkerHealth(env);
         healthCache = { backendReachable, timestamp: now };
       } else {
         // Layer 2: KV cache (30s TTL, globally shared across all PoPs)
@@ -341,9 +307,7 @@ export default {
             healthCache = { backendReachable, timestamp: now };
           } else {
             // Layer 3: Fresh backend fetch
-            backendReachable = useApiWorker
-              ? await pingApiWorkerHealth(env)
-              : await fetchBackendHealth(env.BACKEND_URL, env);
+            backendReachable = await pingApiWorkerHealth(env);
             healthCache = { backendReachable, timestamp: now };
             // Store in KV for other PoPs (30s TTL)
             const kvPayload = JSON.stringify({ backend_reachable: backendReachable });
@@ -351,9 +315,7 @@ export default {
           }
         } catch {
           // KV read failed - fall back to direct fetch
-          backendReachable = useApiWorker
-            ? await pingApiWorkerHealth(env)
-            : await fetchBackendHealth(env.BACKEND_URL, env);
+          backendReachable = await pingApiWorkerHealth(env);
           healthCache = { backendReachable, timestamp: now };
         }
       }
@@ -364,7 +326,7 @@ export default {
           service: 'syrabit-backend',
           timestamp: new Date().toISOString(),
           backend_reachable: backendReachable,
-          backend_mode: useApiWorker ? 'api-worker' : 'cloud-run',
+          backend_mode: 'api-worker',
         }),
         {
           status: 200,
@@ -377,7 +339,7 @@ export default {
       securedHealth.headers.set('X-Request-ID', requestId);
       securedHealth.headers.set(
         'X-Syrabit-Health-Backend',
-        useApiWorker ? 'api-worker' : 'cloud-run',
+        'api-worker',
       );
       return securedHealth;
     }
@@ -406,27 +368,13 @@ export default {
         const timeoutId = setTimeout(() => controller.abort(), 5000);
         let res: Response;
 
-        if (useApiWorker) {
-          // Service Binding path — direct Worker-to-Worker call (no OIDC needed)
-          const deepReq = new Request(new URL('/health/deep', request.url).toString(), {
-            signal: controller.signal,
-            headers: env.EDGE_SHARED_SECRET
-              ? { Authorization: `Bearer ${env.EDGE_SHARED_SECRET}` }
-              : undefined,
-          });
-          res = await env.API_WORKER!.fetch(deepReq);
-        } else {
-          // HTTP proxy path — Cloud Run with OIDC token
-          const headers: Record<string, string> = {};
-          const token = await getIdentityToken(env);
-          if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-          }
-          res = await fetch(`${env.BACKEND_URL}/health/deep`, {
-            signal: controller.signal,
-            headers,
-          });
-        }
+        const deepReq = new Request(new URL('/health/deep', request.url).toString(), {
+          signal: controller.signal,
+          headers: env.EDGE_SHARED_SECRET
+            ? { Authorization: `Bearer ${env.EDGE_SHARED_SECRET}` }
+            : undefined,
+        });
+        res = await env.API_WORKER!.fetch(deepReq);
 
         clearTimeout(timeoutId);
         backendStatus = await res.json() as Record<string, unknown>;
@@ -486,7 +434,7 @@ export default {
         let payload: { body: string; cachedAt: number; route?: string } | null = null;
         try { payload = JSON.parse(cached); } catch { /* corrupt — treat as miss */ }
 
-        const expectedRoute = useApiWorker ? 'worker-native' : 'cloud-run-fallback';
+        const expectedRoute = 'worker-native';
         // Entries written before route provenance existed, or written while
         // traffic used the other backend, must not be served after a cutover.
         // Treat them as misses so the route marker always describes the data
@@ -499,9 +447,7 @@ export default {
             // Background revalidation — do NOT await; user already has the response
             const revalRequest = new Request(request.url, request);
             ctx.waitUntil(
-              (useApiWorker
-                ? proxyToApiWorker(revalRequest, env)
-                : proxyRequest(revalRequest, env.BACKEND_URL, env))
+              proxyToApiWorker(revalRequest, env)
                 .then(async r => {
                   if (r.status === 200) {
                     const freshBody = await r.text();
@@ -534,13 +480,10 @@ export default {
       }
 
       // Cache MISS — proxy to backend and populate cache on success
-      const backendResp = useApiWorker
-        ? await proxyToApiWorker(request, env)
-        : await proxyRequest(request, env.BACKEND_URL, env);
+      const backendResp = await proxyToApiWorker(request, env);
       if (backendResp.status === 200) {
         const body = await backendResp.text();
-        const route = backendResp.headers.get('X-Syrabit-Route') ??
-          (useApiWorker ? 'worker-native' : 'cloud-run-fallback');
+        const route = backendResp.headers.get('X-Syrabit-Route') ?? 'worker-native';
         const entry = JSON.stringify({ body, cachedAt: Math.floor(Date.now() / 1000), route });
         ctx.waitUntil(
           env.ISR_CACHE_KV.put(cacheKey, entry, { expirationTtl: HARD_TTL_S })
@@ -575,7 +518,7 @@ export default {
      * Returns: audio/mpeg binary
      *
      * Handled entirely at the edge using env.AI so the backend never receives
-     * large audio payloads and Cloud Run compute is not wasted on audio synthesis.
+     * large audio payloads and API Worker compute is not wasted on audio synthesis.
      */
     if (url.pathname === '/api/v1/chat/tts' && request.method === 'POST') {
       const origin = request.headers.get('Origin') || '';
@@ -627,7 +570,7 @@ export default {
      * Returns: { text: string, model: string }
      *
      * Handled at the edge with Workers AI vision model so image bytes never
-     * travel over the internet to Cloud Run.
+     * travel over the internet to another backend.
      */
     if (url.pathname === '/api/v1/chat/image' && request.method === 'POST') {
       const origin = request.headers.get('Origin') || '';
@@ -686,16 +629,11 @@ export default {
       }
     }
 
-    // API routes → proxy to backend (or API Worker via Service Binding in production)
+    // API routes → API Worker through the private Service Binding.
     // Note: /health/full is handled above; remaining /health/ sub-paths (e.g. /health/deep)
     // are proxied to backend. /health is handled at edge above.
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/')) {
-      // Production (D1 backend): route via Service Binding — direct Worker-to-Worker
-      // connection, no public internet hop, no OIDC token required.
-      // Dev/staging (Cloud Run backend): fall back to HTTP proxy via BACKEND_URL.
-      const response = useApiWorker
-        ? await proxyToApiWorker(request, env)
-        : await proxyRequest(request, env.BACKEND_URL, env);
+      const response = await proxyToApiWorker(request, env);
       const secured = addSecurityHeaders(response);
       const origin = request.headers.get('Origin') || '';
       applyCorsHeaders(secured.headers, origin);
@@ -807,26 +745,6 @@ export default {
     return finalResp;
   },
 };
-
-/** Fetch backend health with a 2s timeout. Returns true if backend responds with 2xx. */
-async function fetchBackendHealth(backendUrl: string, env: Env): Promise<boolean> {
-  try {
-    // Fetch OIDC token BEFORE starting the abort timer so the 2s window
-    // covers only the actual HTTP request to the backend, not token exchange.
-    const headers: Record<string, string> = {};
-    const token = await getIdentityToken(env);
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch(`${backendUrl}/health`, { signal: controller.signal, headers });
-    clearTimeout(timeoutId);
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
 
 /** Add security headers to proxied responses. These are set at the edge to avoid duplication with Cloudflare's built-in headers. */
 function addSecurityHeaders(response: Response): Response {

@@ -41,16 +41,10 @@ interface Env {
   JWT_PUBLIC_KEY?: string;
 
   // ── Variables (defined in wrangler.toml [vars]) ──
-  BACKEND_URL: string;
   ALLOWED_ORIGIN: string;
 
-  // Optional: override default 30s proxy timeout (milliseconds)
-  PROXY_TIMEOUT_MS?: string;
   // Optional: bound service-to-service response-header timeout (milliseconds).
   SERVICE_BINDING_TIMEOUT_MS?: string;
-
-  // Optional: Google Service Account JSON key for Cloud Run authentication
-  GOOGLE_SA_KEY?: string;
 
   // ── Bindings ──
   R2_BUCKET: R2Bucket;
@@ -63,17 +57,9 @@ interface Env {
   CONTENT_KV: KVNamespace;
   // Workers AI binding — used for TTS and OCR directly at the edge.
   AI?: Ai;
-  // Service Binding: syrabit-api-prod (production only).
-  // Declared in wrangler.toml [[env.production.services]] but only ACTIVATED
-  // when API_WORKER_LIVE === 'true'. This two-step approach lets the binding be
-  // wired up before the API Worker has full route parity — routing stays on
-  // BACKEND_URL (Cloud Run) until the operator explicitly flips the flag:
-  //   wrangler secret put API_WORKER_LIVE --env production   # enter: true
+  // Service Binding: syrabit-api-prod. API and health traffic is served only
+  // through this private Worker-to-Worker binding.
   API_WORKER?: { fetch(request: Request): Promise<Response> };
-  // Guards activation of the API_WORKER service binding. Must be explicitly set
-  // to the string "true" to route traffic through the D1-backed API Worker.
-  // Any other value (including absent) keeps routing on BACKEND_URL.
-  API_WORKER_LIVE?: string;
 }
 
 // Minimal Cloudflare Workers AI binding type.

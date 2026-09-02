@@ -5,8 +5,8 @@
  * EDGE WORKER (this file) — PRIMARY and authoritative for bot HTML.
  *   - Detects bot UA on every request that reaches api.syrabit.ai.
  *   - Serves from ISR_CACHE_KV (1-hour TTL) on cache hit.
- *   - On miss: proxies to Cloud Run backend to fetch rendered HTML,
- *     stores in KV, returns to bot.
+ *   - On miss: falls through to the frontend route. Rendering is never fetched
+ *     from an external backend.
  *   - Handles: all /api/*, all dynamic page routes proxied through the edge.
  *
  * CLOUDFLARE PAGES WORKER (public/_worker.js) — SECONDARY / SPA-only.
@@ -60,43 +60,7 @@ export async function handleISR(
       });
     }
 
-    // Cache miss: proxy to backend
-    const backendUrl = `${env.BACKEND_URL.replace(/\/$/, '')}${url.pathname}${url.search}`;
-    const sanitizedHeaders = new Headers(request.headers);
-    sanitizedHeaders.delete('Cookie');
-    sanitizedHeaders.delete('Authorization');
-    sanitizedHeaders.delete('X-User-ID');
-    sanitizedHeaders.delete('Set-Cookie');
-    const response = await fetch(backendUrl, {
-      method: request.method,
-      headers: sanitizedHeaders,
-    });
-
-    if (response.status === 200) {
-      const contentType = response.headers.get('Content-Type') || '';
-      if (contentType.includes('text/html')) {
-        const html = await response.text();
-
-        // Cache asynchronously so we don't block the response
-        ctx.waitUntil(
-          env.ISR_CACHE_KV.put(cacheKey, html, { expirationTtl: 3600 }),
-        );
-
-        // Intentionally construct the Response with only explicitly listed
-        // headers (Content-Type, X-ISR-Cache). This ensures Set-Cookie and
-        // other sensitive headers from the backend response are never
-        // forwarded to the client or persisted in cache.
-        return new Response(html, {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/html; charset=utf-8',
-            'X-ISR-Cache': 'MISS',
-          },
-        });
-      }
-    }
-
-    // Non-200 or non-HTML: fall through to other handlers
+    // Cache miss: rendering belongs to the frontend route.
     return null;
   } catch {
     // On any error, fall through gracefully

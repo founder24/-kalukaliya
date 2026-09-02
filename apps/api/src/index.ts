@@ -2,7 +2,7 @@
  * Syrabit API — Cloudflare Workers Entry Point
  *
  * Stack: Hono + Drizzle ORM + D1 (SQLite)
- * Replaces: Python FastAPI on Google Cloud Run + MongoDB Atlas
+ * Replaces the legacy Python and MongoDB deployment.
  *
  * Migration status:
  *   ✅ Phase 1 — Foundation + D1 schema
@@ -36,9 +36,7 @@ app.use('*', async (c, next) => {
   await next();
   const origin = c.req.header('Origin') ?? '';
   applyCors(c.res.headers, origin, c.env.ALLOWED_ORIGINS ?? '');
-  // A cutover-stage diagnostic. Fallback routes overwrite this with
-  // "cloud-run-fallback", so smoke tests can prove supported requests stayed
-  // in the Worker instead of succeeding through an implicit origin retry.
+  // Mark responses handled by this Worker for operational diagnostics.
   if (!c.res.headers.has('X-Syrabit-Route')) {
     c.res.headers.set('X-Syrabit-Route', 'worker-native');
   }
