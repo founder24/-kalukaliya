@@ -3,11 +3,14 @@ Security Utilities: Input Sanitization, URL Validation, SSRF Protection
 """
 
 import re
+import ssl
 import unicodedata
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 import ipaddress
-from typing import Optional
+from typing import Awaitable, Callable, Optional
+
+import httpx
 
 
 def _log_injection_attempt(text: str, pattern: str) -> None:
@@ -242,6 +245,140 @@ async def is_safe_url(
 
     except Exception:
         return False
+
+
+class PinnedNetworkBackend:
+    """Connect only to DNS answers that were validated as public."""
+
+    def __init__(self, hostname: str, addresses: tuple[str, ...]):
+        import httpcore
+
+        self._hostname = hostname.rstrip(".").lower()
+        self._addresses = addresses
+        self._backend = httpcore.AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options=None,
+    ):
+        import httpcore
+
+        if host.rstrip(".").lower() != self._hostname:
+            raise httpcore.ConnectError("Outbound host changed after validation")
+        last_error: Exception | None = None
+        for address in self._addresses:
+            try:
+                return await self._backend.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except Exception as exc:
+                last_error = exc
+        if last_error:
+            raise last_error
+        raise httpcore.ConnectError("No validated address available")
+
+
+class PinnedAsyncHTTPTransport(httpx.AsyncHTTPTransport):
+    """An HTTPX transport that connects to a previously validated IP list."""
+
+    def __init__(self, hostname: str, addresses: tuple[str, ...]):
+        import httpcore
+
+        super().__init__(verify=True, trust_env=False, retries=0)
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=ssl.create_default_context(),
+            network_backend=PinnedNetworkBackend(hostname, addresses),
+            retries=0,
+        )
+
+
+async def fetch_url_safely(
+    url: str,
+    *,
+    allowed_schemes: Optional[list[str]] = None,
+    allowed_hosts: Optional[list[str] | set[str] | tuple[str, ...]] = None,
+    max_redirects: int = 3,
+    timeout: float = 30.0,
+    url_validator: Optional[Callable[[str], Awaitable[bool]]] = None,
+) -> httpx.Response:
+    """Fetch a URL after validating and pinning every outbound connection.
+
+    URL validation and the connection use the same resolved public addresses,
+    preventing DNS rebinding between the security check and the socket
+    connection. Redirects are never followed by HTTPX: each destination is
+    independently validated, resolved, and pinned before it is requested.
+
+    ``url_validator`` is an optional feature-specific asynchronous check. It
+    runs for the initial URL and every redirect, after the generic SSRF
+    checks, so callers can enforce rules such as an owned storage path.
+
+    Raises:
+        ValueError: If the URL, its resolved addresses, or a redirect is unsafe.
+        httpx.HTTPError: If the validated request fails or returns an error
+            status.
+    """
+    from urllib.parse import urljoin
+
+    if max_redirects < 0:
+        raise ValueError("max_redirects must not be negative")
+
+    current_url = url
+    for redirect_count in range(max_redirects + 1):
+        if not await is_safe_url(
+            current_url,
+            allowed_schemes=allowed_schemes,
+            allowed_hosts=allowed_hosts,
+        ):
+            raise ValueError("Outbound URL failed SSRF validation")
+        if url_validator is not None and not await url_validator(current_url):
+            raise ValueError("Outbound URL failed feature-specific validation")
+
+        parsed = urlparse(current_url)
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("Outbound URL has an invalid port") from exc
+        expected_port = 443 if parsed.scheme.lower() == "https" else 80
+        addresses = await resolve_public_ip_addresses(
+            parsed.hostname or "",
+            port or expected_port,
+        )
+        if not addresses:
+            raise ValueError("Outbound URL did not resolve to a public address")
+
+        transport = PinnedAsyncHTTPTransport(parsed.hostname or "", addresses)
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=False,
+            transport=transport,
+        ) as client:
+            response = await client.get(current_url)
+
+        if response.status_code not in {301, 302, 303, 307, 308}:
+            response.raise_for_status()
+            return response
+
+        if redirect_count == max_redirects:
+            raise ValueError("Outbound URL exceeded the redirect limit")
+        location = response.headers.get("location")
+        if not location:
+            raise ValueError("Outbound URL redirect did not include a location")
+        current_url = urljoin(current_url, location)
+
+    raise ValueError("Outbound URL exceeded the redirect limit")
+
+
+# Short name for callers that do not need to distinguish this from other
+# safe outbound operations.
+safe_fetch = fetch_url_safely
 
 
 def is_internal_ip(ip_str: str) -> bool:

@@ -7,7 +7,7 @@ import pytest
 
 from app.api.v1 import admin_indexnow_admin, admin_pyq
 from app.config import settings
-from app.core.security import is_safe_url
+from app.core.security import PinnedNetworkBackend, fetch_url_safely, is_safe_url
 from app.services.payment.razorpay_client import RazorpayClient
 
 
@@ -50,9 +50,7 @@ async def test_safe_url_rejects_allowlisted_host_resolving_private(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_pyq_redirect_cannot_escape_storage_allowlist(monkeypatch):
-    original_r2_public = settings.CF_R2_PUBLIC_URL
-    settings.CF_R2_PUBLIC_URL = "https://assets.syrabit.ai"
+async def test_shared_fetch_rejects_redirect_escape():
     client = AsyncMock()
     client.__aenter__.return_value = client
     client.__aexit__.return_value = False
@@ -62,30 +60,76 @@ async def test_pyq_redirect_cannot_escape_storage_allowlist(monkeypatch):
         request=httpx.Request("GET", "https://assets.syrabit.ai/source.pdf"),
     )
 
-    try:
-        with (
-            patch("app.api.v1.admin_pyq.httpx.AsyncClient", return_value=client),
-            patch(
-                "app.api.v1.admin_pyq.is_safe_url",
-                new=AsyncMock(return_value=True),
-            ),
-            patch(
-                "app.api.v1.admin_pyq.resolve_public_ip_addresses",
-                new=AsyncMock(return_value=("203.0.113.10",)),
-            ),
-        ):
-            result = await admin_pyq._extract_text_from_pyq(
-                {
-                    "_id": "pyq-1",
-                    "file_url": "https://assets.syrabit.ai/pyq-uploads/a/file.pdf",
-                    "is_pdf": True,
-                }
+    with (
+        patch("app.core.security.httpx.AsyncClient", return_value=client),
+        patch(
+            "app.core.security.is_safe_url",
+            new=AsyncMock(side_effect=[True, False]),
+        ),
+        patch(
+            "app.core.security.resolve_public_ip_addresses",
+            new=AsyncMock(return_value=("203.0.113.10",)),
+        ),
+    ):
+        with pytest.raises(ValueError, match="SSRF validation"):
+            await fetch_url_safely(
+                "https://assets.syrabit.ai/pyq-uploads/a/file.pdf",
+                allowed_schemes=["https"],
+                allowed_hosts={"assets.syrabit.ai"},
             )
-    finally:
-        settings.CF_R2_PUBLIC_URL = original_r2_public
+
+    client.get.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_shared_fetch_rejects_private_dns_rebinding(monkeypatch):
+    loop = __import__("asyncio").get_running_loop()
+    getaddrinfo = AsyncMock(
+        side_effect=[
+            [(2, 1, 6, "", ("8.8.8.8", 443))],
+            [(2, 1, 6, "", ("10.0.0.8", 443))],
+        ]
+    )
+    monkeypatch.setattr(loop, "getaddrinfo", getaddrinfo)
+
+    with pytest.raises(ValueError, match="public address"):
+        await fetch_url_safely("https://assets.syrabit.ai/file.pdf")
+
+    assert getaddrinfo.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_pyq_extraction_uses_shared_safe_fetch():
+    response = httpx.Response(
+        200,
+        content=b"not-a-pdf",
+        request=httpx.Request(
+            "GET", "https://assets.syrabit.ai/pyq-uploads/a/file.pdf"
+        ),
+    )
+    with (
+        patch(
+            "app.api.v1.admin_pyq._pyq_storage_target",
+            return_value=({"assets.syrabit.ai"}, True),
+        ),
+        patch(
+            "app.api.v1.admin_pyq.fetch_url_safely",
+            new=AsyncMock(return_value=response),
+        ) as safe_fetch_mock,
+    ):
+        result = await admin_pyq._extract_text_from_pyq(
+            {
+                "_id": "pyq-1",
+                "file_url": "https://assets.syrabit.ai/pyq-uploads/a/file.pdf",
+                "is_pdf": True,
+            }
+        )
 
     assert result == ""
-    client.get.assert_awaited_once()
+    safe_fetch_mock.assert_awaited_once()
+    assert safe_fetch_mock.await_args.args == (
+        "https://assets.syrabit.ai/pyq-uploads/a/file.pdf",
+    )
 
 
 def test_pyq_gcs_target_requires_owned_bucket_and_canonical_path():
@@ -113,7 +157,7 @@ def test_pyq_gcs_target_requires_owned_bucket_and_canonical_path():
 
 @pytest.mark.asyncio
 async def test_pinned_backend_connects_only_to_validated_address():
-    backend = admin_pyq._PinnedNetworkBackend(
+    backend = PinnedNetworkBackend(
         "assets.syrabit.ai",
         ("203.0.113.10",),
     )

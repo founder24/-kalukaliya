@@ -7,4 +7,4 @@ Validating a hostname before an HTTP request is not sufficient. Request-derived 
 
 **Why:** A second DNS lookup inside the HTTP client creates a check-to-use race where an allowed hostname can rebind from a public address to a private, loopback, link-local, or metadata-service address.
 
-**How to apply:** Use an exact HTTPS host and path allowlist, reject malformed or repeatedly encoded traversal paths, resolve and reject any non-public answer, pin the transport to the approved address set, and disable automatic redirects in favor of bounded per-hop validation.
+**How to apply:** Route request-derived downloads through the shared backend outbound-fetch utility rather than constructing an HTTP client locally. Add exact HTTPS host/path rules as feature-specific validation; keep bounded per-hop validation and pinning enabled.
