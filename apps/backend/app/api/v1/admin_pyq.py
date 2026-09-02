@@ -3,10 +3,11 @@ Admin PYQ (Previous Year Question Paper) endpoints.
 Stores PYQ records in the 'pyqs' MongoDB collection via raw motor (no Beanie model needed).
 """
 import logging
+import re
 import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -18,6 +19,8 @@ from app.core.security import fetch_url_safely
 
 logger = logging.getLogger(__name__)
 _PYQ_MAX_REDIRECTS = 3
+_CF_ACCOUNT_ID_RE = re.compile(r"^[a-f0-9]{32}$")
+_R2_BUCKET_RE = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])?$")
 
 
 def _canonical_url_path(path: str) -> Optional[str]:
@@ -45,6 +48,20 @@ def _configured_gcs_bucket() -> Optional[str]:
     credentials = settings.google_credentials
     project_id = credentials.get("project_id") if credentials else None
     return f"{project_id}-syrabit-content" if project_id else None
+
+
+def _r2_upload_url(account_id: str, bucket: str, object_key: str) -> str:
+    """Build an R2 upload URL only from validated configuration and path parts."""
+    if not _CF_ACCOUNT_ID_RE.fullmatch(account_id.strip().lower()):
+        raise ValueError("Configured Cloudflare account ID is invalid")
+    if not _R2_BUCKET_RE.fullmatch(bucket):
+        raise ValueError("Configured R2 bucket name is invalid")
+
+    encoded_key = "/".join(quote(part, safe="") for part in object_key.split("/"))
+    return (
+        "https://api.cloudflare.com/client/v4/accounts/"
+        f"{account_id.lower()}/r2/buckets/{bucket}/objects/{encoded_key}"
+    )
 
 
 def _pyq_storage_target(url: str) -> tuple[set[str], bool]:
@@ -114,11 +131,8 @@ async def _upload_pyq_file(data: bytes, fname: str, ct: str, chapter_id: str) ->
 
     if account_id and api_token and r2_public:
         key = f"pyq-uploads/{chapter_id or 'global'}/{uid}/{fname}"
-        r2_url = (
-            f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
-            f"/r2/buckets/{r2_bucket}/objects/{key}"
-        )
         try:
+            r2_url = _r2_upload_url(account_id, r2_bucket, key)
             async with httpx.AsyncClient(timeout=60) as client:
                 resp = await client.put(
                     r2_url,

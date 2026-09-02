@@ -6,6 +6,8 @@ from app.config import settings
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+_RAZORPAY_BASE_URL = "https://api.razorpay.com/v1"
+_RAZORPAY_SUBSCRIPTIONS_PATH = "/subscriptions"
 
 
 class PaymentNotConfiguredError(RuntimeError):
@@ -20,8 +22,9 @@ class RazorpayClient:
     def __init__(self):
         self.key_id = settings.RAZORPAY_KEY_ID
         self.key_secret = settings.RAZORPAY_KEY_SECRET
-        self.base_url = "https://api.razorpay.com/v1"
+        self.base_url = _RAZORPAY_BASE_URL
         self._client = httpx.AsyncClient(
+            base_url=_RAZORPAY_BASE_URL,
             timeout=30.0,
             follow_redirects=False,
             auth=(self.key_id, self.key_secret)
@@ -41,8 +44,11 @@ class RazorpayClient:
                 "Payment service not configured - Razorpay credentials missing"
             )
         try:
+            # The client has an immutable Razorpay HTTPS base URL and this path
+            # is a module constant, so request data cannot choose the origin.
+            # nosemgrep: python.fastapi.net.tainted-fastapi-http-request-httpx.tainted-fastapi-http-request-httpx
             response = await self._client.post(
-                f"{self.base_url}/subscriptions",
+                _RAZORPAY_SUBSCRIPTIONS_PATH,
                 json={
                     "plan_id": settings.RAZORPAY_PLAN_ID,
                     "total_count": 12,  # 12 months
@@ -84,7 +90,7 @@ class RazorpayClient:
         try:
             safe_subscription_id = quote(subscription_id, safe="")
             response = await self._client.delete(
-                f"{self.base_url}/subscriptions/{safe_subscription_id}"
+                f"{_RAZORPAY_SUBSCRIPTIONS_PATH}/{safe_subscription_id}"
             )
             if 300 <= response.status_code < 400:
                 raise RuntimeError("Payment gateway returned an unexpected redirect")

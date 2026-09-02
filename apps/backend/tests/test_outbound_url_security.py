@@ -186,10 +186,8 @@ async def test_razorpay_subscription_id_is_encoded_and_redirects_are_not_followe
 
         assert await client.cancel_subscription("../../http://127.0.0.1") is True
         requested_url = client._client.delete.await_args.args[0]
-        assert requested_url.startswith("https://api.razorpay.com/v1/subscriptions/")
-        assert "/" not in requested_url.removeprefix(
-            "https://api.razorpay.com/v1/subscriptions/"
-        )
+        assert requested_url.startswith("/subscriptions/")
+        assert "/" not in requested_url.removeprefix("/subscriptions/")
 
         response.status_code = 302
         with pytest.raises(RuntimeError, match="unexpected redirect"):
