@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import os
 import re
 import shutil
@@ -15,6 +16,7 @@ import subprocess
 import tempfile
 import time
 import threading
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -61,6 +63,11 @@ EDUCATIONAL_RE = re.compile(
     r"\b(?:class\s*(?:11|12|xi|xii)|hs|ahsec|fyugp|semester|sem\.?|"
     r"notes?|questions?|solutions?|books?|syllabus)\b", re.I
 )
+DEV_REFERENCE_SCOPE_RE = re.compile(
+    r"(?:class[-_/ ]?(?:11|12|xi|xii)|ahsec|higher[-_ ]secondary|"
+    r"fyugp|semester|(?:^|[-_/])hs(?:[-_/]|$))",
+    re.I,
+)
 SUBJECTS = ("physics", "chemistry", "mathematics", "maths", "biology", "english",
             "assamese", "economics", "history", "political science", "geography",
             "accountancy", "business studies", "computer science")
@@ -81,7 +88,8 @@ def canonical_url(url: str) -> str:
     """Drop fragments/tracking parameters for stable deduplication."""
     parsed = urlparse(url)
     query = urlencode(sorted((k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True)
-                            if not k.lower().startswith(("utm_", "fbclid", "gclid"))))
+                            if not k.lower().startswith(("utm_", "fbclid", "gclid"))
+                            and k.lower() not in {"sequence", "isallowed"}))
     path = re.sub(r"/+", "/", parsed.path or "/")
     return urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), path, "", query, ""))
 
@@ -110,11 +118,15 @@ def is_dspace_url(source: Source, url: str) -> bool:
     """Restrict DSpace traversal to same-origin handle/item/bitstream routes."""
     if not _same_origin(source, url):
         return False
-    path = urlparse(url).path.lower()
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    query_keys = {key.lower() for key, _ in parse_qsl(parsed.query)}
     # Do not queue repository search, browse, statistics, authentication, or
     # administration endpoints. Offset query parameters on /handle are valid
     # DSpace pagination and deliberately remain allowed.
-    return bool(re.search(r"(?:^|/)(?:jspui/)?handle/[^/]+/[^/]+/?$", path) or
+    handle = bool(re.search(r"(?:^|/)(?:jspui/)?handle/[^/]+/[^/]+/?$", path))
+    allowed_pagination = query_keys <= {"offset", "rpp", "sort_by", "order"}
+    return bool((handle and allowed_pagination) or
                 "/bitstream/" in path or "/retrieve/" in path)
 
 
@@ -178,28 +190,57 @@ def _ocr_language(title: str) -> str:
     return "asm+eng" if "assamese" in value else "ben+eng" if "bengali" in value else "eng"
 
 
-def extract_pdf(data: bytes, title: str) -> tuple[str, int, bool, str]:
+def extract_pdf(
+    data: bytes,
+    title: str,
+    *,
+    max_ocr_pages: int = 3,
+) -> tuple[str, int, bool, str]:
     if not is_pdf_response("", data):
         raise ValueError("response is not a PDF")
     with fitz.open(stream=data, filetype="pdf") as document:
         pages = [page.get_text("text") for page in document]
         method = "pymupdf"
-        # OCR just image-only pages, rather than discarding text from good pages.
-        if shutil.which("tesseract"):
+        # OCR a representative prefix of image-only scans. College repositories
+        # contain thousands of scans; unbounded page-by-page OCR would make a
+        # refresh take days. The complete public PDF remains linked and hashed.
+        ocr_pages = 0
+        skipped_image_pages = 0
+        if max_ocr_pages > 0 and shutil.which("tesseract"):
             with tempfile.TemporaryDirectory(prefix="syrabit-library-ocr-") as tmp:
                 for number, (page, text) in enumerate(zip(document, pages)):
                     if text.strip():
                         continue
+                    if ocr_pages >= max_ocr_pages:
+                        skipped_image_pages += 1
+                        continue
                     image = os.path.join(tmp, f"{number}.png")
-                    page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False).save(image)
+                    page.get_pixmap(
+                        matrix=fitz.Matrix(0.9, 0.9), alpha=False
+                    ).save(image)
                     try:
-                        output = subprocess.run(["tesseract", image, "stdout", "-l", _ocr_language(title)],
-                            capture_output=True, text=True, timeout=60, check=False)
+                        output = subprocess.run(
+                            [
+                                "tesseract", image, "stdout", "-l",
+                                _ocr_language(title), "--psm", "6",
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=15,
+                            check=False,
+                        )
                         pages[number] = output.stdout if output.returncode == 0 else ""
                         method = "pymupdf+ocr"
                     except subprocess.TimeoutExpired:
                         pass
+                    ocr_pages += 1
         text, truncated = _cap_text("\n".join(pages), PDF_TEXT_LIMIT)
+        if skipped_image_pages:
+            truncated = True
+            method = "pymupdf+partial-ocr"
+        elif any(not page.strip() for page in pages):
+            truncated = True
+            method = "pymupdf+image-pages-deferred"
         return text, len(document), truncated, method
 
 
@@ -278,15 +319,92 @@ def _item_title(source: Source, soup: BeautifulSoup, fallback: str) -> str:
     return title.strip() or fallback
 
 
-def crawl_source(source: Source, client: PoliteClient, max_pages: int, max_documents: int) -> tuple[list[Candidate], Optional[str]]:
-    """Discover only source-local documents from the approved seed graph."""
-    queue, seen, candidates = [source.seed], set(), []
+def _reference_sitemap_candidates(
+    source: Source,
+    client: PoliteClient,
+    max_pages: int,
+    max_documents: int,
+) -> tuple[list[Candidate], Optional[str]]:
+    """Catalog allowed reference URLs without copying page-body content."""
+    index_url = canonical_url(urljoin(source.root, "/sitemap_index.xml"))
+    queue, queued, seen = deque([index_url]), {index_url}, set()
+    candidates: list[Candidate] = []
     try:
         while queue and len(seen) < max_pages and len(candidates) < max_documents:
-            page = canonical_url(queue.pop(0))
+            sitemap_url = queue.popleft()
+            if sitemap_url in seen:
+                continue
+            seen.add(sitemap_url)
+            response = client.get(sitemap_url)
+            raw_locations = re.findall(
+                rb"<loc>\s*(.*?)\s*</loc>", response.content, flags=re.I | re.S
+            )
+            for raw in raw_locations:
+                location = canonical_url(
+                    html.unescape(raw.decode("utf-8", errors="replace")).strip()
+                )
+                if not _same_origin(source, location):
+                    continue
+                if urlparse(location).path.lower().endswith(".xml"):
+                    if location not in queued:
+                        queued.add(location)
+                        queue.append(location)
+                    continue
+                if not DEV_REFERENCE_SCOPE_RE.search(location):
+                    continue
+                slug = urlparse(location).path.strip("/").rsplit("/", 1)[-1]
+                title = re.sub(r"[-_]+", " ", slug).strip().title() or location
+                candidates.append(
+                    Candidate(
+                        source, location, location, title,
+                        "study_material", "html",
+                        {"content_policy": "reference-only"},
+                    )
+                )
+                if len(candidates) >= max_documents:
+                    break
+        return candidates, None
+    except Exception as exc:
+        return candidates, str(exc)
+
+
+def crawl_source(source: Source, client: PoliteClient, max_pages: int, max_documents: int) -> tuple[list[Candidate], Optional[str]]:
+    """Discover only source-local documents from the approved seed graph."""
+    if source.name == "dev_library":
+        return _reference_sitemap_candidates(
+            source, client, max_pages, max_documents
+        )
+    seed = canonical_url(source.seed)
+    queue, queued, seen = deque([seed]), {seed}, set()
+    candidates: list[Candidate] = []
+    candidate_keys: set[str] = set()
+
+    def enqueue(url: str) -> None:
+        normalized = canonical_url(url)
+        if normalized not in queued:
+            queued.add(normalized)
+            queue.append(normalized)
+
+    def add_candidate(candidate: Candidate) -> None:
+        key = stable_key(
+            candidate.source.name, candidate.item_url, candidate.content_url
+        )
+        if key not in candidate_keys:
+            candidate_keys.add(key)
+            candidates.append(candidate)
+
+    try:
+        while queue and len(seen) < max_pages and len(candidates) < max_documents:
+            page = queue.popleft()
             if page in seen:
                 continue
             seen.add(page)
+            if len(seen) % 250 == 0:
+                print(
+                    f"[{source.name}] discovery pages={len(seen)} "
+                    f"queued={len(queue)} documents={len(candidates)}",
+                    flush=True,
+                )
             try:
                 response = client.get(page)
             except Exception as exc:
@@ -305,25 +423,42 @@ def crawl_source(source: Source, client: PoliteClient, max_pages: int, max_docum
                     if is_dspace_url(source, link) and "/handle/" in urlparse(link).path.lower():
                         # The queue is a graph rooted at the supplied community;
                         # links are never synthesized or discovered elsewhere.
-                        queue.append(link)
+                        enqueue(link)
                     elif files and ("/bitstream/" in urlparse(link).path.lower() or "/retrieve/" in urlparse(link).path.lower()):
                         if link.lower().split("?", 1)[0].endswith(".pdf") or "pdf" in label.lower():
-                            candidates.append(Candidate(source, page, link, title, "question_paper", "pdf"))
+                            add_candidate(
+                                Candidate(
+                                    source, page, link, title,
+                                    "question_paper", "pdf",
+                                )
+                            )
                 if files and not any(c.item_url == page for c in candidates):
                     # Keep item metadata even where DSpace exposes no usable PDF.
-                    candidates.append(Candidate(source, page, None, title, "library_item", "html"))
+                    add_candidate(
+                        Candidate(
+                            source, page, None, title, "library_item", "html"
+                        )
+                    )
             else:
                 for link, label in links:
                     if not is_educational_url(source, link, label):
                         continue
                     if link.lower().split("?", 1)[0].endswith(".pdf"):
-                        candidates.append(Candidate(source, page, link, title, "library_document", "pdf"))
+                        add_candidate(
+                            Candidate(
+                                source, page, link, title,
+                                "library_document", "pdf",
+                            )
+                        )
                     else:
-                        queue.append(link)
+                        enqueue(link)
                 if page != canonical_url(source.seed) and EDUCATIONAL_RE.search(f"{title} {page}"):
-                    candidates.append(Candidate(source, page, page, title, "study_material", "html"))
-        unique = {stable_key(c.source.name, c.item_url, c.content_url): c for c in candidates}
-        return list(unique.values())[:max_documents], None
+                    add_candidate(
+                        Candidate(
+                            source, page, page, title, "study_material", "html"
+                        )
+                    )
+        return candidates[:max_documents], None
     except Exception as exc:
         return candidates, str(exc)
 
@@ -355,12 +490,29 @@ def record_for(candidate: Candidate, client: PoliteClient, metadata_only: bool) 
         "status": "metadata_only" if metadata_only else "discovered", "metadata": candidate.metadata,
         "discovered_at": now, "updated_at": now, **hierarchy,
     }
-    if metadata_only or not candidate.content_url:
+    if (
+        metadata_only
+        or not candidate.content_url
+        or candidate.source.reference_excerpt_chars
+    ):
+        if candidate.source.reference_excerpt_chars:
+            record["status"] = "metadata_only"
+            record["metadata"] = {
+                **record["metadata"],
+                "content_policy": "reference-only",
+            }
         return record
     data = _download_limited(client, candidate.content_url)
     record["size_bytes"] = len(data)
     if is_pdf_response("", data):
-        text, pages, truncated, method = extract_pdf(data, candidate.title)
+        text, pages, truncated, method = extract_pdf(
+            data,
+            candidate.title,
+            # DSpace question-paper archives are predominantly scans and can
+            # contain thousands of files. Keep the complete validated source
+            # linked for deferred OCR rather than blocking the catalog import.
+            max_ocr_pages=0 if candidate.source.kind == "dspace" else 3,
+        )
         if candidate.source.reference_excerpt_chars:
             text, was_truncated = _cap_text(text, candidate.source.reference_excerpt_chars)
             truncated = truncated or was_truncated
