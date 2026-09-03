@@ -64,6 +64,9 @@ class Subject(Document):
     seo_stats: Optional[dict] = None
     # Subject-level question papers: [{id, name, class_name, year, description, pages:[{id,url}]}]
     pyq_papers: list[dict] = Field(default_factory=list)
+    # Official syllabus catalog entries attached by the syllabus importer.
+    # Kept as compact metadata; extracted PDF text lives in syllabus_documents.
+    syllabus_sources: list[dict] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -216,3 +219,33 @@ class QuestionPaper(Document):
 
     class Settings:
         name = "question_papers"
+
+
+class SyllabusDocument(Document):
+    """An official syllabus PDF and its extracted hierarchy metadata."""
+
+    source_url: str
+    source_page_url: str
+    source_title: str
+    institution: str
+    programme: Optional[str] = None
+    faculty: Optional[str] = None
+    session: Optional[str] = None
+    subject_name: str
+    course_names: list[str] = Field(default_factory=list)
+    semesters: list[int] = Field(default_factory=list)
+    course_codes: list[str] = Field(default_factory=list)
+    board_id: Optional[FlexId] = None
+    class_ids: list[FlexId] = Field(default_factory=list)
+    stream_ids: list[FlexId] = Field(default_factory=list)
+    subject_ids: list[FlexId] = Field(default_factory=list)
+    checksum_sha256: str
+    extracted_text: str = ""
+    page_count: int = 0
+    status: str = "active"
+    crawled_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    class Settings:
+        name = "syllabus_documents"

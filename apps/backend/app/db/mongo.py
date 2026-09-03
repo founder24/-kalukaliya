@@ -18,6 +18,7 @@ from app.models.content import (
     Chapter,
     TopicEmbedding,
     QuestionPaper,
+    SyllabusDocument,
     ContentAuditLog,
 )
 from app.models.rag import (
@@ -89,6 +90,7 @@ async def init_mongo() -> None:
                     Chapter,
                     TopicEmbedding,
                     QuestionPaper,
+                    SyllabusDocument,
                     RagDocument,
                     Chunk,
                     ContentNode,
@@ -271,6 +273,19 @@ async def create_indexes() -> None:
         await db.question_papers.create_index([("status", ASCENDING)])
     except Exception as e:
         logger.warning(f"Question-papers index creation failed (non-fatal): {e}")
+
+    # ── Official syllabus documents ──────────────────────────────────────────
+    try:
+        await db.syllabus_documents.create_index(
+            [("source_url", ASCENDING)], unique=True
+        )
+        await db.syllabus_documents.create_index(
+            [("institution", ASCENDING), ("programme", ASCENDING), ("subject_name", ASCENDING)]
+        )
+        await db.syllabus_documents.create_index([("semesters", ASCENDING)])
+        await db.syllabus_documents.create_index([("updated_at", DESCENDING)])
+    except Exception as e:
+        logger.warning(f"Syllabus-document index creation failed (non-fatal): {e}")
 
     # ── Topic embeddings ──────────────────────────────────────────────────────
     try:
