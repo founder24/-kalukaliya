@@ -3,6 +3,7 @@
 *.log
 *.tmp
 *.swp
+.ahsec_d1_state/
 
 # Environment
 .env
