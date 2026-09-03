@@ -22,7 +22,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ne } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters } from '../db/schema';
 import type { Env } from '../types';
@@ -215,8 +215,8 @@ contentRouter.get('/subjects/:id', async (c) => {
 
 // ── Chapters list ──────────────────────────────────────────────────────────────
 // GET /api/v1/content/chapters/:subjectId
-// → [{ chapter_id, title, title_as, slug, chapter_number,
-//      notes_generated, has_assamese }]
+// → [{ id, chapter_id, title, title_as, slug, chapter_number,
+//      notes_generated, has_assamese, has_qa, has_pyq, syllabus_topics }]
 //
 // Cloud Run returns ALL chapters for a (published) subject sorted by
 // chapter_number. Security: we validate the subject is published first so
@@ -255,11 +255,22 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     chapterNumber: chapters.chapterNumber,
     notesEn: chapters.notesEn,
     notesAs: chapters.notesAs,
+    qaEn: chapters.qaEn,
+    publishedTopics: chapters.publishedTopics,
+    pyqPdfUrl: chapters.pyqPdfUrl,
+    pyqPapers: chapters.pyqPapers,
   }).from(chapters)
-    .where(eq(chapters.subjectId, subjectId))
+    .where(and(eq(chapters.subjectId, subjectId), ne(chapters.status, 'archived')))
     .orderBy(chapters.chapterNumber);
 
-  const payload = rows.map(r => ({
+  const payload = rows.map(r => {
+    const syllabusTopics = (safeParse<Array<{ title?: unknown }>>(r.publishedTopics) ?? [])
+      .map(topic => typeof topic?.title === 'string' ? topic.title.trim() : '')
+      .filter(Boolean);
+    const qa = safeParse<unknown[]>(r.qaEn) ?? [];
+    const pyqPapers = safeParse<unknown[]>(r.pyqPapers) ?? [];
+    return {
+    id:              r.id,
     chapter_id:      r.id,
     title:           r.title,
     title_as:        null,           // not in D1 schema (field not migrated)
@@ -267,7 +278,13 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     chapter_number:  r.chapterNumber ?? null,
     notes_generated: Boolean(r.notesEn),
     has_assamese:    Boolean(r.notesAs),
-  }));
+    has_qa:           qa.length > 0,
+    has_pyq:          Boolean(r.pyqPdfUrl) || pyqPapers.length > 0,
+    syllabus_topics:  syllabusTopics,
+    topic_count:      syllabusTopics.length,
+    content_type:     'chapter',
+  };
+  });
 
   // Populate KV so the next request is served from cache
   c.env.CONTENT_KV.put(kvKey, JSON.stringify(payload), { expirationTtl: 86400 * 7 })
@@ -365,7 +382,7 @@ async function resolveChapterBySlug(
     createdAt: chapters.createdAt,
     updatedAt: chapters.updatedAt,
   }).from(chapters)
-    .where(eq(chapters.subjectId, subjectRow.id))
+    .where(and(eq(chapters.subjectId, subjectRow.id), ne(chapters.status, 'archived')))
     .orderBy(chapters.chapterNumber);
 
   // Match chapter by slug or slug_as
@@ -403,18 +420,15 @@ async function resolveChapterBySlug(
   let faqArr: unknown[] = [];
   try { topicsArr = JSON.parse(chapterRow.publishedTopics ?? '[]') as unknown[]; } catch { /* leave empty */ }
 
-  // topic_title: first published topic title or chapter title (matches Cloud Run logic)
-  const topicTitle = (topicsArr.length > 0 && typeof (topicsArr[0] as Record<string, unknown>)?.title === 'string')
-    ? (topicsArr[0] as Record<string, unknown>).title as string
-    : chapterRow.title;
-
   return c.json({
     chapter_id:     chapterRow.id,
     title:          chapterRow.title,
     chapter_title:  chapterRow.title,
     chapter_slug:   chapterRow.slug,
     slug_as:        chapterRow.slugAs ?? null,
-    topic_title:    topicTitle,
+    // A topic is a subsection of a chapter, never the chapter's display title.
+    // Dedicated topic deep links resolve their own heading on the client.
+    topic_title:    chapterRow.title,
     subject_name:   subjectRow.name,
     subject_slug:   subjectRow.slug,
     board_name:     boardRow.name,

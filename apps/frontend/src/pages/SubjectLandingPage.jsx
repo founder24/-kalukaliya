@@ -33,13 +33,11 @@ export default function SubjectLandingPage() {
   const [expandedPyqId, setExpandedPyqId] = useState(null);
 
   const SECTIONS = useMemo(() => {
-    // notes_generated=false means the ingestion pipeline hasn't produced notes yet — hide those
-    // stubs so students never land on a blank page. They auto-appear once ingestion runs.
-    const notesChs = chapters.filter(ch =>
-      (!ch.content_type || (ch.content_type !== 'qa' && ch.content_type !== 'question_paper'))
-      && ch.notes_generated
-    );
-    const qaChs = chapters.filter(ch => ch.content_type === 'qa' && ch.notes_generated);
+    // The chapter sequence is the syllabus structure, not a notes-availability
+    // filter. Keep chapters visible while content is being generated so numbers
+    // and names do not shift between visits.
+    const notesChs = chapters;
+    const qaChs = chapters.filter(ch => ch.has_qa);
     // Subject-level PYQ papers — read from subject.pyq_papers (not chapters)
     const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => ({
       id:          p.id || `pyq-${pi}`,
@@ -54,7 +52,7 @@ export default function SubjectLandingPage() {
       })),
     }));
     return [
-      { key: 'notes',          label: 'Notes',     icon: BookOpen,   chapters: notesChs, pyqGroups: null,   accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
+      { key: 'notes',          label: 'Chapters',  icon: BookOpen,   chapters: notesChs, pyqGroups: null,   accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
       { key: 'qa',             label: 'Questions', icon: HelpCircle, chapters: qaChs,    pyqGroups: null,   accent: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' },
       { key: 'question_paper', label: 'PYQs',      icon: FileText,   chapters: [],       pyqGroups,         accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.25)' },
     ];
@@ -75,6 +73,7 @@ export default function SubjectLandingPage() {
   }, [activeSectionChapters, searchQuery]);
 
   const basePath = `/${board}/${classSlug}/${subjectSlug}`;
+  const chapterBasePath = `/${board}/${classSlug}${subject?.stream_slug ? `/${subject.stream_slug}` : ''}/${subjectSlug}`;
 
   // Pull SEO related-topics for the first chapter to seed the
   // ContinueLearning rail, then backfill with sibling chapters until ≥4 links.
@@ -523,7 +522,7 @@ export default function SubjectLandingPage() {
           ) : (
             filteredChapters.flatMap((ch, i) => {
               const chPath = ch.slug
-                ? `${basePath}/${ch.slug}`
+                ? `${chapterBasePath}/${ch.slug}`
                 : `${basePath}`;
 
               const card = (
@@ -539,19 +538,30 @@ export default function SubjectLandingPage() {
                       className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
                       style={{ background: 'rgba(139,92,246,0.08)', color: 'rgb(124,58,237)' }}
                     >
-                      {i + 1}
+                      {ch.chapter_number ?? i + 1}
                     </span>
                     <div className="flex-1 min-w-0">
                       <h2 className="text-sm font-semibold text-foreground group-hover/ch:text-violet-600 transition-colors">
                         {ch.title}
                       </h2>
-                      {ch.description && (
-                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{ch.description}</p>
+                      {(ch.description || ch.syllabus_topics?.length > 0) && (
+                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+                          {ch.description || ch.syllabus_topics.slice(0, 2).join(' • ')}
+                        </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {ch.content_type && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{ch.content_type}</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {ch.notes_generated && (
+                        <span className="hidden sm:inline text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-700">Notes</span>
+                      )}
+                      {ch.has_qa && (
+                        <span className="hidden sm:inline text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-700">Q&amp;A</span>
+                      )}
+                      {ch.has_pyq && (
+                        <span className="hidden sm:inline text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700">PYQ</span>
+                      )}
+                      {!ch.notes_generated && !ch.has_qa && !ch.has_pyq && (
+                        <span className="hidden sm:inline text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Content soon</span>
                       )}
                       <ChevronRight size={16} className="text-muted-foreground/40 group-hover/ch:text-violet-600 transition-colors" />
                     </div>

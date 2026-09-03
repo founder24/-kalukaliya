@@ -473,7 +473,7 @@ export default function ChapterPage() {
     if (!data || !data.chapter_id) return;
     pushRecentChapter({
       path: `${`/${board}/${classSlug}${data.stream_slug ? '/' + data.stream_slug : ''}/${subjectSlug}`}/${chapterSlug}`,
-      title: data.topic_title || data.chapter_title || chapterSlug,
+      title: data.chapter_title || data.title || data.topic_title || chapterSlug,
       subject: data.subject_name || subjectSlug,
       board: data.board_name || board,
     });
@@ -1095,7 +1095,7 @@ export default function ChapterPage() {
     );
   }
 
-  const chapterTitle = data.topic_title || data.chapter_title || chapterSlug;
+  const chapterTitle = data.chapter_title || data.title || data.topic_title || chapterSlug;
   const subjectName = data.subject_name || subjectSlug;
   const boardName = data.board_name || board;
   const className = data.class_name || classSlug;
@@ -1274,7 +1274,7 @@ export default function ChapterPage() {
                   subjectName: data?.subject_name || '',
                 },
               }}
-              onClick={() => Analytics.chapterAskAi(subjectSlug, data?.topic_title || data?.chapter_title || chapterSlug)}
+              onClick={() => Analytics.chapterAskAi(subjectSlug, data?.chapter_title || data?.title || data?.topic_title || chapterSlug)}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-all hover:opacity-90 active:scale-95"
               style={{ background: 'linear-gradient(135deg, #7c3aed, #8b5cf6)', boxShadow: '0 2px 10px rgba(139,92,246,0.20)' }}
             >
