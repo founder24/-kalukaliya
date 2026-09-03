@@ -31,6 +31,7 @@ from app.models.rag import (
 )
 from app.models.ai_usage_log import AiUsageLog
 from app.models.document import LibraryDocument
+from app.models.external_library_document import ExternalLibraryDocument
 from app.models.seed_run import SeedRun
 from app.db.migrations.runner import check_and_apply_migrations
 import logging
@@ -100,6 +101,7 @@ async def init_mongo() -> None:
                     AiUsageLog,
                     ContentAuditLog,
                     LibraryDocument,
+                    ExternalLibraryDocument,
                     SeedRun,
                 ],
             )
@@ -286,6 +288,22 @@ async def create_indexes() -> None:
         await db.syllabus_documents.create_index([("updated_at", DESCENDING)])
     except Exception as e:
         logger.warning(f"Syllabus-document index creation failed (non-fatal): {e}")
+
+    # ── Approved external public-library documents ───────────────────────────
+    try:
+        await db.external_library_documents.create_index(
+            [("stable_key", ASCENDING)], unique=True
+        )
+        await db.external_library_documents.create_index([("source_name", ASCENDING)])
+        await db.external_library_documents.create_index([("document_type", ASCENDING)])
+        await db.external_library_documents.create_index(
+            [("board", ASCENDING), ("class_name", ASCENDING), ("semester", ASCENDING),
+             ("course", ASCENDING), ("subject", ASCENDING)]
+        )
+        await db.external_library_documents.create_index([("status", ASCENDING)])
+        await db.external_library_documents.create_index([("updated_at", DESCENDING)])
+    except Exception as e:
+        logger.warning(f"External-library document index creation failed (non-fatal): {e}")
 
     # ── Topic embeddings ──────────────────────────────────────────────────────
     try:
