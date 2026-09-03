@@ -36,3 +36,13 @@ own cron secret.
 **How to apply:** Store the Access client ID/secret only in the scheduler's
 secret store, send both Access headers and the application's cron credential,
 and make reconciliation remove any bypass policy that appears on the cron app.
+
+Vectorize REST endpoints for ID operations use underscores:
+`delete_by_ids` and `get_by_ids`. Hyphenated variants return a plain 404 even
+when authentication, account, and index are valid.
+
+**Why:** A production notes reindex reached the valid index but failed at
+`delete-by-ids`; probing the equivalent underscore endpoint succeeded.
+
+**How to apply:** Use the underscore paths in direct REST clients, and validate
+the endpoint contract with an empty ID list before beginning a bulk mutation.

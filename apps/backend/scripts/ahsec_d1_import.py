@@ -96,6 +96,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Update D1 notes but do not replace Vectorize/D1 chunk mappings",
     )
+    parser.add_argument(
+        "--clean-preambles",
+        action="store_true",
+        help="Remove model-introduction preambles from existing AHSEC notes",
+    )
     return parser.parse_args()
 
 
@@ -199,7 +204,7 @@ class CloudflareClient:
         if not ids:
             return
         self._post(
-            f"{self.api}/vectorize/v2/indexes/{VECTOR_INDEX}/delete-by-ids",
+            f"{self.api}/vectorize/v2/indexes/{VECTOR_INDEX}/delete_by_ids",
             {"ids": ids},
         )
 
@@ -210,6 +215,19 @@ def clean_notes(text: str) -> str:
     first_heading = re.search(r"^##\s+\S", text, flags=re.M)
     if first_heading:
         text = text[first_heading.start() :]
+    else:
+        # Some generations use a one-line introduction but omit Markdown
+        # headings. Remove only the known model-style preamble, never the
+        # chapter's actual first sentence.
+        text = re.sub(
+            r"^\s*(?:here|below|the following) are "
+            r"(?:comprehensive\s+)?(?:study\s+)?notes?\s+for the chapter"
+            r"[^.\n]*[.!?]\s*(?:---\s*)?",
+            "",
+            text,
+            count=1,
+            flags=re.I,
+        )
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
 
@@ -532,6 +550,52 @@ def replace_index(
     return len(rows)
 
 
+def clean_existing_preambles(
+    client: CloudflareClient, chapters: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    affected: list[dict[str, Any]] = []
+    for chapter in chapters:
+        original = str(chapter.get("notes_en") or "")
+        cleaned = clean_notes(original)
+        if not original or cleaned == original:
+            continue
+        sections = notes_to_rag_sections(cleaned)
+        if not sections:
+            log.warning("Skipping cleanup for %s: no sections after scrub", chapter["id"])
+            continue
+        backup_existing(chapter, "existing-d1-preamble-cleanup")
+        now = int(time.time())
+        client.execute(
+            """
+            UPDATE chapters
+            SET notes_en = ?, rag_text = ?, rag_sections_en = ?,
+                word_count_en = ?, rag_updated_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            [
+                cleaned,
+                cleaned,
+                json.dumps(sections, ensure_ascii=False),
+                len(cleaned.split()),
+                now,
+                now,
+                chapter["id"],
+            ],
+        )
+        client.execute(
+            """
+            UPDATE rag_documents
+            SET content = ?, indexed_at = ?
+            WHERE id = ?
+            """,
+            [cleaned, now, f"ahsec-notes-en:{chapter['id']}"],
+        )
+        affected.append({**chapter, "notes_en": cleaned})
+        log.info("Removed preamble from %s (%s)", chapter["id"], chapter["title"])
+        # The caller reindexes after all D1 updates so cleanup remains bounded.
+    return affected
+
+
 async def main() -> int:
     args = parse_args()
     client = CloudflareClient()
@@ -541,6 +605,20 @@ async def main() -> int:
         chapters = [row for row in chapters if row["class_name"] == expected]
     if args.subject:
         chapters = [row for row in chapters if row["subject_slug"] == args.subject]
+
+    if args.clean_preambles:
+        affected = await asyncio.to_thread(clean_existing_preambles, client, chapters)
+        if not args.skip_index:
+            for chapter in affected:
+                await asyncio.to_thread(
+                    replace_index,
+                    client,
+                    chapter,
+                    str(chapter.get("notes_en") or ""),
+                    "existing-d1-preamble-cleanup",
+                )
+        log.info("Preamble cleanup complete: changed=%d", len(affected))
+        return 0
 
     sources = await extract_sources(args)
     done = set() if args.restart else load_done()

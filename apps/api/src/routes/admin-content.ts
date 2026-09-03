@@ -37,6 +37,20 @@ type SeedLog = {
 const now = () => Math.floor(Date.now() / 1000);
 const SEED_LEASE_SECONDS = 900;
 
+export function sanitizeGeneratedNotes(text: string): string {
+  let cleaned = text.trim()
+    .replace(/^```(?:markdown)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
+  const firstHeading = cleaned.search(/^##\s+\S/m);
+  if (firstHeading >= 0) return cleaned.slice(firstHeading).trim();
+  cleaned = cleaned.replace(
+    /^\s*(?:here|below|the following) are (?:comprehensive\s+)?(?:study\s+)?notes?\s+for the chapter[^.\n]*[.!?]\s*(?:---\s*)?/i,
+    '',
+  );
+  return cleaned.trim();
+}
+
 function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   try { return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; }
 }
@@ -360,6 +374,7 @@ async function commitSeedChapter(
 ): Promise<boolean> {
   const timestamp = now();
   const field = medium === 'en' ? 'notes_en' : 'notes_as';
+  const storedText = medium === 'en' ? sanitizeGeneratedNotes(text) : text.trim();
   const processed = log.filter(entry => entry.status === 'done').length;
   const failed = log.filter(entry => entry.status === 'failed').length;
   const result = await env.DB.batch([
@@ -373,7 +388,7 @@ async function commitSeedChapter(
         SELECT 1 FROM seed_runs
         WHERE id = ? AND status = 'running' AND lease_token = ? AND lease_expires_at >= ?
       )
-    `).bind(text, timestamp, timestamp, chapterId, runId, leaseToken, timestamp),
+    `).bind(storedText, timestamp, timestamp, chapterId, runId, leaseToken, timestamp),
     env.DB.prepare(`
       UPDATE seed_runs
       SET processed = ?, failed = ?, log = ?, lease_expires_at = ?
@@ -445,8 +460,8 @@ async function runSeed(env: Env, runId: string, medium: 'en' | 'as'): Promise<vo
         } else {
           const request = medium === 'en'
             ? {
-              systemPrompt: 'You write accurate, structured AHSEC study notes in English. Use concise Markdown headings, definitions, examples, and exam revision points. Do not invent a syllabus.',
-              userMessage: `Create study notes for the chapter titled "${chapter.title}".`,
+              systemPrompt: 'You write accurate, structured AHSEC study notes in English. Use concise Markdown headings, definitions, examples, and exam revision points. Do not invent a syllabus. Return only the notes and begin with a ## heading; never add an introductory sentence.',
+              userMessage: `Create study notes for the chapter titled "${chapter.title}". Begin directly with the first ## heading.`,
               maxTokens: 1800,
             }
             : {
@@ -596,11 +611,11 @@ adminContentRouter.post('/content/chapters/:chapterId/generate-notes', async c =
   if (!chapter) return c.json({ detail: 'Chapter not found' }, 404);
   try {
     const result = await generate(c.env.AI, {
-      systemPrompt: 'You write accurate, structured AHSEC study notes in English. Use concise Markdown headings, definitions, examples, and revision points. Do not invent a syllabus.',
-      userMessage: `Create study notes for the chapter titled "${chapter.title}".`,
+      systemPrompt: 'You write accurate, structured AHSEC study notes in English. Use concise Markdown headings, definitions, examples, and revision points. Do not invent a syllabus. Return only the notes and begin with a ## heading; never add an introductory sentence.',
+      userMessage: `Create study notes for the chapter titled "${chapter.title}". Begin directly with the first ## heading.`,
       maxTokens: 1800,
     });
-    await db.update(chapters).set({ notesEn: result.text, ragUpdatedAt: now(), updatedAt: now() })
+    await db.update(chapters).set({ notesEn: sanitizeGeneratedNotes(result.text), ragUpdatedAt: now(), updatedAt: now() })
       .where(eq(chapters.id, chapter.id));
     return c.json({ status: 'generated', chapter_id: chapter.id, model: result.model });
   } catch (error) {

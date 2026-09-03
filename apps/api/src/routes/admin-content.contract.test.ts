@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 import { SignJWT } from 'jose';
 import type { Env } from '../types';
-import { resumePublishJobs, resumeSeedRuns } from './admin-content';
+import { resumePublishJobs, resumeSeedRuns, sanitizeGeneratedNotes } from './admin-content';
 import { hashPassword } from '../middleware/auth';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -117,6 +117,12 @@ function adminRequest(pathname: string, method = 'GET', body?: unknown): Request
 }
 
 describe('Worker-native admin publishing and seed dispatch', () => {
+  it('removes model-introduction prose before the first notes heading', () => {
+    expect(sanitizeGeneratedNotes(
+      'Here are comprehensive study notes for the chapter "Motion in a Plane," designed to be clear and helpful for students.\n\n---\n\n## Motion in a Plane\n\nActual notes.',
+    )).toBe('## Motion in a Plane\n\nActual notes.');
+  });
+
   it('supports the existing admin login, verify, and logout cookie lifecycle', async () => {
     const login = await workerFetch(new Request('http://worker/api/v1/admin/login', {
       method: 'POST',
