@@ -273,11 +273,18 @@ class PoliteClient:
                 self._robots[origin] = robot
         return self._robots[origin].can_fetch(USER_AGENT, url)
 
-    def get(self, url: str, *, stream: bool = False) -> requests.Response:
+    def get(
+        self,
+        url: str,
+        *,
+        stream: bool = False,
+        retries: int = 3,
+    ) -> requests.Response:
         if not self.allowed(url):
             raise PermissionError("robots.txt disallows this URL")
         last: Optional[Exception] = None
-        for attempt in range(3):
+        retries = max(1, retries)
+        for attempt in range(retries):
             try:
                 # A shared origin gate keeps concurrent extraction workers from
                 # turning an approved crawl into an abusive burst.
@@ -298,7 +305,7 @@ class PoliteClient:
                 return response
             except (requests.RequestException, PermissionError) as exc:
                 last = exc
-                if isinstance(exc, PermissionError) or attempt == 2:
+                if isinstance(exc, PermissionError) or attempt == retries - 1:
                     break
                 time.sleep(1.0 * (2 ** attempt))
         raise RuntimeError(str(last))
@@ -406,7 +413,7 @@ def crawl_source(source: Source, client: PoliteClient, max_pages: int, max_docum
                     flush=True,
                 )
             try:
-                response = client.get(page)
+                response = client.get(page, retries=1)
             except Exception as exc:
                 # A disallowed or stale child URL must not discard the rest of
                 # an approved source graph. Only failure of the seed itself is
