@@ -7,4 +7,4 @@ Application API and health traffic must use the Cloudflare edge Worker and the D
 
 **Why:** Keeping a dormant fallback allowed local and production behavior to diverge and made releases dependent on GCP billing, Secret Manager, and Cloud Run credentials even after the Worker-native cutover.
 
-**How to apply:** Build and test local UI against the Cloudflare-native API path, keep production releases limited to API Worker, edge Worker, and Pages, and treat any future GCP service deletion as a separate destructive decommissioning task.
+**How to apply:** Build and test local UI against the Cloudflare-native API path, keep production releases limited to API Worker, edge Worker, and Pages, and treat any future GCP service deletion as a separate destructive decommissioning task. Legacy MongoDB ingestion scripts and workflows are migration-era tooling and must not be run against current production; new ingestion must write D1 and Vectorize directly.
