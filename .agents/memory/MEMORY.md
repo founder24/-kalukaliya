@@ -62,6 +62,7 @@
 - [Cloudflare account API contracts](cloudflare-account-api-contracts.md) — R2 custom domains and Access writes require current, resource-specific API fields and permissions.
 - [Chat transport retry identity](chat-transport-retry-identity.md) — Keep one stable logical request key across bounded transport retries so quota is reserved only once.
 - [Worker chat web egress and latency](worker-chat-web-egress-latency.md) — Wikimedia is blocked from Workers; Crossref works, and the fast Llama model meets the first-token target.
+- [Worker chat student memory](worker-chat-student-memory.md) — authenticated chat reads and refreshes bounded D1 memory; anonymous chat never writes long-term memory.
 - [Outbound URL connection pinning](outbound-url-connection-pinning.md) — URL checks must pin HTTP connections to validated public DNS answers and revalidate every redirect.
 - [GitHub Actions secret repair](github-actions-secret-repair.md) — If shell tokens lack secret-admin scope, use the GitHub connector public key and sealed-box encrypted secret writes.
 - [Cloudflare-only production boundary](cloudflare-only-production.md) — Local and production traffic must use the API Worker service binding; Cloud Run is disconnected, not an allowed fallback.

@@ -211,6 +211,17 @@ usersRouter.post('/onboarding', async (c) => {
 // ── GET /memories ──────────────────────────────────────────────────────────────
 // Returns paginated memory list from the memory_brain table.
 
+function memoryDisplayText(key: string, value: string | null): string {
+  if (!value) return '';
+  try {
+    const parsed = JSON.parse(value) as { question?: string };
+    if (parsed.question) return parsed.question;
+  } catch {
+    // Legacy memories are stored as plain text.
+  }
+  return value;
+}
+
 usersRouter.get('/memories', async (c) => {
   const { id, error } = await requireUser(c);
   if (error) return error;
@@ -243,8 +254,8 @@ usersRouter.get('/memories', async (c) => {
   return c.json({
     items: rows.map(r => ({
       id: r.id,
-      text: r.value ?? '',
-      kind: r.key,
+      text: memoryDisplayText(r.key, r.value),
+      kind: r.key.startsWith('qa:') ? 'qa' : r.key,
       subject_id: null,
       subject_name: null,
       chapter_name: null,

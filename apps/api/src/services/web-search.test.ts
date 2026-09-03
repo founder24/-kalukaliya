@@ -27,8 +27,8 @@ describe('Worker web-search policy', () => {
     })).toBe(true);
   });
 
-  it('uses bounded web retrieval when broad input has no curriculum scope', () => {
-    expect(shouldUseWebSearch({ question: 'Explain renewable energy' })).toBe(true);
+  it('does not delay ordinary broad questions with unrelated scholarly search', () => {
+    expect(shouldUseWebSearch({ question: 'Explain renewable energy' })).toBe(false);
     expect(buildWebSearchQuery('  renewable   energy ', 'en'))
       .toBe('renewable energy Assam education');
   });

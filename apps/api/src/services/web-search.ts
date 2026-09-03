@@ -43,8 +43,9 @@ const WEB_INTENT =
 
 /**
  * Textbook page context remains the fast authoritative path. Web search is
- * reserved for explicit freshness/web intent or broad questions that arrive
- * without a chapter or subject scope and may be missing curriculum evidence.
+ * reserved for explicit freshness or web intent. Ordinary unscoped educational
+ * questions should proceed immediately through curriculum retrieval and the LLM;
+ * a generic scholarly search adds latency and often returns irrelevant papers.
  */
 export function shouldUseWebSearch(opts: {
   question: string;
@@ -53,8 +54,7 @@ export function shouldUseWebSearch(opts: {
 }): boolean {
   const question = opts.question.trim();
   if (!question) return false;
-  if (FRESHNESS_INTENT.test(question) || WEB_INTENT.test(question)) return true;
-  return !opts.chapterId && !opts.subjectId;
+  return FRESHNESS_INTENT.test(question) || WEB_INTENT.test(question);
 }
 
 export function buildWebSearchQuery(question: string, lang: 'en' | 'as'): string {
