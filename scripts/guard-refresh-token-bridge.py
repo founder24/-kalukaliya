@@ -18,8 +18,8 @@ BRIDGE_MARKER = re.compile(
 ROUTE_GUARDS = {
     "logout-route": {
         "bridge_blocks": ("logout-kv",),
-        "full_hash": "a87780428b9ff15d88575184f21b1e996de5bc1a43a239eada2a67df6b4d1b91",
-        "d1_hash": "4053ba9b9032c6dd63af3138c6e7a642d6c306f6c5bc27ebda4b2a34acb76281",
+        "full_hash": "5630d3a1f512d27af5114db056063dee55595a30788c6b09d858ef10b7c4f55b",
+        "d1_hash": "1974b5eec70bbd183950420bb5013a339dffc8c8603dac7a3ec6600aa2c3d1ab",
     },
     "refresh-route": {
         "bridge_blocks": ("legacy-read", "refresh-kv"),

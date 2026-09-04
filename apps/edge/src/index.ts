@@ -26,6 +26,13 @@ export { RateLimitDurableObject } from './middleware/rate-limit';
 // Cached health probe state (module-level)
 let healthCache: { backendReachable: boolean; timestamp: number } | null = null;
 const HEALTH_CACHE_TTL_MS = 10_000; // 10 seconds
+const MAX_TTS_BODY_BYTES = 16 * 1024;
+const MAX_TTS_TEXT_LENGTH = 5_000;
+const MAX_OCR_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_OCR_MULTIPART_BYTES = MAX_OCR_IMAGE_BYTES + 64 * 1024;
+const MAX_OCR_PROMPT_LENGTH = 2_000;
+const TTS_RATE_LIMIT = 20;
+const OCR_RATE_LIMIT = 10;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -137,7 +144,12 @@ export default {
     }
 
     // ── 4. Per-Language Rate Limiting (chat POST only) ──
-    if (url.pathname.startsWith('/api/v1/chat') && request.method === 'POST') {
+    if (
+      url.pathname.startsWith('/api/v1/chat')
+      && url.pathname !== '/api/v1/chat/tts'
+      && url.pathname !== '/api/v1/chat/image'
+      && request.method === 'POST'
+    ) {
       if (!env.RATE_LIMIT_DO) {
         console.error('RATE_LIMIT_DO binding not available - failing chat closed');
         const unavailable = jsonResponse(503, {
@@ -378,7 +390,7 @@ export default {
 
         clearTimeout(timeoutId);
         backendStatus = await res.json() as Record<string, unknown>;
-        if (!res.ok) {
+        if (!res.ok || backendStatus.status !== 'healthy') {
           overallStatus = 'degraded';
         }
       } catch (err) {
@@ -396,7 +408,7 @@ export default {
           backend: backendStatus,
         }),
         {
-          status: 200,
+          status: overallStatus === 'healthy' ? 200 : 503,
           headers: { 'Content-Type': 'application/json' },
         }
       );
@@ -534,15 +546,45 @@ export default {
         // AI binding not configured — fall through to backend proxy
       } else {
         try {
-          const body = await request.json() as { text?: string; lang?: string };
-          const text = (body.text || '').trim().slice(0, 5000);
+          const contentType = request.headers.get('Content-Type');
+          if (!isJsonContentType(contentType)) {
+            return aiErrorResponse(415, { error: 'Content-Type must be application/json' }, origin, requestId);
+          }
+          if (requestExceedsContentLength(request, MAX_TTS_BODY_BYTES)) {
+            return aiErrorResponse(413, { error: 'Request body must be 16KB or less' }, origin, requestId);
+          }
+          const bodyBytes = await request.arrayBuffer();
+          if (bodyBytes.byteLength > MAX_TTS_BODY_BYTES) {
+            return aiErrorResponse(413, { error: 'Request body must be 16KB or less' }, origin, requestId);
+          }
+          let body: { text?: unknown; lang?: unknown };
+          try {
+            body = JSON.parse(new TextDecoder().decode(bodyBytes)) as { text?: unknown; lang?: unknown };
+          } catch {
+            return aiErrorResponse(400, { error: 'Request body must be valid JSON' }, origin, requestId);
+          }
+          if (typeof body.text !== 'string') {
+            return aiErrorResponse(400, { error: 'text must be a string' }, origin, requestId);
+          }
+          const text = body.text.trim();
           if (!text) {
             const r = jsonResponse(400, { error: 'text is required' });
             applyCorsHeaders(r.headers, origin);
             r.headers.set('X-Request-ID', requestId);
             return r;
           }
-          const lang = (body.lang || 'en').toLowerCase().startsWith('as') ? 'AS' : 'EN';
+          if (text.length > MAX_TTS_TEXT_LENGTH) {
+            return aiErrorResponse(400, { error: 'text must be 5000 characters or less' }, origin, requestId);
+          }
+          if (body.lang !== undefined && body.lang !== 'en' && body.lang !== 'as') {
+            return aiErrorResponse(400, { error: 'lang must be "en" or "as"' }, origin, requestId);
+          }
+          const rateLimitResponse = await aiRateLimitResponse(
+            env, userId, 'tts', TTS_RATE_LIMIT, origin, requestId,
+          );
+          if (rateLimitResponse) return rateLimitResponse;
+
+          const lang = body.lang === 'as' ? 'AS' : 'EN';
           const aiResult = await env.AI.run('@cf/myshell/melotts', { prompt: text, language: lang });
           // Workers AI TTS returns a Response with audio content
           const audioBytes = aiResult instanceof Response
@@ -586,24 +628,56 @@ export default {
         // AI binding not configured — fall through to backend proxy
       } else {
         try {
-          const form = await request.formData();
-          const file = form.get('file') as File | null;
-          const prompt = (form.get('prompt') as string | null) || 'Extract all text from this image. Return only the text content, no commentary.';
+          const contentType = request.headers.get('Content-Type');
+          if (!contentType?.toLowerCase().startsWith('multipart/form-data;')) {
+            return aiErrorResponse(415, { error: 'Content-Type must be multipart/form-data' }, origin, requestId);
+          }
+          if (requestExceedsContentLength(request, MAX_OCR_MULTIPART_BYTES)) {
+            return aiErrorResponse(413, { error: 'Image upload is too large' }, origin, requestId);
+          }
+          let form: FormData;
+          try {
+            form = await request.formData();
+          } catch {
+            return aiErrorResponse(400, { error: 'Request body must be valid multipart/form-data' }, origin, requestId);
+          }
+          const value = form.get('file');
+          const promptValue = form.get('prompt');
+          const prompt = promptValue === null
+            ? 'Extract all text from this image. Return only the text content, no commentary.'
+            : promptValue;
 
-          if (!file) {
+          if (!isUploadedFile(value)) {
             const r = jsonResponse(400, { error: 'file is required' });
             applyCorsHeaders(r.headers, origin);
             r.headers.set('X-Request-ID', requestId);
             return r;
           }
+          const file = value;
+          if (typeof prompt !== 'string') {
+            return aiErrorResponse(400, { error: 'prompt must be a string' }, origin, requestId);
+          }
+          if (prompt.length > MAX_OCR_PROMPT_LENGTH) {
+            return aiErrorResponse(400, { error: 'prompt must be 2000 characters or less' }, origin, requestId);
+          }
+          if (!isAllowedImageMimeType(file.type)) {
+            return aiErrorResponse(415, { error: 'Only PNG, JPEG, and WebP images are supported' }, origin, requestId);
+          }
+          if (file.size === 0 || file.size > MAX_OCR_IMAGE_BYTES) {
+            return aiErrorResponse(413, { error: 'Image must be 4MB or less' }, origin, requestId);
+          }
 
           const imageBytes = await file.arrayBuffer();
-          if (imageBytes.byteLength > 4 * 1024 * 1024) {
-            const r = jsonResponse(400, { error: 'Image must be less than 4MB' });
-            applyCorsHeaders(r.headers, origin);
-            r.headers.set('X-Request-ID', requestId);
-            return r;
+          if (imageBytes.byteLength === 0 || imageBytes.byteLength > MAX_OCR_IMAGE_BYTES) {
+            return aiErrorResponse(413, { error: 'Image must be 4MB or less' }, origin, requestId);
           }
+          if (!hasMatchingImageSignature(file.type, imageBytes)) {
+            return aiErrorResponse(400, { error: 'Image content does not match its declared type' }, origin, requestId);
+          }
+          const rateLimitResponse = await aiRateLimitResponse(
+            env, userId, 'ocr', OCR_RATE_LIMIT, origin, requestId,
+          );
+          if (rateLimitResponse) return rateLimitResponse;
 
           const imageArray = [...new Uint8Array(imageBytes)];
           const aiResult = await env.AI.run('@cf/unum/uform-gen2-qwen-500m', {
@@ -777,4 +851,94 @@ function jsonResponse(status: number, body: Record<string, string>): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function aiErrorResponse(
+  status: number,
+  body: Record<string, string>,
+  origin: string,
+  requestId: string,
+): Response {
+  const response = jsonResponse(status, body);
+  applyCorsHeaders(response.headers, origin);
+  response.headers.set('X-Request-ID', requestId);
+  return response;
+}
+
+function requestExceedsContentLength(request: Request, maximumBytes: number): boolean {
+  const contentLength = request.headers.get('Content-Length');
+  if (contentLength === null) return false;
+  const length = Number(contentLength);
+  return !Number.isSafeInteger(length) || length < 0 || length > maximumBytes;
+}
+
+function isJsonContentType(contentType: string | null): boolean {
+  return contentType?.split(';', 1)[0]?.trim().toLowerCase() === 'application/json';
+}
+
+function isAllowedImageMimeType(contentType: string): boolean {
+  return contentType === 'image/png'
+    || contentType === 'image/jpeg'
+    || contentType === 'image/webp';
+}
+
+function isUploadedFile(value: unknown): value is File {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Partial<File>;
+  return typeof candidate.arrayBuffer === 'function'
+    && typeof candidate.type === 'string'
+    && typeof candidate.size === 'number';
+}
+
+function hasMatchingImageSignature(contentType: string, image: ArrayBuffer): boolean {
+  const bytes = new Uint8Array(image);
+  if (contentType === 'image/png') {
+    return bytes.length >= 8
+      && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+      && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+  }
+  if (contentType === 'image/jpeg') {
+    return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  }
+  return bytes.length >= 12
+    && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
+    && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50;
+}
+
+async function aiRateLimitResponse(
+  env: Env,
+  userId: string,
+  operation: 'tts' | 'ocr',
+  limit: number,
+  origin: string,
+  requestId: string,
+): Promise<Response | null> {
+  if (!env.RATE_LIMIT_DO) {
+    console.error('RATE_LIMIT_DO binding not available - failing AI route closed');
+    return aiErrorResponse(503, {
+      error: 'Rate limit service unavailable',
+      error_code: 'rate_limit_storage_unavailable',
+    }, origin, requestId);
+  }
+
+  try {
+    const result = await checkRateLimit(env.RATE_LIMIT_DO, userId, operation, limit);
+    if (result.allowed) return null;
+    const response = new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+      status: 429,
+      headers: {
+        'Content-Type': 'application/json',
+        ...rateLimitHeaders(result, limit),
+      },
+    });
+    applyCorsHeaders(response.headers, origin);
+    response.headers.set('X-Request-ID', requestId);
+    return response;
+  } catch (err) {
+    console.error('Atomic AI rate-limit storage unavailable:', err);
+    return aiErrorResponse(503, {
+      error: 'Rate limit service unavailable',
+      error_code: 'rate_limit_storage_unavailable',
+    }, origin, requestId);
+  }
 }

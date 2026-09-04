@@ -1,12 +1,26 @@
 name: Deploy — Cloudflare Native Only
 
-# This manual path mirrors the Cloudflare-native jobs in deploy.yml.
-# Worker secrets are provisioned from GitHub Actions secrets through Wrangler.
+# This is the single implementation of the production Cloudflare release.
+# deploy.yml invokes it for main/tag releases; this dispatch is retained for
+# intentionally gated cutover checks. Worker secrets are provisioned through
+# Wrangler and are never read back.
 on:
   workflow_dispatch:
     inputs:
       validate_authenticated:
         description: 'Require disposable authenticated API checks after deployment'
+        required: false
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      validate_authenticated:
+        description: 'Require disposable authenticated API checks after deployment'
+        required: false
+        default: false
+        type: boolean
+      validate_reset_delivery:
+        description: 'Require a fresh disposable password-reset email proof after deployment'
         required: false
         default: false
         type: boolean
@@ -67,6 +81,9 @@ jobs:
 
       - name: Validate required Cloudflare bindings and crawler routes
         run: python3 scripts/validate-cloudflare-release-config.py
+
+      - name: Enforce Cloudflare-only production release configuration
+        run: python3 scripts/validate-cloudflare-only-production.py
 
       - name: Validate refresh-token bridge release guard
         run: python3 scripts/test-refresh-token-bridge-guard.py
@@ -585,8 +602,8 @@ jobs:
     needs: [post-native-smoke]
     if: |
       always() &&
-      github.event.inputs.validate_authenticated == 'true' &&
-      github.event.inputs.validate_reset_delivery == 'true' &&
+       inputs.validate_authenticated &&
+       inputs.validate_reset_delivery &&
       needs.post-native-smoke.result == 'success'
     outputs:
       nonce: ${{ steps.request.outputs.nonce }}

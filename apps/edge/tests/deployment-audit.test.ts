@@ -98,6 +98,25 @@ describe('edge deployment routing audit', () => {
     expect(response.headers.get('X-Syrabit-Health-Backend')).toBe('api-worker');
   });
 
+  it('returns 503 for degraded full health while preserving its response body', async () => {
+    const apiFetch = vi.fn(async () => Response.json({
+      status: 'degraded',
+      checks: { d1: { status: 'error' } },
+    }));
+    const response = await worker.fetch(
+      new Request('https://api.syrabit.ai/health/full'),
+      env({ API_WORKER: { fetch: apiFetch } }),
+      ctx(),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'degraded',
+      edge: { status: 'healthy' },
+      backend: { status: 'degraded' },
+    });
+  });
+
   it('serves R2 assets and keeps unknown non-API routes isolated', async () => {
     const missingAsset = await worker.fetch(
       new Request('https://api.syrabit.ai/assets/missing.js'),

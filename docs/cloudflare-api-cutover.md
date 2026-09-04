@@ -22,8 +22,11 @@ content seeding permanently blocked.
 
 ## Cloudflare-native release
 
-The Cloudflare migration can be deployed without the GCP release gate by
-manually running `.github/workflows/deploy-cloudflare.yml`. This path:
+`.github/workflows/deploy.yml` is the sole automatic production entrypoint and
+delegates to the canonical Cloudflare-native release implementation in
+`.github/workflows/deploy-cloudflare.yml`. The latter can also be dispatched
+manually when its optional authenticated/reset-delivery cutover checks are
+needed. This Cloudflare-only path:
 
 - validates the D1 configuration and runs the API, edge, and frontend quality
   gates;

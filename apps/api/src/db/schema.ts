@@ -454,6 +454,19 @@ export const contentAuditLog = sqliteTable('content_audit_log', {
   index('cal_expires_idx').on(t.expiresAt),
 ]);
 
+// Browser analytics is retained as a deliberately small, privacy-preserving
+// event ledger. Payloads are sanitized and bounded by the route before insert.
+export const analyticsEvents = sqliteTable('analytics_events', {
+  id: text('id').primaryKey(),
+  eventName: text('event_name').notNull(),
+  payload: text('payload').notNull().default('{}'),
+  routePath: text('route_path'),
+  createdAt: integer('created_at').default(sql`(unixepoch())`),
+}, (t) => [
+  index('analytics_events_name_created_idx').on(t.eventName, t.createdAt),
+  index('analytics_events_route_created_idx').on(t.routePath, t.createdAt),
+]);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // OPERATIONAL
 // ─────────────────────────────────────────────────────────────────────────────
@@ -475,6 +488,34 @@ export const emailAlertState = sqliteTable('email_alert_state', {
   id: text('id').primaryKey().default('singleton'),
   alertActive: integer('alert_active').default(0),
   lastAlertAt: integer('last_alert_at'),
+  updatedAt: integer('updated_at').default(sql`(unixepoch())`),
+});
+
+// Every scheduled invocation has one immutable execution record. The singleton
+// state gives an operator a durable indication of the current cron failure
+// condition without relying on an external alerting provider.
+export const cronRuns = sqliteTable('cron_runs', {
+  id: text('id').primaryKey(),
+  cronExpression: text('cron_expression').notNull(),
+  scheduledAt: integer('scheduled_at').notNull(),
+  startedAt: integer('started_at').notNull(),
+  completedAt: integer('completed_at'),
+  status: text('status').notNull(),                                    // running | succeeded | failed
+  failureCount: integer('failure_count').notNull().default(0),
+  errorSummary: text('error_summary'),
+}, (t) => [
+  index('cron_runs_expression_scheduled_idx').on(t.cronExpression, t.scheduledAt),
+  index('cron_runs_status_started_idx').on(t.status, t.startedAt),
+]);
+
+export const cronAlertState = sqliteTable('cron_alert_state', {
+  id: text('id').primaryKey().default('singleton'),
+  alertActive: integer('alert_active').notNull().default(0),
+  consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+  lastFailureAt: integer('last_failure_at'),
+  lastSuccessAt: integer('last_success_at'),
+  lastAlertAt: integer('last_alert_at'),
+  alertReason: text('alert_reason'),
   updatedAt: integer('updated_at').default(sql`(unixepoch())`),
 });
 

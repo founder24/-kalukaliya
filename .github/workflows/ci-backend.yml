@@ -1,4 +1,8 @@
-name: CI Backend — Lint & Test
+name: CI Retired Local Tooling — Lint & Test
+
+# apps/backend is retained for local AHSEC/Mongo tooling only. This workflow
+# performs static/test quality checks and contains no deployment credentials or
+# deployment step; Cloudflare Workers are the only production runtime.
 
 on:
   pull_request:

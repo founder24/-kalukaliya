@@ -6,6 +6,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from './index';
+import { sanitizeAnalyticsPayload } from './operations';
 import type { Env } from '../types';
 
 const chapterRows = [{
@@ -64,6 +65,62 @@ describe('Worker-native site-operation routes', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ status: 'ok' });
+  });
+
+  it('persists a bounded, sanitized analytics payload without storing PII', async () => {
+    const writes: { query: string; bindings: unknown[] }[] = [];
+    const database = {
+      prepare: (query: string) => {
+        let bindings: unknown[] = [];
+        const statement = {
+          bind: (...values: unknown[]) => {
+            bindings = values;
+            return statement;
+          },
+          run: async () => {
+            writes.push({ query, bindings });
+            return { meta: { changes: 1 } };
+          },
+          all: async () => ({ results: [] }),
+          first: async () => null,
+        };
+        return statement;
+      },
+    };
+    const env = { ...testEnv(), DB: database } as unknown as Env;
+
+    const response = await api.fetch(request('/api/v1/analytics/page-view', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path: '/physics?student_email=private@example.com',
+        email: 'private@example.com',
+        nested: { token: 'do-not-store', label: 'chapter' },
+      }),
+    }), env);
+
+    expect(response.status).toBe(200);
+    expect(writes).toHaveLength(1);
+    const write = writes[0]!;
+    expect(write.query).toContain('INSERT INTO analytics_events');
+    expect(JSON.parse(String(write.bindings[2]))).toEqual({
+      path: '/physics',
+      nested: { label: 'chapter' },
+    });
+    expect(write.bindings[3]).toBe('/physics');
+  });
+
+  it('bounds and removes sensitive values from custom analytics payloads', () => {
+    const payload = sanitizeAnalyticsPayload({
+      password: 'never persisted',
+      name: 'x'.repeat(600),
+      items: Array.from({ length: 30 }, (_, index) => index),
+    });
+
+    expect(payload).toEqual({
+      name: 'x'.repeat(512),
+      items: Array.from({ length: 20 }, (_, index) => index),
+    });
   });
 
   it('returns null for an intentionally unconfigured Trustpilot module', async () => {

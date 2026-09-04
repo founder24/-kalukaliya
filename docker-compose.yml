@@ -43,6 +43,9 @@ services:
       - syrabit-net
 
   backend:
+    # Retired production backend: this is retained solely for local legacy
+    # tooling. It cannot start as part of a normal compose invocation.
+    profiles: ["legacy-local"]
     build:
       context: ./apps/backend
       dockerfile: Dockerfile

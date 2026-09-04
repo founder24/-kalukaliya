@@ -17,8 +17,6 @@ import { Hono } from 'hono';
 import { applyCors } from './middleware/cors';
 import { api } from './routes/index';
 import type { Env } from './types';
-import { createDb } from './db/client';
-import { sql } from 'drizzle-orm';
 import { resumePublishJobs, resumeSeedRuns } from './routes/admin-content';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -62,49 +60,72 @@ app.onError((err, c) => {
 });
 
 // ── Scheduled handler (Cron Triggers) ─────────────────────────────────────────
-async function handleScheduled(controller: ScheduledController, env: Env): Promise<void> {
-  const db = createDb(env.DB);
+function cronErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message.slice(0, 512) : String(error).slice(0, 512);
+}
+
+export async function handleScheduled(controller: ScheduledController, env: Env): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const cronExpr = controller.cron;
+  const scheduledAt = Math.floor((controller.scheduledTime || Date.now()) / 1000);
+  const runId = crypto.randomUUID();
+  const failures: string[] = [];
+
+  // An execution record begins before work so an interrupted invocation remains
+  // visible as running rather than silently disappearing.
+  try {
+    await env.DB.prepare(`
+      INSERT INTO cron_runs (id, cron_expression, scheduled_at, started_at, status)
+      VALUES (?, ?, ?, ?, 'running')
+    `).bind(runId, cronExpr, scheduledAt, now).run();
+  } catch (err) {
+    console.error('[cron] could not create execution record:', err);
+  }
+
+  const runTask = async (name: string, task: () => Promise<unknown>): Promise<void> => {
+    try {
+      await task();
+    } catch (err) {
+      const message = cronErrorMessage(err);
+      failures.push(`${name}: ${message}`);
+      console.error(`[cron] ${name} error:`, err);
+    }
+  };
+
   // Resume D1-backed seed plans independently of any request lifetime.
-  await resumeSeedRuns(env).catch(err => console.error('[cron] seed resume error:', err));
-  await resumePublishJobs(env).catch(err => console.error('[cron] publish resume error:', err));
+  await runTask('seed resume', () => resumeSeedRuns(env));
+  await runTask('publish resume', () => resumePublishJobs(env));
 
   // ── Hourly: clean up expired TTL records ──────────────────────────────────
   if (cronExpr === '0 * * * *') {
-    try {
-      const tables = [
-        'email_failure_events',
-        'payments_pending',
-        'password_reset_tokens',
-        'refresh_token_claims',
-        'ai_usage_logs',
-        'chat_feedback',
-        'dead_letters',
-        'content_audit_log',
-        'seed_runs',
-        'chats',
-        'chat_request_claims',
-      ];
+    const tables = [
+      'email_failure_events',
+      'payments_pending',
+      'password_reset_tokens',
+      'refresh_token_claims',
+      'ai_usage_logs',
+      'chat_feedback',
+      'dead_letters',
+      'content_audit_log',
+      'seed_runs',
+      'chats',
+      'chat_request_claims',
+    ];
 
-      for (const table of tables) {
+    for (const table of tables) {
+      await runTask(`TTL cleanup for ${table}`, async () => {
         await env.DB.prepare(
           `DELETE FROM ${table} WHERE expires_at IS NOT NULL AND expires_at < ?`
-        ).bind(now).run().catch((e: unknown) => {
-          console.warn(`[cron] TTL cleanup failed for ${table}:`, e);
-        });
-      }
-
-      console.log('[cron] TTL cleanup complete');
-    } catch (err) {
-      console.error('[cron] TTL cleanup error:', err);
+        ).bind(now).run();
+      });
     }
+    if (failures.length === 0) console.log('[cron] TTL cleanup complete');
   }
 
   // ── Daily: reset monthly message counts, expire subscriptions ────────────
   if (cronExpr === '0 0 * * *') {
-    try {
-      // Reset monthly counts for users whose last_reset_date was in a previous month
+    // Reset monthly counts for users whose last_reset_date was in a previous month
+    await runTask('monthly usage reset', async () => {
       const startOfMonth = new Date();
       startOfMonth.setUTCDate(1);
       startOfMonth.setUTCHours(0, 0, 0, 0);
@@ -116,8 +137,10 @@ async function handleScheduled(controller: ScheduledController, env: Env): Promi
             last_reset_date = ?
         WHERE last_reset_date < ?
       `).bind(now, startOfMonthTs).run();
+    });
 
-      // Expire subscriptions whose period has ended
+    // Expire subscriptions whose period has ended
+    await runTask('subscription expiry', async () => {
       await env.DB.prepare(`
         UPDATE users
         SET subscription_tier = 'free',
@@ -127,11 +150,55 @@ async function handleScheduled(controller: ScheduledController, env: Env): Promi
           AND current_period_end < ?
           AND subscription_tier != 'free'
       `).bind(now).run();
+    });
 
-      console.log('[cron] Daily maintenance complete');
-    } catch (err) {
-      console.error('[cron] Daily maintenance error:', err);
-    }
+    if (failures.length === 0) console.log('[cron] Daily maintenance complete');
+  }
+
+  const completedAt = Math.floor(Date.now() / 1000);
+  const failed = failures.length > 0;
+  const errorSummary = failed ? failures.join('\n').slice(0, 2_048) : null;
+  try {
+    await env.DB.prepare(`
+      UPDATE cron_runs
+      SET completed_at = ?, status = ?, failure_count = ?, error_summary = ?
+      WHERE id = ?
+    `).bind(completedAt, failed ? 'failed' : 'succeeded', failures.length, errorSummary, runId).run();
+
+    await env.DB.prepare(`
+      INSERT INTO cron_alert_state (
+        id, alert_active, consecutive_failures, last_failure_at, last_success_at,
+        last_alert_at, alert_reason, updated_at
+      ) VALUES ('singleton', ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        alert_active = excluded.alert_active,
+        consecutive_failures = CASE
+          WHEN excluded.alert_active = 1 THEN cron_alert_state.consecutive_failures + 1
+          ELSE 0
+        END,
+        last_failure_at = CASE WHEN excluded.alert_active = 1 THEN excluded.last_failure_at ELSE cron_alert_state.last_failure_at END,
+        last_success_at = CASE WHEN excluded.alert_active = 0 THEN excluded.last_success_at ELSE cron_alert_state.last_success_at END,
+        last_alert_at = CASE
+          WHEN excluded.alert_active = 1
+            AND (cron_alert_state.alert_active = 0
+              OR cron_alert_state.last_alert_at IS NULL
+              OR cron_alert_state.last_alert_at < excluded.last_failure_at - 600)
+          THEN excluded.last_failure_at
+          ELSE cron_alert_state.last_alert_at
+        END,
+        alert_reason = CASE WHEN excluded.alert_active = 1 THEN excluded.alert_reason ELSE NULL END,
+        updated_at = excluded.updated_at
+    `).bind(
+      failed ? 1 : 0,
+      failed ? 1 : 0,
+      failed ? completedAt : null,
+      failed ? null : completedAt,
+      failed ? completedAt : null,
+      errorSummary,
+      completedAt,
+    ).run();
+  } catch (err) {
+    console.error('[cron] could not finalize execution record:', err);
   }
 }
 

@@ -11,13 +11,14 @@ Syrabit.ai helps students prepare for SEBA, AHSEC, Degree, and related board exa
 
 ## What This Repo Contains
 
-This is a full-stack monorepo with three main runtime surfaces:
+This is a Cloudflare-production monorepo with three deployed runtime surfaces
+and one retained local-tooling directory:
 
 | App | Path | Stack | Purpose |
 | --- | --- | --- | --- |
 | Frontend | `apps/frontend` | React 18, Vite, Tailwind, React Router | Student app, public pages, library, chat, profile, admin, staff UI |
 | API | `apps/api` | Cloudflare Workers, Hono, D1 | Production auth, chat/RAG, content, payments, admin/staff services |
-| Backend tools | `apps/backend` | FastAPI/Python utilities | Local ingestion, migration, and retained offline reporting tools |
+| Retired backend tools | `apps/backend` | FastAPI/Python utilities | Local AHSEC ingestion, migration, and retained offline reporting only; never deployed |
 | Edge | `apps/edge` | Cloudflare Workers, TypeScript | API shield, rate limiting, caching, ISR/content routes, API service binding |
 
 Local support services are defined in `docker-compose.yml`:
@@ -25,7 +26,7 @@ Local support services are defined in `docker-compose.yml`:
 - MongoDB 7
 - Redis 7
 - Redis REST bridge compatible with Upstash-style calls
-- Optional backend container
+- Retired local backend container (only with `--profile legacy-local`)
 
 ## Highlights
 
@@ -119,7 +120,7 @@ Provider keys such as `SARVAM_API_KEY`, `GEMINI_API_KEY`, `RAZORPAY_KEY_ID`, `RE
 docker compose up -d mongo redis redis-rest
 ```
 
-### 4. Run the Backend
+### 4. Optional: Run retired local backend tooling
 
 ```bash
 cd apps/backend
@@ -151,7 +152,9 @@ In a third terminal:
 pnpm --filter syrabit-edge run dev
 ```
 
-The worker defaults to `http://localhost:8787` and proxies backend traffic to `http://localhost:8000`.
+The worker defaults to `http://localhost:8787`. The legacy local backend is
+available only when explicitly started with
+`docker compose --profile legacy-local up backend`.
 
 ## Common Commands
 
@@ -266,8 +269,10 @@ Core areas:
 - `drizzle` - D1 schema and migrations
 - `middleware` - authentication, CORS, and request controls
 
-`apps/backend` remains available for local/offline ingestion and the retained
-MongoDB-dependent accuracy report; it is not a production request runtime.
+`apps/backend` is retired from production and remains only for local/offline
+ingestion (including the AHSEC D1 importer) and the retained MongoDB-dependent
+accuracy report. It is not a production request runtime and has no deploy
+workflow.
 
 ## Edge Worker Overview
 
@@ -332,7 +337,10 @@ Production worker configuration lives in `apps/edge/wrangler.toml`.
 GitHub Actions workflows live in `.github/workflows`, including:
 
 - Frontend, API Worker, and edge CI
-- Full deploy workflows
+- `.github/workflows/deploy.yml`, the sole automatic production entrypoint;
+  it delegates to the canonical Cloudflare-native release validation and
+  deployment workflow. No GitHub Actions workflow deploys `apps/backend`,
+  Cloud Run, or Azure Container Apps.
 - Smoke tests
 - Uptime monitoring
 - Security, dependency, container, drift, and performance checks

@@ -1,7 +1,9 @@
 name: Deploy — Cloudflare Native
 
-# Production releases are Cloudflare-native: API Worker, edge Worker, Pages,
-# and smoke tests. There is no alternate backend deployment path.
+# This is the only push/tag production entrypoint. The complete release
+# implementation lives in deploy-cloudflare.yml and is called below so manual
+# and automatic releases cannot drift. Cloud Run, Azure Container Apps, and
+# apps/backend are local/offline tooling only and cannot be deployed here.
 on:
   push:
     branches: [main]
@@ -13,17 +15,21 @@ on:
       skip_dep_check:
         description: 'Skip dependency sync check (emergency deploy only)'
         required: false
-        default: 'false'
+        default: false
+        type: boolean
+      validate_authenticated:
+        description: 'Require disposable authenticated API checks after deployment'
+        required: false
+        default: false
+        type: boolean
+      validate_reset_delivery:
+        description: 'Require a fresh disposable password-reset email proof after deployment'
+        required: false
+        default: false
         type: boolean
 
 permissions:
   contents: read
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  API_WORKER_URL: https://syrabit-api-prod.axomxplain.workers.dev
-  PUBLIC_EDGE_URL: https://api.syrabit.ai
-  FRONTEND_URL: https://syrabit.ai
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -32,186 +38,15 @@ concurrency:
 jobs:
   dep-check:
     name: Dependency Gate
-    if: ${{ github.event.inputs.skip_dep_check != 'true' }}
+    if: ${{ inputs.skip_dep_check != true }}
     uses: ./.github/workflows/ci-deps.yml
 
-  cloudflare-preflight:
-    name: Cloudflare Release Secret Preflight
-    runs-on: ubuntu-latest
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET }}
-      ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
-      RESET_TOKEN_SECRET: ${{ secrets.RESET_TOKEN_SECRET }}
-      EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
-      RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
-      RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
-      RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-    steps:
-      - name: Validate Cloudflare deployment and Worker secrets
-        run: |
-          set -euo pipefail
-          required=(
-            CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
-            JWT_SECRET ADMIN_JWT_SECRET RESET_TOKEN_SECRET EDGE_SHARED_SECRET
-            RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET
-            RESEND_API_KEY
-          )
-          missing=()
-          for name in "${required[@]}"; do
-            [[ -n "${!name:-}" ]] || missing+=("$name")
-          done
-          if ((${#missing[@]} > 0)); then
-            echo "::error::Required Cloudflare release secrets are not supplied: ${missing[*]}"
-            exit 1
-          fi
-
-  deploy-api:
-    name: Deploy API Worker (Cloudflare D1 + Hono)
-    runs-on: ubuntu-latest
-    needs: [dep-check, cloudflare-preflight]
-    if: |
-      always() &&
-      (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
-      needs.cloudflare-preflight.result == 'success'
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Enable Corepack + PNPM
-        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Check D1 configuration
-        run: bash scripts/validate-d1-config.sh apps/api/wrangler.toml
-      - name: Run D1 round-trip tests
-        run: pnpm --filter syrabit-api test
-      - name: TypeScript type-check
-        run: pnpm --filter syrabit-api run type-check
-      - name: Apply D1 migrations (remote)
-        run: pnpm --filter syrabit-api exec wrangler d1 migrations apply syrabit-db --remote --env production
-      - name: Provision API Worker secrets from GitHub
-        working-directory: apps/api
-        env:
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
-          RESET_TOKEN_SECRET: ${{ secrets.RESET_TOKEN_SECRET }}
-          EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
-          RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
-          RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
-          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-        run: |
-          set -euo pipefail
-          for name in JWT_SECRET ADMIN_JWT_SECRET RESET_TOKEN_SECRET EDGE_SHARED_SECRET RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET RESEND_API_KEY; do
-            value="${!name:-}"
-            [[ -n "$value" ]] || { echo "::error::$name is required for the API Worker release."; exit 1; }
-            printf '%s' "$value" | pnpm exec wrangler secret put "$name" --env production >/dev/null
-          done
-      - name: Deploy API Worker
-        run: pnpm --filter syrabit-api run deploy
-
-  deploy-edge:
-    name: Deploy Edge (Cloudflare Worker)
-    runs-on: ubuntu-latest
-    needs: [dep-check, cloudflare-preflight, deploy-api]
-    if: |
-      always() &&
-      (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
-      needs.cloudflare-preflight.result == 'success' &&
-      needs.deploy-api.result == 'success'
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Enable Corepack + PNPM
-        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Guard configured KV namespaces
-        run: |
-          ! grep -v '^\s*#' apps/edge/wrangler.toml | grep -qi 'REPLACE_ME'
-      - name: Provision edge secrets from GitHub
-        working-directory: apps/edge
-        env:
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
-        run: |
-          set -euo pipefail
-          for name in JWT_SECRET EDGE_SHARED_SECRET; do
-            value="${!name:-}"
-            [[ -n "$value" ]] || { echo "::error::$name is required for the edge Worker release."; exit 1; }
-            printf '%s' "$value" | pnpm exec wrangler secret put "$name" --env production >/dev/null
-          done
-      - name: Deploy edge Worker
-        run: pnpm --filter syrabit-edge exec wrangler deploy --env production
-
-  deploy-frontend:
-    name: Deploy Frontend (Cloudflare Pages)
-    runs-on: ubuntu-latest
-    needs: [dep-check, cloudflare-preflight]
-    if: |
-      always() &&
-      (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') &&
-      needs.cloudflare-preflight.result == 'success'
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-      INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Enable Corepack + PNPM
-        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Build
-        run: pnpm --filter @workspace/syrabit run build
-        env:
-          VITE_BACKEND_URL: https://api.syrabit.ai
-      - name: Deploy to Cloudflare Pages
-        run: |
-          cd apps/edge
-          pnpm exec wrangler pages deploy ../frontend/dist --project-name=syrabitfrontend
-      - name: Submit URLs to IndexNow
-        if: ${{ env.INDEXNOW_SECRET != '' }}
-        run: node apps/frontend/scripts/indexnow-submit.mjs
-
-  smoke-test:
-    name: Cloudflare Native Smoke Tests
-    runs-on: ubuntu-latest
-    needs: [deploy-api, deploy-edge, deploy-frontend]
-    if: |
-      always() &&
-      needs.deploy-api.result == 'success' &&
-      needs.deploy-edge.result == 'success' &&
-      needs.deploy-frontend.result == 'success'
-    steps:
-      - name: API Worker is healthy in required native mode
-        run: |
-          set -euo pipefail
-          status="$(curl -sS -D /tmp/api.headers -o /tmp/api.json -w '%{http_code}' "${API_WORKER_URL}/health" --max-time 30)"
-          test "$status" = "200"
-          grep -qi '^x-syrabit-route: worker-native' /tmp/api.headers
-      - name: Public edge routes to the API Worker
-        run: |
-          set -euo pipefail
-          status="$(curl -sS -D /tmp/edge.headers -o /tmp/edge.json -w '%{http_code}' "${PUBLIC_EDGE_URL}/health" --max-time 30)"
-          test "$status" = "200"
-          grep -qi '^x-syrabit-health-backend: api-worker' /tmp/edge.headers
-      - name: Frontend is reachable
-        run: |
-          status="$(curl -sS -L -o /dev/null -w '%{http_code}' "${FRONTEND_URL}" --max-time 30)"
-          test "$status" = "200"
+  cloudflare-release:
+    name: Cloudflare Native Release
+    needs: dep-check
+    if: ${{ always() && (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-cloudflare.yml
+    with:
+      validate_authenticated: ${{ inputs.validate_authenticated }}
+      validate_reset_delivery: ${{ inputs.validate_reset_delivery }}
+    secrets: inherit
