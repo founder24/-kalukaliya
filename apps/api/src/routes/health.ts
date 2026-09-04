@@ -63,6 +63,27 @@ export async function runDeepHealthChecks(env: Env): Promise<{
   const probes: Array<[string, keyof Env, () => Promise<unknown>]> = [
     ['d1', 'DB', () => env.DB.prepare('SELECT 1').first()],
     [
+      'cron_operations',
+      'DB',
+      async () => {
+        const state = await env.DB.prepare(`
+          SELECT alert_active, consecutive_failures, alert_reason
+          FROM cron_alert_state
+          WHERE id = 'singleton'
+        `).first<{
+          alert_active: number;
+          consecutive_failures: number;
+          alert_reason: string | null;
+        }>();
+        if (state?.alert_active === 1) {
+          throw new Error(
+            `scheduled operations alert active after ${state.consecutive_failures} failure(s)`
+            + (state.alert_reason ? `: ${state.alert_reason.slice(0, 256)}` : ''),
+          );
+        }
+      },
+    ],
+    [
       'workers_ai',
       'AI',
       () => env.AI.run('@cf/baai/bge-m3' as any, { text: ['health probe'] }),

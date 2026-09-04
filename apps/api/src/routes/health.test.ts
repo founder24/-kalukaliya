@@ -32,7 +32,7 @@ describe('API Worker deep health', () => {
     expect(payload.missing_bindings).toEqual([]);
     expect(payload.mutation_free).toBe(true);
     expect(Object.keys(payload.checks).sort()).toEqual(
-      ['content_kv', 'd1', 'r2', 'rate_limit_kv', 'vectorize', 'workers_ai'].sort(),
+      ['content_kv', 'cron_operations', 'd1', 'r2', 'rate_limit_kv', 'vectorize', 'workers_ai'].sort(),
     );
     expect(env.AI.run).toHaveBeenCalledWith('@cf/baai/bge-m3', { text: ['health probe'] });
     expect(env.R2_BUCKET.head).toHaveBeenCalledWith('__health_probe__');
@@ -51,6 +51,29 @@ describe('API Worker deep health', () => {
     expect(payload.status).toBe('degraded');
     expect(payload.missing_bindings).toContain('VECTORIZE');
     expect(payload.checks.vectorize.status).toBe('unbound');
+  });
+
+  it('returns 503 while a durable cron outage alert is active', async () => {
+    const env = healthyEnv();
+    env.DB = {
+      prepare: vi.fn((query: string) => ({
+        first: vi.fn(async () => query.includes('cron_alert_state')
+          ? {
+              alert_active: 1,
+              consecutive_failures: 2,
+              alert_reason: 'publish resume: storage unavailable',
+            }
+          : { 1: 1 }),
+      })),
+    } as unknown as D1Database;
+
+    const response = await healthRouter.fetch(deepRequest(), env);
+    const payload = await response.json() as Record<string, any>;
+
+    expect(response.status).toBe(503);
+    expect(payload.status).toBe('degraded');
+    expect(payload.checks.cron_operations.status).toBe('error');
+    expect(payload.checks.cron_operations.detail).toContain('2 failure(s)');
   });
 
   it('bounds a stalled dependency probe', async () => {
