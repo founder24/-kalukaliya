@@ -64,7 +64,7 @@ request "$API_WORKER/health" "200" "x-syrabit-route: worker-native"
 request "$API/health" "200" "x-syrabit-health-backend: api-worker"
 request "$API/api/v1/auth/me" "401" "x-syrabit-route: worker-native"
 request "$API/api/v1/users/me" "401" "x-syrabit-route: worker-native"
-request "$API/api/v1/payments/history" "401" "x-syrabit-route: worker-native"
+request "$API/api/v1/payments/history" "410" "x-syrabit-route: worker-native"
 request "$API/api/v1/content/library-bundle?slim=1" "200" "x-syrabit-route: worker-native"
 request "$FE/" "200 301"
 

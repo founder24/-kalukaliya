@@ -10,7 +10,7 @@ const FEATURES = {
     { icon: BookOpen, title: 'Structured Subject Browser', desc: 'Every chapter across AssamBoard divisions (AHSEC, DEGREE, SEBA) organized by class and stream — so you always know where to start.', gradient: 'linear-gradient(135deg,#2563eb,#06b6d4)', glow: 'rgba(59,130,246,0.18)', border: 'rgba(59,130,246,0.15)' },
     { icon: Layers, title: 'Multi-format Content', desc: 'Notes, solved examples, formulas, PYQ insights, and chapter summaries — all formats exam boards love.', gradient: 'linear-gradient(135deg,#059669,#22c55e)', glow: 'rgba(16,185,129,0.18)', border: 'rgba(16,185,129,0.15)' },
     { icon: Clock, title: 'Chat History', desc: 'Every conversation auto-saved and searchable. Revisit any explanation without starting over.', gradient: 'linear-gradient(135deg,#f97316,#fbbf24)', glow: 'rgba(245,158,11,0.18)', border: 'rgba(245,158,11,0.15)' },
-    { icon: BarChart3, title: 'Credit System', desc: 'Transparent usage tracking. Starter (500/day, ₹99) or Pro (4,000/day, ₹999) — credits reset daily at midnight UTC.', gradient: 'linear-gradient(135deg,#db2777,#f43f5e)', glow: 'rgba(244,63,94,0.18)', border: 'rgba(244,63,94,0.15)' },
+    { icon: BarChart3, title: 'Free Daily Access', desc: 'Use 30 AI messages every day at no cost. Your allowance resets automatically each day, supported by clearly labeled advertising.', gradient: 'linear-gradient(135deg,#db2777,#f43f5e)', glow: 'rgba(244,63,94,0.18)', border: 'rgba(244,63,94,0.15)' },
     { icon: Shield, title: 'Secure & Private', desc: 'Your study data is encrypted, never sold, and never shared. Study without surveillance.', gradient: 'linear-gradient(135deg,#4f46e5,#8b5cf6)', glow: 'rgba(99,102,241,0.18)', border: 'rgba(99,102,241,0.15)' },
   ],
   as: [
@@ -18,19 +18,19 @@ const FEATURES = {
     { icon: BookOpen, title: 'গাঁথনিমূলক বিষয় ব্ৰাউজাৰ', desc: 'অসম বোৰ্ডৰ সকলো বিভাগৰ (AHSEC, DEGREE, SEBA) প্ৰতিটো অধ্যায় শ্ৰেণী আৰু শাখা অনুসৰি সজোৱা — যাতে আপুনি সদায় ক\'ৰ পৰা আৰম্ভ কৰিব জানে।', gradient: 'linear-gradient(135deg,#2563eb,#06b6d4)', glow: 'rgba(59,130,246,0.18)', border: 'rgba(59,130,246,0.15)' },
     { icon: Layers, title: 'বহু-ফৰ্মেট বিষয়বস্তু', desc: 'টোকা, সমাধান কৰা উদাহৰণ, সূত্ৰ, PYQ অন্তৰ্দৃষ্টি, আৰু অধ্যায়ৰ সাৰাংশ — পৰীক্ষা বোৰ্ডে পছন্দ কৰা সকলো ফৰ্মেট।', gradient: 'linear-gradient(135deg,#059669,#22c55e)', glow: 'rgba(16,185,129,0.18)', border: 'rgba(16,185,129,0.15)' },
     { icon: Clock, title: 'চেট ইতিহাস', desc: 'প্ৰতিটো কথোপকথন স্বয়ংক্ৰিয়ভাৱে সংৰক্ষিত আৰু সন্ধানযোগ্য। নতুনকৈ আৰম্ভ নকৰাকৈ যিকোনো ব্যাখ্যা পুনৰ চাওক।', gradient: 'linear-gradient(135deg,#f97316,#fbbf24)', glow: 'rgba(245,158,11,0.18)', border: 'rgba(245,158,11,0.15)' },
-    { icon: BarChart3, title: 'ক্ৰেডিট ব্যৱস্থা', desc: 'স্বচ্ছ ব্যৱহাৰ ট্ৰেকিং। Starter (৫০০/দিন, ₹৯৯) বা Pro (৪,০০০/দিন, ₹৯৯৯) — ক্ৰেডিট প্ৰতিদিন মাজনিশা UTC-ত ৰিছেট হয়।', gradient: 'linear-gradient(135deg,#db2777,#f43f5e)', glow: 'rgba(244,63,94,0.18)', border: 'rgba(244,63,94,0.15)' },
+    { icon: BarChart3, title: 'প্ৰতিদিন বিনামূলীয়া ব্যৱহাৰ', desc: 'প্ৰতিদিন বিনামূলীয়াকৈ ৩০টা AI বাৰ্তা ব্যৱহাৰ কৰক। স্পষ্টভাৱে চিহ্নিত বিজ্ঞাপনৰ সহায়ত আপোনাৰ সীমা প্ৰতিদিন স্বয়ংক্ৰিয়ভাৱে ৰিছেট হয়।', gradient: 'linear-gradient(135deg,#db2777,#f43f5e)', glow: 'rgba(244,63,94,0.18)', border: 'rgba(244,63,94,0.15)' },
     { icon: Shield, title: 'সুৰক্ষিত আৰু ব্যক্তিগত', desc: 'আপোনাৰ অধ্যয়নৰ তথ্য এনক্ৰিপ্ট কৰা হয়, কেতিয়াও বিক্ৰী কৰা নহয়, আৰু কেতিয়াও শ্বেয়াৰ কৰা নহয়।', gradient: 'linear-gradient(135deg,#4f46e5,#8b5cf6)', glow: 'rgba(99,102,241,0.18)', border: 'rgba(99,102,241,0.15)' },
   ],
 };
 
 const STEPS = {
   en: [
-    { num: '01', title: 'Create your free account', desc: 'Sign up in under 30 seconds with email — no credit card needed. Get Starter (300 credits) for ₹99 or Pro (4000 credits) for ₹999.', icon: GraduationCap },
+    { num: '01', title: 'Create your free account', desc: 'Sign up in under 30 seconds with email — no credit card or payment needed. Your free AI allowance resets every day.', icon: GraduationCap },
     { num: '02', title: 'Pick your subject', desc: "Browse the library by board, class, and stream. Save subjects you're preparing for and jump straight into the material.", icon: BookOpen },
     { num: '03', title: 'Ask Syra — your study companion', desc: 'Ask anything about your syllabus. Syra responds with grounded answers, worked examples, formulas, and PYQ insights — instantly.', icon: MessageSquare },
   ],
   as: [
-    { num: '01', title: 'আপোনাৰ বিনামূলীয়া একাউণ্ট তৈয়াৰ কৰক', desc: 'ইমেইলেৰে ৩০ ছেকেণ্ডতকৈ কম সময়ত চাইন আপ কৰক — ক্ৰেডিট কাৰ্ডৰ প্ৰয়োজন নাই। ₹৯৯-ত Starter (৩০০ ক্ৰেডিট) বা ₹৯৯৯-ত Pro (৪০০০ ক্ৰেডিট) পাওক।', icon: GraduationCap },
+    { num: '01', title: 'আপোনাৰ বিনামূলীয়া একাউণ্ট তৈয়াৰ কৰক', desc: 'ইমেইলেৰে ৩০ ছেকেণ্ডতকৈ কম সময়ত চাইন আপ কৰক — ক্ৰেডিট কাৰ্ড বা পৰিশোধৰ প্ৰয়োজন নাই। আপোনাৰ বিনামূলীয়া AI সীমা প্ৰতিদিন ৰিছেট হয়।', icon: GraduationCap },
     { num: '02', title: 'আপোনাৰ বিষয় বাছনি কৰক', desc: 'বোৰ্ড, শ্ৰেণী, আৰু শাখা অনুসৰি লাইব্ৰেৰী ব্ৰাউজ কৰক। আপুনি প্ৰস্তুতি লোৱা বিষয়বোৰ সংৰক্ষণ কৰক আৰু পোনে পোনে সামগ্ৰীত যাওক।', icon: BookOpen },
     { num: '03', title: 'Syra-ক সোধক — আপোনাৰ অধ্যয়ন সংগী', desc: 'আপোনাৰ পাঠ্যক্ৰমৰ বিষয়ে যিকোনো কথা সোধক। Syra-ই ভিত্তিযুক্ত উত্তৰ, সমাধান কৰা উদাহৰণ, সূত্ৰ, আৰু PYQ অন্তৰ্দৃষ্টি তাৎক্ষণিকভাৱে প্ৰদান কৰে।', icon: MessageSquare },
   ],

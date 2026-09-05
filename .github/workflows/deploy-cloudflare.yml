@@ -54,9 +54,6 @@ jobs:
       ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
       RESET_TOKEN_SECRET: ${{ secrets.RESET_TOKEN_SECRET }}
       EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
-      RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
-      RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
-      RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
       INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
@@ -93,7 +90,6 @@ jobs:
           set -euo pipefail
           required=(
             JWT_SECRET ADMIN_JWT_SECRET RESET_TOKEN_SECRET EDGE_SHARED_SECRET
-            RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET
             RESEND_API_KEY
           )
           missing=()
@@ -151,9 +147,6 @@ jobs:
           ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
           RESET_TOKEN_SECRET: ${{ secrets.RESET_TOKEN_SECRET }}
           EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
-          RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
-          RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
-          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
           INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
@@ -183,9 +176,6 @@ jobs:
           put_required_secret ADMIN_JWT_SECRET "$ADMIN_JWT_SECRET"
           put_required_secret RESET_TOKEN_SECRET "$RESET_TOKEN_SECRET"
           put_required_secret EDGE_SHARED_SECRET "$EDGE_SHARED_SECRET"
-          put_required_secret RAZORPAY_KEY_ID "$RAZORPAY_KEY_ID"
-          put_required_secret RAZORPAY_KEY_SECRET "$RAZORPAY_KEY_SECRET"
-          put_required_secret RAZORPAY_WEBHOOK_SECRET "$RAZORPAY_WEBHOOK_SECRET"
           put_required_secret RESEND_API_KEY "$RESEND_API_KEY"
           put_optional_secret INDEXNOW_API_KEY "$INDEXNOW_API_KEY"
           put_optional_secret INDEXNOW_INTERNAL_SECRET "$INDEXNOW_INTERNAL_SECRET"
@@ -201,8 +191,7 @@ jobs:
           import sys
           required = {
               "JWT_SECRET", "ADMIN_JWT_SECRET", "RESET_TOKEN_SECRET",
-              "EDGE_SHARED_SECRET", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET",
-              "RAZORPAY_WEBHOOK_SECRET", "RESEND_API_KEY",
+              "EDGE_SHARED_SECRET", "RESEND_API_KEY",
           }
           configured = {item["name"] for item in json.load(sys.stdin)}
           missing = sorted(required - configured)
@@ -585,9 +574,6 @@ jobs:
           STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
           STAFF_TOKEN: ${{ secrets.CUTOVER_STAFF_TOKEN }}
           ADMIN_SESSION_TOKEN: ${{ secrets.CUTOVER_ADMIN_SESSION_TOKEN }}
-          CUTOVER_PAYMENT_TOKEN: ${{ secrets.CUTOVER_PAYMENT_TOKEN }}
-          RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
-          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
           EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
           TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}

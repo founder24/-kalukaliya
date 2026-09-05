@@ -398,7 +398,7 @@ export function InputBar({
                 : isOutOfCredits
                 ? (isAnon
                     ? 'Sign in to keep chatting…'
-                    : 'No credits — upgrade to continue')
+                    : 'Free daily messages used — resets at midnight UTC')
                 : activeChapter
                 ? (responseLang === 'as'
                     ? `${activeChapter.title} সম্পৰ্কে সুধিব…`

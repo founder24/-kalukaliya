@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import AdminQuickLinks from './AdminQuickLinks';
 import { Loader2, RefreshCw } from 'lucide-react';
 import axios from 'axios';
-import { adminGetAnalytics, adminGetRevenue, adminGetPredictor,
+import { adminGetAnalytics, adminGetPredictor,
   adminGetGA4Status, adminGetGA4AuthUrl, adminTestGA4, API_BASE,
   pageConversions, adminGetDailyAnalytics } from '@/utils/api';
 import { toast } from 'sonner';
@@ -11,7 +11,6 @@ import DailyStatsTab from './analytics/DailyStatsTab';
 import FunnelTab from './analytics/FunnelTab';
 import HeatmapTab from './analytics/HeatmapTab';
 import SeoPagesTab from './analytics/SeoPagesTab';
-import RevenueTab from './analytics/RevenueTab';
 import PredictionsTab from './analytics/PredictionsTab';
 import ConversionsTab from './analytics/ConversionsTab';
 import ContentCardViewsTab from './analytics/ContentCardViewsTab';
@@ -23,7 +22,6 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
   const [data, setData]         = useState(null);
   const [funnel, setFunnel]     = useState(null);
   const [heatmap, setHeatmap]   = useState(null);
-  const [revenue, setRevenue]   = useState(null);
   const [predict, setPredict]   = useState(null);
   const [ga4Status, setGa4Status] = useState(null);
   const [loading, setLoading]   = useState(true);
@@ -43,15 +41,10 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true); else setRefreshing(true);
-    const [r1, r2, r3, r4, r5, r6] = await Promise.allSettled([
+    const [r1, r2, r3, r4, r5] = await Promise.allSettled([
       adminGetAnalytics(adminToken, overviewDays),
       axios.get(`${API_BASE}/admin/analytics/funnel`, h),
       axios.get(`${API_BASE}/admin/analytics/content-heatmap`, h),
-      // Daily-revenue chart and cohort split follow the page's range
-      // selector. (Top-line MRR/Predicted MRR come from the predictor
-      // endpoint and are intentionally range-agnostic — MRR is a
-      // 30-day SaaS metric by definition.)
-      adminGetRevenue(adminToken, overviewDays),
       adminGetPredictor(adminToken),
       adminGetGA4Status(adminToken),
     ]);
@@ -59,9 +52,8 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
     if (r1.status === 'fulfilled') setData(r1.value.data); else { errs.overview = true; setData(null); }
     if (r2.status === 'fulfilled') setFunnel(r2.value.data); else { errs.funnel = true; setFunnel(null); }
     if (r3.status === 'fulfilled') setHeatmap(r3.value.data); else { errs.heatmap = true; setHeatmap(null); }
-    if (r4.status === 'fulfilled') setRevenue(r4.value.data); else { errs.revenue = true; setRevenue(null); }
-    if (r5.status === 'fulfilled') setPredict(r5.value.data); else { errs.predictions = true; setPredict(null); }
-    if (r6.status === 'fulfilled') setGa4Status(r6.value.data); else errs.ga4 = true;
+    if (r4.status === 'fulfilled') setPredict(r4.value.data); else { errs.predictions = true; setPredict(null); }
+    if (r5.status === 'fulfilled') setGa4Status(r5.value.data); else errs.ga4 = true;
     setWidgetErrors(errs);
     setLastRefresh(new Date());
     setLoading(false);
@@ -142,11 +134,6 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
   const mrr         = predict?.current_mrr_inr || 0;
   const predicted   = predict?.predicted_mrr_inr || 0;
   const growth      = predict?.growth_rate_pct || 0;
-  const cohorts     = revenue?.cohorts || {};
-  const dailyRev    = revenue?.daily_revenue || [];
-  const paidUsers   = funnel?.funnel?.find(f => f.stage === 'Paid User')?.count || 0;
-  const arpu        = paidUsers > 0 ? Math.round(mrr / paidUsers) : 0;
-  const ltv         = arpu > 0 ? Math.round(arpu * 12) : 0;
   const topSubject  = heatmap?.top_subjects?.[0];
   const topSearch   = heatmap?.top_searches?.[0];
   const aiInsight   = topSubject
@@ -154,7 +141,6 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
     : topSearch
     ? `Top search query: "${topSearch.query}" — consider generating dedicated SEO pages for it.`
     : null;
-  const cohortData = Object.entries(cohorts).map(([plan, count]) => ({ plan, count }));
 
   const TABS = [
     { id: 'overview',  label: 'Overview' },
@@ -163,7 +149,6 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
     { id: 'heatmap',   label: 'Heatmap' },
     { id: 'cardviews', label: 'Card Views' },
     { id: 'seo',       label: 'SEO & Pages' },
-    { id: 'revenue',   label: 'Revenue' },
     { id: 'predict',   label: 'Predictions' },
     { id: 'pages',     label: 'Page Conversions' },
     { id: 'actions',   label: 'Admin Actions' },
@@ -211,7 +196,7 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
 
         {tab === 'overview' && (
           <OverviewTab data={data} vs={vs} widgetErrors={widgetErrors} load={load}
-            mrr={mrr} predicted={predicted} growth={growth} arpu={arpu} ltv={ltv}
+            mrr={mrr} predicted={predicted} growth={growth}
             cfConnected={data?.cf_connected}
             overviewDays={overviewDays} setOverviewDays={setOverviewDays}
             adminToken={adminToken} />
@@ -239,13 +224,6 @@ export default function AdminAnalytics({ adminToken, onNavigate }) {
             ga4Testing={ga4Testing} ga4TestResult={ga4TestResult}
             handleGA4Connect={handleGA4Connect} handleGA4Test={handleGA4Test}
             onNavigate={onNavigate} />
-        )}
-
-        {tab === 'revenue' && (
-          <RevenueTab widgetErrors={widgetErrors} load={load} mrr={mrr} predicted={predicted}
-            growth={growth} arpu={arpu} ltv={ltv} paidUsers={paidUsers}
-            dailyRev={dailyRev} cohortData={cohortData} predict={predict} revenue={revenue}
-            rangeDays={overviewDays} />
         )}
 
         {tab === 'predict' && (

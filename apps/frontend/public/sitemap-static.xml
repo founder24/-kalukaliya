@@ -17,11 +17,6 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://syrabit.ai/pricing</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
     <loc>https://syrabit.ai/about</loc>
     <changefreq>weekly</changefreq>
     <priority>0.5</priority>

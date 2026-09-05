@@ -8,10 +8,6 @@
 # Required for full validation: STUDENT_TOKEN, STAFF_TOKEN,
 # ADMIN_SESSION_TOKEN, EDGE_SHARED_SECRET, TRANSLATE_CRON_SECRET,
 # CF_ACCESS_CLIENT_ID, and CF_ACCESS_CLIENT_SECRET.
-# Payment validation additionally requires CUTOVER_PAYMENT_TOKEN (a dedicated
-# disposable-user access token), RAZORPAY_KEY_SECRET, and
-# RAZORPAY_WEBHOOK_SECRET. The API Worker must be configured with a rzp_test_
-# key; this check refuses to run against live Razorpay credentials.
 # Set CUTOVER_RESET_ONLY=true only in the post-deploy reset job. It requires
 # CUTOVER_RESET_EMAIL, CUTOVER_RESET_LINK, CUTOVER_RESET_PASSWORD, and the
 # fresh CUTOVER_RESET_NONCE emitted by the preceding reset-request job.
@@ -20,11 +16,8 @@
 # through the public edge without exposing the token in logs.
 # Set CUTOVER_STAGE=public only for a deliberately public-only preflight.
 #
-# This script creates one disposable Razorpay test-mode order and payment
-# record for the dedicated CUTOVER_PAYMENT_TOKEN user. Successful verification
-# removes its pending order; the user and resulting payment are intentionally
-# isolated to that disposable fixture. It refuses a Cloud Run fallback where a
-# D1-backed route is expected and never uses live Razorpay credentials.
+# Commercial endpoints are checked as retired (HTTP 410); this validation never
+# creates payment records or changes a user's entitlement.
 set -euo pipefail
 
 : "${PUBLIC_EDGE_URL:?Set PUBLIC_EDGE_URL to the deployed edge API origin}"
@@ -52,9 +45,6 @@ if [[ "$RESET_ONLY" != "true" && "${CUTOVER_STAGE:-full}" != "public" ]]; then
   : "${TRANSLATE_CRON_SECRET:?Set TRANSLATE_CRON_SECRET for scheduled-operation checks}"
   : "${CF_ACCESS_CLIENT_ID:?Set CF_ACCESS_CLIENT_ID for public-edge admin checks}"
   : "${CF_ACCESS_CLIENT_SECRET:?Set CF_ACCESS_CLIENT_SECRET for public-edge admin checks}"
-  : "${CUTOVER_PAYMENT_TOKEN:?Set CUTOVER_PAYMENT_TOKEN for the disposable payment user}"
-  : "${RAZORPAY_KEY_SECRET:?Set RAZORPAY_KEY_SECRET for test payment verification}"
-  : "${RAZORPAY_WEBHOOK_SECRET:?Set RAZORPAY_WEBHOOK_SECRET for signed webhook validation}"
 fi
 
 native_get() {
@@ -230,48 +220,6 @@ edge_admin_json_status() {
   }
   grep -qi '^x-syrabit-route: worker-native' "$headers" || {
     cat "$headers"; echo "Expected Worker-native public-edge admin route for ${path}" >&2; exit 1;
-  }
-  cat "$output"
-}
-
-edge_webhook_invalid_signature() {
-  local output headers status
-  output=$(mktemp)
-  headers=$(mktemp)
-  TMP_FILES+=("$output" "$headers")
-  status=$(curl --silent --show-error --max-time 30 \
-    --request POST --header 'Content-Type: application/json' \
-    --header 'X-Razorpay-Signature: invalid-cutover-signature' \
-    --data '{"event":"payment.captured","event_id":"evt_cutover_invalid","payload":{}}' \
-    --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
-    "${EDGE_BASE}/api/webhooks/razorpay")
-  test "$status" = "400" || {
-    cat "$output"; echo "Expected invalid Razorpay webhook signature to return 400, got ${status}" >&2; exit 1;
-  }
-  grep -qi '^x-syrabit-route: worker-native' "$headers" || {
-    cat "$headers"; echo "Expected Worker-native public-edge webhook route" >&2; exit 1;
-  }
-  cat "$output"
-}
-
-edge_webhook_signed() {
-  local payload="$1"
-  local signature="$2"
-  local output headers status
-  output=$(mktemp)
-  headers=$(mktemp)
-  TMP_FILES+=("$output" "$headers")
-  status=$(curl --silent --show-error --max-time 30 \
-    --request POST --header 'Content-Type: application/json' \
-    --header "X-Razorpay-Signature: ${signature}" \
-    --data "$payload" \
-    --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
-    "${EDGE_BASE}/api/webhooks/razorpay")
-  test "$status" = "200" || {
-    cat "$output"; echo "Expected signed Razorpay webhook to return 200, got ${status}" >&2; exit 1;
-  }
-  grep -qi '^x-syrabit-route: worker-native' "$headers" || {
-    cat "$headers"; echo "Expected Worker-native public-edge webhook route" >&2; exit 1;
   }
   cat "$output"
 }
@@ -511,20 +459,16 @@ if [[ -n "${STUDENT_TOKEN:-}" ]]; then
   edge_auth_get "/users/me" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert "id" in p and "subscription_tier" in p, p'
   edge_auth_get "/conversations" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert isinstance(p.get("conversations"), list), p'
   edge_auth_get "/users/credits" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), dict)'
-  edge_auth_get "/subscription/status" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert "tier" in p and "monthly_limit" in p, p'
-  edge_auth_get "/payments/history" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), (list, dict))'
   edge_auth_get "/content/library-bundle?slim=1" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert all(k in p for k in ("boards","classes","streams","subjects")), p'
   # A valid student token must never grant access to the staff catalogue.
   edge_auth_status "/staff/content/subjects" "403" "${STUDENT_TOKEN}" \
     | python3 -c 'import json,sys; assert json.load(sys.stdin)["detail"] == "Staff access required"'
 
-  # These deliberately-invalid test fields fail before any payment state can
-  # change. They prove both authenticated verification endpoints reject forged
-  # callbacks on the Worker-native public route.
-  edge_auth_json_status "/payments/verify" "400" '{"razorpay_order_id":"order_cutover_invalid","razorpay_payment_id":"pay_cutover_invalid","razorpay_signature":"invalid"}' \
-    | python3 -c 'import json,sys; assert json.load(sys.stdin)["detail"] == "Invalid payment signature"'
-  edge_auth_json_status "/payments/credit-topup/verify" "400" '{"razorpay_order_id":"order_cutover_invalid","razorpay_payment_id":"pay_cutover_invalid","razorpay_signature":"invalid"}' \
-    | python3 -c 'import json,sys; assert json.load(sys.stdin)["detail"] == "Invalid payment signature"'
+  # The ads-only release boundary retires every commercial route before any
+  # legacy handler can read or mutate entitlement/payment records.
+  edge_auth_status "/subscription/status" "410" "${STUDENT_TOKEN}"
+  edge_auth_status "/payments/history" "410" "${STUDENT_TOKEN}"
+  edge_auth_status "/payments/verify" "410" "${STUDENT_TOKEN}" "POST"
 
   echo "Checking authenticated student chat through the public edge"
   chat_output=$(mktemp)
@@ -544,116 +488,6 @@ if [[ -n "${STUDENT_TOKEN:-}" ]]; then
   ! grep -q '"error":true' "$chat_output"
 else
   echo "STUDENT_TOKEN not set: authenticated student checks skipped."
-fi
-
-if [[ -n "${CUTOVER_PAYMENT_TOKEN:-}" ]]; then
-  echo "Checking a disposable Razorpay test-mode order, verification, and webhook retry through the public edge"
-  edge_auth_get "/payments/test-mode-status" "${CUTOVER_PAYMENT_TOKEN}" \
-    | python3 -c '
-import json,sys
-p=json.load(sys.stdin)
-assert p.get("configured") is True, p
-assert p.get("test_mode") is True, (
-    "Payment validation requires a Razorpay test-mode key (rzp_test_), got " + repr(p.get("key_id"))
-)
-'
-  payment_order=$(edge_auth_json_status "/payments/create-order" "200" '{"plan":"pro"}' "${CUTOVER_PAYMENT_TOKEN}")
-  payment_order_id=$(printf '%s' "$payment_order" | python3 -c '
-import json,sys
-p=json.load(sys.stdin)
-key_id=p.get("key_id")
-assert isinstance(key_id, str) and key_id.startswith("rzp_test_"), (
-    "Razorpay key changed after the test-mode preflight: " + repr(key_id)
-)
-assert p.get("currency") == "INR" and p.get("amount") == 9900, p
-assert isinstance(p.get("order_id"), str) and p["order_id"].startswith("order_"), p
-print(p["order_id"])
-')
-  payment_id="pay_cutover_${payment_order_id#order_}_$(date +%s)"
-  payment_signature=$(printf '%s|%s' "$payment_order_id" "$payment_id" | python3 -c '
-import hashlib,hmac,os,sys
-print(hmac.new(os.environ["RAZORPAY_KEY_SECRET"].encode(), sys.stdin.buffer.read(), hashlib.sha256).hexdigest())
-')
-  verify_payload=$(python3 - "$payment_order_id" "$payment_id" "$payment_signature" <<'PY'
-import json,sys
-print(json.dumps({
-    "razorpay_order_id": sys.argv[1],
-    "razorpay_payment_id": sys.argv[2],
-    "razorpay_signature": sys.argv[3],
-}))
-PY
-)
-  edge_auth_json_status "/payments/verify" "200" "$verify_payload" "${CUTOVER_PAYMENT_TOKEN}" \
-    | python3 -c '
-import json,sys
-p=json.load(sys.stdin)
-assert p.get("status") == "success", p
-assert isinstance(p.get("receipt_token"), str) and p["receipt_token"], p
-'
-  edge_auth_json_status "/payments/recover" "404" '{}' "${CUTOVER_PAYMENT_TOKEN}" \
-    | python3 -c '
-import json,sys
-p=json.load(sys.stdin)
-assert p.get("detail") == "No pending payment found", p
-'
-  edge_auth_get "/subscription/status" "${CUTOVER_PAYMENT_TOKEN}" \
-    | python3 -c '
-import json,sys
-p=json.load(sys.stdin)
-assert p.get("tier") == "pro" and p.get("status") == "active", p
-'
-
-  webhook_payload=$(python3 - "$payment_order_id" "$payment_id" <<'PY'
-import json,sys
-print(json.dumps({
-    "event": "subscription.charged",
-    "id": "evt_cutover_" + sys.argv[1],
-    "payload": {
-        "subscription": {"id": sys.argv[1]},
-        "payment": {
-            "id": sys.argv[2],
-            "order_id": sys.argv[1],
-            "amount": 9900,
-        },
-    },
-}, separators=(",", ":")))
-PY
-)
-  webhook_signature=$(printf '%s' "$webhook_payload" | python3 -c '
-import hashlib,hmac,os,sys
-print(hmac.new(os.environ["RAZORPAY_WEBHOOK_SECRET"].encode(), sys.stdin.buffer.read(), hashlib.sha256).hexdigest())
-')
-  edge_webhook_signed "$webhook_payload" "$webhook_signature" \
-    | python3 -c '
-import json,sys
-p=json.load(sys.stdin)
-assert p == {"status":"ok"}, p
-'
-  edge_webhook_signed "$webhook_payload" "$webhook_signature" \
-    | python3 -c '
-import json,sys
-p=json.load(sys.stdin)
-assert p == {"status":"ok","duplicate":True}, p
-'
-  edge_auth_get "/subscription/status" "${CUTOVER_PAYMENT_TOKEN}" \
-    | python3 -c '
-import json,sys
-p=json.load(sys.stdin)
-assert p.get("tier") == "pro" and p.get("status") == "active", p
-'
-  edge_auth_get "/payments/history?limit=50" "${CUTOVER_PAYMENT_TOKEN}" \
-    | python3 - "$payment_order_id" <<'PY'
-import json,sys
-order_id=sys.argv[1]
-p=json.load(sys.stdin)
-rows=p.get("payments", [])
-matching=[row for row in rows if row.get("razorpay_order_id") == order_id]
-assert len(matching) == 1, matching
-assert matching[0].get("status") == "captured" and matching[0].get("plan") == "pro", matching[0]
-PY
-  echo "Razorpay test-mode payment verification and exactly-once webhook handling passed."
-else
-  echo "CUTOVER_PAYMENT_TOKEN not set: authenticated payment check skipped."
 fi
 
 if [[ -n "${STAFF_TOKEN:-}" ]]; then
@@ -755,7 +589,14 @@ else
   echo "EDGE_SHARED_SECRET not set: authenticated generation check skipped."
 fi
 
-echo "Checking invalid Razorpay webhook handling through the public edge"
-edge_webhook_invalid_signature | python3 -c 'import json,sys; assert json.load(sys.stdin)["error"] == "Invalid signature"'
+echo "Checking retired webhook boundary through the public edge"
+retired_webhook_status=$(curl --silent --show-error --max-time 30 \
+  --request POST --header 'Content-Type: application/json' --data '{}' \
+  --write-out '%{http_code}' --output /dev/null \
+  "${EDGE_BASE}/api/webhooks/razorpay")
+test "$retired_webhook_status" = "410" || {
+  echo "Expected retired webhook endpoint to return 410, got ${retired_webhook_status}" >&2
+  exit 1
+}
 
 echo "Cloudflare API cutover validation passed."

@@ -122,7 +122,7 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
     if (failures.length === 0) console.log('[cron] TTL cleanup complete');
   }
 
-  // ── Daily: reset monthly message counts, expire subscriptions ────────────
+  // ── Daily: reset usage counters for free-user chat quotas ────────────────
   if (cronExpr === '0 0 * * *') {
     // Reset monthly counts for users whose last_reset_date was in a previous month
     await runTask('monthly usage reset', async () => {
@@ -137,19 +137,6 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
             last_reset_date = ?
         WHERE last_reset_date < ?
       `).bind(now, startOfMonthTs).run();
-    });
-
-    // Expire subscriptions whose period has ended
-    await runTask('subscription expiry', async () => {
-      await env.DB.prepare(`
-        UPDATE users
-        SET subscription_tier = 'free',
-            subscription_status = 'cancelled'
-        WHERE subscription_status = 'active'
-          AND current_period_end IS NOT NULL
-          AND current_period_end < ?
-          AND subscription_tier != 'free'
-      `).bind(now).run();
     });
 
     if (failures.length === 0) console.log('[cron] Daily maintenance complete');

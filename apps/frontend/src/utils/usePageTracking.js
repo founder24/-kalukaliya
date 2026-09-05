@@ -7,12 +7,9 @@ import { incrementVisitIfNewSession } from './visitTracker';
 
 const KNOWN_PATTERNS = [
   '/',
-  '/pricing',
   '/terms',
   '/privacy',
   '/exam-routine',
-  '/payment/success',
-  '/payment/cancel',
   '/login',
   '/signup',
   '/reset-password',

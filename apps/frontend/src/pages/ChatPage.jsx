@@ -16,6 +16,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { toast } from 'sonner';
 
 import { MessageBubble } from './chat/MessageBubble';
+import ChatSponsoredCard from '@/components/ads/ChatSponsoredCard';
 import { InputBar } from './chat/InputBar';
 import { ModelSelector, MODELS } from './chat/ModelSelector';
 import { Analytics } from '@/utils/analytics';
@@ -30,6 +31,7 @@ import { startTrace, makeTraceparent } from '@/utils/firebasePerf';
 import { EmptyState } from './chat/EmptyState';
 import { useHashScroll } from '@/hooks/useHashScroll';
 import { requestReviewPrompt } from '@/components/ReviewPrompt';
+import { getChatSponsorIndex } from '@/utils/chatAdPlacement';
 
 const MAX_TRANSPORT_AUTO_RETRIES = 1;
 const TRANSPORT_RETRY_DELAY_MS = import.meta.env.MODE === 'test' ? 10 : 3000;
@@ -42,9 +44,8 @@ function createChatRequestId() {
   }
 }
 // ─────────────────────────────────────────────────────────────────────────────
-// AD POLICY: /chat is intentionally AD-FREE. Do NOT import <AdSlot /> or any
-// ad-network script here. The ad stack (Task #526) only runs on PYQ and Learn
-// pages. Chat must stay distraction-free for the AI tutor experience.
+// Sponsored content is inserted only after completed assistant turns. It never
+// renders inside a streaming turn or between a question and its answer.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── ChatPage ──────────────────────────────────────────────────────────────────
@@ -452,7 +453,7 @@ export default function ChatPage() {
           || errData.failure_stage
           || 'http_response';
         if (response.status === 402) {
-          toast.error('Credits exhausted — upgrade to continue.', { action: { label: 'Upgrade', onClick: () => navigate('/profile') } });
+          toast.error('Your free daily messages are used. They reset at midnight UTC.');
           setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
           return;
         }
@@ -960,12 +961,8 @@ export default function ChatPage() {
       <div className="flex flex-col chat-viewport-height">
         {isOutOfCredits && (
           /*
-            Task #796 — for anonymous students this banner is the
-            soft-CTA conversion lever the spec asks for: instead of
-            "Upgrade →" (which dumps them on /profile, where they then
-            still have to sign in), they get "Sign in →" pointing
-            straight at /login. Logged-in students keep the original
-            "Credits exhausted — upgrade →" copy.
+            Daily quota messaging stays focused on the free product. Anonymous
+            students can still sign in to keep their study history.
           */
           <div
             className="flex items-center justify-between px-4 py-2.5 text-sm flex-shrink-0"
@@ -977,9 +974,7 @@ export default function ChatPage() {
               <span>
                 {!user
                   ? `Free daily messages used (${effectiveLimit ?? 20}/day) — sign in for more`
-                  : credits.limit === 0
-                  ? 'Free plan has no credits — upgrade to start chatting'
-                  : 'Credits exhausted — upgrade to continue'}
+                  : 'Your free daily messages are used — they reset at midnight UTC'}
               </span>
             </div>
             {!user ? (
@@ -991,15 +986,7 @@ export default function ChatPage() {
               >
                 Sign in →
               </button>
-            ) : (
-              <button
-                onClick={() => navigate('/profile')}
-                className="text-xs font-semibold text-red-300 hover:text-red-200 transition-colors underline"
-                aria-label="Go to profile to upgrade plan"
-              >
-                Upgrade →
-              </button>
-            )}
+            ) : null}
           </div>
         )}
         {/* Context banner — shown when user arrived via an Ask AI button with chapter/subject context */}
@@ -1082,6 +1069,15 @@ export default function ChatPage() {
                       />
                     </div>
                   );
+                  const sponsorIndex = getChatSponsorIndex(messages, i);
+                  if (sponsorIndex !== null) {
+                    out.push(
+                      <ChatSponsoredCard
+                        key={`sponsor-after-${msg.id || i}`}
+                        placementIndex={sponsorIndex}
+                      />,
+                    );
+                  }
                 });
                 return out;
               })()}

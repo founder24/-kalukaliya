@@ -2,7 +2,7 @@
 
 AI-powered study, content, and educational browsing platform for Assam Board students.
 
-Syrabit.ai helps students prepare for SEBA, AHSEC, Degree, and related board exams with curriculum-aware content, multilingual AI assistance, staff/admin publishing tools, SEO-ready learning pages, payments, analytics, and an edge-protected production architecture.
+Syrabit.ai helps students prepare for SEBA, AHSEC, Degree, and related board exams with curriculum-aware content, multilingual AI assistance, staff/admin publishing tools, SEO-ready learning pages, advertising-supported access, analytics, and an edge-protected production architecture.
 
 - **Status:** Production-oriented private monorepo
 - **Primary users:** Students, staff content editors, administrators
@@ -17,7 +17,7 @@ and one retained local-tooling directory:
 | App | Path | Stack | Purpose |
 | --- | --- | --- | --- |
 | Frontend | `apps/frontend` | React 18, Vite, Tailwind, React Router | Student app, public pages, library, chat, profile, admin, staff UI |
-| API | `apps/api` | Cloudflare Workers, Hono, D1 | Production auth, chat/RAG, content, payments, admin/staff services |
+| API | `apps/api` | Cloudflare Workers, Hono, D1 | Production auth, chat/RAG, content, ads-safe quotas, admin/staff services |
 | Retired backend tools | `apps/backend` | FastAPI/Python utilities | Local AHSEC ingestion, migration, and retained offline reporting only; never deployed |
 | Edge | `apps/edge` | Cloudflare Workers, TypeScript | API shield, rate limiting, caching, ISR/content routes, API service binding |
 
@@ -37,7 +37,7 @@ Local support services are defined in `docker-compose.yml`:
 - Public library, chapter, learn, PYQ, pricing, terms, privacy, status, and marketing pages.
 - SEO/GEO/AEO infrastructure: sitemaps, feeds, structured data, crawler-friendly prerendering, and IndexNow hooks.
 - Cloudflare Worker edge layer for API service-binding routing, KV-backed limits/cache, R2 assets, and bot/crawler routing.
-- Production integrations for Cloudflare, Sarvam AI, Gemini, Razorpay, Resend, Sentry, and PostHog.
+- Production integrations for Cloudflare, Sarvam AI, Gemini, Resend, Sentry, and PostHog.
 
 ## Quick Start
 
@@ -112,7 +112,7 @@ VITE_BACKEND_URL=http://localhost:8000
 VITE_WORKER_API_URL=http://localhost:8787
 ```
 
-Provider keys such as `SARVAM_API_KEY`, `GEMINI_API_KEY`, `RAZORPAY_KEY_ID`, `RESEND_API_KEY`, `SENTRY_DSN`, and Cloudflare/GCP credentials are only needed when you exercise those integrations.
+Provider keys such as `SARVAM_API_KEY`, `GEMINI_API_KEY`, `RESEND_API_KEY`, `SENTRY_DSN`, and Cloudflare/GCP credentials are only needed when you exercise those integrations.
 
 ### 3. Start Local Services
 
@@ -192,7 +192,7 @@ Browser
                          |-- D1 application data
                          |-- R2, KV, and Vectorize
                          |-- Workers AI and provider integrations
-                         |-- Auth, payments, staff/admin workflows
+                          |-- Auth, ads-safe quotas, staff/admin workflows
 ```
 
 ### Production Pillars
@@ -201,10 +201,9 @@ Browser
 | --- | --- | --- |
 | Edge and static delivery | Cloudflare Workers, Pages, KV, R2, Turnstile | Global delivery, API protection, caching, assets |
 | API compute | Cloudflare Workers | Hono runtime and orchestration |
-| Data | Cloudflare D1, R2, Vectorize | Users, content, chat, CMS, subscriptions, assets, RAG |
+| Data | Cloudflare D1, R2, Vectorize | Users, content, chat, CMS, historical commercial records, assets, RAG |
 | Cache and limits | Cloudflare KV and D1 | Burst limits, counters, ephemeral state |
 | AI | Sarvam AI, Gemini, Cloudflare Workers AI | Assamese/English responses, fallback, embeddings/media helpers |
-| Payments | Razorpay | INR plans, orders, subscriptions, webhooks |
 | Email | Resend | Transactional email |
 | Observability | Sentry, PostHog, Cloudflare analytics, GitHub Actions | Errors, analytics, logs, scheduled monitors |
 
@@ -235,7 +234,9 @@ Important backend models live in `apps/backend/app/models`, including:
 - `user.py`
 - `quota.py`
 
-Key API areas are registered from `apps/backend/app/main.py`, including chat, auth, users, education/browser routes, content, SEO, IndexNow, payments, admin, staff, and health.
+Key production API areas are registered from `apps/api/src/routes/index.ts`. The
+retained `apps/backend/app/main.py` supports local AHSEC ingestion and historical
+tooling only; its commercial modules are intentionally not mounted.
 
 ## Frontend Routes
 

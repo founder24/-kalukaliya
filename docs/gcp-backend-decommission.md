@@ -21,7 +21,7 @@ On 2026-09-02:
 
 - The `syrabit-backend` Cloud Run service in `asia-south1` was deleted.
 - The service had `minScale=1`; deleting it removed the residual baseline compute risk.
-- Current GitHub schedules were checked. Native translation, subscription expiry, analytics, and uptime jobs call `https://api.syrabit.ai`; none call Cloud Run or use a GCP deployment credential.
+- Current GitHub schedules were checked. Native translation, analytics, and uptime jobs call `https://api.syrabit.ai`; none call Cloud Run or use a GCP deployment credential.
 - The obsolete `GCP_SA_KEY` GitHub Actions secret was deleted.
 - The checked-in Cloud Run manifests and redeploy scripts were removed to prevent accidental recreation.
 - The production edge and API Workers had no `GOOGLE_SA_KEY` secret, so no Cloudflare-side Google credential needed removal.
@@ -54,4 +54,4 @@ Verify all of the following:
 1. `gcloud run services list --project=blissful-acumen-495019-t6 --region=asia-south1` has no `syrabit-backend` entry.
 2. `https://syrabit-api-prod.axomxplain.workers.dev/health` returns `200` with `X-Syrabit-Route: worker-native`.
 3. `https://api.syrabit.ai/health` returns `200` with `X-Syrabit-Health-Backend: api-worker`.
-4. Protected routes such as `/api/v1/auth/me`, `/api/v1/users/me`, and `/api/v1/payments/history` return the expected authentication response with `X-Syrabit-Route: worker-native`.
+4. Protected routes such as `/api/v1/auth/me` and `/api/v1/users/me` return the expected authentication response with `X-Syrabit-Route: worker-native`; retired commercial routes return `410`.

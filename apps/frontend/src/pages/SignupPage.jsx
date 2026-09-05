@@ -26,9 +26,9 @@ const STRENGTH_COLORS = ['', 'bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg
 
 const PERKS = [
   { icon: BookOpen, text: 'Browse all 55+ subjects — free forever' },
-  { icon: Zap, text: 'Starter: 300 credits for just ₹99' },
+  { icon: Zap, text: '30 free AI messages every day' },
   { icon: GraduationCap, text: 'Ask Syra — your Assam board study companion' },
-  { icon: CheckCircle, text: 'Upgrade anytime — no lock-in' },
+  { icon: CheckCircle, text: '30 free AI messages every day' },
 ];
 
 export default function SignupPage() {

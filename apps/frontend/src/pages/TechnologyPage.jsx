@@ -113,14 +113,14 @@ const CATEGORIES = [
     icon: CreditCard,
     color: '#dc2626',
     en: {
-      title: 'Flexible Plans & Payments',
-      description: 'Start free with 30 daily credits. Upgrade to Starter or Pro for more credits and premium content. Pay via UPI, cards, or international methods.',
-      highlights: ['Free tier with 30 daily credits', 'UPI & card payments', 'Credit top-ups available'],
+      title: 'Free access for students',
+      description: 'Start with 30 daily credits, explore syllabus content, and ask focused questions without a card.',
+      highlights: ['30 free daily credits', 'Syllabus-aligned learning', 'No card required'],
     },
     as: {
-      title: 'নমনীয় পৰিকল্পনা আৰু পৰিশোধ',
-      description: '৩০ টা দৈনিক ক্ৰেডিটৰ সৈতে বিনামূলীয়াকৈ আৰম্ভ কৰক। অধিক ক্ৰেডিট আৰু প্ৰিমিয়াম বিষয়বস্তুৰ বাবে Starter বা Pro লৈ আপগ্ৰেড কৰক। UPI, কাৰ্ড, বা আন্তৰ্জাতিক পদ্ধতিৰে পৰিশোধ কৰক।',
-      highlights: ['৩০ টা দৈনিক ক্ৰেডিটৰ সৈতে বিনামূলীয়া', 'UPI আৰু কাৰ্ড পৰিশোধ', 'ক্ৰেডিট টপ-আপ উপলব্ধ'],
+      title: 'ছাত্ৰ-ছাত্ৰীৰ বাবে বিনামূলীয়া প্ৰৱেশ',
+      description: '৩০ টা দৈনিক ক্ৰেডিটৰ সৈতে আৰম্ভ কৰক, পাঠ্যক্ৰমৰ বিষয়বস্তু চাওক আৰু কাৰ্ড নোহোৱাকৈ প্ৰশ্ন সোধক।',
+      highlights: ['৩০ টা বিনামূলীয়া দৈনিক ক্ৰেডিট', 'পাঠ্যক্ৰম-ভিত্তিক শিক্ষা', 'কাৰ্ডৰ প্ৰয়োজন নাই'],
     },
   },
   {
@@ -165,7 +165,7 @@ const FEATURE_CATALOG = {
         'Conversation history & search',
         'Sarvam AI Text-to-Speech in Assamese & Indic languages',
         'Audio playback for AI responses',
-        'AI credits with daily allowance + top-ups',
+        'AI credits with a daily allowance',
         'Conversation export & sharing',
       ],
     },
@@ -208,15 +208,11 @@ const FEATURE_CATALOG = {
       ],
     },
     {
-      group: 'Plans & Payments',
+      group: 'Learning access',
       items: [
         'Free tier with 30 daily AI credits',
-        'Starter and Pro subscription plans',
-        'Razorpay payments — UPI, cards, wallets',
-        'International card support',
-        'AI credit top-ups on demand',
-        'Full payment history',
-        'Transparent pricing page',
+        'Sponsorship keeps access open',
+        'No card required',
       ],
     },
     {
@@ -312,14 +308,12 @@ const FEATURE_CATALOG = {
       ],
     },
     {
-      group: 'পৰিকল্পনা আৰু পৰিশোধ',
+      group: 'শিক্ষাৰ প্ৰৱেশ',
       items: [
         '৩০ টা দৈনিক AI ক্ৰেডিটৰ সৈতে বিনামূলীয়া স্তৰ',
-        'Starter আৰু Pro চাবস্ক্ৰিপশ্বন',
-        'Razorpay পৰিশোধ — UPI, কাৰ্ড, ৱালেট',
-        'আন্তঃৰাষ্ট্ৰীয় কাৰ্ডৰ সমৰ্থন',
-        'AI ক্ৰেডিট টপ-আপ',
-        'সম্পূৰ্ণ পৰিশোধৰ ইতিহাস',
+        'প্ৰতিদিন ৩০ টা বিনামূলীয়া AI ক্ৰেডিট',
+        'স্পনছৰে সকলোৰে বাবে প্ৰৱেশ মুকলি ৰাখে',
+        'কাৰ্ডৰ প্ৰয়োজন নাই',
       ],
     },
     {

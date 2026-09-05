@@ -1,3 +1,5 @@
+"""RETIRED LOCAL HISTORICAL TOOLING — former paid-plan API, not mounted."""
+
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 import logging

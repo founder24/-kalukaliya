@@ -4,7 +4,7 @@ import {
   LayoutDashboard, BookOpen, Users,
   MessageSquare, TrendingUp, Bell, Settings, HeartPulse, LogOut,
   ChevronLeft, ChevronRight, Loader2, Globe,
-  Crown, Cpu, Activity, ShieldAlert,
+  Cpu, Activity, ShieldAlert,
   ExternalLink, Gauge, Bug, FileText,
 } from 'lucide-react';
 import axios from 'axios';
@@ -24,7 +24,6 @@ const AdminSettings        = lazy(() => import('@/components/admin/AdminSettings
 const AdminHealth          = lazy(() => import('@/components/admin/AdminHealth'));
 const AdminSeoManager      = lazy(() => import('@/components/admin/AdminSeoManager'));
 const AdminAiHub           = lazy(() => import('@/components/admin/AdminAiHub'));
-const AdminRevenueHub      = lazy(() => import('@/components/admin/AdminRevenueHub'));
 const AdminAccessSecurity  = lazy(() => import('@/components/admin/AdminAccessSecurity'));
 const AdminLogsExplorer    = lazy(() => import('@/components/admin/AdminLogsExplorer'));
 const AdminOpsConsole      = lazy(() => import('@/components/admin/AdminOpsConsole'));
@@ -43,7 +42,6 @@ const SECTIONS = [
   { id: 'conversations', icon: MessageSquare,   label: 'Conversations',     group: 'audience'   },
   { id: 'notifications', icon: Bell,            label: 'Notifications',     group: 'audience'   },
   { id: 'ai',            icon: Cpu,             label: 'AI & Automation',   group: 'operations' },
-  { id: 'revenue',       icon: Crown,           label: 'Revenue',           group: 'operations' },
   { id: 'analytics',     icon: TrendingUp,      label: 'Analytics',         group: 'operations' },
   { id: 'security',      icon: ShieldAlert,     label: 'Access & Security', group: 'system'     },
   { id: 'logs',          icon: Activity,        label: 'Logs',              group: 'system'     },
@@ -69,7 +67,6 @@ const SECTION_COMPONENTS = {
   conversations: AdminConversations,
   notifications: AdminNotifications,
   ai:            AdminAiHub,
-  revenue:       AdminRevenueHub,
   analytics:     AdminAnalytics,
   security:      AdminAccessSecurity,
   logs:          AdminLogsExplorer,
@@ -84,9 +81,6 @@ export const SECTION_REDIRECTS = {
   vertex:       { section: 'ai',       tab: 'providers', subTab: 'vertex'       },
   intelligence: { section: 'ai',       tab: 'providers', subTab: 'intelligence' },
   automation:   { section: 'ai',       tab: 'jobs' },
-  monetization: { section: 'revenue',  tab: 'monetization' },
-  plans:        { section: 'revenue',  tab: 'plans' },
-  ads:          { section: 'revenue',  tab: 'ads' },
   googleauth:   { section: 'security', tab: 'auth' },
   ratelimits:   { section: 'security', tab: 'ratelimits' },
   botsecurity:  { section: 'security', tab: 'botsecurity' },
@@ -336,7 +330,7 @@ export default function AdminPage() {
 
   const SECTIONS_WITH_CONTEXT = new Set([
     'users', 'contenthub', 'dashboard', 'conversations',
-    'ai', 'revenue', 'security', 'logs',
+    'ai', 'security', 'logs',
   ]);
 
   return (

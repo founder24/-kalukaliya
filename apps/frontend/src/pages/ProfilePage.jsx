@@ -1,30 +1,24 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { isDegreeBoard } from '@/utils/courseTypes';
 import { useAuth } from '@/context/AuthContext';
 import { PageTitle } from '@/components/PageTitle';
-import { apiClient, createSubscriptionOrder, verifyPayment, createCreditTopUp, verifyCreditTopUp } from '@/utils/api';
+import { apiClient } from '@/utils/api';
 import { toast } from 'sonner';
-import { Analytics } from '@/utils/analytics';
-import { PLANS, loadRazorpay } from './profile/planConfig';
+import { PLANS } from './profile/planConfig';
 import ProfileHeader from './profile/ProfileHeader';
 import AcademicDetails from './profile/AcademicDetails';
 import AiCredits from './profile/AiCredits';
-import SubscriptionPlans from './profile/SubscriptionPlans';
 import DangerZone, { DeletionBanner } from './profile/DangerZone';
 import PrivacyControls from './profile/PrivacyControls';
 import EditFieldDialog from './profile/EditFieldDialog';
 import DeleteConfirmDialog from './profile/DeleteConfirmDialog';
-import PaymentModal from './profile/PaymentModal';
-import TopUpModal from './profile/TopUpModal';
-import PaymentHistory from './profile/PaymentHistory';
 import { hydrateAdsOptOutFromServer } from '@/utils/adsConfig';
 
 export default function ProfilePage() {
-  const { user, refreshUser } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
 
   const [profile, setProfile]               = useState(null);
   const [profileError, setProfileError]     = useState(false);
@@ -39,14 +33,7 @@ export default function ProfilePage() {
   const [deletionPending, setDeletionPending] = useState(false);
   const [deletionHardAt, setDeletionHardAt] = useState(null);
   const [cancellingDelete, setCancellingDelete] = useState(false);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentPlan, setPaymentPlan]       = useState(null);
-  const [paymentLoading, setPaymentLoading] = useState(false);
   const [copiedId, setCopiedId]             = useState(false);
-  const [showTopUpModal, setShowTopUpModal] = useState(false);
-  const [topUpCredits, setTopUpCredits]     = useState(null);
-  const [topUpLoading, setTopUpLoading]     = useState(false);
-  const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
   const editInputRef = useRef(null);
 
   const loadProfile = useCallback(() => {
@@ -82,15 +69,6 @@ export default function ProfilePage() {
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadProfile(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const upgradePlan = searchParams.get('upgrade');
-    if (upgradePlan && ['starter', 'pro'].includes(upgradePlan)) {
-      setPaymentPlan(upgradePlan);
-      setShowPaymentModal(true);
-      setSearchParams({}, { replace: true });
-    }
-  }, [searchParams]);
 
   useEffect(() => {
     if (editField) {
@@ -174,117 +152,6 @@ export default function ProfilePage() {
     setTimeout(() => setCopiedId(false), 2000);
   };
 
-  const refreshData = async () => {
-    await Promise.all([
-      apiClient().get('/user/profile').then(r => { if (r.data && typeof r.data === 'object') setProfile(r.data); }),
-      apiClient().get('/user/stats').then(r => { if (r.data && typeof r.data === 'object') setStats(r.data); }),
-    ]).catch(() => {});
-    if (refreshUser) refreshUser();
-    setPaymentRefreshKey(k => k + 1);
-  };
-
-  const prefillData = () => ({
-    name: profile?.name || '', email: profile?.email || user?.email || '', contact: profile?.phone || '',
-  });
-
-  const openRzp = (orderData, setLoadingFn, onSuccess) => {
-    const planName = orderData._plan || 'unknown';
-    const options = {
-      key: orderData.key_id, amount: orderData.amount, currency: orderData.currency,
-      name: 'Syrabit.ai', description: orderData._desc, order_id: orderData.order_id,
-      prefill: prefillData(), theme: { color: '#7c3aed' },
-      modal: { ondismiss: () => { Analytics.paymentModalClosed(planName); setLoadingFn(false); } },
-      handler: onSuccess,
-    };
-    const rzp = new window.Razorpay(options);
-    rzp.on('payment.failed', (r) => { Analytics.purchaseFailed(planName, r.error?.description || 'Unknown error', options.order_id); toast.error(`Payment failed: ${r.error?.description || 'Unknown error'}`); setLoadingFn(false); });
-    rzp.open();
-  };
-
-  const handleRazorpayCheckout = async () => {
-    if (!paymentPlan) return;
-    setPaymentLoading(true);
-    try {
-      const loaded = await loadRazorpay();
-      if (!loaded) { toast.error('Failed to load payment gateway. Check your internet connection.'); setPaymentLoading(false); return; }
-      let orderData;
-      try { orderData = (await createSubscriptionOrder(paymentPlan)).data; }
-      catch (err) { toast.error(err?.response?.data?.detail || 'Payment gateway not configured. Contact admin@syrabit.ai.'); setPaymentLoading(false); return; }
-      Analytics.upgradeInitiated(paymentPlan, orderData.amount);
-      orderData._desc = `${orderData.plan_label} Plan — ${PLANS[paymentPlan]?.credits.toLocaleString()} AI credits`;
-      orderData._plan = paymentPlan;
-      openRzp(orderData, setPaymentLoading, async (response) => {
-        try {
-          const verifyRes = await verifyPayment({ razorpay_order_id: response.razorpay_order_id, razorpay_payment_id: response.razorpay_payment_id, razorpay_signature: response.razorpay_signature, plan: paymentPlan });
-          if (verifyRes.data?.receipt_token) {
-            sessionStorage.setItem('receipt_token', verifyRes.data.receipt_token);
-          }
-          Analytics.purchaseComplete(paymentPlan, orderData.amount, response.razorpay_payment_id);
-          refreshData().catch(() => {});
-          const params = new URLSearchParams({
-            type: 'subscription',
-            plan: paymentPlan,
-            order_id: response.razorpay_order_id,
-            payment_id: response.razorpay_payment_id,
-            amount: String(orderData.amount),
-          });
-          navigate(`/payment/success?${params.toString()}`);
-        } catch {
-          try {
-            const { recoverPayment } = await import('@/utils/api');
-            const res = await recoverPayment();
-            if (res.data?.success) {
-              refreshData().catch(() => {});
-              const params = new URLSearchParams({
-                type: 'subscription',
-                plan: paymentPlan,
-                order_id: response.razorpay_order_id,
-              });
-              navigate(`/payment/success?${params.toString()}`);
-              return;
-            }
-          } catch {}
-          toast.error('Payment received but verification failed. Please contact admin@syrabit.ai.');
-        }
-        finally { setPaymentLoading(false); }
-      });
-    } catch { toast.error('Something went wrong. Please try again.'); setPaymentLoading(false); }
-  };
-
-  const handleTopUpCheckout = async () => {
-    if (!topUpCredits) return;
-    setTopUpLoading(true);
-    try {
-      const loaded = await loadRazorpay();
-      if (!loaded) { toast.error('Failed to load payment gateway.'); setTopUpLoading(false); return; }
-      let orderData;
-      try { orderData = (await createCreditTopUp(topUpCredits)).data; }
-      catch (err) { toast.error(err?.response?.data?.detail || 'Failed to create top-up order.'); setTopUpLoading(false); return; }
-      Analytics.upgradeInitiated(`topup_${topUpCredits}`, orderData.amount);
-      orderData._desc = `Credit Top-up — ${topUpCredits} credits`;
-      orderData._plan = `topup_${topUpCredits}`;
-      openRzp(orderData, setTopUpLoading, async (response) => {
-        try {
-          const topUpRes = await verifyCreditTopUp({ razorpay_order_id: response.razorpay_order_id, razorpay_payment_id: response.razorpay_payment_id, razorpay_signature: response.razorpay_signature, credits: topUpCredits });
-          if (topUpRes.data?.receipt_token) {
-            sessionStorage.setItem('receipt_token', topUpRes.data.receipt_token);
-          }
-          Analytics.purchaseComplete(`topup_${topUpCredits}`, orderData.amount, response.razorpay_payment_id);
-          refreshData().catch(() => {});
-          const params = new URLSearchParams({
-            type: 'topup',
-            credits: String(topUpCredits),
-            order_id: response.razorpay_order_id,
-            payment_id: response.razorpay_payment_id,
-            amount: String(orderData.amount),
-          });
-          navigate(`/payment/success?${params.toString()}`);
-        } catch { toast.error('Payment received but verification failed. Contact admin@syrabit.ai.'); }
-        finally { setTopUpLoading(false); }
-      });
-    } catch { toast.error('Something went wrong. Please try again.'); setTopUpLoading(false); }
-  };
-
   const openEdit = (key, label, placeholder) => {
     setEditField({ key, label, placeholder });
     setEditValue(profile?.[key] || '');
@@ -300,7 +167,7 @@ export default function ProfilePage() {
           </div>
           <h2 className="text-lg font-semibold text-foreground mb-2">Sign in to view your profile</h2>
           <p className="text-muted-foreground text-sm mb-6 max-w-xs">
-            Create an account to track your credits, save conversations, and unlock premium features.
+             Create an account to track your daily free messages, save conversations, and keep your study history together.
           </p>
           <button
             onClick={() => navigate('/login')}
@@ -393,13 +260,8 @@ export default function ProfilePage() {
         <AiCredits
           stats={stats} creditsRemaining={creditsRemaining} creditsUsed={creditsUsed}
           creditsLimit={creditsLimit} creditPercent={creditPercent} isLowCredits={isLowCredits}
-          plan={plan} setShowTopUpModal={setShowTopUpModal}
+             plan={plan}
         />
-        <SubscriptionPlans
-          plan={plan} planInfo={planInfo} profile={profile}
-          setPaymentPlan={setPaymentPlan} setShowPaymentModal={setShowPaymentModal}
-        />
-        <PaymentHistory refreshKey={paymentRefreshKey} />
         <PrivacyControls profile={profile} />
         <DangerZone
           profile={profile} deletionPending={deletionPending}
@@ -415,15 +277,6 @@ export default function ProfilePage() {
       <DeleteConfirmDialog
         showDeleteConfirm={showDeleteConfirm} deleteText={deleteText} setDeleteText={setDeleteText}
         deleting={deleting} handleDeleteAccount={handleDeleteAccount} setShowDeleteConfirm={setShowDeleteConfirm}
-      />
-      <PaymentModal
-        showPaymentModal={showPaymentModal} paymentPlan={paymentPlan}
-        setShowPaymentModal={setShowPaymentModal}
-      />
-      <TopUpModal
-        showTopUpModal={showTopUpModal} topUpCredits={topUpCredits} setTopUpCredits={setTopUpCredits}
-        topUpLoading={topUpLoading} planInfo={planInfo} creditsRemaining={creditsRemaining}
-        setShowTopUpModal={setShowTopUpModal} handleTopUpCheckout={handleTopUpCheckout}
       />
     </AppLayout>
   );

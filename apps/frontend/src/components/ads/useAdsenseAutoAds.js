@@ -16,8 +16,8 @@
  * Google's auto-placement is welcome (LearnPage, PYQReplicaPage).
  *
  * Gating mirrors `<AdSlot />`: production build only AND `adsConsentGranted()`
- * true (honours `syrabit_ads_optout` and the paid-plan gate). Dev builds,
- * opted-out users, and paying subscribers never see this script.
+ * true (honours `syrabit_ads_optout`). Dev builds and opted-out users never
+ * see this script.
  *
  * Consent is reactive: the hook listens for `syrabit:ads-consent-changed`
  * and re-evaluates. If consent flips to false mid-session the previously

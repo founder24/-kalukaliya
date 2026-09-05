@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Key, Zap, CreditCard, Mail, Bell, BarChart3, Shield, CheckCircle2, Eye, EyeOff, TestTube2, Loader2, Database, Cpu, Mic, Languages, Layers } from 'lucide-react';
+import { Key, Zap, Mail, Bell, BarChart3, Shield, CheckCircle2, Eye, EyeOff, TestTube2, Loader2, Database, Cpu, Mic, Languages, Layers } from 'lucide-react';
 import AdminQuickLinks from './AdminQuickLinks';
 import RoutingPools from './RoutingPools';
 import { toast } from 'sonner';
@@ -20,7 +20,6 @@ const SERVICES = [
   { id: 'mongodb_atlas', icon: Database, label: 'MongoDB Atlas',accent: 'emerald',desc: 'Atlas $vectorSearch — weight-0 fallback in vector_search pool (free tier).' },
   { id: 'emergent',icon: Zap,        label: 'Emergent AI',      accent: 'amber',  desc: 'Universal LLM key — admin AI generation' },
   { id: 'supabase',icon: Database,   label: 'Supabase',         accent: 'cyan',   desc: 'Users & conversations DB' },
-  { id: 'payment', icon: CreditCard, label: 'Payments',          accent: 'emerald', desc: 'Razorpay / Stripe' },
   { id: 'email',   icon: Mail,       label: 'Email',             accent: 'blue',   desc: 'Amazon SES' },
   { id: 'push',    icon: Bell,       label: 'Push',              accent: 'orange', desc: 'OneSignal / FCM' },
   { id: 'analytics',icon: BarChart3, label: 'Analytics',         accent: 'pink',   desc: 'PostHog / GA4' },
@@ -55,7 +54,7 @@ const inputStyle = "w-full h-9 px-3 rounded-xl text-sm text-gray-900 font-mono o
 
 export default function AdminApiConfig({ adminToken, onNavigate }) {
   const [active, setActive] = useState('routing');
-  const [creds, setCreds] = useState({ chatModelDefault: 'vertex/gemini-flash', emergentKey: '', emergentBaseUrl: '', supabaseUrl: '', supabaseServiceKey: '', supabaseAnonKey: '', razorpayKeyId: '', razorpayKeySecret: '', razorpayWebhookSecret: '', sesRegion: '', oneSignalKey: '', posthogKey: '', googleClientId: '', googleClientSecret: '' });
+  const [creds, setCreds] = useState({ chatModelDefault: 'vertex/gemini-flash', emergentKey: '', emergentBaseUrl: '', supabaseUrl: '', supabaseServiceKey: '', supabaseAnonKey: '', sesRegion: '', oneSignalKey: '', posthogKey: '', googleClientId: '', googleClientSecret: '' });
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -72,9 +71,6 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
           supabaseUrl: cfg.supabase?.url || '',
           supabaseServiceKey: cfg.supabase?.service_key || '',
           supabaseAnonKey: cfg.supabase?.anon_key || '',
-          razorpayKeyId: cfg.payment?.razorpay_key_id || '',
-          razorpayKeySecret: cfg.payment?.razorpay_key_secret || '',
-          razorpayWebhookSecret: cfg.payment?.razorpay_webhook_secret || '',
           sesRegion: cfg.email?.ses_region || '',
           oneSignalKey: cfg.push?.onesignal_key || '',
           posthogKey: cfg.analytics?.posthog_key || '',
@@ -93,7 +89,6 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
     chat_model: { default: creds.chatModelDefault },
     emergent: { key: creds.emergentKey, base_url: creds.emergentBaseUrl },
     supabase: { url: creds.supabaseUrl, service_key: creds.supabaseServiceKey, anon_key: creds.supabaseAnonKey },
-    payment: { razorpay_key_id: creds.razorpayKeyId, razorpay_key_secret: creds.razorpayKeySecret, razorpay_webhook_secret: creds.razorpayWebhookSecret },
     email: { ses_region: creds.sesRegion },
     push: { onesignal_key: creds.oneSignalKey },
     analytics: { posthog_key: creds.posthogKey },
@@ -149,11 +144,6 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
         setTestResult({ ok: inAnyPool, data: inAnyPool
           ? `${provName} is wired into the locked provider chain — see Routing & Pools tab.`
           : `${provName} is not present in any pool right now.` });
-      } else if (active === 'payment') {
-        const res = await adminAxios('get', '/health');
-        const payStatus = res.data?.dependencies?.payment?.status;
-        const payOk = payStatus === 'ok';
-        setTestResult({ ok: payOk, data: payOk ? 'Payment service reachable' : `Payment status: ${payStatus || 'not_configured'}` });
       } else if (active === 'auth') {
         await axios.get('https://accounts.google.com/.well-known/openid-configuration');
         setTestResult({ ok: true, data: 'Google OAuth endpoint reachable' });
@@ -308,19 +298,6 @@ export default function AdminApiConfig({ adminToken, onNavigate }) {
                 </div>
                 <div><label className="text-xs text-gray-500 block mb-1">Base URL (optional)</label>
                   <input value={creds.emergentBaseUrl} onChange={(e) => setCreds((c) => ({...c, emergentBaseUrl: e.target.value}))} placeholder="https://api.emergent.sh/v1" className={inputStyle} />
-                </div>
-              </div>
-            )}
-            {active === 'payment' && (
-              <div className="space-y-3">
-                <div><label className="text-xs text-gray-500 block mb-1">Razorpay Key ID</label>
-                  <input value={creds.razorpayKeyId} onChange={(e) => setCreds((c) => ({...c, razorpayKeyId: e.target.value}))} placeholder="rzp_live_..." className={inputStyle} />
-                </div>
-                <div><label className="text-xs text-gray-500 block mb-1">Razorpay Key Secret</label>
-                  <SecretInput value={creds.razorpayKeySecret} onChange={(e) => setCreds((c) => ({...c, razorpayKeySecret: e.target.value}))} placeholder="secret..." />
-                </div>
-                <div><label className="text-xs text-gray-500 block mb-1">Razorpay Webhook Secret</label>
-                  <SecretInput value={creds.razorpayWebhookSecret} onChange={(e) => setCreds((c) => ({...c, razorpayWebhookSecret: e.target.value}))} placeholder="webhook_secret..." />
                 </div>
               </div>
             )}

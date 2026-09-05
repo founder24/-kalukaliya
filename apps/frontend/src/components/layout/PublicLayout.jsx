@@ -30,7 +30,6 @@ export const PublicLayout = ({ children }) => {
               <Link to="/technology" className="hover:text-foreground transition-colors py-2 px-1 min-h-[44px] flex items-center">Technology</Link>
               <Link to="/terms"   className="hover:text-foreground transition-colors py-2 px-1 min-h-[44px] flex items-center">Terms</Link>
               <Link to="/privacy" className="hover:text-foreground transition-colors py-2 px-1 min-h-[44px] flex items-center">Privacy</Link>
-              <Link to="/pricing" className="hover:text-foreground transition-colors py-2 px-1 min-h-[44px] flex items-center">Pricing</Link>
             </div>
             <p className="text-muted-foreground/50 text-xs">
               &copy; {new Date().getFullYear()} Syrabit.ai. All rights reserved.

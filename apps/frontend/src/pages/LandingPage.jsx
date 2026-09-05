@@ -9,7 +9,6 @@ import HeroSection from './landing/HeroSection';
 import PopularSubjects from './landing/PopularSubjects';
 import { RecentMemoriesSection } from './chat/RecentMemoriesSection';
 const FeaturesGrid = lazy(() => import('./landing/FeaturesGrid'));
-const PricingSection = lazy(() => import('./landing/PricingSection'));
 const PlatformSection = lazy(() => import('./landing/PlatformSection'));
 const TestimonialsFooter = lazy(() => import('./landing/TestimonialsFooter'));
 
@@ -49,7 +48,7 @@ const faqJsonLd = {
       name: 'Is Syrabit.ai free for students in Assam?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'Yes, Syrabit.ai offers a generous free tier. Every visitor gets 30 AI credits per day at no cost — enough to browse notes, read PYQs, and ask Syra study questions daily. Premium plans with unlimited credits are available for students who need heavier usage during exam season.',
+        text: 'Yes, Syrabit.ai is free for students. Every visitor gets 30 AI credits per day at no cost — enough to browse notes, read PYQs, and ask Syra study questions daily. Sponsorship keeps the learning experience available to everyone.',
       },
     },
     {
@@ -124,11 +123,6 @@ export default function LandingPage() {
       <Suspense fallback={<div style={{ minHeight: '640px' }} aria-hidden />}>
         <div style={{ minHeight: '640px', contentVisibility: 'auto', containIntrinsicSize: '0 640px' }}>
           <PlatformSection contentLang={contentLang} />
-        </div>
-      </Suspense>
-      <Suspense fallback={<div style={{ minHeight: '720px' }} aria-hidden />}>
-        <div style={{ minHeight: '720px', contentVisibility: 'auto', containIntrinsicSize: '0 720px' }}>
-          <PricingSection contentLang={contentLang} />
         </div>
       </Suspense>
       <Suspense fallback={<div style={{ minHeight: '480px' }} aria-hidden />}>

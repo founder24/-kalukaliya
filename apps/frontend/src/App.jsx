@@ -15,7 +15,7 @@ const PWAInstallPrompt = lazy(() => import("@/components/PWAInstallPrompt"));
 const CookieConsent = lazy(() => import("@/components/CookieConsent"));
 const LazyToaster = lazy(() => import("sonner").then(m => ({ default: m.Toaster })));
 // Only GlobalSeo is lazy — HelmetProvider must wrap the entire app so that
-// per-page <PageMeta>/Helmet usage on Library, Chapter, Pricing, etc. still
+// per-page <PageMeta>/Helmet usage on Library and Chapter routes still
 // works. (Task #381 fix after architect review.)
 const LazyGlobalSeo = lazy(() => import("@/components/seo/GlobalSeo"));
 import { apiClient } from "@/utils/api";
@@ -92,7 +92,6 @@ export function preloadPageForKind(kind) {
 const HistoryPage        = lazy(pageImports.history);
 const ProfilePage        = lazy(pageImports.profile);
 const MyMemoriesPage     = lazy(() => import("@/pages/MyMemoriesPage"));
-const PricingPage        = lazy(() => import("@/pages/PricingPage"));
 const TermsPage          = lazy(() => import("@/pages/TermsPage"));
 const PrivacyPage        = lazy(() => import("@/pages/PrivacyPage"));
 const NotFoundPage       = lazy(() => import("@/pages/NotFoundPage"));
@@ -101,8 +100,6 @@ const AdminPage          = lazy(() => import("@/pages/AdminPage"));
 const StaffDashboard     = lazy(() => import("@/pages/staff/StaffDashboard"));
 const ExamRoutinePage    = lazy(() => import("@/pages/ExamRoutinePage"));
 const CurriculumMap      = lazy(() => import("@/pages/CurriculumMap"));
-const PaymentSuccessPage = lazy(() => import("@/pages/PaymentSuccessPage"));
-const PaymentCancelPage  = lazy(() => import("@/pages/PaymentCancelPage"));
 const StatusPage         = lazy(() => import("@/pages/StatusPage"));
 const LearnPage              = lazy(() => import("@/pages/LearnPage"));
 const PYQReplicaPage         = lazy(() => import("@/pages/PYQReplicaPage"));
@@ -273,15 +270,15 @@ export function AppRoutes() {
       {/* ── Public routes ── */}
       <Route path="/"         element={<Navigate to="/library" replace />} />
       <Route path="/home"     element={<Navigate to="/library" replace />} />
-      <Route path="/pricing"  element={<PricingPage />} />
+      <Route path="/pricing"  element={<Navigate to="/chat" replace />} />
       <Route path="/terms"    element={<TermsPage />} />
       <Route path="/privacy"       element={<PrivacyPage />} />
       <Route path="/about"         element={<AboutPage />} />
       <Route path="/technology"   element={<TechnologyPage />} />
       <Route path="/status"        element={<StatusPage />} />
       <Route path="/exam-routine" element={<ExamRoutinePage />} />
-      <Route path="/payment/success" element={<PaymentSuccessPage />} />
-      <Route path="/payment/cancel" element={<PaymentCancelPage />} />
+      <Route path="/payment/success" element={<Navigate to="/chat" replace />} />
+      <Route path="/payment/cancel" element={<Navigate to="/chat" replace />} />
 
       {/* ── Auth routes ── */}
       <Route path="/login"          element={<LoginPage />} />
@@ -308,11 +305,11 @@ export function AppRoutes() {
       {/* ── CMS Learn pages ── */}
       <Route path="/learn/:slug" element={<LearnPage />} />
 
-      {/* ── Personalized CMS (private, paid) ── */}
+      {/* ── Personalized CMS (private) ── */}
       <Route path="/cms/:userId/:slug" element={<AuthGuard><PersonalizedCmsPage /></AuthGuard>} />
 
-      {/* /subscribe → pricing */}
-      <Route path="/subscribe" element={<PricingPage />} />
+      {/* Legacy route retained for compatibility; redirects to free chat. */}
+      <Route path="/subscribe" element={<Navigate to="/chat" replace />} />
 
       {/* ── PYQ HTML Replica pages ── */}
       <Route path="/pyq/:slug" element={<PYQReplicaPage />} />

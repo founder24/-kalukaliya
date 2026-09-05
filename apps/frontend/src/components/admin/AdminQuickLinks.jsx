@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, BookOpen, Globe, Cpu, Users, MessageSquare,
-  TrendingUp, Crown, CreditCard, Bell, Key, Shield, ShieldAlert, Settings,
+  TrendingUp, Bell, Key, Shield, ShieldAlert, Settings,
   Activity, HeartPulse, GitBranch, Zap,
 } from 'lucide-react';
 
@@ -16,9 +16,6 @@ const ICON_MAP = {
   conversations: MessageSquare,
   feedback:      MessageSquare,
   analytics:     TrendingUp,
-  monetization:  Crown,
-  revenue:       Crown,
-  plans:         CreditCard,
   ads:           TrendingUp,
   notifications: Bell,
   apiconfig:     Key,
@@ -47,9 +44,6 @@ const LABEL_MAP = {
   conversations: 'Conversations',
   feedback:      'Chat Feedback',
   analytics:     'Analytics',
-  monetization:  'Monetization',
-  revenue:       'Revenue',
-  plans:         'Plans & Credits',
   ads:           'Ad Revenue',
   notifications: 'Notifications',
   apiconfig:     'API Config',

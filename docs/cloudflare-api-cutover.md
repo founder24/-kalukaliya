@@ -1,11 +1,11 @@
 # Cloudflare API cutover runbook
 
 The Cloudflare API Worker is the primary implementation for student auth,
-library/chapter content, chat history and quota, subscriptions/payments, staff
+library/chapter content, chat history and quota, advertising-supported access, staff
 content editing, R2 PYQ uploads, Vectorize reindexing, D1 maintenance, and
 authenticated Workers AI generation.
 
-The API Worker natively serves student and payment flows plus public search,
+The API Worker natively serves student flows plus public search,
 analytics beacons, public configuration, IndexNow submission, changelog, and
 all sitemap/feed/LLM crawler artifacts. Every native response is marked
 `X-Syrabit-Route: worker-native`.
@@ -43,7 +43,6 @@ complete native feature set, add these GitHub Actions secrets before running
 the workflow:
 
 `JWT_SECRET`, `ADMIN_JWT_SECRET`, `RESET_TOKEN_SECRET`, `EDGE_SHARED_SECRET`,
-`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`,
 `RESEND_API_KEY`, `INDEXNOW_API_KEY`, `INDEXNOW_INTERNAL_SECRET`,
 `R2_PUBLIC_URL`, `TRANSLATE_CRON_SECRET`, `CF_ACCESS_CLIENT_ID`, and
 `CF_ACCESS_CLIENT_SECRET`.
@@ -75,7 +74,7 @@ service-binding probe.
    absent from Mongo are reported as absent rather than treated as migrated.
 
 3. Deploy through `.github/workflows/deploy.yml`. It synchronizes the Worker
-   secrets required by native auth, payments, email, R2 upload URLs, and
+    secrets required by native auth, email, R2 upload URLs, and
    internal generation before deploy. Optional Trustpilot display values are
    supplied directly to the Cloudflare release environment. When none are
    configured, the endpoint intentionally returns `null`. The API Worker
@@ -96,9 +95,9 @@ service-binding probe.
    user. Do not put tokens or secrets in shell history or logs; use the
    workspace secret mechanism in CI. The full check validates public-edge
    markers for student profile/history/credits/content/chat, staff content,
-   admin publishing/RAG/translation reads, scheduled seed status, forged
-   payment verification, and forged Razorpay webhook rejection. It creates
-   no orders, credits, content, seed runs, or publish jobs. The chat and
+    admin publishing/RAG/translation reads, scheduled seed status, and retired
+    commercial-route rejection. It creates no payment records, credits, content,
+    seed runs, or publish jobs. The chat and
    internal-generation probes intentionally consume bounded AI capacity, so
    run them only with disposable cutover accounts and the approved worker
    test budget.

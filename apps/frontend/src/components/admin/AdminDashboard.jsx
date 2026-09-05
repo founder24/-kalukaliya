@@ -16,7 +16,7 @@ import {
   Users, MessageSquare, BookOpen, Zap, Loader2, Activity,
   ArrowRight, PenTool, Settings, Eye, TrendingUp, RefreshCw,
   UserPlus, Globe, Search, Bot, BarChart2, Server, Clock,
-  CheckCircle, AlertCircle, AlertTriangle, Wifi, Database, DollarSign, Crown,
+  CheckCircle, AlertCircle, AlertTriangle, Wifi, Database, DollarSign,
   Layers, Link2, FileCheck, Target, Cpu, ShieldCheck, Smartphone,
   Volume2, VolumeX, Bell, BellOff, RotateCcw, Upload, Trash2, Music, X,
   ShieldAlert, UserCheck, Cloud,
@@ -859,7 +859,6 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
     { id: 'users',     label: 'View Users',     icon: Users,    color: '#7c3aed' },
     { id: 'blog',      label: 'Blog Publisher', icon: PenTool,  color: '#3b82f6' },
     { id: 'analytics', label: 'Analytics',       icon: BarChart2, color: '#10b981' },
-    { id: 'monetization', label: 'Monetization', icon: Crown,    color: '#f59e0b' },
   ];
 
   const ctx = {
@@ -1033,7 +1032,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
       </div>
 
       <SectionErrorBoundary name="Revenue">
-      {metrics?.revenue && (
+      {false && metrics?.revenue && (
         <>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard
@@ -1044,7 +1043,6 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
             subLabel="MRR"
             subValue={'₹' + Math.round(metrics.revenue.mrr_inr || 0).toLocaleString('en-IN')}
           />
-          <StatCard label="Paid Users"      value={metrics.users?.paid || 0}     icon={Crown}  color="#f59e0b" />
           <StatCard label="Free Users"      value={metrics.users?.free || 0}     icon={Users}  color="#64748b" />
           <StatCard label="SEO Pages"       value={metrics.seo?.published_pages || 0} icon={Globe} color="#06b6d4"
             subLabel="Topics" subValue={metrics.seo?.topics || 0}
@@ -1091,7 +1089,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
           );
         })()}
         <p className="text-[11px] text-gray-400 mt-2 px-1">
-          Revenue includes Razorpay (INR) + Stripe (USD→INR via daily ECB rate). All values stored as <code>amount_inr</code> on each payment row.
+          Commerce metrics are retired from the student product.
         </p>
         </>
       )}
@@ -1131,7 +1129,7 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
       <UserAnalyticsWidget {...ctx} />
       <ActivityWidget {...ctx} />
 
-      <AdminQuickLinks links={['content','seomanager','analytics','users','conversations','ai','revenue','roadmap']} onNavigate={onNavigate} />
+      <AdminQuickLinks links={['content','seomanager','analytics','users','conversations','ai','roadmap']} onNavigate={onNavigate} />
     </div>
   );
 }

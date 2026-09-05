@@ -272,44 +272,6 @@ export const Analytics = {
     track('seo_page_viewed', { board, class: classSlug, subject: subjectSlug, topic: topicSlug, type: pageType });
   },
 
-  // ── Payment ────────────────────────────────────────────────────────────────
-  // Task #731 S7 — defensive normalizer for the `priceInr` argument.
-  //
-  // The 4 call sites in ProfilePage.jsx (Razorpay full plan + 3 top-up
-  // paths) pass `orderData.amount` directly, and Razorpay returns that
-  // amount in PAISE (so a ₹99 plan shows up as 9900). For ~6 months the
-  // analytics events have therefore been emitting `price_inr=9900`,
-  // making PostHog/GA4 revenue dashboards 100x too high.
-  //
-  // Rather than rely on every future caller remembering to divide by
-  // 100, we normalize here: any value above PAISE_THRESHOLD that's also
-  // an exact multiple of 100 is treated as paise and converted to
-  // rupees. This is safe because (a) Razorpay paise are always integer
-  // multiples of 100 and (b) no real plan price exceeds ₹50000 — well
-  // below the 5_000_000 paise floor a future ₹50000 plan would have to
-  // exceed to misclassify.
-  _normalizePriceInr: (v) => {
-    if (typeof v !== "number" || !Number.isFinite(v)) return v;
-    const PAISE_THRESHOLD = 50_000;       // ₹50000 max plausible plan price
-    if (v >= PAISE_THRESHOLD && v % 100 === 0) return v / 100;
-    return v;
-  },
-  upgradeInitiated: (plan, priceInr) => {
-    track('upgrade_initiated', { plan, price_inr: Analytics._normalizePriceInr(priceInr), attribution_source: _getAttribution() });
-  },
-
-  purchaseComplete: (plan, priceInr, orderId) => {
-    track('purchase_completed', { plan, price_inr: Analytics._normalizePriceInr(priceInr), order_id: orderId, attribution_source: _getAttribution() });
-  },
-
-  purchaseFailed: (plan, reason, orderId) => {
-    track('purchase_failed', { plan, reason, order_id: orderId, attribution_source: _getAttribution() });
-  },
-
-  paymentModalClosed: (plan) => {
-    track('payment_modal_closed', { plan, attribution_source: _getAttribution() });
-  },
-
   // ── Admin ──────────────────────────────────────────────────────────────────
   // ── PWA ────────────────────────────────────────────────────────────────
   pwaPromptShown: () => {

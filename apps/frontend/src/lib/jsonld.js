@@ -861,7 +861,7 @@ export function homeSchema(url) {
           { '@type': 'State', name: 'Assam' },
           { '@type': 'City', name: 'Guwahati' },
         ],
-        priceRange: '₹0–₹999',
+        priceRange: 'Free',
       },
       {
         '@type': 'WebSite',

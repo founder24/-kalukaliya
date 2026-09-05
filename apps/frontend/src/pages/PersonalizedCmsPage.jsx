@@ -31,7 +31,7 @@ export default function PersonalizedCmsPage() {
       .then(r => setDoc(r.data))
       .catch(e => {
         const status = e.response?.status;
-        if (status === 402) setPayError(e.response?.data?.message || 'Upgrade required');
+        if (status === 402) setPayError(e.response?.data?.message || 'This study plan is not available right now.');
         else if (status === 403) setError('forbidden');
         else if (status === 404) setError('not-found');
         else setError('error');
@@ -60,17 +60,17 @@ export default function PersonalizedCmsPage() {
                 <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(139,92,246,0.15)' }}>
                   <Lock size={16} className="text-violet-400" />
                 </div>
-                <span className="text-[11px] font-semibold text-violet-400 uppercase tracking-widest">Premium Feature</span>
+                <span className="text-[11px] font-semibold text-violet-400 uppercase tracking-widest">Study plan</span>
               </div>
               <h1 className="text-lg font-bold text-white">Personalized Study Plans</h1>
-              <p className="text-sm text-white/45 mt-1">Available on Starter & Pro plans</p>
+              <p className="text-sm text-white/45 mt-1">This feature is being refreshed.</p>
             </div>
             <div className="px-6 py-5 space-y-3">
               <div className="text-sm text-white/60">{payError}</div>
-              <Link to="/pricing"
+              <Link to="/library"
                 className="flex items-center justify-center gap-2 w-full h-11 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
                 style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#6d28d9 100%)', boxShadow: '0 4px 20px rgba(124,58,237,0.35)' }}>
-                <Zap size={15} /> Upgrade to Starter — ₹99
+                <ArrowLeft size={15} /> Continue learning
               </Link>
               <div className="flex justify-center">
                 <Link to="/library" className="text-xs text-white/35 hover:text-white/60 flex items-center gap-1 transition-colors">

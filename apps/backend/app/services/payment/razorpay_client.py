@@ -1,3 +1,9 @@
+"""RETIRED LOCAL HISTORICAL TOOLING — former Razorpay client.
+
+No production route invokes this client. It remains only so local historical
+tools can interpret prior provider records; do not use it for new commerce.
+"""
+
 import httpx
 import logging
 from urllib.parse import quote

@@ -107,7 +107,7 @@ export default function ProfileHeader({
         {[
           { icon: BookMarked, label: 'Saved',  value: stats.saved_subjects },
           { icon: MessageSquare, label: 'Chats', value: stats.conversations },
-          { icon: Zap, label: 'Credits', value: creditsLimit === 0 ? 'Upgrade' : `${creditsRemaining}/${creditsLimit}` },
+          { icon: Zap, label: 'Credits', value: creditsLimit === 0 ? 'Resets daily' : `${creditsRemaining}/${creditsLimit}` },
         ].map(({ icon: Icon, label, value }) => (
           <div
             key={label}

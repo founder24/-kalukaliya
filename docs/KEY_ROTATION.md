@@ -81,48 +81,23 @@ This document provides step-by-step procedures for rotating all secrets used by 
 
 ---
 
-## 3. Razorpay Keys (Key ID + Key Secret)
+## 3. Retired Razorpay credentials (historical only)
 
 ### Pre-requisites
-- Razorpay Dashboard access (owner role)
-- Azure CLI authenticated
-- Access to Azure Key Vault
+- Historical Razorpay Dashboard access (owner role), only when an audit of
+  retained records requires it.
 
 ### Steps
-1. In Razorpay Dashboard, navigate to Settings > API Keys > Generate Key.
-2. Copy both the Key ID and Key Secret (Secret is shown only once).
-3. Update Azure Key Vault:
-   ```bash
-   az keyvault secret set \
-     --vault-name syrabit-prod-kv \
-     --name razorpay-key-id \
-     --value "<NEW_KEY_ID>"
-
-   az keyvault secret set \
-     --vault-name syrabit-prod-kv \
-     --name razorpay-key-secret \
-     --value "<NEW_KEY_SECRET>"
-   ```
-4. Update the container app environment variables:
-   ```bash
-   az containerapp update \
-     --name syrabit-backend \
-     --resource-group syrabit-prod-rg \
-     --set-env-vars \
-       RAZORPAY_KEY_ID=secretref:razorpay-key-id \
-       RAZORPAY_KEY_SECRET=secretref:razorpay-key-secret
-   ```
-5. Verify webhook signature validation still works (Razorpay uses Key Secret for HMAC).
+Do not generate, rotate, or provision replacement payment credentials. The
+ads-only Cloudflare production API retires all payment and webhook routes;
+historical records remain retained in D1.
 
 ### Verification
-- Create a test subscription and verify payment flow completes.
-- Check webhook endpoint returns 200 for incoming Razorpay events.
-- Monitor `/api/webhooks/razorpay` logs for signature validation errors.
+- Confirm retired commercial endpoints return `410` and no payment secret is
+  provisioned to the production Worker.
 
 ### Rollback
-- Re-set the old Key ID and Key Secret in Azure Key Vault.
-- Update the container app env vars to point to old secrets.
-- Note: The old key remains valid in Razorpay until explicitly deactivated.
+- Do not restore retired payment credentials or routes.
 
 ---
 

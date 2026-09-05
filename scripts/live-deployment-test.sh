@@ -512,34 +512,30 @@ if should_run "seo"; then
 fi
 
 # ===========================================================================
-# CATEGORY: payments
+# CATEGORY: retired commercial routes
 # ===========================================================================
 if should_run "payments"; then
-    echo -e "${BOLD}--- [payments] Payment Endpoints ---${NC}"
+    echo -e "${BOLD}--- [payments] Retired Commercial Endpoints ---${NC}"
     echo ""
 
     # POST /api/v1/payments/create-order without auth
     do_request POST "$BACKEND_URL/api/v1/payments/create-order" \
         -H "Content-Type: application/json" \
         -d '{"plan_id":"test"}'
-    if [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
-        pass_test "payments/create-order without auth returns $HTTP_CODE"
-    elif [[ "$HTTP_CODE" == "404" ]]; then
-        warn_test "payments/create-order endpoint not found (may not be deployed)"
+    if [[ "$HTTP_CODE" == "410" || "$HTTP_CODE" == "404" ]]; then
+        pass_test "payments/create-order is retired (returned $HTTP_CODE)"
     else
-        fail_test "payments/create-order without auth returned $HTTP_CODE (expected 401 or 403)" "yes"
+        fail_test "payments/create-order returned $HTTP_CODE (expected 404 or 410)" "yes"
     fi
 
     # POST /api/v1/payments/verify without auth
     do_request POST "$BACKEND_URL/api/v1/payments/verify" \
         -H "Content-Type: application/json" \
         -d '{"order_id":"test","payment_id":"test","signature":"test"}'
-    if [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
-        pass_test "payments/verify without auth returns $HTTP_CODE"
-    elif [[ "$HTTP_CODE" == "404" ]]; then
-        warn_test "payments/verify endpoint not found (may not be deployed)"
+    if [[ "$HTTP_CODE" == "410" || "$HTTP_CODE" == "404" ]]; then
+        pass_test "payments/verify is retired (returned $HTTP_CODE)"
     else
-        fail_test "payments/verify without auth returned $HTTP_CODE (expected 401 or 403)" "yes"
+        fail_test "payments/verify returned $HTTP_CODE (expected 404 or 410)" "yes"
     fi
 
     echo ""
@@ -732,16 +728,14 @@ if should_run "security"; then
         fail_test "path traversal NOT blocked (returned $HTTP_CODE, expected 400)" "yes"
     fi
 
-    # Webhook endpoint rejects unsigned requests
+    # Retired webhook endpoint cannot accept any provider callback.
     do_request POST "$BACKEND_URL/api/webhooks/razorpay" \
         -H "Content-Type: application/json" \
         -d '{"event":"payment.captured","payload":{}}'
-    if [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" || "$HTTP_CODE" == "400" ]]; then
-        pass_test "webhook rejects unsigned request (returned $HTTP_CODE)"
-    elif [[ "$HTTP_CODE" == "404" ]]; then
-        warn_test "webhook endpoint not found (may not be deployed)"
+    if [[ "$HTTP_CODE" == "410" || "$HTTP_CODE" == "404" ]]; then
+        pass_test "webhook is retired (returned $HTTP_CODE)"
     else
-        fail_test "webhook accepted unsigned request (returned $HTTP_CODE)" "yes"
+        fail_test "webhook returned $HTTP_CODE (expected 404 or 410)" "yes"
     fi
 
     # Check error responses don't leak stack traces
@@ -802,22 +796,20 @@ if should_run "performance"; then
 fi
 
 # ===========================================================================
-# CATEGORY: webhook
+# CATEGORY: retired webhook
 # ===========================================================================
 if should_run "webhook"; then
-    echo -e "${BOLD}--- [webhook] Webhook Security ---${NC}"
+    echo -e "${BOLD}--- [webhook] Retired Webhook Boundary ---${NC}"
     echo ""
 
     # POST /api/webhooks/razorpay with empty body
     do_request POST "$BACKEND_URL/api/webhooks/razorpay" \
         -H "Content-Type: application/json" \
         -d '{}'
-    if [[ "$HTTP_CODE" == "400" || "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
-        pass_test "webhook with empty body returns $HTTP_CODE"
-    elif [[ "$HTTP_CODE" == "404" ]]; then
-        warn_test "webhook endpoint not found (may not be deployed)"
+    if [[ "$HTTP_CODE" == "410" || "$HTTP_CODE" == "404" ]]; then
+        pass_test "webhook with empty body is retired (returned $HTTP_CODE)"
     else
-        fail_test "webhook with empty body returned $HTTP_CODE (expected 400 or 401)" "yes"
+        fail_test "webhook with empty body returned $HTTP_CODE (expected 404 or 410)" "yes"
     fi
 
     # POST /api/webhooks/razorpay with invalid signature header
@@ -825,12 +817,10 @@ if should_run "webhook"; then
         -H "Content-Type: application/json" \
         -H "X-Razorpay-Signature: invalid-signature-value" \
         -d '{"event":"payment.captured","payload":{"payment":{"entity":{"id":"pay_fake"}}}}'
-    if [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" || "$HTTP_CODE" == "400" ]]; then
-        pass_test "webhook with invalid signature returns $HTTP_CODE"
-    elif [[ "$HTTP_CODE" == "404" ]]; then
-        warn_test "webhook endpoint not found"
+    if [[ "$HTTP_CODE" == "410" || "$HTTP_CODE" == "404" ]]; then
+        pass_test "webhook with invalid signature is retired (returned $HTTP_CODE)"
     else
-        fail_test "webhook accepted invalid signature (returned $HTTP_CODE)" "yes"
+        fail_test "webhook with invalid signature returned $HTTP_CODE (expected 404 or 410)" "yes"
     fi
 
     echo ""

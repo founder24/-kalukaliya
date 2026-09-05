@@ -28,14 +28,13 @@ const _t = {
     ctaHeading: 'Ready to ace your boards?',
     ctaSub: 'Join hundreds of AssamBoard students (AHSEC, DEGREE & SEBA) who study smarter with Syrabit.ai. Free forever — no credit card required.',
     ctaPrimary: 'Create Free Account',
-    ctaSecondary: 'View all plans',
+    ctaSecondary: 'Browse the library',
     footerDesc: 'AI-powered exam prep for AssamBoard students in Assam — AHSEC (Class 11–12), DEGREE (B.Com, B.A, B.Sc), and SEBA.',
     product: 'PRODUCT',
     company: 'COMPANY',
     contact: 'CONTACT',
     boards: 'BOARDS',
     features: 'Features',
-    pricing: 'Pricing',
     subjects: 'Library',
     curriculum: 'Curriculum',
     examRoutine: 'Exam Routine',
@@ -66,7 +65,6 @@ const _t = {
     contact: 'যোগাযোগ',
     boards: 'বোৰ্ডসমূহ',
     features: 'সুবিধাসমূহ',
-    pricing: 'মূল্য নিৰ্ধাৰণ',
     subjects: 'লাইব্ৰেৰী',
     curriculum: 'পাঠ্যক্ৰম',
     examRoutine: 'পৰীক্ষাৰ সময়সূচী',
@@ -131,7 +129,7 @@ export default function TestimonialsFooter({ year, contentLang = 'en' }) {
               {t.ctaPrimary}
             </Link>
             <Link
-              to="/pricing"
+              to="/library"
               className="flex items-center gap-2 font-semibold text-muted-foreground transition-transform duration-200 ease-out hover:scale-[1.04] hover:-translate-y-0.5 active:scale-[0.97]"
               style={{
                 height: 56,
@@ -176,7 +174,6 @@ export default function TestimonialsFooter({ year, contentLang = 'en' }) {
             <div className="space-y-1">
               <p className="text-xs font-bold tracking-[0.10em] pb-1 text-muted-foreground">{t.product}</p>
               <Link to="/home#features" className="block text-sm text-muted-foreground hover:text-foreground transition-colors min-h-[44px] flex items-center">{t.features}</Link>
-              <Link to="/pricing" className="block text-sm text-muted-foreground hover:text-foreground transition-colors min-h-[44px] flex items-center">{t.pricing}</Link>
               <Link to="/library" className="block text-sm text-muted-foreground hover:text-foreground transition-colors min-h-[44px] flex items-center">{t.subjects}</Link>
               <Link to="/curriculum" className="block text-sm text-muted-foreground hover:text-foreground transition-colors min-h-[44px] flex items-center">{t.curriculum}</Link>
               <Link to="/exam-routine" className="block text-sm text-muted-foreground hover:text-foreground transition-colors min-h-[44px] flex items-center">{t.examRoutine}</Link>

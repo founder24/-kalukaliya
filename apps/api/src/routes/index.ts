@@ -5,9 +5,6 @@ import { chatRouter } from './chat';
 import { contentRouter } from './content';
 import { staffRouter } from './staff';
 import { usersRouter } from './users';
-import { subscriptionRouter } from './subscription';
-import { paymentsRouter } from './payments';
-import { webhookRouter } from './webhook';
 import { internalRouter } from './internal';
 import { conversationsRouter } from './conversations';
 import { analyticsRouter, changelogRouter, configRouter, indexNowRouter } from './operations';
@@ -35,9 +32,6 @@ api.route('/api/v1/admin',        adminContentRouter);
 api.route('/api/v1/admin',        staffRouter);
 api.route('/api/v1/users',        usersRouter);       // profile, memories, onboarding, credits, stats
 api.route('/api/v1/user',         usersRouter);       // alias — frontend uses /user/profile, /user/me
-api.route('/api/v1/subscription', subscriptionRouter); // plans, status, create-order, cancel
-api.route('/api/v1/payments',     paymentsRouter);    // create-order, verify, credit-topup, history
-api.route('/api/webhooks',        webhookRouter);     // Razorpay HMAC-verified webhook
 api.route('/api/v1/internal',     internalRouter);    // internal Worker-to-Worker endpoints
 api.route('/api/v1/conversations', conversationsRouter); // saved history, rename/star/archive
 api.route('/api/v1/analytics', analyticsRouter);     // public browser beacons
@@ -49,6 +43,23 @@ api.route('/api/v1/changelog', changelogRouter);     // public API release histo
 api.route('/api/changelog', changelogRouter);        // legacy release-history path
 api.route('/api/v1/seo', seoRouter);                 // sitemaps, feeds, robots, LLM index
 api.route('/api/seo', seoRouter);                    // legacy public sitemap path
+
+// Commercial endpoints are deliberately retired at the public routing boundary.
+// Retained D1 payment/subscription rows are historical records only; no request
+// reaching this Worker can create orders, alter credits/entitlements, or process
+// a provider callback.
+const retiredCommercialRoute = (c: import('hono').Context) =>
+  c.json({ detail: 'Not found' }, 410);
+for (const path of [
+  '/api/v1/subscription',
+  '/api/v1/subscription/*',
+  '/api/v1/payments',
+  '/api/v1/payments/*',
+  '/api/webhooks',
+  '/api/webhooks/*',
+]) {
+  api.all(path, retiredCommercialRoute);
+}
 
 // Catch-all: 404 for any path not implemented above
 api.all('*', (c) => c.json({ detail: 'Not found' }, 404));

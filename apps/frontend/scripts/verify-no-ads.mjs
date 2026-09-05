@@ -1,4 +1,4 @@
-// Task #529: enforce the "no ads on /chat, /library, /chapter" policy at
+// Task #529: enforce the "no ads on /library" policy at
 // build time. Task #526 placed comment-block warnings at the top of
 // these three route files, but a comment is easy to miss in code review.
 // This script hard-fails the build if any of the guarded files import
@@ -15,7 +15,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const srcDir = path.resolve(__dirname, "..", "src");
 
 const GUARDED_FILES = [
-  "pages/ChatPage.jsx",
   "pages/LibraryPage.jsx",
   // ChapterPage is intentionally monetised (Notes, Q&A, PYQ tabs) — removed from deny-list.
 ];

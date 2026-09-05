@@ -4,7 +4,7 @@ import {
 
 export default function AiCredits({
   stats, creditsRemaining, creditsUsed, creditsLimit,
-  creditPercent, isLowCredits, plan, setShowTopUpModal,
+  creditPercent, isLowCredits,
 }) {
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
@@ -28,7 +28,7 @@ export default function AiCredits({
         </div>
         <div className="mt-4">
           <div className="flex justify-between text-xs text-muted-foreground mb-1.5">
-            <span>{creditsLimit === 0 ? 'No credits — upgrade to chat' : 'Credits used'}</span>
+            <span>{creditsLimit === 0 ? 'Daily free messages reset tomorrow' : 'Credits used today'}</span>
             <span className={isLowCredits ? 'text-amber-700' : ''}>
               {creditsLimit === 0 ? '' : `${creditsUsed} / ${creditsLimit}`}
             </span>
@@ -47,15 +47,6 @@ export default function AiCredits({
               }}
             />
           </div>
-          {plan !== 'free' && (
-            <button
-              onClick={() => setShowTopUpModal(true)}
-              className="mt-3 w-full h-8 rounded-lg text-xs font-semibold transition-all hover:opacity-90 active:scale-[0.98] flex items-center justify-center gap-1.5"
-              style={{ background: 'rgba(139,92,246,0.12)', color: 'hsl(var(--primary))', border: '1px solid rgba(139,92,246,0.25)' }}
-            >
-              <Zap size={12} /> Buy More Credits
-            </button>
-          )}
         </div>
       </div>
     </div>

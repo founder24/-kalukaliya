@@ -48,7 +48,7 @@ binding = "AI"
 crons = [
   "*/5 * * * *",  # resume bounded native seed batches and recover leases
   "0 * * * *",    # hourly: expire TTL records
-  "0 0 * * *",    # daily: reset monthly message counts, expire subscriptions
+  "0 0 * * *",    # daily: reset monthly message counts
 ]
 
 # ── Production environment ────────────────────────────────────────────────────
@@ -91,12 +91,11 @@ crons = [
 ]
 
 # ── Required Secrets (wrangler secret put <NAME> --env production) ────────────
+# Commercial payment secrets are intentionally not provisioned: the public
+# payment, subscription, and webhook routes are retired while D1 history remains.
 # JWT_SECRET           — HS256 signing key (must match edge worker)
 # ADMIN_JWT_SECRET     — Admin panel JWT signing key
 # RESET_TOKEN_SECRET   — Password reset token signing key
-# RAZORPAY_KEY_ID      — Razorpay API key ID
-# RAZORPAY_KEY_SECRET  — Razorpay API secret
-# RAZORPAY_WEBHOOK_SECRET — Razorpay webhook signature secret
 # RESEND_API_KEY       — Resend email API key
 # POSTHOG_API_KEY      — PostHog analytics
 # INDEXNOW_API_KEY     — IndexNow submission key

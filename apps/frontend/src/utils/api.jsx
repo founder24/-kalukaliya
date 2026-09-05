@@ -846,32 +846,6 @@ export const seoRelatedByChapter = (chapterId, excludeTopicId = null, limit = 5)
 
 
 
-// ── Payments ─────────────────────────────────────────────────────────────────
-
-export const createPaymentOrder = (plan) =>
-  axios.post(`${API_BASE}/payments/create-order`, { plan }, authConfig());
-
-export const createSubscriptionOrder = (plan) =>
-  axios.post(`${API_BASE}/subscription/create-order`, { plan }, authConfig());
-
-export const verifyPayment = (data) =>
-  axios.post(`${API_BASE}/payments/verify`, data, authConfig());
-
-export const recoverPayment = () =>
-  axios.post(`${API_BASE}/payments/recover`, {}, authConfig());
-
-export const createCreditTopUp = (credits) =>
-  axios.post(`${API_BASE}/payments/credit-topup`, { credits, provider: 'razorpay' }, authConfig());
-
-export const verifyCreditTopUp = (data) =>
-  axios.post(`${API_BASE}/payments/credit-topup/verify`, data, authConfig());
-
-export const getPaymentHistory = () =>
-  axios.get(`${API_BASE}/payments/history`, authConfig());
-
-export const requestRefund = (paymentId, reason = '') =>
-  axios.post(`${API_BASE}/payments/refund-request`, { payment_id: paymentId, reason }, authConfig());
-
 // ── Vertex AI / Gemini Services ──────────────────────────────────────────────
 export const vertexHealth = (token) =>
   axios.get(`${API_BASE}/admin/vertex/health`, { headers: adminHeaders(token), withCredentials: true });
@@ -915,7 +889,7 @@ export const vertexMcqGenerator = (token, text, subject, class_name, count = 10,
   axios.post(`${API_BASE}/admin/vertex/mcq-generator`, { text, subject, class_name, count, difficulty },
     { headers: adminHeaders(token), withCredentials: true });
 
-// ── Upgrade Wave API Helpers ──────────────────────────────────────────────────
+// ── SEO pipeline API helpers ──────────────────────────────────────────────────
 export const seoInternalLinksAnalyze = (token) =>
   axios.get(`${API_BASE}/admin/seo/internal-links/analyze`, { headers: adminHeaders(token), withCredentials: true });
 

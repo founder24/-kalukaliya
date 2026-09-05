@@ -7,12 +7,12 @@
  * returns `{ enabled: false }` and `<AdSlot />` renders nothing — no
  * layout shift, no script tag injected.
  *
- * Routes that intentionally have NO ads:
- *   - /chat       (ChatPage)
+ * Sponsored surfaces:
+ *   - /chat       (between completed assistant turns only)
  *   - /library    (LibraryPage)
  *   - /browser    (LibraryPage alias)
  *
- * Monetised content routes (manual per-slot units only, no auto-ads):
+ * Sponsored content routes (manual per-slot units only, no auto-ads):
  *   - /learn/:slug   (LearnPage — Notes standalone view)
  *   - /pyq/:slug     (PYQReplicaPage — Question Paper standalone view)
  *   - /:board/...    (ChapterPage — Notes, Q&A, and Question Paper tabs)
@@ -53,9 +53,7 @@ const NETWORKS = {
 };
 
 // ── Per-placement wiring ─────────────────────────────────────────────────────
-// Monetised surfaces: /learn/... (LearnPage), /pyq/... (PYQReplicaPage),
-// and /:board/... (ChapterPage — Notes, Q&A, PYQ tabs). All other routes
-// (chat, library, browser) stay ad-free — see `scripts/verify-no-ads.mjs`.
+// Sponsored surfaces include chat, Learn, PYQ, and chapter content.
 //
 // ALL placements are wired to Google AdSense (the only active network).
 // adpushup, adsterra, and propellerads are hard-disabled in DISABLED_NETWORKS,
@@ -76,6 +74,17 @@ const NETWORKS = {
 //   entirely. No minHeight reserved — the slot collapses to nothing when
 //   Google decides not to fill it, which is the correct mobile behaviour.
 const PLACEMENTS = {
+  'chat.afterAssistant': {
+    network: 'adsense',
+    slotId: env.VITE_ADS_ADSENSE_CHAT_AFTER_ASSISTANT_SLOT
+      || env.VITE_ADS_ADSENSE_LEARN_INCONTENT_SLOT
+      || env.VITE_ADS_ADSENSE_PYQ_INCONTENT_SLOT
+      || '',
+    height: 120,
+    label: 'Sponsored learning content',
+    adFormat: 'fluid',
+    adLayout: 'in-article',
+  },
   // ── PYQ pages ─────────────────────────────────────────────────────────────
   'pyq.topOfContent': {
     network: 'adsense',
@@ -322,24 +331,8 @@ export function hydrateAdsOptOutFromServer(serverValue) {
   }
 }
 
-// ── Paid-plan ad-free gate (Task #552) ──────────────────────────────────────
-// Paying subscribers (Starter / Pro) get an ad-free reading experience as
-// a perk of upgrading. `AuthContext` is the single source of truth for the
-// signed-in user's plan; it mirrors the plan into this module via
-// `setAdsUserPlan()` whenever the user state changes (login, signup,
-// /auth/me hydrate, profile refresh, logout). `adsConsentGranted()` then
-// reads the mirrored value with zero extra network calls.
-//
-// The set of "paid" plan keys mirrors the rest of the codebase
-// (Free / Starter / Pro — see ProfilePage / PricingSection / AdminPlans).
-const PAID_PLAN_KEYS = new Set(['starter', 'pro']);
-
-let _userPlan = null;
-// Until AuthContext finishes its first /auth/me probe we don't yet
-// know if the visitor is a paying subscriber. Fail closed so a paid
-// user with a cookie-only session never sees an ad flash before their
-// plan hydrates. AuthContext flips this to `true` via
-// `setAdsAuthChecked(true)` as soon as `authChecked` is true.
+// Wait for the auth probe before loading third-party scripts. This avoids
+// consent/config decisions changing during the first client render.
 let _authChecked = false;
 
 export function setAdsAuthChecked(checked) {
@@ -365,35 +358,6 @@ export function setAdsAuthChecked(checked) {
  * subscribers without a server round-trip. Pass `null` / `undefined`
  * for anonymous visitors and on logout.
  */
-export function setAdsUserPlan(plan) {
-  const next = typeof plan === 'string' ? plan.toLowerCase() : null;
-  if (next === _userPlan) return;
-  _userPlan = next;
-  // Notify already-mounted ad surfaces so they can re-evaluate
-  // `adsConsentGranted()` and tear down any scripts they injected
-  // while the user was anonymous (or hadn't hydrated yet).
-  if (typeof window !== 'undefined') {
-    try {
-      window.dispatchEvent(
-        new CustomEvent('syrabit:ads-consent-changed', {
-          detail: { reason: 'plan', plan: _userPlan },
-        })
-      );
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-/**
- * True when the mirrored user plan is one of the paid tiers
- * (Starter / Pro). Exported for tests and for any future caller that
- * needs to branch on the same gate that suppresses ads.
- */
-function isPaidPlanActive() {
-  return !!(_userPlan && PAID_PLAN_KEYS.has(_userPlan));
-}
-
 // One-time banner that explains the new cross-device sync behaviour to
 // users who already had a local "opt out of ads" choice set before the
 // account-synced version of the toggle shipped. Bump the version
@@ -437,7 +401,7 @@ export function markAdsCrossDeviceBannerSeen() {
 //                   popunder creatives slipping past category filters.)
 //   - quge5:        disabled 2026-04-19. (Same — popunders + adult.)
 //   - adpushup:     disabled 2026-04-19 per user request "keep only
-//                   adsense". Premium SSP, brand-safe, but user wants
+//                   adsense". Brand-safe, with one network for simplicity.
 //                   single-network simplicity.
 //
 // Net result: only Google AdSense serves ads on the site. Auto Ads
@@ -481,11 +445,7 @@ export function getAdConfig(placement) {
 export function adsConsentGranted() {
   if (typeof window === 'undefined') return false;
   if (getAdsOptOut()) return false;
-  // Fail closed until auth has been checked, so a returning paid
-  // subscriber whose plan is still hydrating from `/auth/me` never
-  // sees an ad flash on /learn or /pyq — Task #552.
+  // Fail closed until the initial auth probe has settled.
   if (!_authChecked) return false;
-  // Paid subscribers (Starter / Pro) get an ad-free experience — Task #552.
-  if (isPaidPlanActive()) return false;
   return !!(env && env.PROD);
 }

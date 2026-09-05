@@ -15,9 +15,8 @@
 - The bounded Workers AI chat request returned `200` as Server-Sent Events,
   carried `X-Syrabit-Route: worker-native`, emitted a source card and clean
   completion event, and contained answer content without an error event.
-- Invalid payment-verification requests without a user session returned `401`,
-  and malformed/forged Razorpay webhook requests returned `400`. No order,
-  credit, or webhook state was created by these probes.
+- Retired payment, subscription, and webhook routes returned `410` before any
+  legacy handler could create an order, credit, or change entitlement state.
 - The cutover validator now checks the native password-reset request's
   non-enumerating `200` response through the public edge and checks the native
   confirmation route's invalid-token `400` response without changing password
@@ -110,21 +109,20 @@ credentials, so no authenticated production account was used for this record.
 `EDGE_SHARED_SECRET`, and `TRANSLATE_CRON_SECRET` for a full stage. It checks
 public-edge Worker-native markers for:
 
-- student profile, history, credits, subscription, content access, payments,
-  and chat;
+- student profile, history, credits, content access, and chat;
 - staff content and read-only RAG state;
 - admin publishing-route reachability, translation progress, RAG status, and
   seed-run history;
 - scheduled English/Assamese seed status and authenticated internal AI
   generation; and
-- forged payment-verification and Razorpay-webhook rejection paths.
+- payment, subscription, and webhook retirement paths.
 
 The Cloudflare deployment workflow exposes the same full check when
 `validate_authenticated` is selected. Supply the documented disposable GitHub
 secrets before using that gate. A successful public-only smoke test is not
 evidence of full authenticated parity. Chat and internal generation are
 bounded usage probes against these disposable credentials; all other added
-checks avoid creating orders, payment credits, content, seed runs, or publish
+checks avoid creating payment records, credits, content, seed runs, or publish
 jobs.
 
 A failed, skipped, or cancelled downstream smoke job blocks the release. It

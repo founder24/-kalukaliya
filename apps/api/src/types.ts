@@ -20,9 +20,6 @@ export interface Env {
   ADMIN_JWT_SECRET: string;
   RESET_TOKEN_SECRET: string;
   EDGE_SHARED_SECRET: string;
-  RAZORPAY_KEY_ID: string;
-  RAZORPAY_KEY_SECRET: string;
-  RAZORPAY_WEBHOOK_SECRET: string;
   RESEND_API_KEY: string;
   POSTHOG_API_KEY?: string;
   INDEXNOW_API_KEY?: string;

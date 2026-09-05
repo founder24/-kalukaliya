@@ -17,6 +17,8 @@ from app.db.mongo import init_mongo, close_mongo
 from app.api.v1 import (
     chat,
     auth,
+    # Retired local historical billing module. It is intentionally not mounted;
+    # the production API is the Cloudflare Worker and no longer sells plans.
     subscription,
     users,
     health,
@@ -64,9 +66,11 @@ from app.api.v1 import (
     content,
     public_content,
     changelog,
+    # Retained only for local historical record inspection; never mount it.
     payments,
     staff_content,
 )
+# Retired local historical webhook tooling. Do not mount this router.
 from app.api.webhooks import razorpay
 
 logger = logging.getLogger(__name__)
@@ -414,16 +418,15 @@ def create_app() -> FastAPI:
     )
     app.include_router(edu.router, prefix="/api/v1", tags=["Education"])
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
-    app.include_router(
-        subscription.router, prefix="/api/v1/subscription", tags=["Subscription"]
-    )
+    # Payment, subscription, and Razorpay webhook modules remain in this Python
+    # repository solely as retired local historical tooling. They are not part of
+    # the Cloudflare production API and must not be re-mounted.
     app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
     app.include_router(health.router, prefix="/health", tags=["Health"])
     app.include_router(health.router, prefix="/api/v1/health", tags=["Health"])
     app.include_router(
         feedback.router, prefix="/api/v1/chat/feedback", tags=["Feedback"]
     )
-    app.include_router(razorpay.router, prefix="/api/webhooks", tags=["Webhooks"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
     app.include_router(
         admin_dashboard.router, prefix="/api/v1/admin", tags=["Admin Dashboard"]
@@ -480,7 +483,6 @@ def create_app() -> FastAPI:
         tags=["Admin Dead Letters"],
     )
     app.include_router(changelog.router, prefix="/api/v1", tags=["Changelog"])
-    app.include_router(payments.router, prefix="/api/v1/payments", tags=["Payments"])
     app.include_router(
         admin_security.router, prefix="/api/v1/admin", tags=["Admin Security"]
     )

@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, BookOpen, MessageCircle, CreditCard, LogIn, Sparkles } from 'lucide-react';
+import { Home, BookOpen, MessageCircle, LogIn, Sparkles } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { prefetchRoute } from '@/utils/prefetchRoute';
 
@@ -8,7 +8,6 @@ const NAV_ITEMS = [
   { to: '/home', icon: Home, label: 'Home' },
   { to: '/library', icon: BookOpen, label: 'Library' },
   { to: '/chat', icon: MessageCircle, label: 'Chat' },
-  { to: '/pricing', icon: CreditCard, label: 'Pricing' },
 ];
 
 export const PublicBottomNav = memo(function PublicBottomNav() {
@@ -18,9 +17,7 @@ export const PublicBottomNav = memo(function PublicBottomNav() {
   const isActive = (path) =>
     location.pathname === path || location.pathname.startsWith(path + '/');
 
-  // Signed-out users see Home/Library/Chat/Pricing + a Sign-Up CTA.
-  // Signed-in users keep the same four nav tiles (so Library/Chat/Pricing
-  // remain present on every public page) and get an "Open App" CTA that
+  // Keep public navigation focused on learning surfaces and the free app.
   // also routes to /chat — same destination, distinct visual role.
   const ctaItem = user
     ? { to: '/chat', icon: Sparkles, label: 'Open App', isCta: true, key: 'cta-open-app' }

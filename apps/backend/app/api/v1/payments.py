@@ -1,5 +1,9 @@
 """
-Payments API - Razorpay integration for subscriptions and credit top-ups.
+RETIRED LOCAL HISTORICAL TOOLING — former Razorpay payment implementation.
+
+This module is intentionally not mounted by app.main and is not deployed by the
+Cloudflare production API. Retain it only to interpret historical records; do
+not use it for new payment, top-up, refund, or entitlement flows.
 """
 
 import asyncio

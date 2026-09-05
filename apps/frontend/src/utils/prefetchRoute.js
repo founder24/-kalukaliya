@@ -7,7 +7,6 @@ const routeImports = {
   '/chat': () => import('@/pages/ChatPage'),
   '/history': () => import('@/pages/HistoryPage'),
   '/profile': () => import('@/pages/ProfilePage'),
-  '/pricing': () => import('@/pages/PricingPage'),
   '/curriculum': () => import('@/pages/CurriculumMap'),
   '/exam-routine': () => import('@/pages/ExamRoutinePage'),
   '/login': () => import('@/pages/LoginPage'),

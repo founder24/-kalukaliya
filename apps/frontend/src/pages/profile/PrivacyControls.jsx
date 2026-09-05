@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ShieldOff, ChevronRight, Brain, Lock } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ShieldOff, ChevronRight, Brain } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getAdsOptOut,
@@ -14,12 +14,10 @@ import { useAuth } from '@/context/AuthContext';
 
 export default function PrivacyControls({ profile }) {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [optedOut, setOptedOut] = useState(false);
   const [saving, setSaving] = useState(false);
   const announcedRef = useRef(false);
 
-  const isPaidUser = profile?.plan && profile.plan !== 'free';
 
   // Hydrate from the server-side value when the profile loads.
   useEffect(() => {
@@ -52,14 +50,6 @@ export default function PrivacyControls({ profile }) {
 
   const handleToggle = async () => {
     if (saving) return;
-
-    // Free users: nudge toward upgrade instead of toggling.
-    if (!isPaidUser) {
-      toast.info('Upgrade to Starter or Pro to remove ads.', {
-        action: { label: 'Upgrade', onClick: () => navigate('/profile?upgrade=starter') },
-      });
-      return;
-    }
 
     const next = !optedOut;
     setOptedOut(next);
@@ -99,59 +89,43 @@ export default function PrivacyControls({ profile }) {
         <div
           className="flex items-start gap-3 p-3 rounded-xl"
           style={{
-            background: isPaidUser ? 'rgba(124,58,237,0.06)' : 'rgba(148,163,184,0.06)',
-            border: isPaidUser
-              ? '1px solid rgba(139,92,246,0.18)'
-              : '1px solid rgba(148,163,184,0.18)',
+            background: 'rgba(124,58,237,0.06)',
+            border: '1px solid rgba(139,92,246,0.18)',
           }}
         >
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={
-              isPaidUser
-                ? { background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.25)' }
-                : { background: 'rgba(148,163,184,0.10)', border: '1px solid rgba(148,163,184,0.20)' }
-            }
+            style={{ background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.25)' }}
           >
-            <ShieldOff size={16} style={{ color: isPaidUser ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))' }} />
+            <ShieldOff size={16} style={{ color: 'hsl(var(--primary))' }} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
               <p className="text-sm font-semibold text-foreground">Opt out of ads</p>
-              {!isPaidUser && (
-                <span
-                  className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
-                  style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' }}
-                >
-                  <Lock size={8} /> Paid
-                </span>
-              )}
             </div>
             <p className="text-xs text-muted-foreground/70 mt-0.5">
-              {isPaidUser
-                ? 'Stop ad scripts from loading. While you\'re signed in, this preference is saved to your account and synced across all your devices, and applies on the next page you open.'
-                : 'Ad-free browsing is included with Starter and Pro plans. Upgrade to remove all ads across your devices.'}
+              Stop ad scripts from loading. Your preference is saved to your account and applies on the next page you open.
             </p>
           </div>
           <button
             type="button"
             role="switch"
-            aria-checked={isPaidUser ? optedOut : false}
-            aria-label={isPaidUser ? 'Opt out of ads' : 'Upgrade to opt out of ads'}
+            aria-checked={optedOut}
+            aria-label="Opt out of ads"
             onClick={handleToggle}
             data-testid="ads-optout-toggle"
             className="relative flex-shrink-0 w-11 h-6 rounded-full transition-colors"
             style={{
-              background: isPaidUser && optedOut
+              background: optedOut
                 ? 'hsl(var(--primary))'
                 : 'rgba(148,163,184,0.35)',
-              cursor: isPaidUser ? 'pointer' : 'not-allowed',
-              opacity: isPaidUser ? 1 : 0.5,
+              cursor: 'pointer',
+              opacity: 1,
             }}
           >
             <span
               className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform shadow"
-              style={{ transform: isPaidUser && optedOut ? 'translateX(22px)' : 'translateX(2px)' }}
+              style={{ transform: optedOut ? 'translateX(22px)' : 'translateX(2px)' }}
             />
           </button>
         </div>

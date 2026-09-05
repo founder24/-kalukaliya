@@ -26,13 +26,6 @@ az containerapp revision list --name syrabit-backend --resource-group rg-syrabit
 2. Update KeyVault: `az keyvault secret set --vault-name kv-syrabit --name GOOGLE-CREDENTIALS --value <base64-encoded-json>`
 3. Restart backend
 
-### Razorpay Keys
-
-1. Generate new keys in Razorpay Dashboard
-2. Update KeyVault secrets: RAZORPAY-KEY-ID and RAZORPAY-KEY-SECRET
-3. Restart backend
-4. Verify webhook signature verification still works
-
 ## Rollback a Deploy
 
 ```bash

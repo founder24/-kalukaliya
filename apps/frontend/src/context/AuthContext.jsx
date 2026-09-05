@@ -4,7 +4,6 @@ import { API_BASE } from '@/utils/api';
 import { Analytics } from '@/utils/analytics';
 import {
   hydrateAdsOptOutFromServer,
-  setAdsUserPlan,
   setAdsAuthChecked,
 } from '@/utils/adsConfig';
 import {
@@ -68,17 +67,14 @@ export const AuthProvider = ({ children }) => {
         setUser(userData);
         resolvedUserId = userData.id;
         hydrateAdsOptOutFromServer(userData.ads_opt_out);
-        setAdsUserPlan(userData.plan ?? null);
       } else {
         setUser(null);
-        setAdsUserPlan(null);
       }
       justAuthenticated.current = false;
       return !!resolvedUserId;
     } catch {
       if (!justAuthenticated.current) {
         setUser(null);
-        setAdsUserPlan(null);
       }
       return false;
     } finally {
@@ -110,7 +106,6 @@ export const AuthProvider = ({ children }) => {
 
   // Mirror the signed-in user's plan into the ads module
   useEffect(() => {
-    setAdsUserPlan(user?.plan ?? null);
   }, [user?.plan]);
 
 
@@ -135,7 +130,6 @@ export const AuthProvider = ({ children }) => {
       const userData = profileRes.data;
       setUser(userData);
       hydrateAdsOptOutFromServer(userData?.ads_opt_out);
-      setAdsUserPlan(userData?.plan ?? null);
       try { Analytics.login(userData.id, userData.email); } catch {}
       return userData;
     } catch (err) {
@@ -165,7 +159,6 @@ export const AuthProvider = ({ children }) => {
       const userData = profileRes.data;
       setUser(userData);
       hydrateAdsOptOutFromServer(userData?.ads_opt_out);
-      setAdsUserPlan(userData?.plan ?? null);
       try { Analytics.signup(userData.email, userData.plan); } catch {}
       return userData;
     } catch (err) {

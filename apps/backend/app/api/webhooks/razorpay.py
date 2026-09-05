@@ -1,3 +1,9 @@
+"""RETIRED LOCAL HISTORICAL TOOLING — former Razorpay webhook handler.
+
+This module is deliberately not mounted by app.main or deployed to Cloudflare.
+Keep it only to interpret historical provider records.
+"""
+
 from fastapi import APIRouter, Request, HTTPException
 from app.config import settings
 from app.models.user import User
@@ -36,7 +42,9 @@ def _validate_subscription_id(value) -> str:
 
 @router.post("/razorpay")
 async def handle_razorpay_webhook(request: Request):
-    """
+"""
+RETIRED LOCAL HISTORICAL TOOLING — former Razorpay webhook handler, not mounted.
+
     Handle Razorpay Payment Webhooks
     Verifies signature and updates subscription status
     """

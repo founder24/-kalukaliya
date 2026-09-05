@@ -60,7 +60,7 @@ jobs:
           echo "coverage_pct=$COV_PCT" >> "$GITHUB_OUTPUT"
 
           # Only fail on coverage threshold, not on individual test failures
-          # Pre-existing failures (Razorpay 503, Beanie not initialized) are expected in CI
+          # Pre-existing failures (retired commerce 410, Beanie not initialized) are expected in CI
           COV_NUM=$(echo "$COV_PCT" | grep -oP '\d+' || echo "0")
           if [ "$COV_NUM" -lt "30" ]; then
             echo "coverage_failed=true" >> "$GITHUB_OUTPUT"

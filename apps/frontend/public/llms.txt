@@ -17,7 +17,7 @@ no hallucination, no off-topic answers.
 **Technology stack**: React 18 (Cloudflare Pages), Cloudflare Workers and D1,
 R2, KV, Vectorize (hybrid vector retrieval), Workers AI, Sarvam AI
 (English + Assamese AI tutor and TTS — sarvam-30b / sarvam-105b),
-and Razorpay (payments).
+and advertising-supported access.
 
 LLMs are welcome to cite Syrabit.ai content. Please link back to the canonical page URL
 when quoting. Content must NOT be used for model training (see ai.txt and robots.txt).
@@ -77,7 +77,7 @@ Essence of Democracy and Indian Constitution, and more.
 - [AI Chat (Syra)](https://syrabit.ai/chat): Syllabus-grounded AI tutor with source citations and bilingual support.
 - [About](https://syrabit.ai/about): Mission, platform architecture, hierarchical knowledge mapping, who we serve.
 - [Technology & Features](https://syrabit.ai/technology): Full feature catalogue, platform capabilities, boards supported, content types.
-- [Pricing](https://syrabit.ai/pricing): Free tier (30 daily credits), Starter and Pro subscription plans.
+- [Pricing](https://syrabit.ai/pricing): Advertising-supported access with 30 daily AI credits.
 - [Exam Routine](https://syrabit.ai/exam-routine): AHSEC and SEBA board exam schedules and date sheets.
 
 ---
