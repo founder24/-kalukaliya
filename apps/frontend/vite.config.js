@@ -657,6 +657,20 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
+  // `vite preview` inherits `server.proxy` unless explicitly overridden.
+  // Never proxy built `/assets` during a production preview: those files live
+  // in `dist`, and forwarding them to the API host leaves the app unhydrated.
+  preview: {
+    host: '0.0.0.0',
+    allowedHosts: true,
+    proxy: {
+      '/api/v1/chat/stream': { target: CHAT_WORKER_TARGET, changeOrigin: true },
+      '/api': { target: BACKEND_TARGET, changeOrigin: true },
+      '/health': { target: BACKEND_TARGET, changeOrigin: true },
+      '/docs': { target: BACKEND_TARGET, changeOrigin: true },
+      '/openapi.json': { target: BACKEND_TARGET, changeOrigin: true },
+    },
+  },
 
   define: {
     'process.env.NODE_ENV': JSON.stringify(mode),
