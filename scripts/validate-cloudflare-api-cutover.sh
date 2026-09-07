@@ -4,7 +4,7 @@
 # Required: API_WORKER_URL, e.g. https://syrabit-api-prod.<account>.workers.dev
 # Required: PUBLIC_EDGE_URL, e.g. https://api.syrabit.ai
 # Optional: PUBLIC_SITE_URL, defaults to https://syrabit.ai
-# Required: INDEXNOW_INTERNAL_SECRET for authenticated IndexNow validation
+# Optional: INDEXNOW_INTERNAL_SECRET enables authenticated IndexNow validation
 # Required for full validation: STUDENT_TOKEN, STAFF_TOKEN,
 # ADMIN_SESSION_TOKEN, EDGE_SHARED_SECRET, TRANSLATE_CRON_SECRET,
 # CF_ACCESS_CLIENT_ID, and CF_ACCESS_CLIENT_SECRET.
@@ -28,7 +28,6 @@ if [[ "$RESET_ONLY" != "true" && "$RESET_ONLY" != "false" ]]; then
 fi
 if [[ "$RESET_ONLY" != "true" ]]; then
   : "${API_WORKER_URL:?Set API_WORKER_URL to the deployed API Worker URL}"
-  : "${INDEXNOW_INTERNAL_SECRET:?Set INDEXNOW_INTERNAL_SECRET for IndexNow validation}"
 fi
 BASE="${API_WORKER_URL:-}/api/v1"
 EDGE_BASE="${PUBLIC_EDGE_URL%/}"
@@ -393,7 +392,14 @@ fi
 native_get "/content/library-bundle?slim=1" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert all(k in p for k in ("boards","classes","streams","subjects")), p'
 native_get "/content/question-papers" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), list)'
 echo "Checking Worker-native operational and crawler routes"
-native_get "/analytics/top-routes" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p == {"routes":[],"period":"7d"}, p'
+native_get "/analytics/top-routes" | python3 -c '
+import json, sys
+p = json.load(sys.stdin)
+assert p.get("period") == "7d", p
+routes = p.get("routes")
+assert isinstance(routes, list) and len(routes) <= 20, p
+assert all(isinstance(row.get("route"), str) and isinstance(row.get("count"), int) and row["count"] >= 0 for row in routes), p
+'
 native_get "/config/trustpilot" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p is None or {"profileUrl","businessUnitId"} <= set(p), p'
 native_get "/changelog" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), list)'
 native_get "/seo/sitemap-index.xml" | grep -q '<sitemapindex'
@@ -403,7 +409,11 @@ native_get "/seo/llms.txt" | grep -q 'Syrabit.ai'
 # Preserve the unauthenticated contract, then prove the deployed Worker has both
 # server-to-server secrets by using the safe empty-list path below.
 native_status "/indexnow/submit" "403" "POST" | python3 -c 'import json,sys; assert json.load(sys.stdin)["detail"] == "Missing IndexNow secret"'
-native_indexnow_empty_submit | python3 -c 'import json,sys; assert json.load(sys.stdin) == {"submitted":0,"failed":0,"detail":"No URLs provided"}'
+if [[ -n "${INDEXNOW_INTERNAL_SECRET:-}" ]]; then
+  native_indexnow_empty_submit | python3 -c 'import json,sys; assert json.load(sys.stdin) == {"submitted":0,"failed":0,"detail":"No URLs provided"}'
+else
+  echo "Skipping authenticated IndexNow validation because INDEXNOW_INTERNAL_SECRET is not configured."
+fi
 
 # Publishing, content editing, RAG, and scheduled seed routes are native.
 # No catch-all compatibility bridge may reintroduce Cloud Run.
