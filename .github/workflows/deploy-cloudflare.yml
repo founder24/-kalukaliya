@@ -24,11 +24,6 @@ on:
         required: false
         default: false
         type: boolean
-      validate_reset_delivery:
-        description: 'Require a fresh disposable password-reset email proof after deployment'
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -368,8 +363,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright Chromium for hydration verification
+      - name: Install Playwright Chromium
         run: pnpm --filter @workspace/syrabit run playwright:install:chromium
+
+      - name: Test chat ad interruption safeguards
+        run: pnpm --filter @workspace/syrabit run test:e2e:chat-ads
+
+      - name: Upload chat ad Playwright diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-ads-playwright-diagnostics
+          path: apps/frontend/test-results/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Build frontend
         run: pnpm --filter @workspace/syrabit run build
