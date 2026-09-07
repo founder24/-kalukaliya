@@ -9,6 +9,7 @@ import {
 } from "../../scripts/release-guards.mjs";
 import {
   fetchWithFallback,
+  JSON_ENDPOINTS,
   validateJsonPayload,
 } from "../../scripts/generate-static-data.mjs";
 
@@ -63,6 +64,11 @@ describe("curriculum release strictness", () => {
 });
 
 describe("static curriculum payload guards", () => {
+  it("does not make retired subscription plans a release dependency", () => {
+    expect(JSON_ENDPOINTS.some(({ apiPath }) => apiPath === "/subscription/plans")).toBe(false);
+    expect(JSON_ENDPOINTS.some(({ file }) => file === "plans.json")).toBe(false);
+  });
+
   it("rejects malformed JSON and zero-subject curriculum payloads", () => {
     expect(() => validateJsonPayload("subjects.json", "{not-json")).toThrow(
       "invalid JSON",

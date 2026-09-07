@@ -44,9 +44,13 @@ jobs:
   cloudflare-release:
     name: Cloudflare Native Release
     needs: dep-check
-    if: ${{ always() && (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') }}
+    # Reusable-workflow jobs can fail to materialize when push events pass the
+    # absent workflow_dispatch inputs through as empty strings. Coerce both
+    # values to real booleans and run after either a completed or intentionally
+    # skipped dependency gate.
+    if: ${{ !cancelled() && (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') }}
     uses: ./.github/workflows/deploy-cloudflare.yml
     with:
-      validate_authenticated: ${{ inputs.validate_authenticated }}
-      validate_reset_delivery: ${{ inputs.validate_reset_delivery }}
+      validate_authenticated: ${{ inputs.validate_authenticated == true }}
+      validate_reset_delivery: ${{ inputs.validate_reset_delivery == true }}
     secrets: inherit

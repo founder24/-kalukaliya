@@ -34,14 +34,13 @@ const ALLOW_INCOMPLETE_CURRICULUM_BUILD =
 const STRICT_CURRICULUM_BUILD = isStrictCurriculumBuild();
 
 // ── JSON endpoints ──────────────────────────────────────────────────────────
-const JSON_ENDPOINTS = [
+export const JSON_ENDPOINTS = [
   { gcsPath: "derived/library-bundle.json", apiPath: "/content/library-bundle", file: "library-bundle.json" },
   { gcsPath: "derived/library-bundle-slim.json", apiPath: "/content/library-bundle?slim=1", file: "library-bundle-slim.json" },
   { gcsPath: "hierarchy/boards.json", apiPath: "/content/boards", file: "boards.json" },
   { gcsPath: "hierarchy/subjects.json", apiPath: "/content/subjects", file: "subjects.json" },
   { gcsPath: "hierarchy/classes.json", apiPath: "/content/classes", file: "classes.json" },
   { gcsPath: "hierarchy/streams.json", apiPath: "/content/streams", file: "streams.json" },
-  { gcsPath: "derived/plans.json", apiPath: "/subscription/plans", file: "plans.json" },
 ];
 
 // ── Sitemap XML endpoints ───────────────────────────────────────────────────
