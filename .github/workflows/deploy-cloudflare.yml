@@ -585,6 +585,7 @@ jobs:
 
       - name: Validate authenticated Cloudflare API routing
         env:
+          CUTOVER_STAGE: ${{ inputs.validate_authenticated && 'full' || 'public' }}
           INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
           STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
           STAFF_TOKEN: ${{ secrets.CUTOVER_STAFF_TOKEN }}
