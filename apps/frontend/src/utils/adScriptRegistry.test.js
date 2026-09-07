@@ -9,14 +9,15 @@ describe('ad script registry', () => {
     removeAdScript(ADSENSE_SRC);
   });
 
-  it('creates one marked script when the same URL is requested repeatedly', () => {
+  it('creates one supported script when the same URL is requested repeatedly', () => {
     injectAdScript(ADSENSE_SRC, { crossorigin: 'anonymous' });
     injectAdScript(ADSENSE_SRC, { crossorigin: 'anonymous' });
 
     const scripts = document.head.querySelectorAll(
-      `script[data-syrabit-ad][src="${ADSENSE_SRC}"]`,
+      `script[src="${ADSENSE_SRC}"]`,
     );
     expect(scripts).toHaveLength(1);
+    expect(scripts[0].hasAttribute('data-syrabit-ad')).toBe(false);
   });
 
   it('adopts an existing matching script instead of adding another', () => {
@@ -25,6 +26,17 @@ describe('ad script registry', () => {
     document.head.appendChild(existing);
 
     injectAdScript(ADSENSE_SRC);
+
+    expect(document.head.querySelectorAll(`script[src="${ADSENSE_SRC}"]`)).toHaveLength(1);
+  });
+
+  it('does not remove a matching script it did not create', () => {
+    const existing = document.createElement('script');
+    existing.src = ADSENSE_SRC;
+    document.head.appendChild(existing);
+
+    injectAdScript(ADSENSE_SRC);
+    removeAdScript(ADSENSE_SRC);
 
     expect(document.head.querySelectorAll(`script[src="${ADSENSE_SRC}"]`)).toHaveLength(1);
   });

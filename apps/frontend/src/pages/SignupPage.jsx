@@ -28,7 +28,7 @@ const PERKS = [
   { icon: BookOpen, text: 'Browse all 55+ subjects — free forever' },
   { icon: Zap, text: '30 free AI messages every day' },
   { icon: GraduationCap, text: 'Ask Syra — your Assam board study companion' },
-  { icon: CheckCircle, text: '30 free AI messages every day' },
+  { icon: CheckCircle, text: 'Study in English or Assamese' },
 ];
 
 export default function SignupPage() {
@@ -51,6 +51,11 @@ export default function SignupPage() {
 
   const strength = getPasswordStrength(password);
   const passwordsMatch = confirmPassword && password === confirmPassword;
+  const passwordsMismatch = Boolean(confirmPassword && !passwordsMatch);
+  const passwordDescriptionIds = [
+    password && 'password-strength-hint',
+    passwordsMismatch && 'confirm-password-mismatch',
+  ].filter(Boolean).join(' ') || undefined;
 
   const handleInputFocus = useCallback((e) => {
     setTimeout(() => {
@@ -320,11 +325,11 @@ export default function SignupPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     onFocus={handleInputFocus}
-                    className={`pl-10 pr-11 h-11 ${confirmPassword && !passwordsMatch ? 'border-red-500/40' : ''}`}
+                    className={`pl-10 pr-11 h-11 ${passwordsMismatch ? 'border-red-500/40' : ''}`}
                     style={{ scrollMarginBottom: '4rem' }}
                     required
-                    aria-invalid={confirmPassword && !passwordsMatch ? true : undefined}
-                    aria-describedby={password ? 'password-strength-hint' : undefined}
+                    aria-invalid={passwordsMismatch ? true : undefined}
+                    aria-describedby={passwordDescriptionIds}
                     data-testid="auth-password-input"
                   />
                   <button
@@ -372,11 +377,11 @@ export default function SignupPage() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     onFocus={handleInputFocus}
-                    className={`pl-10 pr-11 h-11 ${confirmPassword && !passwordsMatch ? 'border-red-500/40' : ''}`}
+                    className={`pl-10 pr-11 h-11 ${passwordsMismatch ? 'border-red-500/40' : ''}`}
                     style={{ scrollMarginBottom: '4rem' }}
                     required
-                    aria-invalid={confirmPassword && !passwordsMatch ? true : undefined}
-                    aria-describedby={confirmPassword && !passwordsMatch ? 'confirm-password-mismatch' : undefined}
+                    aria-invalid={passwordsMismatch ? true : undefined}
+                    aria-describedby={passwordsMismatch ? 'confirm-password-mismatch' : undefined}
                   />
                   <button
                     type="button"
@@ -387,56 +392,46 @@ export default function SignupPage() {
                     {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
                 </div>
-                {confirmPassword && !passwordsMatch && (
+                {passwordsMismatch && (
                   <p id="confirm-password-mismatch" className="text-xs text-red-500" role="alert">Passwords don't match</p>
                 )}
               </div>
 
-              <div className="flex items-start gap-1 py-1">
-                <button
-                  type="button"
-                  onClick={() => setAgreed(!agreed)}
-                  className="-ml-3 p-3 min-w-[44px] min-h-[44px] rounded flex-shrink-0 flex items-center justify-center transition-all cursor-pointer"
+              <div className="flex items-start gap-2 py-1">
+                <input
+                  id="terms-consent"
+                  type="checkbox"
+                  checked={agreed}
+                  onChange={(e) => setAgreed(e.target.checked)}
+                  className="mt-1 h-4 w-4 flex-shrink-0 accent-violet-600"
                   aria-label="Agree to terms"
                   aria-invalid={error === 'Please agree to the Terms of Service' ? 'true' : undefined}
                   aria-describedby={error === 'Please agree to the Terms of Service' ? 'signup-error-message' : undefined}
-                >
-                  <span
-                    className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${agreed ? 'border-violet-500' : 'border-border bg-muted/50'}`}
-                    style={agreed ? { background: 'linear-gradient(135deg,#7c3aed,#8b5cf6)' } : {}}
-                  >
-                    {agreed && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                  </span>
-                </button>
-                <span className="text-xs text-muted-foreground">
+                />
+                <label htmlFor="terms-consent" className="text-xs text-muted-foreground">
                   I agree to the{' '}
                   <Link to="/terms" target="_blank" rel="noopener noreferrer" className="font-medium text-violet-600 hover:text-violet-700 transition-colors">Terms</Link>
                   {' '}and{' '}
                   <Link to="/privacy" target="_blank" rel="noopener noreferrer" className="font-medium text-violet-600 hover:text-violet-700 transition-colors">Privacy Policy</Link>
-                </span>
+                </label>
               </div>
 
-              <div className="flex items-start gap-1 py-1">
-                <button
-                  type="button"
-                  onClick={() => setConsentDpdp(!consentDpdp)}
-                  className="-ml-3 p-3 min-w-[44px] min-h-[44px] rounded flex-shrink-0 flex items-center justify-center transition-all cursor-pointer"
+              <div className="flex items-start gap-2 py-1">
+                <input
+                  id="dpdp-consent"
+                  type="checkbox"
+                  checked={consentDpdp}
+                  onChange={(e) => setConsentDpdp(e.target.checked)}
+                  className="mt-1 h-4 w-4 flex-shrink-0 accent-violet-600"
                   aria-label="Consent to data processing"
                   aria-invalid={error === 'Please provide consent for data processing under the DPDP Act' ? 'true' : undefined}
                   aria-describedby={error === 'Please provide consent for data processing under the DPDP Act' ? 'signup-error-message' : undefined}
-                >
-                  <span
-                    className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${consentDpdp ? 'border-violet-500' : 'border-border bg-muted/50'}`}
-                    style={consentDpdp ? { background: 'linear-gradient(135deg,#7c3aed,#8b5cf6)' } : {}}
-                  >
-                    {consentDpdp && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                  </span>
-                </button>
-                <span className="text-xs text-muted-foreground">
+                />
+                <label htmlFor="dpdp-consent" className="text-xs text-muted-foreground">
                   I consent to the processing of my personal data as described in the{' '}
                   <Link to="/privacy" target="_blank" rel="noopener noreferrer" className="font-medium text-violet-600 hover:text-violet-700 transition-colors">Privacy Policy</Link>
                   {' '}under the DPDP Act, 2023
-                </span>
+                </label>
               </div>
 
               <button

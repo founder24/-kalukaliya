@@ -98,6 +98,9 @@ interface ContextChunk {
   subjectId?: string | undefined;
   content: string;
   score: number;
+  medium?: string | undefined;
+  sourceType?: string | undefined;
+  topicName?: string | undefined;
 }
 
 /**
@@ -144,6 +147,22 @@ interface ChunkMeta {
   chapterTitle?: string;
 }
 
+interface SourceEntry {
+  id: string;
+  title: string;
+  kind: 'curriculum' | 'web';
+  url: string | null;
+  snippet: string;
+  medium: string;
+  source_type: string;
+  score?: number | undefined;
+  chapter_slug?: string | undefined;
+  subject_slug?: string | undefined;
+  class_slug?: string | undefined;
+  board_slug?: string | undefined;
+  topic_name?: string | undefined;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -165,6 +184,43 @@ function sanitize(text: string): string {
     .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F]/g, '')
     .trim()
     .slice(0, 2000);
+}
+
+/**
+ * Keep streamed Assamese output safe to render and record suspicious language
+ * drift without deleting model text mid-answer. Removing words from a stream
+ * can corrupt formulas, names, and partially emitted Markdown; NFC plus
+ * line-ending/invisible-format normalization is safe for independently emitted
+ * chunks. The prompt remains the enforcement mechanism, while this signal is
+ * persisted for quality monitoring and future provider retry policy.
+ */
+export function normalizeAssameseStreamChunk(text: string): string {
+  return text
+    .normalize('NFC')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/শুধুমাত্র/g, 'কেৱল')
+    .replace(/যেমন/g, 'যেনে')
+    .replace(/পদার্থ/g, 'পদাৰ্থ')
+    .replace(/এবং/g, 'আৰু')
+    .replace(/একটি/g, 'এটা')
+    .replace(/হচ্ছে/g, 'হৈছে')
+    .replace(/হলো/g, 'হ’ল')
+    .replace(/জন্য/g, 'বাবে')
+    .replace(/থেকে/g, 'পৰা')
+    .replace(/আপনি/g, 'আপুনি');
+}
+
+export function hasAssameseProseLeakage(text: string): boolean {
+  // Devanagari is unambiguously not Assamese. Bengali and Assamese share the
+  // same Unicode block, so only flag a small set of Bengali connective words
+  // rather than guessing from shared letter forms. Do not flag Latin tokens:
+  // they are commonly necessary in formulas and proper nouns (AHSEC, Newton,
+  // CO2).
+  // U+0964/U+0965 are shared danda punctuation in Assamese writing, so they
+  // are deliberately excluded from the Devanagari-script signal.
+  return /[\u0900-\u0963\u0966-\u097F]/u.test(text)
+    || /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি)(?=$|[\s,.!?।])/u.test(text);
 }
 
 function sseEvent(payload: unknown): string {
@@ -628,6 +684,65 @@ async function fetchChapterContent(
   return null;
 }
 
+/**
+ * Resolve the navigation metadata for the compact set of chapters used to
+ * ground a turn. This deliberately happens after retrieval (never in the
+ * Vectorize hot path) and gracefully leaves a source usable when legacy
+ * hierarchy rows are absent.
+ */
+async function buildSourceEntries(
+  d1: D1Database,
+  chunks: ContextChunk[],
+  webResults: WebSearchResult[],
+  lang: 'en' | 'as',
+): Promise<SourceEntry[]> {
+  const curriculum = await Promise.all(chunks.map(async (chunk) => {
+    const row = await d1.prepare(`
+      SELECT chapters.slug AS chapter_slug, subjects.slug AS subject_slug,
+             classes.slug AS class_slug, boards.slug AS board_slug
+      FROM chapters
+      LEFT JOIN subjects ON subjects.id = chapters.subject_id
+      LEFT JOIN streams ON streams.id = subjects.stream_id
+      LEFT JOIN classes ON classes.id = streams.class_id
+      LEFT JOIN boards ON boards.id = classes.board_id
+      WHERE chapters.id = ?
+    `).bind(chunk.chapterId).first<{
+      chapter_slug: string | null;
+      subject_slug: string | null;
+      class_slug: string | null;
+      board_slug: string | null;
+    }>().catch(() => null);
+    const path = row?.board_slug && row.class_slug && row.subject_slug && row.chapter_slug
+      ? `/${row.board_slug}/${row.class_slug}/${row.subject_slug}/${row.chapter_slug}`
+      : null;
+    return {
+      id: `chapter:${chunk.chapterId}`,
+      title: chunk.chapterTitle,
+      kind: 'curriculum' as const,
+      url: path,
+      snippet: chunk.content.replace(/\s+/g, ' ').trim().slice(0, 360),
+      medium: chunk.medium ?? (lang === 'as' ? 'assamese' : 'english'),
+      source_type: chunk.sourceType ?? 'rag_chapter',
+      score: chunk.score,
+      ...(row?.chapter_slug && { chapter_slug: row.chapter_slug }),
+      ...(row?.subject_slug && { subject_slug: row.subject_slug }),
+      ...(row?.class_slug && { class_slug: row.class_slug }),
+      ...(row?.board_slug && { board_slug: row.board_slug }),
+      ...(chunk.topicName && { topic_name: chunk.topicName }),
+    };
+  }));
+  const web = webResults.map((result, index) => ({
+    id: `web:${index}:${result.url}`,
+    title: result.title,
+    kind: 'web' as const,
+    url: result.url,
+    snippet: result.snippet,
+    medium: 'web',
+    source_type: result.source,
+  }));
+  return [...curriculum, ...web];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Conversation history
 // ─────────────────────────────────────────────────────────────────────────────
@@ -797,7 +912,9 @@ export function buildSystemPrompt(opts: {
       '- তোমাৰ সহায়তা কেৱল Assamboard পাঠ্যক্রম (AHSEC, SEBA আৰু প্ৰসংগত থকা Assamboard Degree পাঠ্যক্রম) লৈ সীমিত।',
       '- শ্ৰেণী ১১ আৰু ১২-ৰ পাঠ্যক্রমৰ ব’ৰ্ড হিচাপে AHSEC কোৱা; Degree course-ৰ ব’ৰ্ড হিচাপে Assamboard কোৱা। Degree course-ক AHSEC, CBSE বা NCERT বুলি নক’বা।',
       '- CBSE, NCERT, ICSE বা অন্য কোনো ব’ৰ্ডৰ প্ৰশ্নৰ উত্তৰ নিদিবা। এনে প্ৰশ্ন আহিলে ভদ্ৰভাৱে কোৱা যে Syrabit কেৱল অসম ব’ৰ্ডৰ পাঠ্যক্রম সমৰ্থন কৰে আৰু অসম ব’ৰ্ডৰ সমতুল্য প্ৰশ্ন সুধিবলৈ কোৱা।',
-      '- সম্পূৰ্ণ অসমীয়াত উত্তৰ দিয়া।',
+       '- উত্তৰৰ ব্যাখ্যামূলক গদ্য সম্পূৰ্ণ শুদ্ধ অসমীয়াত আৰু অসমীয়া লিপিত লিখিবা। বাংলা, হিন্দী/দেৱনাগৰী বা ইংৰাজী বাক্য, অনুচ্ছেদ বা অনুবাদ নিদিবা।',
+       '- সূত্ৰ, সমীকৰণ, ৰাসায়নিক সংকেত, একক, প্ৰচলিত সংক্ষিপ্ত ৰূপ আৰু সঠিক নাম (যেনে AHSEC, NCERT, Syrabit বা Newton) অপৰিৱৰ্তিত ৰাখিব পাৰা; এই অনুমতি ব্যাখ্যামূলক ইংৰাজী গদ্যৰ বাবে নহয়।',
+       '- উত্তৰ শেষ কৰাৰ আগতে নীৰৱে ভাষা পৰীক্ষা কৰা: ব্যাখ্যামূলক প্ৰতিটো বাক্য অসমীয়াত আছে নিশ্চিত কৰা।',
       '- পাঠ্যক্রমৰ প্ৰসংগ থাকিলে তাৰ ওপৰত ভিত্তি কৰি উত্তৰ দিয়া।',
       '- প্ৰথম বাক্যতেই প্ৰশ্নৰ পোনপটীয়া উত্তৰ দিয়া; “ইয়াত উত্তৰটো দিয়া হ’ল” ধৰণৰ ভূমিকা নিদিবা।',
       '- উত্তৰৰ দৈৰ্ঘ্য প্ৰশ্ন অনুসৰি ৰাখিবা। সহজ প্ৰশ্নৰ চমু উত্তৰ আৰু পৰীক্ষামুখী প্ৰশ্নৰ সংক্ষিপ্ত গঠনমূলক উত্তৰ দিয়া।',
@@ -1229,6 +1346,8 @@ chatRouter.post('/stream', async (c) => {
         content:      directChapterContent.slice(0, CONTEXT_CHAR_CAP),
         // Explicit page context is stronger than a semantic cosine score.
         score:        1,
+          medium:       lang === 'as' ? 'assamese' : 'english',
+          sourceType:   'chapter_direct',
       }];
       confidenceTier = 'high';
       topScore = 1;
@@ -1302,6 +1421,9 @@ chatRouter.post('/stream', async (c) => {
               ...(topSubjectId !== undefined && { subjectId: topSubjectId }),
               content:      content.slice(0, CONTEXT_CHAR_CAP),
               score:        best.score,
+              medium:       best.meta.medium ?? (lang === 'as' ? 'assamese' : 'english'),
+              sourceType:   best.meta.sourceType ?? 'rag_chapter',
+              ...(best.meta.topicId !== undefined && { topicName: best.meta.topicId }),
             }];
             ragPath = 'vectorize_d1';
           }
@@ -1338,6 +1460,8 @@ chatRouter.post('/stream', async (c) => {
           ...(body.subject_id !== undefined && { subjectId: body.subject_id }),
           content:      content.slice(0, CONTEXT_CHAR_CAP),
           score:        0.5,
+          medium:       lang === 'as' ? 'assamese' : 'english',
+          sourceType:   'card_context',
         }];
         ragPath        = 'card_context';
         confidenceTier = 'low';
@@ -1390,6 +1514,8 @@ chatRouter.post('/stream', async (c) => {
   // the ID from the first SSE event. We must mint here (not in waitUntil) so
   // history and persistence both use the same ID and the client learns it early.
   const effectiveSessionId: string = sessionId ?? crypto.randomUUID();
+  const sourceEntries = await buildSourceEntries(c.env.DB, contextChunks, webResults, lang);
+  const primaryCurriculumSource = sourceEntries.find(entry => entry.kind === 'curriculum');
 
   // ── 8. Source card (emitted as the very first SSE event) ────────────────────
   // Always emitted — even for llm_only responses — so the client consistently
@@ -1407,12 +1533,16 @@ chatRouter.post('/stream', async (c) => {
     match_score:      topScore,
     rag_chunks:       contextChunks.length,
     rag_chapter_name: topChapterTitle,
+    rag_chapter_slug: primaryCurriculumSource?.chapter_slug,
     rag_subject_id:   topSubjectId,
     rag_subject_name: body.subject_name,
     ctx_board_name:   body.board_name,
     ctx_class_name:   body.class_name,
     ctx_class_level:  body.class_name,
     ctx_stream_name:  body.stream_name,
+    ctx_board_slug:   primaryCurriculumSource?.board_slug,
+    ctx_class_slug:   primaryCurriculumSource?.class_slug,
+    ctx_subject_slug: primaryCurriculumSource?.subject_slug,
     web_used:         webResults.length > 0,
     web_status:       webStatus,
     web_sources:      webResults.map(result => ({
@@ -1420,6 +1550,10 @@ chatRouter.post('/stream', async (c) => {
       url: result.url,
       source_type: result.source,
     })),
+    // Detailed entries keep each source's own URL, snippet, medium, score and
+    // available hierarchy slugs; the existing top-level fields remain intact
+    // for older clients and the primary source card.
+    sources: sourceEntries,
   };
 
   // ── 8. SSE via TransformStream + waitUntil ──────────────────────────────────
@@ -1434,6 +1568,7 @@ chatRouter.post('/stream', async (c) => {
     let fullResponse = '';
     let actualModel  = AI_MODEL_PRIMARY;
     let firstTokenRecorded = false;
+    let assameseProseLeakage = false;
 
     try {
       // Always emit source_card first — client uses this to learn the conversation_id
@@ -1453,12 +1588,20 @@ chatRouter.post('/stream', async (c) => {
             actualModel = chunk.slice(7);
             continue;
           }
-          if (!firstTokenRecorded && chunk.length > 0) {
+          if (lang !== 'as' && !firstTokenRecorded && chunk.length > 0) {
             timings.first_token_ms = Date.now() - startTime;
             firstTokenRecorded = true;
           }
-          fullResponse += chunk;
-          await write({ content: chunk, done: false });
+          const normalizedChunk = lang === 'as'
+            ? normalizeAssameseStreamChunk(chunk)
+            : chunk;
+          fullResponse += normalizedChunk;
+          // Assamese is held until the complete answer can be validated. This
+          // prevents a mixed Hindi/Bengali sentence from reaching the browser
+          // before the route can detect it. English retains true token streaming.
+          if (lang !== 'as') {
+            await write({ content: normalizedChunk, done: false });
+          }
         }
         streamDone = true;
       } catch (streamErr) {
@@ -1471,6 +1614,25 @@ chatRouter.post('/stream', async (c) => {
         await write({ content: '', done: true, error: 'Empty response from AI. Please try again.' });
         await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
         return;
+      }
+
+      if (lang === 'as') {
+        fullResponse = normalizeAssameseStreamChunk(fullResponse);
+        assameseProseLeakage = hasAssameseProseLeakage(fullResponse);
+        if (assameseProseLeakage) {
+          await write({
+            content: '',
+            done: true,
+            error_kind: 'assamese_unavailable',
+            failure_stage: 'language_validation',
+            error: 'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। ইংৰাজী মোড ব্যৱহাৰ কৰি পুনৰ চেষ্টা কৰক।',
+          });
+          await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
+          return;
+        }
+        timings.first_token_ms = Date.now() - startTime;
+        firstTokenRecorded = true;
+        await write({ content: fullResponse, done: false });
       }
 
       // ── syrabit_done event ────────────────────────────────────────────────
@@ -1501,6 +1663,7 @@ chatRouter.post('/stream', async (c) => {
           timings_ms:       { ...timings },
         },
         request_id: serverRequestId,
+        assamese_prose_leakage: lang === 'as' ? assameseProseLeakage : false,
       };
       await write(doneEvent);
 

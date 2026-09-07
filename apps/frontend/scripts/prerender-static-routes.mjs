@@ -12,7 +12,6 @@
 //
 // Routes covered:
 //   /home               (LandingPage — public marketing landing)
-//   /pricing
 //   /login
 //   /signup
 //   /terms
@@ -57,13 +56,6 @@ const ROUTES = [
     description:
       "AI-powered educational browser for AHSEC, SEBA and Degree students in Assam. Browse syllabus content, get instant answers, and study smarter.",
     ogImageAlt: "Syrabit.ai — Educational Browser For Assam Board Students",
-  },
-  {
-    path: "/pricing",
-    title: "Pricing & Plans — Free, Starter & Pro | Syrabit.ai",
-    description:
-      "Compare Syrabit.ai plans for AHSEC and Degree students. Start free or upgrade to Starter (₹99) or Pro (₹999) for unlimited AI study help.",
-    ogImageAlt: "Syrabit.ai Pricing & Plans — Free, Starter & Pro",
   },
   {
     path: "/login",
@@ -344,7 +336,7 @@ function main() {
     const outFile = path.join(outDir, "index.html");
 
     // Don't overwrite a real SSR'd prerender if one already exists for
-    // this path (e.g. some future task adds full SSR for /pricing).
+    // this path (e.g. some future task adds full SSR for /about).
     if (fs.existsSync(outFile)) {
       const existing = fs.readFileSync(outFile, "utf-8");
       if (/data-hydrate="[a-z]+"/.test(existing)) {

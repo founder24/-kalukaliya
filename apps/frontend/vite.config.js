@@ -33,7 +33,7 @@ const CHAT_WORKER_TARGET = process.env.VITE_CHAT_API_ORIGIN || 'https://api.syra
 const BOT_UA = /googlebot|google-extended|googleother|google-inspectiontool|bingbot|duckduckbot|applebot|yandexbot|baiduspider|petalbot|yeti|mojeekbot|seznambot|youbot|slurp|msnbot|perplexitybot|perplexity-user|oai-searchbot|chatgpt-user|gptbot|claudebot|claude-web|anthropic-ai|applebot-extended|ccbot|cohere-ai|bytespider|amazonbot|diffbot|meta-externalagent|facebookexternalhit|facebookbot|twitterbot|linkedinbot|telegrambot|whatsapp|discordbot|slackbot|redditbot|ia_archiver|ahrefsbot|semrushbot|rogerbot|mj12bot|dotbot/i;
 
 const SKIP_ROUTES = new Set([
-  'library', 'chat', 'history', 'profile', 'pricing', 'signup', 'login',
+  'library', 'chat', 'history', 'profile', 'signup', 'login',
   'admin', 'auth', 'api', 'health', 'docs', 'openapi.json', 'assets',
   'icons', 'fonts', 'robots.txt', 'sitemap.xml', 'favicon.ico',
 ]);
@@ -245,7 +245,7 @@ ${navLinks ? `<div class="related"><h2>Related Topics in ${page.subject_name}</h
 
 <p style="font-size:0.8rem;color:#334155;margin-top:32px;text-align:center">
   <a href="/">Syrabit.ai</a> &mdash; AI-powered exam prep for Assam Board students (AHSEC, SEBA, Degree) &mdash;
-  <a href="/library">Study Library</a> &mdash; <a href="/pricing">Plans &amp; Pricing</a>
+  <a href="/library">Study Library</a>
 </p>
 
 </div>

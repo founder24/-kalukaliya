@@ -244,4 +244,31 @@ describe("Pages worker crawler snapshots", () => {
     expect(response.headers.get("X-Source")).toBe("bot-render-not-found");
     expect(response.headers.get("X-Robots-Tag")).toContain("noindex");
   });
+
+  it.each([
+    ["browser navigation", { Accept: "text/html" }, 404],
+    ["crawler with a Pages HTML fallback", BOT_HEADERS, 200],
+  ])("returns a non-HTML 404 for a missing hashed asset requested by a %s", async (_kind, headers, assetStatus) => {
+    const backendFetch = vi.fn();
+    vi.stubGlobal("fetch", backendFetch);
+    const assetFetch = vi.fn().mockResolvedValue(
+      new Response("<!doctype html><title>SPA shell</title>", {
+        status: assetStatus,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      }),
+    );
+    const request = new Request(
+      "https://syrabit.ai/assets/index-deadbeef.js",
+      { headers },
+    );
+
+    const response = await worker.fetch(request, { ASSETS: { fetch: assetFetch } });
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("Content-Type")).toContain("text/plain");
+    expect(response.headers.get("X-Source")).toBe("asset-not-found");
+    expect(await response.text()).not.toContain("SPA shell");
+    expect(assetFetch).toHaveBeenCalledWith(request);
+    expect(backendFetch).not.toHaveBeenCalled();
+  });
 });

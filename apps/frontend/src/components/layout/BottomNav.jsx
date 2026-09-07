@@ -4,6 +4,7 @@ import { BookOpen, MessageSquare, Clock, User } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { pageImports } from '@/utils/pageImports';
 import { prefetchRoute } from '@/utils/prefetchRoute';
+import { isLibraryNavigationActive } from '@/utils/libraryNavigation';
 
 const NAV_ITEMS = [
   { to: '/library', icon: BookOpen,      label: 'Browser',  preloadKey: 'library' },
@@ -16,8 +17,11 @@ export const BottomNav = memo(function BottomNav() {
   const location = useLocation();
   const { user } = useAuth();
 
-  const isActive = (path) =>
-    location.pathname === path || location.pathname.startsWith(path + '/');
+  const isActive = (path) => (
+    path === '/library'
+      ? isLibraryNavigationActive(location.pathname, path)
+      : location.pathname === path || location.pathname.startsWith(path + '/')
+  );
 
   const items = NAV_ITEMS;
 

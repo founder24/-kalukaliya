@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildSystemPrompt } from './chat';
+import {
+  buildSystemPrompt,
+  hasAssameseProseLeakage,
+  normalizeAssameseStreamChunk,
+} from './chat';
 
 describe('student chat curriculum scope', () => {
   it('limits English answers to Assam Board and refuses other boards', () => {
@@ -30,6 +34,18 @@ describe('student chat curriculum scope', () => {
     expect(prompt).toContain('CBSE, NCERT, ICSE');
     expect(prompt).toContain('শ্ৰেণী ১১ আৰু ১২-ৰ পাঠ্যক্রমৰ ব’ৰ্ড হিচাপে AHSEC');
     expect(prompt).toContain('Degree course-ৰ ব’ৰ্ড হিচাপে Assamboard');
+    expect(prompt).toContain('বাংলা, হিন্দী/দেৱনাগৰী বা ইংৰাজী বাক্য');
+    expect(prompt).toContain('সূত্ৰ, সমীকৰণ, ৰাসায়নিক সংকেত');
+  });
+
+  it('normalizes streamed Assamese safely without removing formulas or names', () => {
+    expect(normalizeAssameseStreamChunk('CO2\r\nNewton\u200B')).toBe('CO2\nNewton');
+    expect(normalizeAssameseStreamChunk('শুধুমাত্র একটি পদার্থ যেমন জল')).toBe(
+      'কেৱল এটা পদাৰ্থ যেনে জল',
+    );
+    expect(hasAssameseProseLeakage('অসমীয়াত CO2-ৰ কথা কোৱা হৈছে।')).toBe(false);
+    expect(hasAssameseProseLeakage('यह हिंदी वाक्य है')).toBe(true);
+    expect(hasAssameseProseLeakage('এবং এটি বাংলা বাক্য।')).toBe(true);
   });
 
   it('separates authoritative curriculum evidence from supplementary web sources', () => {

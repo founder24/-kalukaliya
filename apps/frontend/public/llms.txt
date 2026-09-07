@@ -77,7 +77,6 @@ Essence of Democracy and Indian Constitution, and more.
 - [AI Chat (Syra)](https://syrabit.ai/chat): Syllabus-grounded AI tutor with source citations and bilingual support.
 - [About](https://syrabit.ai/about): Mission, platform architecture, hierarchical knowledge mapping, who we serve.
 - [Technology & Features](https://syrabit.ai/technology): Full feature catalogue, platform capabilities, boards supported, content types.
-- [Pricing](https://syrabit.ai/pricing): Advertising-supported access with 30 daily AI credits.
 - [Exam Routine](https://syrabit.ai/exam-routine): AHSEC and SEBA board exam schedules and date sheets.
 
 ---

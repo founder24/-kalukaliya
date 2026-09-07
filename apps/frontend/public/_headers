@@ -108,9 +108,6 @@
 /browser/index.html
   Cache-Control: public, max-age=0, must-revalidate
 
-/pricing
-  Cache-Control: public, max-age=0, must-revalidate
-
 /login
   Cache-Control: public, max-age=0, must-revalidate
 

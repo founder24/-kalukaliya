@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Home, BookOpen, MessageCircle, LogIn, Sparkles } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { prefetchRoute } from '@/utils/prefetchRoute';
+import { isLibraryNavigationActive } from '@/utils/libraryNavigation';
 
 const NAV_ITEMS = [
   { to: '/home', icon: Home, label: 'Home' },
@@ -14,8 +15,11 @@ export const PublicBottomNav = memo(function PublicBottomNav() {
   const location = useLocation();
   const { user } = useAuth();
 
-  const isActive = (path) =>
-    location.pathname === path || location.pathname.startsWith(path + '/');
+  const isActive = (path) => (
+    path === '/library'
+      ? isLibraryNavigationActive(location.pathname, path)
+      : location.pathname === path || location.pathname.startsWith(path + '/')
+  );
 
   // Keep public navigation focused on learning surfaces and the free app.
   // also routes to /chat — same destination, distinct visual role.

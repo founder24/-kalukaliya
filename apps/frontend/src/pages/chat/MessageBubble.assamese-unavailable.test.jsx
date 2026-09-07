@@ -95,4 +95,43 @@ describe('MessageBubble — Assamese chat unavailable card (Task #370)', () => {
     expect(screen.getByText(/সংযোগ সাময়িকভাৱে বিচ্ছিন্ন হৈছে/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'আকৌ চেষ্টা কৰক' })).toBeTruthy();
   });
+
+  it('renders detailed source-card entries with safe external links', () => {
+    renderBubble({
+      msg: {
+        id: 'sources-1',
+        role: 'assistant',
+        content: 'উত্তৰটো ইয়াত আছে।',
+        source_entries: [
+          {
+            id: 'chapter:motion',
+            title: 'Motion',
+            kind: 'curriculum',
+            url: '/assam/hs-1/physics/motion',
+            snippet: 'Motion is a change in position.',
+            medium: 'assamese',
+            source_type: 'rag_chapter',
+            score: 0.91,
+          },
+          {
+            id: 'web:doi',
+            title: 'Supporting research',
+            kind: 'web',
+            url: 'https://doi.org/10.1000/example',
+            snippet: 'Supplementary research summary.',
+            medium: 'web',
+            source_type: 'web_search',
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByTestId('detailed-source-entries')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Curriculum source: Motion' }))
+      .toHaveAttribute('href', '/assam/hs-1/physics/motion');
+    const external = screen.getByRole('link', { name: 'Web source: Supporting research' });
+    expect(external).toHaveAttribute('target', '_blank');
+    expect(external).toHaveAttribute('rel', 'noreferrer');
+    expect(screen.getByTestId('detailed-source-entries')).toHaveTextContent('91% match');
+  });
 });

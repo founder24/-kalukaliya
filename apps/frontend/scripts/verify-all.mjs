@@ -33,7 +33,6 @@ const REQUIRED_CANONICAL_ROUTES = [
   { route: "/library", file: "library/index.html" },
   { route: "/chat", file: "chat/index.html" },
   { route: "/home", file: "home/index.html" },
-  { route: "/pricing", file: "pricing/index.html" },
   { route: "/login", file: "login/index.html" },
   { route: "/signup", file: "signup/index.html" },
   { route: "/terms", file: "terms/index.html" },
@@ -683,7 +682,7 @@ const cssRoutesToCheck = [
 // Soft + hard budgets for per-route inline critical CSS (sum of every
 // non-data-inline-css <style> body in <head>). The 14 KB target comes
 // from the Task #856 spec; today's measured worst case is ~16 KB on
-// the marketing-shell SPA fallbacks (/about, /pricing, /login,
+// the marketing-shell SPA fallbacks (/about, /login,
 // /signup) where Beasties picks up shared header/hero/CTA selectors.
 // A WARN at 18 KB gives us headroom + visibility before silent growth
 // becomes a real LCP regression; a hard FAIL at 30 KB catches the

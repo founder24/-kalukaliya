@@ -6,6 +6,7 @@
  * which caller runs first.
  */
 const _injected = new Set();
+const _ownedScripts = new Map();
 
 export function injectAdScript(url, opts = {}) {
   if (typeof document === 'undefined' || !url) return null;
@@ -22,27 +23,28 @@ export function injectAdScript(url, opts = {}) {
   const script = document.createElement('script');
   script.src = url;
   script.async = true;
-  script.dataset.syrabitAd = '1';
   if (opts.crossorigin) script.crossOrigin = opts.crossorigin;
   if (opts.dataAdClient) script.setAttribute('data-ad-client', opts.dataAdClient);
   document.head.appendChild(script);
   _injected.add(url);
+  _ownedScripts.set(url, script);
   return script;
 }
 
 export function removeAdScript(url) {
   if (typeof document === 'undefined' || !url) return;
 
-  // Only remove scripts owned by this registry. An unrelated existing
-  // publisher tag should still satisfy future dedupe checks.
-  document
-    .querySelectorAll(`script[data-syrabit-ad][src="${url}"]`)
-    .forEach((script) => {
-      try {
-        script.remove();
-      } catch {
-        /* ignore */
-      }
-    });
+  // Keep ownership in module state rather than adding a custom attribute to
+  // the third-party script. A matching publisher tag supplied outside this
+  // registry must not be removed.
+  const script = _ownedScripts.get(url);
+  if (script) {
+    try {
+      script.remove();
+    } catch {
+      /* ignore */
+    }
+    _ownedScripts.delete(url);
+  }
   _injected.delete(url);
 }

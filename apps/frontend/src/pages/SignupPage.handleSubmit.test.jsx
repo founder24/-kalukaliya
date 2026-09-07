@@ -56,8 +56,8 @@ async function triggerSignup() {
     });
     const [confirmInput] = screen.getAllByPlaceholderText('••••••••').slice(-1);
     fireEvent.change(confirmInput, { target: { value: 'Password1!' } });
-    fireEvent.click(screen.getByRole('button', { name: /agree to terms/i }));
-    fireEvent.click(screen.getByRole('button', { name: /consent to data processing/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /agree to terms/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /consent to data processing/i }));
   });
   await act(async () => {
     fireEvent.click(screen.getByTestId('auth-submit-button'));
@@ -89,10 +89,10 @@ async function fillForm({ password = 'Password1!', confirmPassword = 'Password1!
     const [confirmInput] = screen.getAllByPlaceholderText('••••••••').slice(-1);
     fireEvent.change(confirmInput, { target: { value: confirmPassword } });
     if (agreed) {
-      fireEvent.click(screen.getByRole('button', { name: /agree to terms/i }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /agree to terms/i }));
     }
     if (consentDpdp) {
-      fireEvent.click(screen.getByRole('button', { name: /consent to data processing/i }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /consent to data processing/i }));
     }
   });
   await act(async () => {
@@ -173,8 +173,8 @@ describe('SignupPage — error banner is cleared on retry', () => {
       });
       const confirmInput = screen.getAllByPlaceholderText('••••••••').slice(-1)[0];
       fireEvent.change(confirmInput, { target: { value: 'Different1!' } });
-      fireEvent.click(screen.getByRole('button', { name: /agree to terms/i }));
-      fireEvent.click(screen.getByRole('button', { name: /consent to data processing/i }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /agree to terms/i }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /consent to data processing/i }));
     });
     await act(async () => {
       fireEvent.click(screen.getByTestId('auth-submit-button'));
@@ -332,6 +332,8 @@ describe('SignupPage — aria-invalid and aria-describedby on password mismatch'
     const confirmInput = screen.getAllByPlaceholderText('••••••••').slice(-1)[0];
     expect(confirmInput.getAttribute('aria-describedby')).toBe('confirm-password-mismatch');
     expect(document.getElementById('confirm-password-mismatch')).toBeTruthy();
+    expect(screen.getByTestId('auth-password-input').getAttribute('aria-describedby'))
+      .toBe('password-strength-hint confirm-password-mismatch');
   });
 
   it('removes aria-describedby from the confirm input once passwords match', async () => {
@@ -412,8 +414,8 @@ describe('SignupPage — email format error aria attributes', () => {
       });
       const confirmInput = screen.getAllByPlaceholderText('••••••••').slice(-1)[0];
       fireEvent.change(confirmInput, { target: { value: 'Password1!' } });
-      fireEvent.click(screen.getByRole('button', { name: /agree to terms/i }));
-      fireEvent.click(screen.getByRole('button', { name: /consent to data processing/i }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /agree to terms/i }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /consent to data processing/i }));
     });
     await act(async () => {
       // Use fireEvent.submit on the form to bypass jsdom native email validation
@@ -447,59 +449,59 @@ describe('SignupPage — error banner aria attributes', () => {
   });
 });
 
-describe('SignupPage — ToS button aria attributes on error', () => {
-  it('sets aria-invalid and aria-describedby on the ToS button when the ToS error fires', async () => {
+describe('SignupPage — ToS checkbox aria attributes on error', () => {
+  it('sets aria-invalid and aria-describedby on the ToS checkbox when the ToS error fires', async () => {
     render(<SignupPage />);
     await fillForm({ password: 'Password1!', confirmPassword: 'Password1!', agreed: false, consentDpdp: true });
-    const tosBtn = screen.getByRole('button', { name: /agree to terms/i });
-    expect(tosBtn.getAttribute('aria-invalid')).toBe('true');
-    expect(tosBtn.getAttribute('aria-describedby')).toBe('signup-error-message');
+    const tosCheckbox = screen.getByRole('checkbox', { name: /agree to terms/i });
+    expect(tosCheckbox.getAttribute('aria-invalid')).toBe('true');
+    expect(tosCheckbox.getAttribute('aria-describedby')).toBe('signup-error-message');
   });
 
-  it('removes aria-invalid from the ToS button after the error is resolved', async () => {
+  it('removes aria-invalid from the ToS checkbox after the error is resolved', async () => {
     mockSignup.mockResolvedValueOnce({ role: '', onboarding_done: false });
     render(<SignupPage />);
     // Trigger ToS error
     await fillForm({ password: 'Password1!', confirmPassword: 'Password1!', agreed: false, consentDpdp: true });
-    expect(screen.getByRole('button', { name: /agree to terms/i }).getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByRole('checkbox', { name: /agree to terms/i }).getAttribute('aria-invalid')).toBe('true');
     // Fix: check Terms and resubmit successfully
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /agree to terms/i }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /agree to terms/i }));
     });
     await act(async () => {
       fireEvent.click(screen.getByTestId('auth-submit-button'));
     });
     await act(async () => {});
-    expect(screen.getByRole('button', { name: /agree to terms/i }).getAttribute('aria-invalid')).toBeNull();
-    expect(screen.getByRole('button', { name: /agree to terms/i }).getAttribute('aria-describedby')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /agree to terms/i }).getAttribute('aria-invalid')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /agree to terms/i }).getAttribute('aria-describedby')).toBeNull();
   });
 });
 
-describe('SignupPage — DPDP button aria attributes on error', () => {
-  it('sets aria-invalid and aria-describedby on the DPDP button when the DPDP error fires', async () => {
+describe('SignupPage — DPDP checkbox aria attributes on error', () => {
+  it('sets aria-invalid and aria-describedby on the DPDP checkbox when the DPDP error fires', async () => {
     render(<SignupPage />);
     await fillForm({ password: 'Password1!', confirmPassword: 'Password1!', agreed: true, consentDpdp: false });
-    const dpdpBtn = screen.getByRole('button', { name: /consent to data processing/i });
-    expect(dpdpBtn.getAttribute('aria-invalid')).toBe('true');
-    expect(dpdpBtn.getAttribute('aria-describedby')).toBe('signup-error-message');
+    const dpdpCheckbox = screen.getByRole('checkbox', { name: /consent to data processing/i });
+    expect(dpdpCheckbox.getAttribute('aria-invalid')).toBe('true');
+    expect(dpdpCheckbox.getAttribute('aria-describedby')).toBe('signup-error-message');
   });
 
-  it('removes aria-invalid from the DPDP button after the error is resolved', async () => {
+  it('removes aria-invalid from the DPDP checkbox after the error is resolved', async () => {
     mockSignup.mockResolvedValueOnce({ role: '', onboarding_done: false });
     render(<SignupPage />);
     // Trigger DPDP error
     await fillForm({ password: 'Password1!', confirmPassword: 'Password1!', agreed: true, consentDpdp: false });
-    expect(screen.getByRole('button', { name: /consent to data processing/i }).getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByRole('checkbox', { name: /consent to data processing/i }).getAttribute('aria-invalid')).toBe('true');
     // Fix: check DPDP and resubmit successfully
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /consent to data processing/i }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /consent to data processing/i }));
     });
     await act(async () => {
       fireEvent.click(screen.getByTestId('auth-submit-button'));
     });
     await act(async () => {});
-    expect(screen.getByRole('button', { name: /consent to data processing/i }).getAttribute('aria-invalid')).toBeNull();
-    expect(screen.getByRole('button', { name: /consent to data processing/i }).getAttribute('aria-describedby')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /consent to data processing/i }).getAttribute('aria-invalid')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /consent to data processing/i }).getAttribute('aria-describedby')).toBeNull();
   });
 });
 
@@ -529,6 +531,26 @@ describe('SignupPage — password strength hint aria attributes', () => {
   it('does not set aria-describedby on the password input when password is empty', () => {
     render(<SignupPage />);
     expect(screen.getByTestId('auth-password-input').getAttribute('aria-describedby')).toBeNull();
+  });
+});
+
+describe('SignupPage — signup autofill and consent semantics', () => {
+  it('uses signup autocomplete tokens for identity and password fields', () => {
+    render(<SignupPage />);
+
+    expect(screen.getByPlaceholderText('Your name')).toHaveAttribute('autocomplete', 'name');
+    expect(screen.getByTestId('auth-email-input')).toHaveAttribute('autocomplete', 'email');
+    expect(screen.getByTestId('auth-password-input')).toHaveAttribute('autocomplete', 'new-password');
+    expect(screen.getAllByPlaceholderText('••••••••').slice(-1)[0])
+      .toHaveAttribute('autocomplete', 'new-password');
+  });
+
+  it('uses native, labelled checkboxes for both consent choices', () => {
+    render(<SignupPage />);
+
+    expect(screen.getByRole('checkbox', { name: /agree to terms/i })).toHaveAttribute('type', 'checkbox');
+    expect(screen.getByRole('checkbox', { name: /consent to data processing/i }))
+      .toHaveAttribute('type', 'checkbox');
   });
 });
 

@@ -461,7 +461,10 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               const matchPct = (msg.match_score != null && msg.match_score > 0)
                 ? Math.round(msg.match_score * 100) : null;
 
-              const hasAnything = hasContext || sourceLine;
+              const detailedSources = Array.isArray(msg.source_entries)
+                ? msg.source_entries.filter((entry) => entry && entry.title)
+                : [];
+              const hasAnything = hasContext || sourceLine || detailedSources.length > 0;
               if (!hasAnything) return null;
 
               const sourceMeta = isWeb
@@ -572,6 +575,59 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                       </div>
                       <span className="text-[13px] font-bold text-foreground" style={{ textTransform: 'uppercase', letterSpacing: '0.03em' }}>{sourceMeta.kindLabel}</span>
                     </div>
+                  )}
+                  {detailedSources.length > 0 && (
+                    <section
+                      className="mt-2.5 rounded-xl border border-border/70 bg-muted/20 px-3 py-2.5"
+                      aria-label="Sources used for this answer"
+                      data-testid="detailed-source-entries"
+                    >
+                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Sources used
+                      </h3>
+                      <ul className="mt-2 space-y-2">
+                        {detailedSources.map((entry) => {
+                          const sourceUrl = typeof entry.url === 'string'
+                            && (/^\//.test(entry.url) || /^https:\/\//i.test(entry.url))
+                            ? entry.url
+                            : null;
+                          const isExternal = /^https:\/\//i.test(sourceUrl || '');
+                          const title = entry.title;
+                          const label = `${entry.kind === 'web' ? 'Web source' : 'Curriculum source'}: ${title}`;
+                          const score = typeof entry.score === 'number' && entry.score > 0
+                            ? `${Math.round(entry.score * 100)}% match`
+                            : null;
+                          return (
+                            <li key={entry.id || `${entry.kind}-${entry.url || title}`} className="min-w-0">
+                              {sourceUrl ? (
+                                <a
+                                  href={sourceUrl}
+                                  {...(isExternal ? { target: '_blank', rel: 'noreferrer' } : {})}
+                                  className="text-[12.5px] font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded"
+                                  aria-label={label}
+                                >
+                                  {title}
+                                  {isExternal && <span aria-hidden="true"> ↗</span>}
+                                </a>
+                              ) : (
+                                <span className="text-[12.5px] font-semibold text-foreground">{title}</span>
+                              )}
+                              <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                                <span>{entry.kind === 'web' ? 'Supplementary web' : 'Curriculum'}</span>
+                                {entry.medium && <span>· {entry.medium}</span>}
+                                {entry.source_type && <span>· {entry.source_type}</span>}
+                                {score && <span>· {score}</span>}
+                              </div>
+                              {entry.snippet && (
+                                <p className="mt-0.5 text-[11.5px] leading-4 text-muted-foreground line-clamp-2">
+                                  {entry.snippet}
+                                </p>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
                   )}
                   <div className={`flex flex-wrap items-center gap-1 sm:gap-1.5 mt-1 transition-opacity ${responseLang && responseLang !== 'en' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                     {timeStr && (

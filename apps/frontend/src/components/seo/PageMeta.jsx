@@ -24,8 +24,11 @@ const ABS_DEFAULT_IMG = "https://syrabit.ai/opengraph.jpg";
 const MARKER_ATTR = "data-pm";
 
 function setMetaByName(name, content) {
-  if (content == null || content === "") return;
   let el = document.head.querySelector(`meta[name="${name}"]`);
+  if (content == null || content === "") {
+    el?.remove();
+    return;
+  }
   if (!el) {
     el = document.createElement("meta");
     el.setAttribute("name", name);
@@ -36,8 +39,11 @@ function setMetaByName(name, content) {
 }
 
 function setMetaByProperty(property, content) {
-  if (content == null || content === "") return;
   let el = document.head.querySelector(`meta[property="${property}"]`);
+  if (content == null || content === "") {
+    el?.remove();
+    return;
+  }
   if (!el) {
     el = document.createElement("meta");
     el.setAttribute("property", property);
@@ -48,13 +54,16 @@ function setMetaByProperty(property, content) {
 }
 
 function setLink(rel, href, extraAttrs = {}) {
-  if (!href) return;
   // For rel="alternate" with hreflang, multiple links are valid; key by hreflang.
   const hreflang = extraAttrs.hreflang;
   const selector = hreflang
     ? `link[rel="${rel}"][hreflang="${hreflang}"]`
     : `link[rel="${rel}"]`;
   let el = document.head.querySelector(selector);
+  if (!href) {
+    el?.remove();
+    return;
+  }
   if (!el) {
     el = document.createElement("link");
     el.setAttribute("rel", rel);
@@ -63,6 +72,18 @@ function setLink(rel, href, extraAttrs = {}) {
   }
   el.setAttribute("href", href);
   for (const [k, v] of Object.entries(extraAttrs)) el.setAttribute(k, v);
+}
+
+function removeMetaByProperty(property) {
+  document.head
+    .querySelectorAll(`meta[property="${property}"]`)
+    .forEach((el) => el.remove());
+}
+
+function removeRouteAlternates() {
+  document.head
+    .querySelectorAll('link[rel="alternate"][hreflang]')
+    .forEach((el) => el.remove());
 }
 
 function syncJsonLd(blocks) {
@@ -121,7 +142,11 @@ export default function PageMeta({
     document.title = finalTitle;
 
     setMetaByName("description", description);
-    if (keywords) setMetaByName("keywords", keywords);
+    if (keywords) {
+      setMetaByName("keywords", keywords);
+    } else {
+      document.head.querySelectorAll('meta[name="keywords"]').forEach((el) => el.remove());
+    }
 
     setLink("canonical", url);
 
@@ -135,14 +160,21 @@ export default function PageMeta({
     setMetaByProperty("og:image:width", "1200");
     setMetaByProperty("og:image:height", "630");
 
+    // These are only valid for article routes. Remove the previous route's
+    // values before conditionally adding the current article metadata; this
+    // is essential when browser history restores a non-article route.
+    for (const property of [
+      "article:section",
+      "article:published_time",
+      "article:modified_time",
+      "article:tag",
+    ]) {
+      removeMetaByProperty(property);
+    }
     if (type === "article") {
       if (section) setMetaByProperty("article:section", section);
       if (publishedTime) setMetaByProperty("article:published_time", publishedTime);
       if (modifiedTime) setMetaByProperty("article:modified_time", modifiedTime);
-      // article:tag — multi-valued. Remove old managed ones then re-add.
-      document.head
-        .querySelectorAll(`meta[property="article:tag"][${MARKER_ATTR}]`)
-        .forEach((el) => el.remove());
       if (Array.isArray(tags)) {
         for (const t of tags) {
           const m = document.createElement("meta");
@@ -170,6 +202,9 @@ export default function PageMeta({
     );
 
     // hreflang alternates
+    // Static prerendered pages can leave an old route's hreflang nodes in the
+    // document. Unlike RSS alternates, route alternates always have hreflang.
+    removeRouteAlternates();
     if (hasAssamese && url) {
       const asUrl = url.includes("?") ? `${url}&lang=as` : `${url}?lang=as`;
       setLink("alternate", url, { hreflang: "en" });

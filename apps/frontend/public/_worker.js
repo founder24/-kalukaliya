@@ -18,8 +18,9 @@
 //    falls through to /index.html so React Router can take over.
 //    HEAD parity is preserved (Task #365).
 //
-// Static assets (/assets/*, /icons/*, sitemaps, feeds, etc.) are
-// excluded in `_routes.json` and never reach this worker.
+// Static assets are normally served by the ASSETS binding. `/assets/*` stays
+// inside this worker deliberately: a missing hashed bundle must be a real,
+// non-HTML 404 rather than an accidental SPA navigation fallback.
 
 // ─── SECURITY HEADERS ────────────────────────────────────────────────────────
 // Applied to every response the worker generates (bot-render, sitemap proxy,
@@ -237,7 +238,7 @@ function normalizedPathname(pathname) {
 }
 
 const EXACT_FRONTEND_ROUTES = new Set([
-  "/", "/home", "/pricing", "/terms", "/privacy", "/about", "/technology",
+  "/", "/home", "/terms", "/privacy", "/about", "/technology",
   "/status", "/exam-routine", "/payment/success", "/payment/cancel", "/login",
   "/signup", "/reset-password", "/onboarding", "/library", "/browser",
   "/browse", "/browser-tabs", "/curriculum", "/subscribe", "/chat", "/read",
@@ -288,6 +289,20 @@ function botNotFoundResponse(request) {
     request.method === "HEAD" ? null : "<!doctype html><title>Not Found</title><h1>Not Found</h1>",
     { status: 404, headers },
   );
+}
+
+function assetNotFoundResponse(request) {
+  const headers = new Headers({
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "X-Source": "asset-not-found",
+  });
+  addSecurityHeaders(headers);
+  return new Response(request.method === "HEAD" ? null : "Not Found\n", {
+    status: 404,
+    headers,
+  });
 }
 
 async function botRender(request, env, url) {
@@ -431,6 +446,25 @@ export default {
     const wouldLoop =
       request.headers.get("X-Bot-Render") === "1" ||
       (backendHost && backendHost === url.host);
+
+    // Hashed Vite bundles are requested with a script/style destination but
+    // can also carry Accept: text/html through proxies. Never apply the SPA
+    // fallback to these requests: a stale deployment must surface as a real
+    // non-HTML 404 so browsers fail the asset, rather than parse index.html as
+    // JavaScript or CSS. This runs before bot rendering too.
+    if (/^\/assets\/.+/.test(url.pathname)) {
+      try {
+        const response = await env.ASSETS.fetch(request);
+        const contentType = response.headers.get("Content-Type") || "";
+        // Guard against a Pages asset fallback that reports 200 but sends
+        // index.html. A JavaScript/CSS asset is never an HTML document.
+        return response.status === 404 || /(?:x?html)/i.test(contentType)
+          ? assetNotFoundResponse(request)
+          : response;
+      } catch {
+        return assetNotFoundResponse(request);
+      }
+    }
 
     // Bot rendering: GET requests from search/AI bot UAs that hit a
     // non-skip path get high-quality HTML. Priority order:

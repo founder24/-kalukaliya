@@ -5,7 +5,7 @@
  *
  * Why static HTML and not a JS-rendered crawl:
  *   The whole point of Task #729 is whether Googlebot picks up the
- *   stars on lower-priority pages (FAQ/About/Pricing/Learn/Technology/
+ *   stars on lower-priority pages (FAQ/About/Learn/Technology/
  *   ExamRoutine) where its render budget is tight. The honest test
  *   is "is the JSON-LD present BEFORE any JS executes?". If yes,
  *   Google's RRT will pass on the first crawl. If no, RRT may pass
@@ -61,7 +61,6 @@ const TARGET_PATHS = [
   "/",                  // Landing (control — should always pass)
   "/faq",               // Task #729 target
   "/about",             // Task #729 target
-  "/pricing",           // Task #729 target
   "/learn",             // Task #729 target
   "/technology",        // Task #729 target
   "/exam-routine",      // Task #729 target
