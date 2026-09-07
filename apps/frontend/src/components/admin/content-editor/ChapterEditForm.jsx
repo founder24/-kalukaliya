@@ -116,24 +116,36 @@ export default function ChapterEditForm({
       const tid = toast.loading(`Uploading ${files.length} page(s)…`);
       try {
         const urls = [];
+        const failures = [];
         for (let i = 0; i < files.length; i++) {
           toast.loading(`Page ${i + 1}/${files.length}…`, { id: tid });
-          urls.push(await imageUploadHandler(files[i]));
+          try {
+            urls.push(await imageUploadHandler(files[i]));
+          } catch (error) {
+            // Keep successfully uploaded pages in the unsaved draft. Losing them
+            // after a later file fails is worse than requiring a retry.
+            failures.push(files[i].name);
+          }
         }
+        if (!urls.length) throw new Error('No pages uploaded');
         const current = editorRef.current?.value ?? activeContent;
         const pagesMd = urls.map((u, i) => `![Page ${i + 1}](${u})`).join('\n\n');
         const field = _contentField();
         setContentForm(f => ({ ...f, [field]: current + (current.trim() ? '\n\n' : '') + pagesMd + '\n' }));
         setEditorKey(k => k + 1);
-        toast.success(`${urls.length} page(s) added`, { id: tid });
+        if (failures.length) {
+          toast.error(`${urls.length} page(s) added; ${failures.length} failed. Retry: ${failures.join(', ')}`, { id: tid });
+        } else {
+          toast.success(`${urls.length} page(s) added`, { id: tid });
+        }
       } catch {
-        toast.error('Upload failed', { id: tid });
+        toast.error('No pages were uploaded', { id: tid });
       } finally {
         setImgUploading(false);
       }
     };
     input.click();
-  }, [imageUploadHandler, editorRef, activeContent, editorLang, setContentForm, setEditorKey]);
+  }, [imageUploadHandler, editorRef, activeContent, setContentForm, setEditorKey, _contentField]);
 
   const [showAuditLog, setShowAuditLog] = useState(false);
 

@@ -1,7 +1,30 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Cookie, X } from 'lucide-react';
+import { ANALYTICS_CONSENT_KEY, setAnalyticsConsent } from '@/utils/analyticsConsent';
+import { API_BASE } from '@/utils/api';
 
-const CONSENT_KEY = 'syrabit_cookie_consent';
+const CONSENT_KEY = ANALYTICS_CONSENT_KEY;
+
+export function recordConsentDecision(decision) {
+  if (typeof window === 'undefined') return;
+  const payload = JSON.stringify({
+    event: decision === 'accepted' ? 'consent_granted' : 'consent_declined',
+  });
+  const url = `${API_BASE}/analytics/consent-decision`;
+  try {
+    const blob = new Blob([payload], { type: 'application/json' });
+    if (navigator.sendBeacon?.(url, blob)) return;
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      keepalive: true,
+      credentials: 'omit',
+    }).catch(() => {});
+  } catch {
+    // Consent storage remains authoritative if operational reporting is down.
+  }
+}
 
 export default function CookieConsent() {
   const [visible, setVisible] = useState(false);
@@ -17,12 +40,14 @@ export default function CookieConsent() {
   }, []);
 
   const handleAccept = useCallback(() => {
-    try { localStorage.setItem(CONSENT_KEY, 'accepted'); } catch {}
+    setAnalyticsConsent('accepted');
+    recordConsentDecision('accepted');
     setVisible(false);
   }, []);
 
   const handleDecline = useCallback(() => {
-    try { localStorage.setItem(CONSENT_KEY, 'declined'); } catch {}
+    setAnalyticsConsent('declined');
+    recordConsentDecision('declined');
     setVisible(false);
   }, []);
 

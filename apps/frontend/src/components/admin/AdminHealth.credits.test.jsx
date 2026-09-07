@@ -483,7 +483,7 @@ describe('AdminHealth — Sentry credit panel', () => {
 describe('AdminHealth — Startup Credits summary row', () => {
   afterEach(() => vi.clearAllMocks());
 
-  it('renders all four provider boxes with correct amounts and labels', async () => {
+  it('omits retired GCP while retaining current provider summaries', async () => {
     axiosGet.mockImplementation(makeMock({}));
     await renderAdmin();
 
@@ -496,13 +496,13 @@ describe('AdminHealth — Startup Credits summary row', () => {
     const sum = within(card);
 
     // Provider labels in the summary row
-    expect(sum.getByText('GCP Activate')).toBeInTheDocument();
+    expect(sum.queryByText('GCP Activate')).not.toBeInTheDocument();
     expect(sum.getByText('AWS Activate')).toBeInTheDocument();
     expect(sum.getByText('Azure Startups')).toBeInTheDocument();
     expect(sum.getByText('Axiom + Sentry')).toBeInTheDocument();
 
     // Amounts (summary row uses '$100 000' with a space, not locale-formatted)
-    expect(sum.getAllByText('$100 000')).toHaveLength(2); // GCP + AWS
+    expect(sum.getByText('$100 000')).toBeInTheDocument();
     expect(sum.getByText('$5 000')).toBeInTheDocument();
     expect(sum.getByText('Free tiers')).toBeInTheDocument();
   });

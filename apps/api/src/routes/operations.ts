@@ -21,6 +21,7 @@ const ANALYTICS_BEACONS = new Set([
   'review-prompt-event',
   'ad-impression',
   'hydrate-event',
+  'consent-decision',
 ]);
 
 const MAX_ANALYTICS_BODY_BYTES = 16 * 1024;
@@ -30,6 +31,11 @@ const MAX_ANALYTICS_KEYS = 32;
 const MAX_ANALYTICS_ARRAY_ITEMS = 20;
 const MAX_ANALYTICS_STRING_LENGTH = 512;
 const SENSITIVE_ANALYTICS_KEY = /(?:pass(?:word)?|secret|token|authorization|cookie|email|phone|address)/i;
+const ESSENTIAL_OPERATIONAL_EVENTS = new Set([
+  'hydrate_preload_failed',
+  'hydrate_stalled',
+  'hydrate_recovered',
+]);
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -84,6 +90,30 @@ function analyticsRoutePath(payload: JsonValue): string | null {
   }
 }
 
+function analyticsEventDetails(eventName: string, payload: JsonValue): {
+  subtype: string;
+  classification: 'optional_analytics' | 'essential_operational';
+} | null {
+  const event = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload.event
+    : undefined;
+  const subtype = typeof event === 'string' && /^[a-z0-9_:-]{1,128}$/i.test(event)
+    ? event
+    : eventName.replace(/-/g, '_');
+  if (eventName === 'hydrate-event' && ESSENTIAL_OPERATIONAL_EVENTS.has(subtype)) {
+    return { subtype, classification: 'essential_operational' };
+  }
+  if (eventName === 'consent-decision' && ['consent_granted', 'consent_declined'].includes(subtype)) {
+    return { subtype, classification: 'essential_operational' };
+  }
+  return { subtype, classification: 'optional_analytics' };
+}
+
+function hasGrantedAnalyticsConsent(payload: JsonValue): boolean {
+  return Boolean(payload && typeof payload === 'object' && !Array.isArray(payload)
+    && payload.analytics_consent === 'granted');
+}
+
 /**
  * Browser beacons remain acknowledgement-first: malformed or failed durable
  * writes cannot interrupt navigation. Valid, bounded payloads are retained in
@@ -108,6 +138,14 @@ analyticsRouter.post('/:event', async (c) => {
     }
     const payload = sanitizeAnalyticsPayload(JSON.parse(raw));
     if (payload === undefined) return c.json({ status: 'ok' });
+    const details = analyticsEventDetails(event, payload);
+    if (!details) return c.json({ status: 'ok' });
+    // Browser-supplied consent is deliberately required server-side for every
+    // optional ledger write. Essential hydration health is explicitly listed
+    // above, never inferred from a client-provided classification.
+    if (details.classification === 'optional_analytics' && !hasGrantedAnalyticsConsent(payload)) {
+      return c.json({ status: 'ok' });
+    }
 
     const serialized = JSON.stringify(payload);
     if (new TextEncoder().encode(serialized).byteLength > MAX_ANALYTICS_PAYLOAD_BYTES) {
@@ -115,11 +153,14 @@ analyticsRouter.post('/:event', async (c) => {
     }
 
     await c.env.DB.prepare(`
-      INSERT INTO analytics_events (id, event_name, payload, route_path, created_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO analytics_events
+        (id, event_name, event_subtype, classification, payload, route_path, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `).bind(
       crypto.randomUUID(),
       event,
+      details.subtype,
+      details.classification,
       serialized,
       analyticsRoutePath(payload),
       Math.floor(Date.now() / 1000),

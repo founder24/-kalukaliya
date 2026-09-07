@@ -94,6 +94,7 @@ describe('Worker-native site-operation routes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         path: '/physics?student_email=private@example.com',
+        analytics_consent: 'granted',
         email: 'private@example.com',
         nested: { token: 'do-not-store', label: 'chapter' },
       }),
@@ -103,11 +104,82 @@ describe('Worker-native site-operation routes', () => {
     expect(writes).toHaveLength(1);
     const write = writes[0]!;
     expect(write.query).toContain('INSERT INTO analytics_events');
-    expect(JSON.parse(String(write.bindings[2]))).toEqual({
+    expect(write.bindings[2]).toBe('page_view');
+    expect(write.bindings[3]).toBe('optional_analytics');
+    expect(JSON.parse(String(write.bindings[4]))).toEqual({
       path: '/physics',
       nested: { label: 'chapter' },
+      analytics_consent: 'granted',
     });
-    expect(write.bindings[3]).toBe('/physics');
+    expect(write.bindings[5]).toBe('/physics');
+  });
+
+  it('does not persist optional analytics without affirmative consent', async () => {
+    const run = vi.fn(async () => ({ meta: { changes: 1 } }));
+    const database = {
+      prepare: () => {
+        const statement = { bind: () => statement, run, all: async () => ({ results: [] }), first: async () => null };
+        return statement;
+      },
+    };
+    const response = await api.fetch(request('/api/v1/analytics/page-view', {
+      method: 'POST',
+      body: JSON.stringify({ path: '/private' }),
+    }), { ...testEnv(), DB: database } as unknown as Env);
+
+    expect(response.status).toBe(200);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('preserves explicitly classified hydration subtypes without consent', async () => {
+    const writes: unknown[][] = [];
+    const database = {
+      prepare: () => {
+        let bindings: unknown[] = [];
+        const statement = {
+          bind: (...values: unknown[]) => { bindings = values; return statement; },
+          run: async () => { writes.push(bindings); return { meta: { changes: 1 } }; },
+          all: async () => ({ results: [] }),
+          first: async () => null,
+        };
+        return statement;
+      },
+    };
+    const response = await api.fetch(request('/api/v1/analytics/hydrate-event', {
+      method: 'POST',
+      body: JSON.stringify({ event: 'hydrate_stalled', path: '/learn/biology' }),
+    }), { ...testEnv(), DB: database } as unknown as Env);
+
+    expect(response.status).toBe(200);
+    expect(writes[0]?.[2]).toBe('hydrate_stalled');
+    expect(writes[0]?.[3]).toBe('essential_operational');
+  });
+
+  it.each([
+    ['consent_granted'],
+    ['consent_declined'],
+  ])('persists the privacy-safe %s decision without optional analytics consent', async (event) => {
+    const writes: unknown[][] = [];
+    const database = {
+      prepare: () => {
+        let bindings: unknown[] = [];
+        const statement = {
+          bind: (...values: unknown[]) => { bindings = values; return statement; },
+          run: async () => { writes.push(bindings); return { meta: { changes: 1 } }; },
+          all: async () => ({ results: [] }),
+          first: async () => null,
+        };
+        return statement;
+      },
+    };
+    const response = await api.fetch(request('/api/v1/analytics/consent-decision', {
+      method: 'POST',
+      body: JSON.stringify({ event }),
+    }), { ...testEnv(), DB: database } as unknown as Env);
+
+    expect(response.status).toBe(200);
+    expect(writes[0]?.[2]).toBe(event);
+    expect(writes[0]?.[3]).toBe('essential_operational');
   });
 
   it('bounds and removes sensitive values from custom analytics payloads', () => {

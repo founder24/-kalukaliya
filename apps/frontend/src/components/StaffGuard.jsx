@@ -1,10 +1,31 @@
 import { Navigate } from 'react-router-dom';
+import { cloneElement, useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { adminVerify } from '@/utils/api';
+import { getToken } from '@/hooks/useTokenManager';
 
 export const StaffGuard = ({ children }) => {
   const { user, authChecked } = useAuth();
+  const [cookieAdmin, setCookieAdmin] = useState(null);
 
-  if (!authChecked) {
+  const hasStaffRole = user?.role === 'staff' || user?.role === 'admin';
+
+  // Admin sessions are intentionally HttpOnly-cookie based in some deployments,
+  // so `/users/me` cannot be the only authority for the staff route. Verify the
+  // admin cookie once the normal auth probe has completed.
+  useEffect(() => {
+    if (!authChecked || hasStaffRole) {
+      setCookieAdmin(false);
+      return;
+    }
+    let active = true;
+    adminVerify(getToken())
+      .then(() => { if (active) setCookieAdmin(true); })
+      .catch(() => { if (active) setCookieAdmin(false); });
+    return () => { active = false; };
+  }, [authChecked, hasStaffRole]);
+
+  if (!authChecked || (!hasStaffRole && cookieAdmin === null)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-5">
@@ -22,11 +43,12 @@ export const StaffGuard = ({ children }) => {
     );
   }
 
-  if (!user) return <Navigate to="/login" replace />;
-  const role = user.role || '';
-  if (role !== 'staff' && role !== 'admin') {
-    return <Navigate to="/" replace />;
+  if (!hasStaffRole && !cookieAdmin) {
+    // A bearer-authenticated user belongs at the normal login page. With no
+    // bearer, this was an admin-cookie verification and belongs at admin login.
+    return <Navigate to={getToken() ? "/login" : "/admin/login"} replace />;
   }
-
-  return children;
+  // Keep the cookie-derived privilege available to the staff shell. The admin
+  // cookie is HttpOnly, so it cannot be copied into the AuthContext token.
+  return cloneElement(children, { adminCookieAccess: Boolean(cookieAdmin && !hasStaffRole) });
 };

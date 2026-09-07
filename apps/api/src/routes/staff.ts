@@ -98,6 +98,188 @@ async function guard(c: Context<{ Bindings: Env }>): Promise<AuthPayload | null>
   return payload;
 }
 
+const ANALYTICS_MAX_DAYS = 90;
+
+function analyticsDays(value: string | undefined): number | null {
+  if (value === undefined) return 30;
+  if (!/^\d{1,3}$/.test(value)) return null;
+  const days = Number(value);
+  return days >= 1 && days <= ANALYTICS_MAX_DAYS ? days : null;
+}
+
+/**
+ * Privacy-safe, staff-only totals. These queries intentionally return neither
+ * user/session identifiers nor chat/content text. They are mounted under both
+ * /staff and /admin by routes/index.ts.
+ */
+staffRouter.get('/analytics/aggregates/:metric', async (c) => {
+  const auth = await guard(c); if (!auth) return c.res;
+  const days = analyticsDays(c.req.query('days'));
+  if (days === null) {
+    return c.json({ detail: `days must be an integer between 1 and ${ANALYTICS_MAX_DAYS}` }, 422);
+  }
+  const metric = c.req.param('metric');
+  const since = Math.floor(Date.now() / 1000) - (days * 24 * 60 * 60);
+  try {
+    let data: Record<string, number | null> | null = null;
+    if (metric === 'users') {
+      data = await c.env.DB.prepare(`
+        SELECT COUNT(*) AS registered,
+          COALESCE(SUM(CASE WHEN onboarding_done = 1 THEN 1 ELSE 0 END), 0) AS onboarded
+        FROM users WHERE created_at >= ?
+      `).bind(since).first<Record<string, number | null>>();
+    } else if (metric === 'sessions') {
+      data = await c.env.DB.prepare(`
+        SELECT COUNT(*) AS page_views,
+          COUNT(DISTINCT json_extract(payload, '$.session_id')) AS sessions
+        FROM analytics_events
+        WHERE event_subtype = 'page_view'
+          AND classification = 'optional_analytics'
+          AND created_at >= ?
+      `).bind(since).first<Record<string, number | null>>();
+    } else if (metric === 'chat') {
+      data = await c.env.DB.prepare(`
+        SELECT COUNT(*) AS messages,
+          COUNT(DISTINCT session_id) AS sessions,
+          COALESCE(SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END), 0) AS user_messages
+        FROM chats WHERE created_at >= ?
+      `).bind(since).first<Record<string, number |null>>();
+    } else if (metric === 'content') {
+      data = await c.env.DB.prepare(`
+        SELECT COUNT(*) AS chapters_created,
+          COALESCE(SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END), 0) AS published_chapters
+        FROM chapters WHERE created_at >= ?
+      `).bind(since).first<Record<string, number | null>>();
+    } else {
+      return c.json({ detail: 'Unknown aggregate metric' }, 404);
+    }
+    return c.json({ metric, days, since, data: data ?? {} });
+  } catch {
+    return c.json({ detail: 'Analytics aggregate unavailable' }, 503);
+  }
+});
+
+type CommandCenterRow = Record<string, number | string | null>;
+
+function numericSummary(row: CommandCenterRow | null | undefined): Record<string, number> {
+  if (!row) return {};
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [key, Number(value ?? 0)]),
+  );
+}
+
+/**
+ * One request powers the staff command center. The response deliberately
+ * contains aggregate counts only: no identifiers, route payloads, chat text,
+ * audit diffs, or other drill-down data leave this endpoint.
+ */
+staffRouter.get('/analytics/command-center', async (c) => {
+  const auth = await guard(c); if (!auth) return c.res;
+  const days = analyticsDays(c.req.query('days'));
+  if (days === null) {
+    return c.json({ detail: `days must be an integer between 1 and ${ANALYTICS_MAX_DAYS}` }, 422);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const since = now - (days * 24 * 60 * 60);
+  try {
+    const results = await c.env.DB.batch<CommandCenterRow>([
+      c.env.DB.prepare(`
+        SELECT
+          COUNT(*) AS registered,
+          COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), 0) AS new_users,
+          COALESCE(SUM(CASE WHEN onboarding_done = 1 THEN 1 ELSE 0 END), 0) AS onboarded,
+          COALESCE(SUM(CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS active_accounts
+        FROM users
+      `).bind(since),
+      c.env.DB.prepare(`
+        SELECT
+          COUNT(*) AS total,
+          COALESCE(SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END), 0) AS published,
+          COALESCE(SUM(CASE WHEN status != 'published' THEN 1 ELSE 0 END), 0) AS unpublished,
+          COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), 0) AS created_in_period
+        FROM chapters
+      `).bind(since),
+      c.env.DB.prepare(`
+        SELECT
+          COALESCE(SUM(CASE WHEN rag_indexed_at IS NOT NULL
+            AND (rag_updated_at IS NULL OR rag_indexed_at >= rag_updated_at)
+            THEN 1 ELSE 0 END), 0) AS indexed,
+          COALESCE(SUM(CASE WHEN rag_indexed_at IS NOT NULL
+            AND rag_updated_at IS NOT NULL AND rag_indexed_at < rag_updated_at
+            THEN 1 ELSE 0 END), 0) AS stale,
+          COALESCE(SUM(CASE WHEN rag_indexed_at IS NULL THEN 1 ELSE 0 END), 0) AS unindexed,
+          (SELECT COUNT(*) FROM chunks) AS chunks
+        FROM chapters
+      `),
+      c.env.DB.prepare(`
+        SELECT
+          COALESCE(SUM(CASE WHEN event_subtype = 'chat_completion' THEN 1 ELSE 0 END), 0) AS completions,
+          COALESCE(SUM(CASE WHEN event_subtype = 'chat_failure' THEN 1 ELSE 0 END), 0) AS failures,
+          COALESCE(ROUND(AVG(CASE WHEN event_subtype = 'chat_completion'
+            THEN CAST(json_extract(payload, '$.latency_ms') AS REAL) END)), 0) AS average_latency_ms,
+          COALESCE(SUM(CASE WHEN event_subtype = 'chat_completion'
+            AND CAST(json_extract(payload, '$.source_coverage') AS INTEGER) > 0
+            THEN 1 ELSE 0 END), 0) AS sourced_completions
+        FROM analytics_events
+        WHERE classification = 'essential_operational' AND created_at >= ?
+      `).bind(since),
+      c.env.DB.prepare(`
+        SELECT
+          COALESCE(SUM(CASE WHEN event_subtype = 'ad_slot_viewed' THEN 1 ELSE 0 END), 0) AS slot_views,
+          COUNT(DISTINCT CASE WHEN event_subtype = 'ad_slot_viewed'
+            THEN json_extract(payload, '$.placement') END) AS active_placements
+        FROM analytics_events
+        WHERE classification = 'optional_analytics' AND created_at >= ?
+      `).bind(since),
+      c.env.DB.prepare(`
+        SELECT
+          COALESCE(SUM(CASE WHEN event_subtype = 'consent_granted' THEN 1 ELSE 0 END), 0) AS granted,
+          COALESCE(SUM(CASE WHEN event_subtype = 'consent_declined' THEN 1 ELSE 0 END), 0) AS declined,
+          COALESCE(ROUND(100.0 * SUM(CASE WHEN event_subtype = 'consent_granted' THEN 1 ELSE 0 END)
+            / NULLIF(SUM(CASE WHEN event_subtype IN ('consent_granted', 'consent_declined') THEN 1 ELSE 0 END), 0), 1), 0)
+            AS consent_rate
+        FROM analytics_events
+        WHERE created_at >= ?
+      `).bind(since),
+      c.env.DB.prepare(`
+        SELECT
+          COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_publish_jobs,
+          COALESCE(SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END), 0) AS partial_publish_jobs,
+          COALESCE(SUM(CASE WHEN status IN ('pending', 'running') THEN 1 ELSE 0 END), 0) AS active_publish_jobs,
+          (SELECT COUNT(*) FROM dead_letters WHERE created_at >= ?) AS dead_letters
+        FROM publish_jobs
+        WHERE created_at >= ?
+      `).bind(since, since),
+      c.env.DB.prepare(`
+        SELECT
+          COUNT(*) AS actions,
+          COALESCE(SUM(CASE WHEN action LIKE '%publish%' THEN 1 ELSE 0 END), 0) AS publish_actions,
+          COALESCE(SUM(CASE WHEN action LIKE '%reindex%' THEN 1 ELSE 0 END), 0) AS reindex_actions
+        FROM content_audit_log
+        WHERE created_at >= ?
+      `).bind(since),
+    ]);
+
+    const rows = results.map(result => result.results[0] ?? null);
+    return c.json({
+      generated_at: new Date(now * 1000).toISOString(),
+      days,
+      users: numericSummary(rows[0]),
+      content: numericSummary(rows[1]),
+      rag: numericSummary(rows[2]),
+      chat: numericSummary(rows[3]),
+      ads: numericSummary(rows[4]),
+      consent: numericSummary(rows[5]),
+      incidents: numericSummary(rows[6]),
+      audit: numericSummary(rows[7]),
+    });
+  } catch (error) {
+    console.error('[staff analytics] command center unavailable', error);
+    return c.json({ detail: 'Command-center analytics unavailable' }, 503);
+  }
+});
+
 // ── Staff account actions ──────────────────────────────────────────────────────
 
 staffRouter.post('/auth/change-password', async (c) => {
@@ -159,6 +341,11 @@ function makeSlug(name: string): string {
 }
 
 function nowTs(): number { return Math.floor(Date.now() / 1000); }
+const CHAPTER_STATUSES = new Set(['draft', 'published', 'unpublished', 'archived']);
+const CHAPTER_TYPES = new Set(['standard', 'notes', 'qa', 'question_paper', 'formula', 'summary', 'solution', 'reference']);
+function validChapterNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
 
 async function safeBody(c: Context<{ Bindings: Env }>): Promise<Record<string, unknown>> {
   try { return await c.req.json<Record<string, unknown>>(); } catch { return {}; }
@@ -642,7 +829,12 @@ staffRouter.post('/content/chapters', async (c) => {
   const db  = createDb(c.env.DB);
   const now = nowTs();
 
-  let chapterNumber = typeof body['chapter_number'] === 'number' ? body['chapter_number'] : undefined;
+  if ('status' in body && (!CHAPTER_STATUSES.has(String(body.status)))) return c.json({ detail: 'Invalid chapter status' }, 422);
+  if ('content_type' in body && (!CHAPTER_TYPES.has(String(body.content_type)))) return c.json({ detail: 'Invalid chapter content type' }, 422);
+  if ('chapter_number' in body && !validChapterNumber(body.chapter_number)) return c.json({ detail: 'chapter_number must be a positive integer' }, 422);
+  const subject = await db.select({ id: subjects.id }).from(subjects).where(eq(subjects.id, subjectId)).get();
+  if (!subject) return c.json({ detail: 'Subject not found' }, 404);
+  let chapterNumber = validChapterNumber(body['chapter_number']) ? body['chapter_number'] : undefined;
   if (!chapterNumber) {
     const maxRow = await c.env.DB
       .prepare('SELECT MAX(chapter_number) as mx FROM chapters WHERE subject_id = ?')
@@ -650,15 +842,24 @@ staffRouter.post('/content/chapters', async (c) => {
     chapterNumber = (maxRow?.mx ?? 0) + 1;
   }
 
-  const slug = makeSlug(title);
+  const slug = makeSlug(String(body['slug'] ?? title));
   const id   = crypto.randomUUID();
 
   await db.insert(chapters).values({
     id, title, subjectId, slug, chapterNumber,
     contentType:     String(body['content_type'] ?? 'standard'),
     status:          String(body['status'] ?? 'draft'),
-    ragSectionsEn:   '[]', ragSectionsAs: '[]',
-    publishedTopics: '[]', qaEn: '[]', qaAs: '[]',
+    notesEn: typeof body.notes_en === 'string' ? body.notes_en : (typeof body.content === 'string' ? body.content : null),
+    notesAs: typeof body.notes_as === 'string' ? body.notes_as : (typeof body.content_as === 'string' ? body.content_as : null),
+    ragText: typeof body.rag_text_en === 'string' ? body.rag_text_en : null,
+    ragTextAs: typeof body.rag_text_as === 'string' ? body.rag_text_as : null,
+    ragSectionsEn: Array.isArray(body.rag_sections_en) ? JSON.stringify(body.rag_sections_en) : '[]',
+    ragSectionsAs: Array.isArray(body.rag_sections_as) ? JSON.stringify(body.rag_sections_as) : '[]',
+    publishedTopics: Array.isArray(body.topics) ? JSON.stringify(body.topics) : '[]',
+    qaEn: Array.isArray(body.qa_en) ? JSON.stringify(body.qa_en) : (typeof body.qa_rag_text_en === 'string' || typeof body.qa_text_en === 'string' ? JSON.stringify([{ content: body.qa_rag_text_en ?? body.qa_text_en ?? '' }]) : '[]'),
+    qaAs: Array.isArray(body.qa_as) ? JSON.stringify(body.qa_as) : (typeof body.qa_rag_text_as === 'string' || typeof body.qa_text_as === 'string' ? JSON.stringify([{ content: body.qa_rag_text_as ?? body.qa_text_as ?? '' }]) : '[]'),
+    pyqPdfUrl: typeof body.pyq_pdf_url === 'string' ? body.pyq_pdf_url : null,
+    ragUpdatedAt: ['notes_en', 'notes_as', 'content', 'content_as', 'rag_text_en', 'rag_text_as', 'rag_sections_en', 'rag_sections_as', 'qa_en', 'qa_as', 'qa_text_en', 'qa_text_as', 'qa_rag_text_en', 'qa_rag_text_as'].some(key => key in body) ? now : null,
     createdAt: now, updatedAt: now,
   });
 
@@ -704,8 +905,8 @@ staffRouter.get('/content/chapter/:chapterId', async (c) => {
   // qa_rag_sections_en/as — dashboard field names for structured Q&A sections.
   // D1 stores these in qaEn/qaAs (same column, same JSON shape).
   // Expose both field names so the dashboard round-trips without changes.
-  const qaEnArr = safeParse(ch.qaEn) ?? [];
-  const qaAsArr = safeParse(ch.qaAs) ?? [];
+  const qaEnArr = safeParse<Array<Record<string, unknown>>>(ch.qaEn) ?? [];
+  const qaAsArr = safeParse<Array<Record<string, unknown>>>(ch.qaAs) ?? [];
 
   return c.json({
     id:             ch.id,
@@ -728,6 +929,10 @@ staffRouter.get('/content/chapter/:chapterId', async (c) => {
     qa_rag_sections_as:  qaAsArr,
     qa_en:               qaEnArr,
     qa_as:               qaAsArr,
+    qa_text_en:          typeof qaEnArr[0] === 'object' && typeof (qaEnArr[0] as Record<string, unknown>).content === 'string' ? (qaEnArr[0] as Record<string, string>).content : '',
+    qa_text_as:          typeof qaAsArr[0] === 'object' && typeof (qaAsArr[0] as Record<string, unknown>).content === 'string' ? (qaAsArr[0] as Record<string, string>).content : '',
+    qa_rag_text_en:      typeof qaEnArr[0] === 'object' && typeof (qaEnArr[0] as Record<string, unknown>).content === 'string' ? (qaEnArr[0] as Record<string, string>).content : '',
+    qa_rag_text_as:      typeof qaAsArr[0] === 'object' && typeof (qaAsArr[0] as Record<string, unknown>).content === 'string' ? (qaAsArr[0] as Record<string, string>).content : '',
     published_topics:    safeParse(ch.publishedTopics) ?? [],
     // PYQ fields
     pyq_pdf_url:         ch.pyqPdfUrl ?? '',
@@ -773,42 +978,45 @@ staffRouter.patch('/content/chapter/:chapterId', async (c) => {
     ragText: string; ragTextAs: string;
     ragSectionsEn: string; ragSectionsAs: string;
     publishedTopics: string; qaEn: string; qaAs: string;
-    ragUpdatedAt: number; wordCountEn: number; updatedAt: number;
+    ragUpdatedAt: number; wordCountEn: number; updatedAt: number; pyqPdfUrl: string | null;
   }>;
 
   const updates: ChapterUpdate = { updatedAt: now };
 
-  // Scalar fields — empty string = no-op for non-clearable fields
-  if ('title' in body && body['title'] !== undefined)          updates.title         = String(body['title'] ?? '').trim();
-  if ('slug' in body  && body['slug'] !== undefined)           updates.slug          = String(body['slug']  ?? '').trim();
+  if ('title' in body && !String(body.title ?? '').trim()) return c.json({ detail: 'title cannot be empty' }, 422);
+  if ('title' in body && body['title'] !== undefined)          updates.title         = String(body['title']).trim();
+  if ('slug' in body && !makeSlug(String(body.slug ?? ''))) return c.json({ detail: 'slug cannot be empty' }, 422);
+  if ('slug' in body  && body['slug'] !== undefined)           updates.slug          = makeSlug(String(body['slug']));
   if ('slug_as' in body && body['slug_as'] !== undefined)      updates.slugAs        = String(body['slug_as'] ?? '').trim() || null;
-  if ('chapter_number' in body && typeof body['chapter_number'] === 'number') updates.chapterNumber = body['chapter_number'] as number;
-  if ('status' in body && body['status'] !== undefined)        updates.status        = String(body['status'] ?? '');
-  if ('content_type' in body && body['content_type'] !== undefined) updates.contentType = String(body['content_type'] ?? '');
+  if ('chapter_number' in body && !validChapterNumber(body.chapter_number)) return c.json({ detail: 'chapter_number must be a positive integer' }, 422);
+  if ('chapter_number' in body) updates.chapterNumber = body['chapter_number'] as number;
+  if ('status' in body && !CHAPTER_STATUSES.has(String(body.status))) return c.json({ detail: 'Invalid chapter status' }, 422);
+  if ('status' in body) updates.status = String(body.status);
+  if ('content_type' in body && !CHAPTER_TYPES.has(String(body.content_type))) return c.json({ detail: 'Invalid chapter content type' }, 422);
+  if ('content_type' in body) updates.contentType = String(body.content_type);
 
-  // Notes (content fields) — treat '' as no-op on round-trip
-  if ('notes_en' in body && body['notes_en'] !== '' && body['notes_en'] !== undefined) {
-    updates.notesEn = String(body['notes_en']);
+  // Presence means intent: explicit empty strings clear editor fields.
+  if ('notes_en' in body && body['notes_en'] !== undefined) {
+    updates.notesEn = String(body['notes_en'] ?? '');
     contentChanged = ragChanged = true;
   }
-  if ('notes_as' in body && body['notes_as'] !== '' && body['notes_as'] !== undefined) {
-    updates.notesAs = String(body['notes_as']);
+  if ('notes_as' in body && body['notes_as'] !== undefined) {
+    updates.notesAs = String(body['notes_as'] ?? '');
     contentChanged = ragChanged = true;
   }
 
   // RAG blob fields
-  if ('rag_text_en' in body && body['rag_text_en'] !== '' && body['rag_text_en'] !== undefined) {
+  if ('rag_text_en' in body && body['rag_text_en'] !== undefined) {
     updates.ragText = String(body['rag_text_en']); ragChanged = true;
   }
-  if ('rag_text_as' in body && body['rag_text_as'] !== '' && body['rag_text_as'] !== undefined) {
+  if ('rag_text_as' in body && body['rag_text_as'] !== undefined) {
     updates.ragTextAs = String(body['rag_text_as']); ragChanged = true;
   }
 
-  // Structured RAG sections — only update when non-empty (never clear on round-trip)
-  if ('rag_sections_en' in body && Array.isArray(body['rag_sections_en']) && (body['rag_sections_en'] as unknown[]).length > 0) {
+  if ('rag_sections_en' in body && Array.isArray(body['rag_sections_en'])) {
     updates.ragSectionsEn = JSON.stringify(body['rag_sections_en']); ragChanged = true;
   }
-  if ('rag_sections_as' in body && Array.isArray(body['rag_sections_as']) && (body['rag_sections_as'] as unknown[]).length > 0) {
+  if ('rag_sections_as' in body && Array.isArray(body['rag_sections_as'])) {
     updates.ragSectionsAs = JSON.stringify(body['rag_sections_as']); ragChanged = true;
   }
 
@@ -819,16 +1027,23 @@ staffRouter.patch('/content/chapter/:chapterId', async (c) => {
   // Q&A — accept both qa_en/as (canonical) and qa_rag_sections_en/as (dashboard alias).
   // D1 stores all structured Q&A in qaEn/qaAs regardless of field name used by caller.
   // qa_rag_sections_en takes priority when both are provided in the same request.
-  if ('qa_en' in body && Array.isArray(body['qa_en']) && (body['qa_en'] as unknown[]).length > 0)
-    updates.qaEn = JSON.stringify(body['qa_en']);
+  if ('qa_en' in body && Array.isArray(body['qa_en'])) {
+    updates.qaEn = JSON.stringify(body['qa_en']); ragChanged = true;
+  }
   if ('qa_rag_sections_en' in body && Array.isArray(body['qa_rag_sections_en']) && (body['qa_rag_sections_en'] as unknown[]).length > 0) {
     updates.qaEn = JSON.stringify(body['qa_rag_sections_en']); ragChanged = true;
   }
-  if ('qa_as' in body && Array.isArray(body['qa_as']) && (body['qa_as'] as unknown[]).length > 0)
-    updates.qaAs = JSON.stringify(body['qa_as']);
+  if ('qa_as' in body && Array.isArray(body['qa_as'])) {
+    updates.qaAs = JSON.stringify(body['qa_as']); ragChanged = true;
+  }
   if ('qa_rag_sections_as' in body && Array.isArray(body['qa_rag_sections_as']) && (body['qa_rag_sections_as'] as unknown[]).length > 0) {
     updates.qaAs = JSON.stringify(body['qa_rag_sections_as']); ragChanged = true;
   }
+  if ('qa_text_en' in body && typeof body.qa_text_en === 'string') { updates.qaEn = JSON.stringify(body.qa_text_en ? [{ content: body.qa_text_en }] : []); ragChanged = true; }
+  if ('qa_text_as' in body && typeof body.qa_text_as === 'string') { updates.qaAs = JSON.stringify(body.qa_text_as ? [{ content: body.qa_text_as }] : []); ragChanged = true; }
+  if ('qa_rag_text_en' in body && typeof body.qa_rag_text_en === 'string') { updates.qaEn = JSON.stringify(body.qa_rag_text_en ? [{ content: body.qa_rag_text_en }] : []); ragChanged = true; }
+  if ('qa_rag_text_as' in body && typeof body.qa_rag_text_as === 'string') { updates.qaAs = JSON.stringify(body.qa_rag_text_as ? [{ content: body.qa_rag_text_as }] : []); ragChanged = true; }
+  if ('pyq_pdf_url' in body && typeof body.pyq_pdf_url === 'string') updates.pyqPdfUrl = body.pyq_pdf_url || null;
 
   if (ragChanged)     updates.ragUpdatedAt = now;
   if (contentChanged) {

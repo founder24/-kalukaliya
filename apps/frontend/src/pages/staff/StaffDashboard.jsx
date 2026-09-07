@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { API_BASE } from '@/utils/api';
+import { API_BASE, adminLogout } from '@/utils/api';
 import { getToken, clearTokens } from '@/hooks/useTokenManager';
 import { setAuthToken } from '@/utils/api';
 import axios from 'axios';
@@ -160,7 +161,7 @@ function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {isAdmin && <>
           <SidebarLink active={view === 'dashboard'} icon={<DashboardIcon />} label="Dashboard" onClick={() => onViewChange('dashboard')} />
-          <SidebarLink active={view === 'analytics'} icon={<AnalyticsIcon />} label="Analytics" onClick={() => onViewChange('analytics')} />
+          <SidebarLink active={view === 'analytics'} icon={<AnalyticsIcon />} label="Command center" onClick={() => onViewChange('analytics')} />
           <SidebarLink active={view === 'users'} icon={<UsersIcon />} label="Users" onClick={() => onViewChange('users')} />
           <SidebarLink active={view === 'conversations'} icon={<ConversationsIcon />} label="Conversations" onClick={() => onViewChange('conversations')} />
           <div className="my-2 border-t border-gray-100" />
@@ -2362,12 +2363,17 @@ function SubjectCard({ subject, boards, classes, onClick }) {
 
 // ── Root component ────────────────────────────────────────────────────────────
 
-export default function StaffDashboard() {
+export default function StaffDashboard({ adminCookieAccess = false }) {
   const { user, logout } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const commandSections = ['overview', 'users', 'content', 'rag', 'chat', 'ads', 'reliability', 'audit'];
+  const initialSection = searchParams.get('section')?.toLowerCase();
 
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
   const [changePwOpen, setChangePwOpen] = useState(false);
-  const [view,         setView]         = useState('subjects');
+  const [view,         setView]         = useState(
+    commandSections.includes(initialSection) ? 'analytics' : 'subjects',
+  );
 
   const [boards,   setBoards]   = useState([]);
   const [classes,  setClasses]  = useState([]);
@@ -2380,6 +2386,7 @@ export default function StaffDashboard() {
   const [chapters,        setChapters]        = useState([]);
   const [loadingChapters, setLoadingChapters] = useState(false);
   const [editingChapterId, setEditingChapterId] = useState(null);
+  const isAdmin = user?.role === 'admin' || adminCookieAccess;
 
   const handleAccessError = useCallback((error, fallbackMessage) => {
     const status = error?.response?.status;
@@ -2482,11 +2489,22 @@ export default function StaffDashboard() {
   }, []);
 
   const handleViewChange = (v) => {
-    if (['dashboard', 'analytics', 'users', 'conversations'].includes(v) && user?.role !== 'admin') {
+    if (['dashboard', 'analytics', 'users', 'conversations'].includes(v) && !isAdmin) {
       toast.error('Dashboard, analytics, users, and conversations are available to administrators only.');
       return;
     }
     setView(v);
+    // Command-center states are shareable (`/staff?section=rag&days=30`).
+    // Content editing itself remains the established Subjects/Chapters workflow.
+    if (v === 'analytics') {
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev);
+        if (!next.get('section')) next.set('section', 'overview');
+        return next;
+      });
+    } else if (v === 'subjects') {
+      setSearchParams({});
+    }
     setSidebarOpen(false);
     if (v === 'subjects') setSelectedSubject(null);
   };
@@ -2507,8 +2525,11 @@ export default function StaffDashboard() {
   }, [handleViewChange]);
 
   const handleLogout = async () => {
-    try { await logout(); } catch { /* ignore */ }
-    window.location.href = '/login';
+    try {
+      if (adminCookieAccess && !user) await adminLogout();
+      else await logout();
+    } catch { /* ignore */ }
+    window.location.href = adminCookieAccess && !user ? '/admin/login' : '/login';
   };
 
   return (
@@ -2516,7 +2537,7 @@ export default function StaffDashboard() {
       {/* Desktop sidebar */}
       <div className="hidden lg:flex lg:w-64 lg:flex-shrink-0">
         <div className="w-full h-full">
-          <Sidebar user={user} onLogout={handleLogout} view={view} onViewChange={handleViewChange} onChangePassword={() => { setSidebarOpen(false); setChangePwOpen(true); }} />
+          <Sidebar user={adminCookieAccess && !user ? { role: 'admin', name: 'Administrator' } : user} onLogout={handleLogout} view={view} onViewChange={handleViewChange} onChangePassword={() => { setSidebarOpen(false); setChangePwOpen(true); }} />
         </div>
       </div>
 
@@ -2525,7 +2546,7 @@ export default function StaffDashboard() {
 
       {/* Mobile drawer */}
       <div className={`fixed inset-y-0 left-0 z-50 w-72 lg:hidden transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <Sidebar user={user} onLogout={handleLogout} view={view} onViewChange={handleViewChange} onChangePassword={() => { setSidebarOpen(false); setChangePwOpen(true); }} />
+        <Sidebar user={adminCookieAccess && !user ? { role: 'admin', name: 'Administrator' } : user} onLogout={handleLogout} view={view} onViewChange={handleViewChange} onChangePassword={() => { setSidebarOpen(false); setChangePwOpen(true); }} />
       </div>
 
       {/* Main */}

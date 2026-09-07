@@ -459,11 +459,16 @@ export const contentAuditLog = sqliteTable('content_audit_log', {
 export const analyticsEvents = sqliteTable('analytics_events', {
   id: text('id').primaryKey(),
   eventName: text('event_name').notNull(),
+  // Stable canonical subtype (for example hydrate_preload_failed) rather than
+  // a route-level bucket such as "hydrate-event".
+  eventSubtype: text('event_subtype').notNull(),
+  classification: text('classification').notNull(), // optional_analytics | essential_operational
   payload: text('payload').notNull().default('{}'),
   routePath: text('route_path'),
   createdAt: integer('created_at').default(sql`(unixepoch())`),
 }, (t) => [
   index('analytics_events_name_created_idx').on(t.eventName, t.createdAt),
+  index('analytics_events_subtype_created_idx').on(t.eventSubtype, t.createdAt),
   index('analytics_events_route_created_idx').on(t.routePath, t.createdAt),
 ]);
 

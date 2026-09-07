@@ -668,7 +668,10 @@ async def main() -> int:
             )
         return 0
 
-    generated_cache: dict[tuple[str, str, int], tuple[str, list[dict[str, str]]]] = {}
+    # The prompt contains destination class/subject/chapter identity. Do not
+    # reuse a generation merely because two PDFs happened to expose the same
+    # title/number: that can silently write notes for the wrong D1 chapter.
+    generated_cache: dict[tuple[str, str, int, str, str], tuple[str, list[dict[str, str]]]] = {}
     processed = 0
     failed = 0
     for chapter, source, score in matches:
@@ -681,6 +684,8 @@ async def main() -> int:
             str(source["source_pdf_url"]),
             normalize(str(source["title"])),
             int(source["effective_number"]),
+            str(chapter["subject_id"]),
+            str(chapter["id"]),
         )
         try:
             if source_key not in generated_cache:

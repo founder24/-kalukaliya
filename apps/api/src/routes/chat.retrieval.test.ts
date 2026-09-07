@@ -1,11 +1,36 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  detectAuthoritativeIntent,
   semanticRetrievalFilters,
   shouldBypassSemanticRetrieval,
+  terminalChatErrorEvent,
 } from './chat';
 
 describe('chapter-scoped chat retrieval', () => {
+  it.each([
+    ['Show the Physics syllabus', 'syllabus'],
+    ['Give me the chapter list', 'syllabus'],
+    ['Show previous year question papers', 'pyq'],
+    ['PYQ for this subject', 'pyq'],
+    ['Explain Newton’s first law', null],
+  ] as const)('routes authoritative list intent: %s', (message, intent) => {
+    expect(detectAuthoritativeIntent(message)).toBe(intent);
+  });
+
+  it('marks post-header provider failures as terminal SSE errors', () => {
+    expect(terminalChatErrorEvent('Unavailable', 'provider_stream_failed', 'provider_stream', 'r1'))
+      .toEqual({
+        event: 'chat_error',
+        content: '',
+        done: true,
+        error: 'Unavailable',
+        error_code: 'provider_stream_failed',
+        failure_stage: 'provider_stream',
+        request_id: 'r1',
+      });
+  });
+
   it('bypasses embedding and Vectorize only for usable explicit chapter content', () => {
     expect(shouldBypassSemanticRetrieval('chapter-1', 'Chapter notes')).toBe(true);
   });

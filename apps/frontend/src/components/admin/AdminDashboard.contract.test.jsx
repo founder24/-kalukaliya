@@ -97,8 +97,6 @@ const DASHBOARD_RESPONSE = {
   active_today: 72,
   total_messages: 876,
   messages_today: 54,
-  revenue_total: 12345,
-  revenue_month: 3456,
   pro_users: 89,
   free_users: 232,
   system_health: 'ok',
@@ -112,7 +110,6 @@ const DASHBOARD_RESPONSE = {
 
 const METRICS_RESPONSE = {
   response_time_ms: 48,
-  revenue: { total_inr: 12345, mrr_inr: 3456 },
   users: { paid: 89, free: 232 },
   seo: { published_pages: 45, topics: 38 },
   bot_render: { total_requests: 120, by_page_type: {} },
@@ -176,7 +173,7 @@ describe('AdminDashboard dashboard response contract', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText('321').length).toBeGreaterThan(0);
-      expect(screen.getByText('₹12,345')).toBeInTheDocument();
+      expect(screen.getAllByText('876').length).toBeGreaterThan(0);
     });
 
     expect(screen.getAllByText('876').length).toBeGreaterThan(0);

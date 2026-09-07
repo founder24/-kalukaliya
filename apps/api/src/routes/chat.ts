@@ -163,6 +163,94 @@ interface SourceEntry {
   topic_name?: string | undefined;
 }
 
+export type AuthoritativeIntent = 'syllabus' | 'pyq' | null;
+
+/**
+ * These requests are lists/records, not open-ended semantic questions. They
+ * must be grounded in D1's published curriculum data rather than a nearest
+ * vector chunk (which can be incomplete or from another chapter).
+ */
+export function detectAuthoritativeIntent(message: string): AuthoritativeIntent {
+  const text = message.toLowerCase();
+  if (/(?:\bpyq\b|previous\s*(?:year'?s?)?\s*(?:question|paper)|past\s*paper|question\s*paper|পূৰ্বৰ\s*বছৰ|প্ৰশ্ন\s*কাকত)/u.test(text)) {
+    return 'pyq';
+  }
+  if (/(?:\bsyllabus\b|chapter\s*(?:list|names?)|list\s*(?:of\s*)?chapters?|course\s*(?:content|outline)|পাঠ্যক্ৰম|অধ্যায়ৰ\s*তালিকা)/u.test(text)) {
+    return 'syllabus';
+  }
+  return null;
+}
+
+interface AuthoritativeD1Row {
+  id: string;
+  title: string;
+  subject_id: string;
+  pyq_pdf_url: string | null;
+  pyq_papers: string | null;
+}
+
+async function fetchAuthoritativeIntentContext(
+  d1: D1Database,
+  intent: Exclude<AuthoritativeIntent, null>,
+  subjectId: string | undefined,
+  chapterId: string | undefined,
+  lang: 'en' | 'as',
+): Promise<ContextChunk[]> {
+  // 30 titles / 12 PYQ-bearing chapters keeps the prompt bounded even for a
+  // subject with a long catalogue. Parameters, rather than text interpolation,
+  // preserve D1 query safety.
+  const where = chapterId
+    ? "WHERE id = ? AND status = 'published'"
+    : subjectId ? "WHERE subject_id = ? AND status = 'published'" : "WHERE status = 'published'";
+  const bind = chapterId ?? subjectId;
+  const limit = intent === 'syllabus' ? 30 : 12;
+  const rows = await d1.prepare(`
+    SELECT id, title, subject_id, pyq_pdf_url, pyq_papers
+    FROM chapters
+    ${where}
+    ORDER BY chapter_number ASC, title ASC
+    LIMIT ?
+  `).bind(...(bind ? [bind, limit] : [limit])).all<AuthoritativeD1Row>();
+
+  return (rows.results ?? [])
+    .filter((row) => intent === 'syllabus'
+      || Boolean(row.pyq_pdf_url || (tryJson<unknown[]>(row.pyq_papers, []).length)))
+    .map((row) => {
+      const papers = tryJson<unknown[]>(row.pyq_papers, []);
+      const evidence = intent === 'syllabus'
+        ? `Authoritative syllabus chapter: ${row.title}`
+        : `Authoritative PYQ record for ${row.title}. PDF available: ${row.pyq_pdf_url ? 'yes' : 'no'}. Stored paper pages: ${papers.length}.`;
+      return {
+        chapterId: row.id,
+        chapterTitle: row.title,
+        subjectId: row.subject_id,
+        content: evidence,
+        score: 1,
+        medium: lang === 'as' ? 'assamese' : 'english',
+        sourceType: intent === 'pyq' ? 'pyq_d1' : 'syllabus_d1',
+      };
+    });
+}
+
+/** Write only operational dimensions — never student text, history, or output. */
+async function writeChatOperationalAnalytics(
+  d1: D1Database,
+  eventName: 'chat_completion' | 'chat_failure',
+  payload: Record<string, string | number | boolean | null>,
+): Promise<void> {
+  await d1.prepare(`
+    INSERT INTO analytics_events
+      (id, event_name, event_subtype, classification, payload, route_path, created_at)
+    VALUES (?, ?, ?, 'essential_operational', ?, '/v1/chat/stream', ?)
+  `).bind(
+    crypto.randomUUID(),
+    eventName,
+    eventName,
+    JSON.stringify(payload),
+    Math.floor(Date.now() / 1000),
+  ).run();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -225,6 +313,24 @@ export function hasAssameseProseLeakage(text: string): boolean {
 
 function sseEvent(payload: unknown): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
+}
+
+/** A terminal error is an SSE payload once streaming has started (not HTTP). */
+export function terminalChatErrorEvent(
+  error: string,
+  errorCode: string,
+  failureStage: string,
+  requestId: string,
+): Record<string, string | boolean> {
+  return {
+    event: 'chat_error',
+    content: '',
+    done: true,
+    error,
+    error_code: errorCode,
+    failure_stage: failureStage,
+    request_id: requestId,
+  };
 }
 
 function tryJson<T>(s: string | null | undefined, fallback: T): T {
@@ -963,6 +1069,7 @@ export function buildSystemPrompt(opts: {
     '- Your scope is limited to the Assamboard curriculum (including AHSEC, SEBA, and supported Assamboard Degree curriculum represented in the provided context).',
     '- Board naming: identify Class 11 and Class 12 curriculum as AHSEC; identify Degree courses as Assamboard. Do not label Degree courses as AHSEC, CBSE, or NCERT.',
     '- Do not answer CBSE, NCERT, ICSE, or any other non-Assam-board curriculum questions. If asked, politely explain that Syrabit only supports the Assam Board curriculum and invite the student to ask an Assam Board equivalent.',
+     '- Write all explanatory prose in English only. Do not switch to Assamese, Bengali, Hindi, or another language unless the selected response language is Assamese.',
     '- Answer clearly and concisely. Use the curriculum context above when available.',
     '- Answer the question directly in the first sentence. Do not start with generic introductions such as "Here is the answer".',
     '- Match the answer length to the question: short for simple questions; structured and exam-ready only when needed.',
@@ -1307,7 +1414,10 @@ chatRouter.post('/stream', async (c) => {
   // alongside history and avoid an embedding + Vectorize round trip when it is
   // available. Semantic retrieval remains the fallback for stale/missing IDs.
   const directChapterId = body.chapter_id?.trim() || undefined;
-  const webSearchPlanned = c.env.WEB_SEARCH_ENABLED === 'true'
+  const authoritativeIntent = detectAuthoritativeIntent(message);
+  // D1 is authoritative for syllabus/PYQ availability. Do not dilute a list
+  // request with web snippets or nearest-neighbour retrieval.
+  const webSearchPlanned = !authoritativeIntent && c.env.WEB_SEARCH_ENABLED === 'true'
     && shouldUseWebSearch({
       question: message,
       chapterId: directChapterId,
@@ -1320,7 +1430,36 @@ chatRouter.post('/stream', async (c) => {
     : Promise.resolve(skippedWebSearch());
   const memoryPromise = loadMemories(db, userId, isAnon);
   let historyLoaded = false;
-  if (directChapterId) {
+  if (authoritativeIntent) {
+    try {
+      contextChunks = await fetchAuthoritativeIntentContext(
+        c.env.DB,
+        authoritativeIntent,
+        body.subject_id,
+        directChapterId,
+        lang,
+      );
+      ragPath = `${authoritativeIntent}_d1`;
+      confidenceTier = contextChunks.length > 0 ? 'high' : 'none';
+      topScore = contextChunks.length > 0 ? 1 : 0;
+      const first = contextChunks[0];
+      topChapterId = first?.chapterId;
+      topChapterTitle = first?.chapterTitle;
+      topSubjectId = first?.subjectId ?? body.subject_id;
+    } catch (error) {
+      // This occurs before SSE headers/body are committed, so keep it a typed
+      // HTTP error clients can safely retry instead of a misleading stream.
+      await releaseQuota().catch(() => {});
+      c.header('X-Failure-Stage', 'authoritative_retrieval');
+      return c.json({
+        detail: 'Authoritative curriculum records are temporarily unavailable. Please try again.',
+        error_code: 'authoritative_context_unavailable',
+        request_id: serverRequestId,
+        failure_stage: 'authoritative_retrieval',
+      }, 503);
+    }
+  }
+  if (!authoritativeIntent && directChapterId) {
     const [directHistoryResult, directContentResult, directMemoryResult] = await Promise.allSettled([
       loadHistory(db, sessionId, userId),
       fetchChapterContent(db, directChapterId, lang),
@@ -1355,7 +1494,7 @@ chatRouter.post('/stream', async (c) => {
     }
   }
 
-  if (contextChunks.length === 0) {
+  if (!authoritativeIntent && contextChunks.length === 0) {
   // Embed + history in parallel — zero extra latency vs serial
   // Pass userId so history is scoped to its owner (session ownership enforcement)
   const [embedResult, historyResult] = await startRetrievalFanout({
@@ -1446,7 +1585,7 @@ chatRouter.post('/stream', async (c) => {
   }
 
   // Card-context fallback — when RAG missed but chapter_id provided by frontend
-  if (contextChunks.length === 0 && directChapterId) {
+  if (!authoritativeIntent && contextChunks.length === 0 && directChapterId) {
     try {
       const content = await fetchChapterContent(db, directChapterId, lang);
       if (content) {
@@ -1524,10 +1663,12 @@ chatRouter.post('/stream', async (c) => {
     event:            'source_card',
     request_id:       serverRequestId,
     conversation_id:  effectiveSessionId,
-    source_type:      contextChunks.length > 0
-      ? 'rag_chapter'
-      : webResults.length > 0 ? 'web_search' : 'llm_only',
-    rag_source:       contextChunks.length > 0 ? 'rag_chapter' : 'llm_only',
+    // Provenance belongs to the selected retrieval entry, not to a generic
+    // route label. This preserves PYQ/syllabus/direct-chapter distinctions.
+    source_type:      primaryCurriculumSource?.source_type
+      ?? sourceEntries.find(entry => entry.kind === 'web')?.source_type
+      ?? 'llm_only',
+    rag_source:       primaryCurriculumSource?.source_type ?? 'llm_only',
     rag_path:         ragPath,
     confidence_tier:  confidenceTier,
     match_score:      topScore,
@@ -1554,6 +1695,7 @@ chatRouter.post('/stream', async (c) => {
     // available hierarchy slugs; the existing top-level fields remain intact
     // for older clients and the primary source card.
     sources: sourceEntries,
+    ...(authoritativeIntent && { authoritative_intent: authoritativeIntent }),
   };
 
   // ── 8. SSE via TransformStream + waitUntil ──────────────────────────────────
@@ -1569,6 +1711,27 @@ chatRouter.post('/stream', async (c) => {
     let actualModel  = AI_MODEL_PRIMARY;
     let firstTokenRecorded = false;
     let assameseProseLeakage = false;
+    let analyticsRecorded = false;
+    const recordAnalytics = async (
+      eventName: 'chat_completion' | 'chat_failure',
+      failureStage: string | null = null,
+    ) => {
+      if (analyticsRecorded) return;
+      analyticsRecorded = true;
+      await writeChatOperationalAnalytics(c.env.DB, eventName, {
+        language: lang,
+        route: ragPath,
+        authoritative_intent: authoritativeIntent,
+        source_coverage: sourceEntries.length,
+        curriculum_sources: contextChunks.length,
+        web_sources: webResults.length,
+        provider: 'workers-ai',
+        model: actualModel,
+        latency_ms: Date.now() - startTime,
+        latency_semantics: lang === 'as' ? 'buffered_completion' : 'first_token_streaming',
+        failure_stage: failureStage,
+      }).catch((error) => console.warn('[chat] operational analytics write failed:', error));
+    };
 
     try {
       // Always emit source_card first — client uses this to learn the conversation_id
@@ -1611,7 +1774,13 @@ chatRouter.post('/stream', async (c) => {
 
       if (!streamDone || !fullResponse) {
         // Provider returned an empty response — release the reserved slot
-        await write({ content: '', done: true, error: 'Empty response from AI. Please try again.' });
+        await write(terminalChatErrorEvent(
+          'Empty response from AI. Please try again.',
+          'provider_empty_response',
+          'provider_stream',
+          serverRequestId,
+        ));
+        await recordAnalytics('chat_failure', 'provider_stream');
         await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
         return;
       }
@@ -1621,16 +1790,21 @@ chatRouter.post('/stream', async (c) => {
         assameseProseLeakage = hasAssameseProseLeakage(fullResponse);
         if (assameseProseLeakage) {
           await write({
-            content: '',
-            done: true,
+            ...terminalChatErrorEvent(
+              'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। ইংৰাজী মোড ব্যৱহাৰ কৰি পুনৰ চেষ্টা কৰক।',
+              'assamese_language_validation_failed',
+              'language_validation',
+              serverRequestId,
+            ),
             error_kind: 'assamese_unavailable',
-            failure_stage: 'language_validation',
-            error: 'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। ইংৰাজী মোড ব্যৱহাৰ কৰি পুনৰ চেষ্টা কৰক।',
           });
+          await recordAnalytics('chat_failure', 'language_validation');
           await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
           return;
         }
-        timings.first_token_ms = Date.now() - startTime;
+        // Assamese is intentionally emitted only after complete validation;
+        // this is completion latency, never a misleading first-token metric.
+        timings.buffered_completion_ms = Date.now() - startTime;
         firstTokenRecorded = true;
         await write({ content: fullResponse, done: false });
       }
@@ -1661,11 +1835,13 @@ chatRouter.post('/stream', async (c) => {
           web_status:       webStatus,
           web_results:      webResults.length,
           timings_ms:       { ...timings },
+          latency_semantics: lang === 'as' ? 'buffered_completion' : 'first_token_streaming',
         },
         request_id: serverRequestId,
         assamese_prose_leakage: lang === 'as' ? assameseProseLeakage : false,
       };
       await write(doneEvent);
+      await recordAnalytics('chat_completion');
 
       // ── Fire-and-forget: persist chat + update user stats ────────────────
       // quota_usage was already incremented atomically in reserveAuthQuota /
@@ -1715,15 +1891,16 @@ chatRouter.post('/stream', async (c) => {
     } catch (err) {
       console.error('[chat] Stream pipeline error:', err);
       try {
-        await write({
-          error: 'AI service temporarily unavailable. Please try again.',
-          done: true,
-          request_id: serverRequestId,
-          failure_stage: 'provider_stream',
-        });
+        await write(terminalChatErrorEvent(
+          'AI service temporarily unavailable. Please try again.',
+          'provider_stream_failed',
+          'provider_stream',
+          serverRequestId,
+        ));
       } catch { /* writer may already be closed */ }
       // Release the reserved slot — provider/config errors must not consume quota
       await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
+      await recordAnalytics('chat_failure', 'provider_stream');
     }
   })();
 

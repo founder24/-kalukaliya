@@ -166,13 +166,17 @@ describe('ChatPage transport recovery', () => {
   });
 
   it('turns a pre-response fetch rejection into a recoverable connection card', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    const fetchMock = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
     render(<ChatPage />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
 
+    // The transport performs one bounded automatic retry before leaving the
+    // stable manual-retry card on screen.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByTestId('connection-interrupted-card')).toBeInTheDocument();
     expect(screen.getByTestId('failure-stage')).toHaveTextContent('pre_response');
     expect(screen.getAllByText('Explain gravity')).toHaveLength(1);
@@ -180,11 +184,13 @@ describe('ChatPage transport recovery', () => {
   });
 
   it('turns a mid-stream reader failure into a recoverable connection card', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => disconnectedStream()));
+    const fetchMock = vi.fn(async () => disconnectedStream());
+    vi.stubGlobal('fetch', fetchMock);
     render(<ChatPage />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
 
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByTestId('connection-interrupted-card')).toBeInTheDocument();
     expect(screen.getByTestId('failure-stage')).toHaveTextContent('stream');
     expect(screen.getAllByText('Explain gravity')).toHaveLength(1);

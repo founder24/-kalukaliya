@@ -8,12 +8,18 @@
  */
 
 import { API_BASE } from './api';
+import { hasAnalyticsConsent } from './analyticsConsent';
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 const track = (event, properties = {}) => {
+  const essentialOperational = typeof event === 'string' && event.startsWith('hydrate_');
+  // Product/page/session analytics and all third-party PostHog calls are
+  // optional. Hydration failure health is the narrowly scoped exception: it is
+  // essential operational telemetry and contains only the bounded fields below.
+  if (!essentialOperational && !hasAnalyticsConsent()) return;
   try {
-    if (window.posthog && typeof window.posthog.capture === 'function') {
+    if (hasAnalyticsConsent() && window.posthog && typeof window.posthog.capture === 'function') {
       window.posthog.capture(event, {
         app: 'syrabit.ai',
         timestamp: new Date().toISOString(),
@@ -50,6 +56,7 @@ const mirrorReviewPromptEvent = (event, properties) => {
   try {
     const payload = JSON.stringify({
       event,
+      analytics_consent: hasAnalyticsConsent() ? 'granted' : undefined,
       reason: (properties && properties.reason) || null,
     });
     const url = `${API_BASE}/analytics/review-prompt-event`;
@@ -79,6 +86,8 @@ const mirrorAdImpression = (properties) => {
     // Dropped in the admin-panel audit; backend ignores the extra
     // key from older bundles, so this is a one-sided rollout.
     const payload = JSON.stringify({
+      event: 'ad_slot_viewed',
+      analytics_consent: 'granted',
       placement: properties.placement,
       network: properties.network,
     });
@@ -134,12 +143,14 @@ const mirrorHydrateEvent = (event, properties) => {
 };
 
 const identify = (userId, traits = {}) => {
+  if (!hasAnalyticsConsent()) return;
   try {
     if (window.posthog) window.posthog.identify(userId, traits);
   } catch {}
 };
 
 const reset = () => {
+  // Reset is privacy-preserving and must remain available after a decline.
   try { if (window.posthog) window.posthog.reset(); } catch {}
 };
 

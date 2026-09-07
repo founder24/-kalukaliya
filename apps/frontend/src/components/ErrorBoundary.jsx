@@ -6,6 +6,7 @@
 import { Component } from 'react';
 import { RefreshCw, Home, AlertTriangle } from 'lucide-react';
 import { log } from '@/utils/logger';
+import { hasAnalyticsConsent } from '@/utils/analyticsConsent';
 
 // DO NOT statically import sentry.js here — it puts ~400 KB of Sentry SDK
 // on the critical JS path and forces Vite to add 7 modulepreload hints that
@@ -31,7 +32,7 @@ export class ErrorBoundary extends Component {
     try { getSentry()?.captureException(error, { extra: errorInfo }); } catch {}
 
     // Report to PostHog if available
-    if (window.posthog) {
+    if (hasAnalyticsConsent() && window.posthog) {
       window.posthog.capture('error_boundary_triggered', {
         error_message: error.message,
         component_stack: errorInfo.componentStack,

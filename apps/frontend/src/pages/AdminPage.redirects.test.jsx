@@ -38,11 +38,13 @@ describe('AdminPage SECTION_REDIRECTS', () => {
     });
   });
 
-  it('routes the Revenue legacy ids', () => {
-    expect(resolveSectionRedirect('monetization').section).toBe('revenue');
-    expect(resolveSectionRedirect('monetization').navContext.tab).toBe('monetization');
-    expect(resolveSectionRedirect('plans').navContext.tab).toBe('plans');
-    expect(resolveSectionRedirect('ads').navContext.tab).toBe('ads');
+  it('routes retired paid and ad ids to the operational command center', () => {
+    expect(resolveSectionRedirect('monetization')).toEqual({
+      section: 'analytics',
+      navContext: {},
+    });
+    expect(resolveSectionRedirect('plans').section).toBe('analytics');
+    expect(resolveSectionRedirect('ads').section).toBe('analytics');
   });
 
   it('routes the Access & Security legacy ids', () => {
@@ -108,6 +110,7 @@ describe('AdminPage SECTION_REDIRECTS', () => {
       'googleauth', 'ratelimits', 'botsecurity', 'edubrowser',
       'logsexplorer', 'activitylog',
       'feedback',
+      'awsnative',
     ];
     for (const id of retired) {
       expect(SECTION_REDIRECTS, `expected ${id} to redirect`).toHaveProperty(id);

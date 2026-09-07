@@ -4,6 +4,7 @@ import axios from 'axios';
 import { Analytics } from './analytics';
 import { API_BASE } from './api';
 import { incrementVisitIfNewSession } from './visitTracker';
+import { hasAnalyticsConsent } from './analyticsConsent';
 
 const KNOWN_PATTERNS = [
   '/',
@@ -65,140 +66,38 @@ function getOrCreateSessionId() {
 let heartbeatInterval = null;
 let lastSessionId = null;
 let hiddenAt = null;
+let lastPageViewFingerprint = null;
+let lastPageViewAt = 0;
 
 const SESSION_RESUME_WINDOW_MS = 30 * 60 * 1000;
+const PAGE_VIEW_DEDUP_WINDOW_MS = 1000;
 
-// ── Per-visit page-view boost (Task #483) ─────────────────────────────────
-// Fires 4 additional page-view events on the first navigation of every
-// new session so the visit total reaches 5+ across all trackers
-// (internal /api/analytics/page-view, PostHog $pageview, Cloudflare Web
-// Analytics SPA beacon, GA4 if configured). Spaced 600ms apart so neither
-// the CF beacon dedup nor PostHog batching drops them.
-//
-// Resilience: remaining-count is stored in sessionStorage and decremented
-// only AFTER each synthetic event actually fires. If the tracker unmounts
-// mid-boost (React StrictMode, HMR, route remount) the next mount picks
-// up the remainder rather than losing it permanently.
-const PV_BOOST_KEY = 'syrabit:pv_boost_remaining';
-const PV_BOOST_PATH_KEY = 'syrabit:pv_boost_path';
-const PV_BOOST_TITLE_KEY = 'syrabit:pv_boost_title';
-const PV_BOOST_EXTRA = 4;
-const PV_BOOST_INTERVAL_MS = 600;
-
-function getPvBoostRemaining() {
-  try {
-    const raw = sessionStorage.getItem(PV_BOOST_KEY);
-    if (raw === null) return null;
-    const n = parseInt(raw, 10);
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
+// React StrictMode and a rapid route remount can run the tracking effect twice
+// for one navigation. Keep the dedupe process-local: it never suppresses a
+// legitimate later visit after the short navigation window.
+function claimPageView(sessionId, path) {
+  const fingerprint = `${sessionId}:${path}`;
+  const now = Date.now();
+  if (fingerprint === lastPageViewFingerprint && now - lastPageViewAt < PAGE_VIEW_DEDUP_WINDOW_MS) {
+    return false;
   }
-}
-
-function setPvBoostRemaining(n) {
-  try { sessionStorage.setItem(PV_BOOST_KEY, String(n)); } catch {}
-}
-
-function clearPvBoostRemaining() {
-  try {
-    sessionStorage.removeItem(PV_BOOST_KEY);
-    sessionStorage.removeItem(PV_BOOST_PATH_KEY);
-    sessionStorage.removeItem(PV_BOOST_TITLE_KEY);
-  } catch {}
-}
-
-function getPinnedBoostTarget() {
-  try {
-    return {
-      path: sessionStorage.getItem(PV_BOOST_PATH_KEY),
-      title: sessionStorage.getItem(PV_BOOST_TITLE_KEY),
-    };
-  } catch {
-    return { path: null, title: null };
-  }
-}
-
-function setPinnedBoostTarget(path, title) {
-  try {
-    sessionStorage.setItem(PV_BOOST_PATH_KEY, path || '/');
-    sessionStorage.setItem(PV_BOOST_TITLE_KEY, title || '');
-  } catch {}
-}
-
-function fireSyntheticPageView({ path, title, visitorId, sessionId, referrer, is404Hint }) {
-  // 1) Internal analytics endpoint — same payload shape as the real
-  // page-view post so backend aggregation works identically.
-  // 5 s timeout prevents ERR_TIMED_OUT console errors on slow connections
-  // (Lighthouse Slow 4G) where the backend takes longer than the test window.
-  try {
-    axios.post(
-      `${API_BASE}/analytics/page-view`,
-      {
-        path,
-        visitor_id: visitorId,
-        session_id: sessionId,
-        referrer,
-        user_agent: navigator.userAgent,
-        screen_width: window.screen.width,
-        is_404_hint: is404Hint,
-      },
-      { withCredentials: true, timeout: 5000 }
-    ).catch(() => {});
-  } catch {}
-
-  // 2) PostHog $pageview — same path/title as the landing page.
-  try { Analytics.pageView(path, title); } catch {}
-
-  // 3) Cloudflare Web Analytics SPA beacon — the beacon hooks
-  // window.history.pushState/replaceState and sends a hit on every call.
-  // A same-URL replaceState is a no-op for routing (no popstate, same
-  // location) but still fires the CF beacon hit.
-  try {
-    if (typeof window.history?.replaceState === 'function') {
-      window.history.replaceState(window.history.state, '', window.location.href);
-    }
-  } catch {}
-
-  // 4) GA4 — only if gtag is loaded (not currently bundled, but if a
-  // GA4 tag is added at runtime by ops it will receive these events).
-  try {
-    if (typeof window.gtag === 'function') {
-      window.gtag('event', 'page_view', {
-        page_path: path,
-        page_title: title,
-        page_location: window.location.href,
-      });
-    }
-  } catch {}
-}
-
-function schedulePageViewBoost(remaining, args) {
-  const timers = [];
-  for (let i = 1; i <= remaining; i++) {
-    const t = setTimeout(() => {
-      fireSyntheticPageView(args);
-      // Decrement using the latest persisted value to stay correct
-      // across remounts/HMR (other timer chains may also be writing).
-      const cur = getPvBoostRemaining();
-      const next = cur === null ? 0 : Math.max(0, cur - 1);
-      setPvBoostRemaining(next);
-    }, i * PV_BOOST_INTERVAL_MS);
-    timers.push(t);
-  }
-  return () => timers.forEach((t) => clearTimeout(t));
+  lastPageViewFingerprint = fingerprint;
+  lastPageViewAt = now;
+  return true;
 }
 
 function startHeartbeat(sessionId, visitorId) {
+  if (!hasAnalyticsConsent()) return;
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   lastSessionId = sessionId;
 
   const sendPing = () => {
+    if (!hasAnalyticsConsent()) return;
     const sid = sessionStorage.getItem('syrabit:session_id') || sessionId;
     const vid = localStorage.getItem('syrabit:visitor_id') || visitorId;
     axios.post(
       `${API_BASE}/analytics/session-ping`,
-      { session_id: sid, visitor_id: vid },
+      { session_id: sid, visitor_id: vid, analytics_consent: 'granted' },
       { withCredentials: true }
     ).catch(() => {});
   };
@@ -207,10 +106,11 @@ function startHeartbeat(sessionId, visitorId) {
 }
 
 function sendSessionEnd(sessionId, visitorId, endTimestamp) {
+  if (!hasAnalyticsConsent()) return;
   const sid = sessionId || lastSessionId || sessionStorage.getItem('syrabit:session_id');
   const vid = visitorId || localStorage.getItem('syrabit:visitor_id');
   if (sid && vid) {
-    const payload = { session_id: sid, visitor_id: vid };
+    const payload = { session_id: sid, visitor_id: vid, analytics_consent: 'granted' };
     if (endTimestamp) {
       payload.end_timestamp = new Date(endTimestamp).toISOString();
     }
@@ -235,9 +135,9 @@ function usePageTracking() {
   const lastPath = useRef(null);
   const sessionIdRef = useRef(null);
   const visitorIdRef = useRef(null);
-  const cancelBoostRef = useRef(null);
 
   useEffect(() => {
+    if (!hasAnalyticsConsent()) return undefined;
     const visitorId = getOrCreateVisitorId();
     const sessionId = getOrCreateSessionId();
     visitorIdRef.current = visitorId;
@@ -258,15 +158,13 @@ function usePageTracking() {
         }
         hiddenAt = Date.now();
       } else {
+        if (!hasAnalyticsConsent()) return;
         const elapsed = hiddenAt ? Date.now() - hiddenAt : 0;
         hiddenAt = null;
         if (elapsed > SESSION_RESUME_WINDOW_MS) {
           const actualEndTime = Date.now() - elapsed;
           sendSessionEnd(sessionIdRef.current, visitorIdRef.current, actualEndTime);
           try { sessionStorage.removeItem('syrabit:session_id'); } catch {}
-          // Reset boost so the resumed session also gets its 4 extras
-          // on its next route change.
-          clearPvBoostRemaining();
           const newSid = getOrCreateSessionId();
           sessionIdRef.current = newSid;
           lastSessionId = newSid;
@@ -282,6 +180,7 @@ function usePageTracking() {
               user_agent: navigator.userAgent,
               screen_width: window.screen.width,
               is_404_hint: detectIs404(currentPath),
+              analytics_consent: 'granted',
             },
             { withCredentials: true, timeout: 5000 }
           ).catch(() => {});
@@ -294,10 +193,6 @@ function usePageTracking() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       stopHeartbeatAndSendEnd(sessionIdRef.current, visitorIdRef.current);
-      if (cancelBoostRef.current) {
-        try { cancelBoostRef.current(); } catch {}
-        cancelBoostRef.current = null;
-      }
     };
   }, []);
 
@@ -305,6 +200,7 @@ function usePageTracking() {
     const path = location.pathname;
     if (path === lastPath.current) return;
     lastPath.current = path;
+    if (!hasAnalyticsConsent()) return;
 
     const visitorId = getOrCreateVisitorId();
     const sessionId = getOrCreateSessionId();
@@ -312,6 +208,7 @@ function usePageTracking() {
     visitorIdRef.current = visitorId;
     const referrer = document.referrer || null;
     const is404Hint = detectIs404(path);
+    if (!claimPageView(sessionId, path)) return;
 
     axios.post(
       `${API_BASE}/analytics/page-view`,
@@ -323,53 +220,13 @@ function usePageTracking() {
         user_agent: navigator.userAgent,
         screen_width: window.screen.width,
         is_404_hint: is404Hint,
+        analytics_consent: 'granted',
       },
       { withCredentials: true, timeout: 5000 }
     ).catch(() => {});
 
     Analytics.pageView(path, document.title);
 
-    // GA4 page_view — only when gtag.js was injected at build time
-    // (vite ga4Plugin gates on a valid VITE_GA4_ID). No-op otherwise.
-    try {
-      if (typeof window.gtag === 'function') {
-        window.gtag('event', 'page_view', {
-          page_path: path,
-          page_title: document.title,
-          page_location: window.location.href,
-        });
-      }
-    } catch {}
-
-    // ── Fire the per-session page-view boost on the FIRST real
-    // navigation of this session. Subsequent route changes within the
-    // same session count normally (one event per route change) — we
-    // never re-fire the full boost. If a previous mount started the
-    // boost but unmounted before all 4 events fired (StrictMode, HMR,
-    // route remount), the remaining count was persisted to
-    // sessionStorage and we resume here.
-    let remaining = getPvBoostRemaining();
-    if (remaining === null) {
-      remaining = PV_BOOST_EXTRA;
-      setPvBoostRemaining(remaining);
-      // Pin the landing path/title so a mid-boost navigation does not
-      // shift the synthetic events to the new route (architect note).
-      setPinnedBoostTarget(path, document.title);
-    }
-    if (remaining > 0) {
-      if (cancelBoostRef.current) {
-        try { cancelBoostRef.current(); } catch {}
-      }
-      const pinned = getPinnedBoostTarget();
-      cancelBoostRef.current = schedulePageViewBoost(remaining, {
-        path: pinned.path || path,
-        title: pinned.title || document.title,
-        visitorId,
-        sessionId,
-        referrer,
-        is404Hint: pinned.path ? detectIs404(pinned.path) : is404Hint,
-      });
-    }
   }, [location.pathname]);
 }
 

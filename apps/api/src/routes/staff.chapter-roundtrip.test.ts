@@ -20,14 +20,14 @@
  *   1. POST /staff/content/chapters — creates a chapter (201)
  *   2. PATCH /staff/content/chapter/:id — writes notes_en, rag_sections_en, qa_en
  *   3. GET  /staff/content/chapter/:id — asserts those values are persisted
- *   4. PATCH with empty-string / empty-array — asserts content fields NOT cleared
+ *   4. PATCH with empty-string / empty-array — asserts explicit content clears
  *   5-8. PYQ upload / delete / detail endpoints
  *
  * AS suite (parallel describe)
  *   1. POST — creates a separate chapter
  *   2. PATCH — writes notes_as, rag_sections_as, qa_as
  *   3. GET — asserts those Assamese values are persisted
- *   4. PATCH with empty-string / empty-array — asserts NOT cleared
+ *   4. PATCH with empty-string / empty-array — asserts explicit content clears
  */
 
 import fs from 'node:fs';
@@ -209,6 +209,68 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await sharedDisposeProxy?.();
+});
+
+describe('Staff command-center analytics through D1', () => {
+  it('reports canonical chat, ad, consent, and audit activity', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    await sharedEnv.DB.batch([
+      sharedEnv.DB.prepare(`
+        INSERT OR IGNORE INTO users (id, email, hashed_password, role)
+        VALUES ('test-staff-user', 'staff@example.test', ?, 'staff')
+      `).bind(await hashPassword('current-password')),
+      sharedEnv.DB.prepare(`
+        INSERT INTO analytics_events
+          (id, event_name, event_subtype, classification, payload, route_path, created_at)
+        VALUES (?, 'chat_completion', 'chat_completion', 'essential_operational', ?, '/v1/chat/stream', ?)
+      `).bind(crypto.randomUUID(), JSON.stringify({ latency_ms: 240, source_coverage: 2 }), now),
+      sharedEnv.DB.prepare(`
+        INSERT INTO analytics_events
+          (id, event_name, event_subtype, classification, payload, route_path, created_at)
+        VALUES (?, 'consent-decision', 'consent_declined', 'essential_operational', '{}', NULL, ?)
+      `).bind(crypto.randomUUID(), now),
+      sharedEnv.DB.prepare(`
+        INSERT INTO content_audit_log
+          (id, user_id, action, target_type, target_id, created_at)
+        VALUES (?, 'test-staff-user', 'publish_chapter', 'chapter', 'chapter-audit-test', ?)
+      `).bind(crypto.randomUUID(), now),
+    ]);
+
+    const adResponse = await sharedWorkerFetch(new Request(
+      'http://worker/api/v1/analytics/ad-impression',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'ad_slot_viewed',
+          analytics_consent: 'granted',
+          placement: 'chapter_footer',
+          network: 'adsense',
+        }),
+      },
+    ));
+    expect(adResponse.status).toBe(200);
+
+    const response = await sharedWorkerFetch(new Request(
+      'http://worker/api/v1/admin/analytics/command-center?days=7',
+      { headers: authHeaders(sharedToken) },
+    ));
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      chat: { completions: number; average_latency_ms: number; sourced_completions: number };
+      consent: { declined: number };
+      ads: { slot_views: number; active_placements: number };
+      audit: { actions: number; publish_actions: number };
+    };
+    expect(body.chat).toMatchObject({
+      completions: 1,
+      average_latency_ms: 240,
+      sourced_completions: 1,
+    });
+    expect(body.consent.declined).toBe(1);
+    expect(body.ads).toMatchObject({ slot_views: 1, active_placements: 1 });
+    expect(body.audit).toMatchObject({ actions: 1, publish_actions: 1 });
+  });
 });
 
 // ── EN Suite ───────────────────────────────────────────────────────────────────
@@ -394,19 +456,18 @@ describe('Staff chapter edit round-trip through D1', () => {
     expect(body.qa_en[0]?.question).toBe('What is this chapter about?');
   });
 
-  // ── Step 4: PATCH with empty values must NOT clear content ─────────────────
+  // ── Step 4: PATCH with empty values explicitly clears content ───────────────
 
-  it('Step 4 — PATCH with empty-string / empty-array values does not clear content fields', async () => {
-    // These are the values the GET serialiser returns when a field is null in
-    // D1.  Sending them back in a round-trip PATCH must be a no-op for
-    // non-clearable content fields.
+  it('Step 4 — PATCH with empty-string / empty-array values clears content fields', async () => {
+    // Staff can intentionally remove obsolete content. Explicit empty values
+    // must therefore be persisted rather than treated as omitted fields.
     const patchRes = await workerFetch(new Request(`http://worker/api/v1/staff/content/chapter/${chapterId}`, {
       method: 'PATCH',
       headers: authHeaders(token),
       body: JSON.stringify({
-        notes_en:        '',  // empty string — must be ignored
-        rag_sections_en: [], // empty array  — must be ignored
-        qa_en:           [], // empty array  — must be ignored
+        notes_en:        '',
+        rag_sections_en: [],
+        qa_en:           [],
         // Include a harmless scalar change to confirm the PATCH actually fired.
         status: 'draft',
       }),
@@ -416,7 +477,7 @@ describe('Staff chapter edit round-trip through D1', () => {
     const patchBody = await patchRes.json() as { ok: boolean };
     expect(patchBody.ok).toBe(true);
 
-    // Re-fetch and assert all content fields are still intact.
+    // Re-fetch and assert all requested fields were cleared.
     const getRes = await workerFetch(new Request(`http://worker/api/v1/staff/content/chapter/${chapterId}`, {
       headers: authHeaders(token),
     }));
@@ -428,20 +489,11 @@ describe('Staff chapter edit round-trip through D1', () => {
       qa_en: Array<{ question: string; answer: string }>;
     };
 
-    // notes_en must NOT have been cleared to ''.
-    expect(body.notes_en).toBe(
-      'These are the English notes for the round-trip test chapter.',
-    );
-
-    // rag_sections_en must NOT have been cleared to [].
+    expect(body.notes_en).toBe('');
     expect(Array.isArray(body.rag_sections_en)).toBe(true);
-    expect(body.rag_sections_en.length).toBeGreaterThan(0);
-    expect(body.rag_sections_en[0]?.title).toBe('Introduction');
-
-    // qa_en must NOT have been cleared to [].
+    expect(body.rag_sections_en).toHaveLength(0);
     expect(Array.isArray(body.qa_en)).toBe(true);
-    expect(body.qa_en.length).toBeGreaterThan(0);
-    expect(body.qa_en[0]?.question).toBe('What is this chapter about?');
+    expect(body.qa_en).toHaveLength(0);
   });
 
   it('Step 5 — qa_rag_sections_en takes priority over qa_en when both are submitted', async () => {
@@ -895,18 +947,16 @@ describe('Staff chapter edit round-trip — Assamese fields', () => {
     expect(body.qa_as[0]?.answer).toBe('ৰাউণ্ড-ট্ৰিপ পৰীক্ষাৰ বিষয়ে।');
   });
 
-  // ── AS-Step 4: PATCH with empty values must NOT clear Assamese content ─────────
+  // ── AS-Step 4: PATCH with empty values explicitly clears Assamese content ──
 
-  it('AS-Step 4 — PATCH with empty-string / empty-array values does not clear Assamese content fields', async () => {
-    // Sending the serialised-null forms back in a round-trip PATCH must be a
-    // no-op for non-clearable content fields — same guard as for EN fields.
+  it('AS-Step 4 — PATCH with empty-string / empty-array values clears Assamese content fields', async () => {
     const patchRes = await workerFetch(new Request(`http://worker/api/v1/staff/content/chapter/${chapterId}`, {
       method: 'PATCH',
       headers: authHeaders(token),
       body: JSON.stringify({
-        notes_as:        '',  // empty string — must be ignored
-        rag_sections_as: [], // empty array  — must be ignored
-        qa_as:           [], // empty array  — must be ignored
+        notes_as:        '',
+        rag_sections_as: [],
+        qa_as:           [],
         // Include a harmless scalar change to confirm the PATCH actually fired.
         status: 'draft',
       }),
@@ -916,7 +966,7 @@ describe('Staff chapter edit round-trip — Assamese fields', () => {
     const patchBody = await patchRes.json() as { ok: boolean };
     expect(patchBody.ok).toBe(true);
 
-    // Re-fetch and assert all Assamese content fields are still intact.
+    // Re-fetch and assert all requested Assamese fields were cleared.
     const getRes = await workerFetch(new Request(`http://worker/api/v1/staff/content/chapter/${chapterId}`, {
       headers: authHeaders(token),
     }));
@@ -928,20 +978,11 @@ describe('Staff chapter edit round-trip — Assamese fields', () => {
       qa_as: Array<{ question: string; answer: string }>;
     };
 
-    // notes_as must NOT have been cleared to ''.
-    expect(body.notes_as).toBe('এইটো অসমীয়া ভাষাত লিখা টোকা।');
-
-    // rag_sections_as must NOT have been cleared to [].
+    expect(body.notes_as).toBe('');
     expect(Array.isArray(body.rag_sections_as)).toBe(true);
-    expect(body.rag_sections_as.length).toBeGreaterThan(0);
-    expect(body.rag_sections_as[0]?.title).toBe('পৰিচয়');
-    expect(body.rag_sections_as[0]?.content).toBe('বিষয়টোৰ এক পৰিচয়।');
-
-    // qa_as must NOT have been cleared to [].
+    expect(body.rag_sections_as).toHaveLength(0);
     expect(Array.isArray(body.qa_as)).toBe(true);
-    expect(body.qa_as.length).toBeGreaterThan(0);
-    expect(body.qa_as[0]?.question).toBe('এই অধ্যায়টো কিহৰ বিষয়ে?');
-    expect(body.qa_as[0]?.answer).toBe('ৰাউণ্ড-ট্ৰিপ পৰীক্ষাৰ বিষয়ে।');
+    expect(body.qa_as).toHaveLength(0);
   });
 
   // ── AS-Step 5: Dashboard Q&A alias must also survive empty round-trips ───────

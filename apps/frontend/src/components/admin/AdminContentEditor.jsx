@@ -280,15 +280,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     try {
       const slug = contentForm.slug || autoSlug(contentForm.title);
       const topics = (contentForm.topics || []).filter(Boolean);
-      const createPayload = { subject_id: selSubject, title: contentForm.title, slug, description: contentForm.description, content: contentForm.notes_en || contentForm.content, content_type: contentForm.content_type, order: contentForm.order, status: 'published', topics };
-      if (contentForm.notes_en) createPayload.notes_en = contentForm.notes_en;
-      if (contentForm.notes_as) createPayload.notes_as = contentForm.notes_as;
-      if (contentForm.content_as) createPayload.content_as = contentForm.content_as;
-      if (contentForm.rag_text_en) createPayload.rag_text_en = contentForm.rag_text_en;
-      if (contentForm.rag_text_as) createPayload.rag_text_as = contentForm.rag_text_as;
-      if (contentForm.qa_text_en) createPayload.qa_text_en = contentForm.qa_text_en;
-      if (contentForm.qa_text_as) createPayload.qa_text_as = contentForm.qa_text_as;
-      if (contentForm.pyq_pdf_url) createPayload.pyq_pdf_url = contentForm.pyq_pdf_url;
+      const createPayload = { subject_id: selSubject, title: contentForm.title, slug, description: contentForm.description, content: contentForm.notes_en || contentForm.content, notes_en: contentForm.notes_en, notes_as: contentForm.notes_as, content_as: contentForm.content_as, rag_text_en: contentForm.rag_text_en, rag_text_as: contentForm.rag_text_as, qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as, qa_rag_text_en: contentForm.qa_rag_text_en, qa_rag_text_as: contentForm.qa_rag_text_as, pyq_pdf_url: contentForm.pyq_pdf_url, content_type: contentForm.content_type, chapter_number: contentForm.order, status: 'published', topics };
       await axios.post(`${API}/admin/content/chapters`, createPayload, authHeaders(adminToken));
       toast.success('Chapter created successfully'); setEditView(null); setContentForm({ title: '', slug: '', description: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '' }); setChapterStats(null); refreshChapters(selSubject);
     } catch { toast.error('Failed to create chapter'); }
@@ -301,16 +293,14 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     try {
       const slug = contentForm.slug || autoSlug(contentForm.title);
       const topics = (contentForm.topics || []).filter(Boolean);
-      const updatePayload = { title: contentForm.title, slug, description: contentForm.description, content_type: contentForm.content_type, order: contentForm.order, topics };
-      // notes_en/as are the primary fields; send them when present.
-      // content/content_as are legacy — only send if notes_en/as are absent (manual chapters).
-      if (contentForm.notes_en !== undefined) updatePayload.notes_en = contentForm.notes_en || '';
-      if (contentForm.notes_as !== undefined) updatePayload.notes_as = contentForm.notes_as || '';
-      if (!contentForm.notes_en && contentForm.content !== undefined) updatePayload.content = contentForm.content || '';
-      if (contentForm.content_as !== undefined) updatePayload.content_as = contentForm.content_as || '';
-      if (contentForm.qa_text_en !== undefined) updatePayload.qa_text_en = contentForm.qa_text_en || '';
-      if (contentForm.qa_text_as !== undefined) updatePayload.qa_text_as = contentForm.qa_text_as || '';
-      if (contentForm.pyq_pdf_url !== undefined) updatePayload.pyq_pdf_url = contentForm.pyq_pdf_url || '';
+      // Send every editable reader/RAG/QA field, including empty strings.  Empty
+      // values are intentional clears, not accidental omissions from a card view.
+      const updatePayload = { title: contentForm.title, slug, description: contentForm.description, content_type: contentForm.content_type, chapter_number: contentForm.order, topics,
+        notes_en: contentForm.notes_en, notes_as: contentForm.notes_as, content: contentForm.content,
+        content_as: contentForm.content_as, rag_text_en: contentForm.rag_text_en, rag_text_as: contentForm.rag_text_as,
+        qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as,
+        qa_rag_text_en: contentForm.qa_rag_text_en, qa_rag_text_as: contentForm.qa_rag_text_as,
+        pyq_pdf_url: contentForm.pyq_pdf_url };
       if (!force) updatePayload.version = contentForm.version ?? 0;
       const res = await axios.patch(`${API}/admin/content/chapters/${editTarget.id}`, updatePayload, authHeaders(adminToken));
       const newVersion = res.data?.version ?? (contentForm.version + 1);
@@ -383,14 +373,14 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
         { rag_text_en: contentForm.rag_text_en || '', rag_text_as: contentForm.rag_text_as || '', qa_rag_text_en: contentForm.qa_rag_text_en || '', qa_rag_text_as: contentForm.qa_rag_text_as || '' },
         authHeaders(adminToken),
       );
-      toast.success('RAG text saved — watching reindex progress…', { id: tid });
+      toast.success(res.data?.job_id ? 'RAG text saved — watching reindex progress…' : 'RAG text saved — reindex is required before it is current.', { id: tid });
       if (res.data?.job_id) addTrackedJob(res.data.job_id);
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to save RAG text', { id: tid });
     } finally {
       setRagSaving(false);
     }
-  }, [editTarget?.id, contentForm.rag_text_en, contentForm.rag_text_as, adminToken, addTrackedJob]);
+  }, [editTarget?.id, contentForm.rag_text_en, contentForm.rag_text_as, contentForm.qa_rag_text_en, contentForm.qa_rag_text_as, adminToken, addTrackedJob]);
 
   const handleDeleteChapter = (id) => {
     setConfirmDialog({
@@ -930,14 +920,14 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                       onToggleSelect={toggleChapterSelect}
                       onToggleSelectAll={toggleChapterSelectAll}
                       onViewChapter={(ch) => setViewerItem(ch)}
-                      onEditChapter={(ch) => { setEditTarget(ch); setContentForm({ title: ch.title, slug: ch.slug || '', description: ch.description || '',
+                      onEditChapter={async (ch) => { let full = ch; try { const response = await axios.get(`${API}/admin/content/chapter/${ch.id}`, authHeaders(adminToken)); full = response.data || ch; } catch { toast.error('Could not load full chapter; opening available draft'); } setEditTarget(full); setContentForm({ title: full.title, slug: full.slug || '', description: full.description || '',
                         // notes_en/as are the primary fields written by ingestion; fall back to content/content_as
                         // so legacy chapters (pre-notes pipeline) still show their content in the editor.
-                        notes_en: ch.notes_en || ch.content_en || ch.content || '',
-                        notes_as: ch.notes_as || ch.content_as || '',
+                        notes_en: full.notes_en ?? full.content_en ?? full.content ?? '',
+                        notes_as: full.notes_as ?? full.content_as ?? '',
                         // Keep legacy fields in state so the backend can read them if notes_en is absent.
-                        content: ch.content || ch.content_en || '',
-                        content_type: ch.content_type || 'notes', order: ch.order || 1, topics: ch.topics || [], content_as: ch.content_as || '', rag_text_en: ch.rag_text_en || '', rag_text_as: ch.rag_text_as || '', qa_text_en: ch.qa_text_en || '', qa_text_as: ch.qa_text_as || '', qa_rag_text_en: ch.qa_rag_text_en || '', qa_rag_text_as: ch.qa_rag_text_as || '', pyq_pdf_url: ch.pyq_pdf_url || '', version: ch.version ?? 0 }); setEditView('edit-chapter'); loadChapterStats(ch.id); }}
+                        content: full.content ?? full.content_en ?? '',
+                        content_type: full.content_type || 'notes', order: full.order ?? full.chapter_number ?? 1, topics: full.topics ?? full.published_topics ?? [], content_as: full.content_as ?? '', rag_text_en: full.rag_text_en ?? '', rag_text_as: full.rag_text_as ?? '', qa_text_en: full.qa_text_en ?? '', qa_text_as: full.qa_text_as ?? '', qa_rag_text_en: full.qa_rag_text_en ?? '', qa_rag_text_as: full.qa_rag_text_as ?? '', pyq_pdf_url: full.pyq_pdf_url ?? '', version: full.version ?? 0 }); setEditView('edit-chapter'); loadChapterStats(ch.id); }}
                       onPublishChapter={handlePublishChapter}
                       publishingChapters={publishingChapters}
                       selSubject={selSubject} subjectData={subjectData}

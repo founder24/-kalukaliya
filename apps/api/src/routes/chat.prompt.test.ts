@@ -20,6 +20,7 @@ describe('student chat curriculum scope', () => {
     expect(prompt).toContain('invite the student to ask an Assam Board equivalent');
     expect(prompt).toContain('identify Class 11 and Class 12 curriculum as AHSEC');
     expect(prompt).toContain('identify Degree courses as Assamboard');
+    expect(prompt).toContain('all explanatory prose in English only');
   });
 
   it('includes the same restriction in Assamese mode', () => {

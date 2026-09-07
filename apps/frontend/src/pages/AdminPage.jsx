@@ -81,6 +81,9 @@ export const SECTION_REDIRECTS = {
   vertex:       { section: 'ai',       tab: 'providers', subTab: 'vertex'       },
   intelligence: { section: 'ai',       tab: 'providers', subTab: 'intelligence' },
   automation:   { section: 'ai',       tab: 'jobs' },
+  monetization: { section: 'analytics' },
+  plans:        { section: 'analytics' },
+  ads:          { section: 'analytics' },
   googleauth:   { section: 'security', tab: 'auth' },
   ratelimits:   { section: 'security', tab: 'ratelimits' },
   botsecurity:  { section: 'security', tab: 'botsecurity' },
@@ -89,8 +92,7 @@ export const SECTION_REDIRECTS = {
   activitylog:  { section: 'logs', initialSources: ['admin-actions'] },
   feedback:     { section: 'conversations', tab: 'feedback' },
   roadmap:      { section: 'roadmap' },
-  // Legacy stub — redirect to GCP which is still implemented
-  awsnative:    { section: 'gcp' },
+  awsnative:    { section: 'health' },
 };
 
 export function resolveSectionRedirect(section, ctx = null) {

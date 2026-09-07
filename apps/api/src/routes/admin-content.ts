@@ -7,7 +7,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, chapters, publishJobs, seedRuns, streams, subjects, users } from '../db/schema';
 import { extractBearer, isSessionValid, sessionIssuedAt, signAdminToken, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
@@ -732,12 +732,23 @@ adminContentRouter.patch('/content/chapters/:chapterId/rag', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
   const body = await safeBody(c);
   const db = createDb(c.env.DB);
+  const chapterId = c.req.param('chapterId');
+  const existing = await db.select({ id: chapters.id }).from(chapters).where(eq(chapters.id, chapterId)).get();
+  if (!existing) return c.json({ detail: 'Chapter not found' }, 404);
+  const changedAt = now();
   await db.update(chapters).set({
     ragText: typeof body.rag_text_en === 'string' ? body.rag_text_en : undefined,
     ragTextAs: typeof body.rag_text_as === 'string' ? body.rag_text_as : undefined,
-    updatedAt: now(),
-  }).where(eq(chapters.id, c.req.param('chapterId')));
-  return c.json({ status: 'saved', chapter_id: c.req.param('chapterId') });
+    // qa_rag_text is a visible editor input. Preserve it as a canonical
+    // one-section QA document so the staff detail serializer can round-trip it.
+    qaEn: typeof body.qa_rag_text_en === 'string' ? JSON.stringify(body.qa_rag_text_en ? [{ content: body.qa_rag_text_en }] : []) : undefined,
+    qaAs: typeof body.qa_rag_text_as === 'string' ? JSON.stringify(body.qa_rag_text_as ? [{ content: body.qa_rag_text_as }] : []) : undefined,
+    ragUpdatedAt: changedAt,
+    updatedAt: changedAt,
+  }).where(eq(chapters.id, chapterId));
+  // Deliberately do not claim freshness until the explicit reindex endpoint has
+  // successfully replaced all scope mappings.
+  return c.json({ status: 'saved', chapter_id: chapterId, reindex_required: true });
 });
 
 async function uploadAdminAsset(c: Context<{ Bindings: Env }>, prefix: string): Promise<Response> {
@@ -946,9 +957,14 @@ adminContentRouter.post('/content/subjects/:subjectId/bulk-publish', async c => 
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
   const body = await safeBody(c);
   const requested = Array.isArray(body.chapter_ids) ? body.chapter_ids.filter((id): id is string => typeof id === 'string') : [];
+  const subjectId = c.req.param('subjectId');
   const rows = requested.length
-    ? requested.map(id => ({ id }))
-    : await createDb(c.env.DB).select({ id: chapters.id }).from(chapters).where(eq(chapters.subjectId, c.req.param('subjectId')));
+    ? await createDb(c.env.DB).select({ id: chapters.id }).from(chapters)
+      .where(and(eq(chapters.subjectId, subjectId), inArray(chapters.id, requested)))
+    : await createDb(c.env.DB).select({ id: chapters.id }).from(chapters).where(eq(chapters.subjectId, subjectId));
+  if (requested.length && rows.length !== new Set(requested).size) {
+    return c.json({ detail: 'Every requested chapter must belong to the destination subject.' }, 422);
+  }
   const jobIds: string[] = [];
   for (const row of rows) {
     const id = crypto.randomUUID();
