@@ -383,7 +383,10 @@ if [[ -n "${EDGE_SHARED_SECRET:-}" ]]; then
   printf '%s' "$DEEP_HEALTH" | python3 -c '
 import json,sys
 p=json.load(sys.stdin)
-required={"d1","workers_ai","vectorize","r2","content_kv","rate_limit_kv"}
+required={
+    "d1", "workers_ai", "vectorize", "r2",
+    "content_kv", "rate_limit_kv", "cron_operations",
+}
 assert p["status"] == "healthy" and p["mutation_free"] is True, p
 assert p["missing_bindings"] == [] and set(p["checks"]) == required, p
 assert all(check["status"] == "healthy" for check in p["checks"].values()), p
