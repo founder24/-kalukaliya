@@ -435,7 +435,10 @@ jobs:
           import json, sys
           with open(sys.argv[1]) as f:
               payload = json.load(f)
-          required = {"d1", "workers_ai", "vectorize", "r2", "content_kv", "rate_limit_kv"}
+          required = {
+              "d1", "workers_ai", "vectorize", "r2",
+              "content_kv", "rate_limit_kv", "cron_operations",
+          }
           assert payload["status"] == "healthy", payload
           assert payload["mutation_free"] is True, payload
           assert payload["missing_bindings"] == [], payload
