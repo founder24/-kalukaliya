@@ -420,10 +420,10 @@ fi
 
 # Publishing, content editing, RAG, and scheduled seed routes are native.
 # No catch-all compatibility bridge may reintroduce Cloud Run.
-rg -q "api\.route\\('/api/v1/admin', +adminContentRouter\\)" apps/api/src/routes/index.ts || {
+grep -Eq "api\.route\\('/api/v1/admin', +adminContentRouter\\)" apps/api/src/routes/index.ts || {
   echo "Native admin content router is not mounted." >&2; exit 1;
 }
-if rg -q 'proxyToCloudRun|cloud-run-fallback|X-Cloud-Run-Token' apps/api/src apps/edge/src; then
+if grep -ERq 'proxyToCloudRun|cloud-run-fallback|X-Cloud-Run-Token' apps/api/src apps/edge/src; then
   echo "Cloud Run compatibility code is present in the active Worker sources." >&2
   exit 1
 fi
