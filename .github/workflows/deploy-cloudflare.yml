@@ -12,6 +12,11 @@ on:
         required: false
         default: false
         type: boolean
+      validate_reset_delivery:
+        description: 'Require a fresh disposable password-reset email proof after deployment'
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       validate_authenticated:
