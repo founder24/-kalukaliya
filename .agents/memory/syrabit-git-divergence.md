@@ -32,6 +32,20 @@ multi-commit backlog. Use the connector Git Data API for small reconciliations;
 send text blobs as UTF-8, throttle writes, and update the ref only after every
 blob, tree, and commit has been created successfully.
 
+The GitHub OAuth connector's `repo` scope can create blobs and trees for normal
+source files but cannot modify `.github/workflows/*` without GitHub's separate
+`workflow` permission; GitHub reports this as a misleading 404 from the Trees
+API. A stale workspace `GITHUB_TOKEN` may independently fail normal pushes.
+
+**Why:** A reconciliation succeeded incrementally until the deployment workflow
+path, where both proxy and native Octokit tree creation returned 404 despite
+healthy repository write access.
+
+**How to apply:** when workflow permission cannot be granted, publish the
+authorized source tree, preserve the complete local tip on a clearly named
+backup branch, verify the only remaining delta is the workflow file, then
+realign `main` to the remote. Never silently drop the protected workflow change.
+
 ## How to apply
 1. Get current GitHub main SHA via `GET /repos/{repo}/git/refs/heads/main`
 2. Get base tree SHA from `GET /repos/{repo}/git/commits/{sha}`
