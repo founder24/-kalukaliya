@@ -335,32 +335,10 @@ jobs:
       - name: Verify edge Worker secret names
         run: |
           set -euo pipefail
-          for attempt in 1 2 3 4 5; do
-            secret_list="$(pnpm --filter syrabit-edge exec wrangler secret list --env production --format json)"
-            if printf '%s' "$secret_list" | python3 -c '
-            import json
-            import sys
-            required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}
-            configured = {item["name"] for item in json.load(sys.stdin)}
-            raise SystemExit(0 if required <= configured else 1)
-            '; then
-              echo "Required edge Worker secret names are present."
-              break
-            fi
-            if [[ "$attempt" == 5 ]]; then
-              echo "::error::Cloudflare edge Worker secret provisioning remained incomplete after retries."
-              printf '%s' "$secret_list" | python3 -c '
-              import json
-              import sys
-              required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}
-              configured = {item["name"] for item in json.load(sys.stdin)}
-              print("Missing secret names: " + ", ".join(sorted(required - configured)))
-              '
-              exit 1
-            fi
-            echo "Secret metadata has not propagated yet; retrying ($attempt/5)."
-            sleep 3
-          done
+          settings="$(curl --fail-with-body --silent --show-error \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/syrabitworker-prod/settings")"
+          printf '%s' "$settings" | python3 -c 'import json, sys; payload = json.load(sys.stdin); required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}; configured = {item["name"] for item in payload.get("result", {}).get("bindings", []) if item.get("type") == "secret_text"}; missing = sorted(required - configured); print("Missing edge Worker secret names: " + ", ".join(missing) if missing else "Required edge Worker secret names are present."); sys.exit(bool(missing))'
 
       - name: Guard against sentinel KV IDs
         run: |
