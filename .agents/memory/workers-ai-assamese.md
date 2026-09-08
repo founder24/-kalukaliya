@@ -14,3 +14,9 @@ Assamese and Bengali share the U+0980–U+09FF block, while the danda `।` is U
 **Why:** A whole-range Devanagari rejection treated every normal Assamese sentence ending in `।` as Hindi leakage. Single Bengali-looking words are also not sufficient language evidence because vocabulary overlaps.
 
 **How to apply:** Exclude danda punctuation from Devanagari-letter checks, use multiple lexical signals before declaring Bengali leakage, allow technical Latin terms proportionally, and verify with real Assamese-script plus romanized-Assamese production probes.
+
+Strict dialect validation is advisory, not a reason to strand students behind an error card.
+
+**Why:** Assamese and Bengali cannot be perfectly separated with deterministic Unicode and word lists. A readable script-heavy answer is more useful than a terminal “Assamese unavailable” response when the strict heuristic remains uncertain after one quality retry.
+
+**How to apply:** Retry once through SEA-LION, then deliver the repaired or initial answer when it is script-heavy and neither Devanagari nor predominantly English. Reserve terminal language errors for genuinely unusable output.
