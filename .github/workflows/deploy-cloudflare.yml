@@ -335,10 +335,20 @@ jobs:
       - name: Verify edge Worker secret names
         run: |
           set -euo pipefail
-          settings="$(curl --fail-with-body --silent --show-error \
-            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/syrabitworker-prod/settings")"
-          printf '%s' "$settings" | python3 -c 'import json, sys; payload = json.load(sys.stdin); required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}; configured = {item["name"] for item in payload.get("result", {}).get("bindings", []) if item.get("type") == "secret_text"}; missing = sorted(required - configured); print("Missing edge Worker secret names: " + ", ".join(missing) if missing else "Required edge Worker secret names are present."); sys.exit(bool(missing))'
+          for attempt in 1 2 3 4 5 6; do
+            settings="$(curl --fail-with-body --silent --show-error \
+              --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/syrabitworker-prod/settings")"
+            if printf '%s' "$settings" | python3 -c 'import json, sys; payload = json.load(sys.stdin); required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}; configured = {item["name"] for item in payload.get("result", {}).get("bindings", []) if item.get("type") == "secret_text"}; missing = sorted(required - configured); print("Missing edge Worker secret names: " + ", ".join(missing) if missing else "Required edge Worker secret names are present."); sys.exit(bool(missing))'; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 6 ]]; then
+              echo "Cloudflare bindings have not converged yet; retrying in 5 seconds (attempt $attempt/6)."
+              sleep 5
+            fi
+          done
+          echo "::error::Required edge Worker secret names were still absent after bounded retries."
+          exit 1
 
       - name: Guard against sentinel KV IDs
         run: |
