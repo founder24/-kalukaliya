@@ -4,10 +4,12 @@ import {
   ShieldCheck, Mail, Lock, Eye, EyeOff, Loader2, AlertCircle,
 } from 'lucide-react';
 import { adminLogin } from '@/utils/api';
+import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -33,6 +35,23 @@ export default function AdminLoginPage() {
     } catch (err) {
       const status = err.response?.status;
       const data   = err.response?.data || {};
+      const permissionDenied = status === 403
+        && (data.detail === 'Insufficient permissions' || data.error === 'Insufficient permissions');
+      if (permissionDenied) {
+        try {
+          const user = await login(email, password);
+          if (user?.role === 'staff') {
+            toast.success(`Welcome back, ${user.name || 'Staff'}!`, {
+              description: 'Staff session started',
+            });
+            navigate('/staff');
+            return;
+          }
+        } catch {
+          // Continue to the standard error below without exposing which
+          // authentication step failed.
+        }
+      }
       // `detail` is FastAPI's error field; `error` is the edge-worker's
       // normalised field for infra errors (cold-start 503, etc.)
       const detail = data.detail || data.error;
