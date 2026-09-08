@@ -143,6 +143,9 @@ async function probe(name, body) {
       rag_path: done?.route_trace?.rag_path,
       web_used: done?.route_trace?.web_used,
       web_status: done?.route_trace?.web_status,
+      attributed_web_sources: Array.isArray(sourceCard?.web_sources)
+        ? sourceCard.web_sources.length
+        : 0,
       worker_timings_ms: done?.route_trace?.timings_ms,
       model: done?.model,
     };
@@ -185,6 +188,9 @@ for (let sample = 1; sample <= samples; sample += 1) {
     });
     if (web.web_used !== true || web.web_status !== 'ok') {
       throw new Error(`Web probe did not return attributed web context: ${JSON.stringify(web)}`);
+    }
+    if (web.attributed_web_sources < 1) {
+      throw new Error(`Web probe did not include an attributed web source: ${JSON.stringify(web)}`);
     }
     webSamples.push(web);
     console.error(`[chat-performance] ${web.name}: first token ${web.first_token_ms} ms, web ${web.web_status}`);

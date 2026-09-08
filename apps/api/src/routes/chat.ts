@@ -1476,20 +1476,25 @@ chatRouter.post('/stream', async (c) => {
   // available. Semantic retrieval remains the fallback for stale/missing IDs.
   const directChapterId = body.chapter_id?.trim() || undefined;
   const authoritativeIntent = detectAuthoritativeIntent(message);
+  const requestedWebIntent = shouldUseWebSearch({
+    question: message,
+    chapterId: directChapterId,
+    subjectId: body.subject_id,
+  });
   // D1 is authoritative for syllabus/PYQ availability. Do not dilute a list
-  // request with web snippets or nearest-neighbour retrieval.
-  const webSearchEnabled = !authoritativeIntent && c.env.WEB_SEARCH_ENABLED === 'true';
-  const explicitWebIntent = webSearchEnabled
-    && shouldUseWebSearch({
-      question: message,
-      chapterId: directChapterId,
-      subjectId: body.subject_id,
-    });
+  // request with web snippets unless the student explicitly asks for current
+  // information. Freshness-qualified syllabus requests use both sources, with
+  // D1 curriculum content remaining authoritative if they conflict.
+  const webSearchEnabled = c.env.WEB_SEARCH_ENABLED === 'true'
+    && (!authoritativeIntent || requestedWebIntent);
+  // Keep intent independent from provider availability. If verified current
+  // retrieval is disabled, the answer-level gate must still fail closed.
+  const explicitWebIntent = requestedWebIntent;
   // Prestart bounded web lookup before any D1/embedding await. Its result is
   // discarded when curriculum evidence is already strong, so ordinary textbook
   // answers stay authoritative while weak RAG gets a zero-waterfall fallback.
   const webSearchPromise = webSearchEnabled
-    ? searchWeb(message, lang)
+    ? searchWeb(message, lang, { cache: c.env.CONTENT_KV })
     : Promise.resolve(skippedWebSearch());
   const memoryPromise = loadMemories(db, userId, isAnon);
   let historyLoaded = false;
@@ -1563,17 +1568,25 @@ chatRouter.post('/stream', async (c) => {
   }
 
   if (!authoritativeIntent && contextChunks.length === 0) {
+  const skipSemanticForUnscopedWebIntent = explicitWebIntent
+    && directChapterId === undefined
+    && !body.subject_id;
   // Embed + history in parallel — zero extra latency vs serial
   // Pass userId so history is scoped to its owner (session ownership enforcement)
   const [embedResult, historyResult] = await startRetrievalFanout({
-    embed: () => embedQuery(c.env.AI, buildEmbeddingQuery(message, lang)),
+    // An explicit unscoped current/web request has no curriculum target to
+    // filter against. Avoid a wasted embedding + Vectorize round trip while
+    // still running history and bounded web retrieval in parallel.
+    embed: () => skipSemanticForUnscopedWebIntent
+      ? Promise.resolve([] as number[])
+      : embedQuery(c.env.AI, buildEmbeddingQuery(message, lang)),
     history: () => historyLoaded ? Promise.resolve(history) : loadHistory(db, sessionId, userId),
     web: () => webSearchPromise,
   });
 
   if (historyResult.status === 'fulfilled' && !historyLoaded) history = historyResult.value;
 
-  if (embedResult.status === 'fulfilled') {
+  if (embedResult.status === 'fulfilled' && embedResult.value.length > 0) {
     const embedding = embedResult.value;
 
     try {
@@ -1667,7 +1680,7 @@ chatRouter.post('/stream', async (c) => {
       console.error('[chat] RAG retrieval error:', err);
       // Non-fatal: continue without context
     }
-  } else {
+  } else if (embedResult.status === 'rejected') {
     console.warn('[chat] Embedding failed:', embedResult.reason);
   }
   }
@@ -1716,6 +1729,7 @@ chatRouter.post('/stream', async (c) => {
   });
   webResults = includeWebEvidence ? dedupeWebResults(webResult.results) : [];
   webStatus = webResult.status;
+  const verifiedWebEvidenceUnavailable = explicitWebIntent && webResults.length === 0;
   timings.web_ms = webResult.durationMs;
   timings.retrieval_ms = Date.now() - retrievalStart;
 
@@ -1841,6 +1855,22 @@ chatRouter.post('/stream', async (c) => {
     try {
       // Always emit source_card first — client uses this to learn the conversation_id
       await write(sourceCard);
+      if (verifiedWebEvidenceUnavailable) {
+        await write({
+          ...terminalChatErrorEvent(
+            lang === 'as'
+              ? 'বিশ্বাসযোগ্য শেহতীয়া তথ্য এতিয়া পোৱা নগ’ল। অনুগ্ৰহ কৰি কিছু সময়ৰ পিছত পুনৰ চেষ্টা কৰক।'
+              : 'Verified current information is unavailable right now. Please try again later.',
+            'verified_web_evidence_unavailable',
+            'web_evidence',
+            serverRequestId,
+          ),
+          error_kind: 'web_evidence_unavailable',
+        });
+        await recordAnalytics('chat_failure', 'web_evidence');
+        await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
+        return;
+      }
 
       // English streams through the low-latency model. Assamese is intentionally
       // generated non-streaming because the route must validate the complete

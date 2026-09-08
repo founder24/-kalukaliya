@@ -121,13 +121,11 @@ describe('anonymous identity flow', () => {
   it('emits web attribution before Workers AI tokens for eligible current queries', async () => {
     const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
     env.WEB_SEARCH_ENABLED = 'true';
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({
-      message: { items: [{
-        title: ['Education in Assam'],
-        URL: 'https://doi.org/10.1000/assam-education',
-        abstract: 'Education in Assam includes state institutions and curriculum authorities.',
-      }] },
-    }));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/official-notification/',
+      title: { rendered: 'Official Notifications' },
+      content: { rendered: 'HS Final Examination routine for the 2026-27 session.' },
+    }]));
     try {
       const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
         method: 'POST',
@@ -136,7 +134,7 @@ describe('anonymous identity flow', () => {
           'x-anon-id': 'anon_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
         },
         body: JSON.stringify({
-          message: 'What is the latest update in Assam education?',
+          message: 'What is the latest AHSEC examination routine?',
           lang: 'en',
         }),
       }));
@@ -154,8 +152,8 @@ describe('anonymous identity flow', () => {
         web_status: 'ok',
       });
       expect(events[0]?.web_sources).toEqual([{
-        title: 'Education in Assam',
-        url: 'https://doi.org/10.1000/assam-education',
+        title: 'Official Notifications',
+        url: 'https://ahsec.assam.gov.in/index.php/official-notification',
         source_type: 'web_search',
       }]);
       expect(events[1]).toMatchObject({ done: false });
@@ -169,6 +167,1031 @@ describe('anonymous identity flow', () => {
           web_results: 1,
         },
       });
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it.each([
+    ['1', 'empty', 'empty', 'What is the latest AHSEC syllabus update?', 'en'],
+    ['2', 'error', 'error', 'What is the latest AHSEC scholarship update?', 'en'],
+    ['3', 'timeout', 'timeout', 'What is the latest AHSEC admission update?', 'en'],
+    ['4', 'empty', 'empty', 'অসম ব’ৰ্ডৰ শেহতীয়া পাঠ্যক্ৰম দেখুৱাওক', 'as'],
+    ['5', 'empty', 'empty', 'What is the AHSEC result date?', 'en'],
+    ['6', 'empty', 'empty', 'Show me the SEBA Class 10 examination routine', 'en'],
+    ['7', 'empty', 'empty', 'What is the AHSEC result re-checking deadline?', 'en'],
+    ['8', 'error', 'error', 'What is the deadline for AHSEC admission?', 'en'],
+    ['9', 'timeout', 'timeout', 'What is the AHSEC scholarship deadline?', 'en'],
+    ['10', 'empty', 'empty', 'What is the current status of AHSEC teacher recruitment?', 'en'],
+    ['11', 'empty', 'empty', 'What is the current AHSEC syllabus?', 'en'],
+    ['12', 'error', 'error', 'What is the current AHSEC academic calendar?', 'en'],
+    ['13', 'empty', 'empty', "What is AHSEC's current grading policy?", 'en'],
+    ['14', 'empty', 'empty', 'Does the current AHSEC syllabus include alternating current?', 'en'],
+    ['15', 'error', 'error', 'Is electric current currently included in the AHSEC syllabus?', 'en'],
+    ['16', 'empty', 'empty', 'Does the current AHSEC syllabus include quantum mechanics?', 'en'],
+    ['17', 'empty', 'empty', 'What are the AHSEC exam dates?', 'en'],
+    ['18', 'error', 'error', 'Show me the AHSEC exam dates', 'en'],
+    ['19', 'timeout', 'timeout', 'When are the AHSEC exam dates?', 'en'],
+    ['20', 'empty', 'empty', 'What is the AHSEC form fill-up deadline?', 'en'],
+    ['21', 'empty', 'empty', 'When is the AHSEC merit-list announcement date?', 'en'],
+    ['22', 'empty', 'empty', 'What is the AHSEC correction-window deadline?', 'en'],
+    ['23', 'empty', 'empty', 'How soon after AHSEC exams are results released?', 'en'],
+    ['24', 'error', 'error', 'How long after the AHSEC exam are results released?', 'en'],
+    ['25', 'timeout', 'timeout', 'What time does the AHSEC exam start?', 'en'],
+    ['26', 'empty', 'empty', 'AHSEC পৰীক্ষা কেইটা বজাত আৰম্ভ হয়?', 'as'],
+  ] as const)('does not generate an unsupported current answer when official web search case %s is %s', async (
+    suffix,
+    mode,
+    expectedStatus,
+    question,
+    lang,
+  ) => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (mode === 'empty') return Promise.resolve(Response.json([]));
+        if (mode === 'error') return Promise.resolve(new Response('unavailable', { status: 503 }));
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      },
+    );
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': `anon_${suffix.repeat(32)}`,
+        },
+        body: JSON.stringify({
+          message: question,
+          lang,
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      const events = streamText
+        .split('\n')
+        .filter(line => line.startsWith('data: '))
+        .map(line => JSON.parse(line.slice(6)) as Record<string, unknown>);
+      expect(events[0]).toMatchObject({
+        event: 'source_card',
+        web_status: expectedStatus,
+        web_used: false,
+      });
+      expect(events.at(-1)).toMatchObject({
+        event: 'chat_error',
+        error_code: 'verified_web_evidence_unavailable',
+        failure_stage: 'web_evidence',
+      });
+      expect(streamText).not.toContain('Plants use light to make food.');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('does not generate a current board answer when verified web retrieval is disabled', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'false';
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_66666666666666666666666666666666',
+        },
+        body: JSON.stringify({
+          message: 'What is the AHSEC result date?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      const events = streamText
+        .split('\n')
+        .filter(line => line.startsWith('data: '))
+        .map(line => JSON.parse(line.slice(6)) as Record<string, unknown>);
+      expect(events[0]).toMatchObject({
+        event: 'source_card',
+        web_status: 'skipped',
+        web_used: false,
+      });
+      expect(events.at(-1)).toMatchObject({
+        event: 'chat_error',
+        error_code: 'verified_web_evidence_unavailable',
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('fails closed for a bare AHSEC examination schedule request when retrieval is disabled', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'false';
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_88888888888888888888888888888888',
+        },
+        body: JSON.stringify({
+          message: 'Show me the AHSEC examination schedule',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(streamText).not.toContain('Plants use light to make food.');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('fails closed for an unsupported AHSEC form-fill deadline when retrieval is disabled', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'false';
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_50000000000000000000000000000000',
+        },
+        body: JSON.stringify({
+          message: 'What is the AHSEC form fill-up deadline?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('keeps a physical-and-chemical-changes explanation on normal curriculum generation', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json({ message: { items: [] } }),
+    );
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_99999999999999999999999999999999',
+        },
+        body: JSON.stringify({
+          message: 'Explain physical and chemical changes',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('Plants use light to make food.');
+      expect(streamText).not.toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore + 1);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('keeps an AHSEC electric-current curriculum question off the web-evidence gate', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json({ message: { items: [] } }),
+    );
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_cccccccccccccccccccccccccccccccd',
+        },
+        body: JSON.stringify({
+          message: 'Explain electric current for AHSEC physics',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('Plants use light to make food.');
+      expect(streamText).not.toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore + 1);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it.each([
+    'For AHSEC physics, explain when total internal reflection occurs.',
+    "For AHSEC physics, when is Ohm's law applicable?",
+  ])('keeps a conditional curriculum when-question on normal generation: %s', async question => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'false';
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': `anon_${question.includes('reflection') ? '6' : '7'}${'0'.repeat(31)}`,
+        },
+        body: JSON.stringify({ message: question, lang: 'en' }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('Plants use light to make food.');
+      expect(streamText).not.toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore + 1);
+    } finally {
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('recognizes Assamese freshness and board wording without falling through to Crossref', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    let requestedUrl = '';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async input => {
+      requestedUrl = String(input);
+      return Response.json([{
+        link: 'https://ahsec.assam.gov.in/index.php/academic-calendar/',
+        title: { rendered: 'Academic Calendar' },
+        content: { rendered: 'Academic calendar for the 2026-27 session.' },
+      }]);
+    });
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_44444444444444444444444444444444',
+        },
+        body: JSON.stringify({
+          message: 'অসম ব’ৰ্ডৰ শেহতীয়া পঞ্জিকা দেখুৱাওক',
+          lang: 'as',
+        }),
+      }));
+      await chat.text();
+      await Promise.all(background);
+      expect(requestedUrl).toContain('ahsec.assam.gov.in');
+      expect(requestedUrl).not.toContain('crossref.org');
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('returns attributed evidence for the exact production institution-status probe', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      '<html><title>ASSEB Official</title><body>Formed under the Assam State School Education Board merger.</body></html>',
+    ));
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_ddddddddddddddddddddddddddddddde',
+        },
+        body: JSON.stringify({
+          message: 'What is the current status of the Assam Higher Secondary Education Council? Use web context if needed.',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      const events = streamText
+        .split('\n')
+        .filter(line => line.startsWith('data: '))
+        .map(line => JSON.parse(line.slice(6)) as Record<string, unknown>);
+      expect(events[0]).toMatchObject({
+        event: 'source_card',
+        web_status: 'ok',
+        web_used: true,
+      });
+      expect(streamText).toContain('Plants use light to make food.');
+      expect(generationCalls).toBe(generationCallsBefore + 1);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('retrieves authoritative D1 and official web paths for a current syllabus request', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/hs-syllabus-26-27/',
+      title: { rendered: 'HS Syllabus 2026-27' },
+      content: { rendered: 'The current syllabus for the 2026-27 academic session includes alternating current.' },
+      modified: '2026-08-01T08:00:00',
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef',
+        },
+        body: JSON.stringify({
+          message: 'Does the current AHSEC syllabus include alternating current?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      const events = streamText
+        .split('\n')
+        .filter(line => line.startsWith('data: '))
+        .map(line => JSON.parse(line.slice(6)) as Record<string, unknown>);
+      expect(events[0]).toMatchObject({
+        event: 'source_card',
+        authoritative_intent: 'syllabus',
+        rag_path: 'syllabus_d1',
+        web_status: 'ok',
+        web_used: true,
+      });
+      expect(streamText).toContain('Plants use light to make food.');
+      expect(generationCalls).toBe(generationCallsBefore + 1);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('fails closed when official evidence mismatches Assamese class and session qualifiers', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/hs-1st-year-syllabus-25-26/',
+      title: { rendered: 'HS 1st Year Syllabus 2025-26' },
+      content: { rendered: 'Class XI syllabus for the 2025-26 session.' },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_77777777777777777777777777777777',
+        },
+        body: JSON.stringify({
+          message: 'অসম ব’ৰ্ডৰ শেহতীয়া দ্বাদশ শ্ৰেণীৰ ২০২৬-২৭ পাঠ্যক্ৰম দেখুৱাওক',
+          lang: 'as',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      const events = streamText
+        .split('\n')
+        .filter(line => line.startsWith('data: '))
+        .map(line => JSON.parse(line.slice(6)) as Record<string, unknown>);
+      expect(events[0]).toMatchObject({ web_status: 'empty', web_used: false });
+      expect(events.at(-1)).toMatchObject({
+        event: 'chat_error',
+        error_code: 'verified_web_evidence_unavailable',
+      });
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('does not generate from an admission page that omits the requested deadline', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/registration-admission/',
+      title: { rendered: 'Registration and Admission' },
+      content: { rendered: 'Official information about the admission process and required documents.' },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab',
+        },
+        body: JSON.stringify({
+          message: 'What is the AHSEC admission deadline?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(streamText).not.toContain('Plants use light to make food.');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('does not generate from stale result evidence for a current when-question', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/official-notification/',
+      title: { rendered: 'Official Result Notification' },
+      content: { rendered: 'Results will be announced on 15 May 2024.' },
+      modified: '2026-08-20T08:00:00',
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc',
+        },
+        body: JSON.stringify({
+          message: 'When will AHSEC results be announced?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(streamText).not.toContain('Plants use light to make food.');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('does not generate when fresh evidence omits an Assamese substantive claim', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/hs-syllabus-26-27/',
+      title: { rendered: 'HS Syllabus 2026-27' },
+      content: { rendered: 'পাঠ্যক্ৰম 2026-27 শিক্ষাবৰ্ষৰ বাবে প্ৰকাশ কৰা হৈছে।' },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_fffffffffffffffffffffffffffffff0',
+        },
+        body: JSON.stringify({
+          message: 'বৰ্তমান AHSEC পাঠ্যক্ৰমত কোৱাণ্টাম অন্তৰ্ভুক্ত নেকি?',
+          lang: 'as',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it.each([
+    [
+      'AHSEC নামভৰ্তিৰ সময়সীমা কি?',
+      'Official admission deadline is 15 May 2026.',
+    ],
+    [
+      'অসমৰ বৰ্ডৰ পৰীক্ষাৰ ৰুটিন কি?',
+      'HS examination routine for the 2026-27 session.',
+    ],
+  ])('generates from valid English evidence for Assamese framing: %s', async (
+    question,
+    content,
+  ) => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/current-information/',
+      title: { rendered: 'Official AHSEC Information' },
+      content: { rendered: content },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': `anon_${question.includes('নামভৰ্তি') ? '1' : '2'}${'0'.repeat(31)}`,
+        },
+        body: JSON.stringify({ message: question, lang: 'as' }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).not.toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore + 1);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('does not generate from Class 11 evidence for a hyphenated HS 2nd-year claim', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/hs-syllabus-26-27/',
+      title: { rendered: 'HS Syllabus 2026-27' },
+      content: { rendered: 'Class 11 syllabus for 2026-27 includes quantum mechanics.' },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_30000000000000000000000000000000',
+        },
+        body: JSON.stringify({
+          message: 'Does the current AHSEC HS 2nd-year syllabus include quantum mechanics?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('does not generate from a fresh exam-dates passage without a concrete date', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/examination-notification/',
+      title: { rendered: 'Examination Notification 2026' },
+      content: { rendered: 'Examination dates for 2026 will be notified separately.' },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_40000000000000000000000000000000',
+        },
+        body: JSON.stringify({
+          message: 'What are the AHSEC exam dates?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('does not generate when a neighboring date belongs to a different event', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/result-notification/',
+      title: { rendered: 'Result Notification 2026' },
+      content: {
+        rendered: 'Registration closes 15 May 2026. Result date will be notified later.',
+      },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      await env.CONTENT_KV.delete('web-search:official:asseb:v2:division-ii:result');
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': 'anon_80000000000000000000000000000000',
+        },
+        body: JSON.stringify({
+          message: 'What is the AHSEC result date?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it.each([
+    [
+      'What are the AHSEC exam dates?',
+      'The examination lasts three hours in 2026.',
+    ],
+    [
+      'What is the AHSEC exam start time?',
+      'The examination starts on 15 May 2026.',
+    ],
+    [
+      'What is the AHSEC exam timing?',
+      'General examination information for the 2026 session.',
+    ],
+  ])('does not generate from the wrong temporal evidence type: %s', async (
+    question,
+    content,
+  ) => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/examination-notification/',
+      title: { rendered: 'Examination Notification 2026' },
+      content: { rendered: content },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      await env.CONTENT_KV.delete('web-search:official:asseb:v2:division-ii:examination');
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': `anon_${question.includes('dates') ? '9' : 'a'}${'0'.repeat(31)}`,
+        },
+        body: JSON.stringify({ message: question, lang: 'en' }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it.each([
+    [
+      'How soon after AHSEC exams are results released?',
+      'Results are released 30 days after examinations end in 2026.',
+      'result',
+    ],
+    [
+      'What is the AHSEC exam start time?',
+      'The examination starts at 9:00 AM on 15 May 2026.',
+      'examination',
+    ],
+    [
+      'What is the AHSEC exam timing?',
+      'The examination starts at 9:00 AM on 15 May 2026.',
+      'examination',
+    ],
+  ])('generates from event-bound evidence of the requested temporal type: %s', async (
+    question,
+    content,
+    topic,
+  ) => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/current-information/',
+      title: { rendered: 'Official Information 2026' },
+      content: { rendered: content },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      await env.CONTENT_KV.delete(`web-search:official:asseb:v2:division-ii:${topic}`);
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': `anon_${topic === 'result' ? 'b' : 'c'}${'0'.repeat(31)}`,
+        },
+        body: JSON.stringify({ message: question, lang: 'en' }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).not.toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore + 1);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it.each([
+    [
+      'What is the current AHSEC Class 12 result date?',
+      'Class 12 registration closes 15 May 2026. Class 11 result date is 20 May 2026.',
+    ],
+    [
+      'Is the AHSEC result date 15 May 2026?',
+      'Registration closes 15 May 2026. Result date is 20 May 2026.',
+    ],
+  ])('does not generate when a neighboring event supplies the qualifier: %s', async (
+    question,
+    content,
+  ) => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/result-notification/',
+      title: { rendered: 'Result Notification 2026' },
+      content: { rendered: content },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      await env.CONTENT_KV.delete('web-search:official:asseb:v2:division-ii:result');
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': `anon_${question.includes('Class 12') ? 'd' : 'e'}${'0'.repeat(31)}`,
+        },
+        body: JSON.stringify({ message: question, lang: 'en' }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it.each([
+    [
+      'What is the current AHSEC Class 12 result date?',
+      'Class 12 result date is 20 May 2026.',
+    ],
+    [
+      'Is the AHSEC result date 15 May 2026?',
+      'Result date is 15 May 2026.',
+    ],
+  ])('generates when qualifiers are bound to the requested event: %s', async (
+    question,
+    content,
+  ) => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/result-notification/',
+      title: { rendered: 'Result Notification 2026' },
+      content: { rendered: content },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      await env.CONTENT_KV.delete('web-search:official:asseb:v2:division-ii:result');
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': `anon_${question.includes('Class 12') ? 'f' : '0'}${'1'.repeat(31)}`,
+        },
+        body: JSON.stringify({ message: question, lang: 'en' }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).not.toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore + 1);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it.each([
+    '<ul><li>Class 12 registration closes 15 May 2026</li><li>Class 11 result date is 20 May 2026</li></ul>',
+    '<table><tr><td>Class 12 registration</td><td>15 May 2026</td></tr><tr><td>Class 11 result date</td><td>20 May 2026</td></tr></table>',
+  ])('does not generate when structured HTML separates the requested qualifier', async content => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/result-notification/',
+      title: { rendered: 'Result Notification 2026' },
+      content: { rendered: content },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      await env.CONTENT_KV.delete('web-search:official:asseb:v2:division-ii:result');
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': `anon_${content.startsWith('<ul') ? '2' : '3'}${'2'.repeat(31)}`,
+        },
+        body: JSON.stringify({
+          message: 'What is the current AHSEC Class 12 result date?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it('generates when one structured table row contains the event and qualifier', async () => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/result-notification/',
+      title: { rendered: 'Result Notification 2026' },
+      content: {
+        rendered: '<table><tr><td><p>Class 12 result date</p></td><td><p>20 May 2026</p></td></tr></table>',
+      },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      await env.CONTENT_KV.delete('web-search:official:asseb:v2:division-ii:result');
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': `anon_4${'2'.repeat(31)}`,
+        },
+        body: JSON.stringify({
+          message: 'What is the current AHSEC Class 12 result date?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).not.toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore + 1);
+    } finally {
+      fetchMock.mockRestore();
+      if (originalWebSearchFlag === undefined) {
+        delete env.WEB_SEARCH_ENABLED;
+      } else {
+        env.WEB_SEARCH_ENABLED = originalWebSearchFlag;
+      }
+    }
+  });
+
+  it.each([
+    '<ul><li><table><tr><td><p>Class 12 registration</p></td><td><p>15 May 2026</p></td></tr><tr><td><p>Class 11 result date</p></td><td><p>20 May 2026</p></td></tr></table></li></ul>',
+    `<p>Class 12 result ${'general information '.repeat(35)}date is 20 May 2026.</p>`,
+  ])('does not generate from structurally or spatially separated validating facts', async content => {
+    const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
+    env.WEB_SEARCH_ENABLED = 'true';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
+      link: 'https://ahsec.assam.gov.in/index.php/result-notification/',
+      title: { rendered: 'Result Notification 2026' },
+      content: { rendered: content },
+    }]));
+    const generationCallsBefore = generationCalls;
+    try {
+      await env.CONTENT_KV.delete('web-search:official:asseb:v2:division-ii:result');
+      const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-anon-id': `anon_${content.startsWith('<ul') ? '5' : '6'}${'2'.repeat(31)}`,
+        },
+        body: JSON.stringify({
+          message: 'What is the current AHSEC Class 12 result date?',
+          lang: 'en',
+        }),
+      }));
+      const streamText = await chat.text();
+      await Promise.all(background);
+      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(generationCalls).toBe(generationCallsBefore);
     } finally {
       fetchMock.mockRestore();
       if (originalWebSearchFlag === undefined) {

@@ -3,11 +3,11 @@ name: Worker chat web egress and latency
 description: Production-proven constraints for bounded web retrieval and fast Workers AI streaming.
 ---
 
-Use Crossref's public JSON API for the bounded educational web-search branch. Wikimedia's REST and Action APIs return immediate errors when called from the production Cloudflare Worker, even though they work from a normal shell.
+Use Crossref for non-board educational fallback. For Assam board facts, query the official AHSEC WordPress pages API by recognized topic; use the ASSEB formation page only for merger/status questions. Cache successful payloads briefly in KV.
 
-**Why:** Repeated production deployments showed both Wikimedia API forms failing from Worker egress. Crossref returned attributed DOI sources within the bounded retrieval budget.
+**Why:** Repeated production deployments showed Wikimedia, Bing RSS, DuckDuckGo Lite, Google News RSS, and WordPress public search failing or timing out from Worker egress even when they worked from a normal shell. ASSEB and Crossref were reachable within the bounded path.
 
-**How to apply:** Do not switch the Worker web adapter back to Wikimedia without testing from an actually deployed Worker. Keep provider failures non-blocking and web text explicitly delimited as untrusted quoted data.
+**How to apply:** Treat shell reachability as insufficient; test from the deployed Worker. Require topic-specific official evidence, never turn an official failure into a scholarly success, distinguish HTTP failure from empty, and delimit web text as untrusted.
 
 Run the web branch only for explicit web-search or freshness intent, not merely because a question lacks chapter or subject scope.
 
