@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  chooseAssameseRetrievalLanguage,
   detectAuthoritativeIntent,
   semanticRetrievalFilters,
   shouldBypassSemanticRetrieval,
@@ -55,4 +56,17 @@ describe('chapter-scoped chat retrieval', () => {
       subjectId: 'physics',
     });
   });
+
+  it.each([
+    [0.80, 0.98, true, 'en'],
+    [0.87, 0.89, true, 'as'],
+    [0.00, 0.76, false, 'en'],
+    [0.83, 0.00, true, 'as'],
+  ] as const)(
+    'chooses the strongest bilingual evidence (%s vs %s)',
+    (assameseTop, englishTop, hasAssamese, expected) => {
+      expect(chooseAssameseRetrievalLanguage(assameseTop, englishTop, hasAssamese))
+        .toBe(expected);
+    },
+  );
 });

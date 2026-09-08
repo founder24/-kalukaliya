@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildSystemPrompt,
+  buildEmbeddingQuery,
+  detectLang,
   hasAssameseProseLeakage,
+  isReliableAssameseAnswer,
   normalizeAssameseStreamChunk,
 } from './chat';
 
@@ -37,16 +40,41 @@ describe('student chat curriculum scope', () => {
     expect(prompt).toContain('Degree course-ৰ ব’ৰ্ড হিচাপে Assamboard');
     expect(prompt).toContain('বাংলা, হিন্দী/দেৱনাগৰী বা ইংৰাজী বাক্য');
     expect(prompt).toContain('সূত্ৰ, সমীকৰণ, ৰাসায়নিক সংকেত');
+    expect(prompt).toContain('উৎসৰ ভাষা `english`');
   });
 
   it('normalizes streamed Assamese safely without removing formulas or names', () => {
     expect(normalizeAssameseStreamChunk('CO2\r\nNewton\u200B')).toBe('CO2\nNewton');
     expect(normalizeAssameseStreamChunk('শুধুমাত্র একটি পদার্থ যেমন জল')).toBe(
-      'কেৱল এটা পদাৰ্থ যেনে জল',
+      'শুধুমাত্র একটি পদার্থ যেমন জল',
     );
     expect(hasAssameseProseLeakage('অসমীয়াত CO2-ৰ কথা কোৱা হৈছে।')).toBe(false);
     expect(hasAssameseProseLeakage('यह हिंदी वाक्य है')).toBe(true);
     expect(hasAssameseProseLeakage('এবং এটি বাংলা বাক্য।')).toBe(true);
+    expect(isReliableAssameseAnswer('এই উত্তৰটো শুদ্ধ অসমীয়া ভাষাত লিখা হৈছে।')).toBe(true);
+    expect(isReliableAssameseAnswer('This answer is only in English.')).toBe(false);
+    expect(isReliableAssameseAnswer('হয়। Wrong answer')).toBe(false);
+    expect(isReliableAssameseAnswer('বাংলা ভাষায় লেখা সাধারণ বাক্য।')).toBe(false);
+    expect(isReliableAssameseAnswer('বাংলা ভাষা সুন্দর হয়।')).toBe(false);
+    expect(isReliableAssameseAnswer('নাই।')).toBe(true);
+    expect(isReliableAssameseAnswer('ঠিক আছে।')).toBe(true);
+    expect(isReliableAssameseAnswer(
+      'Newton First Law অনুসৰি কোনো বস্তুৰ ওপৰত বাহ্যিক বল নাথাকিলে বস্তুটোৱে নিজৰ অৱস্থা বজাই ৰাখে।',
+    )).toBe(true);
+  });
+
+  it('detects Assamese script and conservative romanized Assamese', () => {
+    expect(detectLang('এইটো কেনেকৈ সমাধান কৰিম?')).toBe('as');
+    expect(detectLang('moi ei chapter tu kenekoi bujim')).toBe('as');
+    expect(detectLang('mur babe bujai diya')).toBe('as');
+    expect(detectLang('etiya ki korim')).toBe('as');
+    expect(detectLang('moi ki koru')).toBe('as');
+    expect(detectLang('ei chapter tu bujhibo bisaru')).toBe('as');
+    expect(detectLang('Explain Assamese literature in English')).toBe('en');
+    expect(detectLang('Explain photosynthesis', 'as')).toBe('as');
+    expect(detectLang('এইটো কেনেকৈ বুজিম', 'en')).toBe('as');
+    expect(buildEmbeddingQuery('moi kenekoi bujim', 'as')).toContain('Romanized Assamese');
+    expect(buildEmbeddingQuery('এইটো কেনেকৈ বুজিম', 'as')).toBe('এইটো কেনেকৈ বুজিম');
   });
 
   it('separates authoritative curriculum evidence from supplementary web sources', () => {

@@ -26,7 +26,11 @@ import {
   chapters as chaptersTable,
 } from '../db/schema';
 import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
-import { streamGenerate, AI_MODEL_PRIMARY } from '../services/ai';
+import {
+  streamGenerate,
+  generateFallback,
+  AI_MODEL_PRIMARY,
+} from '../services/ai';
 import {
   searchWeb,
   dedupeWebResults,
@@ -228,7 +232,9 @@ async function fetchAuthoritativeIntentContext(
         subjectId: row.subject_id,
         content: evidence,
         score: 1,
-        medium: lang === 'as' ? 'assamese' : 'english',
+        // The generated evidence sentence above is English even when the answer
+        // language is Assamese; label it truthfully so the prompt translates it.
+        medium: 'english',
         sourceType: intent === 'pyq' ? 'pyq_d1' : 'syllabus_d1',
       };
     });
@@ -261,15 +267,38 @@ async function writeChatOperationalAnalytics(
  * Detect whether a message is Assamese (Bengali script U+0980–U+09FF).
  * Uses explicit override when provided; otherwise falls back to character ratio.
  */
-function detectLang(text: string, explicit?: 'en' | 'as'): 'en' | 'as' {
-  if (explicit === 'en' || explicit === 'as') return explicit;
-  const assamese = (text.match(/[\u0980-\u09FF]/g) ?? []).length;
-  return assamese / Math.max(text.length, 1) > 0.15 ? 'as' : 'en';
+export function detectLang(text: string, explicit?: 'en' | 'as'): 'en' | 'as' {
+  if (explicit === 'as') return 'as';
+  const normalized = text.normalize('NFC');
+  const assamese = (normalized.match(/[\u0980-\u09FF]/g) ?? []).length;
+  const letters = (normalized.match(/\p{L}/gu) ?? []).length;
+  if (/[\u09F0\u09F1]/u.test(normalized) || (assamese >= 2 && assamese / Math.max(letters, 1) > 0.15)) {
+    return 'as';
+  }
+
+  // Conservative romanized-Assamese detection. Require a distinctive phrase or
+  // multiple markers so ordinary English questions containing words like
+  // "Assamese" are not silently switched to Assamese mode.
+  const latin = normalized.toLowerCase().replace(/[^a-z\s'-]/g, ' ');
+  if (/\b(?:kenekoi|bujai\s+diya|bujhai\s+diya|axomiyat|oxomiyat|moi\s+kenekoi|etiya\s+ki\s+korim|bujhibo\s+bisaru)\b/.test(latin)) {
+    return 'as';
+  }
+  const markers = latin.match(/\b(?:moi|mur|mok|tumi|apuni|etiya|kenekoi|kio|aru|nohoi|ase|asile|hobo|koru|korim|koribo|bujim|bujhibo|bisaru|bujai|diya|axomiya|oxomiya)\b/g) ?? [];
+  return new Set(markers).size >= 2 ? 'as' : 'en';
+}
+
+export function buildEmbeddingQuery(text: string, lang: 'en' | 'as'): string {
+  const normalized = text.normalize('NFC').replace(/\s+/g, ' ').trim();
+  if (lang === 'as' && !/[\u0980-\u09FF]/u.test(normalized)) {
+    return `অসমীয়া প্ৰশ্ন (Romanized Assamese): ${normalized}`;
+  }
+  return normalized;
 }
 
 /** Strip null bytes + dangerous control chars; hard-cap at 2000 chars. */
 function sanitize(text: string): string {
   return text
+    .normalize('NFC')
     .replace(/\x00/g, '')
     .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F]/g, '')
     .trim()
@@ -288,17 +317,7 @@ export function normalizeAssameseStreamChunk(text: string): string {
   return text
     .normalize('NFC')
     .replace(/\r\n?/g, '\n')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/শুধুমাত্র/g, 'কেৱল')
-    .replace(/যেমন/g, 'যেনে')
-    .replace(/পদার্থ/g, 'পদাৰ্থ')
-    .replace(/এবং/g, 'আৰু')
-    .replace(/একটি/g, 'এটা')
-    .replace(/হচ্ছে/g, 'হৈছে')
-    .replace(/হলো/g, 'হ’ল')
-    .replace(/জন্য/g, 'বাবে')
-    .replace(/থেকে/g, 'পৰা')
-    .replace(/আপনি/g, 'আপুনি');
+    .replace(/[\u200B-\u200D\uFEFF]/g, '');
 }
 
 export function hasAssameseProseLeakage(text: string): boolean {
@@ -310,7 +329,25 @@ export function hasAssameseProseLeakage(text: string): boolean {
   // U+0964/U+0965 are shared danda punctuation in Assamese writing, so they
   // are deliberately excluded from the Devanagari-script signal.
   return /[\u0900-\u0963\u0966-\u097F]/u.test(text)
-    || /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি)(?=$|[\s,.!?।])/u.test(text);
+    || /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি|কিন্তু|তবে|তাই|কারণ|যদি|তখন|এটি|সেটি|করতে|হবে|বাংলা|শুধুমাত্র|যেমন|পদার্থ|ভাষায়|লেখা|সুন্দর|সাধারণ|বাক্য|আমার|তোমার|কী|কেন|কোথায়|নয়|করুন|দেওয়া|ব্যবহার)(?=$|[\s,.!?।])/u.test(text);
+}
+
+export function isReliableAssameseAnswer(text: string): boolean {
+  if (hasAssameseProseLeakage(text)) return false;
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (/^(?:হয়|নাই|ভাল|ঠিক আছে|অৱশ্যই|নহয়)[।.!]?$/u.test(normalized)) return true;
+  const assameseChars = (text.match(/[\u0980-\u09FF]/g) ?? []).length;
+  const latinChars = (text.match(/[A-Za-z]/g) ?? []).length;
+  return assameseChars >= 2
+    && latinChars <= Math.max(8, Math.floor(assameseChars * 0.35));
+}
+
+export function chooseAssameseRetrievalLanguage(
+  assameseTop: number,
+  englishTop: number,
+  hasAssameseMatches: boolean,
+): 'as' | 'en' {
+  return hasAssameseMatches && assameseTop >= englishTop - 0.03 ? 'as' : 'en';
 }
 
 function sseEvent(payload: unknown): string {
@@ -758,7 +795,7 @@ async function fetchChapterContent(
   db: ReturnType<typeof createDb>,
   chapterId: string,
   lang: 'en' | 'as',
-): Promise<string | null> {
+): Promise<{ content: string; language: 'assamese' | 'english' } | null> {
   const row = await db
     .select({
       ragSectionsEn: chaptersTable.ragSectionsEn,
@@ -778,17 +815,17 @@ async function fetchChapterContent(
   if (lang === 'as') {
     // Assamese fallback chain
     const sections = tryJson<RagSection[]>(row.ragSectionsAs, []);
-    if (sections.length > 0) return sections.map(s => s.content).join('\n\n');
-    if (row.ragTextAs) return row.ragTextAs;
-    if (row.notesAs)   return row.notesAs;
+    if (sections.length > 0) return { content: sections.map(s => s.content).join('\n\n'), language: 'assamese' };
+    if (row.ragTextAs) return { content: row.ragTextAs, language: 'assamese' };
+    if (row.notesAs)   return { content: row.notesAs, language: 'assamese' };
     // Fall through to English when Assamese content is missing
   }
 
   // English fallback chain
   const sections = tryJson<RagSection[]>(row.ragSectionsEn, []);
-  if (sections.length > 0) return sections.map(s => s.content).join('\n\n');
-  if (row.ragText) return row.ragText;
-  if (row.notesEn) return row.notesEn;
+  if (sections.length > 0) return { content: sections.map(s => s.content).join('\n\n'), language: 'english' };
+  if (row.ragText) return { content: row.ragText, language: 'english' };
+  if (row.notesEn) return { content: row.notesEn, language: 'english' };
   return null;
 }
 
@@ -1021,9 +1058,11 @@ export function buildSystemPrompt(opts: {
       '- শ্ৰেণী ১১ আৰু ১২-ৰ পাঠ্যক্রমৰ ব’ৰ্ড হিচাপে AHSEC কোৱা; Degree course-ৰ ব’ৰ্ড হিচাপে Assamboard কোৱা। Degree course-ক AHSEC, CBSE বা NCERT বুলি নক’বা।',
       '- CBSE, NCERT, ICSE বা অন্য কোনো ব’ৰ্ডৰ প্ৰশ্নৰ উত্তৰ নিদিবা। এনে প্ৰশ্ন আহিলে ভদ্ৰভাৱে কোৱা যে Syrabit কেৱল অসম ব’ৰ্ডৰ পাঠ্যক্রম সমৰ্থন কৰে আৰু অসম ব’ৰ্ডৰ সমতুল্য প্ৰশ্ন সুধিবলৈ কোৱা।',
        '- উত্তৰৰ ব্যাখ্যামূলক গদ্য সম্পূৰ্ণ শুদ্ধ অসমীয়াত আৰু অসমীয়া লিপিত লিখিবা। বাংলা, হিন্দী/দেৱনাগৰী বা ইংৰাজী বাক্য, অনুচ্ছেদ বা অনুবাদ নিদিবা।',
+       '- ছাত্ৰই Latin আখৰে Romanized Assamese লিখিলেও তাক অসমীয়া প্ৰশ্ন হিচাপে অৰ্থ বুজি উত্তৰটো অসমীয়া লিপিত দিবা।',
        '- সূত্ৰ, সমীকৰণ, ৰাসায়নিক সংকেত, একক, প্ৰচলিত সংক্ষিপ্ত ৰূপ আৰু সঠিক নাম (যেনে AHSEC, NCERT, Syrabit বা Newton) অপৰিৱৰ্তিত ৰাখিব পাৰা; এই অনুমতি ব্যাখ্যামূলক ইংৰাজী গদ্যৰ বাবে নহয়।',
        '- উত্তৰ শেষ কৰাৰ আগতে নীৰৱে ভাষা পৰীক্ষা কৰা: ব্যাখ্যামূলক প্ৰতিটো বাক্য অসমীয়াত আছে নিশ্চিত কৰা।',
       '- পাঠ্যক্রমৰ প্ৰসংগ থাকিলে তাৰ ওপৰত ভিত্তি কৰি উত্তৰ দিয়া।',
+      '- কোনো উৎসৰ ভাষা `english` বুলি চিহ্নিত থাকিলে তথ্যৰ অৰ্থ, সংখ্যা, সূত্ৰ আৰু কাৰিকৰী শব্দ সলনি নকৰাকৈ বিশ্বস্তভাৱে অসমীয়ালৈ অনুবাদ কৰি উত্তৰ দিয়া। উৎসটো অসমীয়া ভাষাৰ বুলি দাবী নকৰিবা।',
       '- প্ৰথম বাক্যতেই প্ৰশ্নৰ পোনপটীয়া উত্তৰ দিয়া; “ইয়াত উত্তৰটো দিয়া হ’ল” ধৰণৰ ভূমিকা নিদিবা।',
       '- উত্তৰৰ দৈৰ্ঘ্য প্ৰশ্ন অনুসৰি ৰাখিবা। সহজ প্ৰশ্নৰ চমু উত্তৰ আৰু পৰীক্ষামুখী প্ৰশ্নৰ সংক্ষিপ্ত গঠনমূলক উত্তৰ দিয়া।',
       '- ছাত্ৰৰ স্মৃতি আৰু আগৰ কথোপকথন কেৱল প্ৰাসংগিক হ’লেহে স্বাভাৱিকভাৱে ব্যৱহাৰ কৰা; সংৰক্ষিত স্মৃতি আছে বুলি ঘোষণা নকৰিবা।',
@@ -1477,7 +1516,10 @@ chatRouter.post('/stream', async (c) => {
     const directChapterContent = directContentResult.status === 'fulfilled'
       ? directContentResult.value
       : null;
-    if (shouldBypassSemanticRetrieval(directChapterId, directChapterContent)) {
+    if (
+      directChapterContent
+      && shouldBypassSemanticRetrieval(directChapterId, directChapterContent.content)
+    ) {
       const resolvedTitle = body.chapter_name ?? directChapterId;
       topChapterId = directChapterId;
       topChapterTitle = resolvedTitle;
@@ -1486,11 +1528,13 @@ chatRouter.post('/stream', async (c) => {
         chapterId:    directChapterId,
         chapterTitle: resolvedTitle,
         ...(topSubjectId !== undefined && { subjectId: topSubjectId }),
-        content:      directChapterContent.slice(0, CONTEXT_CHAR_CAP),
+        content:      directChapterContent.content.slice(0, CONTEXT_CHAR_CAP),
         // Explicit page context is stronger than a semantic cosine score.
         score:        1,
-          medium:       lang === 'as' ? 'assamese' : 'english',
-          sourceType:   'chapter_direct',
+          medium:       directChapterContent.language,
+          sourceType:   lang === 'as' && directChapterContent.language === 'english'
+            ? 'chapter_direct_english_fallback'
+            : 'chapter_direct',
       }];
       confidenceTier = 'high';
       topScore = 1;
@@ -1502,7 +1546,7 @@ chatRouter.post('/stream', async (c) => {
   // Embed + history in parallel — zero extra latency vs serial
   // Pass userId so history is scoped to its owner (session ownership enforcement)
   const [embedResult, historyResult] = await startRetrievalFanout({
-    embed: () => embedQuery(c.env.AI, message),
+    embed: () => embedQuery(c.env.AI, buildEmbeddingQuery(message, lang)),
     history: () => historyLoaded ? Promise.resolve(history) : loadHistory(db, sessionId, userId),
     web: () => webSearchPromise,
   });
@@ -1522,7 +1566,32 @@ chatRouter.post('/stream', async (c) => {
         Boolean(directChapterId),
       );
 
-      const matches = await queryVectorize(c.env.VECTORIZE, embedding, lang, extraFilters);
+      let retrievalLang = lang;
+      let matches: VectorizeMatch[];
+      if (lang === 'as') {
+        const [assameseMatches, englishMatches] = await Promise.all([
+          queryVectorize(c.env.VECTORIZE, embedding, 'as', extraFilters),
+          queryVectorize(c.env.VECTORIZE, embedding, 'en', extraFilters),
+        ]);
+        const assameseTop = assameseMatches[0]?.score ?? 0;
+        const englishTop = englishMatches[0]?.score ?? 0;
+        // Prefer native evidence when quality is comparable, but do not let one
+        // weak Assamese hit suppress a materially stronger English source.
+        if (
+          chooseAssameseRetrievalLanguage(
+            assameseTop,
+            englishTop,
+            assameseMatches.length > 0,
+          ) === 'as'
+        ) {
+          matches = assameseMatches;
+        } else {
+          retrievalLang = 'en';
+          matches = englishMatches;
+        }
+      } else {
+        matches = await queryVectorize(c.env.VECTORIZE, embedding, 'en', extraFilters);
+      }
 
       // noUncheckedIndexedAccess: array[0] is T | undefined; guard before access
       const firstMatch = matches[0];
@@ -1554,18 +1623,20 @@ chatRouter.post('/stream', async (c) => {
           topSubjectId = best.meta.subjectId;
 
           // D1 fast path — full chapter content with fallback chain
-          const content = await fetchChapterContent(db, bestId, lang);
-          if (content) {
+          const chapterContent = await fetchChapterContent(db, bestId, lang);
+          if (chapterContent) {
             const resolvedTitle = best.meta.chapterTitle ?? bestId;
             topChapterTitle = resolvedTitle;
             contextChunks = [{
               chapterId:    bestId,
               chapterTitle: resolvedTitle,
               ...(topSubjectId !== undefined && { subjectId: topSubjectId }),
-              content:      content.slice(0, CONTEXT_CHAR_CAP),
+              content:      chapterContent.content.slice(0, CONTEXT_CHAR_CAP),
               score:        best.score,
-              medium:       best.meta.medium ?? (lang === 'as' ? 'assamese' : 'english'),
-              sourceType:   best.meta.sourceType ?? 'rag_chapter',
+              medium:       chapterContent.language,
+              sourceType:   lang === 'as' && (
+                retrievalLang === 'en' || chapterContent.language === 'english'
+              ) ? 'rag_chapter_english_fallback' : (best.meta.sourceType ?? 'rag_chapter'),
               ...(best.meta.topicId !== undefined && { topicName: best.meta.topicId }),
             }];
             ragPath = 'vectorize_d1';
@@ -1591,8 +1662,8 @@ chatRouter.post('/stream', async (c) => {
   // Card-context fallback — when RAG missed but chapter_id provided by frontend
   if (!authoritativeIntent && contextChunks.length === 0 && directChapterId) {
     try {
-      const content = await fetchChapterContent(db, directChapterId, lang);
-      if (content) {
+      const chapterContent = await fetchChapterContent(db, directChapterId, lang);
+      if (chapterContent) {
         topChapterId    = directChapterId;
         topChapterTitle = body.chapter_name;
         topSubjectId    = body.subject_id;
@@ -1601,10 +1672,12 @@ chatRouter.post('/stream', async (c) => {
           chapterTitle: body.chapter_name ?? directChapterId,
           // exactOptionalPropertyTypes: spread only when defined
           ...(body.subject_id !== undefined && { subjectId: body.subject_id }),
-          content:      content.slice(0, CONTEXT_CHAR_CAP),
+          content:      chapterContent.content.slice(0, CONTEXT_CHAR_CAP),
           score:        0.5,
-          medium:       lang === 'as' ? 'assamese' : 'english',
-          sourceType:   'card_context',
+          medium:       chapterContent.language,
+          sourceType:   lang === 'as' && chapterContent.language === 'english'
+            ? 'card_context_english_fallback'
+            : 'card_context',
         }];
         ragPath        = 'card_context';
         confidenceTier = 'low';
@@ -1629,7 +1702,10 @@ chatRouter.post('/stream', async (c) => {
   // ── 6. System prompt ────────────────────────────────────────────────────────
   const promptStart = Date.now();
   const contextText = contextChunks
-    .map((chunk, i) => `[Source ${i + 1}: ${chunk.chapterTitle}]\n${chunk.content}`)
+    .map((chunk, i) => [
+      `[Source ${i + 1}: ${chunk.chapterTitle}; source language: ${chunk.medium ?? 'unknown'}]`,
+      chunk.content,
+    ].join('\n'))
     .join('\n\n---\n\n');
   const webContextText = webResults
     .map((result, i) => [
@@ -1720,6 +1796,7 @@ chatRouter.post('/stream', async (c) => {
     let actualModel  = AI_MODEL_PRIMARY;
     let firstTokenRecorded = false;
     let assameseProseLeakage = false;
+    let lastAssameseHeartbeat = Date.now();
     let analyticsRecorded = false;
     const recordAnalytics = async (
       eventName: 'chat_completion' | 'chat_failure',
@@ -1773,6 +1850,9 @@ chatRouter.post('/stream', async (c) => {
           // before the route can detect it. English retains true token streaming.
           if (lang !== 'as') {
             await write({ content: normalizedChunk, done: false });
+          } else if (Date.now() - lastAssameseHeartbeat >= 1_500) {
+            await write({ event: 'heartbeat', content: '', done: false });
+            lastAssameseHeartbeat = Date.now();
           }
         }
         streamDone = true;
@@ -1796,20 +1876,37 @@ chatRouter.post('/stream', async (c) => {
 
       if (lang === 'as') {
         fullResponse = normalizeAssameseStreamChunk(fullResponse);
-        assameseProseLeakage = hasAssameseProseLeakage(fullResponse);
+        assameseProseLeakage = !isReliableAssameseAnswer(fullResponse);
         if (assameseProseLeakage) {
-          await write({
-            ...terminalChatErrorEvent(
-              'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। ইংৰাজী মোড ব্যৱহাৰ কৰি পুনৰ চেষ্টা কৰক।',
-              'assamese_language_validation_failed',
-              'language_validation',
-              serverRequestId,
-            ),
-            error_kind: 'assamese_unavailable',
-          });
-          await recordAnalytics('chat_failure', 'language_validation');
-          await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
-          return;
+          try {
+            const repaired = await generateFallback(c.env.AI, {
+              systemPrompt: `${systemPrompt}\n\n## বাধ্যতামূলক ভাষা সংশোধন\nআগৰ খচৰা ব্যৱহাৰ নকৰিবা। কেৱল শুদ্ধ অসমীয়া লিপিত নতুনকৈ সম্পূৰ্ণ উত্তৰ লিখিবা। বাংলা, হিন্দী বা ইংৰাজী ব্যাখ্যামূলক বাক্য নিদিবা।`,
+              userMessage: message,
+              maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 640),
+            }, 6_000);
+            const repairedText = normalizeAssameseStreamChunk(repaired.text);
+            if (isReliableAssameseAnswer(repairedText)) {
+              fullResponse = repairedText;
+              actualModel = repaired.model;
+              assameseProseLeakage = false;
+            }
+          } catch (repairError) {
+            console.warn('[chat] Assamese fallback-model repair failed:', repairError);
+          }
+          if (assameseProseLeakage) {
+            await write({
+              ...terminalChatErrorEvent(
+                'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। অনুগ্ৰহ কৰি পুনৰ চেষ্টা কৰক।',
+                'assamese_language_validation_failed',
+                'language_validation',
+                serverRequestId,
+              ),
+              error_kind: 'assamese_unavailable',
+            });
+            await recordAnalytics('chat_failure', 'language_validation');
+            await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
+            return;
+          }
         }
         // Assamese is intentionally emitted only after complete validation;
         // this is completion latency, never a misleading first-token metric.

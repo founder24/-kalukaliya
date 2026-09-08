@@ -191,6 +191,30 @@ export async function generate(
   return { text, model: AI_MODEL_FALLBACK };
 }
 
+/** Generate directly with the stronger fallback model for a quality repair. */
+export async function generateFallback(
+  ai: Ai,
+  opts: GenerateOptions,
+  timeoutMs = 6_000,
+): Promise<GenerateResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const text = await Promise.race([
+      runModel(ai, AI_MODEL_FALLBACK, opts),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('[ai] Fallback model quality repair timed out')),
+          Math.max(500, timeoutMs),
+        );
+      }),
+    ]);
+    if (!text) throw new Error('[ai] Fallback model returned an empty response');
+    return { text, model: AI_MODEL_FALLBACK };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /**
  * Streaming text generation with primary → fallback model retry.
  *
