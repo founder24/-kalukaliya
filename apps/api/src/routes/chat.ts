@@ -348,6 +348,19 @@ export function isReliableAssameseAnswer(text: string): boolean {
     && latinChars <= Math.max(8, Math.floor(assameseChars * 0.35));
 }
 
+/**
+ * Last-resort delivery gate. Assamese and Bengali share a script and many words,
+ * so strict dialect heuristics must never strand a student behind an error card.
+ * This still blocks Hindi/Devanagari and predominantly English responses.
+ */
+export function isUsableAssameseAnswer(text: string): boolean {
+  if (/[\u0900-\u0963\u0970-\u097F]/u.test(text)) return false;
+  const scriptChars = (text.match(/[\u0980-\u09FF]/g) ?? []).length;
+  const latinChars = (text.match(/[A-Za-z]/g) ?? []).length;
+  return scriptChars >= 2
+    && latinChars <= Math.max(30, Math.floor(scriptChars * 0.8));
+}
+
 export function chooseAssameseRetrievalLanguage(
   assameseTop: number,
   englishTop: number,
@@ -1887,6 +1900,8 @@ chatRouter.post('/stream', async (c) => {
         fullResponse = normalizeAssameseStreamChunk(fullResponse);
         assameseProseLeakage = !isReliableAssameseAnswer(fullResponse);
         if (assameseProseLeakage) {
+          const initialAssameseResponse = fullResponse;
+          let hasUsableAssameseFallback = false;
           try {
             const repaired = await generateAssamese(c.env.AI, {
               systemPrompt: `${systemPrompt}\n\n## বাধ্যতামূলক ভাষা সংশোধন\nআগৰ খচৰা ব্যৱহাৰ নকৰিবা। কেৱল শুদ্ধ অসমীয়া লিপিত নতুনকৈ সম্পূৰ্ণ উত্তৰ লিখিবা। বাংলা, হিন্দী বা ইংৰাজী ব্যাখ্যামূলক বাক্য নিদিবা।`,
@@ -1898,11 +1913,23 @@ chatRouter.post('/stream', async (c) => {
               fullResponse = repairedText;
               actualModel = repaired.model;
               assameseProseLeakage = false;
+            } else if (isUsableAssameseAnswer(repairedText)) {
+              fullResponse = repairedText;
+              actualModel = repaired.model;
+              hasUsableAssameseFallback = true;
             }
           } catch (repairError) {
             console.warn('[chat] Assamese fallback-model repair failed:', repairError);
           }
-          if (assameseProseLeakage) {
+          if (
+            assameseProseLeakage
+            && !hasUsableAssameseFallback
+            && isUsableAssameseAnswer(initialAssameseResponse)
+          ) {
+            fullResponse = initialAssameseResponse;
+            hasUsableAssameseFallback = true;
+          }
+          if (assameseProseLeakage && !hasUsableAssameseFallback) {
             await write({
               ...terminalChatErrorEvent(
                 'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। অনুগ্ৰহ কৰি পুনৰ চেষ্টা কৰক।',
