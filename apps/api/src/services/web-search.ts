@@ -1,5 +1,8 @@
 const WEB_SEARCH_LIMIT = 4;
-export const WEB_SEARCH_TIMEOUT_MS = 700;
+// Crossref occasionally needs more than 700 ms from a cold Worker isolate.
+// This still fits the 3 s first-token budget because lookup starts in parallel
+// with quota, embedding, history, and curriculum retrieval.
+export const WEB_SEARCH_TIMEOUT_MS = 1_100;
 const WEB_SNIPPET_CHAR_CAP = 500;
 const STRONG_RAG_SCORE = 0.80;
 const MIN_STRONG_RAG_CHARS = 500;
