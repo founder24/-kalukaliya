@@ -71,3 +71,4 @@
 - [Syllabus PDF alignment](syllabus-pdf-alignment.md) — catalog PDFs lack subject links; align by official structure and reject body-keyword guesses.
 - [IndexNow endpoint fallback](indexnow-endpoint-fallback.md) — Cloudflare egress can be rate-limited per provider; use bounded participant fallback.
 - [Cloudflare secret verification](cloudflare-secret-verification.md) — verify Worker secret names through bindings metadata when immediate Wrangler CI listing is inconsistent.
+- [Workers AI Assamese generation](workers-ai-assamese.md) — use SEA-LION non-streaming; Assamese/Bengali share script and danda must not trigger Hindi detection.
