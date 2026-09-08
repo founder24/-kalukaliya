@@ -333,7 +333,13 @@ export function hasAssameseProseLeakage(text: string): boolean {
 }
 
 export function isReliableAssameseAnswer(text: string): boolean {
-  if (hasAssameseProseLeakage(text)) return false;
+  // U+0964/U+0965 danda punctuation is also standard in Assamese; reject
+  // Devanagari letters/marks, not punctuation or digits.
+  if (/[\u0900-\u0963\u0970-\u097F]/u.test(text)) return false;
+  const bengaliMarkers = text.match(
+    /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি|তবে|তাই|তখন|এটি|সেটি|করতে|হবে|বাংলা|শুধুমাত্র|যেমন|পদার্থ|ভাষায়|লেখা|সুন্দর|সাধারণ|বাক্য|আমার|তোমার|কী|কেন|কোথায়|নয়|করুন|দেওয়া|ব্যবহার)(?=$|[\s,.!?।])/gu,
+  ) ?? [];
+  if (bengaliMarkers.length >= 2) return false;
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (/^(?:হয়|নাই|ভাল|ঠিক আছে|অৱশ্যই|নহয়)[।.!]?$/u.test(normalized)) return true;
   const assameseChars = (text.match(/[\u0980-\u09FF]/g) ?? []).length;
@@ -1060,6 +1066,7 @@ export function buildSystemPrompt(opts: {
        '- উত্তৰৰ ব্যাখ্যামূলক গদ্য সম্পূৰ্ণ শুদ্ধ অসমীয়াত আৰু অসমীয়া লিপিত লিখিবা। বাংলা, হিন্দী/দেৱনাগৰী বা ইংৰাজী বাক্য, অনুচ্ছেদ বা অনুবাদ নিদিবা।',
        '- ছাত্ৰই Latin আখৰে Romanized Assamese লিখিলেও তাক অসমীয়া প্ৰশ্ন হিচাপে অৰ্থ বুজি উত্তৰটো অসমীয়া লিপিত দিবা।',
        '- সূত্ৰ, সমীকৰণ, ৰাসায়নিক সংকেত, একক, প্ৰচলিত সংক্ষিপ্ত ৰূপ আৰু সঠিক নাম (যেনে AHSEC, NCERT, Syrabit বা Newton) অপৰিৱৰ্তিত ৰাখিব পাৰা; এই অনুমতি ব্যাখ্যামূলক ইংৰাজী গদ্যৰ বাবে নহয়।',
+       '- কোনো কাৰিকৰী শব্দৰ শুদ্ধ অসমীয়া বানান নিশ্চিত নহ’লে ভুল ধ্বনিগত বানান উদ্ভাৱন নকৰিবা; মূল English শব্দটো বন্ধনীৰ ভিতৰত অপৰিৱৰ্তিত ৰাখিবা।',
        '- উত্তৰ শেষ কৰাৰ আগতে নীৰৱে ভাষা পৰীক্ষা কৰা: ব্যাখ্যামূলক প্ৰতিটো বাক্য অসমীয়াত আছে নিশ্চিত কৰা।',
       '- পাঠ্যক্রমৰ প্ৰসংগ থাকিলে তাৰ ওপৰত ভিত্তি কৰি উত্তৰ দিয়া।',
       '- কোনো উৎসৰ ভাষা `english` বুলি চিহ্নিত থাকিলে তথ্যৰ অৰ্থ, সংখ্যা, সূত্ৰ আৰু কাৰিকৰী শব্দ সলনি নকৰাকৈ বিশ্বস্তভাৱে অসমীয়ালৈ অনুবাদ কৰি উত্তৰ দিয়া। উৎসটো অসমীয়া ভাষাৰ বুলি দাবী নকৰিবা।',
@@ -1832,7 +1839,7 @@ chatRouter.post('/stream', async (c) => {
           const generated = await generateAssamese(c.env.AI, {
             systemPrompt,
             userMessage: message,
-            maxTokens: CHAT_MAX_OUTPUT_TOKENS,
+            maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 384),
           }, 8_000);
           fullResponse = normalizeAssameseStreamChunk(generated.text);
           actualModel = generated.model;

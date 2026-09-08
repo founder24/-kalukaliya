@@ -56,6 +56,7 @@ describe('student chat curriculum scope', () => {
     expect(isReliableAssameseAnswer('হয়। Wrong answer')).toBe(false);
     expect(isReliableAssameseAnswer('বাংলা ভাষায় লেখা সাধারণ বাক্য।')).toBe(false);
     expect(isReliableAssameseAnswer('বাংলা ভাষা সুন্দর হয়।')).toBe(false);
+    expect(isReliableAssameseAnswer('যদি বাহ্যিক বল নাথাকে, তেন্তে বস্তুটোৱে নিজৰ অৱস্থা বজাই ৰাখে।')).toBe(true);
     expect(isReliableAssameseAnswer('নাই।')).toBe(true);
     expect(isReliableAssameseAnswer('ঠিক আছে।')).toBe(true);
     expect(isReliableAssameseAnswer(
