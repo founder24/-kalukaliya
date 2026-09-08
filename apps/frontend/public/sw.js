@@ -5,7 +5,9 @@
 // v18 (2026-08-21): chapter/document navigations are network-first. Serving a
 //   cached HTML document first can reference content-hashed JS/CSS files deleted
 //   by a newer Pages deploy, breaking responsive layout until a second reload.
-const CACHE_VERSION = '18';
+// v19 (2026-09-08): invalidate library bundles that omitted public chapters
+//   carrying the legacy `active` status.
+const CACHE_VERSION = '19';
 const STATIC_CACHE = 'syrabit-static-v' + CACHE_VERSION;
 const RUNTIME_CACHE = 'syrabit-runtime-v' + CACHE_VERSION;
 const API_CACHE = 'syrabit-api-v' + CACHE_VERSION;

@@ -22,7 +22,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { eq, and, ne } from 'drizzle-orm';
+import { eq, and, ne, inArray } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters } from '../db/schema';
 import type { Env } from '../types';
@@ -540,7 +540,7 @@ contentRouter.get('/library-bundle', async (c) => {
       chapterNumber: chapters.chapterNumber, status: chapters.status, contentType: chapters.contentType,
       notesEn: chapters.notesEn, notesAs: chapters.notesAs,
       qaEn: chapters.qaEn, publishedTopics: chapters.publishedTopics,
-    }).from(chapters).where(eq(chapters.status, 'published'));
+    }).from(chapters).where(inArray(chapters.status, ['published', 'active']));
   }
 
   // Build chapter maps: subjectId → chapter list
