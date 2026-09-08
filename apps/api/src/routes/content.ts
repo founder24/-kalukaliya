@@ -25,6 +25,7 @@ import { Hono, type Context } from 'hono';
 import { eq, and, ne, inArray } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters } from '../db/schema';
+import { serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env } from '../types';
 
 export const contentRouter = new Hono<{ Bindings: Env }>();
@@ -254,6 +255,7 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     slug: chapters.slug,
     slugAs: chapters.slugAs,
     chapterNumber: chapters.chapterNumber,
+    status: chapters.status,
     notesEn: chapters.notesEn,
     notesAs: chapters.notesAs,
     qaEn: chapters.qaEn,
@@ -264,35 +266,7 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     .where(and(eq(chapters.subjectId, subjectId), ne(chapters.status, 'archived')))
     .orderBy(chapters.chapterNumber);
 
-  const payload = rows.map(r => {
-    const parsedTopics = safeParse<Array<{ title?: unknown; title_as?: unknown }>>(r.publishedTopics) ?? [];
-    const syllabusTopics = parsedTopics
-      .map(topic => typeof topic?.title === 'string' ? topic.title.trim() : '')
-      .filter(Boolean);
-    const syllabusTopicsAs = parsedTopics
-      .map(topic => typeof topic?.title_as === 'string' && topic.title_as.trim()
-        ? topic.title_as.trim()
-        : (typeof topic?.title === 'string' ? topic.title.trim() : ''))
-      .filter(Boolean);
-    const qa = safeParse<unknown[]>(r.qaEn) ?? [];
-    const pyqPapers = safeParse<unknown[]>(r.pyqPapers) ?? [];
-    return {
-    id:              r.id,
-    chapter_id:      r.id,
-    title:           r.title,
-    title_as:        r.titleAs ?? null,
-    slug:            r.slug,
-    chapter_number:  r.chapterNumber ?? null,
-    notes_generated: Boolean(r.notesEn),
-    has_assamese:    Boolean(r.notesAs),
-    has_qa:           qa.length > 0,
-    has_pyq:          Boolean(r.pyqPdfUrl) || pyqPapers.length > 0,
-    syllabus_topics:  syllabusTopics,
-    syllabus_topics_as: syllabusTopicsAs,
-    topic_count:      syllabusTopics.length,
-    content_type:     'chapter',
-  };
-  });
+  const payload = serializePublicChapterList(rows);
 
   // Populate KV so the next request is served from cache
   c.env.CONTENT_KV.put(kvKey, JSON.stringify(payload), { expirationTtl: 86400 * 7 })

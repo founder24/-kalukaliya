@@ -13,6 +13,7 @@ import { boards, classes, chapters, publishJobs, seedRuns, streams, subjects, us
 import { extractBearer, isSessionValid, sessionIssuedAt, signAdminToken, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import { generate } from '../services/ai';
 import { reindexChapterRag } from '../services/rag-indexing';
+import { serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env } from '../types';
 
 export const adminContentRouter = new Hono<{ Bindings: Env }>();
@@ -198,33 +199,7 @@ async function prewarmSubject(env: Env, subjectId: string): Promise<void> {
     pyqPapers: chapters.pyqPapers,
   }).from(chapters).where(eq(chapters.subjectId, subjectId)).orderBy(chapters.chapterNumber);
 
-  const payload = rows.map(chapter => {
-    const topics = parseJson<Array<{ title?: unknown; title_as?: unknown }>>(chapter.publishedTopics, []);
-    const syllabusTopics = topics.map(topic => typeof topic.title === 'string' ? topic.title.trim() : '').filter(Boolean);
-    const syllabusTopicsAs = topics.map(topic =>
-      typeof topic.title_as === 'string' && topic.title_as.trim()
-        ? topic.title_as.trim()
-        : (typeof topic.title === 'string' ? topic.title.trim() : '')
-    ).filter(Boolean);
-    return {
-      id: chapter.id,
-      chapter_id: chapter.id,
-      title: chapter.title,
-      title_as: chapter.titleAs ?? null,
-      slug: chapter.slug,
-      slug_as: chapter.slugAs ?? null,
-      chapter_number: chapter.chapterNumber ?? null,
-      status: chapter.status ?? 'draft',
-      notes_generated: Boolean(chapter.notesEn),
-      has_assamese: Boolean(chapter.notesAs),
-      has_qa: Boolean(chapter.qaEn && chapter.qaEn !== '[]'),
-      has_pyq: Boolean(chapter.pyqPdfUrl) || parseJson<unknown[]>(chapter.pyqPapers, []).length > 0,
-      syllabus_topics: syllabusTopics,
-      syllabus_topics_as: syllabusTopicsAs,
-      topic_count: syllabusTopics.length,
-      content_type: 'chapter',
-    };
-  });
+  const payload = serializePublicChapterList(rows);
   await env.CONTENT_KV.put(`subject:${subjectId}:chapters`, JSON.stringify(payload), { expirationTtl: 86400 * 7 });
 }
 
@@ -331,13 +306,13 @@ async function runPublish(env: Env, jobId: string, chapterId: string): Promise<v
 
   try {
     await run('gcs', async () => ({ status: 'done', store: 'd1', chapter_id: chapter.id }), true);
-    await run('cloudflare', async () => {
-      await prewarmSubject(env, chapter.subjectId);
-      return { status: 'done', cache: 'CONTENT_KV' };
-    }, true);
     await run('status_update', async () => {
       await db.update(chapters).set({ status: 'published', updatedAt: now() }).where(eq(chapters.id, chapter.id));
       return { status: 'done' };
+    }, true);
+    await run('cloudflare', async () => {
+      await prewarmSubject(env, chapter.subjectId);
+      return { status: 'done', cache: 'CONTENT_KV' };
     }, true);
     await run('pages_rebuild', async () => ({ status: 'done', delivery: 'worker-dynamic' }));
     await run('indexnow', async () => {

@@ -79,6 +79,7 @@ beforeAll(async () => {
     env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status) VALUES ('chapter','subject','Native queue chapter','native-queue','draft')`),
     env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status) VALUES ('chapter-two','subject','Second native chapter','native-queue-two','draft')`),
     env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status) VALUES ('chapter-three','subject','Third native chapter','native-queue-three','draft')`),
+    env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status) VALUES ('chapter-cache','subject','Cache contract chapter','cache-contract','draft')`),
   ]);
   await env.DB.prepare(`
     INSERT INTO users (id, email, hashed_password, role, name)
@@ -153,6 +154,26 @@ describe('Worker-native admin publishing and seed dispatch', () => {
       `/api/v1/admin/content/chapters/${chapterId}/publish`, 'POST',
     ));
     expect(duplicate.status).toBe(409);
+  });
+
+  it('serves the same chapter list from publish-prewarmed KV and a live read', async () => {
+    const response = await workerFetch(adminRequest(
+      '/api/v1/admin/content/chapters/chapter-cache/publish', 'POST',
+    ));
+    expect(response.status).toBe(200);
+    await Promise.allSettled(background);
+
+    const cacheHit = await workerFetch(new Request('http://worker/api/v1/content/chapters/subject'));
+    expect(cacheHit.status).toBe(200);
+    expect(cacheHit.headers.get('X-Cache')).toBe('HIT');
+    const cachedPayload = await cacheHit.json() as Array<{ id: string; status: string }>;
+    expect(cachedPayload.find(chapter => chapter.id === 'chapter-cache')?.status).toBe('published');
+
+    await env.CONTENT_KV.delete('subject:subject:chapters');
+    const liveRead = await workerFetch(new Request('http://worker/api/v1/content/chapters/subject'));
+    expect(liveRead.status).toBe(200);
+    expect(liveRead.headers.get('X-Cache')).toBe('MISS');
+    expect(await liveRead.json()).toEqual(cachedPayload);
   });
 
   it('turns interrupted publish work into a retryable partial job', async () => {

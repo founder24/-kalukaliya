@@ -32,6 +32,7 @@ import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters, chunks, contentAuditLog, users } from '../db/schema';
 import { extractBearer, hashPassword, isSessionValid, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import { purgeChapterRag, purgeRagScope, reindexChapterRag } from '../services/rag-indexing';
+import { serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env, JwtPayload } from '../types';
 import type { JWTPayload } from 'jose';
 
@@ -381,33 +382,7 @@ async function kvPrewarm(env: Env, subjectId: string): Promise<void> {
       publishedTopics: chapters.publishedTopics, pyqPdfUrl: chapters.pyqPdfUrl, pyqPapers: chapters.pyqPapers,
     }).from(chapters).where(eq(chapters.subjectId, subjectId)).orderBy(chapters.chapterNumber);
 
-    const payload = chaps.map(ch => {
-      const topics = safeParse<Array<{ title?: unknown; title_as?: unknown }>>(ch.publishedTopics) ?? [];
-      const syllabusTopics = topics.map(topic => typeof topic.title === 'string' ? topic.title.trim() : '').filter(Boolean);
-      const syllabusTopicsAs = topics.map(topic =>
-        typeof topic.title_as === 'string' && topic.title_as.trim()
-          ? topic.title_as.trim()
-          : (typeof topic.title === 'string' ? topic.title.trim() : '')
-      ).filter(Boolean);
-      return {
-        id: ch.id,
-        chapter_id: ch.id,
-        title: ch.title,
-        title_as: ch.titleAs ?? null,
-        slug: ch.slug,
-        slug_as: ch.slugAs ?? null,
-        chapter_number: ch.chapterNumber ?? null,
-        status: ch.status ?? 'draft',
-        notes_generated: Boolean(ch.notesEn),
-        has_assamese: Boolean(ch.notesAs),
-        has_qa: Boolean(ch.qaEn && ch.qaEn !== '[]'),
-        has_pyq: Boolean(ch.pyqPdfUrl) || (safeParse<unknown[]>(ch.pyqPapers) ?? []).length > 0,
-        syllabus_topics: syllabusTopics,
-        syllabus_topics_as: syllabusTopicsAs,
-        topic_count: syllabusTopics.length,
-        content_type: 'chapter',
-      };
-    });
+    const payload = serializePublicChapterList(chaps);
 
     await env.CONTENT_KV.put(
       `subject:${subjectId}:chapters`,
