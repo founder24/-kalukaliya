@@ -29,7 +29,6 @@ import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import {
   streamGenerate,
   generateAssamese,
-  AI_MODEL_ASSAMESE,
   AI_MODEL_PRIMARY,
 } from '../services/ai';
 import {
@@ -1797,7 +1796,6 @@ chatRouter.post('/stream', async (c) => {
     let actualModel  = AI_MODEL_PRIMARY;
     let firstTokenRecorded = false;
     let assameseProseLeakage = false;
-    let lastAssameseHeartbeat = Date.now();
     let analyticsRecorded = false;
     const recordAnalytics = async (
       eventName: 'chat_completion' | 'chat_failure',
@@ -1824,40 +1822,39 @@ chatRouter.post('/stream', async (c) => {
       // Always emit source_card first — client uses this to learn the conversation_id
       await write(sourceCard);
 
-      // ── Stream via Workers AI (primary → fallback handled by service) ──────
+      // English streams through the low-latency model. Assamese is intentionally
+      // generated non-streaming because the route must validate the complete
+      // answer before exposing it, and SEA-LION uses an OpenAI-style response.
       let streamDone = false;
 
       try {
-        for await (const chunk of streamGenerate(c.env.AI, {
-          systemPrompt,
-          userMessage: message,
-          maxTokens: CHAT_MAX_OUTPUT_TOKENS,
-          ...(lang === 'as' && {
-            primaryModel: AI_MODEL_ASSAMESE,
-            fallbackModel: AI_MODEL_PRIMARY,
-          }),
-        })) {
-          // Sentinel chunk carries the resolved model name — do not forward to client
-          if (chunk.startsWith('\x00model:')) {
-            actualModel = chunk.slice(7);
-            continue;
-          }
-          if (lang !== 'as' && !firstTokenRecorded && chunk.length > 0) {
-            timings.first_token_ms = Date.now() - startTime;
-            firstTokenRecorded = true;
-          }
-          const normalizedChunk = lang === 'as'
-            ? normalizeAssameseStreamChunk(chunk)
-            : chunk;
-          fullResponse += normalizedChunk;
-          // Assamese is held until the complete answer can be validated. This
-          // prevents a mixed Hindi/Bengali sentence from reaching the browser
-          // before the route can detect it. English retains true token streaming.
-          if (lang !== 'as') {
-            await write({ content: normalizedChunk, done: false });
-          } else if (Date.now() - lastAssameseHeartbeat >= 1_500) {
-            await write({ event: 'heartbeat', content: '', done: false });
-            lastAssameseHeartbeat = Date.now();
+        if (lang === 'as') {
+          const generated = await generateAssamese(c.env.AI, {
+            systemPrompt,
+            userMessage: message,
+            maxTokens: CHAT_MAX_OUTPUT_TOKENS,
+          }, 8_000);
+          fullResponse = normalizeAssameseStreamChunk(generated.text);
+          actualModel = generated.model;
+          timings.first_token_ms = Date.now() - startTime;
+          firstTokenRecorded = true;
+        } else {
+          for await (const chunk of streamGenerate(c.env.AI, {
+            systemPrompt,
+            userMessage: message,
+            maxTokens: CHAT_MAX_OUTPUT_TOKENS,
+          })) {
+            // Sentinel chunk carries the resolved model name — do not forward to client
+            if (chunk.startsWith('\x00model:')) {
+              actualModel = chunk.slice(7);
+              continue;
+            }
+            if (!firstTokenRecorded && chunk.length > 0) {
+              timings.first_token_ms = Date.now() - startTime;
+              firstTokenRecorded = true;
+            }
+            fullResponse += chunk;
+            await write({ content: chunk, done: false });
           }
         }
         streamDone = true;
