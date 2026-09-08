@@ -3,11 +3,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const cronWorkers = vi.hoisted(() => ({
   resumeSeedRuns: vi.fn(async () => undefined),
   resumePublishJobs: vi.fn(async () => undefined),
+  resumeRagReindexJobs: vi.fn(async () => undefined),
 }));
 
 vi.mock('./routes/admin-content', async importOriginal => ({
   ...(await importOriginal<typeof import('./routes/admin-content')>()),
-  ...cronWorkers,
+  resumeSeedRuns: cronWorkers.resumeSeedRuns,
+  resumePublishJobs: cronWorkers.resumePublishJobs,
+}));
+
+vi.mock('./routes/staff', async importOriginal => ({
+  ...(await importOriginal<typeof import('./routes/staff')>()),
+  resumeRagReindexJobs: cronWorkers.resumeRagReindexJobs,
 }));
 
 import { handleScheduled } from './index';
@@ -39,6 +46,7 @@ describe('scheduled D1 operational persistence', () => {
   beforeEach(() => {
     cronWorkers.resumeSeedRuns.mockReset().mockResolvedValue(undefined);
     cronWorkers.resumePublishJobs.mockReset().mockResolvedValue(undefined);
+    cronWorkers.resumeRagReindexJobs.mockReset().mockResolvedValue(undefined);
   });
 
   it('records a successful invocation and clears the durable failure state', async () => {
@@ -55,6 +63,9 @@ describe('scheduled D1 operational persistence', () => {
     expect(completion?.bindings.slice(1, 4)).toEqual(['succeeded', 0, null]);
     const state = writes.find(write => write.query.includes('INSERT INTO cron_alert_state'));
     expect(state?.bindings.slice(0, 2)).toEqual([0, 0]);
+    expect(cronWorkers.resumeSeedRuns).toHaveBeenCalledTimes(1);
+    expect(cronWorkers.resumePublishJobs).toHaveBeenCalledTimes(1);
+    expect(cronWorkers.resumeRagReindexJobs).toHaveBeenCalledTimes(1);
   });
 
   it('records task failures and activates durable cron alert state', async () => {
@@ -70,6 +81,27 @@ describe('scheduled D1 operational persistence', () => {
     expect(completion?.bindings[1]).toBe('failed');
     expect(completion?.bindings[2]).toBe(1);
     expect(completion?.bindings[3]).toContain('seed resume: seed database unavailable');
+    const state = writes.find(write => write.query.includes('INSERT INTO cron_alert_state'));
+    expect(state?.bindings.slice(0, 2)).toEqual([1, 1]);
+    expect(cronWorkers.resumeRagReindexJobs).toHaveBeenCalledTimes(1);
+  });
+
+  it('accounts for a RAG resume failure without preventing other recovery tasks', async () => {
+    cronWorkers.resumeRagReindexJobs.mockRejectedValueOnce(new Error('RAG lease query unavailable'));
+    const writes: Write[] = [];
+
+    await handleScheduled(
+      { cron: '*/5 * * * *', scheduledTime: 1_735_689_600_000 } as ScheduledController,
+      cronEnv(writes),
+    );
+
+    expect(cronWorkers.resumeSeedRuns).toHaveBeenCalledTimes(1);
+    expect(cronWorkers.resumePublishJobs).toHaveBeenCalledTimes(1);
+    expect(cronWorkers.resumeRagReindexJobs).toHaveBeenCalledTimes(1);
+    const completion = writes.find(write => write.query.includes('UPDATE cron_runs'));
+    expect(completion?.bindings[1]).toBe('failed');
+    expect(completion?.bindings[2]).toBe(1);
+    expect(completion?.bindings[3]).toContain('RAG reindex resume: RAG lease query unavailable');
     const state = writes.find(write => write.query.includes('INSERT INTO cron_alert_state'));
     expect(state?.bindings.slice(0, 2)).toEqual([1, 1]);
   });

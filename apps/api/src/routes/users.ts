@@ -81,12 +81,16 @@ function buildProfileResponse(user: typeof users.$inferSelect): Record<string, u
 
   let savedSubjects: string[] = [];
   try { savedSubjects = JSON.parse(user.savedSubjects ?? '[]') as string[]; } catch { /* leave empty */ }
+  let capabilities: string[] | null = null;
+  try { capabilities = user.capabilities === null ? null : JSON.parse(user.capabilities ?? '[]') as string[]; } catch { capabilities = []; }
 
   return {
     id:                    user.id,
     name:                  user.name ?? '',
     email:                 user.email ?? '',
     role:                  user.role,
+    // null explicitly communicates the backwards-compatible full-staff policy.
+    capabilities,
     subscription_tier:     tier,
     plan:                  tier,             // alias expected by frontend
     monthly_message_count: user.monthlyMessageCount,

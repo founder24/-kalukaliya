@@ -55,6 +55,9 @@ export const users = sqliteTable('users', {
   deletionReason: text('deletion_reason'),
   // Strongly-consistent D1 cutoff for invalidating all older JWT/cookie sessions.
   sessionValidAfter: integer('session_valid_after').default(0),
+  // NULL is intentionally legacy-compatible (all staff capabilities); an
+  // explicit JSON array enables least-privilege staff accounts.
+  capabilities: text('capabilities'),
 
   createdAt: integer('created_at').default(sql`(unixepoch())`),
   updatedAt: integer('updated_at').default(sql`(unixepoch())`),
@@ -391,11 +394,11 @@ export const publishJobs = sqliteTable('publish_jobs', {
   status: text('status').default('pending'),                          // pending | running | done | failed | partial
   progress: text('progress').default('{}'),                           // JSON step progress
   errorLog: text('error_log'),
+  leaseToken: text('lease_token'),
+  leaseExpiresAt: integer('lease_expires_at'),
   createdAt: integer('created_at').default(sql`(unixepoch())`),
   updatedAt: integer('updated_at').default(sql`(unixepoch())`),
   completedAt: integer('completed_at'),
-  leaseToken: text('lease_token'),
-  leaseExpiresAt: integer('lease_expires_at'),
 }, (t) => [
   index('pj_chapter_idx').on(t.chapterId),
   index('pj_status_idx').on(t.status),
@@ -494,6 +497,32 @@ export const emailAlertState = sqliteTable('email_alert_state', {
   alertActive: integer('alert_active').default(0),
   lastAlertAt: integer('last_alert_at'),
   updatedAt: integer('updated_at').default(sql`(unixepoch())`),
+});
+
+export const ragReindexJobs = sqliteTable('rag_reindex_jobs', {
+  id: text('id').primaryKey(),
+  actorId: text('actor_id'),
+  status: text('status').notNull().default('pending'),
+  requestedScopes: text('requested_scopes').notNull().default('["notes"]'),
+  items: text('items').notNull().default('[]'),
+  errorLog: text('error_log'),
+  leaseToken: text('lease_token'),
+  leaseExpiresAt: integer('lease_expires_at'),
+  createdAt: integer('created_at').default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at').default(sql`(unixepoch())`),
+  completedAt: integer('completed_at'),
+}, (t) => [
+  index('rrj_status_updated_idx').on(t.status, t.updatedAt),
+]);
+
+export const destructivePreviewTokens = sqliteTable('destructive_preview_tokens', {
+  id: text('id').primaryKey(),
+  actorId: text('actor_id').notNull(),
+  chapterIds: text('chapter_ids').notNull(),
+  impactHash: text('impact_hash').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  consumedAt: integer('consumed_at'),
+  createdAt: integer('created_at').default(sql`(unixepoch())`),
 });
 
 // Every scheduled invocation has one immutable execution record. The singleton

@@ -545,7 +545,7 @@ describe('Staff chapter edit round-trip through D1', () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { ok: boolean; pyq_pdf_url: string; key: string };
     expect(body.ok).toBe(true);
-    expect(body.key).toBe(`pyq/${chapterId}/test-question-paper.pdf`);
+    expect(body.key).toMatch(new RegExp(`^pyq/${chapterId}/single/[0-9a-f-]+\\.pdf$`));
     expect(body.pyq_pdf_url).toBe(`https://assets.syrabit.ai/${body.key}`);
 
     const stored = await sharedEnv.R2_BUCKET.get(body.key);

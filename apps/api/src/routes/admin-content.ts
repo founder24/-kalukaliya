@@ -12,6 +12,7 @@ import { createDb } from '../db/client';
 import { boards, classes, chapters, publishJobs, seedRuns, streams, subjects, users } from '../db/schema';
 import { extractBearer, isSessionValid, sessionIssuedAt, signAdminToken, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import { generate } from '../services/ai';
+import { reindexChapterRag } from '../services/rag-indexing';
 import type { Env } from '../types';
 
 export const adminContentRouter = new Hono<{ Bindings: Env }>();
@@ -215,6 +216,14 @@ function step(steps: JobStep[], name: string): JobStep {
 async function runNativeReindex(env: Env, chapter: {
   id: string; subjectId: string; notesEn: string | null; notesAs: string | null;
 }): Promise<Record<string, unknown>> {
+  // Publishing and staff editing intentionally share the same cleanup-first
+  // implementation. Do not mark a publish complete when a requested RAG
+  // scope failed: runPublish records this step as failed/partial.
+  const results = await reindexChapterRag(env, chapter.id, ['notes', 'qa', 'pyq']);
+  const failed = Object.entries(results).filter(([, result]) => result.error);
+  if (failed.length) throw new Error(`RAG reindex failed: ${failed.map(([scope, result]) => `${scope}: ${result.error}`).join('; ')}`);
+  return { status: 'done', vectors: Object.values(results).reduce((total, result) => total + result.chunks, 0), results };
+  /*
   const entries: Array<{ id: string; values: number[]; metadata: Record<string, string> }> = [];
   const sources = [
     { medium: 'english', text: chapter.notesEn },
@@ -243,6 +252,7 @@ async function runNativeReindex(env: Env, chapter: {
   await createDb(env.DB).update(chapters).set({ ragIndexedAt: now(), updatedAt: now() })
     .where(eq(chapters.id, chapter.id));
   return { status: entries.length ? 'done' : 'skipped', vectors: entries.length };
+  */
 }
 
 async function runPublish(env: Env, jobId: string, chapterId: string): Promise<void> {
@@ -319,7 +329,9 @@ async function runPublish(env: Env, jobId: string, chapterId: string): Promise<v
       if (!response.ok) throw new Error(`IndexNow returned ${response.status}`);
       return { status: 'done' };
     });
-    await run('rag_reindex', () => runNativeReindex(env, chapter));
+    // Search visibility is a required publish outcome, not an optional
+    // telemetry step. A failed cleanup/index must leave the job retryable.
+    await run('rag_reindex', () => runNativeReindex(env, chapter), true);
     const hasCriticalFailure = ['gcs', 'cloudflare', 'status_update']
       .some(name => step(steps, name).status === 'failed');
     await write(hasCriticalFailure ? 'partial' : 'done', steps,

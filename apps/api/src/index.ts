@@ -18,6 +18,7 @@ import { applyCors } from './middleware/cors';
 import { api } from './routes/index';
 import type { Env } from './types';
 import { resumePublishJobs, resumeSeedRuns } from './routes/admin-content';
+import { resumeRagReindexJobs } from './routes/staff';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -95,6 +96,7 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
   // Resume D1-backed seed plans independently of any request lifetime.
   await runTask('seed resume', () => resumeSeedRuns(env));
   await runTask('publish resume', () => resumePublishJobs(env));
+  await runTask('RAG reindex resume', () => resumeRagReindexJobs(env));
 
   // ── Hourly: clean up expired TTL records ──────────────────────────────────
   if (cronExpr === '0 * * * *') {

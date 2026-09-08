@@ -10,6 +10,7 @@ import AdminDashboard from '@/components/admin/AdminDashboard';
 import AdminAnalytics from '@/components/admin/AdminAnalytics';
 import AdminUsers from '@/components/admin/AdminUsers';
 import AdminConversations from '@/components/admin/AdminConversations';
+import StaffOperations from '@/components/staff/StaffOperations';
 
 const api = () => {
   const token = getToken();
@@ -136,6 +137,49 @@ function TopicsEditor({ topics, onChange }) {
   );
 }
 
+function TopicManager({ chapterId, user, fallbackTopics = [] }) {
+  const [topics, setTopics] = useState(fallbackTopics);
+  const [loading, setLoading] = useState(true);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(null);
+  // Match the worker contract exactly: null retains legacy full access, an
+  // explicit empty list grants none, and absent identity data grants nothing.
+  const allowed = (cap) => user?.role === 'admin' || user?.capabilities === null || (Array.isArray(user?.capabilities) && user.capabilities.includes(cap));
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const res = await api().get(`/staff/content/chapter/${chapterId}/topics`); setTopics(res.data?.topics || []); }
+    catch (error) { toast.error(error?.response?.data?.detail || 'Topics could not be loaded'); }
+    finally { setLoading(false); }
+  }, [chapterId]);
+  useEffect(() => { load(); }, [load]);
+  const add = async () => {
+    if (!draft.trim() || !allowed('content:edit')) return;
+    setBusy('add');
+    try { await api().post(`/staff/content/chapter/${chapterId}/topics`, { title: draft.trim() }); setDraft(''); await load(); toast.success('Topic created'); }
+    catch (error) { toast.error(error?.response?.data?.detail || 'Topic creation failed'); }
+    finally { setBusy(null); }
+  };
+  const action = async (topic, name, body) => {
+    const required = name === 'delete' ? 'content:delete'
+      : name === 'publish' || name === 'unpublish' ? 'content:publish'
+        : name === 'reindex' ? 'rag:reindex' : 'content:edit';
+    if (!allowed(required)) return;
+    if (name === 'delete' && !window.confirm(`Delete topic "${topic.title}"?`)) return;
+    setBusy(`${name}:${topic.id}`);
+    try { await (name === 'delete' ? api().delete(`/staff/content/chapter/${chapterId}/topics/${topic.id}`) : api().post(`/staff/content/chapter/${chapterId}/topics/${topic.id}/${name}`, body || {})); await load(); toast.success(`Topic ${name}d`); }
+    catch (error) { toast.error(error?.response?.data?.detail || `Topic ${name} failed`); }
+    finally { setBusy(null); }
+  };
+  return <div className="space-y-2">
+    {loading ? <div className="h-10 animate-pulse rounded-xl bg-gray-100" /> : topics.map(topic => <div key={topic.id} className="rounded-xl border border-gray-200 bg-white p-2.5">
+      <div className="flex flex-wrap items-center gap-2"><span className="min-w-0 flex-1 text-xs font-semibold text-gray-800">{topic.title}</span><StatusBadge status={topic.status || 'draft'} /></div>
+      <div className="mt-2 flex flex-wrap gap-1.5"><button type="button" disabled={!allowed('content:publish') || busy} onClick={() => action(topic, topic.status === 'published' ? 'unpublish' : 'publish')} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">{topic.status === 'published' ? 'Unpublish' : 'Publish'}</button><button type="button" disabled={!allowed('content:edit') || busy} onClick={() => { const value = window.prompt('Assamese title', topic.title_as || ''); if (value) action(topic, 'translate', { title_as: value }); }} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">Translate</button><button type="button" disabled={!allowed('rag:reindex') || busy} onClick={() => action(topic, 'reindex')} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">Reindex</button><button type="button" disabled={!allowed('content:delete') || busy} onClick={() => action(topic, 'delete')} className="rounded-lg border border-rose-200 px-2 py-1 text-[10px] text-rose-700 disabled:opacity-40">Delete</button></div>
+    </div>)}
+    {!loading && !topics.length && <div className="text-xs text-gray-400">No topics saved on this chapter.</div>}
+    <div className="flex gap-2"><input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} disabled={!allowed('content:edit')} placeholder="Add a topic title" className="min-w-0 flex-1 rounded-xl border border-gray-200 px-3 py-2 text-xs disabled:bg-gray-50" /><button type="button" onClick={add} disabled={!draft.trim() || !allowed('content:edit') || busy} className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Add</button></div>
+  </div>;
+}
+
 function Dot({ filled, label }) {
   return (
     <span
@@ -167,6 +211,7 @@ function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
           <div className="my-2 border-t border-gray-100" />
         </>}
         <SidebarLink active={view === 'subjects' || view === 'chapters'} icon={<GridIcon />} label="Subjects" onClick={() => onViewChange('subjects')} />
+        <SidebarLink active={view === 'operations'} icon={<DatabaseIcon />} label="RAG & lifecycle" onClick={() => onViewChange('operations')} />
       </nav>
       <div className="px-4 py-4 border-t border-gray-100">
         <div className="flex items-center gap-3 mb-3">
@@ -559,6 +604,7 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
   };
 
   const handleDelete = async (paperId) => {
+    if (!window.confirm('Remove this question-paper page? This cannot be undone.')) return;
     setDeletingId(paperId);
     try {
       const res = await api().delete(
@@ -655,13 +701,14 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
 
 // ── Chapter editor ────────────────────────────────────────────────────────────
 
-function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSaved }) {
+function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSaved, user }) {
   const [form,      setForm]      = useState(null);
   const [loading,   setLoading]   = useState(true);
   const [saving,    setSaving]    = useState(false);
   const [reindexing,setReindexing]= useState({});  // { notes: bool, qa: bool }
   const [tab,       setTab]       = useState('info');
   const [subTab,    setSubTab]    = useState({ notes: 'content', questions: 'content' });
+  const allowed = (cap) => user?.role === 'admin' || user?.capabilities === null || (Array.isArray(user?.capabilities) && user.capabilities.includes(cap));
   // pyqUploading / pyqFileRef removed — managed inside PyqPapersEditor
 
   // Load full chapter content on open
@@ -690,7 +737,11 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
     if (!form) return;
     setSaving(true);
     try {
-      await api().patch(`/staff/content/chapter/${chapterId}`, form);
+      // Topics have their own durable API and are intentionally excluded here;
+      // sending the stale editor snapshot could overwrite a topic mutation.
+      const { published_topics: _topics, ...chapterPayload } = form;
+      if (!allowed('content:publish')) delete chapterPayload.status;
+      await api().patch(`/staff/content/chapter/${chapterId}`, chapterPayload);
       toast.success('Chapter saved');
       onSaved(form);
     } catch (err) {
@@ -893,7 +944,7 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <FieldLabel>Status</FieldLabel>
-                  <select value={form?.status || 'draft'} onChange={set('status')} className={`${inputCls} bg-white`}>
+                  <select value={form?.status || 'draft'} onChange={set('status')} disabled={!allowed('content:publish')} className={`${inputCls} bg-white disabled:bg-gray-100 disabled:text-gray-400`}>
                     <option value="planned">Planned</option>
                     <option value="draft">Draft</option>
                     <option value="published">Published</option>
@@ -935,10 +986,7 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                     — each becomes an embedding vector for AI topic matching
                   </span>
                 </FieldLabel>
-                <TopicsEditor
-                  topics={form?.published_topics || []}
-                  onChange={topics => setForm(f => ({ ...f, published_topics: topics }))}
-                />
+                <TopicManager chapterId={chapterId} user={user} fallbackTopics={form?.published_topics || []} />
                 {(form?.published_topics || []).length > 0 && (
                   <p className="mt-1.5 text-[11px] text-gray-400">
                     {(form?.published_topics || []).length} topic{(form?.published_topics || []).length !== 1 ? 's' : ''} · saved with the chapter · re-embedded on next publish
@@ -1721,6 +1769,7 @@ function SubjectPYQsView({ subjectId }) {
   };
 
   const handleDelete = async (paperId) => {
+    if (!window.confirm('Delete this question paper? Its searchable vectors will also be removed.')) return;
     setDeletingId(paperId);
     try {
       const res = await api().delete(`/staff/content/subject/${subjectId}/pyq-papers/${paperId}`);
@@ -2378,6 +2427,7 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
   const initialSection = searchParams.get('section')?.toLowerCase();
 
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
+  const mobileMenuButtonRef = useRef(null);
   const [changePwOpen, setChangePwOpen] = useState(false);
   const [view,         setView]         = useState(
     commandSections.includes(initialSection) ? 'analytics' : 'subjects',
@@ -2396,7 +2446,25 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
   const [loadingChapters, setLoadingChapters] = useState(false);
   const [chapterError, setChapterError] = useState(null);
   const [editingChapterId, setEditingChapterId] = useState(null);
-  const isAdmin = user?.role === 'admin' || adminCookieAccess;
+  const parsedCapabilities = user?.capabilities === null
+    ? null
+    : Array.isArray(user?.capabilities)
+    ? user.capabilities
+    : typeof user?.capabilities === 'string'
+      ? (() => { try { const parsed = JSON.parse(user.capabilities); return Array.isArray(parsed) ? parsed : []; } catch { return []; } })()
+      : undefined;
+  const effectiveUser = user
+    ? { ...user, capabilities: parsedCapabilities }
+    : (adminCookieAccess ? { role: 'admin', name: 'Administrator', capabilities: null } : null);
+  const isAdmin = effectiveUser?.role === 'admin';
+  useEffect(() => {
+    if (!sidebarOpen) return undefined;
+    const onKeyDown = (event) => { if (event.key === 'Escape') { setSidebarOpen(false); mobileMenuButtonRef.current?.focus(); } };
+    document.addEventListener('keydown', onKeyDown);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKeyDown); document.body.style.overflow = previous; };
+  }, [sidebarOpen]);
 
   const handleAccessError = useCallback((error, fallbackMessage) => {
     const status = error?.response?.status;
@@ -2555,22 +2623,22 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
       {/* Desktop sidebar */}
       <div className="hidden lg:flex lg:w-64 lg:flex-shrink-0">
         <div className="w-full h-full">
-          <Sidebar user={adminCookieAccess && !user ? { role: 'admin', name: 'Administrator' } : user} onLogout={handleLogout} view={view} onViewChange={handleViewChange} onChangePassword={() => { setSidebarOpen(false); setChangePwOpen(true); }} />
+          <Sidebar user={effectiveUser} onLogout={handleLogout} view={view} onViewChange={handleViewChange} onChangePassword={() => { setSidebarOpen(false); setChangePwOpen(true); }} />
         </div>
       </div>
 
       {/* Mobile drawer backdrop */}
-      {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
 
       {/* Mobile drawer */}
-      <div className={`fixed inset-y-0 left-0 z-50 w-72 lg:hidden transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <Sidebar user={adminCookieAccess && !user ? { role: 'admin', name: 'Administrator' } : user} onLogout={handleLogout} view={view} onViewChange={handleViewChange} onChangePassword={() => { setSidebarOpen(false); setChangePwOpen(true); }} />
+      <div id="staff-mobile-drawer" role="dialog" aria-modal="true" aria-label="Staff navigation" className={`fixed inset-y-0 left-0 z-50 w-72 lg:hidden transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <Sidebar user={effectiveUser} onLogout={handleLogout} view={view} onViewChange={handleViewChange} onChangePassword={() => { setSidebarOpen(false); setChangePwOpen(true); }} />
       </div>
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="lg:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100 flex-shrink-0 shadow-sm">
-          <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-xl text-gray-500 hover:bg-gray-100 transition-colors" aria-label="Open menu"><HamburgerIcon /></button>
+          <button ref={mobileMenuButtonRef} onClick={() => setSidebarOpen(true)} className="p-2 rounded-xl text-gray-500 hover:bg-gray-100 transition-colors" aria-label="Open menu" aria-expanded={sidebarOpen} aria-controls="staff-mobile-drawer"><HamburgerIcon /></button>
           <div className="flex items-center gap-2">
             <img src="/logo-144.webp" alt="" className="w-7 h-7 rounded-lg object-cover" />
             <span className="font-bold text-gray-900 text-sm">Staff Portal</span>
@@ -2593,6 +2661,15 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
           {view === 'conversations' && (
             <AdminConversations adminToken={adminToken} onNavigate={handleAdminNavigate} />
           )}
+          {view === 'operations' && (
+            <StaffOperations
+              user={effectiveUser}
+              subjects={subjects}
+              chapters={chapters}
+              selectedSubject={selectedSubject}
+              onRefresh={() => selectedSubject && selectSubject(selectedSubject)}
+            />
+          )}
           {view === 'subjects' && (
             <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} error={contentError} onRetry={loadContent} onSelectSubject={selectSubject} onSubjectCreated={handleSubjectCreated} />
           )}
@@ -2610,6 +2687,7 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
           chapterId={editingChapterId}
           subjectName={selectedSubject?.name || ''}
           subjectContext={subjectContext}
+          user={effectiveUser}
           onClose={() => setEditingChapterId(null)}
           onSaved={handleChapterSaved}
         />
@@ -2628,6 +2706,9 @@ function HamburgerIcon() {
 }
 function GridIcon() {
   return <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>;
+}
+function DatabaseIcon() {
+  return <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="8" ry="3" /><path strokeLinecap="round" d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7" /></svg>;
 }
 function DashboardIcon() {
   return <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>;
