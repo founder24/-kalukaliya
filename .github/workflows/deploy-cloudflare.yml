@@ -335,18 +335,32 @@ jobs:
       - name: Verify edge Worker secret names
         run: |
           set -euo pipefail
-          secret_list="$(pnpm --filter syrabit-edge exec wrangler secret list --env production --format json)"
-          printf '%s' "$secret_list" | python3 -c '
-          import json
-          import sys
-          required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}
-          configured = {item["name"] for item in json.load(sys.stdin)}
-          missing = sorted(required - configured)
-          if missing:
-              print("Cloudflare edge Worker secret provisioning is incomplete: " + ", ".join(missing))
-              raise SystemExit(1)
-          print("Required edge Worker secret names are present.")
-          '
+          for attempt in 1 2 3 4 5; do
+            secret_list="$(pnpm --filter syrabit-edge exec wrangler secret list --env production --format json)"
+            if printf '%s' "$secret_list" | python3 -c '
+            import json
+            import sys
+            required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}
+            configured = {item["name"] for item in json.load(sys.stdin)}
+            raise SystemExit(0 if required <= configured else 1)
+            '; then
+              echo "Required edge Worker secret names are present."
+              break
+            fi
+            if [[ "$attempt" == 5 ]]; then
+              echo "::error::Cloudflare edge Worker secret provisioning remained incomplete after retries."
+              printf '%s' "$secret_list" | python3 -c '
+              import json
+              import sys
+              required = {"JWT_SECRET", "EDGE_SHARED_SECRET"}
+              configured = {item["name"] for item in json.load(sys.stdin)}
+              print("Missing secret names: " + ", ".join(sorted(required - configured)))
+              '
+              exit 1
+            fi
+            echo "Secret metadata has not propagated yet; retrying ($attempt/5)."
+            sleep 3
+          done
 
       - name: Guard against sentinel KV IDs
         run: |
