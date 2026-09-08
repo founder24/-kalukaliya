@@ -29,6 +29,8 @@ def main() -> int:
     edge = tomllib.loads((ROOT / "apps/edge/wrangler.toml").read_text())
     routes = json.loads((ROOT / "apps/frontend/public/_routes.json").read_text())
     worker = (ROOT / "apps/frontend/public/_worker.js").read_text()
+    release = (ROOT / ".github/workflows/deploy-cloudflare.yml").read_text()
+    indexnow_submitter = (ROOT / "apps/frontend/scripts/indexnow-submit.mjs").read_text()
     errors: list[str] = []
 
     errors += require("API D1 bindings", binding_names(api, "d1_databases"), {"DB"})
@@ -59,6 +61,15 @@ def main() -> int:
     for marker in ("SEO_PASSTHROUGH_RE", "bot-render-not-found", "env.ASSETS.fetch"):
         if marker not in worker:
             errors.append(f"Pages custom Worker is missing required behavior marker: {marker}")
+
+    for marker in (
+        "INDEXNOW_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}",
+        "INDEXNOW_BACKEND_URL: https://api.syrabit.ai",
+    ):
+        if marker not in release:
+            errors.append(f"Cloudflare release is missing required IndexNow wiring: {marker}")
+    if 'process.env.INDEXNOW_BACKEND_URL || "https://api.syrabit.ai"' not in indexnow_submitter:
+        errors.append("IndexNow submitter must default to the production API origin")
 
     if errors:
         print("Cloudflare release configuration is incomplete:", file=sys.stderr)

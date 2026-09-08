@@ -217,7 +217,6 @@ configRouter.get('/trustpilot/aggregate', async (c) => {
 indexNowRouter.post('/submit', async (c) => {
   const suppliedSecret = c.req.header('X-IndexNow-Secret');
   if (!suppliedSecret) return c.json({ detail: 'Missing IndexNow secret' }, 403);
-  if (!c.env.INDEXNOW_API_KEY) return c.json({ detail: 'INDEXNOW_API_KEY not configured' }, 500);
   if (!c.env.INDEXNOW_INTERNAL_SECRET) {
     return c.json({ detail: 'INDEXNOW_INTERNAL_SECRET not configured' }, 500);
   }
@@ -239,22 +238,40 @@ indexNowRouter.post('/submit', async (c) => {
   if (urls.length === 0) {
     return c.json({ submitted: 0, failed: 0, detail: 'No URLs provided' });
   }
+  if (!c.env.INDEXNOW_API_KEY) return c.json({ detail: 'INDEXNOW_API_KEY not configured' }, 500);
 
   let submitted = 0;
   let failed = 0;
   for (let i = 0; i < urls.length; i += 100) {
     const batch = urls.slice(i, i + 100);
-    try {
-      const response = await fetch('https://api.indexnow.org/indexnow', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ host: 'syrabit.ai', key: c.env.INDEXNOW_API_KEY, urlList: batch }),
-      });
-      if (response.status === 200 || response.status === 202) submitted += batch.length;
-      else failed += batch.length;
-    } catch {
-      failed += batch.length;
+    const payload = JSON.stringify({
+      host: 'syrabit.ai',
+      key: c.env.INDEXNOW_API_KEY,
+      keyLocation: `https://syrabit.ai/${c.env.INDEXNOW_API_KEY}.txt`,
+      urlList: batch,
+    });
+    let accepted = false;
+    for (const endpoint of [
+      'https://www.bing.com/indexnow',
+      'https://yandex.com/indexnow',
+      'https://searchadvisor.naver.com/indexnow',
+    ]) {
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+        });
+        if (response.status === 200 || response.status === 202) {
+          accepted = true;
+          break;
+        }
+      } catch {
+        // Try the next participating IndexNow endpoint.
+      }
     }
+    if (accepted) submitted += batch.length;
+    else failed += batch.length;
   }
 
   return c.json({

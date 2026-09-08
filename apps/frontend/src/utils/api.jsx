@@ -63,6 +63,27 @@ const RETRY_CODES = new Set([408, 429, 500, 502, 503, 504]);
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
 
+// Cookie-authenticated admin pages pass a non-secret sentinel so deeply nested
+// panels know they are allowed to load. Never send that sentinel as a bearer
+// or legacy admin token; strip it centrally and let the HttpOnly cookie travel.
+axios.interceptors.request.use((config) => {
+  const headers = config.headers;
+  const authorization = headers?.get?.('Authorization') ?? headers?.Authorization;
+  const legacyAdminToken = headers?.get?.('X-Admin-Token') ?? headers?.['X-Admin-Token'];
+  if (authorization === 'Bearer cookie' || legacyAdminToken === 'cookie') {
+    if (authorization === 'Bearer cookie') {
+      if (headers?.delete) headers.delete('Authorization');
+      else delete headers.Authorization;
+    }
+    if (legacyAdminToken === 'cookie') {
+      if (headers?.delete) headers.delete('X-Admin-Token');
+      else delete headers['X-Admin-Token'];
+    }
+    config.withCredentials = true;
+  }
+  return config;
+});
+
 axios.interceptors.response.use(
   (response) => response,
   async (error) => {

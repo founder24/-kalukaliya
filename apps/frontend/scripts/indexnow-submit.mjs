@@ -4,7 +4,8 @@
  *
  * Env vars:
  *   INDEXNOW_SECRET       - shared secret for the backend X-IndexNow-Secret header
- *   INDEXNOW_BACKEND_URL  - backend base URL (default: https://syrabit.ai)
+ *   INDEXNOW_BACKEND_URL  - backend base URL (default: https://api.syrabit.ai)
+ *   INDEXNOW_API_KEY      - ownership key used only by --verify-key-file
  */
 
 import fs from "fs";
@@ -14,9 +15,28 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
 const SITE_ORIGIN = "https://syrabit.ai";
-const BACKEND_URL = process.env.INDEXNOW_BACKEND_URL || SITE_ORIGIN;
+const BACKEND_URL = process.env.INDEXNOW_BACKEND_URL || "https://api.syrabit.ai";
 const SECRET = process.env.INDEXNOW_SECRET || "";
 const BATCH_SIZE = 100;
+
+function verifyKeyFile(directory) {
+  const key = process.env.INDEXNOW_API_KEY || "";
+  if (!key) {
+    throw new Error("INDEXNOW_API_KEY is required to verify the ownership file");
+  }
+
+  const keyFile = path.join(directory, `${key}.txt`);
+  if (!fs.existsSync(keyFile)) {
+    throw new Error("The IndexNow ownership file for the configured release key is missing");
+  }
+
+  const contents = fs.readFileSync(keyFile, "utf8").replace(/[\r\n]/g, "");
+  if (contents !== key) {
+    throw new Error("The IndexNow ownership file does not match the configured release key");
+  }
+
+  console.log("[indexnow-submit] IndexNow ownership file matches the configured release key");
+}
 
 function discoverUrls() {
   const urls = [];
@@ -101,8 +121,18 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error("[indexnow-submit] Fatal error:", err);
-  // Non-fatal: don't fail the deploy if IndexNow is unreachable
-  process.exit(0);
-});
+if (process.argv[2] === "--verify-key-file") {
+  try {
+    const directory = path.resolve(process.argv[3] || distDir);
+    verifyKeyFile(directory);
+  } catch (err) {
+    console.error(`[indexnow-submit] Ownership verification failed: ${err.message}`);
+    process.exit(1);
+  }
+} else {
+  main().catch((err) => {
+    console.error("[indexnow-submit] Fatal error:", err);
+    // Non-fatal: don't fail the deploy if IndexNow is unreachable
+    process.exit(0);
+  });
+}

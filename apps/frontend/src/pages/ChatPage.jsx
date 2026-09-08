@@ -193,7 +193,7 @@ export default function ChatPage() {
     apiClient().get('/user/credits', creditHeaders ? { headers: creditHeaders } : undefined)
       .then((res) => {
         const c = res.data;
-        setCredits({ used: c.credits_used ?? c.used ?? 0, limit: c.monthly_limit ?? c.limit ?? null });
+        setCredits({ used: c.credits_used ?? c.used ?? 0, limit: c.daily_limit ?? c.monthly_limit ?? c.limit ?? null });
       })
       .catch(() => {});
   }, [authChecked, user, creditsRefreshKey]);
@@ -641,16 +641,22 @@ export default function ChatPage() {
       };
       let sseBuffer = '';
       let streamCompleted = false;
-      while (true) {
+      let sawDoneMarker = false;
+      while (!sawDoneMarker) {
         const { value, done } = await reader.read();
-        if (done) break;
-        sseBuffer += decoder.decode(value, { stream: true });
-        const lines = sseBuffer.split('\n');
-        sseBuffer = lines.pop() || '';
+        sseBuffer += done
+          ? decoder.decode()
+          : decoder.decode(value, { stream: true });
+        if (done && sseBuffer) sseBuffer += '\n';
+        const lines = sseBuffer.split(/\r?\n/);
+        sseBuffer = done ? '' : (lines.pop() || '');
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const raw = line.slice(6);
-          if (raw === '[DONE]') break;
+          if (!line.startsWith('data:')) continue;
+          const raw = line.slice(5).trimStart();
+          if (raw === '[DONE]') {
+            sawDoneMarker = true;
+            break;
+          }
           let parsed;
           try { parsed = JSON.parse(raw); } catch { continue; }
           if (parsed.conversation_id) meta.convId = parsed.conversation_id;
@@ -773,9 +779,16 @@ export default function ChatPage() {
             } catch {}
           }
         }
+        if (done) break;
       }
       if (!streamCompleted && !meta.hasError) {
         throw new TypeError('Chat stream ended before completion');
+      }
+      if (meta.hasError) {
+        if (flushTimer) clearTimeout(flushTimer);
+        pendingChunk = '';
+        setSyncState('idle');
+        return;
       }
       // Task #796 — anon SSE stream omits credits_used_total /
       // remaining_credits (the chat route only emits them when

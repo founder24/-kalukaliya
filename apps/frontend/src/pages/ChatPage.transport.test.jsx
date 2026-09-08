@@ -59,6 +59,7 @@ vi.mock('./chat/MessageBubble', () => ({
           <span data-testid="failure-stage">{msg.failureStage}</span>
         </div>
       )}
+      {msg.isAiUnavailable && <div data-testid="ai-unavailable-card">AI unavailable</div>}
       {!msg.isAiUnavailable && msg.role === 'assistant' && (
         <span data-testid="assistant-content">{msg.content}</span>
       )}
@@ -153,6 +154,22 @@ function disconnectedStream() {
   });
 }
 
+function chunkedStream(chunks, { close = true } = {}) {
+  const encoder = new TextEncoder();
+  const encoded = chunks.map((chunk) =>
+    typeof chunk === 'string' ? encoder.encode(chunk) : chunk
+  );
+  return new Response(new ReadableStream({
+    start(controller) {
+      encoded.forEach((chunk) => controller.enqueue(chunk));
+      if (close) controller.close();
+    },
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
+}
+
 describe('ChatPage transport recovery', () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -217,5 +234,51 @@ describe('ChatPage transport recovery', () => {
     expect(screen.getAllByText('Explain gravity')).toHaveLength(1);
 
     expect(await screen.findByText('Gravity attracts masses.')).toBeInTheDocument();
+  });
+
+  it('keeps a terminal SSE error as an error card instead of overwriting it with an empty success', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => chunkedStream([
+      `data: ${JSON.stringify({
+        error: 'The AI provider is temporarily unavailable.',
+        error_kind: 'provider_unavailable',
+        failure_stage: 'provider_stream',
+      })}\n\n`,
+    ])));
+    render(<ChatPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
+
+    expect(await screen.findByTestId('ai-unavailable-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-content')).not.toBeInTheDocument();
+  });
+
+  it('parses fragmented UTF-8, CRLF framing, and a final unterminated event', async () => {
+    const encoder = new TextEncoder();
+    const prefix = encoder.encode(`data:${JSON.stringify({ content: 'অসমীয়া' })}\r\n\r\n`);
+    const done = encoder.encode(`data:${JSON.stringify({ event: 'syrabit_done', done: true })}`);
+    vi.stubGlobal('fetch', vi.fn(async () => chunkedStream([
+      prefix.slice(0, 9),
+      prefix.slice(9, 14),
+      prefix.slice(14),
+      done,
+    ])));
+    render(<ChatPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
+
+    expect(await screen.findByText('অসমীয়া')).toBeInTheDocument();
+  });
+
+  it('stops reading after the SSE done marker', async () => {
+    const body =
+      `data: ${JSON.stringify({ content: 'Complete answer' })}\n\n` +
+      `data: ${JSON.stringify({ event: 'syrabit_done', done: true })}\n\n` +
+      'data: [DONE]\n\n';
+    vi.stubGlobal('fetch', vi.fn(async () => chunkedStream([body], { close: false })));
+    render(<ChatPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
+
+    expect(await screen.findByText('Complete answer')).toBeInTheDocument();
   });
 });

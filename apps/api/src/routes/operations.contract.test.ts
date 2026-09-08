@@ -262,6 +262,30 @@ describe('Worker-native site-operation routes', () => {
     expect(outboundFetch).not.toHaveBeenCalled();
   });
 
+  it('authenticates an empty IndexNow proof without requiring the external API key', async () => {
+    const outboundFetch = vi.fn();
+    vi.stubGlobal('fetch', outboundFetch);
+    const env = testEnv();
+    delete env.INDEXNOW_API_KEY;
+
+    const response = await api.fetch(request('/api/v1/indexnow/submit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-IndexNow-Secret': 'submission-secret',
+      },
+      body: JSON.stringify({ urls: [] }),
+    }), env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      submitted: 0,
+      failed: 0,
+      detail: 'No URLs provided',
+    });
+    expect(outboundFetch).not.toHaveBeenCalled();
+  });
+
   it('serves changelog and D1-derived crawler artifacts with their expected contracts', async () => {
     const env = testEnv();
     const [changelog, sitemap, jsonFeed, rssFeed, notesFeed, llms] = await Promise.all([

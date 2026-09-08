@@ -377,6 +377,8 @@ describe('anonymous identity flow', () => {
       anon_id: ANON_ID,
       credits_used: 1,
       credits_remaining: 29,
+      daily_limit: 30,
+      quota_period: 'daily',
       monthly_limit: 30,
     });
 
@@ -409,6 +411,8 @@ describe('anonymous identity flow', () => {
       anon_id: OTHER_ANON_ID,
       credits_used: 0,
       credits_remaining: 30,
+      daily_limit: 30,
+      quota_period: 'daily',
       monthly_limit: 30,
     });
 

@@ -8,7 +8,10 @@
 
 export const BROWSER_ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
 export const ANONYMOUS_COOKIE_NAME = 'syrabit_anon_id';
-export const ANONYMOUS_MONTHLY_LIMIT = 30;
+export const ANONYMOUS_DAILY_LIMIT = 30;
+// Kept as an import-compatible alias while callers migrate their response
+// field names. Anonymous quota itself resets daily.
+export const ANONYMOUS_MONTHLY_LIMIT = ANONYMOUS_DAILY_LIMIT;
 const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/;
 
 export function isBrowserAnonId(value: string | null | undefined): value is string {
@@ -16,8 +19,7 @@ export function isBrowserAnonId(value: string | null | undefined): value is stri
 }
 
 export function currentQuotaPeriod(): string {
-  const d = new Date();
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  return new Date().toISOString().slice(0, 10);
 }
 
 function cookieValue(cookieHeader: string, name: string): string | null {

@@ -15,6 +15,9 @@
 # not a bearer token. This preserves the production admin-cookie contract
 # through the public edge without exposing the token in logs.
 # Set CUTOVER_STAGE=public only for a deliberately public-only preflight.
+# Set CUTOVER_STAFF_AUTH_ONLY=true with CUTOVER_STAFF_EMAIL and
+# CUTOVER_STAFF_PASSWORD plus its future CUTOVER_STAFF_LEASE_EXPIRES_AT Unix
+# timestamp to validate a release-created disposable admin fixture.
 #
 # Commercial endpoints are checked as retired (HTTP 410); this validation never
 # creates payment records or changes a user's entitlement.
@@ -22,8 +25,13 @@ set -euo pipefail
 
 : "${PUBLIC_EDGE_URL:?Set PUBLIC_EDGE_URL to the deployed edge API origin}"
 RESET_ONLY="${CUTOVER_RESET_ONLY:-false}"
+CUTOVER_STAFF_AUTH_ONLY="${CUTOVER_STAFF_AUTH_ONLY:-false}"
 if [[ "$RESET_ONLY" != "true" && "$RESET_ONLY" != "false" ]]; then
   echo "CUTOVER_RESET_ONLY must be true or false." >&2
+  exit 1
+fi
+if [[ "$CUTOVER_STAFF_AUTH_ONLY" != "true" && "$CUTOVER_STAFF_AUTH_ONLY" != "false" ]]; then
+  echo "CUTOVER_STAFF_AUTH_ONLY must be true or false." >&2
   exit 1
 fi
 if [[ "$RESET_ONLY" != "true" ]]; then
@@ -35,6 +43,165 @@ SITE_BASE="${PUBLIC_SITE_URL:-https://syrabit.ai}"
 TMP_FILES=()
 cleanup() { rm -f "${TMP_FILES[@]}"; }
 trap cleanup EXIT
+
+run_disposable_staff_auth_check() {
+  local required_var cookie_jar login_body response headers status access_token refresh_token now
+  for required_var in CUTOVER_STAFF_EMAIL CUTOVER_STAFF_PASSWORD CUTOVER_STAFF_LEASE_EXPIRES_AT CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET; do
+    : "${!required_var:?Set ${required_var} for disposable staff authentication validation}"
+  done
+  if [[ "${CUTOVER_STAFF_EMAIL,,}" != *release-staff-auth* ]]; then
+    echo "CUTOVER_STAFF_EMAIL must identify a disposable release-staff-auth fixture." >&2
+    exit 1
+  fi
+  [[ "$CUTOVER_STAFF_LEASE_EXPIRES_AT" =~ ^[0-9]+$ ]] || {
+    echo "CUTOVER_STAFF_LEASE_EXPIRES_AT must be a Unix timestamp." >&2
+    exit 1
+  }
+  now="$(date -u +%s)"
+  (( CUTOVER_STAFF_LEASE_EXPIRES_AT > now )) || {
+    echo "Disposable staff authentication lease is already expired." >&2
+    exit 1
+  }
+
+  cookie_jar=$(mktemp)
+  response=$(mktemp)
+  headers=$(mktemp)
+  TMP_FILES+=("$cookie_jar" "$response" "$headers")
+  login_body=$(CUTOVER_STAFF_EMAIL="$CUTOVER_STAFF_EMAIL" CUTOVER_STAFF_PASSWORD="$CUTOVER_STAFF_PASSWORD" python3 -c '
+import json, os
+print(json.dumps({"email": os.environ["CUTOVER_STAFF_EMAIL"], "password": os.environ["CUTOVER_STAFF_PASSWORD"]}))
+')
+
+  status=$(curl --silent --show-error --max-time 30 \
+    --request POST --header 'Content-Type: application/json' \
+    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    --data "$login_body" --cookie-jar "$cookie_jar" \
+    --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
+    "${EDGE_BASE}/api/v1/admin/login")
+  test "$status" = "200" || {
+    echo "Disposable admin-cookie login failed with HTTP ${status}; response suppressed." >&2
+    exit 1
+  }
+  grep -qi '^x-syrabit-route: worker-native' "$headers"
+  grep -q $'\tsyrabit_admin_session\t' "$cookie_jar" || {
+    echo "Disposable admin-cookie login did not set the session cookie." >&2
+    exit 1
+  }
+  python3 - "$response" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+assert payload.get("status") == "ok" and payload.get("user_id")
+PY
+
+  for days in 7 30; do
+    status=$(curl --silent --show-error --max-time 30 \
+      --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+      --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+      --cookie "$cookie_jar" --output "$response" --write-out '%{http_code}' \
+      "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=${days}")
+    test "$status" = "200" || {
+      echo "Admin-cookie ${days}-day command-center read failed with HTTP ${status}; response suppressed." >&2
+      exit 1
+    }
+    python3 - "$response" "$days" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+assert payload.get("days") == int(sys.argv[2])
+assert {"users", "content", "rag", "chat", "ads", "consent", "incidents", "audit"} <= set(payload)
+PY
+  done
+
+  status=$(curl --silent --show-error --max-time 30 \
+    --request POST --header 'Content-Type: application/json' \
+    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    --data "$login_body" --output "$response" --write-out '%{http_code}' \
+    "${EDGE_BASE}/api/v1/auth/login")
+  test "$status" = "200" || {
+    echo "Disposable bearer login failed with HTTP ${status}; response suppressed." >&2
+    exit 1
+  }
+  auth_tokens_output=$(python3 - "$response" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+access = payload.get("access_token")
+refresh = payload.get("refresh_token")
+assert isinstance(access, str) and access and isinstance(refresh, str) and refresh
+print(access)
+print(refresh)
+PY
+)
+  readarray -t auth_tokens <<<"$auth_tokens_output"
+  test "${#auth_tokens[@]}" = "2" || {
+    echo "Bearer login response did not contain exactly two session tokens." >&2
+    exit 1
+  }
+  access_token="${auth_tokens[0]}"
+  refresh_token="${auth_tokens[1]}"
+
+  status=$(curl --silent --show-error --max-time 30 \
+    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    --header "Authorization: Bearer ${access_token}" \
+    --output "$response" --write-out '%{http_code}' \
+    "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=7")
+  test "$status" = "200" || {
+    echo "Bearer command-center read failed with HTTP ${status}; response suppressed." >&2
+    exit 1
+  }
+  python3 - "$response" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+assert payload.get("days") == 7 and isinstance(payload.get("users"), dict)
+PY
+
+  logout_body=$(CUTOVER_REFRESH_TOKEN="$refresh_token" python3 -c '
+import json, os
+print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
+')
+  status=$(curl --silent --show-error --max-time 30 \
+    --request POST --header 'Content-Type: application/json' \
+    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    --header "Authorization: Bearer ${access_token}" \
+    --data "$logout_body" --output "$response" --write-out '%{http_code}' \
+    "${EDGE_BASE}/api/v1/auth/logout")
+  test "$status" = "200" || {
+    echo "Bearer logout failed with HTTP ${status}; response suppressed." >&2
+    exit 1
+  }
+
+  status=$(curl --silent --show-error --max-time 30 \
+    --request POST --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    --cookie "$cookie_jar" --cookie-jar "$cookie_jar" \
+    --output "$response" --write-out '%{http_code}' \
+    "${EDGE_BASE}/api/v1/admin/logout")
+  test "$status" = "200" || {
+    echo "Admin-cookie logout failed with HTTP ${status}; response suppressed." >&2
+    exit 1
+  }
+  status=$(curl --silent --show-error --max-time 30 \
+    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    --cookie "$cookie_jar" --output "$response" --write-out '%{http_code}' \
+    "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=7")
+  test "$status" = "401" || {
+    echo "Post-logout command-center request returned HTTP ${status}, expected 401; response suppressed." >&2
+    exit 1
+  }
+  echo "Disposable staff cookie and bearer authentication lifecycle passed."
+}
+
+if [[ "$CUTOVER_STAFF_AUTH_ONLY" == "true" ]]; then
+  run_disposable_staff_auth_check
+  exit 0
+fi
 
 if [[ "$RESET_ONLY" != "true" && "${CUTOVER_STAGE:-full}" != "public" ]]; then
   : "${STUDENT_TOKEN:?Set STUDENT_TOKEN for authenticated student checks}"

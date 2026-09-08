@@ -385,6 +385,7 @@ usersRouter.get('/credits', async (c) => {
     credits_remaining: creditsRemaining,
     credits_used: creditsUsed,
     monthly_limit: monthlyLimit,
+    ...(anonymousId ? { daily_limit: monthlyLimit, quota_period: 'daily' } : {}),
     tier,
     ...(anonymousId ? { anon_id: anonymousId } : {}),
   });

@@ -27,7 +27,7 @@ const api = () => {
         setAuthToken(null);
         toast.error('Your session has expired. Please sign in again.');
         if (window.location.pathname.startsWith('/staff')) {
-          window.location.assign('/login');
+          window.location.assign(token ? '/login' : '/admin/login');
         }
       } else if (status === 403) {
         toast.error('Your account does not have permission for that staff action.');
@@ -2077,7 +2077,7 @@ function SubjectPYQsView({ subjectId }) {
 
 // ── Subjects view ─────────────────────────────────────────────────────────────
 
-function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSubject, onSubjectCreated }) {
+function SubjectsView({ subjects, boards, classes, streams, loading, error, onRetry, onSelectSubject, onSubjectCreated }) {
   const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400';
   const [search,       setSearch]       = useState('');
   const [filterBoard,  setFilterBoard]  = useState('');
@@ -2312,6 +2312,14 @@ function SubjectsView({ subjects, boards, classes, streams, loading, onSelectSub
       <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
         {loading ? (
           <div className="flex justify-center py-20"><Spinner /></div>
+        ) : error ? (
+          <div className="mx-auto max-w-md py-20 text-center">
+            <p className="text-sm font-semibold text-red-700">Content could not be loaded</p>
+            <p className="mt-1 text-xs text-gray-500">{error}</p>
+            <button type="button" onClick={onRetry} className="mt-4 px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700">
+              Try again
+            </button>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-20 text-gray-400 text-sm">
             {subjects.length === 0 ? 'No subjects found.' : 'No subjects match the filter.'}
@@ -2380,11 +2388,13 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
   const [streams,  setStreams]  = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [loading,  setLoading]  = useState(true);
+  const [contentError, setContentError] = useState(null);
 
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [subjectContext,  setSubjectContext]  = useState(null); // { board, cls, course }
   const [chapters,        setChapters]        = useState([]);
   const [loadingChapters, setLoadingChapters] = useState(false);
+  const [chapterError, setChapterError] = useState(null);
   const [editingChapterId, setEditingChapterId] = useState(null);
   const isAdmin = user?.role === 'admin' || adminCookieAccess;
 
@@ -2394,32 +2404,38 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
     toast.error(error?.response?.data?.detail || fallbackMessage);
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [br, cl, st, su] = await Promise.all([
-          api().get('/staff/content/boards'),
-          api().get('/staff/content/classes'),
-          api().get('/staff/content/streams'),
-          api().get('/staff/content/subjects'),
-        ]);
-        setBoards(br.data);
-        setClasses(cl.data);
-        setStreams(st.data);
-        setSubjects(su.data);
-      } catch (error) {
-        handleAccessError(error, 'Failed to load content. Please refresh.');
-      } finally {
-        setLoading(false);
+  const loadContent = useCallback(async () => {
+    setLoading(true);
+    setContentError(null);
+    const results = await Promise.allSettled([
+      api().get('/staff/content/boards'),
+      api().get('/staff/content/classes'),
+      api().get('/staff/content/streams'),
+      api().get('/staff/content/subjects'),
+    ]);
+    const setters = [setBoards, setClasses, setStreams, setSubjects];
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') setters[index](result.value.data);
+    });
+    const failures = results.filter(result => result.status === 'rejected');
+    if (failures.length > 0) {
+      const firstError = failures[0].reason;
+      handleAccessError(firstError, 'Failed to load some staff content.');
+      if (failures.length === results.length) {
+        setContentError('The staff content service is currently unavailable.');
       }
-    })();
+    }
+    setLoading(false);
   }, [handleAccessError]);
+
+  useEffect(() => { loadContent(); }, [loadContent]);
 
   const selectSubject = useCallback(async (subj) => {
     setSelectedSubject(subj);
     setChapters([]);
     setView('chapters');
     setLoadingChapters(true);
+    setChapterError(null);
     // Resolve Board → Class → Course names for breadcrumb context
     const board  = boards.find(b => b.id === subj.board_id);
     const cls    = classes.find(c => c.id === subj.class_id);
@@ -2430,6 +2446,7 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
       setChapters(res.data);
     } catch (error) {
       handleAccessError(error, 'Failed to load chapters.');
+      setChapterError(error?.response?.data?.detail || 'The chapter list could not be loaded.');
     } finally {
       setLoadingChapters(false);
     }
@@ -2449,30 +2466,30 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
   }, [selectedSubject]);
 
   const handleReindexChapter = useCallback(async (chapterId, scope = 'all', chapterTitle = null) => {
-    // Optimistic: clear only the stale flag(s) relevant to this scope
-    setChapters(prev => prev.map(ch => {
-      if (ch.id !== chapterId) return ch;
-      if (scope === 'all')   return { ...ch, notes_rag_stale: false, qa_rag_stale: false, pyq_rag_stale: false };
-      if (scope === 'notes') return { ...ch, notes_rag_stale: false };
-      if (scope === 'qa')    return { ...ch, qa_rag_stale: false };
-      if (scope === 'pyq')   return { ...ch, pyq_rag_stale: false };
-      return ch;
-    }));
     try {
       const res = await api().post(`/staff/content/chapter/${chapterId}/reindex?scope=${scope}`);
-      const jobId = res?.data?.job_id;
-      if (jobId) toast.success(`Reindex started — job ${jobId}`, { duration: 4000 });
+      if (res?.data?.ok === false) {
+        const failedScopes = Object.entries(res.data.results || {})
+          .filter(([, result]) => result?.error)
+          .map(([name]) => name);
+        throw new Error(
+          failedScopes.length > 0
+            ? `Reindex failed for ${failedScopes.join(', ')}`
+            : 'Reindex did not complete successfully',
+        );
+      }
+      // The Worker endpoint completes synchronously. Refresh from D1 only after
+      // it reports success so the freshness badge always reflects canonical
+      // persisted timestamps rather than an optimistic local guess.
+      if (selectedSubject) {
+        const refreshed = await api().get(`/staff/content/chapters/${selectedSubject.id}`);
+        setChapters(refreshed.data);
+      }
+      toast.success(chapterTitle ? `${chapterTitle} reindexed` : 'Chapter reindexed');
       return true;
     } catch (err) {
-      const detail = err?.response?.data?.detail || 'Reindex failed';
+      const detail = err?.response?.data?.detail || err?.message || 'Reindex failed';
       toast.error(chapterTitle ? `${chapterTitle}: ${detail}` : detail);
-      // Revert optimistic update by re-fetching
-      if (selectedSubject) {
-        try {
-          const res = await api().get(`/staff/content/chapters/${selectedSubject.id}`);
-          setChapters(res.data);
-        } catch { /* ignore */ }
-      }
       return false;
     }
   }, [selectedSubject]);
@@ -2531,6 +2548,7 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
     } catch { /* ignore */ }
     window.location.href = adminCookieAccess && !user ? '/admin/login' : '/login';
   };
+  const adminToken = getToken() || (adminCookieAccess ? 'cookie' : null);
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
@@ -2564,22 +2582,24 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden">
           {view === 'dashboard' && (
-            <AdminDashboard adminToken={getToken()} onNavigate={handleAdminNavigate} />
+            <AdminDashboard adminToken={adminToken} onNavigate={handleAdminNavigate} />
           )}
           {view === 'analytics' && (
-            <AdminAnalytics adminToken={getToken()} onNavigate={handleAdminNavigate} />
+            <AdminAnalytics adminToken={adminToken} onNavigate={handleAdminNavigate} />
           )}
           {view === 'users' && (
-            <AdminUsers adminToken={getToken()} onNavigate={handleAdminNavigate} />
+            <AdminUsers adminToken={adminToken} onNavigate={handleAdminNavigate} />
           )}
           {view === 'conversations' && (
-            <AdminConversations adminToken={getToken()} onNavigate={handleAdminNavigate} />
+            <AdminConversations adminToken={adminToken} onNavigate={handleAdminNavigate} />
           )}
           {view === 'subjects' && (
-            <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} onSelectSubject={selectSubject} onSubjectCreated={handleSubjectCreated} />
+            <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} error={contentError} onRetry={loadContent} onSelectSubject={selectSubject} onSubjectCreated={handleSubjectCreated} />
           )}
           {view === 'chapters' && selectedSubject && (
-            <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} onReindexChapter={handleReindexChapter} onChapterCreated={handleChapterCreated} />
+            chapterError
+              ? <div className="p-8 text-center"><p className="text-sm font-semibold text-red-700">{chapterError}</p><button type="button" onClick={() => selectSubject(selectedSubject)} className="mt-4 px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-semibold">Try again</button></div>
+              : <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} onReindexChapter={handleReindexChapter} onChapterCreated={handleChapterCreated} />
           )}
         </main>
       </div>

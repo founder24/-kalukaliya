@@ -4,7 +4,7 @@
 - [CF↔GCP audit](cf-gcp-audit.md) — Token perms, duplicate SM secrets, BACKEND_URL binding conflict, CF KV cache fix, bot rendering fix
 - [Syrabit chat latency fix](syrabit-chat-latency.md) — gemini-2.5-flash thinking phase (7-8s TTFB) fixed; model switch + thinkingBudget guard
 - [Worker chat retrieval speed](worker-chat-retrieval-speed.md) — known chapters use direct D1 context; stale IDs fall back to subject-scoped semantic RAG
-- [Anonymous quota identity](anonymous-quota-identity.md) — browser ID first, signed edge cookie second, trusted connection IP only as final fallback
+- [Anonymous quota identity](anonymous-quota-identity.md) — browser ID first, signed cookie second, trusted IP last; anonymous chat allowance resets daily in UTC
 - [Syrabit Cloud Run deploy fixes](syrabit-cloudrun-fixes.md) — motor missing, pymongo compat, JWT RS256 degraded mode, Atlas index conflicts
 - [Syrabit Cloud Run secrets strategy](syrabit-cloudrun-envvars.md) — gcloud run deploy DROPS all Secret Manager refs every deploy; must pass --update-secrets explicitly in cloudbuild.yaml every time
 - [Syrabit content model FlexId](syrabit-flexid.md) — DB uses legacy string IDs (e.g. 's13', UUID) not ObjectIds; all reference fields must use FlexId
@@ -69,3 +69,4 @@
 - [GCP decommission billing block](gcp-decommission-billing-block.md) — Cloud Run deletion works with billing disabled, but Artifact Registry cleanup is blocked until billing is briefly enabled.
 - [External library crawl boundaries](external-library-crawl-boundaries.md) — dedupe archive graphs before processing and defer bulk scan OCR so large refreshes remain bounded.
 - [Syllabus PDF alignment](syllabus-pdf-alignment.md) — catalog PDFs lack subject links; align by official structure and reject body-keyword guesses.
+- [IndexNow endpoint fallback](indexnow-endpoint-fallback.md) — Cloudflare egress can be rate-limited per provider; use bounded participant fallback.

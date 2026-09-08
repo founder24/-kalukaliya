@@ -37,6 +37,19 @@ own cron secret.
 secret store, send both Access headers and the application's cron credential,
 and make reconciliation remove any bypass policy that appears on the cron app.
 
+An Access application's `destinations` and `self_hosted_domains` define its
+effective host/path coverage; the headline `domain` can look narrow while extra
+destinations still intercept unrelated subdomains.
+
+**Why:** The staff UI app displayed `syrabit.ai/staff*` as its domain but also
+contained admin API destinations, so application-authenticated login requests
+to `api.syrabit.ai` were redirected to Access before reaching the Worker.
+
+**How to apply:** Keep the staff Access app scoped to the staff UI only. Protect
+scheduled admin endpoints with their separate Service Auth app, and leave
+interactive API routes to Syrabit's cookie/bearer guard. After updates, wait for
+propagation and verify both the protected UI redirect and an API-level 401.
+
 Vectorize REST endpoints for ID operations use underscores:
 `delete_by_ids` and `get_by_ids`. Hyphenated variants return a plain 404 even
 when authentication, account, and index are valid.
