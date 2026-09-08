@@ -264,7 +264,47 @@ export default function LibraryPage() {
   }, [enrichedSubjects]);
 
   const baseChips = contentLang === 'as' ? STREAM_CHIPS_AS : STREAM_CHIPS_EN;
-  const allStreamChips = useMemo(() => [...baseChips, ...dynamicStreamChips], [baseChips, dynamicStreamChips]);
+  const classChips = useMemo(() => {
+    const wanted = [
+      { names: ['hs 1st year', 'class 11'], label: 'Class 11' },
+      { names: ['hs 2nd year', 'class 12'], label: 'Class 12' },
+      { names: ['1st semester'], label: '1st Semester' },
+      { names: ['3rd semester'], label: '3rd Semester' },
+      { names: ['5th semester'], label: '5th Semester' },
+    ];
+    return wanted.map((item) => {
+      const cls = classes.find((candidate) => item.names.includes(String(candidate.name || '').trim().toLowerCase()));
+      return { id: `class:${cls?.id || item.label.toLowerCase().replaceAll(' ', '-')}`, label: item.label };
+    });
+  }, [classes]);
+  const allStreamChips = useMemo(
+    () => [...baseChips, ...classChips, ...dynamicStreamChips],
+    [baseChips, classChips, dynamicStreamChips],
+  );
+
+  const searchScore = useCallback((sub, query) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return 0;
+    const subject = String(sub.name || '').toLowerCase();
+    const description = String(sub.description || '').toLowerCase();
+    const hierarchy = `${sub.className || ''} ${sub.streamName || ''} ${sub.boardName || ''}`.toLowerCase();
+    const tags = Array.isArray(sub.tags) ? sub.tags.join(' ').toLowerCase() : '';
+    const chapterTitles = (chaptersBySubject.get(sub.id) || [])
+      .map((chapter) => `${chapter.title || ''} ${chapter.title_as || ''}`.toLowerCase());
+    let score = 0;
+    if (subject === q) score += 160;
+    else if (subject.startsWith(q)) score += 120;
+    else if (subject.includes(q)) score += 90;
+    if (tags.includes(q)) score += 55;
+    if (hierarchy.includes(q)) score += 45;
+    if (description.includes(q)) score += 35;
+    if (chapterTitles.some((title) => title === q)) score += 70;
+    else if (chapterTitles.some((title) => title.includes(q))) score += 40;
+    const tokens = q.split(/\s+/).filter((token) => token.length > 1);
+    const corpus = `${subject} ${tags} ${hierarchy} ${description} ${chapterTitles.join(' ')}`;
+    if (tokens.length && tokens.every((token) => corpus.includes(token))) score += tokens.length * 12;
+    return score;
+  }, [chaptersBySubject]);
 
   const filteredSubjects = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
@@ -275,23 +315,16 @@ export default function LibraryPage() {
       if (sub.status && !['published', 'active'].includes(sub.status)) return false;
       if (activeFilter === 'saved') {
         if (!savedSubjectsSet.has(sub.id)) return false;
+      } else if (activeFilter.startsWith('class:')) {
+        if (`class:${classMap.get(streamMap.get(sub.stream_id)?.class_id)?.id}` !== activeFilter) return false;
       } else if (activeFilter !== 'all') {
         if (sub.streamSlug !== activeFilter) return false;
       }
-      if (q) {
-        const subChapters = chaptersBySubject.get(sub.id) || [];
-        const inName    = sub.name?.toLowerCase().includes(q);
-        const inDesc    = sub.description?.toLowerCase().includes(q);
-        const inTags    = Array.isArray(sub.tags) && sub.tags.some((t) => t.toLowerCase().includes(q));
-        const inClass   = sub.className?.toLowerCase().includes(q);
-        const inStream  = sub.streamName?.toLowerCase().includes(q);
-        const inBoard   = sub.boardName?.toLowerCase().includes(q);
-        const inChapter = subChapters.some((ch) => ch.title?.toLowerCase().includes(q));
-        if (!inName && !inDesc && !inTags && !inClass && !inStream && !inBoard && !inChapter) return false;
-      }
+      if (q && searchScore(sub, q) === 0) return false;
       return true;
     });
-  }, [enrichedSubjects, activeFilter, deferredQuery, savedSubjectsSet, chaptersBySubject]);
+  }, [enrichedSubjects, activeFilter, deferredQuery, savedSubjectsSet,
+      classMap, streamMap, searchScore]);
 
   const totalSeoTopics = useMemo(() => {
     return enrichedSubjects.reduce((sum, s) => sum + (s.seo_stats?.topic_count || 0), 0);
@@ -427,17 +460,24 @@ export default function LibraryPage() {
     // Post-hydration: full personalization + quality combined.
     const recentChapters = getRecentChapters();
     // paths are /{board}/{class}/{subjectSlug}/{chapter} — slug is index 2
-    const recentSubjectSlugs = new Set(
-      recentChapters.flatMap((ch) => {
-        const parts = (ch.path || '').split('/').filter(Boolean);
-        return parts.length >= 3 ? [parts[2]] : [];
-      })
+    const recentSubjectNames = new Map(
+      recentChapters.map((chapter, index) => [String(chapter.subject || '').trim().toLowerCase(), index])
     );
+    const recentSubjectSlugs = new Map();
+    recentChapters.forEach((chapter, index) => {
+      const pathParts = String(chapter.path || '').split('/').filter(Boolean);
+      enrichedSubjects.forEach((sub) => {
+        if (pathParts.includes(sub.slug) && !recentSubjectSlugs.has(sub.slug)) {
+          recentSubjectSlugs.set(sub.slug, index);
+        }
+      });
+    });
     const trendingSubjectIds = new Set(
       allChapters.slice(0, 8).map((ch) => ch.subject_id).filter(Boolean)
     );
     const score = (sub) => {
       let s = qualityScore(sub);
+      s += searchScore(sub, deferredQuery) * 2;
       // Personalization: user's board bubbles its subjects to the top.
       // activeBoardId comes from onboarding profile or logged-in user.board_id.
       if (activeBoardId) {
@@ -445,18 +485,43 @@ export default function LibraryPage() {
         const cls = classMap.get(stream?.class_id);
         if (cls && String(cls.board_id) === String(activeBoardId)) s += 50;
       }
-      if (recentSubjectSlugs.has(sub.slug)) s += 100;
+      const recentIndex = Math.min(
+        recentSubjectNames.get(String(sub.name || '').trim().toLowerCase()) ?? Number.MAX_SAFE_INTEGER,
+        recentSubjectSlugs.get(sub.slug) ?? Number.MAX_SAFE_INTEGER,
+      );
+      if (Number.isFinite(recentIndex) && recentIndex !== Number.MAX_SAFE_INTEGER) {
+        s += Math.max(120, 240 - recentIndex * 20);
+      }
       if (savedSubjectsSet.has(sub.id)) s += 20;
       if (trendingSubjectIds.has(sub.id)) s += 10;
       return s;
     };
     return [...filteredSubjects].sort((a, b) => score(b) - score(a));
   }, [hydrated, filteredSubjects, allChapters, savedSubjectsSet,
-      chaptersBySubject, activeBoardId, streamMap, classMap]);
+      chaptersBySubject, activeBoardId, streamMap, classMap, enrichedSubjects,
+      searchScore, deferredQuery]);
+
+  const browserSubjects = useMemo(() => {
+    const groups = [
+      ['hs 1st year', 'class 11'],
+      ['hs 2nd year', 'class 12'],
+      ['1st semester'],
+      ['3rd semester'],
+      ['5th semester'],
+    ];
+
+    return groups.flatMap((classNames) => rankedSubjects
+      .filter((subject) => {
+        const stream = streamMap.get(subject.stream_id);
+        const cls = classMap.get(stream?.class_id);
+        return classNames.includes(String(cls?.name || '').trim().toLowerCase());
+      })
+      .slice(0, 10));
+  }, [rankedSubjects, streamMap, classMap]);
 
   const visibleSubjects = useMemo(
-    () => rankedSubjects.slice(0, renderLimit),
-    [rankedSubjects, renderLimit]
+    () => browserSubjects.slice(0, renderLimit),
+    [browserSubjects, renderLimit]
   );
 
   const seoTitle = LIBRARY_SEO_TITLE;
@@ -539,7 +604,7 @@ export default function LibraryPage() {
                   {t.heading}
                 </h1>
                 <p className="text-sm text-muted-foreground mt-0.5">
-                  {t.browse(subjects.length, allChapters.length || slimChapterCount)}
+                  {t.browse(browserSubjects.length, allChapters.length || slimChapterCount)}
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0 rounded-xl p-0.5" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.12)' }}>
@@ -570,7 +635,7 @@ export default function LibraryPage() {
                   {t.heading}
                 </h1>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {t.browse(subjects.length, allChapters.length || slimChapterCount)}
+                  {t.browse(browserSubjects.length, allChapters.length || slimChapterCount)}
                 </p>
               </div>
               <div className="flex items-center gap-0.5 shrink-0 rounded-lg p-0.5" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.12)' }}>
@@ -662,7 +727,7 @@ export default function LibraryPage() {
                 />
               ))}
             </ScrollableFilterRow>
-            {filteredSubjects.length === 0 ? (
+            {browserSubjects.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div
                   className="w-20 h-20 rounded-2xl flex items-center justify-center mb-5"
@@ -759,7 +824,7 @@ export default function LibraryPage() {
                   data-testid="library-subject-grid"
                   style={{ contain: 'layout style' }}
                 >
-                  {rankedSubjects.slice(0, VIRTUAL_CHUNK).map((sub, index) => (
+                  {browserSubjects.slice(0, VIRTUAL_CHUNK).map((sub, index) => (
                     <SubjectCard
                       key={sub.id}
                       sub={sub}
@@ -778,17 +843,17 @@ export default function LibraryPage() {
                     the virtualizer initialises with no scroll element and
                     renders 0 rows, making the list appear to stop after the
                     first VIRTUAL_CHUNK static cards. */}
-                {useVirtualGrid && scrollContainerEl && rankedSubjects.length > VIRTUAL_CHUNK && (
+                {useVirtualGrid && scrollContainerEl && browserSubjects.length > VIRTUAL_CHUNK && (
                   <VirtualSubjectGrid
                     scrollParent={scrollContainerEl}
-                    subjects={rankedSubjects.slice(VIRTUAL_CHUNK)}
+                    subjects={browserSubjects.slice(VIRTUAL_CHUNK)}
                     chaptersBySubject={chaptersBySubject}
                     savedSubjects={savedSubjects}
                     onToggleSave={handleToggleSave}
                     onAskAI={handleAskAI}
                   />
                 )}
-                {!useVirtualGrid && rankedSubjects.length > VIRTUAL_CHUNK && (
+                {!useVirtualGrid && browserSubjects.length > VIRTUAL_CHUNK && (
                   <div ref={sentinelRef} aria-hidden="true" style={{ height: 1 }} />
                 )}
               </>
