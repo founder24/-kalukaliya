@@ -77,7 +77,7 @@ export async function reindexChapterRag(env: Env, chapterId: string, requested: 
   const topicText = parse(chapter.publishedTopics).filter(topic => topic.status === 'published')
     .map(topic => [topic.title, topic.content].filter(Boolean).join('\n')).filter(Boolean).join('\n\n');
   const topicTextAs = parse(chapter.publishedTopics).filter(topic => topic.status === 'published')
-    .map(topic => [topic.title_as, topic.content_as].filter(Boolean).join('\n')).filter(Boolean).join('\n\n');
+    .map(topic => [topic.title_as || topic.title, topic.content_as].filter(Boolean).join('\n')).filter(Boolean).join('\n\n');
   const append = (base: string | null, topics: string) => [base, topics].filter(Boolean).join('\n\n') || null;
   const text: Record<RagScope, [string | null, string | null]> = {
     notes: [append(notes(chapter.ragText ?? chapter.notesEn, chapter.ragSectionsEn), topicText), append(notes(chapter.ragTextAs ?? chapter.notesAs, chapter.ragSectionsAs), topicTextAs)],

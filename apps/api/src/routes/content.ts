@@ -250,6 +250,7 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
   const rows = await db.select({
     id: chapters.id,
     title: chapters.title,
+    titleAs: chapters.titleAs,
     slug: chapters.slug,
     slugAs: chapters.slugAs,
     chapterNumber: chapters.chapterNumber,
@@ -264,8 +265,14 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     .orderBy(chapters.chapterNumber);
 
   const payload = rows.map(r => {
-    const syllabusTopics = (safeParse<Array<{ title?: unknown }>>(r.publishedTopics) ?? [])
+    const parsedTopics = safeParse<Array<{ title?: unknown; title_as?: unknown }>>(r.publishedTopics) ?? [];
+    const syllabusTopics = parsedTopics
       .map(topic => typeof topic?.title === 'string' ? topic.title.trim() : '')
+      .filter(Boolean);
+    const syllabusTopicsAs = parsedTopics
+      .map(topic => typeof topic?.title_as === 'string' && topic.title_as.trim()
+        ? topic.title_as.trim()
+        : (typeof topic?.title === 'string' ? topic.title.trim() : ''))
       .filter(Boolean);
     const qa = safeParse<unknown[]>(r.qaEn) ?? [];
     const pyqPapers = safeParse<unknown[]>(r.pyqPapers) ?? [];
@@ -273,7 +280,7 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     id:              r.id,
     chapter_id:      r.id,
     title:           r.title,
-    title_as:        null,           // not in D1 schema (field not migrated)
+    title_as:        r.titleAs ?? null,
     slug:            r.slug,
     chapter_number:  r.chapterNumber ?? null,
     notes_generated: Boolean(r.notesEn),
@@ -281,6 +288,7 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     has_qa:           qa.length > 0,
     has_pyq:          Boolean(r.pyqPdfUrl) || pyqPapers.length > 0,
     syllabus_topics:  syllabusTopics,
+    syllabus_topics_as: syllabusTopicsAs,
     topic_count:      syllabusTopics.length,
     content_type:     'chapter',
   };
@@ -367,8 +375,13 @@ async function resolveChapterBySlug(
   const chapterRows = await db.select({
     id: chapters.id,
     title: chapters.title,
+    titleAs: chapters.titleAs,
     slug: chapters.slug,
     slugAs: chapters.slugAs,
+    metaDescription: chapters.metaDescription,
+    metaDescriptionAs: chapters.metaDescriptionAs,
+    keywords: chapters.keywords,
+    keywordsAs: chapters.keywordsAs,
     chapterNumber: chapters.chapterNumber,
     status: chapters.status,
     notesEn: chapters.notesEn,
@@ -419,16 +432,32 @@ async function resolveChapterBySlug(
   let topicsArr: unknown[] = [];
   let faqArr: unknown[] = [];
   try { topicsArr = JSON.parse(chapterRow.publishedTopics ?? '[]') as unknown[]; } catch { /* leave empty */ }
+  const displayTitle = useSlugAs ? (chapterRow.titleAs?.trim() || chapterRow.title) : chapterRow.title;
+  const displayDescription = useSlugAs
+    ? (chapterRow.metaDescriptionAs?.trim() || chapterRow.metaDescription)
+    : chapterRow.metaDescription;
+  const displayKeywords = useSlugAs
+    ? (chapterRow.keywordsAs?.trim() || chapterRow.keywords)
+    : chapterRow.keywords;
+  const displayTopics = useSlugAs
+    ? topicsArr.map(topic => {
+      if (!topic || typeof topic !== 'object') return topic;
+      const row = topic as Record<string, unknown>;
+      const titleAs = typeof row.title_as === 'string' ? row.title_as.trim() : '';
+      return titleAs ? { ...row, title: titleAs } : row;
+    })
+    : topicsArr;
 
   return c.json({
     chapter_id:     chapterRow.id,
-    title:          chapterRow.title,
-    chapter_title:  chapterRow.title,
+    title:          displayTitle,
+    title_as:       chapterRow.titleAs ?? null,
+    chapter_title:  displayTitle,
     chapter_slug:   chapterRow.slug,
     slug_as:        chapterRow.slugAs ?? null,
     // A topic is a subsection of a chapter, never the chapter's display title.
     // Dedicated topic deep links resolve their own heading on the client.
-    topic_title:    chapterRow.title,
+    topic_title:    displayTitle,
     subject_name:   subjectRow.name,
     subject_slug:   subjectRow.slug,
     board_name:     boardRow.name,
@@ -443,23 +472,29 @@ async function resolveChapterBySlug(
     has_assamese:   hasAssamese,
     pyq_pdf_url:    chapterRow.pyqPdfUrl ?? null,
     pyq_papers:     safeParse(chapterRow.pyqPapers) ?? [],
-    meta_description: null,
+    meta_description: displayDescription ?? null,
+    keywords:       displayKeywords ?? null,
     word_count:     chapterRow.wordCountEn ?? (contentEn ? contentEn.split(' ').length : 0),
     notes_generated: Boolean(contentEn || contentAs),
     chapter_number:  chapterRow.chapterNumber ?? null,
-    topics:          topicsArr,
+    topics:          displayTopics,
+    published_topics: displayTopics,
     faq_jsonld:      faqArr,
     faq_entries:     faqArr,
     prev_chapter:    prevCh ? {
       chapter_id:    prevCh.id,
       title:         prevCh.title,
+      title_as:      prevCh.titleAs ?? null,
       slug:          prevCh.slug,
+      slug_as:       prevCh.slugAs ?? null,
       chapter_number: prevCh.chapterNumber ?? null,
     } : null,
     next_chapter:    nextCh ? {
       chapter_id:    nextCh.id,
       title:         nextCh.title,
+      title_as:      nextCh.titleAs ?? null,
       slug:          nextCh.slug,
+      slug_as:       nextCh.slugAs ?? null,
       chapter_number: nextCh.chapterNumber ?? null,
     } : null,
     generated_at:    chapterRow.createdAt
@@ -528,7 +563,7 @@ contentRouter.get('/library-bundle', async (c) => {
   }
 
   // Load chapters when needed (full mode or boot mode)
-  type ChapterRow = { id: string; subjectId: string; title: string; slug: string; slugAs: string | null;
+  type ChapterRow = { id: string; subjectId: string; title: string; titleAs: string | null; slug: string; slugAs: string | null;
     chapterNumber: number | null; status: string | null; contentType: string | null;
     notesEn: string | null; notesAs: string | null; qaEn: string | null; publishedTopics: string | null; };
 
@@ -536,7 +571,7 @@ contentRouter.get('/library-bundle', async (c) => {
   if (!slim) {
     allChapters = await db.select({
       id: chapters.id, subjectId: chapters.subjectId,
-      title: chapters.title, slug: chapters.slug, slugAs: chapters.slugAs,
+      title: chapters.title, titleAs: chapters.titleAs, slug: chapters.slug, slugAs: chapters.slugAs,
       chapterNumber: chapters.chapterNumber, status: chapters.status, contentType: chapters.contentType,
       notesEn: chapters.notesEn, notesAs: chapters.notesAs,
       qaEn: chapters.qaEn, publishedTopics: chapters.publishedTopics,
@@ -556,7 +591,7 @@ contentRouter.get('/library-bundle', async (c) => {
     const entry = {
       chapter_id: ch.id,
       title: ch.title,
-      title_as: null,  // field not present in D1 schema (MongoDB had it optionally)
+      title_as: ch.titleAs ?? null,
       slug: ch.slug,
       slug_as: ch.slugAs ?? null,
       chapter_number: ch.chapterNumber ?? null,
@@ -739,7 +774,15 @@ contentRouter.get('/chapters/:chapterId/topics-published', async (c) => {
     .from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
-  const topics = safeParse<unknown[]>(ch.publishedTopics) ?? [];
+  const rawTopics = safeParse<unknown[]>(ch.publishedTopics) ?? [];
+  const topics = c.req.query('lang') === 'as'
+    ? rawTopics.map(topic => {
+      if (!topic || typeof topic !== 'object') return topic;
+      const row = topic as Record<string, unknown>;
+      const titleAs = typeof row.title_as === 'string' ? row.title_as.trim() : '';
+      return titleAs ? { ...row, title: titleAs } : row;
+    })
+    : rawTopics;
   return c.json({ chapter_id: ch.id, topics, total: topics.length });
 });
 

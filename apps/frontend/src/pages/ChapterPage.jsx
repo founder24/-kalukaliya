@@ -299,6 +299,8 @@ export default function ChapterPage() {
   const [contentMode, setContentMode] = useState(
     ['notes', 'qa', 'pyq'].includes(_initTab) ? _initTab : 'notes',
   );
+  const isAssamesePath = typeof window !== 'undefined'
+    && (window.location.pathname || '').startsWith('/as/');
   const [activeId, setActiveId] = useState('');
   const [relatedChapterTopics, setRelatedChapterTopics] = useState([]);
   // Task #914 Step 3 — published topics with `definition_status=ok`
@@ -361,7 +363,7 @@ export default function ChapterPage() {
       return;
     }
     apiClient()
-      .get(`/content/chapters/${data.chapter_id}/topics-published`)
+      .get(`/content/chapters/${data.chapter_id}/topics-published${isAssamesePath ? '?lang=as' : ''}`)
       .then((r) => {
         if (cancelled) return;
         const list = Array.isArray(r.data?.topics) ? r.data.topics : [];
@@ -370,7 +372,7 @@ export default function ChapterPage() {
       .catch(() => { if (!cancelled) setPublishedTopics([]); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.chapter_id]);
+  }, [data?.chapter_id, isAssamesePath]);
 
   // Topical-mapping — fetch the related-topic graph (siblings +
   // cross-chapter) once we know the chapter_id. Skipped on the
@@ -486,8 +488,6 @@ export default function ChapterPage() {
   // hreflang="as-IN" target). Force the content language to Assamese
   // for the page regardless of the user's persisted toggle so the SPA
   // never flashes English content for a URL Google indexed as as-IN.
-  const isAssamesePath = typeof window !== 'undefined'
-    && (window.location.pathname || '').startsWith('/as/');
   const contentLang = isAssamesePath ? 'as' : ctxContentLang;
 
   // Task #295 — keep the global LanguageContext in sync with the URL
@@ -1144,7 +1144,7 @@ export default function ChapterPage() {
           // title when the topic isn't yet in the published-topics
           // list (race between route + topics fetch).
           topicSlugParam && activeDeepLinkTopic
-            ? `${activeDeepLinkTopic.title} — ${chapterTitle}`
+            ? `${(isAssamesePath && activeDeepLinkTopic.title_as) || activeDeepLinkTopic.title} — ${chapterTitle}`
             : seoTitle
         }
         description={
@@ -1164,6 +1164,9 @@ export default function ChapterPage() {
           // chapters that haven't been refreshed yet still get keyword
           // coverage.
           const words = chapterTitle.split(/[\s,\-–—/&]+/).filter(w => w.length > 2);
+          const savedKeywords = typeof data.keywords === 'string'
+            ? data.keywords.split(',').map(keyword => keyword.trim()).filter(Boolean)
+            : (Array.isArray(data.keywords) ? data.keywords.filter(Boolean) : []);
           const base = [chapterTitle, subjectName, `${boardName} notes`, `${className} study material`, 'AHSEC', 'SEBA', 'exam preparation'];
           const fallback = [...base, ...words, `${chapterTitle} notes`, `${chapterTitle} definition`, `${chapterTitle} MCQ`, `${chapterTitle} important questions`, `${chapterTitle} ${subjectName}`, `${subjectName} ${className}`, `${chapterTitle} ${boardName}`, `${chapterTitle} study notes`, `${chapterTitle} exam notes`];
           const bingTerms = Array.isArray(data.bing_keywords)
@@ -1171,7 +1174,7 @@ export default function ChapterPage() {
                 .map(k => (typeof k === 'string' ? k : (k && k.keyword) || ''))
                 .filter(Boolean)
             : [];
-          const expanded = [...bingTerms, ...fallback];
+          const expanded = [...savedKeywords, ...bingTerms, ...fallback];
           return [...new Set(expanded)].join(', ');
         })()}
         tags={[chapterTitle, subjectName, boardName, className, data.chapter_title || ''].filter(Boolean)}

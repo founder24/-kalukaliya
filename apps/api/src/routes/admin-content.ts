@@ -185,6 +185,7 @@ async function prewarmSubject(env: Env, subjectId: string): Promise<void> {
   const rows = await createDb(env.DB).select({
     id: chapters.id,
     title: chapters.title,
+    titleAs: chapters.titleAs,
     slug: chapters.slug,
     slugAs: chapters.slugAs,
     chapterNumber: chapters.chapterNumber,
@@ -192,19 +193,39 @@ async function prewarmSubject(env: Env, subjectId: string): Promise<void> {
     notesEn: chapters.notesEn,
     notesAs: chapters.notesAs,
     qaEn: chapters.qaEn,
+    publishedTopics: chapters.publishedTopics,
+    pyqPdfUrl: chapters.pyqPdfUrl,
+    pyqPapers: chapters.pyqPapers,
   }).from(chapters).where(eq(chapters.subjectId, subjectId)).orderBy(chapters.chapterNumber);
 
-  await env.CONTENT_KV.put(`subject:${subjectId}:chapters`, JSON.stringify(rows.map(chapter => ({
-    chapter_id: chapter.id,
-    title: chapter.title,
-    slug: chapter.slug,
-    slug_as: chapter.slugAs ?? null,
-    chapter_number: chapter.chapterNumber ?? null,
-    status: chapter.status ?? 'draft',
-    notes_generated: Boolean(chapter.notesEn),
-    has_assamese: Boolean(chapter.notesAs),
-    has_qa: Boolean(chapter.qaEn && chapter.qaEn !== '[]'),
-  }))), { expirationTtl: 86400 * 7 });
+  const payload = rows.map(chapter => {
+    const topics = parseJson<Array<{ title?: unknown; title_as?: unknown }>>(chapter.publishedTopics, []);
+    const syllabusTopics = topics.map(topic => typeof topic.title === 'string' ? topic.title.trim() : '').filter(Boolean);
+    const syllabusTopicsAs = topics.map(topic =>
+      typeof topic.title_as === 'string' && topic.title_as.trim()
+        ? topic.title_as.trim()
+        : (typeof topic.title === 'string' ? topic.title.trim() : '')
+    ).filter(Boolean);
+    return {
+      id: chapter.id,
+      chapter_id: chapter.id,
+      title: chapter.title,
+      title_as: chapter.titleAs ?? null,
+      slug: chapter.slug,
+      slug_as: chapter.slugAs ?? null,
+      chapter_number: chapter.chapterNumber ?? null,
+      status: chapter.status ?? 'draft',
+      notes_generated: Boolean(chapter.notesEn),
+      has_assamese: Boolean(chapter.notesAs),
+      has_qa: Boolean(chapter.qaEn && chapter.qaEn !== '[]'),
+      has_pyq: Boolean(chapter.pyqPdfUrl) || parseJson<unknown[]>(chapter.pyqPapers, []).length > 0,
+      syllabus_topics: syllabusTopics,
+      syllabus_topics_as: syllabusTopicsAs,
+      topic_count: syllabusTopics.length,
+      content_type: 'chapter',
+    };
+  });
+  await env.CONTENT_KV.put(`subject:${subjectId}:chapters`, JSON.stringify(payload), { expirationTtl: 86400 * 7 });
 }
 
 function step(steps: JobStep[], name: string): JobStep {

@@ -375,22 +375,39 @@ async function kvPrewarm(env: Env, subjectId: string): Promise<void> {
   try {
     const db = createDb(env.DB);
     const chaps = await db.select({
-      id: chapters.id, title: chapters.title, slug: chapters.slug, slugAs: chapters.slugAs,
+      id: chapters.id, title: chapters.title, titleAs: chapters.titleAs, slug: chapters.slug, slugAs: chapters.slugAs,
       chapterNumber: chapters.chapterNumber, status: chapters.status,
       notesEn: chapters.notesEn, notesAs: chapters.notesAs, qaEn: chapters.qaEn,
+      publishedTopics: chapters.publishedTopics, pyqPdfUrl: chapters.pyqPdfUrl, pyqPapers: chapters.pyqPapers,
     }).from(chapters).where(eq(chapters.subjectId, subjectId)).orderBy(chapters.chapterNumber);
 
-    const payload = chaps.map(ch => ({
-      chapter_id:     ch.id,
-      title:          ch.title,
-      slug:           ch.slug,
-      slug_as:        ch.slugAs ?? null,
-      chapter_number: ch.chapterNumber ?? null,
-      status:         ch.status ?? 'draft',
-      notes_generated: Boolean(ch.notesEn),
-      has_assamese:   Boolean(ch.notesAs),
-      has_qa:         Boolean(ch.qaEn && ch.qaEn !== '[]'),
-    }));
+    const payload = chaps.map(ch => {
+      const topics = safeParse<Array<{ title?: unknown; title_as?: unknown }>>(ch.publishedTopics) ?? [];
+      const syllabusTopics = topics.map(topic => typeof topic.title === 'string' ? topic.title.trim() : '').filter(Boolean);
+      const syllabusTopicsAs = topics.map(topic =>
+        typeof topic.title_as === 'string' && topic.title_as.trim()
+          ? topic.title_as.trim()
+          : (typeof topic.title === 'string' ? topic.title.trim() : '')
+      ).filter(Boolean);
+      return {
+        id: ch.id,
+        chapter_id: ch.id,
+        title: ch.title,
+        title_as: ch.titleAs ?? null,
+        slug: ch.slug,
+        slug_as: ch.slugAs ?? null,
+        chapter_number: ch.chapterNumber ?? null,
+        status: ch.status ?? 'draft',
+        notes_generated: Boolean(ch.notesEn),
+        has_assamese: Boolean(ch.notesAs),
+        has_qa: Boolean(ch.qaEn && ch.qaEn !== '[]'),
+        has_pyq: Boolean(ch.pyqPdfUrl) || (safeParse<unknown[]>(ch.pyqPapers) ?? []).length > 0,
+        syllabus_topics: syllabusTopics,
+        syllabus_topics_as: syllabusTopicsAs,
+        topic_count: syllabusTopics.length,
+        content_type: 'chapter',
+      };
+    });
 
     await env.CONTENT_KV.put(
       `subject:${subjectId}:chapters`,
@@ -1136,8 +1153,9 @@ staffRouter.patch('/content/chapter/:chapterId', async (c) => {
   }
   await auditLog(c.env, auth.sub ?? '', 'update_chapter', 'chapter', chapterId);
 
-  // KV prewarm on publish
-  if (updates.status === 'published') await kvPrewarm(c.env, ch.subjectId);
+  // Every editor save can affect the public chapter list (titles, slugs,
+  // topics, availability), so refresh its long-lived KV entry immediately.
+  await kvPrewarm(c.env, ch.subjectId);
 
   return c.json({ ok: true });
 });

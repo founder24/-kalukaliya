@@ -42,7 +42,7 @@ export function siblingsAsRelated(chapters, currentChapterId, currentChapterSlug
   });
   return filtered.slice(0, limit).map((ch) => ({
     id: ch.id || ch._id || ch.slug,
-    title: ch.title || ch.slug,
+    title: (useSlugAs && ch.title_as) ? ch.title_as : (ch.title || ch.slug),
     seo_path: `${basePath}/${useSlugAs ? (ch.slug_as || ch.slug) : ch.slug}`,
   }));
 }
