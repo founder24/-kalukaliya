@@ -28,7 +28,8 @@ import {
 import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import {
   streamGenerate,
-  generateFallback,
+  generateAssamese,
+  AI_MODEL_ASSAMESE,
   AI_MODEL_PRIMARY,
 } from '../services/ai';
 import {
@@ -1831,6 +1832,10 @@ chatRouter.post('/stream', async (c) => {
           systemPrompt,
           userMessage: message,
           maxTokens: CHAT_MAX_OUTPUT_TOKENS,
+          ...(lang === 'as' && {
+            primaryModel: AI_MODEL_ASSAMESE,
+            fallbackModel: AI_MODEL_PRIMARY,
+          }),
         })) {
           // Sentinel chunk carries the resolved model name — do not forward to client
           if (chunk.startsWith('\x00model:')) {
@@ -1879,7 +1884,7 @@ chatRouter.post('/stream', async (c) => {
         assameseProseLeakage = !isReliableAssameseAnswer(fullResponse);
         if (assameseProseLeakage) {
           try {
-            const repaired = await generateFallback(c.env.AI, {
+            const repaired = await generateAssamese(c.env.AI, {
               systemPrompt: `${systemPrompt}\n\n## বাধ্যতামূলক ভাষা সংশোধন\nআগৰ খচৰা ব্যৱহাৰ নকৰিবা। কেৱল শুদ্ধ অসমীয়া লিপিত নতুনকৈ সম্পূৰ্ণ উত্তৰ লিখিবা। বাংলা, হিন্দী বা ইংৰাজী ব্যাখ্যামূলক বাক্য নিদিবা।`,
               userMessage: message,
               maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 640),

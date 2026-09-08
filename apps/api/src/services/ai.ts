@@ -17,6 +17,7 @@
 // parameter to a union that may not include newer model IDs before types update.
 export const AI_MODEL_PRIMARY  = '@cf/meta/llama-3.1-8b-instruct-fast';
 export const AI_MODEL_FALLBACK = '@cf/qwen/qwen3-30b-a3b-fp8';
+export const AI_MODEL_ASSAMESE = '@cf/aisingapore/gemma-sea-lion-v4-27b-it';
 
 export interface GenerateOptions {
   systemPrompt: string;
@@ -51,12 +52,7 @@ async function runModel(
   // depending on the model family. Normalise both shapes.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const r = result as any;
-  const text: string =
-    typeof r?.response === 'string'        ? r.response :
-    typeof r?.result?.response === 'string' ? r.result.response :
-    '';
-
-  return text;
+  return extractResponseText(r) ?? '';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -215,6 +211,30 @@ export async function generateFallback(
   }
 }
 
+/** Assamese-specialized quality repair using the strongest tested model. */
+export async function generateAssamese(
+  ai: Ai,
+  opts: GenerateOptions,
+  timeoutMs = 6_000,
+): Promise<GenerateResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const text = await Promise.race([
+      runModel(ai, AI_MODEL_ASSAMESE, opts),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('[ai] Assamese model quality repair timed out')),
+          Math.max(500, timeoutMs),
+        );
+      }),
+    ]);
+    if (!text) throw new Error('[ai] Assamese model returned an empty response');
+    return { text, model: AI_MODEL_ASSAMESE };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /**
  * Streaming text generation with primary → fallback model retry.
  *
@@ -235,9 +255,14 @@ export async function generateFallback(
  */
 export async function* streamGenerate(
   ai:   Ai,
-  opts: GenerateOptions,
+  opts: GenerateOptions & {
+    primaryModel?: string;
+    fallbackModel?: string;
+  },
 ): AsyncGenerator<string> {
-  let usedModel = AI_MODEL_PRIMARY;
+  const primaryModel = opts.primaryModel ?? AI_MODEL_PRIMARY;
+  const fallbackModel = opts.fallbackModel ?? AI_MODEL_FALLBACK;
+  let usedModel = primaryModel;
   let tokensEmitted = 0;
 
   // Do not mix responses: the fallback is available only when the primary
@@ -245,15 +270,15 @@ export async function* streamGenerate(
   // as a failure, which prevents callers from receiving a successful-looking
   // completion with an empty answer.
   try {
-    for await (const chunk of streamModel(ai, AI_MODEL_PRIMARY, opts)) {
+    for await (const chunk of streamModel(ai, primaryModel, opts)) {
       tokensEmitted++;
       yield chunk;
     }
   } catch (primaryErr) {
     if (tokensEmitted > 0) throw primaryErr;
     console.warn('[ai] Primary stream model failed, trying fallback:', primaryErr);
-    usedModel = AI_MODEL_FALLBACK;
-    for await (const chunk of streamModel(ai, AI_MODEL_FALLBACK, opts)) {
+    usedModel = fallbackModel;
+    for await (const chunk of streamModel(ai, fallbackModel, opts)) {
       tokensEmitted++;
       yield chunk;
     }

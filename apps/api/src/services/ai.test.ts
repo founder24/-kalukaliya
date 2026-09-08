@@ -19,6 +19,7 @@ import {
   streamGenerate,
   AI_MODEL_PRIMARY,
   AI_MODEL_FALLBACK,
+  AI_MODEL_ASSAMESE,
 } from './ai';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -278,6 +279,7 @@ describe('model name constants', () => {
 
   it('fallback model is @cf/qwen/qwen3-30b-a3b-fp8', () => {
     expect(AI_MODEL_FALLBACK).toBe('@cf/qwen/qwen3-30b-a3b-fp8');
+    expect(AI_MODEL_ASSAMESE).toBe('@cf/aisingapore/gemma-sea-lion-v4-27b-it');
   });
 
   it('primary and fallback are distinct', () => {
