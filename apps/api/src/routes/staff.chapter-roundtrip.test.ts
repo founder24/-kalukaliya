@@ -409,6 +409,12 @@ describe('Staff chapter edit round-trip through D1', () => {
       method: 'PATCH',
       headers: authHeaders(token),
       body: JSON.stringify({
+        title_as: 'পৰীক্ষামূলক অধ্যায়',
+        slug_as: 'পৰীক্ষামূলক-অধ্যায়',
+        meta_description: 'English chapter summary.',
+        meta_description_as: 'অসমীয়া অধ্যায়ৰ সাৰাংশ।',
+        keywords: 'physics, measurement',
+        keywords_as: 'পদাৰ্থ বিজ্ঞান, পৰিমাপ',
         notes_en: 'These are the English notes for the round-trip test chapter.',
         rag_sections_en: [
           { title: 'Introduction', content: 'An introduction to the topic.' },
@@ -435,6 +441,12 @@ describe('Staff chapter edit round-trip through D1', () => {
     expect(res.status).toBe(200);
     const body = await res.json() as {
       notes_en: string;
+      title_as: string;
+      slug_as: string;
+      meta_description: string;
+      meta_description_as: string;
+      keywords: string;
+      keywords_as: string;
       rag_sections_en: Array<{ title: string; content: string }>;
       qa_en: Array<{ question: string; answer: string }>;
     };
@@ -443,6 +455,12 @@ describe('Staff chapter edit round-trip through D1', () => {
     expect(body.notes_en).toBe(
       'These are the English notes for the round-trip test chapter.',
     );
+    expect(body.title_as).toBe('পৰীক্ষামূলক অধ্যায়');
+    expect(body.slug_as).toBe('পৰীক্ষামূলক-অধ্যায়');
+    expect(body.meta_description).toBe('English chapter summary.');
+    expect(body.meta_description_as).toBe('অসমীয়া অধ্যায়ৰ সাৰাংশ।');
+    expect(body.keywords).toBe('physics, measurement');
+    expect(body.keywords_as).toBe('পদাৰ্থ বিজ্ঞান, পৰিমাপ');
 
     // rag_sections_en must be the array we sent, not [] or null.
     expect(Array.isArray(body.rag_sections_en)).toBe(true);

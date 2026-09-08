@@ -831,7 +831,7 @@ staffRouter.get('/content/chapters/:subjectId', async (c) => {
   const db = createDb(c.env.DB);
 
   const rows = await db.select({
-    id: chapters.id, title: chapters.title, slug: chapters.slug, slugAs: chapters.slugAs,
+    id: chapters.id, title: chapters.title, titleAs: chapters.titleAs, slug: chapters.slug, slugAs: chapters.slugAs,
     status: chapters.status, contentType: chapters.contentType,
     chapterNumber: chapters.chapterNumber,
     notesEn: chapters.notesEn, notesAs: chapters.notesAs,
@@ -849,7 +849,7 @@ staffRouter.get('/content/chapters/:subjectId', async (c) => {
   return c.json(rows.map(ch => ({
     id:               ch.id,
     title:            ch.title,
-    title_as:         null,
+    title_as:         ch.titleAs ?? null,
     slug:             ch.slug,
     status:           ch.status ?? 'draft',
     content_type:     ch.contentType ?? 'standard',
@@ -904,7 +904,13 @@ staffRouter.post('/content/chapters', async (c) => {
   const id   = crypto.randomUUID();
 
   await db.insert(chapters).values({
-    id, title, subjectId, slug, chapterNumber,
+    id, title, titleAs: typeof body.title_as === 'string' ? body.title_as.trim() || null : null,
+    subjectId, slug, slugAs: typeof body.slug_as === 'string' ? body.slug_as.trim() || null : null,
+    metaDescription: typeof body.meta_description === 'string' ? body.meta_description.trim() || null : null,
+    metaDescriptionAs: typeof body.meta_description_as === 'string' ? body.meta_description_as.trim() || null : null,
+    keywords: typeof body.keywords === 'string' ? body.keywords.trim() || null : null,
+    keywordsAs: typeof body.keywords_as === 'string' ? body.keywords_as.trim() || null : null,
+    chapterNumber,
     contentType:     String(body['content_type'] ?? 'standard'),
     status:          String(body['status'] ?? 'draft'),
     notesEn: typeof body.notes_en === 'string' ? body.notes_en : (typeof body.content === 'string' ? body.content : null),
@@ -929,7 +935,7 @@ staffRouter.post('/content/chapters', async (c) => {
   kvPrewarm(c.env, subjectId).catch(() => { /* best-effort */ });
 
   return c.json({
-    id, title, slug,
+    id, title, title_as: body['title_as'] ?? null, slug, slug_as: body['slug_as'] ?? null,
     status:         body['status'] ?? 'draft',
     content_type:   body['content_type'] ?? 'standard',
     chapter_number: chapterNumber,
@@ -969,9 +975,13 @@ staffRouter.get('/content/chapter/:chapterId', async (c) => {
   return c.json({
     id:             ch.id,
     title:          ch.title,
-    title_as:       null,
+    title_as:       ch.titleAs ?? null,
     slug:           ch.slug ?? '',
     slug_as:        ch.slugAs ?? null,
+    meta_description: ch.metaDescription ?? '',
+    meta_description_as: ch.metaDescriptionAs ?? '',
+    keywords:       ch.keywords ?? '',
+    keywords_as:    ch.keywordsAs ?? '',
     status:         ch.status ?? 'draft',
     content_type:   ch.contentType ?? 'standard',
     chapter_number: ch.chapterNumber ?? null,
@@ -1034,7 +1044,9 @@ staffRouter.patch('/content/chapter/:chapterId', async (c) => {
   let contentChanged = false;
 
   type ChapterUpdate = Partial<{
-    title: string; slug: string; slugAs: string | null;
+    title: string; titleAs: string | null; slug: string; slugAs: string | null;
+    metaDescription: string | null; metaDescriptionAs: string | null;
+    keywords: string | null; keywordsAs: string | null;
     chapterNumber: number; status: string; contentType: string;
     notesEn: string; notesAs: string;
     ragText: string; ragTextAs: string;
@@ -1047,9 +1059,14 @@ staffRouter.patch('/content/chapter/:chapterId', async (c) => {
 
   if ('title' in body && !String(body.title ?? '').trim()) return c.json({ detail: 'title cannot be empty' }, 422);
   if ('title' in body && body['title'] !== undefined)          updates.title         = String(body['title']).trim();
+  if ('title_as' in body && body['title_as'] !== undefined)    updates.titleAs       = String(body['title_as'] ?? '').trim() || null;
   if ('slug' in body && !makeSlug(String(body.slug ?? ''))) return c.json({ detail: 'slug cannot be empty' }, 422);
   if ('slug' in body  && body['slug'] !== undefined)           updates.slug          = makeSlug(String(body['slug']));
   if ('slug_as' in body && body['slug_as'] !== undefined)      updates.slugAs        = String(body['slug_as'] ?? '').trim() || null;
+  if ('meta_description' in body && body['meta_description'] !== undefined) updates.metaDescription = String(body['meta_description'] ?? '').trim() || null;
+  if ('meta_description_as' in body && body['meta_description_as'] !== undefined) updates.metaDescriptionAs = String(body['meta_description_as'] ?? '').trim() || null;
+  if ('keywords' in body && body['keywords'] !== undefined) updates.keywords = String(body['keywords'] ?? '').trim() || null;
+  if ('keywords_as' in body && body['keywords_as'] !== undefined) updates.keywordsAs = String(body['keywords_as'] ?? '').trim() || null;
   if ('chapter_number' in body && !validChapterNumber(body.chapter_number)) return c.json({ detail: 'chapter_number must be a positive integer' }, 422);
   if ('chapter_number' in body) updates.chapterNumber = body['chapter_number'] as number;
   if ('status' in body && !CHAPTER_STATUSES.has(String(body.status))) return c.json({ detail: 'Invalid chapter status' }, 422);
@@ -1553,7 +1570,14 @@ staffRouter.post('/content/chapter/:chapterId/topics', async c => {
   const auth = await guard(c); if (!auth) return c.res; const denied = await capabilityDenied(c, auth, 'content:edit'); if (denied) return denied;
   const row = await topicChapter(c.env, c.req.param('chapterId')); const body = await safeBody(c); const title = typeof body.title === 'string' ? body.title.trim() : '';
   if (!row) return c.json({ detail: 'Chapter not found' }, 404); if (!title || title.length > 300) return c.json({ detail: 'title is required (max 300)' }, 422);
-  const topic: Topic = { id: crypto.randomUUID(), title, content: typeof body.content === 'string' ? body.content : '', status: 'draft' };
+  const topic: Topic = {
+    id: crypto.randomUUID(),
+    title,
+    title_as: typeof body.title_as === 'string' ? body.title_as.trim() : '',
+    content: typeof body.content === 'string' ? body.content : '',
+    content_as: typeof body.content_as === 'string' ? body.content_as : '',
+    status: 'draft',
+  };
   const topics = [...chapterTopics(row), topic];
   await createDb(c.env.DB).update(chapters).set({ publishedTopics: JSON.stringify(topics), updatedAt: nowTs(), ragUpdatedAt: nowTs() }).where(eq(chapters.id, row.id));
   await auditLog(c.env, auth.sub ?? '', 'create_topic', 'topic', topic.id, { chapter_id: row.id }); return c.json({ topic }, 201);

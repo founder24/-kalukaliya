@@ -141,6 +141,7 @@ function TopicManager({ chapterId, user, fallbackTopics = [] }) {
   const [topics, setTopics] = useState(fallbackTopics);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
+  const [draftAs, setDraftAs] = useState('');
   const [busy, setBusy] = useState(null);
   // Match the worker contract exactly: null retains legacy full access, an
   // explicit empty list grants none, and absent identity data grants nothing.
@@ -155,7 +156,16 @@ function TopicManager({ chapterId, user, fallbackTopics = [] }) {
   const add = async () => {
     if (!draft.trim() || !allowed('content:edit')) return;
     setBusy('add');
-    try { await api().post(`/staff/content/chapter/${chapterId}/topics`, { title: draft.trim() }); setDraft(''); await load(); toast.success('Topic created'); }
+    try {
+      await api().post(`/staff/content/chapter/${chapterId}/topics`, {
+        title: draft.trim(),
+        title_as: draftAs.trim(),
+      });
+      setDraft('');
+      setDraftAs('');
+      await load();
+      toast.success('Topic created');
+    }
     catch (error) { toast.error(error?.response?.data?.detail || 'Topic creation failed'); }
     finally { setBusy(null); }
   };
@@ -172,11 +182,15 @@ function TopicManager({ chapterId, user, fallbackTopics = [] }) {
   };
   return <div className="space-y-2">
     {loading ? <div className="h-10 animate-pulse rounded-xl bg-gray-100" /> : topics.map(topic => <div key={topic.id} className="rounded-xl border border-gray-200 bg-white p-2.5">
-      <div className="flex flex-wrap items-center gap-2"><span className="min-w-0 flex-1 text-xs font-semibold text-gray-800">{topic.title}</span><StatusBadge status={topic.status || 'draft'} /></div>
+      <div className="flex flex-wrap items-start gap-2"><div className="min-w-0 flex-1"><div className="text-xs font-semibold text-gray-800">{topic.title}</div>{topic.title_as && <div className="mt-0.5 text-xs text-gray-500">{topic.title_as}</div>}</div><StatusBadge status={topic.status || 'draft'} /></div>
       <div className="mt-2 flex flex-wrap gap-1.5"><button type="button" disabled={!allowed('content:publish') || busy} onClick={() => action(topic, topic.status === 'published' ? 'unpublish' : 'publish')} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">{topic.status === 'published' ? 'Unpublish' : 'Publish'}</button><button type="button" disabled={!allowed('content:edit') || busy} onClick={() => { const value = window.prompt('Assamese title', topic.title_as || ''); if (value) action(topic, 'translate', { title_as: value }); }} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">Translate</button><button type="button" disabled={!allowed('rag:reindex') || busy} onClick={() => action(topic, 'reindex')} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">Reindex</button><button type="button" disabled={!allowed('content:delete') || busy} onClick={() => action(topic, 'delete')} className="rounded-lg border border-rose-200 px-2 py-1 text-[10px] text-rose-700 disabled:opacity-40">Delete</button></div>
     </div>)}
     {!loading && !topics.length && <div className="text-xs text-gray-400">No topics saved on this chapter.</div>}
-    <div className="flex gap-2"><input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} disabled={!allowed('content:edit')} placeholder="Add a topic title" className="min-w-0 flex-1 rounded-xl border border-gray-200 px-3 py-2 text-xs disabled:bg-gray-50" /><button type="button" onClick={add} disabled={!draft.trim() || !allowed('content:edit') || busy} className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Add</button></div>
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+      <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} disabled={!allowed('content:edit')} placeholder="Topic title (English)" className="min-w-0 rounded-xl border border-gray-200 px-3 py-2 text-xs disabled:bg-gray-50" />
+      <input value={draftAs} onChange={e => setDraftAs(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} disabled={!allowed('content:edit')} placeholder="বিষয়ৰ শিৰোনাম (অসমীয়া)" className="min-w-0 rounded-xl border border-gray-200 px-3 py-2 text-xs disabled:bg-gray-50" />
+      <button type="button" onClick={add} disabled={!draft.trim() || !allowed('content:edit') || busy} className="rounded-xl bg-violet-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">Add</button>
+    </div>
   </div>;
 }
 
@@ -941,6 +955,10 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                   <input type="text" value={form?.slug || ''} onChange={set('slug')} className={inputCls} placeholder="chapter-slug" />
                 </div>
               </div>
+              <div>
+                <FieldLabel>Slug (Assamese URL identifier)</FieldLabel>
+                <input type="text" value={form?.slug_as || ''} onChange={set('slug_as')} className={inputCls} placeholder="অসমীয়া-অধ্যায়-স্লাগ" />
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <FieldLabel>Status</FieldLabel>
@@ -973,15 +991,21 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                   <textarea value={form?.meta_description_as || ''} onChange={set('meta_description_as')} rows={3} className={`${inputCls} resize-none`} placeholder="অধ্যায়ৰ বিৱৰণ (অসমীয়া)" />
                 </div>
               </div>
-              <div>
-                <FieldLabel>Keywords</FieldLabel>
-                <input type="text" value={form?.keywords || ''} onChange={set('keywords')} className={inputCls} placeholder="comma, separated, keywords" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <FieldLabel>Keywords (English)</FieldLabel>
+                  <input type="text" value={form?.keywords || ''} onChange={set('keywords')} className={inputCls} placeholder="comma, separated, keywords" />
+                </div>
+                <div>
+                  <FieldLabel>Keywords (Assamese)</FieldLabel>
+                  <input type="text" value={form?.keywords_as || ''} onChange={set('keywords_as')} className={inputCls} placeholder="কমাৰে পৃথক কৰা মূল শব্দ" />
+                </div>
               </div>
 
               {/* ── Topics — drive topic-wise embedding + chat syllabus routing ── */}
               <div>
                 <FieldLabel>
-                  Topics
+                  Topics (English / Assamese)
                   <span className="ml-1 normal-case font-normal text-gray-400">
                     — each becomes an embedding vector for AI topic matching
                   </span>

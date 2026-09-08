@@ -130,8 +130,13 @@ export const chapters = sqliteTable('chapters', {
   id: text('id').primaryKey(),
   subjectId: text('subject_id').notNull(),   // no FK — legacy MongoDB UUID subject IDs (see migration 0001)
   title: text('title').notNull(),
+  titleAs: text('title_as'),
   slug: text('slug').notNull(),
   slugAs: text('slug_as'),                                            // Assamese slug
+  metaDescription: text('meta_description'),
+  metaDescriptionAs: text('meta_description_as'),
+  keywords: text('keywords'),
+  keywordsAs: text('keywords_as'),
   chapterNumber: integer('chapter_number'),
   status: text('status').default('draft'),                            // draft | published
   contentType: text('content_type').default('standard'),
