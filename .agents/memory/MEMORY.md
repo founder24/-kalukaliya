@@ -70,3 +70,4 @@
 - [External library crawl boundaries](external-library-crawl-boundaries.md) — dedupe archive graphs before processing and defer bulk scan OCR so large refreshes remain bounded.
 - [Syllabus PDF alignment](syllabus-pdf-alignment.md) — catalog PDFs lack subject links; align by official structure and reject body-keyword guesses.
 - [IndexNow endpoint fallback](indexnow-endpoint-fallback.md) — Cloudflare egress can be rate-limited per provider; use bounded participant fallback.
+- [Cloudflare secret verification](cloudflare-secret-verification.md) — verify Worker secret names through bindings metadata when immediate Wrangler CI listing is inconsistent.
