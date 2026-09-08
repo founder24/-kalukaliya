@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildWebSearchQuery,
+  dedupeWebResults,
   searchWeb,
+  shouldUseWebEvidence,
   shouldUseWebSearch,
   startRetrievalFanout,
 } from './web-search';
@@ -31,6 +33,39 @@ describe('Worker web-search policy', () => {
     expect(shouldUseWebSearch({ question: 'Explain renewable energy' })).toBe(false);
     expect(buildWebSearchQuery('  renewable   energy ', 'en'))
       .toBe('renewable energy Assam education');
+  });
+
+  it('uses already-started web evidence when RAG is weak or explicitly requested', () => {
+    expect(shouldUseWebEvidence({
+      explicitWebIntent: false,
+      topScore: 0.72,
+      contextContents: ['A short, incomplete chunk.'],
+    })).toBe(true);
+    expect(shouldUseWebEvidence({
+      explicitWebIntent: true,
+      topScore: 0.95,
+      contextContents: ['x'.repeat(900)],
+    })).toBe(true);
+  });
+
+  it('keeps strong substantial curriculum context authoritative', () => {
+    expect(shouldUseWebEvidence({
+      explicitWebIntent: false,
+      topScore: 0.91,
+      contextContents: ['x'.repeat(900)],
+    })).toBe(false);
+  });
+
+  it('deduplicates canonical URLs before evidence is merged', () => {
+    const duplicate = {
+      title: 'Assam education',
+      snippet: 'A sufficiently descriptive scholarly result about education in Assam.',
+      source: 'web_search' as const,
+    };
+    expect(dedupeWebResults([
+      { ...duplicate, url: 'https://doi.org/10.1000/example?utm_source=test' },
+      { ...duplicate, url: 'https://doi.org/10.1000/example' },
+    ])).toHaveLength(1);
   });
 });
 

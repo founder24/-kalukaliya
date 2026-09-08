@@ -1,6 +1,8 @@
 const WEB_SEARCH_LIMIT = 4;
-export const WEB_SEARCH_TIMEOUT_MS = 1_100;
+export const WEB_SEARCH_TIMEOUT_MS = 700;
 const WEB_SNIPPET_CHAR_CAP = 500;
+const STRONG_RAG_SCORE = 0.80;
+const MIN_STRONG_RAG_CHARS = 500;
 
 export interface WebSearchResult {
   title: string;
@@ -55,6 +57,55 @@ export function shouldUseWebSearch(opts: {
   const question = opts.question.trim();
   if (!question) return false;
   return FRESHNESS_INTENT.test(question) || WEB_INTENT.test(question);
+}
+
+/**
+ * Web lookup is prestarted beside embedding for every non-authoritative turn,
+ * but only contributes evidence when explicitly requested or curriculum
+ * retrieval is too weak to stand alone.
+ */
+export function shouldUseWebEvidence(opts: {
+  explicitWebIntent: boolean;
+  topScore: number;
+  contextContents: string[];
+}): boolean {
+  if (opts.explicitWebIntent) return true;
+  const hasSubstantialContext = opts.contextContents.some(
+    content => content.replace(/\s+/g, ' ').trim().length >= MIN_STRONG_RAG_CHARS,
+  );
+  return opts.topScore < STRONG_RAG_SCORE || !hasSubstantialContext;
+}
+
+function canonicalWebUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    url.hash = '';
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(utm_|ref$|source$)/i.test(key)) url.searchParams.delete(key);
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return rawUrl.trim();
+  }
+}
+
+export function dedupeWebResults(results: WebSearchResult[]): WebSearchResult[] {
+  const seen = new Set<string>();
+  const deduped: WebSearchResult[] = [];
+  for (const result of results) {
+    const url = canonicalWebUrl(result.url);
+    const textKey = `${result.title} ${result.snippet}`
+      .toLowerCase()
+      .replace(/[^a-z0-9\u0980-\u09ff]+/g, ' ')
+      .trim()
+      .slice(0, 220);
+    if (!url || seen.has(`url:${url}`) || (textKey && seen.has(`text:${textKey}`))) continue;
+    seen.add(`url:${url}`);
+    if (textKey) seen.add(`text:${textKey}`);
+    deduped.push({ ...result, url });
+    if (deduped.length >= WEB_SEARCH_LIMIT) break;
+  }
+  return deduped;
 }
 
 export function buildWebSearchQuery(question: string, lang: 'en' | 'as'): string {
@@ -139,10 +190,10 @@ export async function searchWeb(
       return { results: [], status: 'error', durationMs: Date.now() - started };
     }
     const payload = await response.json<CrossrefResponse>();
-    const results = (payload.message?.items ?? [])
+    const results = dedupeWebResults((payload.message?.items ?? [])
       .map(work => boundedResult(work))
       .filter((item): item is WebSearchResult => item !== null)
-      .slice(0, WEB_SEARCH_LIMIT);
+    );
     return {
       results,
       status: results.length > 0 ? 'ok' : 'empty',

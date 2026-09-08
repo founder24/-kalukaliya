@@ -29,7 +29,9 @@ import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import { streamGenerate, AI_MODEL_PRIMARY } from '../services/ai';
 import {
   searchWeb,
+  dedupeWebResults,
   shouldUseWebSearch,
+  shouldUseWebEvidence,
   skippedWebSearch,
   startRetrievalFanout,
   type WebSearchResult,
@@ -1417,15 +1419,17 @@ chatRouter.post('/stream', async (c) => {
   const authoritativeIntent = detectAuthoritativeIntent(message);
   // D1 is authoritative for syllabus/PYQ availability. Do not dilute a list
   // request with web snippets or nearest-neighbour retrieval.
-  const webSearchPlanned = !authoritativeIntent && c.env.WEB_SEARCH_ENABLED === 'true'
+  const webSearchEnabled = !authoritativeIntent && c.env.WEB_SEARCH_ENABLED === 'true';
+  const explicitWebIntent = webSearchEnabled
     && shouldUseWebSearch({
       question: message,
       chapterId: directChapterId,
       subjectId: body.subject_id,
     });
-  // Start before any D1/embedding await so eligible web lookup overlaps the
-  // existing retrieval work. The adapter itself enforces a hard 850 ms budget.
-  const webSearchPromise = webSearchPlanned
+  // Prestart bounded web lookup before any D1/embedding await. Its result is
+  // discarded when curriculum evidence is already strong, so ordinary textbook
+  // answers stay authoritative while weak RAG gets a zero-waterfall fallback.
+  const webSearchPromise = webSearchEnabled
     ? searchWeb(message, lang)
     : Promise.resolve(skippedWebSearch());
   const memoryPromise = loadMemories(db, userId, isAnon);
@@ -1612,7 +1616,12 @@ chatRouter.post('/stream', async (c) => {
   }
 
   const webResult = await webSearchPromise;
-  webResults = webResult.results;
+  const includeWebEvidence = webSearchEnabled && shouldUseWebEvidence({
+    explicitWebIntent,
+    topScore,
+    contextContents: contextChunks.map(chunk => chunk.content),
+  });
+  webResults = includeWebEvidence ? dedupeWebResults(webResult.results) : [];
   webStatus = webResult.status;
   timings.web_ms = webResult.durationMs;
   timings.retrieval_ms = Date.now() - retrievalStart;
