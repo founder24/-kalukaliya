@@ -80,6 +80,7 @@ beforeAll(async () => {
     env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status) VALUES ('chapter-two','subject','Second native chapter','native-queue-two','draft')`),
     env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status) VALUES ('chapter-three','subject','Third native chapter','native-queue-three','draft')`),
     env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status) VALUES ('chapter-cache','subject','Cache contract chapter','cache-contract','draft')`),
+    env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status) VALUES ('chapter-archived','subject','Archived chapter','archived-chapter','archived')`),
   ]);
   await env.DB.prepare(`
     INSERT INTO users (id, email, hashed_password, role, name)
@@ -168,12 +169,15 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     expect(cacheHit.headers.get('X-Cache')).toBe('HIT');
     const cachedPayload = await cacheHit.json() as Array<{ id: string; status: string }>;
     expect(cachedPayload.find(chapter => chapter.id === 'chapter-cache')?.status).toBe('published');
+    expect(cachedPayload.some(chapter => chapter.id === 'chapter-archived')).toBe(false);
 
     await env.CONTENT_KV.delete('subject:subject:chapters');
     const liveRead = await workerFetch(new Request('http://worker/api/v1/content/chapters/subject'));
     expect(liveRead.status).toBe(200);
     expect(liveRead.headers.get('X-Cache')).toBe('MISS');
-    expect(await liveRead.json()).toEqual(cachedPayload);
+    const livePayload = await liveRead.json() as Array<{ id: string; status: string }>;
+    expect(livePayload.some(chapter => chapter.id === 'chapter-archived')).toBe(false);
+    expect(livePayload).toEqual(cachedPayload);
   });
 
   it('turns interrupted publish work into a retryable partial job', async () => {

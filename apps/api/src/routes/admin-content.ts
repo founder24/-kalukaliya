@@ -13,7 +13,7 @@ import { boards, classes, chapters, publishJobs, seedRuns, streams, subjects, us
 import { extractBearer, isSessionValid, sessionIssuedAt, signAdminToken, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import { generate } from '../services/ai';
 import { reindexChapterRag } from '../services/rag-indexing';
-import { serializePublicChapterList } from '../services/public-chapter-list';
+import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env } from '../types';
 
 export const adminContentRouter = new Hono<{ Bindings: Env }>();
@@ -197,7 +197,7 @@ async function prewarmSubject(env: Env, subjectId: string): Promise<void> {
     publishedTopics: chapters.publishedTopics,
     pyqPdfUrl: chapters.pyqPdfUrl,
     pyqPapers: chapters.pyqPapers,
-  }).from(chapters).where(eq(chapters.subjectId, subjectId)).orderBy(chapters.chapterNumber);
+  }).from(chapters).where(publicChapterListWhere(subjectId)).orderBy(chapters.chapterNumber);
 
   const payload = serializePublicChapterList(rows);
   await env.CONTENT_KV.put(`subject:${subjectId}:chapters`, JSON.stringify(payload), { expirationTtl: 86400 * 7 });

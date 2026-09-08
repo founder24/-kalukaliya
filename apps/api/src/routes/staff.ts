@@ -32,7 +32,7 @@ import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters, chunks, contentAuditLog, users } from '../db/schema';
 import { extractBearer, hashPassword, isSessionValid, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import { purgeChapterRag, purgeRagScope, reindexChapterRag } from '../services/rag-indexing';
-import { serializePublicChapterList } from '../services/public-chapter-list';
+import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env, JwtPayload } from '../types';
 import type { JWTPayload } from 'jose';
 
@@ -380,7 +380,7 @@ async function kvPrewarm(env: Env, subjectId: string): Promise<void> {
       chapterNumber: chapters.chapterNumber, status: chapters.status,
       notesEn: chapters.notesEn, notesAs: chapters.notesAs, qaEn: chapters.qaEn,
       publishedTopics: chapters.publishedTopics, pyqPdfUrl: chapters.pyqPdfUrl, pyqPapers: chapters.pyqPapers,
-    }).from(chapters).where(eq(chapters.subjectId, subjectId)).orderBy(chapters.chapterNumber);
+    }).from(chapters).where(publicChapterListWhere(subjectId)).orderBy(chapters.chapterNumber);
 
     const payload = serializePublicChapterList(chaps);
 

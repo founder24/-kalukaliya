@@ -25,7 +25,7 @@ import { Hono, type Context } from 'hono';
 import { eq, and, ne, inArray } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters } from '../db/schema';
-import { serializePublicChapterList } from '../services/public-chapter-list';
+import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env } from '../types';
 
 export const contentRouter = new Hono<{ Bindings: Env }>();
@@ -263,7 +263,7 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     pyqPdfUrl: chapters.pyqPdfUrl,
     pyqPapers: chapters.pyqPapers,
   }).from(chapters)
-    .where(and(eq(chapters.subjectId, subjectId), ne(chapters.status, 'archived')))
+    .where(publicChapterListWhere(subjectId))
     .orderBy(chapters.chapterNumber);
 
   const payload = serializePublicChapterList(rows);

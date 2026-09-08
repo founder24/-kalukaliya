@@ -1,3 +1,6 @@
+import { and, eq, ne } from 'drizzle-orm';
+import { chapters } from '../db/schema';
+
 export type PublicChapterListRow = {
   id: string;
   title: string;
@@ -32,6 +35,11 @@ export type PublicChapterListItem = {
   topic_count: number;
   content_type: 'chapter';
 };
+
+/** Shared row-membership rule for every public chapter-list read and prewarm. */
+export function publicChapterListWhere(subjectId: string) {
+  return and(eq(chapters.subjectId, subjectId), ne(chapters.status, 'archived'));
+}
 
 function parseArray<T>(raw: string | null): T[] {
   try {
