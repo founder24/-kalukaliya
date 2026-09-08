@@ -367,7 +367,7 @@ export function AppRoutes() {
 
       {/* ── Staff routes ── */}
       <Route path="/staff" element={<StaffGuard><StaffDashboard /></StaffGuard>} />
-      <Route path="/staff/login" element={<Navigate to="/admin/login" replace />} />
+      <Route path="/staff/login" element={<Navigate to="/login" replace />} />
       <Route path="/staff/content-hub" element={<Navigate to="/staff" replace />} />
 
       {/* ── 404 ── */}
