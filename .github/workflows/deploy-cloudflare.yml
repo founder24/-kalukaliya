@@ -90,7 +90,7 @@ jobs:
           set -euo pipefail
           required=(
             JWT_SECRET ADMIN_JWT_SECRET RESET_TOKEN_SECRET EDGE_SHARED_SECRET
-            RESEND_API_KEY
+            RESEND_API_KEY INDEXNOW_API_KEY INDEXNOW_INTERNAL_SECRET
           )
           missing=()
           for name in "${required[@]}"; do
@@ -103,6 +103,9 @@ jobs:
           else
             echo "All required Cloudflare API Worker release secrets are supplied."
           fi
+
+      - name: Verify IndexNow ownership file matches the release key
+        run: node apps/frontend/scripts/indexnow-submit.mjs --verify-key-file apps/frontend/public
 
       - name: Test and type-check API Worker
         run: |
@@ -119,6 +122,12 @@ jobs:
 
       - name: Test curriculum release guards
         run: pnpm --filter @workspace/syrabit test:release-guards
+
+      - name: Test disposable staff sign-in failure safety
+        run: bash scripts/test-validate-cloudflare-api-cutover.sh
+
+      - name: Test disposable staff-auth release cleanup
+        run: bash scripts/test-release-staff-auth-reaper.sh
 
   deploy-api:
     name: Deploy API Worker + D1
@@ -177,8 +186,8 @@ jobs:
           put_required_secret RESET_TOKEN_SECRET "$RESET_TOKEN_SECRET"
           put_required_secret EDGE_SHARED_SECRET "$EDGE_SHARED_SECRET"
           put_required_secret RESEND_API_KEY "$RESEND_API_KEY"
-          put_optional_secret INDEXNOW_API_KEY "$INDEXNOW_API_KEY"
-          put_optional_secret INDEXNOW_INTERNAL_SECRET "$INDEXNOW_INTERNAL_SECRET"
+          put_required_secret INDEXNOW_API_KEY "$INDEXNOW_API_KEY"
+          put_required_secret INDEXNOW_INTERNAL_SECRET "$INDEXNOW_INTERNAL_SECRET"
           put_optional_secret R2_PUBLIC_URL "$R2_PUBLIC_URL"
           put_optional_secret TRANSLATE_CRON_SECRET "$TRANSLATE_CRON_SECRET"
 
@@ -191,7 +200,8 @@ jobs:
           import sys
           required = {
               "JWT_SECRET", "ADMIN_JWT_SECRET", "RESET_TOKEN_SECRET",
-              "EDGE_SHARED_SECRET", "RESEND_API_KEY",
+              "EDGE_SHARED_SECRET", "RESEND_API_KEY", "INDEXNOW_API_KEY",
+              "INDEXNOW_INTERNAL_SECRET",
           }
           configured = {item["name"] for item in json.load(sys.stdin)}
           missing = sorted(required - configured)
@@ -205,11 +215,11 @@ jobs:
       - name: Apply D1 migrations
         run: pnpm --filter syrabit-api exec wrangler d1 migrations apply syrabit-db --remote --env production
 
-      - name: Verify atomic claims and rollout guard migrations are applied
+      - name: Verify atomic claims, rollout guard, and fixture lease migrations are applied
         run: |
           set -euo pipefail
           applied_migrations="$(pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production --json \
-            --command "SELECT name FROM d1_migrations WHERE name IN ('0013_reset_token_cutover_nonce.sql', '0014_atomic_quota_and_refresh_claims.sql', '0015_refresh_claim_rollout_guard.sql') ORDER BY name")"
+            --command "SELECT name FROM d1_migrations WHERE name IN ('0013_reset_token_cutover_nonce.sql', '0014_atomic_quota_and_refresh_claims.sql', '0015_refresh_claim_rollout_guard.sql', '0020_release_staff_auth_leases.sql') ORDER BY name")"
           if ! printf '%s\n' "$applied_migrations" | python3 -c '
           import json
           import sys
@@ -218,6 +228,7 @@ jobs:
               "0013_reset_token_cutover_nonce.sql",
               "0014_atomic_quota_and_refresh_claims.sql",
               "0015_refresh_claim_rollout_guard.sql",
+              "0020_release_staff_auth_leases.sql",
           }
           found = {
               row.get("name")
@@ -233,10 +244,10 @@ jobs:
               )
           '
           then
-            echo "::error::Production D1 is missing required atomic claims or rollout guard migrations; refusing API Worker deployment."
+            echo "::error::Production D1 is missing required claims, rollout guard, or fixture lease migrations; refusing API Worker deployment."
             exit 1
           fi
-          echo "Production D1 reset-token, atomic claims, and rollout guard migrations are applied."
+          echo "Production D1 reset-token, atomic claims, rollout guard, and fixture lease migrations are applied."
 
       - name: Guard refresh-token bridge cleanup safety window
         run: |
@@ -350,11 +361,12 @@ jobs:
   deploy-frontend:
     name: Deploy Frontend
     runs-on: ubuntu-latest
-    needs: verify
+    needs: deploy-api
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-      INDEXNOW_SECRET: ${{ secrets.INDEXNOW_SECRET }}
+      INDEXNOW_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
+      INDEXNOW_BACKEND_URL: https://api.syrabit.ai
     steps:
       - uses: actions/checkout@v4
 
@@ -391,13 +403,17 @@ jobs:
           ALLOW_INCOMPLETE_CURRICULUM_BUILD: 'false'
           REQUIRE_HYDRATION_BROWSER: 'true'
 
+      - name: Verify built IndexNow ownership file
+        env:
+          INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
+        run: node apps/frontend/scripts/indexnow-submit.mjs --verify-key-file apps/frontend/dist
+
       - name: Deploy to Cloudflare Pages
         run: |
           cd apps/edge
           pnpm exec wrangler pages deploy ../frontend/dist --project-name=syrabitfrontend --commit-dirty=true
 
       - name: Submit URLs to IndexNow
-        if: ${{ env.INDEXNOW_SECRET != '' }}
         run: node apps/frontend/scripts/indexnow-submit.mjs
 
   smoke:
@@ -491,6 +507,30 @@ jobs:
           status="$(curl -sS -L -o /dev/null -w '%{http_code}' "${FRONTEND_URL}" --max-time 30)"
           test "$status" = "200"
           echo "Frontend reachability passed: HTTP ${status}"
+
+      - name: Pages serves the IndexNow ownership file
+        env:
+          INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
+        run: |
+          set -euo pipefail
+          : "${INDEXNOW_API_KEY:?INDEXNOW_API_KEY is required for the Pages ownership-file smoke test}"
+          expected="/tmp/indexnow-ownership.expected"
+          actual="/tmp/indexnow-ownership.actual"
+          printf '%s' "$INDEXNOW_API_KEY" > "$expected"
+          if ! status="$(curl -sS -o "$actual" -w '%{http_code}' --max-time 30 \
+            "${FRONTEND_URL}/${INDEXNOW_API_KEY}.txt")"; then
+            echo "::error::Cloudflare Pages could not serve the configured IndexNow ownership-file URL; this is a Pages availability or routing failure, not an IndexNow provider outage."
+            exit 1
+          fi
+          if [[ "$status" != "200" ]]; then
+            echo "::error::Cloudflare Pages returned HTTP ${status} for the configured IndexNow ownership-file URL; this is a Pages serving or routing failure, not an IndexNow provider outage."
+            exit 1
+          fi
+          if ! cmp -s "$expected" "$actual"; then
+            echo "::error::Cloudflare Pages returned an unexpected body for the configured IndexNow ownership file; this is a Pages serving or routing failure, not an IndexNow provider outage."
+            exit 1
+          fi
+          echo "Cloudflare Pages ownership-file routing passed with HTTP 200 and the exact configured body."
 
       - name: Pages serves crawler artifacts and true 404s
         run: |
@@ -597,6 +637,31 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/validate-cloudflare-api-cutover.sh
+
+  disposable-staff-auth:
+    name: Prove disposable staff sign-in
+    runs-on: ubuntu-latest
+    needs: post-native-smoke
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack + PNPM
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Create, validate, and always remove a temporary admin
+        run: bash scripts/run-disposable-staff-auth-cutover.sh
 
   request-reset-email:
     name: Request fresh disposable password-reset email
