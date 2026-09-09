@@ -257,6 +257,15 @@ describe('anonymous burst protection in the Workers runtime', () => {
     try {
       vi.setSystemTime(new Date('2026-09-09T12:00:00.000Z'));
       const values = new Map<string, unknown>();
+      const healthValues = new Map<string, string>();
+      const healthKv = {
+        get: vi.fn(async (key: string) => {
+          return healthValues.get(key) ?? null;
+        }),
+        put: vi.fn(async (key: string, value: string) => {
+          healthValues.set(key, value);
+        }),
+      };
       let cleanupShouldFail = true;
       const storage = {
         get: vi.fn(async (key: string) => values.get(key)),
@@ -272,7 +281,9 @@ describe('anonymous burst protection in the Workers runtime', () => {
       };
       const durableObject = new RateLimitDurableObject({
         storage,
-      } as unknown as DurableObjectState);
+      } as unknown as DurableObjectState, {
+        RATE_LIMIT_KV: healthKv as unknown as KVNamespace,
+      });
 
       for (let attempt = 0; attempt < 4; attempt += 1) {
         await expect(durableObject.alarm()).rejects.toThrow('simulated storage failure');
@@ -286,6 +297,11 @@ describe('anonymous burst protection in the Workers runtime', () => {
         retryInSeconds: 300,
       });
       expect(String(errorSpy.mock.calls[0]?.[0])).not.toContain('student');
+      expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}')).toEqual({
+        degraded: true,
+        latest_failure_at: '2026-09-09T12:10:00.000Z',
+        latest_recovery_at: null,
+      });
 
       vi.advanceTimersByTime(50 * 60_000);
       await expect(durableObject.alarm()).rejects.toThrow('simulated storage failure');
@@ -306,6 +322,11 @@ describe('anonymous burst protection in the Workers runtime', () => {
       });
       expect(values.size).toBe(0);
       expect(storage.deleteAlarm).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}')).toEqual({
+        degraded: false,
+        latest_failure_at: '2026-09-09T13:10:00.000Z',
+        latest_recovery_at: '2026-09-09T13:10:00.000Z',
+      });
     } finally {
       errorSpy.mockRestore();
       infoSpy.mockRestore();

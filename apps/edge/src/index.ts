@@ -14,6 +14,7 @@ import { verifyJWT } from './middleware/jwt';
 import {
   anonymousNetworkRateLimitIdentity,
   checkRateLimit,
+  RATE_LIMIT_CLEANUP_HEALTH_KEY,
   rateLimitHeaders,
   resolveAnonymousIdentity,
 } from './middleware/rate-limit';
@@ -325,7 +326,24 @@ export default {
       }
 
       let backendReachable = false;
+      let rateLimitCleanup = {
+        degraded: false,
+        latest_failure_at: null as string | null,
+        latest_recovery_at: null as string | null,
+      };
       const now = Date.now();
+
+      if (env.RATE_LIMIT_KV) {
+        try {
+          const raw = await env.RATE_LIMIT_KV.get(RATE_LIMIT_CLEANUP_HEALTH_KEY);
+          const persisted = raw
+            ? JSON.parse(raw) as typeof rateLimitCleanup
+            : null;
+          if (persisted) rateLimitCleanup = persisted;
+        } catch {
+          // Incident telemetry must not make the health endpoint unavailable.
+        }
+      }
 
       // Layer 1: Module-level in-memory cache (10s TTL, per-isolate)
       if (healthCache && (now - healthCache.timestamp) < HEALTH_CACHE_TTL_MS) {
@@ -365,6 +383,7 @@ export default {
           timestamp: new Date().toISOString(),
           backend_reachable: backendReachable,
           backend_mode: 'api-worker',
+          rate_limit_cleanup: rateLimitCleanup,
         }),
         {
           status: 200,

@@ -27,6 +27,13 @@ const CLEANUP_FAILURE_ALERT_THRESHOLD = 3;
 const CLEANUP_FAILURE_ALERT_DEDUP_MS = 60 * 60 * 1000;
 const CLEANUP_FAILURE_COUNT_KEY = 'cleanupFailureCount';
 const CLEANUP_ALERTED_AT_KEY = 'cleanupAlertedAt';
+export const RATE_LIMIT_CLEANUP_HEALTH_KEY = 'health:rate-limit-cleanup';
+
+interface CleanupHealthState {
+  degraded: boolean;
+  latest_failure_at: string | null;
+  latest_recovery_at: string | null;
+}
 
 export interface AnonymousIdentity {
   id: string;
@@ -190,7 +197,32 @@ export function rateLimitHeaders(result: RateLimitResult, limit: number = 30): R
  * state after the hour rolls over.
  */
 export class RateLimitDurableObject {
-  constructor(private readonly state: DurableObjectState) {}
+  constructor(
+    private readonly state: DurableObjectState,
+    private readonly env?: Pick<Env, 'RATE_LIMIT_KV'>,
+  ) {}
+
+  private async writeCleanupHealth(
+    update: Pick<CleanupHealthState, 'degraded'> & Partial<CleanupHealthState>,
+  ): Promise<void> {
+    if (!this.env?.RATE_LIMIT_KV) return;
+    let previous: CleanupHealthState | null = null;
+    try {
+      const raw = await this.env.RATE_LIMIT_KV.get(RATE_LIMIT_CLEANUP_HEALTH_KEY);
+      previous = raw ? JSON.parse(raw) as CleanupHealthState : null;
+    } catch {
+      // A failed read must not prevent a fresh incident/recovery snapshot.
+    }
+    await this.env.RATE_LIMIT_KV.put(RATE_LIMIT_CLEANUP_HEALTH_KEY, JSON.stringify({
+      degraded: update.degraded,
+      latest_failure_at: update.latest_failure_at
+        ?? previous?.latest_failure_at
+        ?? null,
+      latest_recovery_at: update.latest_recovery_at
+        ?? previous?.latest_recovery_at
+        ?? null,
+    } satisfies CleanupHealthState));
+  }
 
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'POST') {
@@ -246,6 +278,11 @@ export class RateLimitDurableObject {
       await this.state.storage.deleteAll();
       await this.state.storage.deleteAlarm();
       if (failureCount >= CLEANUP_FAILURE_ALERT_THRESHOLD) {
+        const recoveredAt = new Date().toISOString();
+        await this.writeCleanupHealth({
+          degraded: false,
+          latest_recovery_at: recoveredAt,
+        });
         console.info(JSON.stringify({
           event: 'rate_limit_cleanup_recovered',
           previousFailures: failureCount,
@@ -260,6 +297,10 @@ export class RateLimitDurableObject {
       await this.state.storage.put(CLEANUP_FAILURE_COUNT_KEY, nextFailureCount);
       if (shouldAlert) {
         await this.state.storage.put(CLEANUP_ALERTED_AT_KEY, now);
+        await this.writeCleanupHealth({
+          degraded: true,
+          latest_failure_at: new Date(now).toISOString(),
+        });
         console.error(JSON.stringify({
           event: 'rate_limit_cleanup_repeated_failure',
           failures: nextFailureCount,
