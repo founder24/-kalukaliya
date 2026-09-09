@@ -142,6 +142,37 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     expect(logout.headers.get('Set-Cookie')).toContain('Max-Age=0');
   });
 
+  it('rejects anonymous, student, and refresh credentials at admin and staff boundaries without writes', async () => {
+    const anonymousAdmin = await workerFetch(new Request('http://worker/api/v1/admin/content/chapters'));
+    const anonymousStaff = await workerFetch(new Request('http://worker/api/v1/staff/content/boards'));
+    expect(anonymousAdmin.status).toBe(401);
+    expect(anonymousStaff.status).toBe(401);
+
+    const student = await new SignJWT({ role: 'student', type: 'access' })
+      .setProtectedHeader({ alg: 'HS256' }).setSubject('native-admin')
+      .setIssuedAt().setExpirationTime('1h')
+      .sign(new TextEncoder().encode('ordinary-user-secret'));
+    const refresh = await new SignJWT({ role: 'admin', type: 'refresh' })
+      .setProtectedHeader({ alg: 'HS256' }).setSubject('native-admin')
+      .setIssuedAt().setExpirationTime('1h')
+      .sign(new TextEncoder().encode('ordinary-user-secret'));
+
+    const studentResponse = await workerFetch(new Request('http://worker/api/v1/staff/content/boards', {
+      headers: { Authorization: `Bearer ${student}` },
+    }));
+    const refreshResponse = await workerFetch(new Request('http://worker/api/v1/admin/content/chapters', {
+      headers: { Authorization: `Bearer ${refresh}` },
+    }));
+    expect(studentResponse.status).toBe(403);
+    expect(refreshResponse.status).toBe(401);
+
+    // The endpoint is a read-only probe; no request above may create a
+    // publish/seed job or alter the chapter fixture.
+    const chapter = await env.DB.prepare('SELECT status FROM chapters WHERE id = ?')
+      .bind(chapterId).first<{ status: string }>();
+    expect(chapter?.status).toBe('draft');
+  });
+
   it('queues a publish job through the existing admin-session cookie', async () => {
     const response = await workerFetch(adminRequest(
       `/api/v1/admin/content/chapters/${chapterId}/publish`, 'POST',
