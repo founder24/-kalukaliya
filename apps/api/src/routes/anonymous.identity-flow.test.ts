@@ -1278,6 +1278,51 @@ describe('anonymous identity flow', () => {
     expect(chats?.count).toBe(2);
   });
 
+  it('keeps edge-owned quota out of D1 while preserving request replay', async () => {
+    const anonId = 'anon_d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1';
+    const clientRequestId = `chat-request-${crypto.randomUUID()}`;
+    const makeRequest = () => new Request('https://api.example/api/v1/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-anon-id': anonId,
+        'X-Rate-Limited-By': 'edge',
+        'X-RateLimit-Limit': '6',
+        'X-RateLimit-Remaining': '4',
+      },
+      body: JSON.stringify({
+        message: 'Explain gravity',
+        lang: 'en',
+        client_request_id: clientRequestId,
+      }),
+    });
+
+    const generationCallsBefore = generationCalls;
+    const first = await workerFetch(makeRequest());
+    expect(first.status).toBe(200);
+    const firstText = await first.text();
+    await Promise.all(background);
+    expect(firstText).toContain('"credits_used_total":2');
+    expect(generationCalls).toBe(generationCallsBefore + 1);
+
+    const retry = await workerFetch(makeRequest());
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get('X-Chat-Replayed')).toBe('true');
+    await retry.text();
+    await Promise.all(background);
+    expect(generationCalls).toBe(generationCallsBefore + 1);
+
+    const quota = await env.DB.prepare(
+      'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
+    ).bind(anonId).first<{ count: number }>();
+    expect(quota).toBeNull();
+
+    const claim = await env.DB.prepare(
+      'SELECT status, quota_reserved FROM chat_request_claims WHERE request_id = ?',
+    ).bind(clientRequestId).first<{ status: string; quota_reserved: number }>();
+    expect(claim).toEqual({ status: 'completed', quota_reserved: 0 });
+  });
+
   it('replays an authenticated completed request without duplicating stats or history', async () => {
     const userId = crypto.randomUUID();
     await env.DB.prepare(

@@ -181,8 +181,8 @@ export default {
       }
 
        const isAnonymous = authenticatedUserId === 'anonymous';
-       const edgeLimit = isAnonymous ? 6 : 500;
-       const chatWindowMs = isAnonymous ? 60 * 1000 : 60 * 60 * 1000;
+       const edgeLimit = 6;
+       const chatWindowMs = 60 * 1000;
        const bucketDimension = isAnonymous ? 'anonymous-chat' : lang;
       let rl;
       try {
@@ -237,6 +237,9 @@ export default {
       // Signal to backend that edge already performed rate limiting
       const rlHeaders = new Headers(request.headers);
       rlHeaders.set('X-Rate-Limited-By', 'edge');
+      for (const [name, value] of Object.entries(rateLimitHeaders(rl, edgeLimit))) {
+        rlHeaders.set(name, value);
+      }
       request = new Request(request, { headers: rlHeaders });
     }
 

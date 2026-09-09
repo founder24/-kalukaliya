@@ -263,6 +263,7 @@ export const chatRequestClaims = sqliteTable('chat_request_claims', {
   userId: text('user_id').notNull(),
   period: text('period').notNull(),
   isAnon: integer('is_anon').notNull().default(1),
+  quotaReserved: integer('quota_reserved').notNull().default(1),
   status: text('status').notNull().default('reserved'),
   sessionId: text('session_id'),
   responseContent: text('response_content'),

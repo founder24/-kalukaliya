@@ -74,7 +74,7 @@ async function signedCookieAnonId(req: Request, secret?: string): Promise<string
   return timingSafeEqual(signature, expected) ? id : null;
 }
 
-async function isTrustedEdgeRequest(req: Request, secret?: string): Promise<boolean> {
+export async function isTrustedEdgeRequest(req: Request, secret?: string): Promise<boolean> {
   if (!secret) return false;
   const timestamp = req.headers.get('X-Edge-Timestamp');
   const signature = req.headers.get('X-Edge-Signature');
@@ -98,6 +98,28 @@ async function isTrustedEdgeRequest(req: Request, secret?: string): Promise<bool
   const message = `${timestamp}:${userId}:${pathname}`;
   const expected = hex(await crypto.subtle.sign('HMAC', key, encoder.encode(message)));
   return timingSafeEqual(signature, expected);
+}
+
+export async function isEdgeRateLimitedRequest(
+  req: Request,
+  secret?: string,
+): Promise<boolean> {
+  return req.headers.get('X-Rate-Limited-By') === 'edge'
+    && await isTrustedEdgeRequest(req, secret);
+}
+
+export async function trustedEdgeRateLimitUsage(
+  req: Request,
+  secret?: string,
+): Promise<{ count: number; limit: number } | null> {
+  if (!await isEdgeRateLimitedRequest(req, secret)) return null;
+  const limit = Number.parseInt(req.headers.get('X-RateLimit-Limit') ?? '', 10);
+  const remaining = Number.parseInt(req.headers.get('X-RateLimit-Remaining') ?? '', 10);
+  if (!Number.isSafeInteger(limit) || limit < 1
+    || !Number.isSafeInteger(remaining) || remaining < 0 || remaining >= limit) {
+    return null;
+  }
+  return { count: limit - remaining - 1, limit };
 }
 
 export async function anonUserId(req: Request, cookieSecret?: string): Promise<string> {

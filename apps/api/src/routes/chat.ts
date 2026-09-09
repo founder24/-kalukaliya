@@ -43,6 +43,7 @@ import {
   CHAT_RPM_LIMIT,
   anonUserId,
   currentQuotaPeriod,
+  trustedEdgeRateLimitUsage,
 } from '../services/anonymous';
 import type { Env } from '../types';
 
@@ -531,6 +532,7 @@ interface ChatRequestClaim {
   status: string;
   period?: string;
   is_anon?: number;
+  quota_reserved?: number;
   session_id: string | null;
   response_content: string | null;
   response_metadata: string | null;
@@ -565,18 +567,20 @@ async function insertChatRequestClaim(
   requestId: string,
   userId: string,
   isAnon: boolean,
+  quotaReserved: boolean,
   period = currentQuotaPeriod(),
 ): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
   const result = await d1.prepare(`
     INSERT OR IGNORE INTO chat_request_claims
-      (request_id, user_id, period, is_anon, status, created_at, expires_at)
-    VALUES (?, ?, ?, ?, 'reserved', ?, ?)
+      (request_id, user_id, period, is_anon, quota_reserved, status, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?)
   `).bind(
     requestId,
     userId,
     period,
     isAnon ? 1 : 0,
+    quotaReserved ? 1 : 0,
     now,
     now + 24 * 3600,
   ).run();
@@ -1583,7 +1587,7 @@ chatRouter.post('/cancel', async (c) => {
     ? payload.sub
     : await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
   let claim = await c.env.DB.prepare(
-    `SELECT user_id, period, is_anon, status FROM chat_request_claims
+    `SELECT user_id, period, is_anon, quota_reserved, status FROM chat_request_claims
      WHERE request_id = ? AND expires_at > ?`,
   ).bind(requestId, Math.floor(Date.now() / 1000)).first<ChatRequestClaim>();
   if (claim && claim.user_id !== userId) {
@@ -1608,7 +1612,7 @@ chatRouter.post('/cancel', async (c) => {
       return c.json({ cancelled: true }, 202);
     }
     claim = await c.env.DB.prepare(
-      `SELECT user_id, period, is_anon, status FROM chat_request_claims
+      `SELECT user_id, period, is_anon, quota_reserved, status FROM chat_request_claims
        WHERE request_id = ? AND expires_at > ?`,
     ).bind(requestId, now).first<ChatRequestClaim>();
     if (!claim || claim.user_id !== userId) {
@@ -1626,6 +1630,7 @@ chatRouter.post('/cancel', async (c) => {
           AND EXISTS (
             SELECT 1 FROM chat_request_claims
             WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+              AND quota_reserved = 1
           )
       `).bind(now, userId, claim.period, requestId, userId)
     : c.env.DB.prepare(`
@@ -1634,6 +1639,7 @@ chatRouter.post('/cancel', async (c) => {
           AND EXISTS (
             SELECT 1 FROM chat_request_claims
             WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+              AND quota_reserved = 1
           )
       `).bind(now, userId, claim.period, requestId, userId);
   const results = await c.env.DB.batch([
@@ -1751,6 +1757,10 @@ chatRouter.post('/stream', async (c) => {
   const quotaStart = Date.now();
   const reservationPeriod = currentQuotaPeriod();
   try {
+    const edgeRateLimitUsage = await trustedEdgeRateLimitUsage(
+      c.req.raw,
+      c.env.EDGE_SHARED_SECRET,
+    );
     const existingClaim = clientRequestId
       ? await getChatRequestClaim(c.env.DB, clientRequestId)
       : null;
@@ -1783,6 +1793,10 @@ chatRouter.post('/stream', async (c) => {
         userId,
         serverRequestId,
       );
+    } else if (edgeRateLimitUsage) {
+      quotaAllowed = true;
+      quotaCount = edgeRateLimitUsage.count;
+      quotaLimit = edgeRateLimitUsage.limit;
     } else {
       if (!isAnon) {
         ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
@@ -1792,42 +1806,43 @@ chatRouter.post('/stream', async (c) => {
           await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId, reservationPeriod));
       }
       ownsQuotaReservation = quotaAllowed && userRole !== 'admin' && userRole !== 'staff';
+    }
 
-      if (quotaAllowed && clientRequestId) {
-        const inserted = await insertChatRequestClaim(
+    if (quotaAllowed && clientRequestId) {
+      const inserted = await insertChatRequestClaim(
+        c.env.DB,
+        clientRequestId,
+        userId,
+        isAnon,
+        ownsQuotaReservation,
+        reservationPeriod,
+      );
+      if (!inserted) {
+        if (ownsQuotaReservation) {
+          await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod);
+          ownsQuotaReservation = false;
+        }
+        const racedClaim = await getChatRequestClaim(c.env.DB, clientRequestId);
+        if (!racedClaim || racedClaim.user_id !== userId) {
+          throw new Error('Unable to establish chat request claim');
+        }
+        if (racedClaim.status === 'completed') {
+          return replayCompletedChatRequest(racedClaim, serverRequestId);
+        }
+        if (racedClaim.status === 'cancelled') {
+          return c.json({
+            detail: 'This chat request was cancelled.',
+            error_code: 'chat_request_cancelled',
+            request_id: serverRequestId,
+            failure_stage: 'cancelled',
+          }, 409);
+        }
+        return waitForInFlightChatRequest(
           c.env.DB,
           clientRequestId,
           userId,
-          isAnon,
-          reservationPeriod,
+          serverRequestId,
         );
-        if (!inserted) {
-          if (ownsQuotaReservation) {
-            await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod);
-            ownsQuotaReservation = false;
-          }
-          const racedClaim = await getChatRequestClaim(c.env.DB, clientRequestId);
-          if (!racedClaim || racedClaim.user_id !== userId) {
-            throw new Error('Unable to establish chat request claim');
-          }
-          if (racedClaim.status === 'completed') {
-            return replayCompletedChatRequest(racedClaim, serverRequestId);
-          }
-          if (racedClaim.status === 'cancelled') {
-            return c.json({
-              detail: 'This chat request was cancelled.',
-              error_code: 'chat_request_cancelled',
-              request_id: serverRequestId,
-              failure_stage: 'cancelled',
-            }, 409);
-          }
-          return waitForInFlightChatRequest(
-              c.env.DB,
-              clientRequestId,
-              userId,
-              serverRequestId,
-            );
-        }
       }
     }
   } catch (err) {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { anonUserId } from '../services/anonymous';
+import {
+  anonUserId,
+  isEdgeRateLimitedRequest,
+  trustedEdgeRateLimitUsage,
+} from '../services/anonymous';
 
 const COOKIE_SECRET = 'cookie-test-secret-at-least-32-characters';
 const COOKIE_ID = 'anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -42,6 +46,28 @@ async function signedCookie(id: string): Promise<string> {
 }
 
 describe('anonymous Worker quota identity', () => {
+  it('honors the edge quota marker only with valid edge trust', async () => {
+    const pathname = '/api/v1/chat/stream';
+    const trusted = new Request(`https://api.syrabit.ai${pathname}`, {
+      headers: {
+        ...(await edgeHeaders(COOKIE_ID, pathname)),
+        'X-Rate-Limited-By': 'edge',
+        'X-RateLimit-Limit': '6',
+        'X-RateLimit-Remaining': '4',
+      },
+    });
+    const forged = new Request(`https://api.syrabit.ai${pathname}`, {
+      headers: { 'X-Rate-Limited-By': 'edge' },
+    });
+
+    await expect(isEdgeRateLimitedRequest(trusted, COOKIE_SECRET)).resolves.toBe(true);
+    await expect(isEdgeRateLimitedRequest(forged, COOKIE_SECRET)).resolves.toBe(false);
+    await expect(trustedEdgeRateLimitUsage(trusted, COOKIE_SECRET)).resolves.toEqual({
+      count: 1,
+      limit: 6,
+    });
+  });
+
   it('rejects a direct unsigned browser ID', async () => {
     const request = new Request('https://api.syrabit.ai/api/v1/chat/stream', {
       headers: {
