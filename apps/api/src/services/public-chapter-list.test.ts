@@ -9,8 +9,8 @@ const row: PublicChapterListRow = {
   slugAs: 'gati',
   chapterNumber: 1,
   status: 'published',
-  notesEn: 'Notes',
-  notesAs: 'টোকা',
+  notesEn: 'Generated chapter notes',
+  notesAs: 'উৎপাদিত অধ্যায়ৰ টোকা',
   qaEn: '[{"question":"What is motion?"}]',
   publishedTopics: '[{"title":" Speed ","title_as":" দ্ৰুতি "},{"title":"Velocity"}]',
   pyqPdfUrl: null,
@@ -55,5 +55,15 @@ describe('serializePublicChapterList', () => {
       syllabus_topics_as: [],
       topic_count: 0,
     });
+  });
+
+  it('only advertises notes when meaningful content exists', () => {
+    const [placeholder, content] = serializePublicChapterList([
+      { ...row, id: 'placeholder', notesEn: '   1234567890   ', notesAs: '   ' },
+      { ...row, id: 'content', notesEn: '12345678901', notesAs: 'অসমীয়া বিষয়বস্তু' },
+    ]);
+
+    expect(placeholder).toMatchObject({ notes_generated: false, has_assamese: false });
+    expect(content).toMatchObject({ notes_generated: true, has_assamese: true });
   });
 });

@@ -92,7 +92,10 @@ export const AuthProvider = ({ children }) => {
       fetchMe();
       return;
     }
-    setAuthChecked(true);
+    // Keep the guard in its loading state until the anonymous session probe
+    // has completed. Marking this true before fetchMe() races with protected
+    // routes: /profile can redirect to /login for one render in production,
+    // and the subsequent successful probe cannot restore the original route.
     const probe = () => { fetchMe(); };
     if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
       window.requestIdleCallback(probe, { timeout: 1500 });

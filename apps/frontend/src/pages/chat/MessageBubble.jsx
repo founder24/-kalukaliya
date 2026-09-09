@@ -482,6 +482,12 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                 : null;
               const matchPct = (msg.match_score != null && msg.match_score > 0)
                 ? Math.round(msg.match_score * 100) : null;
+               const primarySource = (Array.isArray(msg.source_entries) ? msg.source_entries : [])
+                 .find((entry) => entry && entry.kind === 'curriculum') || null;
+               const matchedPassage = (msg.matched_passage || primarySource?.matched_passage || msg.rag_chunk_snippet || primarySource?.snippet || '')
+                 .replace(/\s+/g, ' ').trim().slice(0, 360);
+               const retrievalMethod = msg.retrieval_method || primarySource?.retrieval_method || msg.rag_path || null;
+               const evidenceLanguage = primarySource?.medium || responseLang || null;
 
               const hasAnything = hasContext || isDocument;
               if (!hasAnything) return null;
@@ -567,6 +573,20 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                             )}
                           </div>
                         )}
+                         {(matchedPassage || retrievalMethod || evidenceLanguage) && (
+                           <div className="mt-2 rounded-lg border border-border/60 bg-muted/30 px-2.5 py-2" data-testid="matched-passage">
+                             <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                               {retrievalMethod && <span className="font-medium">Method: {retrievalMethod}</span>}
+                               {evidenceLanguage && <span>· Language: {evidenceLanguage}</span>}
+                               {msg.rag_chapter_id && <span>· Chapter ID: {msg.rag_chapter_id}</span>}
+                             </div>
+                             {matchedPassage && (
+                               <p className="mt-1 text-[11.5px] leading-relaxed text-foreground/80">
+                                 “{matchedPassage}”
+                               </p>
+                             )}
+                           </div>
+                         )}
                       </div>
                     </button>
                   )}

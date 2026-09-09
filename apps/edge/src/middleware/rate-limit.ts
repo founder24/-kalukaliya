@@ -13,6 +13,12 @@ export interface RateLimitResult {
   resetAt: number; // Unix timestamp (ms) when the window resets
 }
 
+// Chat's production allowance is one minute per response language. Keep this
+// in the edge limiter (the authoritative reservation point) so API and UI
+// consumers do not drift back to the retired daily/30-message contract.
+export const CHAT_REQUESTS_PER_MINUTE = 6;
+export const CHAT_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+
 interface RateLimitCommand {
   limit: number;
   resetAt: number;
@@ -148,15 +154,15 @@ export function anonymousNetworkRateLimitIdentity(request: Request): string {
  * @param namespace - Durable Object namespace for strongly-consistent counters
  * @param userId - Authenticated user ID (or "anonymous")
  * @param lang - Language code ("en" or "as")
- * @param limit - Max requests per window per language (default: 30 for free tier)
+ * @param limit - Max requests per minute per language
  * @returns RateLimitResult with allowed status, remaining count, and reset time
  */
 export async function checkRateLimit(
   namespace: DurableObjectNamespace,
   userId: string,
   lang: string,
-  limit: number = 30,
-  windowMs: number = 60 * 60 * 1000,
+  limit: number = CHAT_REQUESTS_PER_MINUTE,
+  windowMs: number = CHAT_RATE_LIMIT_WINDOW_MS,
 ): Promise<RateLimitResult> {
   const now = Date.now();
   const windowKey = Math.floor(now / windowMs);

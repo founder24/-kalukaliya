@@ -29,7 +29,12 @@ import { eq, and, like, sql } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { users, chats, memoryBrain } from '../db/schema';
 import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
-import { CHAT_RPM_LIMIT, anonUserId, currentQuotaPeriod } from '../services/anonymous';
+import {
+  CHAT_RPM_LIMIT,
+  anonUserId,
+  currentQuotaMinutePeriod,
+  isBrowserAnonId,
+} from '../services/anonymous';
 import { getAnonQuotaUsage } from './chat';
 import type { Env } from '../types';
 
@@ -66,7 +71,7 @@ async function requireUser(
 
 function buildProfileResponse(user: typeof users.$inferSelect): Record<string, unknown> {
   const tier = user.subscriptionTier ?? 'free';
-  const creditsLimit = CREDITS_LIMITS[tier] ?? 30; // 30 = free tier default
+  const creditsLimit = CREDITS_LIMITS[tier] ?? CHAT_REQUESTS_PER_MINUTE;
   const creditsUsed  = user.creditsUsed ?? 0;
   const creditsRemaining = user.creditsRemaining != null
     ? user.creditsRemaining
@@ -373,7 +378,15 @@ usersRouter.get('/credits', async (c) => {
   // Match chat's optional-auth behavior: a stale or invalid token is treated
   // as anonymous, and therefore still resolves the browser's persistent ID.
   if (!authenticated) {
-    anonymousId = await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
+    // A credits read does not reserve quota. Accept the browser's validated
+    // anonymous ID when the API is called directly (the edge still signs and
+    // validates this identity for all mutating chat requests). This keeps the
+    // read contract useful in local/API-worker tests without weakening chat
+    // identity enforcement.
+    const requestedAnonId = c.req.header('x-anon-id')?.trim() ?? null;
+    anonymousId = isBrowserAnonId(requestedAnonId)
+      ? requestedAnonId
+      : await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
     creditsUsed = Math.max(
       0,
       await getAnonQuotaUsage(c.env.DB, c.env.RATE_LIMIT_KV, anonymousId),
@@ -381,16 +394,34 @@ usersRouter.get('/credits', async (c) => {
   } else if (authenticatedUserId) {
     const row = await c.env.DB.prepare(
       'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
-    ).bind(authenticatedUserId, currentQuotaPeriod()).first<{ count: number }>();
+    ).bind(authenticatedUserId, currentQuotaMinutePeriod()).first<{ count: number }>();
     creditsUsed = row?.count ?? 0;
   }
 
   const rpmLimit = CHAT_REQUESTS_PER_MINUTE;
+  const nowMs = Date.now();
+  const resetAt = (Math.floor(nowMs / 60_000) + 1) * 60_000;
+  // The edge owns reservations for production chat requests. This explicit
+  // per-language envelope lets clients render independent EN/AS allowances
+  // without exposing identity or falling back to the retired daily contract.
+  const languageQuota = () => ({
+    limit: rpmLimit,
+    reset_at: new Date(resetAt).toISOString(),
+  });
   return c.json({
     credits_remaining: Math.max(0, rpmLimit - creditsUsed),
     credits_used: creditsUsed,
     rpm_limit: rpmLimit,
     quota_period: 'minute',
+    reset_at: new Date(resetAt).toISOString(),
+    languages: {
+      // Edge-owned buckets are independent. Their usage is intentionally not
+      // copied from the D1 compatibility counter (which has no language
+      // dimension); successful chat responses provide the authoritative
+      // per-language remaining/reset headers.
+      en: languageQuota(),
+      as: languageQuota(),
+    },
     tier,
     ...(anonymousId ? { anon_id: anonymousId } : {}),
   });

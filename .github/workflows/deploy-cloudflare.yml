@@ -405,6 +405,9 @@ jobs:
           ALLOW_INCOMPLETE_CURRICULUM_BUILD: 'false'
           REQUIRE_HYDRATION_BROWSER: 'true'
 
+      - name: Verify hashed HTML assets before Pages publish
+        run: pnpm --filter @workspace/syrabit run check:hashed-assets
+
       - name: Verify built IndexNow ownership file
         env:
           INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}

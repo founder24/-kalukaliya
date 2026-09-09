@@ -17,6 +17,8 @@ import {
   RATE_LIMIT_CLEANUP_HEALTH_KEY,
   rateLimitHeaders,
   resolveAnonymousIdentity,
+  CHAT_REQUESTS_PER_MINUTE,
+  CHAT_RATE_LIMIT_WINDOW_MS,
 } from './middleware/rate-limit';
 import { proxyToApiWorker, pingApiWorkerHealth } from './routes/worker-proxy';
 import { handleContentKV } from './routes/content-kv';
@@ -182,8 +184,8 @@ export default {
       }
 
        const isAnonymous = authenticatedUserId === 'anonymous';
-       const edgeLimit = 6;
-       const chatWindowMs = 60 * 1000;
+        const edgeLimit = CHAT_REQUESTS_PER_MINUTE;
+        const chatWindowMs = CHAT_RATE_LIMIT_WINDOW_MS;
        const bucketDimension = isAnonymous ? 'anonymous-chat' : lang;
       let rl;
       try {
@@ -756,6 +758,15 @@ export default {
       const secured = addSecurityHeaders(response);
       const origin = request.headers.get('Origin') || '';
       applyCorsHeaders(secured.headers, origin);
+      // Admin/staff responses contain private operational data and may be
+      // authenticated by an HttpOnly admin cookie. Never allow a browser,
+      // Cloudflare, or an intermediary to replay one user's response for
+      // another user. This is deliberately scoped to the existing API Worker
+      // architecture; it is not a second cache or deployment path.
+      if (url.pathname.startsWith('/api/v1/admin/') || url.pathname.startsWith('/api/v1/staff/')) {
+        secured.headers.set('Cache-Control', 'no-store');
+        secured.headers.set('Vary', 'Authorization, Cookie');
+      }
       secured.headers.set('X-Request-ID', requestId);
       return finalize(secured);
     }

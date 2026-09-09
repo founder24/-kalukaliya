@@ -185,6 +185,14 @@ export function InputBar({
   }, [input, subject, isLoading]);
 
   const sendDisabled = !input.trim() || isOutOfCredits || ocrLoading;
+  const languageQuota = credits?.languages?.[responseLang];
+  const resetAt = languageQuota?.resetAt || credits?.resetAt;
+  const resetLabel = resetAt
+    ? (() => {
+        const seconds = Math.max(0, Math.ceil((new Date(resetAt).getTime() - Date.now()) / 1000));
+        return seconds < 60 ? `${seconds}s` : `${Math.ceil(seconds / 60)}m`;
+      })()
+    : null;
 
   return (
     <div
@@ -468,7 +476,8 @@ export function InputBar({
 
         {effectiveLimit !== null && effectiveLimit > 0 && (
           <div className="mt-2 px-1 text-right text-[10px] font-medium text-muted-foreground" data-testid="chat-rpm-limit">
-            Rate limit: {effectiveLimit} messages/minute
+            {responseLang === 'as' ? 'অসমীয়া' : 'English'} allowance: {remaining == null ? 'available' : `${remaining} of ${effectiveLimit} messages left`} this minute
+            {resetLabel ? ` · resets in ${resetLabel}` : ''}
           </div>
         )}
       </div>

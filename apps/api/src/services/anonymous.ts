@@ -18,7 +18,12 @@ export function isBrowserAnonId(value: string | null | undefined): value is stri
 }
 
 export function currentQuotaPeriod(): string {
-  // One UTC minute bucket, shared across Workers isolates through D1.
+  // Retained for non-chat legacy callers which use calendar-day accounting.
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Canonical period for the atomic chat allowance (one UTC minute bucket). */
+export function currentQuotaMinutePeriod(): string {
   return new Date().toISOString().slice(0, 16);
 }
 

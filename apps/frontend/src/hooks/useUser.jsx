@@ -40,12 +40,26 @@ export const useToggleSavedSubject = () => {
     },
 
     // ── Rollback on error ──────────────────────────────────────────────────
-    onError: (_err, _subjectId, context) => {
-      if (context?.previous !== undefined) {
-        queryClient.setQueryData(['saved-subjects'], context.previous);
-      }
+    onError: (err, _subjectId, context) => {
+      // An anonymous query has no cache entry, so `previous` is undefined.
+      // Still write an empty authoritative value: otherwise the optimistic
+      // [subjectId] created in onMutate remains visibly Saved after a 401.
+      queryClient.setQueryData(['saved-subjects'], context?.previous ?? []);
+      const unauthorized = err?.response?.status === 401;
       import('sonner').then(({ toast }) => {
-        toast.error('Failed to save subject — please try again');
+        if (unauthorized) {
+          toast.error('Sign in to save subjects', {
+            action: {
+              label: 'Sign in',
+              onClick: () => {
+                const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+                window.location.assign(`/login?next=${encodeURIComponent(currentPath)}`);
+              },
+            },
+          });
+        } else {
+          toast.error('Failed to save subject — please try again');
+        }
       });
     },
 

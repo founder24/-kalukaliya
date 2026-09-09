@@ -32,7 +32,21 @@ export const AuthGuard = ({ children }) => {
     );
   }
 
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    return (
+      <Navigate
+        replace
+        // Keep the intended path in the URL rather than router location
+        // state. This survives a hard production navigation and keeps the
+        // guard compatible with lightweight router mocks used by consumers.
+        to={`/login?next=${encodeURIComponent(
+          typeof window !== 'undefined'
+            ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+            : '/',
+        )}`}
+      />
+    );
+  }
   if (!user.onboarding_done) return <Navigate to="/onboarding" replace />;
 
   return children || <Outlet />;

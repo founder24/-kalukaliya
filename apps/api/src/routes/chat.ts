@@ -42,7 +42,7 @@ import {
 import {
   CHAT_RPM_LIMIT,
   anonUserId,
-  currentQuotaPeriod,
+  currentQuotaMinutePeriod,
   trustedEdgeRateLimitUsage,
 } from '../services/anonymous';
 import type { Env } from '../types';
@@ -153,6 +153,11 @@ interface SourceEntry {
   kind: 'curriculum' | 'web';
   url: string | null;
   snippet: string;
+  /** Stable, bounded evidence excerpt; never includes an external URL. */
+  matched_passage?: string | undefined;
+  chapter_id?: string | undefined;
+  retrieval_method?: string | undefined;
+  confidence?: number | undefined;
   medium: string;
   source_type: string;
   score?: number | undefined;
@@ -568,7 +573,7 @@ async function insertChatRequestClaim(
   userId: string,
   isAnon: boolean,
   quotaReserved: boolean,
-  period = currentQuotaPeriod(),
+  period = currentQuotaMinutePeriod(),
 ): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
   const result = await d1.prepare(`
@@ -811,7 +816,7 @@ export async function reserveAuthQuota(
   userId: string,
   tier: string,
   role: string,
-  period = currentQuotaPeriod(),
+  period = currentQuotaMinutePeriod(),
 ): Promise<{ allowed: boolean; count: number; limit: number }> {
   if (role === 'admin' || role === 'staff') {
     return { allowed: true, count: 0, limit: 999_999 };
@@ -855,7 +860,7 @@ export async function reserveAnonQuota(
   d1: D1Database,
   legacyKv: KVNamespace,
   anonId: string,
-  period = currentQuotaPeriod(),
+  period = currentQuotaMinutePeriod(),
 ): Promise<{ allowed: boolean; count: number; limit: number }> {
   const limit = CHAT_REQUESTS_PER_MINUTE;
   const now = Math.floor(Date.now() / 1000);
@@ -907,7 +912,7 @@ export async function getAnonQuotaUsage(
   legacyKv: KVNamespace,
   anonId: string,
 ): Promise<number> {
-  const period = currentQuotaPeriod();
+  const period = currentQuotaMinutePeriod();
   void legacyKv;
   const row = await d1.prepare(
     'SELECT count FROM anonymous_quota_usage WHERE anon_id = ? AND period = ?',
@@ -920,7 +925,7 @@ export async function releaseQuotaReservation(
   d1: D1Database,
   userId: string,
   isAnon: boolean,
-  period = currentQuotaPeriod(),
+  period = currentQuotaMinutePeriod(),
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
 
@@ -1187,6 +1192,10 @@ async function buildSourceEntries(
       kind: 'curriculum' as const,
       url: path,
       snippet: chunk.content.replace(/\s+/g, ' ').trim().slice(0, 360),
+      matched_passage: chunk.content.replace(/\s+/g, ' ').trim().slice(0, 360),
+      chapter_id: chunk.chapterId,
+      retrieval_method: chunk.sourceType ?? 'rag_chapter',
+      confidence: chunk.score,
       medium: chunk.medium ?? (lang === 'as' ? 'assamese' : 'english'),
       source_type: chunk.sourceType ?? 'rag_chapter',
       score: chunk.score,
@@ -1205,8 +1214,10 @@ async function buildSourceEntries(
     id: `web:${index}:${result.url}`,
     title: result.title,
     kind: 'web' as const,
-    url: result.url,
-    snippet: result.snippet,
+    // External URLs are deliberately kept server-side. A source card is a
+    // curriculum provenance surface, not an unsafe arbitrary-link renderer.
+    url: null,
+    snippet: result.snippet.replace(/\s+/g, ' ').trim().slice(0, 360),
     medium: 'web',
     source_type: result.source,
   }));
@@ -1602,7 +1613,7 @@ chatRouter.post('/cancel', async (c) => {
     `).bind(
       requestId,
       userId,
-      currentQuotaPeriod(),
+      currentQuotaMinutePeriod(),
       payload?.sub && payload.type === 'access' ? 0 : 1,
       now,
       now,
@@ -1755,7 +1766,7 @@ chatRouter.post('/stream', async (c) => {
   let ownsQuotaReservation = false;
 
   const quotaStart = Date.now();
-  const reservationPeriod = currentQuotaPeriod();
+  const reservationPeriod = currentQuotaMinutePeriod();
   try {
     const edgeRateLimitUsage = await trustedEdgeRateLimitUsage(
       c.req.raw,
@@ -2243,6 +2254,7 @@ chatRouter.post('/stream', async (c) => {
     confidence_tier:  confidenceTier,
     match_score:      topScore,
     rag_chunks:       contextChunks.length,
+     chapter_id:       topChapterId,
     rag_chapter_name: topChapterTitle,
     rag_chapter_slug: primaryCurriculumSource?.chapter_slug,
     rag_subject_id:   topSubjectId,
@@ -2255,6 +2267,17 @@ chatRouter.post('/stream', async (c) => {
     ctx_board_slug:   primaryCurriculumSource?.board_slug,
     ctx_class_slug:   primaryCurriculumSource?.class_slug,
     ctx_subject_slug: primaryCurriculumSource?.subject_slug,
+     // Keep both legacy ctx_* names and the explicit names consumed by newer
+     // clients. Existing SSE consumers can continue to ignore these fields.
+     rag_board_name:   primaryCurriculumSource?.board_name ?? curriculumScope.boardName ?? body.board_name,
+     rag_class_name:   primaryCurriculumSource?.class_name ?? curriculumScope.className ?? body.class_name,
+     rag_stream_name:  body.stream_name,
+     rag_board_slug:   primaryCurriculumSource?.board_slug,
+     rag_class_slug:   primaryCurriculumSource?.class_slug,
+     rag_subject_slug: primaryCurriculumSource?.subject_slug,
+     matched_passage:  primaryCurriculumSource?.matched_passage ?? primaryCurriculumSource?.snippet ?? null,
+     retrieval_method: primaryCurriculumSource?.retrieval_method ?? ragPath,
+     source_confidence: primaryCurriculumSource?.confidence ?? topScore,
     web_used:         webResults.length > 0,
     web_status:       webStatus,
     // Student-facing provenance is the top curriculum match selected by the

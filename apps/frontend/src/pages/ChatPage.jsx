@@ -88,7 +88,12 @@ export default function ChatPage() {
   const [model, setModel]                 = useState('workers-ai-fast');
   const [subject, setSubject]             = useState(null);
   const [scopedChapters, setScopedChapters] = useState([]);
-  const [credits, setCredits]             = useState({ used: user?.credits_used || 0, limit: user?.credits_limit ?? null });
+  const [credits, setCredits]             = useState({
+    used: user?.credits_used || 0,
+    limit: user?.credits_limit ?? null,
+    resetAt: null,
+    languages: {},
+  });
   const [syncState, setSyncState]         = useState('idle');
   // Once a conversation has loaded its messages, scroll to a `#m<index>`
   // hash if the URL carries one (set by AI-notes citation deep-links).
@@ -185,7 +190,21 @@ export default function ChatPage() {
     apiClient().get('/user/credits', creditHeaders ? { headers: creditHeaders } : undefined)
       .then((res) => {
         const c = res.data;
-        setCredits({ used: c.credits_used ?? c.used ?? 0, limit: c.rpm_limit ?? 6 });
+        const normalizeLanguageQuota = (quota = {}) => ({
+          limit: Number(quota.limit ?? c.rpm_limit ?? 6),
+          used: Number(quota.used ?? 0),
+          remaining: Number(quota.remaining ?? quota.limit ?? c.rpm_limit ?? 6),
+          resetAt: quota.resetAt ?? quota.reset_at ?? c.reset_at ?? null,
+        });
+        setCredits({
+          used: c.credits_used ?? c.used ?? 0,
+          limit: c.rpm_limit ?? 6,
+          resetAt: c.reset_at ?? null,
+          languages: {
+            en: normalizeLanguageQuota(c.languages?.en),
+            as: normalizeLanguageQuota(c.languages?.as),
+          },
+        });
       })
       .catch(() => {});
   }, [authChecked, user, creditsRefreshKey]);
@@ -278,8 +297,12 @@ export default function ChatPage() {
     [subjectId, subject, scopedChapters, activeChapter, user, seedCardContext, sourceSection],
   );
 
-  const effectiveLimit = credits.limit ?? 6;
-  const remaining    = effectiveLimit !== null ? Math.max(0, effectiveLimit - credits.used) : null;
+  const languageCredits = credits.languages?.[responseLang] || null;
+  const effectiveLimit = languageCredits?.limit ?? credits.limit ?? 6;
+  const remaining = languageCredits?.remaining
+    ?? (effectiveLimit !== null && languageCredits?.used != null
+      ? Math.max(0, effectiveLimit - languageCredits.used)
+      : effectiveLimit);
   const creditPercent = effectiveLimit != null && effectiveLimit > 0 ? Math.min(100, (credits.used / effectiveLimit) * 100) : 0;
   // RPM exhaustion is temporary and must never leave the composer disabled.
   const isOutOfCredits = false;
@@ -649,6 +672,7 @@ export default function ChatPage() {
         ragClassSlug: null, ragSubjectSlug: null, libSources: [], sourceEntries: [], hasError: false,
         // Source card fields emitted by backend before LLM starts
         matchScore: null, sourceType: null, confidenceTier: null, ragPath: null,
+         chapterId: null, matchedPassage: null, retrievalMethod: null, sourceConfidence: null,
       };
 
       let pendingChunk = '';
@@ -701,12 +725,19 @@ export default function ChatPage() {
           if (parsed.rag_chapter_slug) meta.ragChapterSlug = parsed.rag_chapter_slug;
           if (parsed.ctx_board_name) meta.ragBoardName = parsed.ctx_board_name;
           if (parsed.ctx_class_name) meta.ragClassName = parsed.ctx_class_name;
+           if (parsed.rag_board_name) meta.ragBoardName = parsed.rag_board_name;
+           if (parsed.rag_class_name) meta.ragClassName = parsed.rag_class_name;
+           if (parsed.rag_stream_name) meta.ragStreamName = parsed.rag_stream_name;
           if (parsed.ctx_stream_name) meta.ragStreamName = parsed.ctx_stream_name;
           if (parsed.ctx_board_slug) meta.ragBoardSlug = parsed.ctx_board_slug;
           if (parsed.ctx_class_slug) meta.ragClassSlug = parsed.ctx_class_slug;
           if (parsed.ctx_subject_slug) meta.ragSubjectSlug = parsed.ctx_subject_slug;
           if (parsed.rag_topic_name) meta.ragTopicName = parsed.rag_topic_name;
           if (parsed.rag_chunk_snippet) meta.ragChunkSnippet = parsed.rag_chunk_snippet;
+          if (parsed.chapter_id) meta.chapterId = parsed.chapter_id;
+          if (parsed.matched_passage) meta.matchedPassage = parsed.matched_passage;
+          if (parsed.retrieval_method) meta.retrievalMethod = parsed.retrieval_method;
+          if (parsed.source_confidence != null) meta.sourceConfidence = parsed.source_confidence;
           if (parsed.content_card_name && !meta.ragTopicName) meta.ragTopicName = parsed.content_card_name;
           if (parsed.content_card_board && !meta.ragBoardName) meta.ragBoardName = parsed.content_card_board;
           if (parsed.content_card_class && !meta.ragClassName) meta.ragClassName = parsed.content_card_class;
@@ -804,7 +835,35 @@ export default function ChatPage() {
             // dev-mode QA badge can show decision/provider/namespace.
             if (parsed.route_trace) meta.routeTrace = parsed.route_trace;
             if (parsed.credits_used_total != null) {
-              setCredits((c) => ({ ...c, used: parsed.credits_used_total }));
+              setCredits((c) => ({
+                ...c,
+                used: parsed.credits_used_total,
+                languages: {
+                  ...c.languages,
+                  [responseLang]: {
+                    ...(c.languages?.[responseLang] || {}),
+                    used: parsed.credits_used_total,
+                    remaining: Math.max(0, (c.languages?.[responseLang]?.limit ?? c.limit ?? 6) - parsed.credits_used_total),
+                  },
+                },
+              }));
+            }
+            const responseRemaining = Number(response.headers?.get?.('X-RateLimit-Remaining'));
+            const responseReset = response.headers?.get?.('X-RateLimit-Reset');
+            if (Number.isFinite(responseRemaining)) {
+              setCredits((c) => ({
+                ...c,
+                languages: {
+                  ...c.languages,
+                  [responseLang]: {
+                    ...(c.languages?.[responseLang] || {}),
+                    used: Math.max(0, (c.languages?.[responseLang]?.limit ?? c.limit ?? 6) - responseRemaining),
+                    remaining: responseRemaining,
+                    limit: Number(c.languages?.[responseLang]?.limit ?? c.limit ?? 6),
+                    resetAt: responseReset ? new Date(Number(responseReset) * 1000).toISOString() : c.resetAt,
+                  },
+                },
+              }));
             }
             const remaining = parsed.remaining_credits ?? 0;
             try {
@@ -839,7 +898,7 @@ export default function ChatPage() {
       } else { setConversationId(meta.convId); }
       setMessages((prev) => prev.map((m) =>
         m.id === aiMsgId
-          ? { ...m, content: fullContent, streaming: false, rag_source: meta.ragSource, rag_chunks: meta.ragChunks, rag_subject_id: meta.ragSubjectId, rag_subject_name: meta.ragSubjectName, rag_chapter_name: meta.ragChapterName, rag_chapter_slug: meta.ragChapterSlug, rag_board_name: meta.ragBoardName, rag_class_name: meta.ragClassName, rag_stream_name: meta.ragStreamName, rag_board_slug: meta.ragBoardSlug, rag_class_slug: meta.ragClassSlug, rag_subject_slug: meta.ragSubjectSlug, rag_topic_name: meta.ragTopicName, rag_chunk_snippet: meta.ragChunkSnippet, ctx_subject_name: subject?.name || null, ctx_subject_icon: meta.ragSubjectIcon || subject?.icon || null, ctx_subject_gradient: meta.ragSubjectGradient || subject?.gradient || null, sources: meta.libSources, source_entries: meta.sourceEntries, route_trace: meta.routeTrace || null, match_score: meta.matchScore, source_type: meta.sourceType, confidence_tier: meta.confidenceTier, rag_path: meta.ragPath }
+          ? { ...m, content: fullContent, streaming: false, rag_source: meta.ragSource, rag_chunks: meta.ragChunks, rag_subject_id: meta.ragSubjectId, rag_subject_name: meta.ragSubjectName, rag_chapter_id: meta.chapterId, rag_chapter_name: meta.ragChapterName, rag_chapter_slug: meta.ragChapterSlug, rag_board_name: meta.ragBoardName, rag_class_name: meta.ragClassName, rag_stream_name: meta.ragStreamName, rag_board_slug: meta.ragBoardSlug, rag_class_slug: meta.ragClassSlug, rag_subject_slug: meta.ragSubjectSlug, rag_topic_name: meta.ragTopicName, rag_chunk_snippet: meta.ragChunkSnippet, matched_passage: meta.matchedPassage, retrieval_method: meta.retrievalMethod, source_confidence: meta.sourceConfidence, ctx_subject_name: subject?.name || null, ctx_subject_icon: meta.ragSubjectIcon || subject?.icon || null, ctx_subject_gradient: meta.ragSubjectGradient || subject?.gradient || null, sources: meta.libSources, source_entries: meta.sourceEntries, route_trace: meta.routeTrace || null, match_score: meta.matchScore, source_type: meta.sourceType, confidence_tier: meta.confidenceTier, rag_path: meta.ragPath }
           : m
       ));
       setSyncState('idle');
