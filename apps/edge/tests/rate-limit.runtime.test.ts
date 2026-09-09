@@ -246,6 +246,61 @@ describe('anonymous burst protection in the Workers runtime', () => {
 });
 
 describe('authenticated per-language limits in the Workers runtime', () => {
+  it('restores both English and Assamese allowances after the minute boundary', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-09T12:00:59.500Z'));
+      const userId = 'student-both-language-reset';
+      const token = await authenticatedToken(userId);
+      const forwardedLanguages: string[] = [];
+      const apiFetch = vi.fn(async (request: Request) => {
+        const body = await request.json() as { lang: string };
+        forwardedLanguages.push(body.lang);
+        return Response.json({ ok: true });
+      });
+      const environment = runtimeEnv(apiFetch);
+      const request = (lang: 'en' | 'as') =>
+        chatRequest(lang, '203.0.113.210', undefined, token);
+
+      for (const lang of ['en', 'as'] as const) {
+        const admitted = [];
+        for (let index = 0; index < 6; index += 1) {
+          admitted.push(await worker.fetch(request(lang), environment, context()));
+        }
+        expect(admitted.every(response => response.status === 200)).toBe(true);
+        expect((await worker.fetch(request(lang), environment, context())).status).toBe(429);
+      }
+      expect(forwardedLanguages.filter(lang => lang === 'en')).toHaveLength(6);
+      expect(forwardedLanguages.filter(lang => lang === 'as')).toHaveLength(6);
+
+      const windowKey = Math.floor(Date.now() / 60_000);
+      const alarmsRan = await Promise.all((['en', 'as'] as const).map(lang =>
+        runDurableObjectAlarm(
+          env.RATE_LIMIT_DO.get(
+            env.RATE_LIMIT_DO.idFromName(`rl:${userId}:${lang}:${windowKey}`),
+          ),
+        )
+      ));
+      expect(alarmsRan).toEqual([true, true]);
+
+      vi.advanceTimersByTime(1_000);
+      const restored = await Promise.all((['en', 'as'] as const).map(lang =>
+        worker.fetch(request(lang), environment, context())
+      ));
+
+      expect(restored.every(response => response.status === 200)).toBe(true);
+      expect(forwardedLanguages).toEqual([
+        ...Array.from({ length: 6 }, () => 'en'),
+        ...Array.from({ length: 6 }, () => 'as'),
+        'en',
+        'as',
+      ]);
+      expect(apiFetch).toHaveBeenCalledTimes(14);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not let excess English traffic consume the Assamese allowance', async () => {
     const token = await authenticatedToken('student-language-isolation');
     const forwardedLanguages: string[] = [];
