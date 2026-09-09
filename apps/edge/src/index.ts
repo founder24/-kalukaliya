@@ -12,10 +12,13 @@
 import { getCorsHeaders, applyCorsHeaders } from './middleware/cors';
 import { verifyJWT } from './middleware/jwt';
 import {
-  anonymousRateLimitIdentity,
+  anonymousNetworkRateLimitIdentity,
   checkRateLimit,
+  RATE_LIMIT_CLEANUP_HEALTH_KEY,
   rateLimitHeaders,
   resolveAnonymousIdentity,
+  CHAT_REQUESTS_PER_MINUTE,
+  CHAT_RATE_LIMIT_WINDOW_MS,
 } from './middleware/rate-limit';
 import { proxyToApiWorker, pingApiWorkerHealth } from './routes/worker-proxy';
 import { handleContentKV } from './routes/content-kv';
@@ -38,6 +41,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     let anonymousCookie: string | null = null;
+    let anonymousIdentityId: string | null = null;
     const finalize = (response: Response): Response => {
       if (anonymousCookie) response.headers.append('Set-Cookie', anonymousCookie);
       return response;
@@ -122,6 +126,7 @@ export default {
 
       if ((jwtResult.userId || 'anonymous') === 'anonymous') {
         const identity = await resolveAnonymousIdentity(request, env.EDGE_SHARED_SECRET);
+        anonymousIdentityId = identity.id;
         anonymousCookie = identity.setCookie;
         if (identity.id.startsWith('anon_')) {
           const identityHeaders = new Headers(request.headers);
@@ -163,7 +168,7 @@ export default {
 
       const authenticatedUserId = request.headers.get('X-User-ID') || 'anonymous';
       const rateLimitIdentity = authenticatedUserId === 'anonymous'
-        ? await anonymousRateLimitIdentity(request, env.EDGE_SHARED_SECRET)
+         ? anonymousIdentityId ?? anonymousNetworkRateLimitIdentity(request)
         : authenticatedUserId;
 
       // Best-effort lang extraction from request body
@@ -178,13 +183,34 @@ export default {
         // Body parsing failed — default to 'en'
       }
 
-      // Authenticated users get a much higher hourly limit — their usage is
-      // traceable and the backend's monthly quota is the real enforcement gate.
-      // Anonymous users keep the strict 30 req/hr burst-protection limit.
-      const edgeLimit = authenticatedUserId === 'anonymous' ? 30 : 500;
+       const isAnonymous = authenticatedUserId === 'anonymous';
+        const edgeLimit = CHAT_REQUESTS_PER_MINUTE;
+        const chatWindowMs = CHAT_RATE_LIMIT_WINDOW_MS;
+       const bucketDimension = isAnonymous ? 'anonymous-chat' : lang;
       let rl;
       try {
-        rl = await checkRateLimit(env.RATE_LIMIT_DO, rateLimitIdentity, lang, edgeLimit);
+         if (isAnonymous) {
+           const networkIdentity = anonymousNetworkRateLimitIdentity(request);
+           const networkResult = await checkRateLimit(
+             env.RATE_LIMIT_DO,
+             `network:${networkIdentity}`,
+             bucketDimension,
+             edgeLimit,
+             chatWindowMs,
+           );
+           if (!networkResult.allowed) {
+             rl = networkResult;
+           }
+         }
+         if (!rl) {
+           rl = await checkRateLimit(
+             env.RATE_LIMIT_DO,
+             rateLimitIdentity,
+             bucketDimension,
+             edgeLimit,
+             chatWindowMs,
+           );
+         }
       } catch (err) {
         console.error('Atomic rate-limit storage unavailable:', err);
         const unavailable = jsonResponse(503, {
@@ -214,6 +240,9 @@ export default {
       // Signal to backend that edge already performed rate limiting
       const rlHeaders = new Headers(request.headers);
       rlHeaders.set('X-Rate-Limited-By', 'edge');
+      for (const [name, value] of Object.entries(rateLimitHeaders(rl, edgeLimit))) {
+        rlHeaders.set(name, value);
+      }
       request = new Request(request, { headers: rlHeaders });
     }
 
@@ -299,7 +328,24 @@ export default {
       }
 
       let backendReachable = false;
+      let rateLimitCleanup = {
+        degraded: false,
+        latest_failure_at: null as string | null,
+        latest_recovery_at: null as string | null,
+      };
       const now = Date.now();
+
+      if (env.RATE_LIMIT_KV) {
+        try {
+          const raw = await env.RATE_LIMIT_KV.get(RATE_LIMIT_CLEANUP_HEALTH_KEY);
+          const persisted = raw
+            ? JSON.parse(raw) as typeof rateLimitCleanup
+            : null;
+          if (persisted) rateLimitCleanup = persisted;
+        } catch {
+          // Incident telemetry must not make the health endpoint unavailable.
+        }
+      }
 
       // Layer 1: Module-level in-memory cache (10s TTL, per-isolate)
       if (healthCache && (now - healthCache.timestamp) < HEALTH_CACHE_TTL_MS) {
@@ -339,6 +385,7 @@ export default {
           timestamp: new Date().toISOString(),
           backend_reachable: backendReachable,
           backend_mode: 'api-worker',
+          rate_limit_cleanup: rateLimitCleanup,
         }),
         {
           status: 200,
@@ -711,6 +758,15 @@ export default {
       const secured = addSecurityHeaders(response);
       const origin = request.headers.get('Origin') || '';
       applyCorsHeaders(secured.headers, origin);
+      // Admin/staff responses contain private operational data and may be
+      // authenticated by an HttpOnly admin cookie. Never allow a browser,
+      // Cloudflare, or an intermediary to replay one user's response for
+      // another user. This is deliberately scoped to the existing API Worker
+      // architecture; it is not a second cache or deployment path.
+      if (url.pathname.startsWith('/api/v1/admin/') || url.pathname.startsWith('/api/v1/staff/')) {
+        secured.headers.set('Cache-Control', 'no-store');
+        secured.headers.set('Vary', 'Authorization, Cookie');
+      }
       secured.headers.set('X-Request-ID', requestId);
       return finalize(secured);
     }
