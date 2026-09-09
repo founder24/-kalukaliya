@@ -204,6 +204,7 @@ export function InputBar({
           type="file"
           accept="image/*"
           capture="environment"
+          aria-label="Take a photo for question recognition"
           className="hidden"
           onChange={onCameraChange}
           data-testid="chat-camera-input"
@@ -212,6 +213,7 @@ export function InputBar({
           ref={galleryInputRef}
           type="file"
           accept="image/*"
+          aria-label="Choose an image for question recognition"
           className="hidden"
           onChange={onGalleryChange}
           data-testid="chat-gallery-input"

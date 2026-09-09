@@ -114,6 +114,7 @@ export default function ChatPage() {
   const lastUserMsgRef    = useRef(null);
   const textareaRef       = useRef(null);
   const abortControllerRef = useRef(null);
+  const activeChatRequestIdRef = useRef(null);
   const modelMenuRef      = useRef(null);
   const scrollTimeoutRef  = useRef(null);
   const autoRetryTimerRef = useRef(null);
@@ -292,6 +293,23 @@ export default function ChatPage() {
   }, [navigate]);
 
   const handleStop = useCallback(() => {
+    const requestId = activeChatRequestIdRef.current;
+    if (requestId) {
+      const headers = { 'Content-Type': 'application/json' };
+      const token = getToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      else {
+        const anonId = getAnonId();
+        if (anonId) headers['x-anon-id'] = anonId;
+      }
+      void fetch(`${API_BASE}/chat/cancel`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        keepalive: true,
+        body: JSON.stringify({ client_request_id: requestId }),
+      }).catch(() => {});
+    }
     if (abortControllerRef.current) abortControllerRef.current.abort();
     setIsLoading(false);
     setMessages((prev) =>
@@ -314,6 +332,7 @@ export default function ChatPage() {
     const userMsgId = retry?.userMsgId || msgId + '_u';
     const aiMsgId = retry?.aiMsgId || msgId + '_a';
     const chatRequestId = retry?.chatRequestId || createChatRequestId();
+    activeChatRequestIdRef.current = chatRequestId;
     const retryAttempt = retry?.attempt || 0;
     const userMsg = {
       id: userMsgId,
@@ -723,6 +742,8 @@ export default function ChatPage() {
             continue;
           }
           if (parsed.error) {
+            if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+            flushPending();
             meta.hasError = true;
             // Task #41 — even on a fail-loud error chunk the backend
             // now ships the per-turn router decision so the dev-only
@@ -748,8 +769,10 @@ export default function ChatPage() {
               m.id === aiMsgId
                 ? {
                     ...m,
-                    content: '',
+                    content: fullContent,
                     isAiUnavailable: true,
+                    isConnectionInterrupted: Boolean(fullContent),
+                    isPartialResponse: Boolean(fullContent),
                     isAssameseUnavailable,
                     retryText: text,
                     userMsgId,
@@ -880,6 +903,9 @@ export default function ChatPage() {
         setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
       }
     } finally {
+      if (activeChatRequestIdRef.current === chatRequestId) {
+        activeChatRequestIdRef.current = null;
+      }
       setIsLoading(false);
       // Task #610 — close any open Firebase Perf traces. Safe to call
       // multiple times; stub stop() is a no-op when Perf is disabled.

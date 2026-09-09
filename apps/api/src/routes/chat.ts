@@ -463,6 +463,13 @@ export function isReliableAssameseAnswer(text: string): boolean {
   if (bengaliMarkers.length >= 2) return false;
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (/^(?:হয়|নাই|ভাল|ঠিক আছে|অৱশ্যই|নহয়)[।.!]?$/u.test(normalized)) return true;
+  // Assamese and Bengali share most of the Unicode block. Require affirmative
+  // Assamese evidence (distinctive letters or common Assamese morphology), not
+  // merely the absence of a short Bengali blacklist.
+  const hasPositiveAssameseEvidence =
+    /[ৰৱ]/u.test(normalized)
+    || /(?:^|[\s,.!?।])(?:আৰু|কাৰণ|তেন্তে|নহয়|হৈছে|কৰা|কৰে|কৰিব|পৰা|টো|বোৰ)(?=$|[\s,.!?।])/u.test(normalized);
+  if (!hasPositiveAssameseEvidence) return false;
   const assameseChars = (text.match(/[\u0980-\u09FF]/g) ?? []).length;
   const latinChars = (text.match(/[A-Za-z]/g) ?? []).length;
   return assameseChars >= 2
@@ -470,9 +477,9 @@ export function isReliableAssameseAnswer(text: string): boolean {
 }
 
 /**
- * Last-resort delivery gate. Assamese and Bengali share a script and many words,
- * so strict dialect heuristics must never strand a student behind an error card.
- * This still blocks Hindi/Devanagari and predominantly English responses.
+ * Telemetry-only broad script signal. Never use this to authorize delivery:
+ * Assamese and Bengali share a script, so only isReliableAssameseAnswer may
+ * approve a final Assamese response.
  */
 export function isUsableAssameseAnswer(text: string): boolean {
   if (/[\u0900-\u0963\u0970-\u097F]/u.test(text)) return false;
@@ -522,6 +529,8 @@ const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 interface ChatRequestClaim {
   user_id: string;
   status: string;
+  period?: string;
+  is_anon?: number;
   session_id: string | null;
   response_content: string | null;
   response_metadata: string | null;
@@ -538,11 +547,25 @@ async function getChatRequestClaim(
   ).bind(requestId, Math.floor(Date.now() / 1000)).first<ChatRequestClaim>();
 }
 
+async function isChatRequestCancelled(
+  d1: D1Database,
+  requestId: string | null,
+  userId: string,
+): Promise<boolean> {
+  if (!requestId) return false;
+  const row = await d1.prepare(
+    `SELECT 1 AS cancelled FROM chat_request_claims
+     WHERE request_id = ? AND user_id = ? AND status = 'cancelled'`,
+  ).bind(requestId, userId).first<{ cancelled: number }>();
+  return Boolean(row);
+}
+
 async function insertChatRequestClaim(
   d1: D1Database,
   requestId: string,
   userId: string,
   isAnon: boolean,
+  period = currentQuotaPeriod(),
 ): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
   const result = await d1.prepare(`
@@ -552,7 +575,7 @@ async function insertChatRequestClaim(
   `).bind(
     requestId,
     userId,
-    currentQuotaPeriod(),
+    period,
     isAnon ? 1 : 0,
     now,
     now + 24 * 3600,
@@ -575,7 +598,7 @@ async function completeChatRequestClaim(
         session_id = ?,
         response_content = ?,
         response_metadata = ?
-    WHERE request_id = ? AND user_id = ?
+    WHERE request_id = ? AND user_id = ? AND status = 'reserved'
   `).bind(
     sessionId,
     responseContent.slice(0, 8000),
@@ -594,6 +617,45 @@ async function deleteChatRequestClaim(
   await d1.prepare(
     'DELETE FROM chat_request_claims WHERE request_id = ? AND user_id = ?',
   ).bind(requestId, userId).run();
+}
+
+async function releaseClaimQuotaReservation(
+  d1: D1Database,
+  requestId: string | null,
+  userId: string,
+  isAnon: boolean,
+): Promise<void> {
+  if (!requestId) {
+    await releaseQuotaReservation(d1, userId, isAnon);
+    return;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const quotaStatement = isAnon
+    ? d1.prepare(`
+        UPDATE anonymous_quota_usage
+        SET count = count - 1, updated_at = ?
+        WHERE anon_id = ? AND count > 0
+          AND period = (
+            SELECT period FROM chat_request_claims
+            WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+          )
+      `).bind(now, userId, requestId, userId)
+    : d1.prepare(`
+        UPDATE quota_usage
+        SET count = count - 1, updated_at = ?
+        WHERE user_id = ? AND count > 0
+          AND period = (
+            SELECT period FROM chat_request_claims
+            WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+          )
+      `).bind(now, userId, requestId, userId);
+  await d1.batch([
+    quotaStatement,
+    d1.prepare(
+      `DELETE FROM chat_request_claims
+       WHERE request_id = ? AND user_id = ? AND status = 'reserved'`,
+    ).bind(requestId, userId),
+  ]);
 }
 
 function replayCompletedChatRequest(
@@ -745,13 +807,13 @@ export async function reserveAuthQuota(
   userId: string,
   tier: string,
   role: string,
+  period = currentQuotaPeriod(),
 ): Promise<{ allowed: boolean; count: number; limit: number }> {
   if (role === 'admin' || role === 'staff') {
     return { allowed: true, count: 0, limit: 999_999 };
   }
 
   const limit = CHAT_REQUESTS_PER_MINUTE;
-  const period = currentQuotaPeriod();
   const now = Math.floor(Date.now() / 1000);
   const rowId = `${userId}:${period}`;
 
@@ -789,9 +851,9 @@ export async function reserveAnonQuota(
   d1: D1Database,
   legacyKv: KVNamespace,
   anonId: string,
+  period = currentQuotaPeriod(),
 ): Promise<{ allowed: boolean; count: number; limit: number }> {
   const limit = CHAT_REQUESTS_PER_MINUTE;
-  const period = currentQuotaPeriod();
   const now = Math.floor(Date.now() / 1000);
   // Daily KV counters must not seed one-minute buckets; doing so would carry
   // the retired 30-message cap into the new RPM limiter.
@@ -854,8 +916,8 @@ export async function releaseQuotaReservation(
   d1: D1Database,
   userId: string,
   isAnon: boolean,
+  period = currentQuotaPeriod(),
 ): Promise<void> {
-  const period = currentQuotaPeriod();
   const now = Math.floor(Date.now() / 1000);
 
   if (isAnon) {
@@ -1425,13 +1487,21 @@ async function persistCompletedChat(
   const statements = [
     d1.prepare(`
       INSERT INTO chats (id, user_id, session_id, role, content, lang, chapter_id, subject_id, expires_at, created_at)
-      VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?)
-    `).bind(userMsgId, uid, sid, opts.userMessage.slice(0, 4000), lang, chId, subId, expiresAt, now),
+      SELECT ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?
+      WHERE ? IS NULL OR EXISTS (
+        SELECT 1 FROM chat_request_claims
+        WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+      )
+    `).bind(userMsgId, uid, sid, opts.userMessage.slice(0, 4000), lang, chId, subId, expiresAt, now, opts.requestId, opts.requestId, uid),
 
     d1.prepare(`
       INSERT INTO chats (id, user_id, session_id, role, content, lang, chapter_id, subject_id, metadata, expires_at, created_at)
-      VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?)
-    `).bind(assistId, uid, sid, opts.assistantResponse.slice(0, 8000), lang, chId, subId, JSON.stringify({ model: opts.modelUsed }), expiresAt, now + 1),
+      SELECT ?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?
+      WHERE ? IS NULL OR EXISTS (
+        SELECT 1 FROM chat_request_claims
+        WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+      )
+    `).bind(assistId, uid, sid, opts.assistantResponse.slice(0, 8000), lang, chId, subId, JSON.stringify({ model: opts.modelUsed }), expiresAt, now + 1, opts.requestId, opts.requestId, uid),
   ];
   if (!opts.isAnon) {
     statements.push(d1.prepare(`
@@ -1439,13 +1509,20 @@ async function persistCompletedChat(
       SET monthly_message_count   = monthly_message_count + 1,
           total_lifetime_messages = total_lifetime_messages + 1,
           updated_at              = ?
-      WHERE id = ?
-    `).bind(now, uid));
+       WHERE id = ? AND (? IS NULL OR EXISTS (
+         SELECT 1 FROM chat_request_claims
+         WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+       ))
+    `).bind(now, uid, opts.requestId, opts.requestId, uid));
 
     if (opts.assistantResponse.trim().length >= 40) {
       statements.push(d1.prepare(`
         INSERT INTO memory_brain (id, user_id, key, value, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        SELECT ?, ?, ?, ?, ?
+        WHERE ? IS NULL OR EXISTS (
+          SELECT 1 FROM chat_request_claims
+          WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+        )
         ON CONFLICT(user_id, key) DO UPDATE SET
           value = excluded.value,
           updated_at = excluded.updated_at
@@ -1462,6 +1539,9 @@ async function persistCompletedChat(
           lang,
         }),
         now,
+        opts.requestId,
+        opts.requestId,
+        uid,
       ));
     }
   }
@@ -1472,7 +1552,7 @@ async function persistCompletedChat(
           session_id = ?,
           response_content = ?,
           response_metadata = ?
-      WHERE request_id = ? AND user_id = ?
+      WHERE request_id = ? AND user_id = ? AND status = 'reserved'
     `).bind(
       sid,
       opts.assistantResponse.slice(0, 8000),
@@ -1489,6 +1569,83 @@ async function persistCompletedChat(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const chatRouter = new Hono<{ Bindings: Env }>();
+
+chatRouter.post('/cancel', async (c) => {
+  const body: { client_request_id?: string } =
+    await c.req.json<{ client_request_id?: string }>().catch(() => ({}));
+  const requestId = body.client_request_id?.trim() ?? '';
+  if (!CLIENT_REQUEST_ID_PATTERN.test(requestId)) {
+    return c.json({ detail: 'A valid client_request_id is required.' }, 422);
+  }
+  const token = extractBearer(c.req.header('Authorization') ?? null);
+  const payload = token ? await verifyToken(token, c.env.JWT_SECRET) : null;
+  const userId = payload?.sub && payload.type === 'access'
+    ? payload.sub
+    : await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
+  let claim = await c.env.DB.prepare(
+    `SELECT user_id, period, is_anon, status FROM chat_request_claims
+     WHERE request_id = ? AND expires_at > ?`,
+  ).bind(requestId, Math.floor(Date.now() / 1000)).first<ChatRequestClaim>();
+  if (claim && claim.user_id !== userId) {
+    return c.json({ cancelled: false }, 200);
+  }
+  if (!claim) {
+    const now = Math.floor(Date.now() / 1000);
+    const inserted = await c.env.DB.prepare(`
+      INSERT OR IGNORE INTO chat_request_claims
+        (request_id, user_id, period, is_anon, status, cancelled_at, created_at, expires_at)
+      VALUES (?, ?, ?, ?, 'cancelled', ?, ?, ?)
+    `).bind(
+      requestId,
+      userId,
+      currentQuotaPeriod(),
+      payload?.sub && payload.type === 'access' ? 0 : 1,
+      now,
+      now,
+      now + 24 * 3600,
+    ).run();
+    if ((inserted.meta.changes ?? 0) > 0) {
+      return c.json({ cancelled: true }, 202);
+    }
+    claim = await c.env.DB.prepare(
+      `SELECT user_id, period, is_anon, status FROM chat_request_claims
+       WHERE request_id = ? AND expires_at > ?`,
+    ).bind(requestId, now).first<ChatRequestClaim>();
+    if (!claim || claim.user_id !== userId) {
+      return c.json({ cancelled: false }, 200);
+    }
+  }
+  if (claim.status !== 'reserved') {
+    return c.json({ cancelled: claim.status === 'cancelled' }, 200);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const quotaStatement = claim.is_anon
+    ? c.env.DB.prepare(`
+        UPDATE anonymous_quota_usage SET count = count - 1, updated_at = ?
+        WHERE anon_id = ? AND period = ? AND count > 0
+          AND EXISTS (
+            SELECT 1 FROM chat_request_claims
+            WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+          )
+      `).bind(now, userId, claim.period, requestId, userId)
+    : c.env.DB.prepare(`
+        UPDATE quota_usage SET count = count - 1, updated_at = ?
+        WHERE user_id = ? AND period = ? AND count > 0
+          AND EXISTS (
+            SELECT 1 FROM chat_request_claims
+            WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+          )
+      `).bind(now, userId, claim.period, requestId, userId);
+  const results = await c.env.DB.batch([
+    quotaStatement,
+    c.env.DB.prepare(
+      `UPDATE chat_request_claims SET status = 'cancelled', cancelled_at = ?
+       WHERE request_id = ? AND user_id = ? AND status = 'reserved'`,
+    ).bind(now, requestId, userId),
+  ]);
+  if ((results[1]?.meta.changes ?? 0) === 0) return c.json({ cancelled: false }, 200);
+  return c.json({ cancelled: true }, 202);
+});
 
 chatRouter.post('/stream', async (c) => {
   const startTime = Date.now();
@@ -1592,6 +1749,7 @@ chatRouter.post('/stream', async (c) => {
   let ownsQuotaReservation = false;
 
   const quotaStart = Date.now();
+  const reservationPeriod = currentQuotaPeriod();
   try {
     const existingClaim = clientRequestId
       ? await getChatRequestClaim(c.env.DB, clientRequestId)
@@ -1609,6 +1767,14 @@ chatRouter.post('/stream', async (c) => {
     if (existingClaim?.status === 'completed') {
       return replayCompletedChatRequest(existingClaim, serverRequestId);
     }
+    if (existingClaim?.status === 'cancelled') {
+      return c.json({
+        detail: 'This chat request was cancelled.',
+        error_code: 'chat_request_cancelled',
+        request_id: serverRequestId,
+        failure_stage: 'cancelled',
+      }, 409);
+    }
 
     if (existingClaim) {
       return waitForInFlightChatRequest(
@@ -1620,10 +1786,10 @@ chatRouter.post('/stream', async (c) => {
     } else {
       if (!isAnon) {
         ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-          await reserveAuthQuota(c.env.DB, userId, userTier, userRole));
+          await reserveAuthQuota(c.env.DB, userId, userTier, userRole, reservationPeriod));
       } else {
         ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-          await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId));
+          await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId, reservationPeriod));
       }
       ownsQuotaReservation = quotaAllowed && userRole !== 'admin' && userRole !== 'staff';
 
@@ -1633,19 +1799,29 @@ chatRouter.post('/stream', async (c) => {
           clientRequestId,
           userId,
           isAnon,
+          reservationPeriod,
         );
         if (!inserted) {
           if (ownsQuotaReservation) {
-            await releaseQuotaReservation(c.env.DB, userId, isAnon);
+            await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod);
             ownsQuotaReservation = false;
           }
           const racedClaim = await getChatRequestClaim(c.env.DB, clientRequestId);
           if (!racedClaim || racedClaim.user_id !== userId) {
             throw new Error('Unable to establish chat request claim');
           }
-          return racedClaim.status === 'completed'
-            ? replayCompletedChatRequest(racedClaim, serverRequestId)
-            : waitForInFlightChatRequest(
+          if (racedClaim.status === 'completed') {
+            return replayCompletedChatRequest(racedClaim, serverRequestId);
+          }
+          if (racedClaim.status === 'cancelled') {
+            return c.json({
+              detail: 'This chat request was cancelled.',
+              error_code: 'chat_request_cancelled',
+              request_id: serverRequestId,
+              failure_stage: 'cancelled',
+            }, 409);
+          }
+          return waitForInFlightChatRequest(
               c.env.DB,
               clientRequestId,
               userId,
@@ -1657,7 +1833,7 @@ chatRouter.post('/stream', async (c) => {
   } catch (err) {
     console.error('[chat] quota storage unavailable:', err);
     if (ownsQuotaReservation) {
-      await releaseQuotaReservation(c.env.DB, userId, isAnon)
+      await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
         .catch(releaseErr => console.error('[chat] quota compensation failed:', releaseErr));
       await deleteChatRequestClaim(c.env.DB, clientRequestId, userId)
         .catch(deleteErr => console.error('[chat] claim compensation failed:', deleteErr));
@@ -1690,8 +1866,7 @@ chatRouter.post('/stream', async (c) => {
   // Helper to release a reserved quota slot on failure paths.
   const releaseQuota = async (): Promise<void> => {
     if (ownsQuotaReservation) {
-      await releaseQuotaReservation(c.env.DB, userId, isAnon);
-      await deleteChatRequestClaim(c.env.DB, clientRequestId, userId);
+      await releaseClaimQuotaReservation(c.env.DB, clientRequestId, userId, isAnon);
       ownsQuotaReservation = false;
     }
   };
@@ -2109,6 +2284,7 @@ chatRouter.post('/stream', async (c) => {
     };
 
     try {
+      if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
       // Always emit source_card first — client uses this to learn the conversation_id
       await write(sourceCard);
       if (verifiedWebEvidenceUnavailable) {
@@ -2141,6 +2317,7 @@ chatRouter.post('/stream', async (c) => {
             maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 384),
           }, 8_000);
           fullResponse = normalizeAssameseStreamChunk(generated.text);
+          if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
           actualModel = generated.model;
           timings.first_token_ms = Date.now() - startTime;
           firstTokenRecorded = true;
@@ -2150,6 +2327,7 @@ chatRouter.post('/stream', async (c) => {
             userMessage: message,
             maxTokens: CHAT_MAX_OUTPUT_TOKENS,
           })) {
+            if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
             // Sentinel chunk carries the resolved model name — do not forward to client
             if (chunk.startsWith('\x00model:')) {
               actualModel = chunk.slice(7);
@@ -2186,36 +2364,24 @@ chatRouter.post('/stream', async (c) => {
         fullResponse = normalizeAssameseStreamChunk(fullResponse);
         assameseProseLeakage = !isReliableAssameseAnswer(fullResponse);
         if (assameseProseLeakage) {
-          const initialAssameseResponse = fullResponse;
-          let hasUsableAssameseFallback = false;
           try {
+            if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
             const repaired = await generateAssamese(c.env.AI, {
               systemPrompt: `${systemPrompt}\n\n## বাধ্যতামূলক ভাষা সংশোধন\nআগৰ খচৰা ব্যৱহাৰ নকৰিবা। কেৱল শুদ্ধ অসমীয়া লিপিত নতুনকৈ সম্পূৰ্ণ উত্তৰ লিখিবা। বাংলা, হিন্দী বা ইংৰাজী ব্যাখ্যামূলক বাক্য নিদিবা।`,
               userMessage: message,
               maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 640),
             }, 6_000);
             const repairedText = normalizeAssameseStreamChunk(repaired.text);
+            if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
             if (isReliableAssameseAnswer(repairedText)) {
               fullResponse = repairedText;
               actualModel = repaired.model;
               assameseProseLeakage = false;
-            } else if (isUsableAssameseAnswer(repairedText)) {
-              fullResponse = repairedText;
-              actualModel = repaired.model;
-              hasUsableAssameseFallback = true;
             }
           } catch (repairError) {
             console.warn('[chat] Assamese fallback-model repair failed:', repairError);
           }
-          if (
-            assameseProseLeakage
-            && !hasUsableAssameseFallback
-            && isUsableAssameseAnswer(initialAssameseResponse)
-          ) {
-            fullResponse = initialAssameseResponse;
-            hasUsableAssameseFallback = true;
-          }
-          if (assameseProseLeakage && !hasUsableAssameseFallback) {
+          if (assameseProseLeakage) {
             await write({
               ...terminalChatErrorEvent(
                 'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। অনুগ্ৰহ কৰি পুনৰ চেষ্টা কৰক।',
@@ -2238,6 +2404,7 @@ chatRouter.post('/stream', async (c) => {
       }
 
       // ── syrabit_done event ────────────────────────────────────────────────
+      if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
       const latencyMs = Date.now() - startTime;
       timings.total_ms = latencyMs;
       const doneEvent = {
@@ -2275,6 +2442,7 @@ chatRouter.post('/stream', async (c) => {
       // quota_usage was already incremented atomically in reserveAuthQuota /
       // reserveAnonQuota before streaming — do not increment again here.
       try {
+        if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
         await persistCompletedChat(c.env.DB, {
           userId,
           sessionId:         effectiveSessionId,

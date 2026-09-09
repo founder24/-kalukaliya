@@ -267,6 +267,7 @@ export const chatRequestClaims = sqliteTable('chat_request_claims', {
   sessionId: text('session_id'),
   responseContent: text('response_content'),
   responseMetadata: text('response_metadata'),
+  cancelledAt: integer('cancelled_at'),
   createdAt: integer('created_at').default(sql`(unixepoch())`),
   expiresAt: integer('expires_at').notNull(),
 }, (t) => [

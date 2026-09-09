@@ -18,9 +18,35 @@ import {
 
 const API_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../');
 const JWT_SECRET = 'atomic-controls-test-secret-at-least-32-characters';
+const EDGE_SHARED_SECRET = 'atomic-controls-edge-secret-at-least-32-characters';
 
 let env: Env;
 let disposeProxy: () => Promise<void>;
+
+async function trustedAnonHeaders(anonId: string): Promise<Record<string, string>> {
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(EDGE_SHARED_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const pathname = '/stream';
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(`${timestamp}:anonymous:${pathname}`),
+  );
+  return {
+    'Content-Type': 'application/json',
+    'x-anon-id': anonId,
+    'x-edge-timestamp': timestamp,
+    'x-edge-signature': Array.from(new Uint8Array(signature))
+      .map(byte => byte.toString(16).padStart(2, '0'))
+      .join(''),
+  };
+}
 
 function migrationStatements(): string[] {
   const directory = path.join(API_ROOT, 'drizzle/migrations');
@@ -46,6 +72,7 @@ beforeAll(async () => {
   env = {
     ...proxy.env,
     JWT_SECRET,
+    EDGE_SHARED_SECRET,
     ALLOWED_ORIGINS: '*',
     APP_ENV: 'test',
   };
@@ -233,7 +260,7 @@ describe('atomic quota controls', () => {
     const response = await chatRouter.fetch(
       new Request('https://api.example/stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-anon-id': anonId },
+        headers: await trustedAnonHeaders(anonId),
         body: JSON.stringify({ message: 'hello', lang: 'en' }),
       }),
       failingEnv,

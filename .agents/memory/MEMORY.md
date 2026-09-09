@@ -74,3 +74,4 @@
 - [Workers AI Assamese generation](workers-ai-assamese.md) — use SEA-LION non-streaming; Assamese/Bengali share script and danda must not trigger Hindi detection.
 - [Explicit curriculum scope](chat-curriculum-scope.md) — explicit class/subject wording must fail closed and every RAG source must pass full published-hierarchy validation.
 - [Exact vector grounding](rag-exact-vector-grounding.md) — preserve matched passage order; never replace semantic matches with chapter openings.
+- [Chat cancellation state](chat-cancellation-state.md) — quota, cancellation, and persistence must compete through one conditional D1 claim state.
