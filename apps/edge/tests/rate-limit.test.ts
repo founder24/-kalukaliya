@@ -149,6 +149,54 @@ describe('Rate Limiting', () => {
     )).toHaveLength(7);
   });
 
+  it('admits exactly six concurrent mixed-language requests for one signed browser identity', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW);
+    const { namespace } = await createMockRateLimitNamespace();
+    const apiFetch = vi.fn(async () => Response.json({ ok: true }));
+    const environment = edgeEnv(namespace, apiFetch);
+    const identity = await resolveAnonymousIdentity(new Request(
+      'https://syrabit.ai/api/v1/user/credits',
+      { headers: { 'CF-Connecting-IP': '203.0.113.20' } },
+    ), EDGE_SECRET);
+    const cookie = cookiePair(identity.setCookie!);
+
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, (_, index) => worker.fetch(
+        chatRequest(index % 2 === 0 ? 'en' : 'as', {
+          Cookie: cookie,
+          'CF-Connecting-IP': `203.0.113.${index + 20}`,
+        }),
+        environment,
+        context(),
+      )),
+    );
+
+    expect(responses.filter(response => response.status === 200)).toHaveLength(6);
+    expect(responses.filter(response => response.status === 429)).toHaveLength(4);
+    expect(apiFetch).toHaveBeenCalledTimes(6);
+  });
+
+  it('admits exactly six concurrent mixed-language requests from fresh identities on one trusted network', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW);
+    const { namespace } = await createMockRateLimitNamespace();
+    const apiFetch = vi.fn(async () => Response.json({ ok: true }));
+    const environment = edgeEnv(namespace, apiFetch);
+
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, (_, index) => worker.fetch(
+        chatRequest(index % 2 === 0 ? 'en' : 'as', {
+          'CF-Connecting-IP': '198.51.100.45',
+        }),
+        environment,
+        context(),
+      )),
+    );
+
+    expect(responses.filter(response => response.status === 200)).toHaveLength(6);
+    expect(responses.filter(response => response.status === 429)).toHaveLength(4);
+    expect(apiFetch).toHaveBeenCalledTimes(6);
+  });
+
   it('retains the separate authenticated per-language edge policy', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW);
     const { namespace, fetch } = await createMockRateLimitNamespace();
