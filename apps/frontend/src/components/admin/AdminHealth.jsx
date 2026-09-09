@@ -14,6 +14,7 @@ import RagTab from './health/RagTab';
 
 export default function AdminHealth({ adminToken, onNavigate }) {
   const [health, setHealth] = useState(null);
+  const [edgeHealth, setEdgeHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [metricsData, setMetricsData] = useState(null);
@@ -1156,10 +1157,17 @@ export default function AdminHealth({ adminToken, onNavigate }) {
 
   const loadHealth = () => {
     setLoading(true);
-    axios.get(`${API_BASE.replace('/api','')}/api/health`)
-      .then((r) => setHealth(r.data))
-      .catch(() => setHealth({ status: 'error', dependencies: {} }))
-      .finally(() => setLoading(false));
+    const apiOrigin = new URL(API_BASE || '/', window.location.origin).origin;
+    const edgeHealthUrl = new URL('/health', apiOrigin).toString();
+    Promise.allSettled([
+      axios.get(`${API_BASE.replace('/api','')}/api/health`),
+      axios.get(edgeHealthUrl),
+    ]).then(([appResult, edgeResult]) => {
+      setHealth(appResult.status === 'fulfilled'
+        ? appResult.value.data
+        : { status: 'error', dependencies: {} });
+      setEdgeHealth(edgeResult.status === 'fulfilled' ? edgeResult.value.data : { _error: true });
+    }).finally(() => setLoading(false));
   };
 
   const loadMetrics = useCallback(() => {
@@ -1312,7 +1320,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
         {healthTab === 'infra' && (
           <InfraTab
             adminToken={adminToken} onNavigate={onNavigate}
-            health={health} loading={loading} deps={deps} allOk={allOk} hasError={hasError}
+            health={health} edgeHealth={edgeHealth} loading={loading} deps={deps} allOk={allOk} hasError={hasError}
             chartData={chartData} peaks={peaks} current={current}
             metricsLoading={metricsLoading} timeRange={timeRange} setTimeRange={setTimeRange}
             loadMetrics={loadMetrics} loadHealth={loadHealth}
