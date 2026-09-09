@@ -82,4 +82,12 @@ describe('ResetPasswordPage', () => {
       );
     });
   });
+
+  it('keeps the back-to-login path as navigation, without submitting the request form', () => {
+    render(<ResetPasswordPage />);
+
+    const links = screen.getAllByRole('link', { name: /Back to Login/i });
+    expect(links[0]).toHaveAttribute('href', '/login');
+    expect(axios.post).not.toHaveBeenCalled();
+  });
 });
