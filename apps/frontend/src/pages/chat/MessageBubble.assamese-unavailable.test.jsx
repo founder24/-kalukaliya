@@ -96,12 +96,22 @@ describe('MessageBubble — Assamese chat unavailable card (Task #370)', () => {
     expect(screen.getByRole('button', { name: 'আকৌ চেষ্টা কৰক' })).toBeTruthy();
   });
 
-  it('renders detailed source-card entries with safe external links', () => {
+  it('renders only the internal RAG curriculum path and hides external sources', () => {
     renderBubble({
       msg: {
         id: 'sources-1',
         role: 'assistant',
         content: 'উত্তৰটো ইয়াত আছে।',
+        rag_source: 'rag_chapter',
+        rag_topic_name: 'Force and Motion',
+        rag_chapter_name: 'Motion',
+        rag_subject_name: 'Physics',
+        rag_class_name: 'HS 1st Year',
+        rag_board_name: 'AHSEC',
+        rag_board_slug: 'ahsec',
+        rag_class_slug: 'hs-1st-year',
+        rag_subject_slug: 'physics',
+        rag_chapter_slug: 'motion',
         source_entries: [
           {
             id: 'chapter:motion',
@@ -126,12 +136,13 @@ describe('MessageBubble — Assamese chat unavailable card (Task #370)', () => {
       },
     });
 
-    expect(screen.getByTestId('detailed-source-entries')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Curriculum source: Motion' }))
-      .toHaveAttribute('href', '/assam/hs-1/physics/motion');
-    const external = screen.getByRole('link', { name: 'Web source: Supporting research' });
-    expect(external).toHaveAttribute('target', '_blank');
-    expect(external).toHaveAttribute('rel', 'noreferrer');
-    expect(screen.getByTestId('detailed-source-entries')).toHaveTextContent('91% match');
+    const path = screen.getByTestId('curriculum-match-path');
+    expect(path).toHaveTextContent('Topic: Force and Motion');
+    expect(path).toHaveTextContent('Chapter: Motion');
+    expect(path).toHaveTextContent('Subject: Physics');
+    expect(path).toHaveTextContent('Class: HS 1st Year');
+    expect(path).toHaveTextContent('Board: AHSEC');
+    expect(screen.queryByText('Sources used')).toBeNull();
+    expect(screen.queryByText('Supporting research')).toBeNull();
   });
 });

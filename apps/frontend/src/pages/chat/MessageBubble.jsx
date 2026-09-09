@@ -436,7 +436,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               const chapterUrl = (basePath && chapterSlug) ? `${basePath}/${chapterSlug}` : null;
               const subjectUrl = chapterUrl || basePath || (msg.rag_subject_id ? `/subject/${msg.rag_subject_id}` : null);
               const isDocument = msg.rag_source === 'document';
-              const isWeb = msg.rag_source === 'web';
+              const isWeb = false;
               // Library, cache, and any other RAG-grounded source (anything
               // that isn't an uploaded user document, an external web hit,
               // or 'none') should render the same clickable card so the
@@ -445,7 +445,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               // 'web'``, which meant the most common case (library /
               // cached library answers) showed no clickable badge at all.
               const isLibrary = msg.rag_source && !isDocument && !isWeb && msg.rag_source !== 'none';
-              const hasContext = boardLabel || subjectLabel || (msg.rag_source && msg.rag_source !== 'none');
+              const hasContext = boardLabel || classLabel || subjectLabel || chapterLabel || topicLabel;
               // Confidence tier chip styling
               const confidenceTierLabel = msg.confidence_tier === 'high' ? 'High confidence'
                 : msg.confidence_tier === 'mid' ? 'Good match'
@@ -461,11 +461,15 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               const matchPct = (msg.match_score != null && msg.match_score > 0)
                 ? Math.round(msg.match_score * 100) : null;
 
-              const detailedSources = Array.isArray(msg.source_entries)
-                ? msg.source_entries.filter((entry) => entry && entry.title)
-                : [];
-              const hasAnything = hasContext || sourceLine || detailedSources.length > 0;
+              const hasAnything = hasContext || isDocument;
               if (!hasAnything) return null;
+              const curriculumPath = [
+                { label: 'Topic', value: topicLabel },
+                { label: 'Chapter', value: chapterLabel },
+                { label: 'Subject', value: subjectLabel },
+                { label: 'Class', value: classLabel },
+                { label: 'Board', value: boardLabel },
+              ].filter((item) => item.value);
 
               const sourceMeta = isWeb
                 ? { Icon: Globe, kindLabel: 'Web Search' }
@@ -511,30 +515,19 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                         {/* Header: source type */}
                         <div className="flex items-center gap-1.5 mb-2">
                           <sourceMeta.Icon size={11} className="source-card-icon" />
-                          <span className="source-card-label text-[10px] font-semibold uppercase tracking-wider">Source</span>
+                          <span className="source-card-label text-[10px] font-semibold uppercase tracking-wider">Curriculum match</span>
                           <span className="text-[10px] text-muted-foreground" aria-hidden="true">·</span>
                           <span className="source-card-browser text-[10.5px] font-medium">{sourceMeta.kindLabel}</span>
                         </div>
-                        {/* Subject name — prominent green headline */}
-                        {subjectLabel && (
-                          <div className="source-card-subject mb-1.5">
-                            {subjectLabel}
-                          </div>
-                        )}
-                        {/* Compact metadata pill badges */}
-                        <div className="flex flex-wrap items-center gap-1">
-                          {boardLabel && (
-                            <span className="source-card-badge text-[10.5px] font-semibold px-2 py-0.5 rounded-full">{boardLabel}</span>
-                          )}
-                          {classLabel && (
-                            <span className="source-card-badge text-[10.5px] font-semibold px-2 py-0.5 rounded-full">{classLabel}</span>
-                          )}
-                          {chapterLabel && (
-                            <span className="source-card-badge text-[10.5px] font-medium px-2 py-0.5 rounded-full truncate max-w-[140px]">{chapterLabel}</span>
-                          )}
-                          {topicLabel && !chapterLabel && (
-                            <span className="source-card-badge text-[10.5px] font-medium px-2 py-0.5 rounded-full truncate max-w-[140px]">{topicLabel}</span>
-                          )}
+                        <div className="flex flex-wrap items-center gap-1" data-testid="curriculum-match-path">
+                          {curriculumPath.map((item, index) => (
+                            <span key={item.label} className="contents">
+                              {index > 0 && <span className="text-[11px] text-muted-foreground" aria-hidden="true">→</span>}
+                              <span className="source-card-badge max-w-[180px] truncate rounded-full px-2 py-0.5 text-[10.5px] font-medium">
+                                <span className="font-semibold">{item.label}:</span> {item.value}
+                              </span>
+                            </span>
+                          ))}
                         </div>
                         {/* Confidence tier + match score */}
                         {(confidenceTierLabel || matchPct != null) && (
@@ -575,59 +568,6 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                       </div>
                       <span className="text-[13px] font-bold text-foreground" style={{ textTransform: 'uppercase', letterSpacing: '0.03em' }}>{sourceMeta.kindLabel}</span>
                     </div>
-                  )}
-                  {detailedSources.length > 0 && (
-                    <section
-                      className="mt-2.5 rounded-xl border border-border/70 bg-muted/20 px-3 py-2.5"
-                      aria-label="Sources used for this answer"
-                      data-testid="detailed-source-entries"
-                    >
-                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Sources used
-                      </h3>
-                      <ul className="mt-2 space-y-2">
-                        {detailedSources.map((entry) => {
-                          const sourceUrl = typeof entry.url === 'string'
-                            && (/^\//.test(entry.url) || /^https:\/\//i.test(entry.url))
-                            ? entry.url
-                            : null;
-                          const isExternal = /^https:\/\//i.test(sourceUrl || '');
-                          const title = entry.title;
-                          const label = `${entry.kind === 'web' ? 'Web source' : 'Curriculum source'}: ${title}`;
-                          const score = typeof entry.score === 'number' && entry.score > 0
-                            ? `${Math.round(entry.score * 100)}% match`
-                            : null;
-                          return (
-                            <li key={entry.id || `${entry.kind}-${entry.url || title}`} className="min-w-0">
-                              {sourceUrl ? (
-                                <a
-                                  href={sourceUrl}
-                                  {...(isExternal ? { target: '_blank', rel: 'noreferrer' } : {})}
-                                  className="text-[12.5px] font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded"
-                                  aria-label={label}
-                                >
-                                  {title}
-                                  {isExternal && <span aria-hidden="true"> ↗</span>}
-                                </a>
-                              ) : (
-                                <span className="text-[12.5px] font-semibold text-foreground">{title}</span>
-                              )}
-                              <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-                                <span>{entry.kind === 'web' ? 'Supplementary web' : 'Curriculum'}</span>
-                                {entry.medium && <span>· {entry.medium}</span>}
-                                {entry.source_type && <span>· {entry.source_type}</span>}
-                                {score && <span>· {score}</span>}
-                              </div>
-                              {entry.snippet && (
-                                <p className="mt-0.5 text-[11.5px] leading-4 text-muted-foreground line-clamp-2">
-                                  {entry.snippet}
-                                </p>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </section>
                   )}
                   <div className={`flex flex-wrap items-center gap-1 sm:gap-1.5 mt-1 transition-opacity ${responseLang && responseLang !== 'en' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                     {timeStr && (

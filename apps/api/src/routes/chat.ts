@@ -167,6 +167,9 @@ interface SourceEntry {
   class_slug?: string | undefined;
   board_slug?: string | undefined;
   topic_name?: string | undefined;
+  subject_name?: string | undefined;
+  class_name?: string | undefined;
+  board_name?: string | undefined;
 }
 
 export type AuthoritativeIntent = 'syllabus' | 'pyq' | null;
@@ -863,7 +866,9 @@ async function buildSourceEntries(
   const curriculum = await Promise.all(chunks.map(async (chunk) => {
     const row = await d1.prepare(`
       SELECT chapters.slug AS chapter_slug, subjects.slug AS subject_slug,
-             classes.slug AS class_slug, boards.slug AS board_slug
+             classes.slug AS class_slug, boards.slug AS board_slug,
+             subjects.name AS subject_name, classes.name AS class_name,
+             boards.name AS board_name
       FROM chapters
       LEFT JOIN subjects ON subjects.id = chapters.subject_id
       LEFT JOIN streams ON streams.id = subjects.stream_id
@@ -875,6 +880,9 @@ async function buildSourceEntries(
       subject_slug: string | null;
       class_slug: string | null;
       board_slug: string | null;
+      subject_name: string | null;
+      class_name: string | null;
+      board_name: string | null;
     }>().catch(() => null);
     const path = row?.board_slug && row.class_slug && row.subject_slug && row.chapter_slug
       ? `/${row.board_slug}/${row.class_slug}/${row.subject_slug}/${row.chapter_slug}`
@@ -893,6 +901,9 @@ async function buildSourceEntries(
       ...(row?.class_slug && { class_slug: row.class_slug }),
       ...(row?.board_slug && { board_slug: row.board_slug }),
       ...(chunk.topicName && { topic_name: chunk.topicName }),
+      ...(row?.subject_name && { subject_name: row.subject_name }),
+      ...(row?.class_name && { class_name: row.class_name }),
+      ...(row?.board_name && { board_name: row.board_name }),
     };
   }));
   const web = webResults.map((result, index) => ({
@@ -1784,9 +1795,7 @@ chatRouter.post('/stream', async (c) => {
     conversation_id:  effectiveSessionId,
     // Provenance belongs to the selected retrieval entry, not to a generic
     // route label. This preserves PYQ/syllabus/direct-chapter distinctions.
-    source_type:      primaryCurriculumSource?.source_type
-      ?? sourceEntries.find(entry => entry.kind === 'web')?.source_type
-      ?? 'llm_only',
+    source_type:      primaryCurriculumSource?.source_type ?? 'llm_only',
     rag_source:       primaryCurriculumSource?.source_type ?? 'llm_only',
     rag_path:         ragPath,
     confidence_tier:  confidenceTier,
@@ -1795,25 +1804,20 @@ chatRouter.post('/stream', async (c) => {
     rag_chapter_name: topChapterTitle,
     rag_chapter_slug: primaryCurriculumSource?.chapter_slug,
     rag_subject_id:   topSubjectId,
-    rag_subject_name: body.subject_name,
-    ctx_board_name:   body.board_name,
-    ctx_class_name:   body.class_name,
-    ctx_class_level:  body.class_name,
+    rag_subject_name: primaryCurriculumSource?.subject_name ?? body.subject_name,
+    rag_topic_name:   primaryCurriculumSource?.topic_name,
+    ctx_board_name:   primaryCurriculumSource?.board_name ?? body.board_name,
+    ctx_class_name:   primaryCurriculumSource?.class_name ?? body.class_name,
+    ctx_class_level:  primaryCurriculumSource?.class_name ?? body.class_name,
     ctx_stream_name:  body.stream_name,
     ctx_board_slug:   primaryCurriculumSource?.board_slug,
     ctx_class_slug:   primaryCurriculumSource?.class_slug,
     ctx_subject_slug: primaryCurriculumSource?.subject_slug,
     web_used:         webResults.length > 0,
     web_status:       webStatus,
-    web_sources:      webResults.map(result => ({
-      title: result.title,
-      url: result.url,
-      source_type: result.source,
-    })),
-    // Detailed entries keep each source's own URL, snippet, medium, score and
-    // available hierarchy slugs; the existing top-level fields remain intact
-    // for older clients and the primary source card.
-    sources: sourceEntries,
+    // Student-facing provenance is the top curriculum match selected by the
+    // answer's RAG retrieval. Web assistance remains internal to generation.
+    sources: primaryCurriculumSource ? [primaryCurriculumSource] : [],
     ...(authoritativeIntent && { authoritative_intent: authoritativeIntent }),
   };
 
