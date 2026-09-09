@@ -88,7 +88,12 @@ export default function ChatPage() {
   const [model, setModel]                 = useState('workers-ai-fast');
   const [subject, setSubject]             = useState(null);
   const [scopedChapters, setScopedChapters] = useState([]);
-  const [credits, setCredits]             = useState({ used: user?.credits_used || 0, limit: user?.credits_limit ?? null });
+  const [credits, setCredits]             = useState({
+    used: user?.credits_used || 0,
+    limit: user?.credits_limit ?? null,
+    resetAt: null,
+    languages: {},
+  });
   const [syncState, setSyncState]         = useState('idle');
   // Once a conversation has loaded its messages, scroll to a `#m<index>`
   // hash if the URL carries one (set by AI-notes citation deep-links).
@@ -114,6 +119,7 @@ export default function ChatPage() {
   const lastUserMsgRef    = useRef(null);
   const textareaRef       = useRef(null);
   const abortControllerRef = useRef(null);
+  const activeChatRequestIdRef = useRef(null);
   const modelMenuRef      = useRef(null);
   const scrollTimeoutRef  = useRef(null);
   const autoRetryTimerRef = useRef(null);
@@ -172,16 +178,7 @@ export default function ChatPage() {
     return () => { if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current); };
   }, [messages]);
 
-  // Task #796 — also fetch credits for anonymous students so the
-  // composer can render "X / 30 free messages left today" against the
-  // device-keyed daily counter that rate_limit_chat_optional charges.
-  // The /user/credits endpoint peeks the same Redis key without
-  // incrementing it, so polling here on every mount / send is safe and
-  // never burns a free message. Bumped by ``creditsRefreshKey`` after
-  // each anon send so the badge stays in sync (the SSE stream only
-  // emits credits_used_total / remaining_credits for logged-in users —
-  // anon users would otherwise need a hard refresh to see the count
-  // tick down).
+  // Read the current one-minute D1 bucket without consuming a request.
   const [creditsRefreshKey, setCreditsRefreshKey] = useState(0);
   useEffect(() => {
     // Wait for the /me round-trip so logged-in students don't fire a
@@ -193,7 +190,21 @@ export default function ChatPage() {
     apiClient().get('/user/credits', creditHeaders ? { headers: creditHeaders } : undefined)
       .then((res) => {
         const c = res.data;
-        setCredits({ used: c.credits_used ?? c.used ?? 0, limit: c.daily_limit ?? c.monthly_limit ?? c.limit ?? null });
+        const normalizeLanguageQuota = (quota = {}) => ({
+          limit: Number(quota.limit ?? c.rpm_limit ?? 6),
+          used: Number(quota.used ?? 0),
+          remaining: Number(quota.remaining ?? quota.limit ?? c.rpm_limit ?? 6),
+          resetAt: quota.resetAt ?? quota.reset_at ?? c.reset_at ?? null,
+        });
+        setCredits({
+          used: c.credits_used ?? c.used ?? 0,
+          limit: c.rpm_limit ?? 6,
+          resetAt: c.reset_at ?? null,
+          languages: {
+            en: normalizeLanguageQuota(c.languages?.en),
+            as: normalizeLanguageQuota(c.languages?.as),
+          },
+        });
       })
       .catch(() => {});
   }, [authChecked, user, creditsRefreshKey]);
@@ -286,11 +297,16 @@ export default function ChatPage() {
     [subjectId, subject, scopedChapters, activeChapter, user, seedCardContext, sourceSection],
   );
 
-  const effectiveLimit = credits.limit ?? user?.credits_limit ?? null;
-  const remaining    = effectiveLimit !== null ? Math.max(0, effectiveLimit - credits.used) : null;
+  const languageCredits = credits.languages?.[responseLang] || null;
+  const effectiveLimit = languageCredits?.limit ?? credits.limit ?? 6;
+  const remaining = languageCredits?.remaining
+    ?? (effectiveLimit !== null && languageCredits?.used != null
+      ? Math.max(0, effectiveLimit - languageCredits.used)
+      : effectiveLimit);
   const creditPercent = effectiveLimit != null && effectiveLimit > 0 ? Math.min(100, (credits.used / effectiveLimit) * 100) : 0;
-  const isOutOfCredits = effectiveLimit !== null && effectiveLimit !== undefined && remaining !== null && remaining <= 0;
-  const isLow = effectiveLimit !== null && effectiveLimit > 0 && remaining !== null && remaining > 0 && remaining <= 5;
+  // RPM exhaustion is temporary and must never leave the composer disabled.
+  const isOutOfCredits = false;
+  const isLow = false;
 
   const handleNewChat = useCallback(() => {
     setMessages([]);
@@ -300,11 +316,30 @@ export default function ChatPage() {
   }, [navigate]);
 
   const handleStop = useCallback(() => {
+    const requestId = activeChatRequestIdRef.current;
+    if (requestId) {
+      const headers = { 'Content-Type': 'application/json' };
+      const token = getToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      else {
+        const anonId = getAnonId();
+        if (anonId) headers['x-anon-id'] = anonId;
+      }
+      void fetch(`${API_BASE}/chat/cancel`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        keepalive: true,
+        body: JSON.stringify({ client_request_id: requestId }),
+      }).catch(() => {});
+    }
     if (abortControllerRef.current) abortControllerRef.current.abort();
     setIsLoading(false);
     setMessages((prev) =>
       prev.map((m, i) =>
-        i === prev.length - 1 && m.role === 'assistant' ? { ...m, streaming: false } : m
+        i === prev.length - 1 && m.role === 'assistant'
+          ? { ...m, streaming: false, isStopped: true, autoRetryScheduled: false }
+          : m
       )
     );
   }, []);
@@ -320,6 +355,7 @@ export default function ChatPage() {
     const userMsgId = retry?.userMsgId || msgId + '_u';
     const aiMsgId = retry?.aiMsgId || msgId + '_a';
     const chatRequestId = retry?.chatRequestId || createChatRequestId();
+    activeChatRequestIdRef.current = chatRequestId;
     const retryAttempt = retry?.attempt || 0;
     const userMsg = {
       id: userMsgId,
@@ -347,6 +383,7 @@ export default function ChatPage() {
               isAiUnavailable: false,
               isAssameseUnavailable: false,
               isConnectionInterrupted: false,
+              isStopped: false,
               autoRetryScheduled: false,
               failureStage: null,
               serverRequestId: null,
@@ -403,6 +440,8 @@ export default function ChatPage() {
       auth: user ? 'user' : 'anon',
     });
     let _firstTokenStopped = false;
+    // Request-scoped so a mid-stream failure can retain useful partial text.
+    let fullContent = '';
     const _stopFirstToken = () => {
       if (_firstTokenStopped) return;
       _firstTokenStopped = true;
@@ -453,8 +492,23 @@ export default function ChatPage() {
           || errData.failure_stage
           || 'http_response';
         if (response.status === 402) {
-          toast.error('Your free daily messages are used. They reset at midnight UTC.');
+          toast.error('You are sending messages too quickly. Please wait a minute and try again.');
           setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
+          return;
+        }
+        if (response.status === 422 && errData.error_code === 'curriculum_scope_ambiguous') {
+          setMessages((prev) => prev.map((m) =>
+            m.id === aiMsgId
+              ? {
+                  ...m,
+                  content: String(errData.detail || 'Please include both your class and subject.'),
+                  streaming: false,
+                  isAiUnavailable: false,
+                  isCurriculumClarification: true,
+                }
+              : m
+          ));
+          setSyncState('idle');
           return;
         }
         // Task #370 — backend's strict 2-leg Assamese chat chain raises
@@ -609,7 +663,6 @@ export default function ChatPage() {
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let fullContent = '';
       const meta = {
         convId: conversationId, ragSource: 'none', ragChunks: 0,
         ragSubjectId: null, ragSubjectName: null, ragSubjectIcon: null,
@@ -619,6 +672,7 @@ export default function ChatPage() {
         ragClassSlug: null, ragSubjectSlug: null, libSources: [], sourceEntries: [], hasError: false,
         // Source card fields emitted by backend before LLM starts
         matchScore: null, sourceType: null, confidenceTier: null, ragPath: null,
+         chapterId: null, matchedPassage: null, retrievalMethod: null, sourceConfidence: null,
       };
 
       let pendingChunk = '';
@@ -671,12 +725,19 @@ export default function ChatPage() {
           if (parsed.rag_chapter_slug) meta.ragChapterSlug = parsed.rag_chapter_slug;
           if (parsed.ctx_board_name) meta.ragBoardName = parsed.ctx_board_name;
           if (parsed.ctx_class_name) meta.ragClassName = parsed.ctx_class_name;
+           if (parsed.rag_board_name) meta.ragBoardName = parsed.rag_board_name;
+           if (parsed.rag_class_name) meta.ragClassName = parsed.rag_class_name;
+           if (parsed.rag_stream_name) meta.ragStreamName = parsed.rag_stream_name;
           if (parsed.ctx_stream_name) meta.ragStreamName = parsed.ctx_stream_name;
           if (parsed.ctx_board_slug) meta.ragBoardSlug = parsed.ctx_board_slug;
           if (parsed.ctx_class_slug) meta.ragClassSlug = parsed.ctx_class_slug;
           if (parsed.ctx_subject_slug) meta.ragSubjectSlug = parsed.ctx_subject_slug;
           if (parsed.rag_topic_name) meta.ragTopicName = parsed.rag_topic_name;
           if (parsed.rag_chunk_snippet) meta.ragChunkSnippet = parsed.rag_chunk_snippet;
+          if (parsed.chapter_id) meta.chapterId = parsed.chapter_id;
+          if (parsed.matched_passage) meta.matchedPassage = parsed.matched_passage;
+          if (parsed.retrieval_method) meta.retrievalMethod = parsed.retrieval_method;
+          if (parsed.source_confidence != null) meta.sourceConfidence = parsed.source_confidence;
           if (parsed.content_card_name && !meta.ragTopicName) meta.ragTopicName = parsed.content_card_name;
           if (parsed.content_card_board && !meta.ragBoardName) meta.ragBoardName = parsed.content_card_board;
           if (parsed.content_card_class && !meta.ragClassName) meta.ragClassName = parsed.content_card_class;
@@ -712,6 +773,8 @@ export default function ChatPage() {
             continue;
           }
           if (parsed.error) {
+            if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+            flushPending();
             meta.hasError = true;
             // Task #41 — even on a fail-loud error chunk the backend
             // now ships the per-turn router decision so the dev-only
@@ -737,8 +800,10 @@ export default function ChatPage() {
               m.id === aiMsgId
                 ? {
                     ...m,
-                    content: '',
+                    content: fullContent,
                     isAiUnavailable: true,
+                    isConnectionInterrupted: Boolean(fullContent),
+                    isPartialResponse: Boolean(fullContent),
                     isAssameseUnavailable,
                     retryText: text,
                     userMsgId,
@@ -770,7 +835,35 @@ export default function ChatPage() {
             // dev-mode QA badge can show decision/provider/namespace.
             if (parsed.route_trace) meta.routeTrace = parsed.route_trace;
             if (parsed.credits_used_total != null) {
-              setCredits((c) => ({ ...c, used: parsed.credits_used_total }));
+              setCredits((c) => ({
+                ...c,
+                used: parsed.credits_used_total,
+                languages: {
+                  ...c.languages,
+                  [responseLang]: {
+                    ...(c.languages?.[responseLang] || {}),
+                    used: parsed.credits_used_total,
+                    remaining: Math.max(0, (c.languages?.[responseLang]?.limit ?? c.limit ?? 6) - parsed.credits_used_total),
+                  },
+                },
+              }));
+            }
+            const responseRemaining = Number(response.headers?.get?.('X-RateLimit-Remaining'));
+            const responseReset = response.headers?.get?.('X-RateLimit-Reset');
+            if (Number.isFinite(responseRemaining)) {
+              setCredits((c) => ({
+                ...c,
+                languages: {
+                  ...c.languages,
+                  [responseLang]: {
+                    ...(c.languages?.[responseLang] || {}),
+                    used: Math.max(0, (c.languages?.[responseLang]?.limit ?? c.limit ?? 6) - responseRemaining),
+                    remaining: responseRemaining,
+                    limit: Number(c.languages?.[responseLang]?.limit ?? c.limit ?? 6),
+                    resetAt: responseReset ? new Date(Number(responseReset) * 1000).toISOString() : c.resetAt,
+                  },
+                },
+              }));
             }
             const remaining = parsed.remaining_credits ?? 0;
             try {
@@ -790,14 +883,9 @@ export default function ChatPage() {
         setSyncState('idle');
         return;
       }
-      // Task #796 — anon SSE stream omits credits_used_total /
-      // remaining_credits (the chat route only emits them when
-      // ``not is_anon``). Bump the refresh key so the credits
-      // effect re-peeks the device-keyed Redis counter and the
-      // "X / 30 free messages left today" badge ticks down without
-      // a page reload. No-op for logged-in users (their counts
-      // already came back inline above) but still cheap (one tiny
-      // GET to a Redis-backed endpoint).
+      // Anonymous SSE responses omit quota totals. Re-read the current
+      // minute bucket after a send so the informational RPM state stays
+      // current without changing the reservation count.
       if (!user) {
         setCreditsRefreshKey((k) => k + 1);
       }
@@ -810,7 +898,7 @@ export default function ChatPage() {
       } else { setConversationId(meta.convId); }
       setMessages((prev) => prev.map((m) =>
         m.id === aiMsgId
-          ? { ...m, content: fullContent, streaming: false, rag_source: meta.ragSource, rag_chunks: meta.ragChunks, rag_subject_id: meta.ragSubjectId, rag_subject_name: meta.ragSubjectName, rag_chapter_name: meta.ragChapterName, rag_chapter_slug: meta.ragChapterSlug, rag_board_name: meta.ragBoardName, rag_class_name: meta.ragClassName, rag_stream_name: meta.ragStreamName, rag_board_slug: meta.ragBoardSlug, rag_class_slug: meta.ragClassSlug, rag_subject_slug: meta.ragSubjectSlug, rag_topic_name: meta.ragTopicName, rag_chunk_snippet: meta.ragChunkSnippet, ctx_subject_name: subject?.name || null, ctx_subject_icon: meta.ragSubjectIcon || subject?.icon || null, ctx_subject_gradient: meta.ragSubjectGradient || subject?.gradient || null, sources: meta.libSources, source_entries: meta.sourceEntries, route_trace: meta.routeTrace || null, match_score: meta.matchScore, source_type: meta.sourceType, confidence_tier: meta.confidenceTier, rag_path: meta.ragPath }
+          ? { ...m, content: fullContent, streaming: false, rag_source: meta.ragSource, rag_chunks: meta.ragChunks, rag_subject_id: meta.ragSubjectId, rag_subject_name: meta.ragSubjectName, rag_chapter_id: meta.chapterId, rag_chapter_name: meta.ragChapterName, rag_chapter_slug: meta.ragChapterSlug, rag_board_name: meta.ragBoardName, rag_class_name: meta.ragClassName, rag_stream_name: meta.ragStreamName, rag_board_slug: meta.ragBoardSlug, rag_class_slug: meta.ragClassSlug, rag_subject_slug: meta.ragSubjectSlug, rag_topic_name: meta.ragTopicName, rag_chunk_snippet: meta.ragChunkSnippet, matched_passage: meta.matchedPassage, retrieval_method: meta.retrievalMethod, source_confidence: meta.sourceConfidence, ctx_subject_name: subject?.name || null, ctx_subject_icon: meta.ragSubjectIcon || subject?.icon || null, ctx_subject_gradient: meta.ragSubjectGradient || subject?.gradient || null, sources: meta.libSources, source_entries: meta.sourceEntries, route_trace: meta.routeTrace || null, match_score: meta.matchScore, source_type: meta.sourceType, confidence_tier: meta.confidenceTier, rag_path: meta.ragPath }
           : m
       ));
       setSyncState('idle');
@@ -845,7 +933,7 @@ export default function ChatPage() {
           message.id === aiMsgId
             ? {
                 ...message,
-                content: '',
+                content: fullContent,
                 streaming: false,
                 isAiUnavailable: true,
                 isConnectionInterrupted: true,
@@ -874,6 +962,9 @@ export default function ChatPage() {
         setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
       }
     } finally {
+      if (activeChatRequestIdRef.current === chatRequestId) {
+        activeChatRequestIdRef.current = null;
+      }
       setIsLoading(false);
       // Task #610 — close any open Firebase Perf traces. Safe to call
       // multiple times; stub stop() is a no-op when Perf is disabled.
@@ -978,36 +1069,6 @@ export default function ChatPage() {
         />
       }>
       <div className="flex flex-col chat-viewport-height">
-        {isOutOfCredits && (
-          /*
-            Daily quota messaging stays focused on the free product. Anonymous
-            students can still sign in to keep their study history.
-          */
-          <div
-            className="flex items-center justify-between px-4 py-2.5 text-sm flex-shrink-0"
-            style={{ background: 'rgba(239,68,68,0.08)', borderBottom: '1px solid rgba(239,68,68,0.15)' }}
-            role="alert"
-          >
-            <div className="flex items-center gap-2 text-red-400">
-              <AlertTriangle size={14} aria-hidden="true" />
-              <span>
-                {!user
-                  ? `Free daily messages used (${effectiveLimit ?? 20}/day) — sign in for more`
-                  : 'Your free daily messages are used — they reset at midnight UTC'}
-              </span>
-            </div>
-            {!user ? (
-              <button
-                onClick={() => navigate('/login')}
-                className="text-xs font-semibold text-red-300 hover:text-red-200 transition-colors underline"
-                aria-label="Sign in for more daily messages"
-                data-testid="chat-out-of-credits-signin"
-              >
-                Sign in →
-              </button>
-            ) : null}
-          </div>
-        )}
         {/* Context banner — shown when user arrived via an Ask AI button with chapter/subject context */}
         {chatContext && !chatContextDismissed && (
           <div
@@ -1035,7 +1096,15 @@ export default function ChatPage() {
             </button>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto min-h-0 bg-background pb-[calc(7rem+64px+env(safe-area-inset-bottom,0px))] md:pb-32" onClick={() => setShowModelMenu(false)} role="log" aria-label="Chat messages" aria-live="polite">
+        <div
+          className="sr-only"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {isLoading ? 'Syra is writing an answer.' : messages.length > 0 ? 'Answer complete.' : ''}
+        </div>
+        <div className="flex-1 overflow-y-auto min-h-0 bg-background pb-[calc(7rem+64px+env(safe-area-inset-bottom,0px))] md:pb-32" onClick={() => setShowModelMenu(false)} role="log" aria-label="Chat messages">
           <div className="max-w-3xl mx-auto px-3 sm:px-4 md:px-6 py-3 sm:py-4">
             {messages.length === 0 && (
               <div style={{ minHeight: 'min(420px, calc(100dvh - 240px))' }}>
@@ -1054,7 +1123,7 @@ export default function ChatPage() {
                         isLast={i === messages.length - 1}
                         onCopy={handleCopy}
                         onRegenerate={msg.role === 'assistant' && i === messages.length - 1 ? handleRegenerate : null}
-                        onRetry={msg.isAiUnavailable && msg.retryText ? () => {
+                        onRetry={(msg.isAiUnavailable || msg.isStopped) && msg.retryText ? () => {
                           if (autoRetryTimerRef.current) { clearTimeout(autoRetryTimerRef.current); autoRetryTimerRef.current = null; }
                           sendMsgRef.current?.(msg.retryText, {
                             msgId: String(msg.id || '').replace(/_a$/, ''),
