@@ -3,7 +3,7 @@ import {
 } from 'lucide-react';
 
 export default function ProfileHeader({
-  profile, stats, planInfo, creditsLimit, creditsRemaining,
+  profile, stats, planInfo,
   copiedId, handleCopyId, getInitials,
 }) {
   return (
@@ -107,7 +107,7 @@ export default function ProfileHeader({
         {[
           { icon: BookMarked, label: 'Saved',  value: stats.saved_subjects },
           { icon: MessageSquare, label: 'Chats', value: stats.conversations },
-          { icon: Zap, label: 'Credits', value: creditsLimit === 0 ? 'Resets daily' : `${creditsRemaining}/${creditsLimit}` },
+          { icon: Zap, label: 'Rate limit', value: '6/min' },
         ].map(({ icon: Icon, label, value }) => (
           <div
             key={label}

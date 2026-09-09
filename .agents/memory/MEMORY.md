@@ -4,7 +4,7 @@
 - [CF↔GCP audit](cf-gcp-audit.md) — Token perms, duplicate SM secrets, BACKEND_URL binding conflict, CF KV cache fix, bot rendering fix
 - [Syrabit chat latency fix](syrabit-chat-latency.md) — gemini-2.5-flash thinking phase (7-8s TTFB) fixed; model switch + thinkingBudget guard
 - [Worker chat retrieval speed](worker-chat-retrieval-speed.md) — known chapters use direct D1 context; stale IDs fall back to subject-scoped semantic RAG
-- [Anonymous quota identity](anonymous-quota-identity.md) — browser ID first, signed cookie second, trusted IP last; anonymous chat allowance resets daily in UTC
+- [Anonymous quota identity](anonymous-quota-identity.md) — browser ID first, signed cookie second, trusted IP last; chat uses an atomic fixed 6 RPM bucket
 - [Syrabit Cloud Run deploy fixes](syrabit-cloudrun-fixes.md) — motor missing, pymongo compat, JWT RS256 degraded mode, Atlas index conflicts
 - [Syrabit Cloud Run secrets strategy](syrabit-cloudrun-envvars.md) — gcloud run deploy DROPS all Secret Manager refs every deploy; must pass --update-secrets explicitly in cloudbuild.yaml every time
 - [Syrabit content model FlexId](syrabit-flexid.md) — DB uses legacy string IDs (e.g. 's13', UUID) not ObjectIds; all reference fields must use FlexId
@@ -72,3 +72,6 @@
 - [IndexNow endpoint fallback](indexnow-endpoint-fallback.md) — Cloudflare egress can be rate-limited per provider; use bounded participant fallback.
 - [Cloudflare secret verification](cloudflare-secret-verification.md) — verify Worker secret names through bindings metadata when immediate Wrangler CI listing is inconsistent.
 - [Workers AI Assamese generation](workers-ai-assamese.md) — use SEA-LION non-streaming; Assamese/Bengali share script and danda must not trigger Hindi detection.
+- [Explicit curriculum scope](chat-curriculum-scope.md) — explicit class/subject wording must fail closed and every RAG source must pass full published-hierarchy validation.
+- [Exact vector grounding](rag-exact-vector-grounding.md) — preserve matched passage order; never replace semantic matches with chapter openings.
+- [Chat cancellation state](chat-cancellation-state.md) — quota, cancellation, and persistence must compete through one conditional D1 claim state.

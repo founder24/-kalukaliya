@@ -54,15 +54,45 @@ export async function purgeChapterRag(env: Env, chapterId: string): Promise<void
 async function ingest(env: Env, chapterId: string, subjectId: string, text: string, medium: 'english' | 'assamese', scope: RagScope): Promise<number> {
   const content = words(text);
   if (!content.length) return 0;
+  const hierarchy = await env.DB.prepare(`
+    SELECT subjects.name AS subjectName, subjects.slug AS subjectSlug,
+           streams.id AS streamId, streams.name AS streamName,
+           classes.id AS classId, classes.name AS className,
+           boards.id AS boardId, boards.name AS boardName
+    FROM subjects
+    LEFT JOIN streams ON streams.id = subjects.stream_id
+    LEFT JOIN classes ON classes.id = streams.class_id
+    LEFT JOIN boards ON boards.id = classes.board_id
+    WHERE subjects.id = ?
+  `).bind(subjectId).first<{
+    subjectName: string | null;
+    subjectSlug: string | null;
+    streamId: string | null;
+    streamName: string | null;
+    classId: string | null;
+    className: string | null;
+    boardId: string | null;
+    boardName: string | null;
+  }>().catch(() => null);
+  const hierarchyMetadata = {
+    ...(hierarchy?.subjectName && { subjectName: hierarchy.subjectName }),
+    ...(hierarchy?.subjectSlug && { subjectSlug: hierarchy.subjectSlug }),
+    ...(hierarchy?.streamId && { streamId: hierarchy.streamId }),
+    ...(hierarchy?.streamName && { streamName: hierarchy.streamName }),
+    ...(hierarchy?.classId && { classId: hierarchy.classId }),
+    ...(hierarchy?.className && { className: hierarchy.className }),
+    ...(hierarchy?.boardId && { boardId: hierarchy.boardId }),
+    ...(hierarchy?.boardName && { boardName: hierarchy.boardName }),
+  };
   const response = await (env.AI as unknown as { run(model: string, input: { text: string[] }): Promise<{ data: Array<{ values: number[] }> }> })
     .run('@cf/baai/bge-m3', { text: content });
   const entries = content.map((item, index) => ({ content: item, values: response.data[index]?.values, id: `${chapterId}_${medium}_${sourceFor[scope]}_${index}` }))
     .filter((entry): entry is { content: string; values: number[]; id: string } => Boolean(entry.values?.length));
   if (!entries.length) throw new Error('Embedding provider returned no vectors');
-  await env.VECTORIZE.upsert(entries.map(entry => ({ id: entry.id, values: entry.values, metadata: { chapterId, subjectId, medium, sourceType: sourceFor[scope], chunkType: 'text', content: entry.content.slice(0, 512) } })));
+  await env.VECTORIZE.upsert(entries.map(entry => ({ id: entry.id, values: entry.values, metadata: { chapterId, subjectId, medium, sourceType: sourceFor[scope], chunkType: 'text', content: entry.content.slice(0, 512), ...hierarchyMetadata } })));
   try {
     const db = createDb(env.DB);
-    await Promise.all(entries.map(entry => db.insert(chunks).values({ id: crypto.randomUUID(), chapterId, subjectId, sourceType: sourceFor[scope], medium, chunkType: 'text', content: entry.content, vectorId: entry.id, metadata: JSON.stringify({ chapterId, subjectId, medium, sourceType: sourceFor[scope] }), createdAt: now() }).run()));
+    await Promise.all(entries.map(entry => db.insert(chunks).values({ id: crypto.randomUUID(), chapterId, subjectId, sourceType: sourceFor[scope], medium, chunkType: 'text', content: entry.content, vectorId: entry.id, metadata: JSON.stringify({ chapterId, subjectId, medium, sourceType: sourceFor[scope], ...hierarchyMetadata }), createdAt: now() }).run()));
   } catch (error) {
     await env.VECTORIZE.deleteByIds(entries.map(entry => entry.id)).catch(() => undefined);
     throw error;

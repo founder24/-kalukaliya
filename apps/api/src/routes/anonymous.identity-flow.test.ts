@@ -37,6 +37,29 @@ async function signedCookie(id: string): Promise<string> {
   return `syrabit_anon_id=${id}.${signature}`;
 }
 
+async function withTrustedEdgeIdentity(request: Request): Promise<Request> {
+  const anonId = request.headers.get('x-anon-id');
+  if (!anonId) return request;
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(COOKIE_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const message = `${timestamp}:anonymous:${new URL(request.url).pathname}`;
+  const signature = Array.from(new Uint8Array(
+    await crypto.subtle.sign('HMAC', key, encoder.encode(message)),
+  )).map(byte => byte.toString(16).padStart(2, '0')).join('');
+  const headers = new Headers(request.headers);
+  headers.set('X-User-ID', 'anonymous');
+  headers.set('X-Edge-Timestamp', timestamp);
+  headers.set('X-Edge-Signature', signature);
+  return new Request(request, { headers });
+}
+
 function migrationStatements(): string[] {
   const directory = path.join(API_ROOT, 'drizzle/migrations');
   return fs.readdirSync(directory)
@@ -97,7 +120,7 @@ beforeAll(async () => {
   }
 
   const { default: worker } = await import('../index.js');
-  workerFetch = (request: Request) => {
+  workerFetch = async (request: Request) => {
     background = [];
     const context = {
       waitUntil(promise: Promise<unknown>) {
@@ -109,7 +132,7 @@ beforeAll(async () => {
       request: Request,
       env: Env,
       context: ExecutionContext,
-    ) => Promise<Response>)(request, env, context);
+    ) => Promise<Response>)(await withTrustedEdgeIdentity(request), env, context);
   };
 }, 60_000);
 
@@ -147,15 +170,12 @@ describe('anonymous identity flow', () => {
 
       expect(events[0]).toMatchObject({
         event: 'source_card',
-        source_type: 'web_search',
+        source_type: 'llm_only',
         web_used: true,
         web_status: 'ok',
       });
-      expect(events[0]?.web_sources).toEqual([{
-        title: 'Official Notifications',
-        url: 'https://ahsec.assam.gov.in/index.php/official-notification',
-        source_type: 'web_search',
-      }]);
+      expect(events[0]?.web_sources).toBeUndefined();
+      expect(events[0]?.sources).toEqual([]);
       expect(events[1]).toMatchObject({ done: false });
       expect(events.at(-1)).toMatchObject({
         event: 'syrabit_done',
@@ -809,7 +829,7 @@ describe('anonymous identity flow', () => {
       }));
       const streamText = await chat.text();
       await Promise.all(background);
-      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(streamText).toContain('curriculum_scope_ambiguous');
       expect(generationCalls).toBe(generationCallsBefore);
     } finally {
       fetchMock.mockRestore();
@@ -1029,7 +1049,11 @@ describe('anonymous identity flow', () => {
       }));
       const streamText = await chat.text();
       await Promise.all(background);
-      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(streamText).toContain(
+        question.includes('Class 12')
+          ? 'curriculum_scope_ambiguous'
+          : 'verified_web_evidence_unavailable',
+      );
       expect(generationCalls).toBe(generationCallsBefore);
     } finally {
       fetchMock.mockRestore();
@@ -1074,8 +1098,13 @@ describe('anonymous identity flow', () => {
       }));
       const streamText = await chat.text();
       await Promise.all(background);
-      expect(streamText).not.toContain('verified_web_evidence_unavailable');
-      expect(generationCalls).toBe(generationCallsBefore + 1);
+      if (question.includes('Class 12')) {
+        expect(streamText).toContain('curriculum_scope_ambiguous');
+        expect(generationCalls).toBe(generationCallsBefore);
+      } else {
+        expect(streamText).not.toContain('verified_web_evidence_unavailable');
+        expect(generationCalls).toBe(generationCallsBefore + 1);
+      }
     } finally {
       fetchMock.mockRestore();
       if (originalWebSearchFlag === undefined) {
@@ -1113,7 +1142,7 @@ describe('anonymous identity flow', () => {
       }));
       const streamText = await chat.text();
       await Promise.all(background);
-      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(streamText).toContain('curriculum_scope_ambiguous');
       expect(generationCalls).toBe(generationCallsBefore);
     } finally {
       fetchMock.mockRestore();
@@ -1125,7 +1154,7 @@ describe('anonymous identity flow', () => {
     }
   });
 
-  it('generates when one structured table row contains the event and qualifier', async () => {
+  it('fails closed on explicit class scope before evaluating a matching structured row', async () => {
     const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
     env.WEB_SEARCH_ENABLED = 'true';
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([{
@@ -1151,8 +1180,8 @@ describe('anonymous identity flow', () => {
       }));
       const streamText = await chat.text();
       await Promise.all(background);
-      expect(streamText).not.toContain('verified_web_evidence_unavailable');
-      expect(generationCalls).toBe(generationCallsBefore + 1);
+      expect(streamText).toContain('curriculum_scope_ambiguous');
+      expect(generationCalls).toBe(generationCallsBefore);
     } finally {
       fetchMock.mockRestore();
       if (originalWebSearchFlag === undefined) {
@@ -1190,7 +1219,7 @@ describe('anonymous identity flow', () => {
       }));
       const streamText = await chat.text();
       await Promise.all(background);
-      expect(streamText).toContain('verified_web_evidence_unavailable');
+      expect(streamText).toContain('curriculum_scope_ambiguous');
       expect(generationCalls).toBe(generationCallsBefore);
     } finally {
       fetchMock.mockRestore();
@@ -1247,6 +1276,51 @@ describe('anonymous identity flow', () => {
       'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
     ).bind(anonId).first<{ count: number }>();
     expect(chats?.count).toBe(2);
+  });
+
+  it('keeps edge-owned quota out of D1 while preserving request replay', async () => {
+    const anonId = 'anon_d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1';
+    const clientRequestId = `chat-request-${crypto.randomUUID()}`;
+    const makeRequest = () => new Request('https://api.example/api/v1/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-anon-id': anonId,
+        'X-Rate-Limited-By': 'edge',
+        'X-RateLimit-Limit': '6',
+        'X-RateLimit-Remaining': '4',
+      },
+      body: JSON.stringify({
+        message: 'Explain gravity',
+        lang: 'en',
+        client_request_id: clientRequestId,
+      }),
+    });
+
+    const generationCallsBefore = generationCalls;
+    const first = await workerFetch(makeRequest());
+    expect(first.status).toBe(200);
+    const firstText = await first.text();
+    await Promise.all(background);
+    expect(firstText).toContain('"credits_used_total":2');
+    expect(generationCalls).toBe(generationCallsBefore + 1);
+
+    const retry = await workerFetch(makeRequest());
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get('X-Chat-Replayed')).toBe('true');
+    await retry.text();
+    await Promise.all(background);
+    expect(generationCalls).toBe(generationCallsBefore + 1);
+
+    const quota = await env.DB.prepare(
+      'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
+    ).bind(anonId).first<{ count: number }>();
+    expect(quota).toBeNull();
+
+    const claim = await env.DB.prepare(
+      'SELECT status, quota_reserved FROM chat_request_claims WHERE request_id = ?',
+    ).bind(clientRequestId).first<{ status: string; quota_reserved: number }>();
+    expect(claim).toEqual({ status: 'completed', quota_reserved: 0 });
   });
 
   it('replays an authenticated completed request without duplicating stats or history', async () => {
@@ -1399,10 +1473,9 @@ describe('anonymous identity flow', () => {
     await expect(credits.json()).resolves.toMatchObject({
       anon_id: ANON_ID,
       credits_used: 1,
-      credits_remaining: 29,
-      daily_limit: 30,
-      quota_period: 'daily',
-      monthly_limit: 30,
+      credits_remaining: 5,
+      rpm_limit: 6,
+      quota_period: 'minute',
     });
 
     const list = await workerFetch(new Request(
@@ -1433,10 +1506,9 @@ describe('anonymous identity flow', () => {
     await expect(otherCredits.json()).resolves.toMatchObject({
       anon_id: OTHER_ANON_ID,
       credits_used: 0,
-      credits_remaining: 30,
-      daily_limit: 30,
-      quota_period: 'daily',
-      monthly_limit: 30,
+      credits_remaining: 6,
+      rpm_limit: 6,
+      quota_period: 'minute',
     });
 
     const otherList = await workerFetch(new Request(
@@ -1488,7 +1560,7 @@ describe('anonymous identity flow', () => {
     await expect(credits.json()).resolves.toMatchObject({
       anon_id: COOKIE_ANON_ID,
       credits_used: 1,
-      credits_remaining: 29,
+      credits_remaining: 5,
     });
     const history = await workerFetch(new Request(
       'https://api.example/api/v1/conversations/anon',
@@ -1509,7 +1581,7 @@ describe('anonymous identity flow', () => {
     await expect(otherCredits.json()).resolves.toMatchObject({
       anon_id: OTHER_COOKIE_ANON_ID,
       credits_used: 0,
-      credits_remaining: 30,
+      credits_remaining: 6,
     });
     const otherHistory = await workerFetch(new Request(
       'https://api.example/api/v1/conversations/anon',
@@ -1518,6 +1590,87 @@ describe('anonymous identity flow', () => {
     await expect(otherHistory.json()).resolves.toMatchObject({
       conversations: [],
       pagination: { total: 0 },
+    });
+  });
+
+  it('lets only the anonymous owner cancel a reserved request and releases its minute slot once', async () => {
+    const requestId = `cancel_${crypto.randomUUID().replace(/-/g, '')}`;
+    const period = new Date().toISOString().slice(0, 16);
+    const ownerCookie = await signedCookie(COOKIE_ANON_ID);
+    const otherCookie = await signedCookie(OTHER_COOKIE_ANON_ID);
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO anonymous_quota_usage (anon_id, period, count) VALUES (?, ?, 2)
+         ON CONFLICT (anon_id, period) DO UPDATE SET count = 2`,
+      ).bind(COOKIE_ANON_ID, period),
+      env.DB.prepare(
+        `INSERT INTO chat_request_claims
+         (request_id, user_id, period, is_anon, status, expires_at)
+         VALUES (?, ?, ?, 1, 'reserved', ?)`,
+      ).bind(requestId, COOKIE_ANON_ID, period, Math.floor(Date.now() / 1000) + 3600),
+    ]);
+
+    const denied = await workerFetch(new Request('https://api.example/api/v1/chat/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: otherCookie },
+      body: JSON.stringify({ client_request_id: requestId }),
+    }));
+    await expect(denied.json()).resolves.toEqual({ cancelled: false });
+
+    const cancellations = await Promise.all([1, 2].map(() => workerFetch(new Request(
+      'https://api.example/api/v1/chat/cancel',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+        body: JSON.stringify({ client_request_id: requestId }),
+      },
+    ))));
+    expect(cancellations.map(response => response.status).sort()).toEqual([200, 202]);
+
+    const claim = await env.DB.prepare(
+      'SELECT status, cancelled_at FROM chat_request_claims WHERE request_id = ?',
+    ).bind(requestId).first<{ status: string; cancelled_at: number | null }>();
+    expect(claim?.status).toBe('cancelled');
+    expect(claim?.cancelled_at).toEqual(expect.any(Number));
+    const quota = await env.DB.prepare(
+      'SELECT count FROM anonymous_quota_usage WHERE anon_id = ? AND period = ?',
+    ).bind(COOKIE_ANON_ID, period).first<{ count: number }>();
+    expect(quota?.count).toBe(1);
+
+    const repeated = await workerFetch(new Request('https://api.example/api/v1/chat/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+      body: JSON.stringify({ client_request_id: requestId }),
+    }));
+    await expect(repeated.json()).resolves.toEqual({ cancelled: true });
+    const afterRepeat = await env.DB.prepare(
+      'SELECT count FROM anonymous_quota_usage WHERE anon_id = ? AND period = ?',
+    ).bind(COOKIE_ANON_ID, period).first<{ count: number }>();
+    expect(afterRepeat?.count).toBe(1);
+  });
+
+  it('records an early cancellation tombstone that prevents later reservation', async () => {
+    const requestId = `early_${crypto.randomUUID().replace(/-/g, '')}`;
+    const ownerCookie = await signedCookie(COOKIE_ANON_ID);
+    const cancelled = await workerFetch(new Request('https://api.example/api/v1/chat/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+      body: JSON.stringify({ client_request_id: requestId }),
+    }));
+    expect(cancelled.status).toBe(202);
+
+    const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+      body: JSON.stringify({
+        client_request_id: requestId,
+        message: 'Explain photosynthesis',
+        lang: 'en',
+      }),
+    }));
+    expect(chat.status).toBe(409);
+    await expect(chat.json()).resolves.toMatchObject({
+      error_code: 'chat_request_cancelled',
     });
   });
 });

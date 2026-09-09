@@ -10,6 +10,7 @@ import { authRouter } from './auth';
 import { anonymousQuotaKey } from '../services/anonymous';
 import {
   chatRouter,
+  fetchMatchedChunkContext,
   releaseQuotaReservation,
   reserveAnonQuota,
   reserveAuthQuota,
@@ -17,9 +18,35 @@ import {
 
 const API_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../');
 const JWT_SECRET = 'atomic-controls-test-secret-at-least-32-characters';
+const EDGE_SHARED_SECRET = 'atomic-controls-edge-secret-at-least-32-characters';
 
 let env: Env;
 let disposeProxy: () => Promise<void>;
+
+async function trustedAnonHeaders(anonId: string): Promise<Record<string, string>> {
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(EDGE_SHARED_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const pathname = '/stream';
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(`${timestamp}:anonymous:${pathname}`),
+  );
+  return {
+    'Content-Type': 'application/json',
+    'x-anon-id': anonId,
+    'x-edge-timestamp': timestamp,
+    'x-edge-signature': Array.from(new Uint8Array(signature))
+      .map(byte => byte.toString(16).padStart(2, '0'))
+      .join(''),
+  };
+}
 
 function migrationStatements(): string[] {
   const directory = path.join(API_ROOT, 'drizzle/migrations');
@@ -45,6 +72,7 @@ beforeAll(async () => {
   env = {
     ...proxy.env,
     JWT_SECRET,
+    EDGE_SHARED_SECRET,
     ALLOWED_ORIGINS: '*',
     APP_ENV: 'test',
   };
@@ -68,16 +96,16 @@ describe('atomic quota controls', () => {
       ),
     );
 
-    expect(results.filter(result => result.allowed)).toHaveLength(30);
-    expect(results.filter(result => !result.allowed)).toHaveLength(10);
+    expect(results.filter(result => result.allowed)).toHaveLength(6);
+    expect(results.filter(result => !result.allowed)).toHaveLength(34);
 
     const row = await env.DB.prepare(
       'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
     ).bind(anonId).first<{ count: number }>();
-    expect(row?.count).toBe(30);
+    expect(row?.count).toBe(6);
   });
 
-  it('preserves partial legacy usage across parallel first reservations', async () => {
+  it('does not carry partial daily KV usage into a minute bucket', async () => {
     const anonId = 'anon_11111111111111111111111111111111';
     await env.RATE_LIMIT_KV.put(anonymousQuotaKey(anonId), '20');
 
@@ -88,15 +116,15 @@ describe('atomic quota controls', () => {
       ),
     );
 
-    expect(results.filter(result => result.allowed)).toHaveLength(10);
-    expect(results.filter(result => !result.allowed)).toHaveLength(10);
+    expect(results.filter(result => result.allowed)).toHaveLength(6);
+    expect(results.filter(result => !result.allowed)).toHaveLength(14);
     const row = await env.DB.prepare(
       'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
     ).bind(anonId).first<{ count: number }>();
-    expect(row?.count).toBe(30);
+    expect(row?.count).toBe(6);
   });
 
-  it('does not reset an at-limit legacy anonymous user', async () => {
+  it('retires an at-limit daily KV counter when RPM begins', async () => {
     const anonId = 'anon_22222222222222222222222222222222';
     await env.RATE_LIMIT_KV.put(anonymousQuotaKey(anonId), '30');
 
@@ -107,11 +135,12 @@ describe('atomic quota controls', () => {
       ),
     );
 
-    expect(results.every(result => !result.allowed)).toBe(true);
+    expect(results.filter(result => result.allowed)).toHaveLength(6);
+    expect(results.filter(result => !result.allowed)).toHaveLength(4);
     const row = await env.DB.prepare(
       'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
     ).bind(anonId).first<{ count: number }>();
-    expect(row?.count).toBe(30);
+    expect(row?.count).toBe(6);
   });
 
   it('does not lose concurrent anonymous or authenticated releases', async () => {
@@ -139,11 +168,11 @@ describe('atomic quota controls', () => {
     const authResults = await Promise.all(
       Array.from({ length: 40 }, () => reserveAuthQuota(env.DB, userId, 'free', 'student')),
     );
-    expect(authResults.filter(result => result.allowed)).toHaveLength(30);
-    expect(authResults.filter(result => !result.allowed)).toHaveLength(10);
+    expect(authResults.filter(result => result.allowed)).toHaveLength(6);
+    expect(authResults.filter(result => !result.allowed)).toHaveLength(34);
 
     await Promise.all(Array.from(
-      { length: 30 },
+      { length: 6 },
       () => releaseQuotaReservation(env.DB, userId, false),
     ));
     const authRow = await env.DB.prepare(
@@ -155,17 +184,17 @@ describe('atomic quota controls', () => {
   it('preserves the count when reservations and releases interleave', async () => {
     const anonId = 'anon_dddddddddddddddddddddddddddddddd';
     await Promise.all(Array.from(
-      { length: 30 },
+      { length: 6 },
       () => reserveAnonQuota(env.DB, env.RATE_LIMIT_KV, anonId),
     ));
 
     const operations = await Promise.all([
-      ...Array.from({ length: 15 }, async () => {
+      ...Array.from({ length: 3 }, async () => {
         await releaseQuotaReservation(env.DB, anonId, true);
         return null;
       }),
       ...Array.from(
-        { length: 15 },
+        { length: 3 },
         () => reserveAnonQuota(env.DB, env.RATE_LIMIT_KV, anonId),
       ),
     ]);
@@ -176,7 +205,7 @@ describe('atomic quota controls', () => {
     const row = await env.DB.prepare(
       'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
     ).bind(anonId).first<{ count: number }>();
-    expect(row?.count).toBe(15 + allowedReservations);
+    expect(row?.count).toBe(3 + allowedReservations);
   });
 
   it('fails chat closed when quota storage is unavailable', async () => {
@@ -231,7 +260,7 @@ describe('atomic quota controls', () => {
     const response = await chatRouter.fetch(
       new Request('https://api.example/stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-anon-id': anonId },
+        headers: await trustedAnonHeaders(anonId),
         body: JSON.stringify({ message: 'hello', lang: 'en' }),
       }),
       failingEnv,
@@ -299,12 +328,17 @@ describe('atomic quota controls', () => {
     expect(authRow?.count).toBe(0);
   });
 
-  it('loads D1 content for the chapter selected by semantic retrieval', async () => {
+  it('uses the exact metadata passage when a legacy vector has no D1 chunk mirror', async () => {
     const chapterId = `semantic-${crypto.randomUUID()}`;
+    const subjectId = `semantic-subject-${crypto.randomUUID()}`;
+    await env.DB.prepare(
+      `INSERT INTO subjects (id, stream_id, name, slug, is_published)
+       VALUES (?, NULL, 'Semantic Physics', ?, 1)`,
+    ).bind(subjectId, subjectId).run();
     await env.DB.prepare(
       `INSERT INTO chapters (id, subject_id, title, slug, status, notes_en)
-       VALUES (?, 'physics', 'Semantic chapter', ?, 'published', 'Matched chapter notes')`,
-    ).bind(chapterId, chapterId).run();
+       VALUES (?, ?, 'Semantic chapter', ?, 'published', NULL)`,
+    ).bind(chapterId, subjectId, chapterId).run();
     const background: Promise<unknown>[] = [];
     const failingEnv = {
       ...env,
@@ -324,7 +358,9 @@ describe('atomic quota controls', () => {
             metadata: {
               chapterId,
               chapterTitle: 'Semantic chapter',
-              subjectId: 'physics',
+              subjectId,
+              content: 'Matched metadata passage',
+              medium: 'english',
             },
           }],
         }),
@@ -354,6 +390,84 @@ describe('atomic quota controls', () => {
 
     expect(stream).toContain('"rag_path":"vectorize_d1"');
     expect(stream).toContain('"rag_chapter_name":"Semantic chapter"');
+  });
+
+  it('grounds semantic retrieval with the exact matched D1 passage', async () => {
+    const chapterId = `matched-passage-${crypto.randomUUID()}`;
+    const subjectId = `matched-subject-${crypto.randomUUID()}`;
+    const vectorId = `vector-${crypto.randomUUID()}`;
+    await env.DB.prepare(
+      `INSERT INTO subjects (id, stream_id, name, slug, is_published)
+       VALUES (?, NULL, 'Matched Physics', ?, 1)`,
+    ).bind(subjectId, subjectId).run();
+    await env.DB.prepare(
+      `INSERT INTO chapters (id, subject_id, title, slug, status, notes_en)
+       VALUES (?, ?, 'Long chapter', ?, 'published', 'Unrelated chapter opening')`,
+    ).bind(chapterId, subjectId, chapterId).run();
+    await env.DB.prepare(
+      `INSERT INTO chunks (id, chapter_id, subject_id, source_type, medium, chunk_type, content, vector_id)
+       VALUES (?, ?, ?, 'notes', 'english', 'text', ?, ?)`,
+    ).bind(crypto.randomUUID(), chapterId, subjectId, 'Exact later-topic matched passage', vectorId).run();
+
+    const chunks = await fetchMatchedChunkContext(
+      env.DB,
+      [{
+        id: vectorId,
+        score: 0.94,
+        metadata: { chapterId, subjectId, chapterTitle: 'Long chapter' },
+      }] as VectorizeMatch[],
+      chapterId,
+      'en',
+      subjectId,
+    );
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.content).toBe('Exact later-topic matched passage');
+    expect(chunks[0]?.content).not.toContain('Unrelated chapter opening');
+  });
+
+  it('does not use metadata when the vector ID has a mismatched D1 mirror', async () => {
+    const subjectId = `stale-subject-${crypto.randomUUID()}`;
+    const expectedChapterId = `expected-${crypto.randomUUID()}`;
+    const staleChapterId = `stale-${crypto.randomUUID()}`;
+    const vectorId = `stale-vector-${crypto.randomUUID()}`;
+    await env.DB.prepare(
+      `INSERT INTO subjects (id, stream_id, name, slug, is_published)
+       VALUES (?, NULL, 'Stale Physics', ?, 1)`,
+    ).bind(subjectId, subjectId).run();
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO chapters (id, subject_id, title, slug, status)
+         VALUES (?, ?, 'Expected chapter', ?, 'published')`,
+      ).bind(expectedChapterId, subjectId, expectedChapterId),
+      env.DB.prepare(
+        `INSERT INTO chapters (id, subject_id, title, slug, status)
+         VALUES (?, ?, 'Stale chapter', ?, 'published')`,
+      ).bind(staleChapterId, subjectId, staleChapterId),
+      env.DB.prepare(
+        `INSERT INTO chunks (id, chapter_id, subject_id, source_type, medium, content, vector_id)
+         VALUES (?, ?, ?, 'notes', 'english', 'Wrong mirrored passage', ?)`,
+      ).bind(crypto.randomUUID(), staleChapterId, subjectId, vectorId),
+    ]);
+
+    const chunks = await fetchMatchedChunkContext(
+      env.DB,
+      [{
+        id: vectorId,
+        score: 0.95,
+        metadata: {
+          chapterId: expectedChapterId,
+          subjectId,
+          chapterTitle: 'Expected chapter',
+          content: 'Metadata must not bypass the stale mirror',
+        },
+      }] as VectorizeMatch[],
+      expectedChapterId,
+      'en',
+      subjectId,
+    );
+
+    expect(chunks).toEqual([]);
   });
 });
 

@@ -63,6 +63,9 @@ importers:
 
   apps/edge:
     devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: ^0.21.3
+        version: 0.21.3(@cloudflare/workers-types@4.20260524.1)(@vitest/runner@4.1.10)(@vitest/snapshot@4.1.10)(vitest@4.1.10(@types/node@22.19.19)(jiti@1.21.7)(jsdom@29.1.1)(tsx@4.23.13))
       '@cloudflare/workers-types':
         specifier: ^4.20260523.1
         version: 4.20260524.1

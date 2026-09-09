@@ -7,9 +7,11 @@
     "dev": "wrangler dev",
     "build": "tsc --noEmit",
     "deploy": "wrangler deploy --env production",
-    "test": "vitest"
+    "test": "vitest run && pnpm run test:runtime",
+    "test:runtime": "vitest run --config vitest.runtime.config.mts"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.21.3",
     "@cloudflare/workers-types": "^4.20260523.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10",

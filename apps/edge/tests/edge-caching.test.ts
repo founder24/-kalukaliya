@@ -221,6 +221,36 @@ describe('/health - ISR_CACHE_KV Cache Layer', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('includes the durable chat-limit cleanup incident without identity data', async () => {
+    const failureAt = '2026-09-09T12:10:00.000Z';
+    const recoveryAt = '2026-09-09T12:15:00.000Z';
+    const rateLimitKv = {
+      get: vi.fn(async (key: string) => key === 'health:rate-limit-cleanup'
+        ? JSON.stringify({
+            degraded: false,
+            latest_failure_at: failureAt,
+            latest_recovery_at: recoveryAt,
+          })
+        : null),
+      put: vi.fn(async () => {}),
+      delete: vi.fn(async () => {}),
+    } as unknown as KVNamespace;
+    const env = createMockEnv({ RATE_LIMIT_KV: rateLimitKv });
+    const response = await worker.fetch(
+      new Request('https://api.syrabit.ai/health'),
+      env,
+      createMockCtx(),
+    );
+    const body = await response.json<Record<string, unknown>>();
+
+    expect(body.rate_limit_cleanup).toEqual({
+      degraded: false,
+      latest_failure_at: failureAt,
+      latest_recovery_at: recoveryAt,
+    });
+    expect(JSON.stringify(body.rate_limit_cleanup)).not.toContain('student');
+  });
+
   it('probes the API Worker binding when KV cache is empty', async () => {
     const mockKV = {
       get: vi.fn(async () => null),

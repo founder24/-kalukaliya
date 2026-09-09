@@ -18,6 +18,9 @@ function quotaDb(): D1Database {
         },
         first: async () => {
           const key = `${String(args[0])}:${String(args[1])}`;
+          if (query.includes('SELECT count FROM anonymous_quota_usage')) {
+            return values.has(key) ? { count: values.get(key) } : null;
+          }
           if (query.includes('INSERT INTO anonymous_quota_usage')) {
             const legacy = Number(args[2]);
             const current = Math.max(values.get(key) ?? 0, legacy);
@@ -62,8 +65,9 @@ describe('anonymous credit balance', () => {
       anon_id: ANON_ID,
       tier: 'free',
       credits_used: 1,
-      credits_remaining: 29,
-      monthly_limit: 30,
+      credits_remaining: 5,
+      rpm_limit: 6,
+      quota_period: 'minute',
     });
   });
 
@@ -80,11 +84,12 @@ describe('anonymous credit balance', () => {
     await expect(response.json()).resolves.toMatchObject({
       anon_id: 'ip_203_0_113_9',
       credits_used: 0,
-      credits_remaining: 30,
+      credits_remaining: 6,
+      rpm_limit: 6,
     });
   });
 
-  it('preserves a legacy KV balance before the first D1 reservation', async () => {
+  it('does not carry a retired daily KV balance into the RPM bucket', async () => {
     const DB = quotaDb();
     const RATE_LIMIT_KV = quotaKv(20);
     const response = await usersRouter.fetch(
@@ -95,9 +100,10 @@ describe('anonymous credit balance', () => {
     );
 
     await expect(response.json()).resolves.toMatchObject({
-      credits_used: 20,
-      credits_remaining: 10,
-      monthly_limit: 30,
+      credits_used: 0,
+      credits_remaining: 6,
+      rpm_limit: 6,
+      quota_period: 'minute',
     });
   });
 });
