@@ -22,6 +22,7 @@ const BROWSER_ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
 const ANONYMOUS_COOKIE_NAME = 'syrabit_anon_id';
 const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/;
 const ANONYMOUS_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+const CLEANUP_RECOVERY_DELAY_MS = 5 * 60 * 1000;
 
 export interface AnonymousIdentity {
   id: string;
@@ -228,6 +229,11 @@ export class RateLimitDurableObject {
   }
 
   async alarm(): Promise<void> {
+    // Install a recovery alarm before deleting state. If this handler fails
+    // after that point, the bucket gets another bounded cleanup attempt even
+    // when the original alarm delivery is not retried.
+    await this.state.storage.setAlarm(Date.now() + CLEANUP_RECOVERY_DELAY_MS);
     await this.state.storage.deleteAll();
+    await this.state.storage.deleteAlarm();
   }
 }

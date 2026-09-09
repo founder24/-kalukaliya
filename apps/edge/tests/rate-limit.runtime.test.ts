@@ -6,6 +6,7 @@ import {
 } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
+import { RateLimitDurableObject } from '../src/middleware/rate-limit';
 
 const EDGE_SECRET = 'edge-runtime-test-secret-at-least-32-characters';
 const JWT_SECRET = 'edge-runtime-jwt-secret-at-least-32-characters';
@@ -201,6 +202,43 @@ describe('anonymous burst protection in the Workers runtime', () => {
       expect(restored.headers.get('X-RateLimit-Remaining')).toBe('5');
       expect(restored.headers.get('X-RateLimit-Reset')).toBe('1788955320');
       expect(apiFetch).toHaveBeenCalledTimes(7);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries expired bucket cleanup after an alarm handler failure', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-09T12:00:00.000Z'));
+      let deleteAttempts = 0;
+      let scheduledAlarm: number | null = null;
+      const storage = {
+        setAlarm: vi.fn(async (time: number | Date) => {
+          scheduledAlarm = typeof time === 'number' ? time : time.getTime();
+        }),
+        deleteAll: vi.fn(async () => {
+          deleteAttempts += 1;
+          if (deleteAttempts === 1) throw new Error('simulated storage failure');
+        }),
+        deleteAlarm: vi.fn(async () => {
+          scheduledAlarm = null;
+        }),
+      };
+      const durableObject = new RateLimitDurableObject({
+        storage,
+      } as unknown as DurableObjectState);
+
+      await expect(durableObject.alarm()).rejects.toThrow('simulated storage failure');
+      expect(scheduledAlarm).toBe(Date.now() + 5 * 60_000);
+      expect(storage.deleteAlarm).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(5 * 60_000);
+      await durableObject.alarm();
+
+      expect(storage.deleteAll).toHaveBeenCalledTimes(2);
+      expect(storage.deleteAlarm).toHaveBeenCalledTimes(1);
+      expect(scheduledAlarm).toBeNull();
     } finally {
       vi.useRealTimers();
     }
