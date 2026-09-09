@@ -19,6 +19,15 @@ const THUMB_GRADIENTS = {
   science:   ['#7c3aed', '#4f46e5'],
 };
 
+export function getSubjectLandingPath(sub = {}) {
+  const boardSlug = sub.boardSlug || sub.board_slug;
+  const classSlug = sub.classSlug || sub.class_slug;
+  const subjectSlug = sub.slug || sub.subject_slug;
+  return boardSlug && classSlug && subjectSlug
+    ? `/${boardSlug}/${classSlug}/${subjectSlug}`
+    : `/subject/${sub.id}`;
+}
+
 const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onToggleSave, onAskAI, index }) {
   const queryClient = useQueryClient();
   const { contentLang } = useContentLang();
@@ -29,18 +38,14 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
   const chapterCount = useMemo(() => chapters.length || sub.chapter_count || sub.chapterCount || 0, [chapters.length, sub.chapter_count, sub.chapterCount]);
   const hasDocument = useMemo(() => sub.has_document === true, [sub.has_document]);
 
-  const subjectLandingPath = useMemo(() =>
-    sub.boardSlug && sub.classSlug && sub.slug
-      ? `/${sub.boardSlug}/${sub.classSlug}/${sub.slug}`
-      : `/subject/${sub.id}`,
-    [sub.boardSlug, sub.classSlug, sub.slug, sub.id]
+  const subjectLandingPath = useMemo(
+    () => getSubjectLandingPath(sub),
+    [sub],
   );
 
   const displayUrl = useMemo(() => {
-    return sub.boardSlug && sub.classSlug && sub.slug
-      ? `syrabit.ai/${sub.boardSlug}/${sub.classSlug}/${sub.slug}`
-      : `syrabit.ai/subject/${sub.id?.slice(0, 8)}`;
-  }, [sub.boardSlug, sub.classSlug, sub.slug, sub.id]);
+    return `syrabit.ai${subjectLandingPath}`;
+  }, [subjectLandingPath]);
 
   const { sharing, share } = useShare();
 
