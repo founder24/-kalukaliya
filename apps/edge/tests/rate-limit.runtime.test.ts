@@ -21,6 +21,7 @@ function chatRequest(
   lang: 'en' | 'as',
   ip: string,
   cookie?: string,
+  token?: string,
 ): Request {
   return new Request('https://syrabit.ai/api/v1/chat/stream', {
     method: 'POST',
@@ -29,9 +30,41 @@ function chatRequest(
       'User-Agent': 'workers-runtime-rate-limit-test',
       'CF-Connecting-IP': ip,
       ...(cookie ? { Cookie: cookie } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({ lang, message: 'Explain this chapter' }),
   });
+}
+
+async function authenticatedToken(userId: string): Promise<string> {
+  const encode = (value: object) => btoa(JSON.stringify(value))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  const header = encode({ alg: 'HS256', typ: 'JWT' });
+  const payload = encode({
+    sub: userId,
+    type: 'access',
+    exp: Math.floor(Date.now() / 1000) + 3600,
+  });
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(JWT_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    encoder.encode(`${header}.${payload}`),
+  );
+  const encodedSignature = btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return `${header}.${payload}.${encodedSignature}`;
 }
 
 async function signedAnonymousCookie(id: string): Promise<string> {
@@ -171,5 +204,39 @@ describe('anonymous burst protection in the Workers runtime', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('authenticated per-language limits in the Workers runtime', () => {
+  it('does not let excess English traffic consume the Assamese allowance', async () => {
+    const token = await authenticatedToken('student-language-isolation');
+    const forwardedLanguages: string[] = [];
+    const apiFetch = vi.fn(async (request: Request) => {
+      const body = await request.json() as { lang: string };
+      forwardedLanguages.push(body.lang);
+      return Response.json({ ok: true });
+    });
+    const environment = runtimeEnv(apiFetch);
+    const languages = [
+      ...Array.from({ length: 10 }, () => 'en' as const),
+      ...Array.from({ length: 6 }, () => 'as' as const),
+    ];
+
+    const responses = await Promise.all(languages.map((lang, index) =>
+      worker.fetch(
+        chatRequest(lang, `203.0.113.${index + 20}`, undefined, token),
+        environment,
+        context(),
+      )
+    ));
+
+    const englishResponses = responses.slice(0, 10);
+    const assameseResponses = responses.slice(10);
+    expect(englishResponses.filter(response => response.status === 200)).toHaveLength(6);
+    expect(englishResponses.filter(response => response.status === 429)).toHaveLength(4);
+    expect(assameseResponses.every(response => response.status === 200)).toBe(true);
+    expect(forwardedLanguages.filter(lang => lang === 'en')).toHaveLength(6);
+    expect(forwardedLanguages.filter(lang => lang === 'as')).toHaveLength(6);
+    expect(apiFetch).toHaveBeenCalledTimes(12);
   });
 });
