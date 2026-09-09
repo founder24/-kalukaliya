@@ -26,7 +26,7 @@ import { adminHeaders, CustomTooltip, LatencyBadge, PeakBadge, TOOLTIP_STYLE } f
 import { toast } from 'sonner';
 import { computeHeavyFreshness, computeThrottleFreshness } from '@/utils/metricsFreshness';
 
-export default function InfraTab({ adminToken, onNavigate, health, loading, deps, allOk, hasError, chartData, peaks, current, metricsLoading, timeRange, setTimeRange, loadMetrics, loadHealth, benchLatest, benchLoading, loadBenchLatest, cfAddons, cfAddonsLoading, loadCfAddons, awsCredits, awsCreditsLoading, loadAwsCredits, gcpCredits, gcpCreditsLoading, loadGcpCredits, axiomCredits, axiomCreditsLoading, loadAxiomCredits, sentryCredits, sentryCreditsLoading, loadSentryCredits, cfAuditData, cfAuditLoading, loadCfAudit, cfHealthData, cfHealthLoading, loadCfHealth, edgeProxyDeployCronHealth, edgeProxyDeployCronLoading, loadEdgeProxyDeployCronHealth, cfDriftCronHealth, cfDriftCronLoading, loadCfDriftCronHealth, tpCronHealth, tpCronLoading, loadTpCronHealth, unifiedLogsCfPullCronHealth, unifiedLogsCfPullCronLoading, loadUnifiedLogsCfPullCronHealth, edgeProxyDeployCronAlertState, cfDriftCronAlertState, tpCronAlertState, unifiedLogsCfPullCronAlertState, aigGuardrailAlertState, slackWebhookMissingAlertStates, slackWebhookMissingAlertHistories, snoozeSlackWebhookMissing, edgeProxyDeployCronAlertHistory, cfDriftCronAlertHistory, tpCronAlertHistory, unifiedLogsCfPullCronAlertHistory, loadEdgeProxyDeployCronAlertHistory, loadCfDriftCronAlertHistory, loadTpCronAlertHistory, loadUnifiedLogsCfPullCronAlertHistory, d1MirrorLagHealth, d1MirrorLagLoading, loadD1MirrorLagHealth, d1MirrorLagAlertHistory, loadD1MirrorLagAlertHistory, tpJsonldReport, tpJsonldLoading, tpJsonldHistory, tpJsonldAlerts, loadTpJsonldReport, loadTpJsonldHistory, loadTpJsonldAlerts, aiCacheStats, aiCacheLoading, aiCachePurging, loadAiCacheStats, purgeAiCache, pineconeHealth, pineconeLoading, pineconeSwitch, switchPineconeRetriever, loadPineconeHealth, healthUrl, copied, handleCopy, SLACK_WEBHOOK_MISSING_ENVS }) {
+export default function InfraTab({ adminToken, onNavigate, health, edgeHealth, loading, deps, allOk, hasError, chartData, peaks, current, metricsLoading, timeRange, setTimeRange, loadMetrics, loadHealth, benchLatest, benchLoading, loadBenchLatest, cfAddons, cfAddonsLoading, loadCfAddons, awsCredits, awsCreditsLoading, loadAwsCredits, gcpCredits, gcpCreditsLoading, loadGcpCredits, axiomCredits, axiomCreditsLoading, loadAxiomCredits, sentryCredits, sentryCreditsLoading, loadSentryCredits, cfAuditData, cfAuditLoading, loadCfAudit, cfHealthData, cfHealthLoading, loadCfHealth, edgeProxyDeployCronHealth, edgeProxyDeployCronLoading, loadEdgeProxyDeployCronHealth, cfDriftCronHealth, cfDriftCronLoading, loadCfDriftCronHealth, tpCronHealth, tpCronLoading, loadTpCronHealth, unifiedLogsCfPullCronHealth, unifiedLogsCfPullCronLoading, loadUnifiedLogsCfPullCronHealth, edgeProxyDeployCronAlertState, cfDriftCronAlertState, tpCronAlertState, unifiedLogsCfPullCronAlertState, aigGuardrailAlertState, slackWebhookMissingAlertStates, slackWebhookMissingAlertHistories, snoozeSlackWebhookMissing, edgeProxyDeployCronAlertHistory, cfDriftCronAlertHistory, tpCronAlertHistory, unifiedLogsCfPullCronAlertHistory, loadEdgeProxyDeployCronAlertHistory, loadCfDriftCronAlertHistory, loadTpCronAlertHistory, loadUnifiedLogsCfPullCronAlertHistory, d1MirrorLagHealth, d1MirrorLagLoading, loadD1MirrorLagHealth, d1MirrorLagAlertHistory, loadD1MirrorLagAlertHistory, tpJsonldReport, tpJsonldLoading, tpJsonldHistory, tpJsonldAlerts, loadTpJsonldReport, loadTpJsonldHistory, loadTpJsonldAlerts, aiCacheStats, aiCacheLoading, aiCachePurging, loadAiCacheStats, purgeAiCache, pineconeHealth, pineconeLoading, pineconeSwitch, switchPineconeRetriever, loadPineconeHealth, healthUrl, copied, handleCopy, SLACK_WEBHOOK_MISSING_ENVS }) {
   return (
     <>
         {/*
@@ -83,6 +83,66 @@ export default function InfraTab({ adminToken, onNavigate, health, loading, deps
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
+        </SectionErrorBoundary>
+
+        <SectionErrorBoundary name="Chat limit cleanup">
+          {(() => {
+            const incident = edgeHealth?.rate_limit_cleanup;
+            const degraded = incident?.degraded === true;
+            const unavailable = !incident;
+            const formatTimestamp = (value) => value
+              ? new Date(value).toLocaleString()
+              : 'Never';
+            return (
+              <div
+                className={`rounded-2xl p-4 border ${
+                  degraded
+                    ? 'bg-red-50 border-red-200'
+                    : unavailable
+                      ? 'bg-gray-50 border-gray-200'
+                      : 'bg-emerald-50 border-emerald-200'
+                }`}
+                data-testid="chat-limit-cleanup-health"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                    degraded ? 'bg-red-100 text-red-500' : unavailable ? 'bg-gray-100 text-gray-400' : 'bg-emerald-100 text-emerald-500'
+                  }`}>
+                    {degraded ? <AlertTriangle size={17} /> : <ShieldCheck size={17} />}
+                  </div>
+                  <div className="flex-1">
+                    <p className={`text-sm font-semibold ${
+                      degraded ? 'text-red-600' : unavailable ? 'text-gray-500' : 'text-emerald-600'
+                    }`}>
+                      Chat-limit cleanup: {degraded ? 'Degraded' : unavailable ? 'Unknown' : 'Healthy'}
+                    </p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      Durable Object expired-bucket cleanup
+                    </p>
+                  </div>
+                  <button onClick={loadHealth} className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-white">
+                    <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+                {!unavailable && (
+                  <div className="grid grid-cols-2 gap-3 mt-3 text-xs">
+                    <div className="rounded-xl bg-white border border-gray-200 p-3">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400">Latest failure</p>
+                      <p className="mt-1 font-medium text-gray-700" data-testid="chat-limit-cleanup-failure">
+                        {formatTimestamp(incident.latest_failure_at)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-white border border-gray-200 p-3">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400">Latest recovery</p>
+                      <p className="mt-1 font-medium text-gray-700" data-testid="chat-limit-cleanup-recovery">
+                        {formatTimestamp(incident.latest_recovery_at)}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </SectionErrorBoundary>
 
         <SectionErrorBoundary name="Trustpilot JSON-LD Coverage">
