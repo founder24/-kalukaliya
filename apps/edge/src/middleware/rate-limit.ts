@@ -23,6 +23,10 @@ const ANONYMOUS_COOKIE_NAME = 'syrabit_anon_id';
 const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/;
 const ANONYMOUS_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 const CLEANUP_RECOVERY_DELAY_MS = 5 * 60 * 1000;
+const CLEANUP_FAILURE_ALERT_THRESHOLD = 3;
+const CLEANUP_FAILURE_ALERT_DEDUP_MS = 60 * 60 * 1000;
+const CLEANUP_FAILURE_COUNT_KEY = 'cleanupFailureCount';
+const CLEANUP_ALERTED_AT_KEY = 'cleanupAlertedAt';
 
 export interface AnonymousIdentity {
   id: string;
@@ -233,7 +237,36 @@ export class RateLimitDurableObject {
     // after that point, the bucket gets another bounded cleanup attempt even
     // when the original alarm delivery is not retried.
     await this.state.storage.setAlarm(Date.now() + CLEANUP_RECOVERY_DELAY_MS);
-    await this.state.storage.deleteAll();
-    await this.state.storage.deleteAlarm();
+    const [failureCount = 0, alertedAt] = await Promise.all([
+      this.state.storage.get<number>(CLEANUP_FAILURE_COUNT_KEY),
+      this.state.storage.get<number>(CLEANUP_ALERTED_AT_KEY),
+    ]);
+
+    try {
+      await this.state.storage.deleteAll();
+      await this.state.storage.deleteAlarm();
+      if (failureCount >= CLEANUP_FAILURE_ALERT_THRESHOLD) {
+        console.info(JSON.stringify({
+          event: 'rate_limit_cleanup_recovered',
+          previousFailures: failureCount,
+        }));
+      }
+    } catch (error) {
+      const nextFailureCount = failureCount + 1;
+      const now = Date.now();
+      const shouldAlert = nextFailureCount >= CLEANUP_FAILURE_ALERT_THRESHOLD
+        && (alertedAt === undefined || now - alertedAt >= CLEANUP_FAILURE_ALERT_DEDUP_MS);
+
+      await this.state.storage.put(CLEANUP_FAILURE_COUNT_KEY, nextFailureCount);
+      if (shouldAlert) {
+        await this.state.storage.put(CLEANUP_ALERTED_AT_KEY, now);
+        console.error(JSON.stringify({
+          event: 'rate_limit_cleanup_repeated_failure',
+          failures: nextFailureCount,
+          retryInSeconds: CLEANUP_RECOVERY_DELAY_MS / 1000,
+        }));
+      }
+      throw error;
+    }
   }
 }

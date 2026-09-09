@@ -213,13 +213,19 @@ describe('anonymous burst protection in the Workers runtime', () => {
       vi.setSystemTime(new Date('2026-09-09T12:00:00.000Z'));
       let deleteAttempts = 0;
       let scheduledAlarm: number | null = null;
+      const values = new Map<string, unknown>();
       const storage = {
+        get: vi.fn(async (key: string) => values.get(key)),
+        put: vi.fn(async (key: string, value: unknown) => {
+          values.set(key, value);
+        }),
         setAlarm: vi.fn(async (time: number | Date) => {
           scheduledAlarm = typeof time === 'number' ? time : time.getTime();
         }),
         deleteAll: vi.fn(async () => {
           deleteAttempts += 1;
           if (deleteAttempts === 1) throw new Error('simulated storage failure');
+          values.clear();
         }),
         deleteAlarm: vi.fn(async () => {
           scheduledAlarm = null;
@@ -240,6 +246,69 @@ describe('anonymous burst protection in the Workers runtime', () => {
       expect(storage.deleteAlarm).toHaveBeenCalledTimes(1);
       expect(scheduledAlarm).toBeNull();
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('deduplicates repeated cleanup alerts and resolves them after recovery', async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      vi.setSystemTime(new Date('2026-09-09T12:00:00.000Z'));
+      const values = new Map<string, unknown>();
+      let cleanupShouldFail = true;
+      const storage = {
+        get: vi.fn(async (key: string) => values.get(key)),
+        put: vi.fn(async (key: string, value: unknown) => {
+          values.set(key, value);
+        }),
+        setAlarm: vi.fn(async () => {}),
+        deleteAll: vi.fn(async () => {
+          if (cleanupShouldFail) throw new Error('simulated storage failure');
+          values.clear();
+        }),
+        deleteAlarm: vi.fn(async () => {}),
+      };
+      const durableObject = new RateLimitDurableObject({
+        storage,
+      } as unknown as DurableObjectState);
+
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        await expect(durableObject.alarm()).rejects.toThrow('simulated storage failure');
+        vi.advanceTimersByTime(5 * 60_000);
+      }
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(errorSpy.mock.calls[0]?.[0]))).toEqual({
+        event: 'rate_limit_cleanup_repeated_failure',
+        failures: 3,
+        retryInSeconds: 300,
+      });
+      expect(String(errorSpy.mock.calls[0]?.[0])).not.toContain('student');
+
+      vi.advanceTimersByTime(50 * 60_000);
+      await expect(durableObject.alarm()).rejects.toThrow('simulated storage failure');
+      expect(errorSpy).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(String(errorSpy.mock.calls[1]?.[0]))).toEqual({
+        event: 'rate_limit_cleanup_repeated_failure',
+        failures: 5,
+        retryInSeconds: 300,
+      });
+
+      cleanupShouldFail = false;
+      await durableObject.alarm();
+
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(infoSpy.mock.calls[0]?.[0]))).toEqual({
+        event: 'rate_limit_cleanup_recovered',
+        previousFailures: 5,
+      });
+      expect(values.size).toBe(0);
+      expect(storage.deleteAlarm).toHaveBeenCalledTimes(1);
+    } finally {
+      errorSpy.mockRestore();
+      infoSpy.mockRestore();
       vi.useRealTimers();
     }
   });
