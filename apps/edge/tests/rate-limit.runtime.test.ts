@@ -1,6 +1,9 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
-import { env } from 'cloudflare:test';
+import {
+  env,
+  runDurableObjectAlarm,
+} from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 
@@ -109,5 +112,64 @@ describe('anonymous burst protection in the Workers runtime', () => {
     );
 
     expectSixAdmissions(responses, apiFetch);
+  });
+
+  it('admits a fresh request after the one-minute window alarm clears persisted buckets', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-09T12:00:59.500Z'));
+      const cookie = await signedAnonymousCookie(
+        'anon_fedcba9876543210fedcba9876543210',
+      );
+      const apiFetch = vi.fn(async (request: Request) => Response.json(
+        { ok: true },
+        {
+          headers: {
+            'X-RateLimit-Limit': request.headers.get('X-RateLimit-Limit') ?? '',
+            'X-RateLimit-Remaining': request.headers.get('X-RateLimit-Remaining') ?? '',
+            'X-RateLimit-Reset': request.headers.get('X-RateLimit-Reset') ?? '',
+          },
+        },
+      ));
+      const environment = runtimeEnv(apiFetch);
+      const request = () => chatRequest('en', '203.0.113.200', cookie);
+
+      const admitted = [];
+      for (let index = 0; index < 6; index += 1) {
+        admitted.push(await worker.fetch(request(), environment, context()));
+      }
+      const blocked = await worker.fetch(request(), environment, context());
+
+      expect(admitted.every(response => response.status === 200)).toBe(true);
+      expect(blocked.status).toBe(429);
+      expect(blocked.headers.get('X-RateLimit-Limit')).toBe('6');
+      expect(blocked.headers.get('X-RateLimit-Remaining')).toBe('0');
+      expect(blocked.headers.get('X-RateLimit-Reset')).toBe('1788955260');
+      expect(blocked.headers.get('Retry-After')).toBe('1');
+      expect(apiFetch).toHaveBeenCalledTimes(6);
+
+      const windowKey = Math.floor(Date.now() / 60_000);
+      const bucketNames = [
+        `rl:network:ip_203_0_113_200:anonymous-chat:${windowKey}`,
+        `rl:anon_fedcba9876543210fedcba9876543210:anonymous-chat:${windowKey}`,
+      ];
+      const alarmsRan = await Promise.all(bucketNames.map(name =>
+        runDurableObjectAlarm(
+          env.RATE_LIMIT_DO.get(env.RATE_LIMIT_DO.idFromName(name)),
+        )
+      ));
+      expect(alarmsRan).toEqual([true, true]);
+
+      vi.advanceTimersByTime(1_000);
+      const restored = await worker.fetch(request(), environment, context());
+
+      expect(restored.status).toBe(200);
+      expect(restored.headers.get('X-RateLimit-Limit')).toBe('6');
+      expect(restored.headers.get('X-RateLimit-Remaining')).toBe('5');
+      expect(restored.headers.get('X-RateLimit-Reset')).toBe('1788955320');
+      expect(apiFetch).toHaveBeenCalledTimes(7);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
