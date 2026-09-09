@@ -192,7 +192,7 @@ function BlogView({ subject, subjectId }) {
             <button
               className="ml-auto flex items-center gap-1 transition-colors text-emerald-600 hover:text-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={sharing}
-              onClick={() => handleShare(post.title, `/subject/${subjectId}`)}
+              onClick={() => handleShare(post.title, subjectUrl)}
             >
               {sharing ? <Loader2 size={11} className="animate-spin" /> : <Share2 size={11} />} Share
             </button>
