@@ -266,6 +266,28 @@ describe('anonymous burst protection in the Workers runtime', () => {
           healthValues.set(key, value);
         }),
       };
+      const aggregateStorage = new Map<string, unknown>();
+      const aggregateState = {
+        blockConcurrencyWhile: async (callback: () => Promise<unknown>) => callback(),
+        storage: {
+          transaction: async (callback: (txn: unknown) => Promise<unknown>) => callback({
+            get: async (key: string) => aggregateStorage.get(key),
+            put: async (key: string, value: unknown) => aggregateStorage.set(key, value),
+          }),
+        },
+      } as unknown as DurableObjectState;
+      let aggregate: RateLimitDurableObject;
+      const namespace = {
+        idFromName: vi.fn(() => ({ toString: () => 'aggregate' })),
+        get: vi.fn(() => ({
+          fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+            aggregate.fetch(new Request(input, init)),
+        })),
+      } as unknown as DurableObjectNamespace;
+      aggregate = new RateLimitDurableObject(aggregateState, {
+        RATE_LIMIT_KV: healthKv as unknown as KVNamespace,
+        RATE_LIMIT_DO: namespace,
+      });
       let cleanupShouldFail = true;
       const storage = {
         get: vi.fn(async (key: string) => values.get(key)),
@@ -283,6 +305,7 @@ describe('anonymous burst protection in the Workers runtime', () => {
         storage,
       } as unknown as DurableObjectState, {
         RATE_LIMIT_KV: healthKv as unknown as KVNamespace,
+        RATE_LIMIT_DO: namespace,
       });
 
       for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -299,6 +322,7 @@ describe('anonymous burst protection in the Workers runtime', () => {
       expect(String(errorSpy.mock.calls[0]?.[0])).not.toContain('student');
       expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}')).toEqual({
         degraded: true,
+        active_incidents: 1,
         latest_failure_at: '2026-09-09T12:10:00.000Z',
         latest_recovery_at: null,
       });
@@ -324,6 +348,7 @@ describe('anonymous burst protection in the Workers runtime', () => {
       expect(storage.deleteAlarm).toHaveBeenCalledTimes(1);
       expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}')).toEqual({
         degraded: false,
+        active_incidents: 0,
         latest_failure_at: '2026-09-09T13:10:00.000Z',
         latest_recovery_at: '2026-09-09T13:10:00.000Z',
       });
@@ -332,6 +357,64 @@ describe('anonymous burst protection in the Workers runtime', () => {
       infoSpy.mockRestore();
       vi.useRealTimers();
     }
+  });
+
+  it.each([
+    ['first then second', [0, 1]],
+    ['second then first', [1, 0]],
+  ])('keeps overlapping cleanup incidents degraded when recovering %s', async (_label, recoveryOrder) => {
+    const healthValues = new Map<string, string>();
+    const healthKv = {
+      get: async (key: string) => healthValues.get(key) ?? null,
+      put: async (key: string, value: string) => { healthValues.set(key, value); },
+    } as unknown as KVNamespace;
+    const aggregateValues = new Map<string, unknown>();
+    const aggregate = new RateLimitDurableObject({
+      blockConcurrencyWhile: async (callback: () => Promise<unknown>) => callback(),
+      storage: {
+        transaction: async (callback: (txn: unknown) => Promise<unknown>) => callback({
+          get: async (key: string) => aggregateValues.get(key),
+          put: async (key: string, value: unknown) => aggregateValues.set(key, value),
+        }),
+      },
+    } as unknown as DurableObjectState, { RATE_LIMIT_KV: healthKv });
+    const incidentTokens = [
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+    ];
+    const transition = (action: 'failed' | 'recovered', incidentToken: string) =>
+      aggregate.fetch(new Request('https://rate-limit.internal/cleanup-health', {
+        method: 'POST',
+        body: JSON.stringify({
+          action,
+          incidentToken,
+          occurredAt: new Date().toISOString(),
+        }),
+      }));
+
+    await transition('failed', incidentTokens[0]);
+    await transition('failed', incidentTokens[1]);
+    expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}')).toMatchObject({
+      degraded: true,
+      active_incidents: 2,
+    });
+
+    await transition('recovered', incidentTokens[recoveryOrder[0]]);
+    expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}')).toMatchObject({
+      degraded: true,
+      active_incidents: 1,
+    });
+
+    await transition('recovered', incidentTokens[recoveryOrder[1]]);
+    const persisted = healthValues.get('health:rate-limit-cleanup') ?? '{}';
+    expect(JSON.parse(persisted)).toMatchObject({
+      degraded: false,
+      active_incidents: 0,
+    });
+    expect(persisted).not.toContain('11111111-1111-4111-8111-111111111111');
+    expect(persisted).not.toContain('22222222-2222-4222-8222-222222222222');
+    expect(persisted).not.toContain('student');
+    expect(persisted).not.toContain('bucket');
   });
 });
 

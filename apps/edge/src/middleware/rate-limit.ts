@@ -33,12 +33,22 @@ const CLEANUP_FAILURE_ALERT_THRESHOLD = 3;
 const CLEANUP_FAILURE_ALERT_DEDUP_MS = 60 * 60 * 1000;
 const CLEANUP_FAILURE_COUNT_KEY = 'cleanupFailureCount';
 const CLEANUP_ALERTED_AT_KEY = 'cleanupAlertedAt';
+const CLEANUP_INCIDENT_TOKEN_KEY = 'cleanupIncidentToken';
+const CLEANUP_HEALTH_AGGREGATE_NAME = 'rate-limit-cleanup-health-aggregate';
+const CLEANUP_HEALTH_INCIDENTS_KEY = 'activeCleanupIncidents';
 export const RATE_LIMIT_CLEANUP_HEALTH_KEY = 'health:rate-limit-cleanup';
 
 interface CleanupHealthState {
   degraded: boolean;
+  active_incidents: number;
   latest_failure_at: string | null;
   latest_recovery_at: string | null;
+}
+
+interface CleanupIncidentCommand {
+  action: 'failed' | 'recovered';
+  incidentToken: string;
+  occurredAt: string;
 }
 
 export interface AnonymousIdentity {
@@ -205,34 +215,83 @@ export function rateLimitHeaders(result: RateLimitResult, limit: number = 30): R
 export class RateLimitDurableObject {
   constructor(
     private readonly state: DurableObjectState,
-    private readonly env?: Pick<Env, 'RATE_LIMIT_KV'>,
+    private readonly env?: Partial<Pick<Env, 'RATE_LIMIT_KV' | 'RATE_LIMIT_DO'>>,
   ) {}
 
-  private async writeCleanupHealth(
-    update: Pick<CleanupHealthState, 'degraded'> & Partial<CleanupHealthState>,
-  ): Promise<void> {
-    if (!this.env?.RATE_LIMIT_KV) return;
-    let previous: CleanupHealthState | null = null;
-    try {
-      const raw = await this.env.RATE_LIMIT_KV.get(RATE_LIMIT_CLEANUP_HEALTH_KEY);
-      previous = raw ? JSON.parse(raw) as CleanupHealthState : null;
-    } catch {
-      // A failed read must not prevent a fresh incident/recovery snapshot.
+  private async reportCleanupIncident(command: CleanupIncidentCommand): Promise<void> {
+    if (!this.env?.RATE_LIMIT_DO) return;
+    const aggregate = this.env.RATE_LIMIT_DO.get(
+      this.env.RATE_LIMIT_DO.idFromName(CLEANUP_HEALTH_AGGREGATE_NAME),
+    );
+    const response = await aggregate.fetch('https://rate-limit.internal/cleanup-health', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(command),
+    });
+    if (!response.ok) {
+      throw new Error(`Cleanup health aggregate returned ${response.status}`);
     }
-    await this.env.RATE_LIMIT_KV.put(RATE_LIMIT_CLEANUP_HEALTH_KEY, JSON.stringify({
-      degraded: update.degraded,
-      latest_failure_at: update.latest_failure_at
-        ?? previous?.latest_failure_at
-        ?? null,
-      latest_recovery_at: update.latest_recovery_at
-        ?? previous?.latest_recovery_at
-        ?? null,
-    } satisfies CleanupHealthState));
+  }
+
+  private async updateCleanupHealthAggregate(request: Request): Promise<Response> {
+    let command: CleanupIncidentCommand;
+    try {
+      command = await request.json<CleanupIncidentCommand>();
+    } catch {
+      return Response.json({ error: 'Invalid request' }, { status: 400 });
+    }
+    if (
+      (command.action !== 'failed' && command.action !== 'recovered')
+      || typeof command.incidentToken !== 'string'
+      || !/^[a-f0-9-]{36}$/.test(command.incidentToken)
+      || Number.isNaN(Date.parse(command.occurredAt))
+    ) {
+      return Response.json({ error: 'Invalid cleanup incident' }, { status: 400 });
+    }
+
+    const activeIncidentCount = await this.state.storage.transaction(async txn => {
+      const active = new Set(
+        await txn.get<string[]>(CLEANUP_HEALTH_INCIDENTS_KEY) ?? [],
+      );
+      if (command.action === 'failed') active.add(command.incidentToken);
+      else active.delete(command.incidentToken);
+      await txn.put(CLEANUP_HEALTH_INCIDENTS_KEY, [...active]);
+      return active.size;
+    });
+    let previous: CleanupHealthState | null = null;
+    if (this.env?.RATE_LIMIT_KV) {
+      try {
+        const raw = await this.env.RATE_LIMIT_KV.get(RATE_LIMIT_CLEANUP_HEALTH_KEY);
+        previous = raw ? JSON.parse(raw) as CleanupHealthState : null;
+      } catch {
+        // The serialized aggregate remains authoritative if telemetry KV is unavailable.
+      }
+    }
+    const snapshot = {
+      degraded: activeIncidentCount > 0,
+      active_incidents: activeIncidentCount,
+      latest_failure_at: command.action === 'failed'
+        ? command.occurredAt
+        : previous?.latest_failure_at ?? null,
+      latest_recovery_at: command.action === 'recovered'
+        ? command.occurredAt
+        : previous?.latest_recovery_at ?? null,
+    } satisfies CleanupHealthState;
+    await this.env?.RATE_LIMIT_KV?.put(
+      RATE_LIMIT_CLEANUP_HEALTH_KEY,
+      JSON.stringify(snapshot),
+    );
+    return Response.json(snapshot);
   }
 
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'POST') {
       return Response.json({ error: 'Method not allowed' }, { status: 405 });
+    }
+    if (new URL(request.url).pathname === '/cleanup-health') {
+      return this.state.blockConcurrencyWhile(
+        () => this.updateCleanupHealthAggregate(request),
+      );
     }
 
     let command: RateLimitCommand;
@@ -279,15 +338,19 @@ export class RateLimitDurableObject {
       this.state.storage.get<number>(CLEANUP_FAILURE_COUNT_KEY),
       this.state.storage.get<number>(CLEANUP_ALERTED_AT_KEY),
     ]);
+    const activeIncidentToken = await this.state.storage.get<string>(
+      CLEANUP_INCIDENT_TOKEN_KEY,
+    );
 
     try {
       await this.state.storage.deleteAll();
       await this.state.storage.deleteAlarm();
-      if (failureCount >= CLEANUP_FAILURE_ALERT_THRESHOLD) {
+      if (failureCount >= CLEANUP_FAILURE_ALERT_THRESHOLD && activeIncidentToken) {
         const recoveredAt = new Date().toISOString();
-        await this.writeCleanupHealth({
-          degraded: false,
-          latest_recovery_at: recoveredAt,
+        await this.reportCleanupIncident({
+          action: 'recovered',
+          incidentToken: activeIncidentToken,
+          occurredAt: recoveredAt,
         });
         console.info(JSON.stringify({
           event: 'rate_limit_cleanup_recovered',
@@ -301,11 +364,26 @@ export class RateLimitDurableObject {
         && (alertedAt === undefined || now - alertedAt >= CLEANUP_FAILURE_ALERT_DEDUP_MS);
 
       await this.state.storage.put(CLEANUP_FAILURE_COUNT_KEY, nextFailureCount);
+      // deleteAll/deleteAlarm may already have succeeded before publishing the
+      // recovery transition failed. Preserve the opaque incident token and a
+      // retry alarm so the aggregate can eventually observe the recovery.
+      if (activeIncidentToken) {
+        await this.state.storage.put(CLEANUP_INCIDENT_TOKEN_KEY, activeIncidentToken);
+        if (alertedAt !== undefined) {
+          await this.state.storage.put(CLEANUP_ALERTED_AT_KEY, alertedAt);
+        }
+        await this.state.storage.setAlarm(now + CLEANUP_RECOVERY_DELAY_MS);
+      }
       if (shouldAlert) {
         await this.state.storage.put(CLEANUP_ALERTED_AT_KEY, now);
-        await this.writeCleanupHealth({
-          degraded: true,
-          latest_failure_at: new Date(now).toISOString(),
+        const incidentToken = activeIncidentToken ?? crypto.randomUUID();
+        if (!activeIncidentToken) {
+          await this.state.storage.put(CLEANUP_INCIDENT_TOKEN_KEY, incidentToken);
+        }
+        await this.reportCleanupIncident({
+          action: 'failed',
+          incidentToken,
+          occurredAt: new Date(now).toISOString(),
         });
         console.error(JSON.stringify({
           event: 'rate_limit_cleanup_repeated_failure',

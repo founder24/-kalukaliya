@@ -330,6 +330,7 @@ export default {
       let backendReachable = false;
       let rateLimitCleanup = {
         degraded: false,
+        active_incidents: 0,
         latest_failure_at: null as string | null,
         latest_recovery_at: null as string | null,
       };
