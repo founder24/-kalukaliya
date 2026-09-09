@@ -33,6 +33,13 @@
 /index.html
   Cache-Control: public, max-age=0, must-revalidate
 
+# Every route document is a deploy manifest: it names the content-hashed
+# bundles for one specific build. Never let a browser or Cloudflare edge keep
+# that manifest past a deployment, otherwise it can reference bundles removed
+# by the next Pages asset upload.
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate
+
 /sw.js
   Cache-Control: public, max-age=0, must-revalidate
 
