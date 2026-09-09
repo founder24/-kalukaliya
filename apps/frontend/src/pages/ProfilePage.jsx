@@ -82,11 +82,6 @@ export default function ProfilePage() {
   const plan            = profile?.plan || 'free';
   const planInfo        = PLANS[plan] || PLANS.free;
   const isDegreeProfile = isDegreeBoard(profile?.board_name);
-  const creditsUsed      = profile?.credits_used  ?? 0;
-  const creditsLimit     = profile?.credits_limit ?? 0;
-  const creditsRemaining = Math.max(0, profile?.credits_remaining ?? (creditsLimit - creditsUsed));
-  const creditPercent = creditsLimit > 0 ? Math.min(100, (creditsUsed / creditsLimit) * 100) : 0;
-  const isLowCredits  = creditsLimit > 0 && creditsRemaining <= 5;
 
   const getDeletionHoursLeft = () => {
     if (!deletionHardAt) return 0;
@@ -167,7 +162,7 @@ export default function ProfilePage() {
           </div>
           <h2 className="text-lg font-semibold text-foreground mb-2">Sign in to view your profile</h2>
           <p className="text-muted-foreground text-sm mb-6 max-w-xs">
-             Create an account to track your daily free messages, save conversations, and keep your study history together.
+             Create an account to save conversations and keep your study history together across devices.
           </p>
           <button
             onClick={() => navigate('/login')}
@@ -248,7 +243,6 @@ export default function ProfilePage() {
       <div className="max-w-lg mx-auto px-4 py-6 space-y-4 pb-20 md:pb-6" data-testid="profile-page">
         <ProfileHeader
           profile={profile} stats={stats} planInfo={planInfo}
-          creditsLimit={creditsLimit} creditsRemaining={creditsRemaining}
           copiedId={copiedId} handleCopyId={handleCopyId} getInitials={getInitials}
         />
         <DeletionBanner
@@ -257,11 +251,7 @@ export default function ProfilePage() {
         />
         <AcademicDetails profile={profile} isDegreeProfile={isDegreeProfile} openEdit={openEdit}
           onProfileUpdate={(updates) => setProfile((p) => ({ ...p, ...updates }))} />
-        <AiCredits
-          stats={stats} creditsRemaining={creditsRemaining} creditsUsed={creditsUsed}
-          creditsLimit={creditsLimit} creditPercent={creditPercent} isLowCredits={isLowCredits}
-             plan={plan}
-        />
+        <AiCredits stats={stats} />
         <PrivacyControls profile={profile} />
         <DangerZone
           profile={profile} deletionPending={deletionPending}
