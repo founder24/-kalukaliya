@@ -277,4 +277,36 @@ describe('authenticated per-language limits in the Workers runtime', () => {
     expect(forwardedLanguages.filter(lang => lang === 'as')).toHaveLength(6);
     expect(apiFetch).toHaveBeenCalledTimes(12);
   });
+
+  it('does not let excess Assamese traffic consume the English allowance', async () => {
+    const token = await authenticatedToken('student-reverse-language-isolation');
+    const forwardedLanguages: string[] = [];
+    const apiFetch = vi.fn(async (request: Request) => {
+      const body = await request.json() as { lang: string };
+      forwardedLanguages.push(body.lang);
+      return Response.json({ ok: true });
+    });
+    const environment = runtimeEnv(apiFetch);
+    const languages = [
+      ...Array.from({ length: 10 }, () => 'as' as const),
+      ...Array.from({ length: 6 }, () => 'en' as const),
+    ];
+
+    const responses = await Promise.all(languages.map((lang, index) =>
+      worker.fetch(
+        chatRequest(lang, `198.51.100.${index + 20}`, undefined, token),
+        environment,
+        context(),
+      )
+    ));
+
+    const assameseResponses = responses.slice(0, 10);
+    const englishResponses = responses.slice(10);
+    expect(assameseResponses.filter(response => response.status === 200)).toHaveLength(6);
+    expect(assameseResponses.filter(response => response.status === 429)).toHaveLength(4);
+    expect(englishResponses.every(response => response.status === 200)).toBe(true);
+    expect(forwardedLanguages.filter(lang => lang === 'as')).toHaveLength(6);
+    expect(forwardedLanguages.filter(lang => lang === 'en')).toHaveLength(6);
+    expect(apiFetch).toHaveBeenCalledTimes(12);
+  });
 });
