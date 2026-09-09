@@ -73,3 +73,4 @@
 - [Cloudflare secret verification](cloudflare-secret-verification.md) — verify Worker secret names through bindings metadata when immediate Wrangler CI listing is inconsistent.
 - [Workers AI Assamese generation](workers-ai-assamese.md) — use SEA-LION non-streaming; Assamese/Bengali share script and danda must not trigger Hindi detection.
 - [Explicit curriculum scope](chat-curriculum-scope.md) — explicit class/subject wording must fail closed and every RAG source must pass full published-hierarchy validation.
+- [Exact vector grounding](rag-exact-vector-grounding.md) — preserve matched passage order; never replace semantic matches with chapter openings.

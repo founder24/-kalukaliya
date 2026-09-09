@@ -74,12 +74,40 @@ async function signedCookieAnonId(req: Request, secret?: string): Promise<string
   return timingSafeEqual(signature, expected) ? id : null;
 }
 
-export async function anonUserId(req: Request, cookieSecret?: string): Promise<string> {
-  const browserId = req.headers.get('x-anon-id')?.trim();
-  if (isBrowserAnonId(browserId)) return browserId;
+async function isTrustedEdgeRequest(req: Request, secret?: string): Promise<boolean> {
+  if (!secret) return false;
+  const timestamp = req.headers.get('X-Edge-Timestamp');
+  const signature = req.headers.get('X-Edge-Signature');
+  const userId = req.headers.get('X-User-ID') ?? 'anonymous';
+  if (!timestamp || !signature || !SIGNATURE_PATTERN.test(signature)) return false;
+  const timestampSeconds = Number.parseInt(timestamp, 10);
+  if (!Number.isSafeInteger(timestampSeconds)
+    || Math.abs(Math.floor(Date.now() / 1000) - timestampSeconds) > 120) {
+    return false;
+  }
 
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const pathname = new URL(req.url).pathname;
+  const message = `${timestamp}:${userId}:${pathname}`;
+  const expected = hex(await crypto.subtle.sign('HMAC', key, encoder.encode(message)));
+  return timingSafeEqual(signature, expected);
+}
+
+export async function anonUserId(req: Request, cookieSecret?: string): Promise<string> {
   const cookieId = await signedCookieAnonId(req, cookieSecret);
   if (cookieId) return cookieId;
+
+  const browserId = req.headers.get('x-anon-id')?.trim();
+  if (isBrowserAnonId(browserId) && await isTrustedEdgeRequest(req, cookieSecret)) {
+    return browserId;
+  }
 
   // Cloudflare supplies and overwrites this header before either Worker runs.
   // Forwarding headers are intentionally excluded because direct callers can

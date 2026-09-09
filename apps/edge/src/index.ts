@@ -12,7 +12,7 @@
 import { getCorsHeaders, applyCorsHeaders } from './middleware/cors';
 import { verifyJWT } from './middleware/jwt';
 import {
-  anonymousRateLimitIdentity,
+  anonymousNetworkRateLimitIdentity,
   checkRateLimit,
   rateLimitHeaders,
   resolveAnonymousIdentity,
@@ -38,6 +38,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     let anonymousCookie: string | null = null;
+    let anonymousIdentityId: string | null = null;
     const finalize = (response: Response): Response => {
       if (anonymousCookie) response.headers.append('Set-Cookie', anonymousCookie);
       return response;
@@ -122,6 +123,7 @@ export default {
 
       if ((jwtResult.userId || 'anonymous') === 'anonymous') {
         const identity = await resolveAnonymousIdentity(request, env.EDGE_SHARED_SECRET);
+        anonymousIdentityId = identity.id;
         anonymousCookie = identity.setCookie;
         if (identity.id.startsWith('anon_')) {
           const identityHeaders = new Headers(request.headers);
@@ -163,7 +165,7 @@ export default {
 
       const authenticatedUserId = request.headers.get('X-User-ID') || 'anonymous';
       const rateLimitIdentity = authenticatedUserId === 'anonymous'
-        ? await anonymousRateLimitIdentity(request, env.EDGE_SHARED_SECRET)
+         ? anonymousIdentityId ?? anonymousNetworkRateLimitIdentity(request)
         : authenticatedUserId;
 
       // Best-effort lang extraction from request body
@@ -178,13 +180,34 @@ export default {
         // Body parsing failed — default to 'en'
       }
 
-      // Authenticated users get a much higher hourly limit — their usage is
-      // traceable and the backend's monthly quota is the real enforcement gate.
-      // Anonymous users keep the strict 30 req/hr burst-protection limit.
-      const edgeLimit = authenticatedUserId === 'anonymous' ? 30 : 500;
+       const isAnonymous = authenticatedUserId === 'anonymous';
+       const edgeLimit = isAnonymous ? 6 : 500;
+       const chatWindowMs = isAnonymous ? 60 * 1000 : 60 * 60 * 1000;
+       const bucketDimension = isAnonymous ? 'anonymous-chat' : lang;
       let rl;
       try {
-        rl = await checkRateLimit(env.RATE_LIMIT_DO, rateLimitIdentity, lang, edgeLimit);
+         if (isAnonymous) {
+           const networkIdentity = anonymousNetworkRateLimitIdentity(request);
+           const networkResult = await checkRateLimit(
+             env.RATE_LIMIT_DO,
+             `network:${networkIdentity}`,
+             bucketDimension,
+             edgeLimit,
+             chatWindowMs,
+           );
+           if (!networkResult.allowed) {
+             rl = networkResult;
+           }
+         }
+         if (!rl) {
+           rl = await checkRateLimit(
+             env.RATE_LIMIT_DO,
+             rateLimitIdentity,
+             bucketDimension,
+             edgeLimit,
+             chatWindowMs,
+           );
+         }
       } catch (err) {
         console.error('Atomic rate-limit storage unavailable:', err);
         const unavailable = jsonResponse(503, {

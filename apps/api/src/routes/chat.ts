@@ -972,6 +972,107 @@ async function fetchChapterContent(
   return null;
 }
 
+export async function fetchMatchedChunkContext(
+  d1: D1Database,
+  matches: VectorizeMatch[],
+  chapterId: string,
+  lang: 'en' | 'as',
+  subjectId?: string,
+): Promise<ContextChunk[]> {
+  const verifiedChapter = async () => d1.prepare(`
+    SELECT chapters.title AS chapterTitle, chapters.subject_id AS subjectId
+    FROM chapters
+    JOIN subjects ON subjects.id = chapters.subject_id
+    LEFT JOIN streams ON streams.id = subjects.stream_id
+    LEFT JOIN classes ON classes.id = streams.class_id
+    LEFT JOIN boards ON boards.id = classes.board_id
+    WHERE chapters.id = ?
+      AND chapters.status = 'published'
+      AND subjects.is_published = 1
+      AND (streams.id IS NULL OR streams.status = 'published')
+      AND (classes.id IS NULL OR classes.status = 'published')
+      AND (boards.id IS NULL OR boards.status = 'published')
+      AND (? IS NULL OR chapters.subject_id = ?)
+    LIMIT 1
+  `).bind(chapterId, subjectId ?? null, subjectId ?? null).first<{
+    chapterTitle: string;
+    subjectId: string;
+  }>();
+
+  const matching = matches
+    .filter(match => (match.metadata as ChunkMeta | undefined)?.chapterId === chapterId)
+    .slice(0, 6);
+  const candidates = await Promise.all(matching.map(async (match) => {
+    const meta = match.metadata as ChunkMeta;
+    const mirror = await d1.prepare(`
+      SELECT chunks.content, chunks.medium, chunks.source_type AS sourceType,
+             chunks.chapter_id AS chapterId, chunks.subject_id AS subjectId
+      FROM chunks
+      WHERE chunks.vector_id = ?
+      LIMIT 1
+    `).bind(match.id).first<{
+      content: string;
+      medium: string;
+      sourceType: string;
+      chapterId: string | null;
+      subjectId: string | null;
+    }>();
+
+    if (mirror) {
+      if (
+        mirror.chapterId !== chapterId
+        || !mirror.content.trim()
+        || (subjectId !== undefined && mirror.subjectId !== null && mirror.subjectId !== subjectId)
+      ) {
+        return null;
+      }
+      const hierarchy = await verifiedChapter();
+      if (!hierarchy) return null;
+      return {
+        chapterId,
+        chapterTitle: hierarchy.chapterTitle,
+        subjectId: hierarchy.subjectId,
+        content: mirror.content.trim(),
+        score: match.score,
+        medium: mirror.medium,
+        sourceType: mirror.sourceType,
+        ...(meta.topicId !== undefined && { topicName: meta.topicId }),
+      } satisfies ContextChunk;
+    }
+
+    // Older vectors can predate the full D1 chunk mirror. Their metadata still
+    // contains the exact indexed passage; use it only after the chapter passes
+    // the same publication and subject validation.
+    if (meta.content?.trim()) {
+      const hierarchy = await verifiedChapter();
+      if (hierarchy) {
+        return {
+          chapterId,
+          chapterTitle: hierarchy.chapterTitle,
+          subjectId: hierarchy.subjectId,
+          content: meta.content.trim(),
+          score: match.score,
+          medium: meta.medium ?? (lang === 'as' ? 'assamese' : 'english'),
+          sourceType: meta.sourceType ?? 'rag_chunk_metadata',
+          ...(meta.topicId !== undefined && { topicName: meta.topicId }),
+        } satisfies ContextChunk;
+      }
+    }
+    return null;
+  }));
+
+  const result: ContextChunk[] = [];
+  let remaining = CONTEXT_CHAR_CAP;
+  for (const candidate of candidates) {
+    if (!candidate || remaining <= 0) continue;
+    const content = candidate.content.slice(0, remaining);
+    if (!content) continue;
+    result.push({ ...candidate, content });
+    remaining -= content.length;
+  }
+  return result;
+}
+
 /**
  * Resolve the navigation metadata for the compact set of chapters used to
  * ground a turn. This deliberately happens after retrieval (never in the
@@ -1819,23 +1920,21 @@ chatRouter.post('/stream', async (c) => {
           topChapterId = bestId;
           topSubjectId = best.meta.subjectId;
 
-          // D1 fast path — full chapter content with fallback chain
-          const chapterContent = await fetchChapterContent(c.env.DB, bestId, lang, scopedSubjectId);
-          if (chapterContent) {
-            const resolvedTitle = best.meta.chapterTitle ?? bestId;
-            topChapterTitle = resolvedTitle;
-            contextChunks = [{
-              chapterId:    bestId,
-              chapterTitle: resolvedTitle,
-              ...(topSubjectId !== undefined && { subjectId: topSubjectId }),
-              content:      chapterContent.content.slice(0, CONTEXT_CHAR_CAP),
-              score:        best.score,
-              medium:       chapterContent.language,
-              sourceType:   lang === 'as' && (
-                retrievalLang === 'en' || chapterContent.language === 'english'
-              ) ? 'rag_chapter_english_fallback' : (best.meta.sourceType ?? 'rag_chapter'),
-              ...(best.meta.topicId !== undefined && { topicName: best.meta.topicId }),
-            }];
+          const matchedChunks = await fetchMatchedChunkContext(
+            c.env.DB,
+            matches,
+            bestId,
+            lang,
+            scopedSubjectId,
+          );
+          if (matchedChunks.length > 0) {
+            topChapterTitle = matchedChunks[0]?.chapterTitle ?? best.meta.chapterTitle ?? bestId;
+            contextChunks = matchedChunks.map(chunk => ({
+              ...chunk,
+              sourceType: lang === 'as' && retrievalLang === 'en'
+                ? 'rag_chunk_english_fallback'
+                : chunk.sourceType,
+            }));
             ragPath = 'vectorize_d1';
           }
         }

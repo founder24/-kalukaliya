@@ -3,22 +3,21 @@ name: Anonymous quota identity
 description: Stable identity rule for anonymous chat allowances and history.
 ---
 
-Anonymous chat quota and its visible credit allowance must resolve from the same
-validated browser-generated anonymous ID whenever it is available. If browser
-storage cannot provide one, use the edge-minted HMAC-signed persistent cookie.
-Network IP data is the final fallback only.
+Anonymous history and quota identity must come from an edge-minted random ID in
+an HMAC-signed, HttpOnly cookie. The edge may forward that ID internally, but the
+API must accept the forwarded header only after verifying the edge's timestamped
+request HMAC. Caller-selected browser IDs are never ownership credentials.
 
-**Why:** IP addresses can change between visits, and different proxy paths can
-produce different IP headers for chat versus a credit lookup. Treating an IP as
-canonical makes returning students appear to receive a fresh allowance and
-causes the displayed balance to diverge from enforcement.
+**Why:** A caller can rotate unsigned local-storage IDs to reset quota or claim
+another pseudonymous history. Signing a caller-selected ID does not fix the
+ownership problem because possession of the ID would still be enough to obtain a
+signature.
 
-**How to apply:** Anonymous quota, history, credit, and edge limiter paths must
-resolve identities in this order: validated browser ID, verified signed cookie,
-then Cloudflare's overwritten `CF-Connecting-IP`. Credentialed frontend requests
-must omit the anonymous header when storage is blocked so the cookie path can
-take over. Never use caller-controlled forwarding headers as ownership or
-limiter identity.
+**How to apply:** Resolve anonymous identity exactly once at the edge and reuse
+it for the downstream header, cookie issuance, and identity limiter. Prefer a
+valid signed cookie; otherwise mint a new random ID. Direct API calls without a
+valid cookie or edge HMAC fall back to trusted connection identity and can never
+select a pseudonymous account.
 
 Chat misuse protection is a fixed six-request-per-minute D1 bucket for both
 anonymous and authenticated students. It is not a daily or monthly message
@@ -31,4 +30,6 @@ budget.
 **How to apply:** Use the same UTC minute key for reservation, usage reads, and
 rollback. Do not seed minute buckets from retired daily KV counters. Keep
 lifetime or monthly counters analytics-only, and never disable the composer
-persistently when a minute bucket fills.
+persistently when a minute bucket fills. The edge must also enforce both a
+signed-identity bucket and a trusted CF-Connecting-IP bucket, with one shared
+dimension across English and Assamese so language switching cannot double RPM.

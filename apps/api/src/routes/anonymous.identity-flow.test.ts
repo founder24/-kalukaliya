@@ -37,6 +37,29 @@ async function signedCookie(id: string): Promise<string> {
   return `syrabit_anon_id=${id}.${signature}`;
 }
 
+async function withTrustedEdgeIdentity(request: Request): Promise<Request> {
+  const anonId = request.headers.get('x-anon-id');
+  if (!anonId) return request;
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(COOKIE_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const message = `${timestamp}:anonymous:${new URL(request.url).pathname}`;
+  const signature = Array.from(new Uint8Array(
+    await crypto.subtle.sign('HMAC', key, encoder.encode(message)),
+  )).map(byte => byte.toString(16).padStart(2, '0')).join('');
+  const headers = new Headers(request.headers);
+  headers.set('X-User-ID', 'anonymous');
+  headers.set('X-Edge-Timestamp', timestamp);
+  headers.set('X-Edge-Signature', signature);
+  return new Request(request, { headers });
+}
+
 function migrationStatements(): string[] {
   const directory = path.join(API_ROOT, 'drizzle/migrations');
   return fs.readdirSync(directory)
@@ -97,7 +120,7 @@ beforeAll(async () => {
   }
 
   const { default: worker } = await import('../index.js');
-  workerFetch = (request: Request) => {
+  workerFetch = async (request: Request) => {
     background = [];
     const context = {
       waitUntil(promise: Promise<unknown>) {
@@ -109,7 +132,7 @@ beforeAll(async () => {
       request: Request,
       env: Env,
       context: ExecutionContext,
-    ) => Promise<Response>)(request, env, context);
+    ) => Promise<Response>)(await withTrustedEdgeIdentity(request), env, context);
   };
 }, 60_000);
 
@@ -1399,10 +1422,9 @@ describe('anonymous identity flow', () => {
     await expect(credits.json()).resolves.toMatchObject({
       anon_id: ANON_ID,
       credits_used: 1,
-      credits_remaining: 29,
-      daily_limit: 30,
-      quota_period: 'daily',
-      monthly_limit: 30,
+      credits_remaining: 5,
+      rpm_limit: 6,
+      quota_period: 'minute',
     });
 
     const list = await workerFetch(new Request(
@@ -1433,10 +1455,9 @@ describe('anonymous identity flow', () => {
     await expect(otherCredits.json()).resolves.toMatchObject({
       anon_id: OTHER_ANON_ID,
       credits_used: 0,
-      credits_remaining: 30,
-      daily_limit: 30,
-      quota_period: 'daily',
-      monthly_limit: 30,
+      credits_remaining: 6,
+      rpm_limit: 6,
+      quota_period: 'minute',
     });
 
     const otherList = await workerFetch(new Request(
@@ -1488,7 +1509,7 @@ describe('anonymous identity flow', () => {
     await expect(credits.json()).resolves.toMatchObject({
       anon_id: COOKIE_ANON_ID,
       credits_used: 1,
-      credits_remaining: 29,
+      credits_remaining: 5,
     });
     const history = await workerFetch(new Request(
       'https://api.example/api/v1/conversations/anon',
@@ -1509,7 +1530,7 @@ describe('anonymous identity flow', () => {
     await expect(otherCredits.json()).resolves.toMatchObject({
       anon_id: OTHER_COOKIE_ANON_ID,
       credits_used: 0,
-      credits_remaining: 30,
+      credits_remaining: 6,
     });
     const otherHistory = await workerFetch(new Request(
       'https://api.example/api/v1/conversations/anon',

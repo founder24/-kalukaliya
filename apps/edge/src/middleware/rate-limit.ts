@@ -97,14 +97,13 @@ export async function resolveAnonymousIdentity(
   request: Request,
   cookieSecret?: string,
 ): Promise<AnonymousIdentity> {
-  const browserId = request.headers.get('x-anon-id')?.trim();
-  if (isBrowserAnonId(browserId)) return { id: browserId, setCookie: null };
-
   const cookieId = await readSignedCookie(request, cookieSecret);
   if (cookieId) return { id: cookieId, setCookie: null };
 
   if (!cookieSecret) return { id: ipFallback(request), setCookie: null };
 
+  // Never sign a caller-selected ID. Only an edge-minted random ID can become
+  // an ownership credential for anonymous history and quota.
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   const id = `anon_${Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -127,6 +126,10 @@ export async function anonymousRateLimitIdentity(
   return (await resolveAnonymousIdentity(request, cookieSecret)).id;
 }
 
+export function anonymousNetworkRateLimitIdentity(request: Request): string {
+  return ipFallback(request);
+}
+
 /**
  * Check if a request is within the rate limit for a given user + language.
  *
@@ -140,10 +143,10 @@ export async function checkRateLimit(
   namespace: DurableObjectNamespace,
   userId: string,
   lang: string,
-  limit: number = 30
+  limit: number = 30,
+  windowMs: number = 60 * 60 * 1000,
 ): Promise<RateLimitResult> {
   const now = Date.now();
-  const windowMs = 60 * 60 * 1000; // 1-hour sliding window
   const windowKey = Math.floor(now / windowMs);
   const resetAt = (windowKey + 1) * windowMs;
 
