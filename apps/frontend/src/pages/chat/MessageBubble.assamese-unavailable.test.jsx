@@ -53,6 +53,26 @@ describe('MessageBubble — Assamese chat unavailable card (Task #370)', () => {
     expect(screen.queryByTestId('assamese-unavailable-card')).toBeNull();
     expect(screen.queryByTestId('assamese-switch-english')).toBeNull();
     expect(screen.getByText(/Syra is resting/)).toBeTruthy();
+    expect(screen.getByText('Your question is saved. Retry when you are ready.')).toBeTruthy();
+  });
+
+  it('marks a stopped answer as incomplete and allows a clean restart', () => {
+    const onRetry = vi.fn();
+    renderBubble({
+      msg: {
+        id: 'stopped-1',
+        role: 'assistant',
+        content: 'This answer is only partly generated.',
+        isStopped: true,
+        retryText: 'Explain gravity',
+      },
+      responseLang: 'en',
+      onRetry,
+    });
+
+    expect(screen.getByTestId('answer-stopped-card')).toHaveTextContent('may be incomplete');
+    fireEvent.click(screen.getByRole('button', { name: 'Start again' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it('invokes onSwitchToEnglish when the user clicks the switch button', () => {
@@ -94,6 +114,25 @@ describe('MessageBubble — Assamese chat unavailable card (Task #370)', () => {
     expect(screen.getByTestId('connection-interrupted-card')).toBeTruthy();
     expect(screen.getByText(/সংযোগ সাময়িকভাৱে বিচ্ছিন্ন হৈছে/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'আকৌ চেষ্টা কৰক' })).toBeTruthy();
+  });
+
+  it('keeps partial answer text visible when the connection is interrupted', () => {
+    renderBubble({
+      msg: {
+        id: 'partial-1',
+        role: 'assistant',
+        content: 'Gravity attracts',
+        isAiUnavailable: true,
+        isConnectionInterrupted: true,
+        autoRetryScheduled: false,
+        retryText: 'Explain gravity',
+      },
+      responseLang: 'en',
+      onRetry: vi.fn(),
+    });
+
+    expect(screen.getByText('Gravity attracts')).toBeTruthy();
+    expect(screen.getByTestId('connection-interrupted-card')).toBeTruthy();
   });
 
   it('renders only the internal RAG curriculum path and hides external sources', () => {
@@ -142,6 +181,7 @@ describe('MessageBubble — Assamese chat unavailable card (Task #370)', () => {
     expect(path).toHaveTextContent('Subject: Physics');
     expect(path).toHaveTextContent('Class: HS 1st Year');
     expect(path).toHaveTextContent('Board: AHSEC');
+    expect(screen.getByRole('button', { name: /Open curriculum match: Topic Force and Motion/ })).toBeTruthy();
     expect(screen.queryByText('Sources used')).toBeNull();
     expect(screen.queryByText('Supporting research')).toBeNull();
   });

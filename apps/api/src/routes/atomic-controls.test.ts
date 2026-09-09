@@ -68,16 +68,16 @@ describe('atomic quota controls', () => {
       ),
     );
 
-    expect(results.filter(result => result.allowed)).toHaveLength(30);
-    expect(results.filter(result => !result.allowed)).toHaveLength(10);
+    expect(results.filter(result => result.allowed)).toHaveLength(6);
+    expect(results.filter(result => !result.allowed)).toHaveLength(34);
 
     const row = await env.DB.prepare(
       'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
     ).bind(anonId).first<{ count: number }>();
-    expect(row?.count).toBe(30);
+    expect(row?.count).toBe(6);
   });
 
-  it('preserves partial legacy usage across parallel first reservations', async () => {
+  it('does not carry partial daily KV usage into a minute bucket', async () => {
     const anonId = 'anon_11111111111111111111111111111111';
     await env.RATE_LIMIT_KV.put(anonymousQuotaKey(anonId), '20');
 
@@ -88,15 +88,15 @@ describe('atomic quota controls', () => {
       ),
     );
 
-    expect(results.filter(result => result.allowed)).toHaveLength(10);
-    expect(results.filter(result => !result.allowed)).toHaveLength(10);
+    expect(results.filter(result => result.allowed)).toHaveLength(6);
+    expect(results.filter(result => !result.allowed)).toHaveLength(14);
     const row = await env.DB.prepare(
       'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
     ).bind(anonId).first<{ count: number }>();
-    expect(row?.count).toBe(30);
+    expect(row?.count).toBe(6);
   });
 
-  it('does not reset an at-limit legacy anonymous user', async () => {
+  it('retires an at-limit daily KV counter when RPM begins', async () => {
     const anonId = 'anon_22222222222222222222222222222222';
     await env.RATE_LIMIT_KV.put(anonymousQuotaKey(anonId), '30');
 
@@ -107,11 +107,12 @@ describe('atomic quota controls', () => {
       ),
     );
 
-    expect(results.every(result => !result.allowed)).toBe(true);
+    expect(results.filter(result => result.allowed)).toHaveLength(6);
+    expect(results.filter(result => !result.allowed)).toHaveLength(4);
     const row = await env.DB.prepare(
       'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
     ).bind(anonId).first<{ count: number }>();
-    expect(row?.count).toBe(30);
+    expect(row?.count).toBe(6);
   });
 
   it('does not lose concurrent anonymous or authenticated releases', async () => {
@@ -139,11 +140,11 @@ describe('atomic quota controls', () => {
     const authResults = await Promise.all(
       Array.from({ length: 40 }, () => reserveAuthQuota(env.DB, userId, 'free', 'student')),
     );
-    expect(authResults.filter(result => result.allowed)).toHaveLength(30);
-    expect(authResults.filter(result => !result.allowed)).toHaveLength(10);
+    expect(authResults.filter(result => result.allowed)).toHaveLength(6);
+    expect(authResults.filter(result => !result.allowed)).toHaveLength(34);
 
     await Promise.all(Array.from(
-      { length: 30 },
+      { length: 6 },
       () => releaseQuotaReservation(env.DB, userId, false),
     ));
     const authRow = await env.DB.prepare(
@@ -155,17 +156,17 @@ describe('atomic quota controls', () => {
   it('preserves the count when reservations and releases interleave', async () => {
     const anonId = 'anon_dddddddddddddddddddddddddddddddd';
     await Promise.all(Array.from(
-      { length: 30 },
+      { length: 6 },
       () => reserveAnonQuota(env.DB, env.RATE_LIMIT_KV, anonId),
     ));
 
     const operations = await Promise.all([
-      ...Array.from({ length: 15 }, async () => {
+      ...Array.from({ length: 3 }, async () => {
         await releaseQuotaReservation(env.DB, anonId, true);
         return null;
       }),
       ...Array.from(
-        { length: 15 },
+        { length: 3 },
         () => reserveAnonQuota(env.DB, env.RATE_LIMIT_KV, anonId),
       ),
     ]);
@@ -176,7 +177,7 @@ describe('atomic quota controls', () => {
     const row = await env.DB.prepare(
       'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
     ).bind(anonId).first<{ count: number }>();
-    expect(row?.count).toBe(15 + allowedReservations);
+    expect(row?.count).toBe(3 + allowedReservations);
   });
 
   it('fails chat closed when quota storage is unavailable', async () => {

@@ -29,18 +29,19 @@ import { eq, and, like, sql } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { users, chats, memoryBrain } from '../db/schema';
 import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
-import { ANONYMOUS_MONTHLY_LIMIT, anonUserId } from '../services/anonymous';
+import { CHAT_RPM_LIMIT, anonUserId, currentQuotaPeriod } from '../services/anonymous';
 import { getAnonQuotaUsage } from './chat';
 import type { Env } from '../types';
 
 export const usersRouter = new Hono<{ Bindings: Env }>();
 
 // Credit limits — authoritative, must match billing pipeline
+const CHAT_REQUESTS_PER_MINUTE = CHAT_RPM_LIMIT;
 const CREDITS_LIMITS: Record<string, number> = {
-  free: ANONYMOUS_MONTHLY_LIMIT,
-  starter: 500,
-  pro: 7000,
-  premium: 9999,
+  free: CHAT_REQUESTS_PER_MINUTE,
+  starter: CHAT_REQUESTS_PER_MINUTE,
+  pro: CHAT_REQUESTS_PER_MINUTE,
+  premium: CHAT_REQUESTS_PER_MINUTE,
 };
 
 // ── Auth middleware ────────────────────────────────────────────────────────────
@@ -348,6 +349,7 @@ usersRouter.get('/credits', async (c) => {
   let creditsUsed = 0;
   let anonymousId: string | null = null;
   let authenticated = false;
+  let authenticatedUserId: string | null = null;
 
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
@@ -362,12 +364,8 @@ usersRouter.get('/credits', async (c) => {
 
       if (user) {
         authenticated = true;
+        authenticatedUserId = payload.sub;
         tier = user.subscriptionTier ?? 'free';
-        creditsUsed = user.creditsUsed ?? 0;
-        const limit = CREDITS_LIMITS[tier] ?? CREDITS_LIMITS.free;
-        creditsRemaining = user.creditsRemaining != null
-          ? user.creditsRemaining
-          : Math.max(0, (limit ?? 30) - creditsUsed);
       }
     }
   }
@@ -380,16 +378,19 @@ usersRouter.get('/credits', async (c) => {
       0,
       await getAnonQuotaUsage(c.env.DB, c.env.RATE_LIMIT_KV, anonymousId),
     );
-    const limit = CREDITS_LIMITS.free ?? 30;
-    creditsRemaining = Math.max(0, limit - creditsUsed);
+  } else if (authenticatedUserId) {
+    const row = await c.env.DB.prepare(
+      'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(authenticatedUserId, currentQuotaPeriod()).first<{ count: number }>();
+    creditsUsed = row?.count ?? 0;
   }
 
-  const monthlyLimit = CREDITS_LIMITS[tier] ?? CREDITS_LIMITS.free;
+  const rpmLimit = CHAT_REQUESTS_PER_MINUTE;
   return c.json({
-    credits_remaining: creditsRemaining,
+    credits_remaining: Math.max(0, rpmLimit - creditsUsed),
     credits_used: creditsUsed,
-    monthly_limit: monthlyLimit,
-    ...(anonymousId ? { daily_limit: monthlyLimit, quota_period: 'daily' } : {}),
+    rpm_limit: rpmLimit,
+    quota_period: 'minute',
     tier,
     ...(anonymousId ? { anon_id: anonymousId } : {}),
   });

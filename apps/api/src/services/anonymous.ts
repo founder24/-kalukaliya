@@ -8,10 +8,9 @@
 
 export const BROWSER_ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
 export const ANONYMOUS_COOKIE_NAME = 'syrabit_anon_id';
-export const ANONYMOUS_DAILY_LIMIT = 30;
-// Kept as an import-compatible alias while callers migrate their response
-// field names. Anonymous quota itself resets daily.
-export const ANONYMOUS_MONTHLY_LIMIT = ANONYMOUS_DAILY_LIMIT;
+export const CHAT_RPM_LIMIT = 6;
+export const ANONYMOUS_DAILY_LIMIT = CHAT_RPM_LIMIT;
+export const ANONYMOUS_MONTHLY_LIMIT = CHAT_RPM_LIMIT;
 const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/;
 
 export function isBrowserAnonId(value: string | null | undefined): value is string {
@@ -19,7 +18,8 @@ export function isBrowserAnonId(value: string | null | undefined): value is stri
 }
 
 export function currentQuotaPeriod(): string {
-  return new Date().toISOString().slice(0, 10);
+  // One UTC minute bucket, shared across Workers isolates through D1.
+  return new Date().toISOString().slice(0, 16);
 }
 
 function cookieValue(cookieHeader: string, name: string): string | null {

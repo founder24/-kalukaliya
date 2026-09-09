@@ -252,6 +252,23 @@ describe('ChatPage transport recovery', () => {
     expect(screen.queryByTestId('assistant-content')).not.toBeInTheDocument();
   });
 
+  it('renders an ambiguous curriculum scope as assistant guidance, not an outage', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      detail: 'I could not identify one matching curriculum. Please include both your class and subject, for example “Class 11 Physics”.',
+      error_code: 'curriculum_scope_ambiguous',
+      failure_stage: 'curriculum_scope',
+    }), {
+      status: 422,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+    render(<ChatPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
+
+    expect(await screen.findByText(/Please include both your class and subject/)).toBeInTheDocument();
+    expect(screen.queryByTestId('ai-unavailable-card')).not.toBeInTheDocument();
+  });
+
   it('parses fragmented UTF-8, CRLF framing, and a final unterminated event', async () => {
     const encoder = new TextEncoder();
     const prefix = encoder.encode(`data:${JSON.stringify({ content: 'অসমীয়া' })}\r\n\r\n`);

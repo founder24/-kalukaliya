@@ -298,7 +298,9 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                           Syra is resting — try again in a moment
                         </p>
                         <p className="text-[12.5px] text-muted-foreground mt-0.5">
-                          Your question is saved and will retry automatically.
+                           {msg.autoRetryScheduled
+                             ? 'Your question is saved and will retry automatically.'
+                             : 'Your question is saved. Retry when you are ready.'}
                         </p>
                       </>
                     )}
@@ -345,7 +347,27 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               </div>
             )}
 
-            {!msg.isAiUnavailable && msg.content && (
+            {msg.isStopped && (
+              <div
+                className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100"
+                role="status"
+                data-testid="answer-stopped-card"
+              >
+                <span className="text-[12.5px] font-medium">Answer stopped. The text above may be incomplete.</span>
+                {onRetry && (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-amber-400/70 px-2.5 py-1 text-[12px] font-semibold hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/50"
+                  >
+                    <RefreshCw size={13} aria-hidden="true" />
+                    Start again
+                  </button>
+                )}
+              </div>
+            )}
+
+            {msg.content && (
               <Suspense fallback={<div className="md-content-light" style={{ fontSize: '0.9375rem' }}>{cleanContent}</div>}>
                 <MarkdownContent
                   content={cleanContent}
@@ -436,7 +458,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               const chapterUrl = (basePath && chapterSlug) ? `${basePath}/${chapterSlug}` : null;
               const subjectUrl = chapterUrl || basePath || (msg.rag_subject_id ? `/subject/${msg.rag_subject_id}` : null);
               const isDocument = msg.rag_source === 'document';
-              const isWeb = false;
+              const isWeb = msg.rag_source === 'web';
               // Library, cache, and any other RAG-grounded source (anything
               // that isn't an uploaded user document, an external web hit,
               // or 'none') should render the same clickable card so the
@@ -476,7 +498,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                 : isDocument
                   ? { Icon: FileText, kindLabel: 'Uploaded Document' }
                   : { Icon: BookOpen, kindLabel: 'Syrabit Library' };
-              const showClickableCard = (isWeb || isLibrary) && subjectUrl && subjectLabel;
+              const showClickableCard = isLibrary && subjectUrl && subjectLabel;
               const showStaticBadge = !showClickableCard && (isWeb || isDocument || isLibrary);
               const handleSourceCardClick = () => {
                 if (chapterUrl) {
@@ -498,18 +520,11 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               return (
                 <>
                   {showClickableCard && (
-                    <div
+                    <button
+                      type="button"
                       onClick={handleSourceCardClick}
-                      className="source-card-container mt-3 rounded-xl overflow-hidden cursor-pointer active:scale-[0.98]"
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          handleSourceCardClick();
-                        }
-                      }}
-                      aria-label={`Open ${chapterLabel || subjectLabel} in Syrabit Browser`}
+                      className="source-card-container mt-3 block w-full overflow-hidden rounded-xl text-left active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                      aria-label={`Open curriculum match: ${curriculumPath.map(item => `${item.label} ${item.value}`).join(', ')}`}
                     >
                       <div className="px-3 py-2.5">
                         {/* Header: source type */}
@@ -519,11 +534,11 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                           <span className="text-[10px] text-muted-foreground" aria-hidden="true">·</span>
                           <span className="source-card-browser text-[10.5px] font-medium">{sourceMeta.kindLabel}</span>
                         </div>
-                        <div className="flex flex-wrap items-center gap-1" data-testid="curriculum-match-path">
+                        <div className="-mx-1 flex items-center gap-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]" data-testid="curriculum-match-path">
                           {curriculumPath.map((item, index) => (
                             <span key={item.label} className="contents">
                               {index > 0 && <span className="text-[11px] text-muted-foreground" aria-hidden="true">→</span>}
-                              <span className="source-card-badge max-w-[180px] truncate rounded-full px-2 py-0.5 text-[10.5px] font-medium">
+                              <span className="source-card-badge shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium" title={`${item.label}: ${item.value}`}>
                                 <span className="font-semibold">{item.label}:</span> {item.value}
                               </span>
                             </span>
@@ -553,7 +568,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                           </div>
                         )}
                       </div>
-                    </div>
+                    </button>
                   )}
                   {showStaticBadge && (
                     <div className="flex items-center gap-2.5 mt-3 px-3 py-2 rounded-xl" style={{

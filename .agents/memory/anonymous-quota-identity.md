@@ -20,15 +20,15 @@ must omit the anonymous header when storage is blocked so the cookie path can
 take over. Never use caller-controlled forwarding headers as ownership or
 limiter identity.
 
-Anonymous chat allowance periods are UTC calendar days (`YYYY-MM-DD`), not
-calendar months. Credit responses may retain the legacy `monthly_limit` field
-for compatibility, but anonymous responses also identify `quota_period:
-daily` and expose `daily_limit`.
+Chat misuse protection is a fixed six-request-per-minute D1 bucket for both
+anonymous and authenticated students. It is not a daily or monthly message
+allowance. Staff and administrators bypass this product limiter.
 
-**Why:** The student UI promises that anonymous messages reset daily. A monthly
-enforcement period would silently block students for the rest of the month
-while the interface promised a midnight reset.
+**Why:** A long-period allowance blocks legitimate ongoing study. A short fixed
+RPM ceiling limits bursts and automation without imposing a recurring message
+budget.
 
-**How to apply:** Use the same UTC daily period key for anonymous reservation,
-usage reads, rollback, and legacy KV-floor migration. Registered-user monthly
-account counters remain a separate contract.
+**How to apply:** Use the same UTC minute key for reservation, usage reads, and
+rollback. Do not seed minute buckets from retired daily KV counters. Keep
+lifetime or monthly counters analytics-only, and never disable the composer
+persistently when a minute bucket fills.

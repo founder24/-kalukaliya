@@ -23,7 +23,6 @@ import {
   users,
   chats,
   memoryBrain,
-  chapters as chaptersTable,
 } from '../db/schema';
 import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import {
@@ -41,9 +40,8 @@ import {
   type WebSearchResult,
 } from '../services/web-search';
 import {
-  ANONYMOUS_MONTHLY_LIMIT,
+  CHAT_RPM_LIMIT,
   anonUserId,
-  anonymousQuotaKey,
   currentQuotaPeriod,
 } from '../services/anonymous';
 import type { Env } from '../types';
@@ -55,12 +53,7 @@ import type { Env } from '../types';
 const CONFIDENCE_HIGH = 0.80;
 const CONFIDENCE_LOW  = 0.50;
 
-const MONTHLY_LIMITS: Record<string, number> = {
-  free:    ANONYMOUS_MONTHLY_LIMIT,
-  starter: 100,
-  pro:     500,
-  premium: 10_000,
-};
+const CHAT_REQUESTS_PER_MINUTE = CHAT_RPM_LIMIT;
 
 // Keep prompts small enough for fast prefill while retaining a useful slice of
 // curriculum content. Chapter-scoped turns bypass semantic retrieval below, so
@@ -174,6 +167,115 @@ interface SourceEntry {
 
 export type AuthoritativeIntent = 'syllabus' | 'pyq' | null;
 
+interface CurriculumScope {
+  subjectId?: string;
+  subjectName?: string;
+  className?: string;
+  boardName?: string;
+  explicit: boolean;
+  unresolved: boolean;
+}
+
+interface CurriculumScopeRow {
+  subject_id: string;
+  subject_name: string;
+  subject_slug: string;
+  class_name: string | null;
+  class_level: string | null;
+  class_slug: string | null;
+  board_name: string | null;
+  board_slug: string | null;
+}
+
+function normalizedScopeText(value: string): string {
+  return ` ${value.toLowerCase().normalize('NFKC').replace(/[^a-z0-9\u0980-\u09ff]+/gu, ' ').trim()} `;
+}
+
+/** Extract only explicit class references; never infer a class from the topic. */
+export function detectCurriculumClass(message: string): '11' | '12' | 'semester-1' | 'semester-3' | 'semester-5' | null {
+  const text = normalizedScopeText(message);
+  if (/\b(?:class\s*11|class\s*xi|hs\s*1(?:st)?\s*year|higher\s*secondary\s*1(?:st)?\s*year)\b/.test(text)) return '11';
+  if (/\b(?:class\s*12|class\s*xii|hs\s*2(?:nd)?\s*year|higher\s*secondary\s*2(?:nd)?\s*year)\b/.test(text)) return '12';
+  if (/\b(?:1st|first)\s*semester\b/.test(text)) return 'semester-1';
+  if (/\b(?:3rd|third)\s*semester\b/.test(text)) return 'semester-3';
+  if (/\b(?:5th|fifth)\s*semester\b/.test(text)) return 'semester-5';
+  return null;
+}
+
+function classMatches(row: CurriculumScopeRow, detected: ReturnType<typeof detectCurriculumClass>): boolean {
+  if (!detected) return true;
+  const text = normalizedScopeText([row.class_name, row.class_level, row.class_slug].filter(Boolean).join(' '));
+  if (detected === '11') return /\b(?:11|xi|hs\s*1|1st\s*year)\b/.test(text);
+  if (detected === '12') return /\b(?:12|xii|hs\s*2|2nd\s*year)\b/.test(text);
+  return text.includes(` ${detected.replace('-', ' ')} `)
+    || text.includes(` ${detected.split('-')[1]} `);
+}
+
+function phraseAppears(text: string, phrase: string): boolean {
+  const normalizedPhrase = normalizedScopeText(phrase).trim();
+  return normalizedPhrase.length >= 3 && text.includes(` ${normalizedPhrase} `);
+}
+
+function hasExplicitSubjectWording(message: string): boolean {
+  return /\b(?:physics|chemistry|biology|mathematics|maths?|english|assamese|economics|accountancy|education|history|geography|sociology|psychology|philosophy|computer\s+science|political\s+science|business\s+studies)\b/i.test(message);
+}
+
+/**
+ * Resolve explicit curriculum wording against D1. An ambiguous or conflicting
+ * request fails closed instead of broadening semantic search across catalogues.
+ */
+async function resolveCurriculumScope(
+  d1: D1Database,
+  message: string,
+  bodySubjectId?: string,
+): Promise<CurriculumScope> {
+  const messageText = normalizedScopeText(message);
+  const detectedClass = detectCurriculumClass(message);
+  const rowsResult = await d1.prepare(`
+    SELECT subjects.id AS subject_id, subjects.name AS subject_name,
+           subjects.slug AS subject_slug, classes.name AS class_name,
+           classes.level AS class_level, classes.slug AS class_slug,
+           boards.name AS board_name, boards.slug AS board_slug
+    FROM subjects
+    LEFT JOIN streams ON streams.id = subjects.stream_id
+    LEFT JOIN classes ON classes.id = streams.class_id
+    LEFT JOIN boards ON boards.id = classes.board_id
+    WHERE subjects.is_published = 1
+      AND (streams.id IS NULL OR streams.status = 'published')
+      AND (classes.id IS NULL OR classes.status = 'published')
+      AND (boards.id IS NULL OR boards.status = 'published')
+  `).all<CurriculumScopeRow>();
+  const rows = rowsResult.results ?? [];
+  const named = rows.filter(row =>
+    phraseAppears(messageText, row.subject_name)
+    || phraseAppears(messageText, row.subject_slug.replace(/-/g, ' ')),
+  );
+  const explicitSubject = named.length > 0;
+  let candidates = explicitSubject ? named : rows;
+  if (detectedClass) candidates = candidates.filter(row => classMatches(row, detectedClass));
+
+  // A page-provided subject remains useful when the question does not name a
+  // different subject, but explicit wording always wins.
+  if (!explicitSubject && bodySubjectId) {
+    candidates = candidates.filter(row => row.subject_id === bodySubjectId);
+  }
+
+  const explicit = Boolean(detectedClass || explicitSubject);
+  const unique = [...new Map(candidates.map(row => [row.subject_id, row])).values()];
+  if (unique.length !== 1) {
+    return { explicit, unresolved: explicit };
+  }
+  const row = unique[0]!;
+  return {
+    subjectId: row.subject_id,
+    subjectName: row.subject_name,
+    ...(row.class_name && { className: row.class_name }),
+    ...(row.board_name && { boardName: row.board_name }),
+    explicit,
+    unresolved: false,
+  };
+}
+
 /**
  * These requests are lists/records, not open-ended semantic questions. They
  * must be grounded in D1's published curriculum data rather than a nearest
@@ -198,7 +300,7 @@ interface AuthoritativeD1Row {
   pyq_papers: string | null;
 }
 
-async function fetchAuthoritativeIntentContext(
+export async function fetchAuthoritativeIntentContext(
   d1: D1Database,
   intent: Exclude<AuthoritativeIntent, null>,
   subjectId: string | undefined,
@@ -208,18 +310,34 @@ async function fetchAuthoritativeIntentContext(
   // 30 titles / 12 PYQ-bearing chapters keeps the prompt bounded even for a
   // subject with a long catalogue. Parameters, rather than text interpolation,
   // preserve D1 query safety.
-  const where = chapterId
-    ? "WHERE id = ? AND status = 'published'"
-    : subjectId ? "WHERE subject_id = ? AND status = 'published'" : "WHERE status = 'published'";
-  const bind = chapterId ?? subjectId;
+  const scopeConditions: string[] = [];
+  const scopeBindings: string[] = [];
+  if (chapterId) {
+    scopeConditions.push('chapters.id = ?');
+    scopeBindings.push(chapterId);
+  }
+  if (subjectId) {
+    scopeConditions.push('chapters.subject_id = ?');
+    scopeBindings.push(subjectId);
+  }
   const limit = intent === 'syllabus' ? 30 : 12;
   const rows = await d1.prepare(`
-    SELECT id, title, subject_id, pyq_pdf_url, pyq_papers
+    SELECT chapters.id, chapters.title, chapters.subject_id,
+           chapters.pyq_pdf_url, chapters.pyq_papers
     FROM chapters
-    ${where}
-    ORDER BY chapter_number ASC, title ASC
+    JOIN subjects ON subjects.id = chapters.subject_id
+    LEFT JOIN streams ON streams.id = subjects.stream_id
+    LEFT JOIN classes ON classes.id = streams.class_id
+    LEFT JOIN boards ON boards.id = classes.board_id
+    WHERE chapters.status = 'published'
+      AND subjects.is_published = 1
+      AND (streams.id IS NULL OR streams.status = 'published')
+      AND (classes.id IS NULL OR classes.status = 'published')
+      AND (boards.id IS NULL OR boards.status = 'published')
+      ${scopeConditions.map(condition => `AND ${condition}`).join('\n      ')}
+    ORDER BY chapters.chapter_number ASC, chapters.title ASC
     LIMIT ?
-  `).bind(...(bind ? [bind, limit] : [limit])).all<AuthoritativeD1Row>();
+  `).bind(...scopeBindings, limit).all<AuthoritativeD1Row>();
 
   return (rows.results ?? [])
     .filter((row) => intent === 'syllabus'
@@ -632,8 +750,7 @@ export async function reserveAuthQuota(
     return { allowed: true, count: 0, limit: 999_999 };
   }
 
-  // noUncheckedIndexedAccess: Record indexing gives number | undefined; fall back to 20
-  const limit: number = MONTHLY_LIMITS[tier] ?? 20;
+  const limit = CHAT_REQUESTS_PER_MINUTE;
   const period = currentQuotaPeriod();
   const now = Math.floor(Date.now() / 1000);
   const rowId = `${userId}:${period}`;
@@ -673,14 +790,13 @@ export async function reserveAnonQuota(
   legacyKv: KVNamespace,
   anonId: string,
 ): Promise<{ allowed: boolean; count: number; limit: number }> {
-  const limit: number = MONTHLY_LIMITS['free'] ?? 20;
+  const limit = CHAT_REQUESTS_PER_MINUTE;
   const period = currentQuotaPeriod();
   const now = Math.floor(Date.now() / 1000);
-  const legacyRaw = await legacyKv.get(anonymousQuotaKey(anonId));
-  const legacyCount = Math.min(limit, Math.max(
-    0,
-    Number.parseInt(legacyRaw ?? '0', 10) || 0,
-  ));
+  // Daily KV counters must not seed one-minute buckets; doing so would carry
+  // the retired 30-message cap into the new RPM limiter.
+  void legacyKv;
+  const legacyCount = 0;
 
   const result = await d1.prepare(`
     INSERT INTO anonymous_quota_usage (anon_id, period, count, updated_at)
@@ -719,28 +835,18 @@ export async function reserveAnonQuota(
   return { allowed: true, count: result.count - 1, limit };
 }
 
-/** Read anonymous usage while atomically preserving legacy KV as a floor. */
+/** Read anonymous usage for the current one-minute bucket. */
 export async function getAnonQuotaUsage(
   d1: D1Database,
   legacyKv: KVNamespace,
   anonId: string,
 ): Promise<number> {
   const period = currentQuotaPeriod();
-  const now = Math.floor(Date.now() / 1000);
-  const legacyRaw = await legacyKv.get(anonymousQuotaKey(anonId));
-  const legacyCount = Math.min(ANONYMOUS_MONTHLY_LIMIT, Math.max(
-    0,
-    Number.parseInt(legacyRaw ?? '0', 10) || 0,
-  ));
-  const row = await d1.prepare(`
-    INSERT INTO anonymous_quota_usage (anon_id, period, count, updated_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT (anon_id, period) DO UPDATE SET
-      count = MAX(anonymous_quota_usage.count, excluded.count),
-      updated_at = excluded.updated_at
-    RETURNING count
-  `).bind(anonId, period, legacyCount, now).first<{ count: number }>();
-  return row?.count ?? legacyCount;
+  void legacyKv;
+  const row = await d1.prepare(
+    'SELECT count FROM anonymous_quota_usage WHERE anon_id = ? AND period = ?',
+  ).bind(anonId, period).first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 /** Release one previously reserved slot with a single atomic decrement. */
@@ -814,23 +920,38 @@ async function queryVectorize(
  * documented in syrabit-rag-v2.md and rag-field-priority.md.
  */
 async function fetchChapterContent(
-  db: ReturnType<typeof createDb>,
+  d1: D1Database,
   chapterId: string,
   lang: 'en' | 'as',
+  subjectId?: string,
 ): Promise<{ content: string; language: 'assamese' | 'english' } | null> {
-  const row = await db
-    .select({
-      ragSectionsEn: chaptersTable.ragSectionsEn,
-      ragSectionsAs: chaptersTable.ragSectionsAs,
-      ragText:       chaptersTable.ragText,
-      ragTextAs:     chaptersTable.ragTextAs,
-      notesEn:       chaptersTable.notesEn,
-      notesAs:       chaptersTable.notesAs,
-      title:         chaptersTable.title,
-    })
-    .from(chaptersTable)
-    .where(eq(chaptersTable.id, chapterId))
-    .get();
+  const row = await d1.prepare(`
+    SELECT chapters.rag_sections_en AS ragSectionsEn,
+           chapters.rag_sections_as AS ragSectionsAs,
+           chapters.rag_text AS ragText, chapters.rag_text_as AS ragTextAs,
+           chapters.notes_en AS notesEn, chapters.notes_as AS notesAs,
+           chapters.title AS title
+    FROM chapters
+    JOIN subjects ON subjects.id = chapters.subject_id
+    LEFT JOIN streams ON streams.id = subjects.stream_id
+    LEFT JOIN classes ON classes.id = streams.class_id
+    LEFT JOIN boards ON boards.id = classes.board_id
+    WHERE chapters.id = ?
+      AND chapters.status = 'published'
+      AND subjects.is_published = 1
+      AND (streams.id IS NULL OR streams.status = 'published')
+      AND (classes.id IS NULL OR classes.status = 'published')
+      AND (boards.id IS NULL OR boards.status = 'published')
+      AND (? IS NULL OR chapters.subject_id = ?)
+  `).bind(chapterId, subjectId ?? null, subjectId ?? null).first<{
+    ragSectionsEn: string | null;
+    ragSectionsAs: string | null;
+    ragText: string | null;
+    ragTextAs: string | null;
+    notesEn: string | null;
+    notesAs: string | null;
+    title: string;
+  }>();
 
   if (!row) return null;
 
@@ -863,7 +984,7 @@ async function buildSourceEntries(
   webResults: WebSearchResult[],
   lang: 'en' | 'as',
 ): Promise<SourceEntry[]> {
-  const curriculum = await Promise.all(chunks.map(async (chunk) => {
+  const curriculumCandidates = await Promise.all(chunks.map(async (chunk): Promise<SourceEntry | null> => {
     const row = await d1.prepare(`
       SELECT chapters.slug AS chapter_slug, subjects.slug AS subject_slug,
              classes.slug AS class_slug, boards.slug AS board_slug,
@@ -875,6 +996,11 @@ async function buildSourceEntries(
       LEFT JOIN classes ON classes.id = streams.class_id
       LEFT JOIN boards ON boards.id = classes.board_id
       WHERE chapters.id = ?
+        AND chapters.status = 'published'
+        AND subjects.is_published = 1
+        AND (streams.id IS NULL OR streams.status = 'published')
+        AND (classes.id IS NULL OR classes.status = 'published')
+        AND (boards.id IS NULL OR boards.status = 'published')
     `).bind(chunk.chapterId).first<{
       chapter_slug: string | null;
       subject_slug: string | null;
@@ -884,6 +1010,7 @@ async function buildSourceEntries(
       class_name: string | null;
       board_name: string | null;
     }>().catch(() => null);
+    if (!row) return null;
     const path = row?.board_slug && row.class_slug && row.subject_slug && row.chapter_slug
       ? `/${row.board_slug}/${row.class_slug}/${row.subject_slug}/${row.chapter_slug}`
       : null;
@@ -906,6 +1033,7 @@ async function buildSourceEntries(
       ...(row?.board_name && { board_name: row.board_name }),
     };
   }));
+  const curriculum = curriculumCandidates.filter((entry): entry is SourceEntry => entry !== null);
   const web = webResults.map((result, index) => ({
     id: `web:${index}:${result.url}`,
     title: result.title,
@@ -1447,7 +1575,8 @@ chatRouter.post('/stream', async (c) => {
     c.header('X-Failure-Stage', 'quota');
     return c.json(
       {
-        detail: 'Monthly message limit reached. Upgrade to Pro for more messages.',
+        detail: 'Rate limit reached. Please wait a minute before sending another message.',
+        error_code: 'chat_rpm_limit',
         quota: { used: quotaCount, limit: quotaLimit },
         request_id: serverRequestId,
         failure_stage: 'quota',
@@ -1487,6 +1616,30 @@ chatRouter.post('/stream', async (c) => {
   // available. Semantic retrieval remains the fallback for stale/missing IDs.
   const directChapterId = body.chapter_id?.trim() || undefined;
   const authoritativeIntent = detectAuthoritativeIntent(message);
+  let curriculumScope: CurriculumScope;
+  try {
+    curriculumScope = await resolveCurriculumScope(c.env.DB, message, body.subject_id);
+  } catch (error) {
+    console.warn('[chat] Curriculum scope resolution failed:', error);
+    curriculumScope = {
+      ...(body.subject_id && { subjectId: body.subject_id }),
+      explicit: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
+      unresolved: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
+    };
+  }
+  const scopedSubjectId = curriculumScope.unresolved
+    ? undefined
+    : (curriculumScope.subjectId ?? body.subject_id);
+  if (curriculumScope.unresolved) {
+    await releaseQuota().catch(() => {});
+    c.header('X-Failure-Stage', 'curriculum_scope');
+    return c.json({
+      detail: 'I could not identify one matching curriculum. Please include both your class and subject, for example “Class 11 Physics”.',
+      error_code: 'curriculum_scope_ambiguous',
+      request_id: serverRequestId,
+      failure_stage: 'curriculum_scope',
+    }, 422);
+  }
   const requestedWebIntent = shouldUseWebSearch({
     question: message,
     chapterId: directChapterId,
@@ -1509,12 +1662,12 @@ chatRouter.post('/stream', async (c) => {
     : Promise.resolve(skippedWebSearch());
   const memoryPromise = loadMemories(db, userId, isAnon);
   let historyLoaded = false;
-  if (authoritativeIntent) {
+  if (authoritativeIntent && !curriculumScope.unresolved) {
     try {
       contextChunks = await fetchAuthoritativeIntentContext(
         c.env.DB,
         authoritativeIntent,
-        body.subject_id,
+        scopedSubjectId,
         directChapterId,
         lang,
       );
@@ -1524,7 +1677,7 @@ chatRouter.post('/stream', async (c) => {
       const first = contextChunks[0];
       topChapterId = first?.chapterId;
       topChapterTitle = first?.chapterTitle;
-      topSubjectId = first?.subjectId ?? body.subject_id;
+      topSubjectId = first?.subjectId ?? scopedSubjectId;
     } catch (error) {
       // This occurs before SSE headers/body are committed, so keep it a typed
       // HTTP error clients can safely retry instead of a misleading stream.
@@ -1541,7 +1694,7 @@ chatRouter.post('/stream', async (c) => {
   if (!authoritativeIntent && directChapterId) {
     const [directHistoryResult, directContentResult, directMemoryResult] = await Promise.allSettled([
       loadHistory(db, sessionId, userId),
-      fetchChapterContent(db, directChapterId, lang),
+      fetchChapterContent(c.env.DB, directChapterId, lang, curriculumScope.explicit ? scopedSubjectId : undefined),
       memoryPromise,
     ]);
     if (directHistoryResult.status === 'fulfilled') {
@@ -1578,10 +1731,10 @@ chatRouter.post('/stream', async (c) => {
     }
   }
 
-  if (!authoritativeIntent && contextChunks.length === 0) {
+  if (!authoritativeIntent && contextChunks.length === 0 && !curriculumScope.unresolved) {
   const skipSemanticForUnscopedWebIntent = explicitWebIntent
     && directChapterId === undefined
-    && !body.subject_id;
+       && !scopedSubjectId;
   // Embed + history in parallel — zero extra latency vs serial
   // Pass userId so history is scoped to its owner (session ownership enforcement)
   const [embedResult, historyResult] = await startRetrievalFanout({
@@ -1606,7 +1759,7 @@ chatRouter.post('/stream', async (c) => {
       // fields; board/class metadata is not available in production.
       const extraFilters = semanticRetrievalFilters(
         body.chapter_id,
-        body.subject_id,
+         scopedSubjectId,
         Boolean(directChapterId),
       );
 
@@ -1667,7 +1820,7 @@ chatRouter.post('/stream', async (c) => {
           topSubjectId = best.meta.subjectId;
 
           // D1 fast path — full chapter content with fallback chain
-          const chapterContent = await fetchChapterContent(db, bestId, lang);
+          const chapterContent = await fetchChapterContent(c.env.DB, bestId, lang, scopedSubjectId);
           if (chapterContent) {
             const resolvedTitle = best.meta.chapterTitle ?? bestId;
             topChapterTitle = resolvedTitle;
@@ -1706,7 +1859,7 @@ chatRouter.post('/stream', async (c) => {
   // Card-context fallback — when RAG missed but chapter_id provided by frontend
   if (!authoritativeIntent && contextChunks.length === 0 && directChapterId) {
     try {
-      const chapterContent = await fetchChapterContent(db, directChapterId, lang);
+      const chapterContent = await fetchChapterContent(c.env.DB, directChapterId, lang, curriculumScope.explicit ? scopedSubjectId : undefined);
       if (chapterContent) {
         topChapterId    = directChapterId;
         topChapterTitle = body.chapter_name;
@@ -1770,9 +1923,9 @@ chatRouter.post('/stream', async (c) => {
     webContextText,
     history,
     memoryText: memories,
-    ...(body.board_name        !== undefined && { boardName:   body.board_name }),
-    ...(body.class_name        !== undefined && { className:   body.class_name }),
-    ...(body.subject_name      !== undefined && { subjectName: body.subject_name }),
+    ...((curriculumScope.boardName ?? body.board_name) !== undefined && { boardName: curriculumScope.boardName ?? body.board_name }),
+    ...((curriculumScope.className ?? body.class_name) !== undefined && { className: curriculumScope.className ?? body.class_name }),
+    ...((curriculumScope.subjectName ?? body.subject_name) !== undefined && { subjectName: curriculumScope.subjectName ?? body.subject_name }),
     ...(chapterNameResolved    !== undefined && { chapterName: chapterNameResolved }),
     question: message,
   });
@@ -1804,11 +1957,11 @@ chatRouter.post('/stream', async (c) => {
     rag_chapter_name: topChapterTitle,
     rag_chapter_slug: primaryCurriculumSource?.chapter_slug,
     rag_subject_id:   topSubjectId,
-    rag_subject_name: primaryCurriculumSource?.subject_name ?? body.subject_name,
+    rag_subject_name: primaryCurriculumSource?.subject_name ?? curriculumScope.subjectName ?? body.subject_name,
     rag_topic_name:   primaryCurriculumSource?.topic_name,
-    ctx_board_name:   primaryCurriculumSource?.board_name ?? body.board_name,
-    ctx_class_name:   primaryCurriculumSource?.class_name ?? body.class_name,
-    ctx_class_level:  primaryCurriculumSource?.class_name ?? body.class_name,
+    ctx_board_name:   primaryCurriculumSource?.board_name ?? curriculumScope.boardName ?? body.board_name,
+    ctx_class_name:   primaryCurriculumSource?.class_name ?? curriculumScope.className ?? body.class_name,
+    ctx_class_level:  primaryCurriculumSource?.class_name ?? curriculumScope.className ?? body.class_name,
     ctx_stream_name:  body.stream_name,
     ctx_board_slug:   primaryCurriculumSource?.board_slug,
     ctx_class_slug:   primaryCurriculumSource?.class_slug,
