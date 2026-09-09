@@ -185,6 +185,14 @@ export function InputBar({
   }, [input, subject, isLoading]);
 
   const sendDisabled = !input.trim() || isOutOfCredits || ocrLoading;
+  const languageQuota = credits?.languages?.[responseLang];
+  const resetAt = languageQuota?.resetAt || credits?.resetAt;
+  const resetLabel = resetAt
+    ? (() => {
+        const seconds = Math.max(0, Math.ceil((new Date(resetAt).getTime() - Date.now()) / 1000));
+        return seconds < 60 ? `${seconds}s` : `${Math.ceil(seconds / 60)}m`;
+      })()
+    : null;
 
   return (
     <div
@@ -204,6 +212,7 @@ export function InputBar({
           type="file"
           accept="image/*"
           capture="environment"
+          aria-label="Take a photo for question recognition"
           className="hidden"
           onChange={onCameraChange}
           data-testid="chat-camera-input"
@@ -212,6 +221,7 @@ export function InputBar({
           ref={galleryInputRef}
           type="file"
           accept="image/*"
+          aria-label="Choose an image for question recognition"
           className="hidden"
           onChange={onGalleryChange}
           data-testid="chat-gallery-input"
@@ -395,10 +405,6 @@ export function InputBar({
             placeholder={
               ocrLoading
                 ? 'Reading image…'
-                : isOutOfCredits
-                ? (isAnon
-                    ? 'Sign in to keep chatting…'
-                    : 'Free daily messages used — resets at midnight UTC')
                 : activeChapter
                 ? (responseLang === 'as'
                     ? `${activeChapter.title} সম্পৰ্কে সুধিব…`
@@ -469,67 +475,9 @@ export function InputBar({
         </div>
 
         {effectiveLimit !== null && effectiveLimit > 0 && (
-          <div className="mt-2 px-1 flex items-center gap-2">
-            <div
-              className="flex-1 h-1 rounded-full overflow-hidden"
-              style={{ background: 'rgba(139,92,246,0.10)' }}
-              role="progressbar"
-              aria-valuenow={creditPercent}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label="Credit usage"
-            >
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${creditPercent}%`,
-                  background: isLow || isOutOfCredits
-                    ? 'linear-gradient(90deg,#ef4444,#f87171)'
-                    : 'linear-gradient(90deg,#7c3aed,#a78bfa)',
-                }}
-              />
-            </div>
-            {/*
-              Task #796 — anonymous students get a slightly more
-              explicit "X / 30 free messages left today" caption (the
-              previous "12 left" was cryptic to first-time visitors who
-              had never seen the cap), plus a tiny "Sign in for more"
-              CTA once they're at the half-way mark. Logged-in users
-              keep the compact "X left" badge they're used to.
-            */}
-            {isAnon ? (
-              <span
-                className="text-[10px] font-medium shrink-0 flex items-center gap-1.5"
-                style={{ color: isLow || isOutOfCredits ? '#f87171' : 'hsl(var(--muted-foreground))' }}
-              >
-                <span data-testid="anon-credits-remaining">
-                  {remaining !== null
-                    ? (isOutOfCredits
-                        ? <><span className="sm:hidden">0 / {effectiveLimit} left</span><span className="hidden sm:inline">0 / {effectiveLimit} free messages left today</span></>
-                        : <><span className="sm:hidden">{remaining} / {effectiveLimit} left</span><span className="hidden sm:inline">{remaining} / {effectiveLimit} free messages left today</span></>)
-                    : ''}
-                </span>
-                {remaining !== null && remaining <= Math.ceil(effectiveLimit / 2) && (
-                  <button
-                    type="button"
-                    onClick={() => navigate('/login')}
-                    className="font-semibold underline hover:no-underline"
-                    style={{ color: isOutOfCredits || isLow ? '#fca5a5' : '#a78bfa' }}
-                    data-testid="anon-credits-signin-cta"
-                    aria-label="Sign in for more messages"
-                  >
-                    {isOutOfCredits ? 'Sign in →' : 'Sign in for more'}
-                  </button>
-                )}
-              </span>
-            ) : (
-              <span
-                className="text-[10px] font-medium shrink-0"
-                style={{ color: isLow || isOutOfCredits ? '#f87171' : 'hsl(var(--muted-foreground))' }}
-              >
-                {remaining !== null ? `${remaining} left` : ''}
-              </span>
-            )}
+          <div className="mt-2 px-1 text-right text-[10px] font-medium text-muted-foreground" data-testid="chat-rpm-limit">
+            {responseLang === 'as' ? 'অসমীয়া' : 'English'} allowance: {remaining == null ? 'available' : `${remaining} of ${effectiveLimit} messages left`} this minute
+            {resetLabel ? ` · resets in ${resetLabel}` : ''}
           </div>
         )}
       </div>

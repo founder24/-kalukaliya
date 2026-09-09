@@ -69,6 +69,28 @@ describe('edge deployment routing audit', () => {
     expect(apiFetch).toHaveBeenCalledOnce();
   });
 
+  it.each(['/api/v1/admin/content/boards', '/api/v1/staff/content/boards'])(
+    'marks %s responses as private and uncacheable',
+    async (pathname) => {
+      const apiFetch = vi.fn(async () => new Response('{"rows":[]}', {
+        headers: { 'Content-Type': 'application/json' },
+      }));
+      const response = await worker.fetch(
+        new Request(`https://api.syrabit.ai${pathname}`, {
+          headers: { Cookie: 'syrabit_admin_session=opaque-session' },
+        }),
+        env({ API_WORKER: { fetch: apiFetch } }),
+        ctx(),
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(response.headers.get('Vary')).toContain('Authorization');
+      expect(response.headers.get('Vary')).toContain('Cookie');
+      expect(apiFetch).toHaveBeenCalledOnce();
+    },
+  );
+
   it('returns an explicit 503 for health when its service binding is absent', async () => {
     const response = await worker.fetch(
       new Request('https://api.syrabit.ai/health'),

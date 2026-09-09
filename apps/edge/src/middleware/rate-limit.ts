@@ -13,6 +13,12 @@ export interface RateLimitResult {
   resetAt: number; // Unix timestamp (ms) when the window resets
 }
 
+// Chat's production allowance is one minute per response language. Keep this
+// in the edge limiter (the authoritative reservation point) so API and UI
+// consumers do not drift back to the retired daily/30-message contract.
+export const CHAT_REQUESTS_PER_MINUTE = 6;
+export const CHAT_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+
 interface RateLimitCommand {
   limit: number;
   resetAt: number;
@@ -22,6 +28,18 @@ const BROWSER_ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
 const ANONYMOUS_COOKIE_NAME = 'syrabit_anon_id';
 const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/;
 const ANONYMOUS_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+const CLEANUP_RECOVERY_DELAY_MS = 5 * 60 * 1000;
+const CLEANUP_FAILURE_ALERT_THRESHOLD = 3;
+const CLEANUP_FAILURE_ALERT_DEDUP_MS = 60 * 60 * 1000;
+const CLEANUP_FAILURE_COUNT_KEY = 'cleanupFailureCount';
+const CLEANUP_ALERTED_AT_KEY = 'cleanupAlertedAt';
+export const RATE_LIMIT_CLEANUP_HEALTH_KEY = 'health:rate-limit-cleanup';
+
+interface CleanupHealthState {
+  degraded: boolean;
+  latest_failure_at: string | null;
+  latest_recovery_at: string | null;
+}
 
 export interface AnonymousIdentity {
   id: string;
@@ -97,14 +115,13 @@ export async function resolveAnonymousIdentity(
   request: Request,
   cookieSecret?: string,
 ): Promise<AnonymousIdentity> {
-  const browserId = request.headers.get('x-anon-id')?.trim();
-  if (isBrowserAnonId(browserId)) return { id: browserId, setCookie: null };
-
   const cookieId = await readSignedCookie(request, cookieSecret);
   if (cookieId) return { id: cookieId, setCookie: null };
 
   if (!cookieSecret) return { id: ipFallback(request), setCookie: null };
 
+  // Never sign a caller-selected ID. Only an edge-minted random ID can become
+  // an ownership credential for anonymous history and quota.
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   const id = `anon_${Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -127,23 +144,27 @@ export async function anonymousRateLimitIdentity(
   return (await resolveAnonymousIdentity(request, cookieSecret)).id;
 }
 
+export function anonymousNetworkRateLimitIdentity(request: Request): string {
+  return ipFallback(request);
+}
+
 /**
  * Check if a request is within the rate limit for a given user + language.
  *
  * @param namespace - Durable Object namespace for strongly-consistent counters
  * @param userId - Authenticated user ID (or "anonymous")
  * @param lang - Language code ("en" or "as")
- * @param limit - Max requests per window per language (default: 30 for free tier)
+ * @param limit - Max requests per minute per language
  * @returns RateLimitResult with allowed status, remaining count, and reset time
  */
 export async function checkRateLimit(
   namespace: DurableObjectNamespace,
   userId: string,
   lang: string,
-  limit: number = 30
+  limit: number = CHAT_REQUESTS_PER_MINUTE,
+  windowMs: number = CHAT_RATE_LIMIT_WINDOW_MS,
 ): Promise<RateLimitResult> {
   const now = Date.now();
-  const windowMs = 60 * 60 * 1000; // 1-hour sliding window
   const windowKey = Math.floor(now / windowMs);
   const resetAt = (windowKey + 1) * windowMs;
 
@@ -182,7 +203,32 @@ export function rateLimitHeaders(result: RateLimitResult, limit: number = 30): R
  * state after the hour rolls over.
  */
 export class RateLimitDurableObject {
-  constructor(private readonly state: DurableObjectState) {}
+  constructor(
+    private readonly state: DurableObjectState,
+    private readonly env?: Pick<Env, 'RATE_LIMIT_KV'>,
+  ) {}
+
+  private async writeCleanupHealth(
+    update: Pick<CleanupHealthState, 'degraded'> & Partial<CleanupHealthState>,
+  ): Promise<void> {
+    if (!this.env?.RATE_LIMIT_KV) return;
+    let previous: CleanupHealthState | null = null;
+    try {
+      const raw = await this.env.RATE_LIMIT_KV.get(RATE_LIMIT_CLEANUP_HEALTH_KEY);
+      previous = raw ? JSON.parse(raw) as CleanupHealthState : null;
+    } catch {
+      // A failed read must not prevent a fresh incident/recovery snapshot.
+    }
+    await this.env.RATE_LIMIT_KV.put(RATE_LIMIT_CLEANUP_HEALTH_KEY, JSON.stringify({
+      degraded: update.degraded,
+      latest_failure_at: update.latest_failure_at
+        ?? previous?.latest_failure_at
+        ?? null,
+      latest_recovery_at: update.latest_recovery_at
+        ?? previous?.latest_recovery_at
+        ?? null,
+    } satisfies CleanupHealthState));
+  }
 
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'POST') {
@@ -225,6 +271,49 @@ export class RateLimitDurableObject {
   }
 
   async alarm(): Promise<void> {
-    await this.state.storage.deleteAll();
+    // Install a recovery alarm before deleting state. If this handler fails
+    // after that point, the bucket gets another bounded cleanup attempt even
+    // when the original alarm delivery is not retried.
+    await this.state.storage.setAlarm(Date.now() + CLEANUP_RECOVERY_DELAY_MS);
+    const [failureCount = 0, alertedAt] = await Promise.all([
+      this.state.storage.get<number>(CLEANUP_FAILURE_COUNT_KEY),
+      this.state.storage.get<number>(CLEANUP_ALERTED_AT_KEY),
+    ]);
+
+    try {
+      await this.state.storage.deleteAll();
+      await this.state.storage.deleteAlarm();
+      if (failureCount >= CLEANUP_FAILURE_ALERT_THRESHOLD) {
+        const recoveredAt = new Date().toISOString();
+        await this.writeCleanupHealth({
+          degraded: false,
+          latest_recovery_at: recoveredAt,
+        });
+        console.info(JSON.stringify({
+          event: 'rate_limit_cleanup_recovered',
+          previousFailures: failureCount,
+        }));
+      }
+    } catch (error) {
+      const nextFailureCount = failureCount + 1;
+      const now = Date.now();
+      const shouldAlert = nextFailureCount >= CLEANUP_FAILURE_ALERT_THRESHOLD
+        && (alertedAt === undefined || now - alertedAt >= CLEANUP_FAILURE_ALERT_DEDUP_MS);
+
+      await this.state.storage.put(CLEANUP_FAILURE_COUNT_KEY, nextFailureCount);
+      if (shouldAlert) {
+        await this.state.storage.put(CLEANUP_ALERTED_AT_KEY, now);
+        await this.writeCleanupHealth({
+          degraded: true,
+          latest_failure_at: new Date(now).toISOString(),
+        });
+        console.error(JSON.stringify({
+          event: 'rate_limit_cleanup_repeated_failure',
+          failures: nextFailureCount,
+          retryInSeconds: CLEANUP_RECOVERY_DELAY_MS / 1000,
+        }));
+      }
+      throw error;
+    }
   }
 }

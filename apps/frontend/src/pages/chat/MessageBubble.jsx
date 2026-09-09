@@ -298,7 +298,9 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                           Syra is resting — try again in a moment
                         </p>
                         <p className="text-[12.5px] text-muted-foreground mt-0.5">
-                          Your question is saved and will retry automatically.
+                           {msg.autoRetryScheduled
+                             ? 'Your question is saved and will retry automatically.'
+                             : 'Your question is saved. Retry when you are ready.'}
                         </p>
                       </>
                     )}
@@ -345,7 +347,27 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               </div>
             )}
 
-            {!msg.isAiUnavailable && msg.content && (
+            {msg.isStopped && (
+              <div
+                className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100"
+                role="status"
+                data-testid="answer-stopped-card"
+              >
+                <span className="text-[12.5px] font-medium">Answer stopped. The text above may be incomplete.</span>
+                {onRetry && (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-amber-400/70 px-2.5 py-1 text-[12px] font-semibold hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/50"
+                  >
+                    <RefreshCw size={13} aria-hidden="true" />
+                    Start again
+                  </button>
+                )}
+              </div>
+            )}
+
+            {msg.content && (
               <Suspense fallback={<div className="md-content-light" style={{ fontSize: '0.9375rem' }}>{cleanContent}</div>}>
                 <MarkdownContent
                   content={cleanContent}
@@ -445,7 +467,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               // 'web'``, which meant the most common case (library /
               // cached library answers) showed no clickable badge at all.
               const isLibrary = msg.rag_source && !isDocument && !isWeb && msg.rag_source !== 'none';
-              const hasContext = boardLabel || subjectLabel || (msg.rag_source && msg.rag_source !== 'none');
+              const hasContext = boardLabel || classLabel || subjectLabel || chapterLabel || topicLabel;
               // Confidence tier chip styling
               const confidenceTierLabel = msg.confidence_tier === 'high' ? 'High confidence'
                 : msg.confidence_tier === 'mid' ? 'Good match'
@@ -460,19 +482,29 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                 : null;
               const matchPct = (msg.match_score != null && msg.match_score > 0)
                 ? Math.round(msg.match_score * 100) : null;
+               const primarySource = (Array.isArray(msg.source_entries) ? msg.source_entries : [])
+                 .find((entry) => entry && entry.kind === 'curriculum') || null;
+               const matchedPassage = (msg.matched_passage || primarySource?.matched_passage || msg.rag_chunk_snippet || primarySource?.snippet || '')
+                 .replace(/\s+/g, ' ').trim().slice(0, 360);
+               const retrievalMethod = msg.retrieval_method || primarySource?.retrieval_method || msg.rag_path || null;
+               const evidenceLanguage = primarySource?.medium || responseLang || null;
 
-              const detailedSources = Array.isArray(msg.source_entries)
-                ? msg.source_entries.filter((entry) => entry && entry.title)
-                : [];
-              const hasAnything = hasContext || sourceLine || detailedSources.length > 0;
+              const hasAnything = hasContext || isDocument;
               if (!hasAnything) return null;
+              const curriculumPath = [
+                { label: 'Topic', value: topicLabel },
+                { label: 'Chapter', value: chapterLabel },
+                { label: 'Subject', value: subjectLabel },
+                { label: 'Class', value: classLabel },
+                { label: 'Board', value: boardLabel },
+              ].filter((item) => item.value);
 
               const sourceMeta = isWeb
                 ? { Icon: Globe, kindLabel: 'Web Search' }
                 : isDocument
                   ? { Icon: FileText, kindLabel: 'Uploaded Document' }
                   : { Icon: BookOpen, kindLabel: 'Syrabit Library' };
-              const showClickableCard = (isWeb || isLibrary) && subjectUrl && subjectLabel;
+              const showClickableCard = isLibrary && subjectUrl && subjectLabel;
               const showStaticBadge = !showClickableCard && (isWeb || isDocument || isLibrary);
               const handleSourceCardClick = () => {
                 if (chapterUrl) {
@@ -494,47 +526,29 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               return (
                 <>
                   {showClickableCard && (
-                    <div
+                    <button
+                      type="button"
                       onClick={handleSourceCardClick}
-                      className="source-card-container mt-3 rounded-xl overflow-hidden cursor-pointer active:scale-[0.98]"
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          handleSourceCardClick();
-                        }
-                      }}
-                      aria-label={`Open ${chapterLabel || subjectLabel} in Syrabit Browser`}
+                      className="source-card-container mt-3 block w-full overflow-hidden rounded-xl text-left active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                      aria-label={`Open curriculum match: ${curriculumPath.map(item => `${item.label} ${item.value}`).join(', ')}`}
                     >
                       <div className="px-3 py-2.5">
                         {/* Header: source type */}
                         <div className="flex items-center gap-1.5 mb-2">
                           <sourceMeta.Icon size={11} className="source-card-icon" />
-                          <span className="source-card-label text-[10px] font-semibold uppercase tracking-wider">Source</span>
+                          <span className="source-card-label text-[10px] font-semibold uppercase tracking-wider">Curriculum match</span>
                           <span className="text-[10px] text-muted-foreground" aria-hidden="true">·</span>
                           <span className="source-card-browser text-[10.5px] font-medium">{sourceMeta.kindLabel}</span>
                         </div>
-                        {/* Subject name — prominent green headline */}
-                        {subjectLabel && (
-                          <div className="source-card-subject mb-1.5">
-                            {subjectLabel}
-                          </div>
-                        )}
-                        {/* Compact metadata pill badges */}
-                        <div className="flex flex-wrap items-center gap-1">
-                          {boardLabel && (
-                            <span className="source-card-badge text-[10.5px] font-semibold px-2 py-0.5 rounded-full">{boardLabel}</span>
-                          )}
-                          {classLabel && (
-                            <span className="source-card-badge text-[10.5px] font-semibold px-2 py-0.5 rounded-full">{classLabel}</span>
-                          )}
-                          {chapterLabel && (
-                            <span className="source-card-badge text-[10.5px] font-medium px-2 py-0.5 rounded-full truncate max-w-[140px]">{chapterLabel}</span>
-                          )}
-                          {topicLabel && !chapterLabel && (
-                            <span className="source-card-badge text-[10.5px] font-medium px-2 py-0.5 rounded-full truncate max-w-[140px]">{topicLabel}</span>
-                          )}
+                        <div className="-mx-1 flex items-center gap-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]" data-testid="curriculum-match-path">
+                          {curriculumPath.map((item, index) => (
+                            <span key={item.label} className="contents">
+                              {index > 0 && <span className="text-[11px] text-muted-foreground" aria-hidden="true">→</span>}
+                              <span className="source-card-badge shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-medium" title={`${item.label}: ${item.value}`}>
+                                <span className="font-semibold">{item.label}:</span> {item.value}
+                              </span>
+                            </span>
+                          ))}
                         </div>
                         {/* Confidence tier + match score */}
                         {(confidenceTierLabel || matchPct != null) && (
@@ -559,8 +573,22 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                             )}
                           </div>
                         )}
+                         {(matchedPassage || retrievalMethod || evidenceLanguage) && (
+                           <div className="mt-2 rounded-lg border border-border/60 bg-muted/30 px-2.5 py-2" data-testid="matched-passage">
+                             <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                               {retrievalMethod && <span className="font-medium">Method: {retrievalMethod}</span>}
+                               {evidenceLanguage && <span>· Language: {evidenceLanguage}</span>}
+                               {msg.rag_chapter_id && <span>· Chapter ID: {msg.rag_chapter_id}</span>}
+                             </div>
+                             {matchedPassage && (
+                               <p className="mt-1 text-[11.5px] leading-relaxed text-foreground/80">
+                                 “{matchedPassage}”
+                               </p>
+                             )}
+                           </div>
+                         )}
                       </div>
-                    </div>
+                    </button>
                   )}
                   {showStaticBadge && (
                     <div className="flex items-center gap-2.5 mt-3 px-3 py-2 rounded-xl" style={{
@@ -575,59 +603,6 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                       </div>
                       <span className="text-[13px] font-bold text-foreground" style={{ textTransform: 'uppercase', letterSpacing: '0.03em' }}>{sourceMeta.kindLabel}</span>
                     </div>
-                  )}
-                  {detailedSources.length > 0 && (
-                    <section
-                      className="mt-2.5 rounded-xl border border-border/70 bg-muted/20 px-3 py-2.5"
-                      aria-label="Sources used for this answer"
-                      data-testid="detailed-source-entries"
-                    >
-                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Sources used
-                      </h3>
-                      <ul className="mt-2 space-y-2">
-                        {detailedSources.map((entry) => {
-                          const sourceUrl = typeof entry.url === 'string'
-                            && (/^\//.test(entry.url) || /^https:\/\//i.test(entry.url))
-                            ? entry.url
-                            : null;
-                          const isExternal = /^https:\/\//i.test(sourceUrl || '');
-                          const title = entry.title;
-                          const label = `${entry.kind === 'web' ? 'Web source' : 'Curriculum source'}: ${title}`;
-                          const score = typeof entry.score === 'number' && entry.score > 0
-                            ? `${Math.round(entry.score * 100)}% match`
-                            : null;
-                          return (
-                            <li key={entry.id || `${entry.kind}-${entry.url || title}`} className="min-w-0">
-                              {sourceUrl ? (
-                                <a
-                                  href={sourceUrl}
-                                  {...(isExternal ? { target: '_blank', rel: 'noreferrer' } : {})}
-                                  className="text-[12.5px] font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded"
-                                  aria-label={label}
-                                >
-                                  {title}
-                                  {isExternal && <span aria-hidden="true"> ↗</span>}
-                                </a>
-                              ) : (
-                                <span className="text-[12.5px] font-semibold text-foreground">{title}</span>
-                              )}
-                              <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-                                <span>{entry.kind === 'web' ? 'Supplementary web' : 'Curriculum'}</span>
-                                {entry.medium && <span>· {entry.medium}</span>}
-                                {entry.source_type && <span>· {entry.source_type}</span>}
-                                {score && <span>· {score}</span>}
-                              </div>
-                              {entry.snippet && (
-                                <p className="mt-0.5 text-[11.5px] leading-4 text-muted-foreground line-clamp-2">
-                                  {entry.snippet}
-                                </p>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </section>
                   )}
                   <div className={`flex flex-wrap items-center gap-1 sm:gap-1.5 mt-1 transition-opacity ${responseLang && responseLang !== 'en' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                     {timeStr && (

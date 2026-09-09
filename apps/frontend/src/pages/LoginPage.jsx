@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, Loader2, MessageSquare, BarChart3, AlertCircle, Sparkles } from 'lucide-react';
 import { usePublicStats } from '@/hooks/usePublicStats';
@@ -45,8 +45,24 @@ export default function LoginPage() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const { login } = useAuth();
+  const loginInFlight = useRef(false);
+  const { login, user, authChecked } = useAuth();
   const navigate = useNavigate();
+  // Auth probes can finish while the login chunk is already mounted (for
+  // example after the protected /profile guard redirects). Complete that
+  // journey instead of leaving the user stranded on the login screen.
+  const nextDestination = (() => {
+    try {
+      const next = new URLSearchParams(window.location.search).get('next');
+      return next && next.startsWith('/') && !next.startsWith('//') ? next : null;
+    } catch {
+      return null;
+    }
+  })();
+  const destination = nextDestination || '/library';
+  useEffect(() => {
+    if (authChecked && user && !loginInFlight.current) navigate(destination, { replace: true });
+  }, [authChecked, user, destination, navigate]);
 
   const handleInputFocus = useCallback((e) => {
     setTimeout(() => {
@@ -58,6 +74,7 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
+    loginInFlight.current = true;
     try {
       const user = await login(email, password);
       toast.success('Welcome back!');
@@ -68,7 +85,8 @@ export default function LoginPage() {
         } else if (!user.onboarding_done) {
           navigate('/onboarding');
         } else {
-          navigate('/library');
+          if (nextDestination) navigate(destination, { replace: true });
+          else navigate('/library');
         }
       }, 100);
     } catch (err) {

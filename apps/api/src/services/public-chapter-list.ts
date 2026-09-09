@@ -73,8 +73,11 @@ export function serializePublicChapterList(
       slug_as: chapter.slugAs ?? null,
       chapter_number: chapter.chapterNumber ?? null,
       status: chapter.status ?? 'draft',
-      notes_generated: Boolean(chapter.notesEn),
-      has_assamese: Boolean(chapter.notesAs),
+       // Keep this in lockstep with the content-service catalogue. Tiny
+       // placeholders are not usable notes and must not advertise a chapter
+       // as generated.
+       notes_generated: Boolean(chapter.notesEn && chapter.notesEn.trim().length > 10),
+       has_assamese: Boolean(chapter.notesAs && chapter.notesAs.trim().length > 10),
       has_qa: parseArray<unknown>(chapter.qaEn).length > 0,
       has_pyq: Boolean(chapter.pyqPdfUrl) || parseArray<unknown>(chapter.pyqPapers).length > 0,
       syllabus_topics: syllabusTopics,

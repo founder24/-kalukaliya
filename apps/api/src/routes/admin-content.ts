@@ -122,6 +122,10 @@ adminContentRouter.get('/verify', async c => {
 });
 
 adminContentRouter.post('/logout', async c => {
+  // Logout is harmless from a data perspective, but requiring the same
+  // session boundary as every other admin route prevents anonymous callers
+  // from using it as an apparent authenticated admin probe.
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
   const response = c.json({ status: 'ok', message: 'Logged out', server_revocation: false });
   response.headers.set('Set-Cookie', 'syrabit_admin_session=; Path=/api/; Max-Age=0; HttpOnly; SameSite=Lax');
   return response;

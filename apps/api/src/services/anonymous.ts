@@ -8,10 +8,9 @@
 
 export const BROWSER_ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
 export const ANONYMOUS_COOKIE_NAME = 'syrabit_anon_id';
-export const ANONYMOUS_DAILY_LIMIT = 30;
-// Kept as an import-compatible alias while callers migrate their response
-// field names. Anonymous quota itself resets daily.
-export const ANONYMOUS_MONTHLY_LIMIT = ANONYMOUS_DAILY_LIMIT;
+export const CHAT_RPM_LIMIT = 6;
+export const ANONYMOUS_DAILY_LIMIT = CHAT_RPM_LIMIT;
+export const ANONYMOUS_MONTHLY_LIMIT = CHAT_RPM_LIMIT;
 const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/;
 
 export function isBrowserAnonId(value: string | null | undefined): value is string {
@@ -19,7 +18,13 @@ export function isBrowserAnonId(value: string | null | undefined): value is stri
 }
 
 export function currentQuotaPeriod(): string {
+  // Retained for non-chat legacy callers which use calendar-day accounting.
   return new Date().toISOString().slice(0, 10);
+}
+
+/** Canonical period for the atomic chat allowance (one UTC minute bucket). */
+export function currentQuotaMinutePeriod(): string {
+  return new Date().toISOString().slice(0, 16);
 }
 
 function cookieValue(cookieHeader: string, name: string): string | null {
@@ -74,12 +79,62 @@ async function signedCookieAnonId(req: Request, secret?: string): Promise<string
   return timingSafeEqual(signature, expected) ? id : null;
 }
 
-export async function anonUserId(req: Request, cookieSecret?: string): Promise<string> {
-  const browserId = req.headers.get('x-anon-id')?.trim();
-  if (isBrowserAnonId(browserId)) return browserId;
+export async function isTrustedEdgeRequest(req: Request, secret?: string): Promise<boolean> {
+  if (!secret) return false;
+  const timestamp = req.headers.get('X-Edge-Timestamp');
+  const signature = req.headers.get('X-Edge-Signature');
+  const userId = req.headers.get('X-User-ID') ?? 'anonymous';
+  if (!timestamp || !signature || !SIGNATURE_PATTERN.test(signature)) return false;
+  const timestampSeconds = Number.parseInt(timestamp, 10);
+  if (!Number.isSafeInteger(timestampSeconds)
+    || Math.abs(Math.floor(Date.now() / 1000) - timestampSeconds) > 120) {
+    return false;
+  }
 
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const pathname = new URL(req.url).pathname;
+  const message = `${timestamp}:${userId}:${pathname}`;
+  const expected = hex(await crypto.subtle.sign('HMAC', key, encoder.encode(message)));
+  return timingSafeEqual(signature, expected);
+}
+
+export async function isEdgeRateLimitedRequest(
+  req: Request,
+  secret?: string,
+): Promise<boolean> {
+  return req.headers.get('X-Rate-Limited-By') === 'edge'
+    && await isTrustedEdgeRequest(req, secret);
+}
+
+export async function trustedEdgeRateLimitUsage(
+  req: Request,
+  secret?: string,
+): Promise<{ count: number; limit: number } | null> {
+  if (!await isEdgeRateLimitedRequest(req, secret)) return null;
+  const limit = Number.parseInt(req.headers.get('X-RateLimit-Limit') ?? '', 10);
+  const remaining = Number.parseInt(req.headers.get('X-RateLimit-Remaining') ?? '', 10);
+  if (!Number.isSafeInteger(limit) || limit < 1
+    || !Number.isSafeInteger(remaining) || remaining < 0 || remaining >= limit) {
+    return null;
+  }
+  return { count: limit - remaining - 1, limit };
+}
+
+export async function anonUserId(req: Request, cookieSecret?: string): Promise<string> {
   const cookieId = await signedCookieAnonId(req, cookieSecret);
   if (cookieId) return cookieId;
+
+  const browserId = req.headers.get('x-anon-id')?.trim();
+  if (isBrowserAnonId(browserId) && await isTrustedEdgeRequest(req, cookieSecret)) {
+    return browserId;
+  }
 
   // Cloudflare supplies and overwrites this header before either Worker runs.
   // Forwarding headers are intentionally excluded because direct callers can

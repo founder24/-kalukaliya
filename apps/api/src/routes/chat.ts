@@ -23,7 +23,6 @@ import {
   users,
   chats,
   memoryBrain,
-  chapters as chaptersTable,
 } from '../db/schema';
 import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import {
@@ -41,10 +40,10 @@ import {
   type WebSearchResult,
 } from '../services/web-search';
 import {
-  ANONYMOUS_MONTHLY_LIMIT,
+  CHAT_RPM_LIMIT,
   anonUserId,
-  anonymousQuotaKey,
-  currentQuotaPeriod,
+  currentQuotaMinutePeriod,
+  trustedEdgeRateLimitUsage,
 } from '../services/anonymous';
 import type { Env } from '../types';
 
@@ -55,12 +54,7 @@ import type { Env } from '../types';
 const CONFIDENCE_HIGH = 0.80;
 const CONFIDENCE_LOW  = 0.50;
 
-const MONTHLY_LIMITS: Record<string, number> = {
-  free:    ANONYMOUS_MONTHLY_LIMIT,
-  starter: 100,
-  pro:     500,
-  premium: 10_000,
-};
+const CHAT_REQUESTS_PER_MINUTE = CHAT_RPM_LIMIT;
 
 // Keep prompts small enough for fast prefill while retaining a useful slice of
 // curriculum content. Chapter-scoped turns bypass semantic retrieval below, so
@@ -159,6 +153,11 @@ interface SourceEntry {
   kind: 'curriculum' | 'web';
   url: string | null;
   snippet: string;
+  /** Stable, bounded evidence excerpt; never includes an external URL. */
+  matched_passage?: string | undefined;
+  chapter_id?: string | undefined;
+  retrieval_method?: string | undefined;
+  confidence?: number | undefined;
   medium: string;
   source_type: string;
   score?: number | undefined;
@@ -167,9 +166,121 @@ interface SourceEntry {
   class_slug?: string | undefined;
   board_slug?: string | undefined;
   topic_name?: string | undefined;
+  subject_name?: string | undefined;
+  class_name?: string | undefined;
+  board_name?: string | undefined;
 }
 
 export type AuthoritativeIntent = 'syllabus' | 'pyq' | null;
+
+interface CurriculumScope {
+  subjectId?: string;
+  subjectName?: string;
+  className?: string;
+  boardName?: string;
+  explicit: boolean;
+  unresolved: boolean;
+}
+
+interface CurriculumScopeRow {
+  subject_id: string;
+  subject_name: string;
+  subject_slug: string;
+  class_name: string | null;
+  class_level: string | null;
+  class_slug: string | null;
+  board_name: string | null;
+  board_slug: string | null;
+}
+
+function normalizedScopeText(value: string): string {
+  return ` ${value.toLowerCase().normalize('NFKC').replace(/[^a-z0-9\u0980-\u09ff]+/gu, ' ').trim()} `;
+}
+
+/** Extract only explicit class references; never infer a class from the topic. */
+export function detectCurriculumClass(message: string): '11' | '12' | 'semester-1' | 'semester-3' | 'semester-5' | null {
+  const text = normalizedScopeText(message);
+  if (/\b(?:class\s*11|class\s*xi|hs\s*1(?:st)?\s*year|higher\s*secondary\s*1(?:st)?\s*year)\b/.test(text)) return '11';
+  if (/\b(?:class\s*12|class\s*xii|hs\s*2(?:nd)?\s*year|higher\s*secondary\s*2(?:nd)?\s*year)\b/.test(text)) return '12';
+  if (/\b(?:1st|first)\s*semester\b/.test(text)) return 'semester-1';
+  if (/\b(?:3rd|third)\s*semester\b/.test(text)) return 'semester-3';
+  if (/\b(?:5th|fifth)\s*semester\b/.test(text)) return 'semester-5';
+  return null;
+}
+
+function classMatches(row: CurriculumScopeRow, detected: ReturnType<typeof detectCurriculumClass>): boolean {
+  if (!detected) return true;
+  const text = normalizedScopeText([row.class_name, row.class_level, row.class_slug].filter(Boolean).join(' '));
+  if (detected === '11') return /\b(?:11|xi|hs\s*1|1st\s*year)\b/.test(text);
+  if (detected === '12') return /\b(?:12|xii|hs\s*2|2nd\s*year)\b/.test(text);
+  return text.includes(` ${detected.replace('-', ' ')} `)
+    || text.includes(` ${detected.split('-')[1]} `);
+}
+
+function phraseAppears(text: string, phrase: string): boolean {
+  const normalizedPhrase = normalizedScopeText(phrase).trim();
+  return normalizedPhrase.length >= 3 && text.includes(` ${normalizedPhrase} `);
+}
+
+function hasExplicitSubjectWording(message: string): boolean {
+  return /\b(?:physics|chemistry|biology|mathematics|maths?|english|assamese|economics|accountancy|education|history|geography|sociology|psychology|philosophy|computer\s+science|political\s+science|business\s+studies)\b/i.test(message);
+}
+
+/**
+ * Resolve explicit curriculum wording against D1. An ambiguous or conflicting
+ * request fails closed instead of broadening semantic search across catalogues.
+ */
+async function resolveCurriculumScope(
+  d1: D1Database,
+  message: string,
+  bodySubjectId?: string,
+): Promise<CurriculumScope> {
+  const messageText = normalizedScopeText(message);
+  const detectedClass = detectCurriculumClass(message);
+  const rowsResult = await d1.prepare(`
+    SELECT subjects.id AS subject_id, subjects.name AS subject_name,
+           subjects.slug AS subject_slug, classes.name AS class_name,
+           classes.level AS class_level, classes.slug AS class_slug,
+           boards.name AS board_name, boards.slug AS board_slug
+    FROM subjects
+    LEFT JOIN streams ON streams.id = subjects.stream_id
+    LEFT JOIN classes ON classes.id = streams.class_id
+    LEFT JOIN boards ON boards.id = classes.board_id
+    WHERE subjects.is_published = 1
+      AND (streams.id IS NULL OR streams.status = 'published')
+      AND (classes.id IS NULL OR classes.status = 'published')
+      AND (boards.id IS NULL OR boards.status = 'published')
+  `).all<CurriculumScopeRow>();
+  const rows = rowsResult.results ?? [];
+  const named = rows.filter(row =>
+    phraseAppears(messageText, row.subject_name)
+    || phraseAppears(messageText, row.subject_slug.replace(/-/g, ' ')),
+  );
+  const explicitSubject = named.length > 0;
+  let candidates = explicitSubject ? named : rows;
+  if (detectedClass) candidates = candidates.filter(row => classMatches(row, detectedClass));
+
+  // A page-provided subject remains useful when the question does not name a
+  // different subject, but explicit wording always wins.
+  if (!explicitSubject && bodySubjectId) {
+    candidates = candidates.filter(row => row.subject_id === bodySubjectId);
+  }
+
+  const explicit = Boolean(detectedClass || explicitSubject);
+  const unique = [...new Map(candidates.map(row => [row.subject_id, row])).values()];
+  if (unique.length !== 1) {
+    return { explicit, unresolved: explicit };
+  }
+  const row = unique[0]!;
+  return {
+    subjectId: row.subject_id,
+    subjectName: row.subject_name,
+    ...(row.class_name && { className: row.class_name }),
+    ...(row.board_name && { boardName: row.board_name }),
+    explicit,
+    unresolved: false,
+  };
+}
 
 /**
  * These requests are lists/records, not open-ended semantic questions. They
@@ -195,7 +306,7 @@ interface AuthoritativeD1Row {
   pyq_papers: string | null;
 }
 
-async function fetchAuthoritativeIntentContext(
+export async function fetchAuthoritativeIntentContext(
   d1: D1Database,
   intent: Exclude<AuthoritativeIntent, null>,
   subjectId: string | undefined,
@@ -205,18 +316,34 @@ async function fetchAuthoritativeIntentContext(
   // 30 titles / 12 PYQ-bearing chapters keeps the prompt bounded even for a
   // subject with a long catalogue. Parameters, rather than text interpolation,
   // preserve D1 query safety.
-  const where = chapterId
-    ? "WHERE id = ? AND status = 'published'"
-    : subjectId ? "WHERE subject_id = ? AND status = 'published'" : "WHERE status = 'published'";
-  const bind = chapterId ?? subjectId;
+  const scopeConditions: string[] = [];
+  const scopeBindings: string[] = [];
+  if (chapterId) {
+    scopeConditions.push('chapters.id = ?');
+    scopeBindings.push(chapterId);
+  }
+  if (subjectId) {
+    scopeConditions.push('chapters.subject_id = ?');
+    scopeBindings.push(subjectId);
+  }
   const limit = intent === 'syllabus' ? 30 : 12;
   const rows = await d1.prepare(`
-    SELECT id, title, subject_id, pyq_pdf_url, pyq_papers
+    SELECT chapters.id, chapters.title, chapters.subject_id,
+           chapters.pyq_pdf_url, chapters.pyq_papers
     FROM chapters
-    ${where}
-    ORDER BY chapter_number ASC, title ASC
+    JOIN subjects ON subjects.id = chapters.subject_id
+    LEFT JOIN streams ON streams.id = subjects.stream_id
+    LEFT JOIN classes ON classes.id = streams.class_id
+    LEFT JOIN boards ON boards.id = classes.board_id
+    WHERE chapters.status = 'published'
+      AND subjects.is_published = 1
+      AND (streams.id IS NULL OR streams.status = 'published')
+      AND (classes.id IS NULL OR classes.status = 'published')
+      AND (boards.id IS NULL OR boards.status = 'published')
+      ${scopeConditions.map(condition => `AND ${condition}`).join('\n      ')}
+    ORDER BY chapters.chapter_number ASC, chapters.title ASC
     LIMIT ?
-  `).bind(...(bind ? [bind, limit] : [limit])).all<AuthoritativeD1Row>();
+  `).bind(...scopeBindings, limit).all<AuthoritativeD1Row>();
 
   return (rows.results ?? [])
     .filter((row) => intent === 'syllabus'
@@ -342,6 +469,13 @@ export function isReliableAssameseAnswer(text: string): boolean {
   if (bengaliMarkers.length >= 2) return false;
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (/^(?:হয়|নাই|ভাল|ঠিক আছে|অৱশ্যই|নহয়)[।.!]?$/u.test(normalized)) return true;
+  // Assamese and Bengali share most of the Unicode block. Require affirmative
+  // Assamese evidence (distinctive letters or common Assamese morphology), not
+  // merely the absence of a short Bengali blacklist.
+  const hasPositiveAssameseEvidence =
+    /[ৰৱ]/u.test(normalized)
+    || /(?:^|[\s,.!?।])(?:আৰু|কাৰণ|তেন্তে|নহয়|হৈছে|কৰা|কৰে|কৰিব|পৰা|টো|বোৰ)(?=$|[\s,.!?।])/u.test(normalized);
+  if (!hasPositiveAssameseEvidence) return false;
   const assameseChars = (text.match(/[\u0980-\u09FF]/g) ?? []).length;
   const latinChars = (text.match(/[A-Za-z]/g) ?? []).length;
   return assameseChars >= 2
@@ -349,9 +483,9 @@ export function isReliableAssameseAnswer(text: string): boolean {
 }
 
 /**
- * Last-resort delivery gate. Assamese and Bengali share a script and many words,
- * so strict dialect heuristics must never strand a student behind an error card.
- * This still blocks Hindi/Devanagari and predominantly English responses.
+ * Telemetry-only broad script signal. Never use this to authorize delivery:
+ * Assamese and Bengali share a script, so only isReliableAssameseAnswer may
+ * approve a final Assamese response.
  */
 export function isUsableAssameseAnswer(text: string): boolean {
   if (/[\u0900-\u0963\u0970-\u097F]/u.test(text)) return false;
@@ -401,6 +535,9 @@ const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 interface ChatRequestClaim {
   user_id: string;
   status: string;
+  period?: string;
+  is_anon?: number;
+  quota_reserved?: number;
   session_id: string | null;
   response_content: string | null;
   response_metadata: string | null;
@@ -417,22 +554,38 @@ async function getChatRequestClaim(
   ).bind(requestId, Math.floor(Date.now() / 1000)).first<ChatRequestClaim>();
 }
 
+async function isChatRequestCancelled(
+  d1: D1Database,
+  requestId: string | null,
+  userId: string,
+): Promise<boolean> {
+  if (!requestId) return false;
+  const row = await d1.prepare(
+    `SELECT 1 AS cancelled FROM chat_request_claims
+     WHERE request_id = ? AND user_id = ? AND status = 'cancelled'`,
+  ).bind(requestId, userId).first<{ cancelled: number }>();
+  return Boolean(row);
+}
+
 async function insertChatRequestClaim(
   d1: D1Database,
   requestId: string,
   userId: string,
   isAnon: boolean,
+  quotaReserved: boolean,
+  period = currentQuotaMinutePeriod(),
 ): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
   const result = await d1.prepare(`
     INSERT OR IGNORE INTO chat_request_claims
-      (request_id, user_id, period, is_anon, status, created_at, expires_at)
-    VALUES (?, ?, ?, ?, 'reserved', ?, ?)
+      (request_id, user_id, period, is_anon, quota_reserved, status, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?)
   `).bind(
     requestId,
     userId,
-    currentQuotaPeriod(),
+    period,
     isAnon ? 1 : 0,
+    quotaReserved ? 1 : 0,
     now,
     now + 24 * 3600,
   ).run();
@@ -454,7 +607,7 @@ async function completeChatRequestClaim(
         session_id = ?,
         response_content = ?,
         response_metadata = ?
-    WHERE request_id = ? AND user_id = ?
+    WHERE request_id = ? AND user_id = ? AND status = 'reserved'
   `).bind(
     sessionId,
     responseContent.slice(0, 8000),
@@ -473,6 +626,45 @@ async function deleteChatRequestClaim(
   await d1.prepare(
     'DELETE FROM chat_request_claims WHERE request_id = ? AND user_id = ?',
   ).bind(requestId, userId).run();
+}
+
+async function releaseClaimQuotaReservation(
+  d1: D1Database,
+  requestId: string | null,
+  userId: string,
+  isAnon: boolean,
+): Promise<void> {
+  if (!requestId) {
+    await releaseQuotaReservation(d1, userId, isAnon);
+    return;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const quotaStatement = isAnon
+    ? d1.prepare(`
+        UPDATE anonymous_quota_usage
+        SET count = count - 1, updated_at = ?
+        WHERE anon_id = ? AND count > 0
+          AND period = (
+            SELECT period FROM chat_request_claims
+            WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+          )
+      `).bind(now, userId, requestId, userId)
+    : d1.prepare(`
+        UPDATE quota_usage
+        SET count = count - 1, updated_at = ?
+        WHERE user_id = ? AND count > 0
+          AND period = (
+            SELECT period FROM chat_request_claims
+            WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+          )
+      `).bind(now, userId, requestId, userId);
+  await d1.batch([
+    quotaStatement,
+    d1.prepare(
+      `DELETE FROM chat_request_claims
+       WHERE request_id = ? AND user_id = ? AND status = 'reserved'`,
+    ).bind(requestId, userId),
+  ]);
 }
 
 function replayCompletedChatRequest(
@@ -624,14 +816,13 @@ export async function reserveAuthQuota(
   userId: string,
   tier: string,
   role: string,
+  period = currentQuotaMinutePeriod(),
 ): Promise<{ allowed: boolean; count: number; limit: number }> {
   if (role === 'admin' || role === 'staff') {
     return { allowed: true, count: 0, limit: 999_999 };
   }
 
-  // noUncheckedIndexedAccess: Record indexing gives number | undefined; fall back to 20
-  const limit: number = MONTHLY_LIMITS[tier] ?? 20;
-  const period = currentQuotaPeriod();
+  const limit = CHAT_REQUESTS_PER_MINUTE;
   const now = Math.floor(Date.now() / 1000);
   const rowId = `${userId}:${period}`;
 
@@ -669,15 +860,14 @@ export async function reserveAnonQuota(
   d1: D1Database,
   legacyKv: KVNamespace,
   anonId: string,
+  period = currentQuotaMinutePeriod(),
 ): Promise<{ allowed: boolean; count: number; limit: number }> {
-  const limit: number = MONTHLY_LIMITS['free'] ?? 20;
-  const period = currentQuotaPeriod();
+  const limit = CHAT_REQUESTS_PER_MINUTE;
   const now = Math.floor(Date.now() / 1000);
-  const legacyRaw = await legacyKv.get(anonymousQuotaKey(anonId));
-  const legacyCount = Math.min(limit, Math.max(
-    0,
-    Number.parseInt(legacyRaw ?? '0', 10) || 0,
-  ));
+  // Daily KV counters must not seed one-minute buckets; doing so would carry
+  // the retired 30-message cap into the new RPM limiter.
+  void legacyKv;
+  const legacyCount = 0;
 
   const result = await d1.prepare(`
     INSERT INTO anonymous_quota_usage (anon_id, period, count, updated_at)
@@ -716,28 +906,18 @@ export async function reserveAnonQuota(
   return { allowed: true, count: result.count - 1, limit };
 }
 
-/** Read anonymous usage while atomically preserving legacy KV as a floor. */
+/** Read anonymous usage for the current one-minute bucket. */
 export async function getAnonQuotaUsage(
   d1: D1Database,
   legacyKv: KVNamespace,
   anonId: string,
 ): Promise<number> {
-  const period = currentQuotaPeriod();
-  const now = Math.floor(Date.now() / 1000);
-  const legacyRaw = await legacyKv.get(anonymousQuotaKey(anonId));
-  const legacyCount = Math.min(ANONYMOUS_MONTHLY_LIMIT, Math.max(
-    0,
-    Number.parseInt(legacyRaw ?? '0', 10) || 0,
-  ));
-  const row = await d1.prepare(`
-    INSERT INTO anonymous_quota_usage (anon_id, period, count, updated_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT (anon_id, period) DO UPDATE SET
-      count = MAX(anonymous_quota_usage.count, excluded.count),
-      updated_at = excluded.updated_at
-    RETURNING count
-  `).bind(anonId, period, legacyCount, now).first<{ count: number }>();
-  return row?.count ?? legacyCount;
+  const period = currentQuotaMinutePeriod();
+  void legacyKv;
+  const row = await d1.prepare(
+    'SELECT count FROM anonymous_quota_usage WHERE anon_id = ? AND period = ?',
+  ).bind(anonId, period).first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 /** Release one previously reserved slot with a single atomic decrement. */
@@ -745,8 +925,8 @@ export async function releaseQuotaReservation(
   d1: D1Database,
   userId: string,
   isAnon: boolean,
+  period = currentQuotaMinutePeriod(),
 ): Promise<void> {
-  const period = currentQuotaPeriod();
   const now = Math.floor(Date.now() / 1000);
 
   if (isAnon) {
@@ -811,23 +991,38 @@ async function queryVectorize(
  * documented in syrabit-rag-v2.md and rag-field-priority.md.
  */
 async function fetchChapterContent(
-  db: ReturnType<typeof createDb>,
+  d1: D1Database,
   chapterId: string,
   lang: 'en' | 'as',
+  subjectId?: string,
 ): Promise<{ content: string; language: 'assamese' | 'english' } | null> {
-  const row = await db
-    .select({
-      ragSectionsEn: chaptersTable.ragSectionsEn,
-      ragSectionsAs: chaptersTable.ragSectionsAs,
-      ragText:       chaptersTable.ragText,
-      ragTextAs:     chaptersTable.ragTextAs,
-      notesEn:       chaptersTable.notesEn,
-      notesAs:       chaptersTable.notesAs,
-      title:         chaptersTable.title,
-    })
-    .from(chaptersTable)
-    .where(eq(chaptersTable.id, chapterId))
-    .get();
+  const row = await d1.prepare(`
+    SELECT chapters.rag_sections_en AS ragSectionsEn,
+           chapters.rag_sections_as AS ragSectionsAs,
+           chapters.rag_text AS ragText, chapters.rag_text_as AS ragTextAs,
+           chapters.notes_en AS notesEn, chapters.notes_as AS notesAs,
+           chapters.title AS title
+    FROM chapters
+    JOIN subjects ON subjects.id = chapters.subject_id
+    LEFT JOIN streams ON streams.id = subjects.stream_id
+    LEFT JOIN classes ON classes.id = streams.class_id
+    LEFT JOIN boards ON boards.id = classes.board_id
+    WHERE chapters.id = ?
+      AND chapters.status = 'published'
+      AND subjects.is_published = 1
+      AND (streams.id IS NULL OR streams.status = 'published')
+      AND (classes.id IS NULL OR classes.status = 'published')
+      AND (boards.id IS NULL OR boards.status = 'published')
+      AND (? IS NULL OR chapters.subject_id = ?)
+  `).bind(chapterId, subjectId ?? null, subjectId ?? null).first<{
+    ragSectionsEn: string | null;
+    ragSectionsAs: string | null;
+    ragText: string | null;
+    ragTextAs: string | null;
+    notesEn: string | null;
+    notesAs: string | null;
+    title: string;
+  }>();
 
   if (!row) return null;
 
@@ -848,6 +1043,107 @@ async function fetchChapterContent(
   return null;
 }
 
+export async function fetchMatchedChunkContext(
+  d1: D1Database,
+  matches: VectorizeMatch[],
+  chapterId: string,
+  lang: 'en' | 'as',
+  subjectId?: string,
+): Promise<ContextChunk[]> {
+  const verifiedChapter = async () => d1.prepare(`
+    SELECT chapters.title AS chapterTitle, chapters.subject_id AS subjectId
+    FROM chapters
+    JOIN subjects ON subjects.id = chapters.subject_id
+    LEFT JOIN streams ON streams.id = subjects.stream_id
+    LEFT JOIN classes ON classes.id = streams.class_id
+    LEFT JOIN boards ON boards.id = classes.board_id
+    WHERE chapters.id = ?
+      AND chapters.status = 'published'
+      AND subjects.is_published = 1
+      AND (streams.id IS NULL OR streams.status = 'published')
+      AND (classes.id IS NULL OR classes.status = 'published')
+      AND (boards.id IS NULL OR boards.status = 'published')
+      AND (? IS NULL OR chapters.subject_id = ?)
+    LIMIT 1
+  `).bind(chapterId, subjectId ?? null, subjectId ?? null).first<{
+    chapterTitle: string;
+    subjectId: string;
+  }>();
+
+  const matching = matches
+    .filter(match => (match.metadata as ChunkMeta | undefined)?.chapterId === chapterId)
+    .slice(0, 6);
+  const candidates = await Promise.all(matching.map(async (match) => {
+    const meta = match.metadata as ChunkMeta;
+    const mirror = await d1.prepare(`
+      SELECT chunks.content, chunks.medium, chunks.source_type AS sourceType,
+             chunks.chapter_id AS chapterId, chunks.subject_id AS subjectId
+      FROM chunks
+      WHERE chunks.vector_id = ?
+      LIMIT 1
+    `).bind(match.id).first<{
+      content: string;
+      medium: string;
+      sourceType: string;
+      chapterId: string | null;
+      subjectId: string | null;
+    }>();
+
+    if (mirror) {
+      if (
+        mirror.chapterId !== chapterId
+        || !mirror.content.trim()
+        || (subjectId !== undefined && mirror.subjectId !== null && mirror.subjectId !== subjectId)
+      ) {
+        return null;
+      }
+      const hierarchy = await verifiedChapter();
+      if (!hierarchy) return null;
+      return {
+        chapterId,
+        chapterTitle: hierarchy.chapterTitle,
+        subjectId: hierarchy.subjectId,
+        content: mirror.content.trim(),
+        score: match.score,
+        medium: mirror.medium,
+        sourceType: mirror.sourceType,
+        ...(meta.topicId !== undefined && { topicName: meta.topicId }),
+      } satisfies ContextChunk;
+    }
+
+    // Older vectors can predate the full D1 chunk mirror. Their metadata still
+    // contains the exact indexed passage; use it only after the chapter passes
+    // the same publication and subject validation.
+    if (meta.content?.trim()) {
+      const hierarchy = await verifiedChapter();
+      if (hierarchy) {
+        return {
+          chapterId,
+          chapterTitle: hierarchy.chapterTitle,
+          subjectId: hierarchy.subjectId,
+          content: meta.content.trim(),
+          score: match.score,
+          medium: meta.medium ?? (lang === 'as' ? 'assamese' : 'english'),
+          sourceType: meta.sourceType ?? 'rag_chunk_metadata',
+          ...(meta.topicId !== undefined && { topicName: meta.topicId }),
+        } satisfies ContextChunk;
+      }
+    }
+    return null;
+  }));
+
+  const result: ContextChunk[] = [];
+  let remaining = CONTEXT_CHAR_CAP;
+  for (const candidate of candidates) {
+    if (!candidate || remaining <= 0) continue;
+    const content = candidate.content.slice(0, remaining);
+    if (!content) continue;
+    result.push({ ...candidate, content });
+    remaining -= content.length;
+  }
+  return result;
+}
+
 /**
  * Resolve the navigation metadata for the compact set of chapters used to
  * ground a turn. This deliberately happens after retrieval (never in the
@@ -860,22 +1156,33 @@ async function buildSourceEntries(
   webResults: WebSearchResult[],
   lang: 'en' | 'as',
 ): Promise<SourceEntry[]> {
-  const curriculum = await Promise.all(chunks.map(async (chunk) => {
+  const curriculumCandidates = await Promise.all(chunks.map(async (chunk): Promise<SourceEntry | null> => {
     const row = await d1.prepare(`
       SELECT chapters.slug AS chapter_slug, subjects.slug AS subject_slug,
-             classes.slug AS class_slug, boards.slug AS board_slug
+             classes.slug AS class_slug, boards.slug AS board_slug,
+             subjects.name AS subject_name, classes.name AS class_name,
+             boards.name AS board_name
       FROM chapters
       LEFT JOIN subjects ON subjects.id = chapters.subject_id
       LEFT JOIN streams ON streams.id = subjects.stream_id
       LEFT JOIN classes ON classes.id = streams.class_id
       LEFT JOIN boards ON boards.id = classes.board_id
       WHERE chapters.id = ?
+        AND chapters.status = 'published'
+        AND subjects.is_published = 1
+        AND (streams.id IS NULL OR streams.status = 'published')
+        AND (classes.id IS NULL OR classes.status = 'published')
+        AND (boards.id IS NULL OR boards.status = 'published')
     `).bind(chunk.chapterId).first<{
       chapter_slug: string | null;
       subject_slug: string | null;
       class_slug: string | null;
       board_slug: string | null;
+      subject_name: string | null;
+      class_name: string | null;
+      board_name: string | null;
     }>().catch(() => null);
+    if (!row) return null;
     const path = row?.board_slug && row.class_slug && row.subject_slug && row.chapter_slug
       ? `/${row.board_slug}/${row.class_slug}/${row.subject_slug}/${row.chapter_slug}`
       : null;
@@ -885,6 +1192,10 @@ async function buildSourceEntries(
       kind: 'curriculum' as const,
       url: path,
       snippet: chunk.content.replace(/\s+/g, ' ').trim().slice(0, 360),
+      matched_passage: chunk.content.replace(/\s+/g, ' ').trim().slice(0, 360),
+      chapter_id: chunk.chapterId,
+      retrieval_method: chunk.sourceType ?? 'rag_chapter',
+      confidence: chunk.score,
       medium: chunk.medium ?? (lang === 'as' ? 'assamese' : 'english'),
       source_type: chunk.sourceType ?? 'rag_chapter',
       score: chunk.score,
@@ -893,14 +1204,20 @@ async function buildSourceEntries(
       ...(row?.class_slug && { class_slug: row.class_slug }),
       ...(row?.board_slug && { board_slug: row.board_slug }),
       ...(chunk.topicName && { topic_name: chunk.topicName }),
+      ...(row?.subject_name && { subject_name: row.subject_name }),
+      ...(row?.class_name && { class_name: row.class_name }),
+      ...(row?.board_name && { board_name: row.board_name }),
     };
   }));
+  const curriculum = curriculumCandidates.filter((entry): entry is SourceEntry => entry !== null);
   const web = webResults.map((result, index) => ({
     id: `web:${index}:${result.url}`,
     title: result.title,
     kind: 'web' as const,
-    url: result.url,
-    snippet: result.snippet,
+    // External URLs are deliberately kept server-side. A source card is a
+    // curriculum provenance surface, not an unsafe arbitrary-link renderer.
+    url: null,
+    snippet: result.snippet.replace(/\s+/g, ' ').trim().slice(0, 360),
     medium: 'web',
     source_type: result.source,
   }));
@@ -1185,13 +1502,21 @@ async function persistCompletedChat(
   const statements = [
     d1.prepare(`
       INSERT INTO chats (id, user_id, session_id, role, content, lang, chapter_id, subject_id, expires_at, created_at)
-      VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?)
-    `).bind(userMsgId, uid, sid, opts.userMessage.slice(0, 4000), lang, chId, subId, expiresAt, now),
+      SELECT ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?
+      WHERE ? IS NULL OR EXISTS (
+        SELECT 1 FROM chat_request_claims
+        WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+      )
+    `).bind(userMsgId, uid, sid, opts.userMessage.slice(0, 4000), lang, chId, subId, expiresAt, now, opts.requestId, opts.requestId, uid),
 
     d1.prepare(`
       INSERT INTO chats (id, user_id, session_id, role, content, lang, chapter_id, subject_id, metadata, expires_at, created_at)
-      VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?)
-    `).bind(assistId, uid, sid, opts.assistantResponse.slice(0, 8000), lang, chId, subId, JSON.stringify({ model: opts.modelUsed }), expiresAt, now + 1),
+      SELECT ?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?
+      WHERE ? IS NULL OR EXISTS (
+        SELECT 1 FROM chat_request_claims
+        WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+      )
+    `).bind(assistId, uid, sid, opts.assistantResponse.slice(0, 8000), lang, chId, subId, JSON.stringify({ model: opts.modelUsed }), expiresAt, now + 1, opts.requestId, opts.requestId, uid),
   ];
   if (!opts.isAnon) {
     statements.push(d1.prepare(`
@@ -1199,13 +1524,20 @@ async function persistCompletedChat(
       SET monthly_message_count   = monthly_message_count + 1,
           total_lifetime_messages = total_lifetime_messages + 1,
           updated_at              = ?
-      WHERE id = ?
-    `).bind(now, uid));
+       WHERE id = ? AND (? IS NULL OR EXISTS (
+         SELECT 1 FROM chat_request_claims
+         WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+       ))
+    `).bind(now, uid, opts.requestId, opts.requestId, uid));
 
     if (opts.assistantResponse.trim().length >= 40) {
       statements.push(d1.prepare(`
         INSERT INTO memory_brain (id, user_id, key, value, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        SELECT ?, ?, ?, ?, ?
+        WHERE ? IS NULL OR EXISTS (
+          SELECT 1 FROM chat_request_claims
+          WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+        )
         ON CONFLICT(user_id, key) DO UPDATE SET
           value = excluded.value,
           updated_at = excluded.updated_at
@@ -1222,6 +1554,9 @@ async function persistCompletedChat(
           lang,
         }),
         now,
+        opts.requestId,
+        opts.requestId,
+        uid,
       ));
     }
   }
@@ -1232,7 +1567,7 @@ async function persistCompletedChat(
           session_id = ?,
           response_content = ?,
           response_metadata = ?
-      WHERE request_id = ? AND user_id = ?
+      WHERE request_id = ? AND user_id = ? AND status = 'reserved'
     `).bind(
       sid,
       opts.assistantResponse.slice(0, 8000),
@@ -1249,6 +1584,85 @@ async function persistCompletedChat(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const chatRouter = new Hono<{ Bindings: Env }>();
+
+chatRouter.post('/cancel', async (c) => {
+  const body: { client_request_id?: string } =
+    await c.req.json<{ client_request_id?: string }>().catch(() => ({}));
+  const requestId = body.client_request_id?.trim() ?? '';
+  if (!CLIENT_REQUEST_ID_PATTERN.test(requestId)) {
+    return c.json({ detail: 'A valid client_request_id is required.' }, 422);
+  }
+  const token = extractBearer(c.req.header('Authorization') ?? null);
+  const payload = token ? await verifyToken(token, c.env.JWT_SECRET) : null;
+  const userId = payload?.sub && payload.type === 'access'
+    ? payload.sub
+    : await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
+  let claim = await c.env.DB.prepare(
+    `SELECT user_id, period, is_anon, quota_reserved, status FROM chat_request_claims
+     WHERE request_id = ? AND expires_at > ?`,
+  ).bind(requestId, Math.floor(Date.now() / 1000)).first<ChatRequestClaim>();
+  if (claim && claim.user_id !== userId) {
+    return c.json({ cancelled: false }, 200);
+  }
+  if (!claim) {
+    const now = Math.floor(Date.now() / 1000);
+    const inserted = await c.env.DB.prepare(`
+      INSERT OR IGNORE INTO chat_request_claims
+        (request_id, user_id, period, is_anon, status, cancelled_at, created_at, expires_at)
+      VALUES (?, ?, ?, ?, 'cancelled', ?, ?, ?)
+    `).bind(
+      requestId,
+      userId,
+      currentQuotaMinutePeriod(),
+      payload?.sub && payload.type === 'access' ? 0 : 1,
+      now,
+      now,
+      now + 24 * 3600,
+    ).run();
+    if ((inserted.meta.changes ?? 0) > 0) {
+      return c.json({ cancelled: true }, 202);
+    }
+    claim = await c.env.DB.prepare(
+      `SELECT user_id, period, is_anon, quota_reserved, status FROM chat_request_claims
+       WHERE request_id = ? AND expires_at > ?`,
+    ).bind(requestId, now).first<ChatRequestClaim>();
+    if (!claim || claim.user_id !== userId) {
+      return c.json({ cancelled: false }, 200);
+    }
+  }
+  if (claim.status !== 'reserved') {
+    return c.json({ cancelled: claim.status === 'cancelled' }, 200);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const quotaStatement = claim.is_anon
+    ? c.env.DB.prepare(`
+        UPDATE anonymous_quota_usage SET count = count - 1, updated_at = ?
+        WHERE anon_id = ? AND period = ? AND count > 0
+          AND EXISTS (
+            SELECT 1 FROM chat_request_claims
+            WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+              AND quota_reserved = 1
+          )
+      `).bind(now, userId, claim.period, requestId, userId)
+    : c.env.DB.prepare(`
+        UPDATE quota_usage SET count = count - 1, updated_at = ?
+        WHERE user_id = ? AND period = ? AND count > 0
+          AND EXISTS (
+            SELECT 1 FROM chat_request_claims
+            WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+              AND quota_reserved = 1
+          )
+      `).bind(now, userId, claim.period, requestId, userId);
+  const results = await c.env.DB.batch([
+    quotaStatement,
+    c.env.DB.prepare(
+      `UPDATE chat_request_claims SET status = 'cancelled', cancelled_at = ?
+       WHERE request_id = ? AND user_id = ? AND status = 'reserved'`,
+    ).bind(now, requestId, userId),
+  ]);
+  if ((results[1]?.meta.changes ?? 0) === 0) return c.json({ cancelled: false }, 200);
+  return c.json({ cancelled: true }, 202);
+});
 
 chatRouter.post('/stream', async (c) => {
   const startTime = Date.now();
@@ -1352,7 +1766,12 @@ chatRouter.post('/stream', async (c) => {
   let ownsQuotaReservation = false;
 
   const quotaStart = Date.now();
+  const reservationPeriod = currentQuotaMinutePeriod();
   try {
+    const edgeRateLimitUsage = await trustedEdgeRateLimitUsage(
+      c.req.raw,
+      c.env.EDGE_SHARED_SECRET,
+    );
     const existingClaim = clientRequestId
       ? await getChatRequestClaim(c.env.DB, clientRequestId)
       : null;
@@ -1369,6 +1788,14 @@ chatRouter.post('/stream', async (c) => {
     if (existingClaim?.status === 'completed') {
       return replayCompletedChatRequest(existingClaim, serverRequestId);
     }
+    if (existingClaim?.status === 'cancelled') {
+      return c.json({
+        detail: 'This chat request was cancelled.',
+        error_code: 'chat_request_cancelled',
+        request_id: serverRequestId,
+        failure_stage: 'cancelled',
+      }, 409);
+    }
 
     if (existingClaim) {
       return waitForInFlightChatRequest(
@@ -1377,47 +1804,62 @@ chatRouter.post('/stream', async (c) => {
         userId,
         serverRequestId,
       );
+    } else if (edgeRateLimitUsage) {
+      quotaAllowed = true;
+      quotaCount = edgeRateLimitUsage.count;
+      quotaLimit = edgeRateLimitUsage.limit;
     } else {
       if (!isAnon) {
         ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-          await reserveAuthQuota(c.env.DB, userId, userTier, userRole));
+          await reserveAuthQuota(c.env.DB, userId, userTier, userRole, reservationPeriod));
       } else {
         ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-          await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId));
+          await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId, reservationPeriod));
       }
       ownsQuotaReservation = quotaAllowed && userRole !== 'admin' && userRole !== 'staff';
+    }
 
-      if (quotaAllowed && clientRequestId) {
-        const inserted = await insertChatRequestClaim(
+    if (quotaAllowed && clientRequestId) {
+      const inserted = await insertChatRequestClaim(
+        c.env.DB,
+        clientRequestId,
+        userId,
+        isAnon,
+        ownsQuotaReservation,
+        reservationPeriod,
+      );
+      if (!inserted) {
+        if (ownsQuotaReservation) {
+          await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod);
+          ownsQuotaReservation = false;
+        }
+        const racedClaim = await getChatRequestClaim(c.env.DB, clientRequestId);
+        if (!racedClaim || racedClaim.user_id !== userId) {
+          throw new Error('Unable to establish chat request claim');
+        }
+        if (racedClaim.status === 'completed') {
+          return replayCompletedChatRequest(racedClaim, serverRequestId);
+        }
+        if (racedClaim.status === 'cancelled') {
+          return c.json({
+            detail: 'This chat request was cancelled.',
+            error_code: 'chat_request_cancelled',
+            request_id: serverRequestId,
+            failure_stage: 'cancelled',
+          }, 409);
+        }
+        return waitForInFlightChatRequest(
           c.env.DB,
           clientRequestId,
           userId,
-          isAnon,
+          serverRequestId,
         );
-        if (!inserted) {
-          if (ownsQuotaReservation) {
-            await releaseQuotaReservation(c.env.DB, userId, isAnon);
-            ownsQuotaReservation = false;
-          }
-          const racedClaim = await getChatRequestClaim(c.env.DB, clientRequestId);
-          if (!racedClaim || racedClaim.user_id !== userId) {
-            throw new Error('Unable to establish chat request claim');
-          }
-          return racedClaim.status === 'completed'
-            ? replayCompletedChatRequest(racedClaim, serverRequestId)
-            : waitForInFlightChatRequest(
-              c.env.DB,
-              clientRequestId,
-              userId,
-              serverRequestId,
-            );
-        }
       }
     }
   } catch (err) {
     console.error('[chat] quota storage unavailable:', err);
     if (ownsQuotaReservation) {
-      await releaseQuotaReservation(c.env.DB, userId, isAnon)
+      await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
         .catch(releaseErr => console.error('[chat] quota compensation failed:', releaseErr));
       await deleteChatRequestClaim(c.env.DB, clientRequestId, userId)
         .catch(deleteErr => console.error('[chat] claim compensation failed:', deleteErr));
@@ -1436,7 +1878,8 @@ chatRouter.post('/stream', async (c) => {
     c.header('X-Failure-Stage', 'quota');
     return c.json(
       {
-        detail: 'Monthly message limit reached. Upgrade to Pro for more messages.',
+        detail: 'Rate limit reached. Please wait a minute before sending another message.',
+        error_code: 'chat_rpm_limit',
         quota: { used: quotaCount, limit: quotaLimit },
         request_id: serverRequestId,
         failure_stage: 'quota',
@@ -1449,8 +1892,7 @@ chatRouter.post('/stream', async (c) => {
   // Helper to release a reserved quota slot on failure paths.
   const releaseQuota = async (): Promise<void> => {
     if (ownsQuotaReservation) {
-      await releaseQuotaReservation(c.env.DB, userId, isAnon);
-      await deleteChatRequestClaim(c.env.DB, clientRequestId, userId);
+      await releaseClaimQuotaReservation(c.env.DB, clientRequestId, userId, isAnon);
       ownsQuotaReservation = false;
     }
   };
@@ -1476,6 +1918,30 @@ chatRouter.post('/stream', async (c) => {
   // available. Semantic retrieval remains the fallback for stale/missing IDs.
   const directChapterId = body.chapter_id?.trim() || undefined;
   const authoritativeIntent = detectAuthoritativeIntent(message);
+  let curriculumScope: CurriculumScope;
+  try {
+    curriculumScope = await resolveCurriculumScope(c.env.DB, message, body.subject_id);
+  } catch (error) {
+    console.warn('[chat] Curriculum scope resolution failed:', error);
+    curriculumScope = {
+      ...(body.subject_id && { subjectId: body.subject_id }),
+      explicit: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
+      unresolved: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
+    };
+  }
+  const scopedSubjectId = curriculumScope.unresolved
+    ? undefined
+    : (curriculumScope.subjectId ?? body.subject_id);
+  if (curriculumScope.unresolved) {
+    await releaseQuota().catch(() => {});
+    c.header('X-Failure-Stage', 'curriculum_scope');
+    return c.json({
+      detail: 'I could not identify one matching curriculum. Please include both your class and subject, for example “Class 11 Physics”.',
+      error_code: 'curriculum_scope_ambiguous',
+      request_id: serverRequestId,
+      failure_stage: 'curriculum_scope',
+    }, 422);
+  }
   const requestedWebIntent = shouldUseWebSearch({
     question: message,
     chapterId: directChapterId,
@@ -1498,12 +1964,12 @@ chatRouter.post('/stream', async (c) => {
     : Promise.resolve(skippedWebSearch());
   const memoryPromise = loadMemories(db, userId, isAnon);
   let historyLoaded = false;
-  if (authoritativeIntent) {
+  if (authoritativeIntent && !curriculumScope.unresolved) {
     try {
       contextChunks = await fetchAuthoritativeIntentContext(
         c.env.DB,
         authoritativeIntent,
-        body.subject_id,
+        scopedSubjectId,
         directChapterId,
         lang,
       );
@@ -1513,7 +1979,7 @@ chatRouter.post('/stream', async (c) => {
       const first = contextChunks[0];
       topChapterId = first?.chapterId;
       topChapterTitle = first?.chapterTitle;
-      topSubjectId = first?.subjectId ?? body.subject_id;
+      topSubjectId = first?.subjectId ?? scopedSubjectId;
     } catch (error) {
       // This occurs before SSE headers/body are committed, so keep it a typed
       // HTTP error clients can safely retry instead of a misleading stream.
@@ -1530,7 +1996,7 @@ chatRouter.post('/stream', async (c) => {
   if (!authoritativeIntent && directChapterId) {
     const [directHistoryResult, directContentResult, directMemoryResult] = await Promise.allSettled([
       loadHistory(db, sessionId, userId),
-      fetchChapterContent(db, directChapterId, lang),
+      fetchChapterContent(c.env.DB, directChapterId, lang, curriculumScope.explicit ? scopedSubjectId : undefined),
       memoryPromise,
     ]);
     if (directHistoryResult.status === 'fulfilled') {
@@ -1567,10 +2033,10 @@ chatRouter.post('/stream', async (c) => {
     }
   }
 
-  if (!authoritativeIntent && contextChunks.length === 0) {
+  if (!authoritativeIntent && contextChunks.length === 0 && !curriculumScope.unresolved) {
   const skipSemanticForUnscopedWebIntent = explicitWebIntent
     && directChapterId === undefined
-    && !body.subject_id;
+       && !scopedSubjectId;
   // Embed + history in parallel — zero extra latency vs serial
   // Pass userId so history is scoped to its owner (session ownership enforcement)
   const [embedResult, historyResult] = await startRetrievalFanout({
@@ -1595,7 +2061,7 @@ chatRouter.post('/stream', async (c) => {
       // fields; board/class metadata is not available in production.
       const extraFilters = semanticRetrievalFilters(
         body.chapter_id,
-        body.subject_id,
+         scopedSubjectId,
         Boolean(directChapterId),
       );
 
@@ -1655,23 +2121,21 @@ chatRouter.post('/stream', async (c) => {
           topChapterId = bestId;
           topSubjectId = best.meta.subjectId;
 
-          // D1 fast path — full chapter content with fallback chain
-          const chapterContent = await fetchChapterContent(db, bestId, lang);
-          if (chapterContent) {
-            const resolvedTitle = best.meta.chapterTitle ?? bestId;
-            topChapterTitle = resolvedTitle;
-            contextChunks = [{
-              chapterId:    bestId,
-              chapterTitle: resolvedTitle,
-              ...(topSubjectId !== undefined && { subjectId: topSubjectId }),
-              content:      chapterContent.content.slice(0, CONTEXT_CHAR_CAP),
-              score:        best.score,
-              medium:       chapterContent.language,
-              sourceType:   lang === 'as' && (
-                retrievalLang === 'en' || chapterContent.language === 'english'
-              ) ? 'rag_chapter_english_fallback' : (best.meta.sourceType ?? 'rag_chapter'),
-              ...(best.meta.topicId !== undefined && { topicName: best.meta.topicId }),
-            }];
+          const matchedChunks = await fetchMatchedChunkContext(
+            c.env.DB,
+            matches,
+            bestId,
+            lang,
+            scopedSubjectId,
+          );
+          if (matchedChunks.length > 0) {
+            topChapterTitle = matchedChunks[0]?.chapterTitle ?? best.meta.chapterTitle ?? bestId;
+            contextChunks = matchedChunks.map(chunk => ({
+              ...chunk,
+              sourceType: lang === 'as' && retrievalLang === 'en'
+                ? 'rag_chunk_english_fallback'
+                : chunk.sourceType,
+            }));
             ragPath = 'vectorize_d1';
           }
         }
@@ -1695,7 +2159,7 @@ chatRouter.post('/stream', async (c) => {
   // Card-context fallback — when RAG missed but chapter_id provided by frontend
   if (!authoritativeIntent && contextChunks.length === 0 && directChapterId) {
     try {
-      const chapterContent = await fetchChapterContent(db, directChapterId, lang);
+      const chapterContent = await fetchChapterContent(c.env.DB, directChapterId, lang, curriculumScope.explicit ? scopedSubjectId : undefined);
       if (chapterContent) {
         topChapterId    = directChapterId;
         topChapterTitle = body.chapter_name;
@@ -1759,9 +2223,9 @@ chatRouter.post('/stream', async (c) => {
     webContextText,
     history,
     memoryText: memories,
-    ...(body.board_name        !== undefined && { boardName:   body.board_name }),
-    ...(body.class_name        !== undefined && { className:   body.class_name }),
-    ...(body.subject_name      !== undefined && { subjectName: body.subject_name }),
+    ...((curriculumScope.boardName ?? body.board_name) !== undefined && { boardName: curriculumScope.boardName ?? body.board_name }),
+    ...((curriculumScope.className ?? body.class_name) !== undefined && { className: curriculumScope.className ?? body.class_name }),
+    ...((curriculumScope.subjectName ?? body.subject_name) !== undefined && { subjectName: curriculumScope.subjectName ?? body.subject_name }),
     ...(chapterNameResolved    !== undefined && { chapterName: chapterNameResolved }),
     question: message,
   });
@@ -1784,36 +2248,41 @@ chatRouter.post('/stream', async (c) => {
     conversation_id:  effectiveSessionId,
     // Provenance belongs to the selected retrieval entry, not to a generic
     // route label. This preserves PYQ/syllabus/direct-chapter distinctions.
-    source_type:      primaryCurriculumSource?.source_type
-      ?? sourceEntries.find(entry => entry.kind === 'web')?.source_type
-      ?? 'llm_only',
+    source_type:      primaryCurriculumSource?.source_type ?? 'llm_only',
     rag_source:       primaryCurriculumSource?.source_type ?? 'llm_only',
     rag_path:         ragPath,
     confidence_tier:  confidenceTier,
     match_score:      topScore,
     rag_chunks:       contextChunks.length,
+     chapter_id:       topChapterId,
     rag_chapter_name: topChapterTitle,
     rag_chapter_slug: primaryCurriculumSource?.chapter_slug,
     rag_subject_id:   topSubjectId,
-    rag_subject_name: body.subject_name,
-    ctx_board_name:   body.board_name,
-    ctx_class_name:   body.class_name,
-    ctx_class_level:  body.class_name,
+    rag_subject_name: primaryCurriculumSource?.subject_name ?? curriculumScope.subjectName ?? body.subject_name,
+    rag_topic_name:   primaryCurriculumSource?.topic_name,
+    ctx_board_name:   primaryCurriculumSource?.board_name ?? curriculumScope.boardName ?? body.board_name,
+    ctx_class_name:   primaryCurriculumSource?.class_name ?? curriculumScope.className ?? body.class_name,
+    ctx_class_level:  primaryCurriculumSource?.class_name ?? curriculumScope.className ?? body.class_name,
     ctx_stream_name:  body.stream_name,
     ctx_board_slug:   primaryCurriculumSource?.board_slug,
     ctx_class_slug:   primaryCurriculumSource?.class_slug,
     ctx_subject_slug: primaryCurriculumSource?.subject_slug,
+     // Keep both legacy ctx_* names and the explicit names consumed by newer
+     // clients. Existing SSE consumers can continue to ignore these fields.
+     rag_board_name:   primaryCurriculumSource?.board_name ?? curriculumScope.boardName ?? body.board_name,
+     rag_class_name:   primaryCurriculumSource?.class_name ?? curriculumScope.className ?? body.class_name,
+     rag_stream_name:  body.stream_name,
+     rag_board_slug:   primaryCurriculumSource?.board_slug,
+     rag_class_slug:   primaryCurriculumSource?.class_slug,
+     rag_subject_slug: primaryCurriculumSource?.subject_slug,
+     matched_passage:  primaryCurriculumSource?.matched_passage ?? primaryCurriculumSource?.snippet ?? null,
+     retrieval_method: primaryCurriculumSource?.retrieval_method ?? ragPath,
+     source_confidence: primaryCurriculumSource?.confidence ?? topScore,
     web_used:         webResults.length > 0,
     web_status:       webStatus,
-    web_sources:      webResults.map(result => ({
-      title: result.title,
-      url: result.url,
-      source_type: result.source,
-    })),
-    // Detailed entries keep each source's own URL, snippet, medium, score and
-    // available hierarchy slugs; the existing top-level fields remain intact
-    // for older clients and the primary source card.
-    sources: sourceEntries,
+    // Student-facing provenance is the top curriculum match selected by the
+    // answer's RAG retrieval. Web assistance remains internal to generation.
+    sources: primaryCurriculumSource ? [primaryCurriculumSource] : [],
     ...(authoritativeIntent && { authoritative_intent: authoritativeIntent }),
   };
 
@@ -1853,6 +2322,7 @@ chatRouter.post('/stream', async (c) => {
     };
 
     try {
+      if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
       // Always emit source_card first — client uses this to learn the conversation_id
       await write(sourceCard);
       if (verifiedWebEvidenceUnavailable) {
@@ -1885,6 +2355,7 @@ chatRouter.post('/stream', async (c) => {
             maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 384),
           }, 8_000);
           fullResponse = normalizeAssameseStreamChunk(generated.text);
+          if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
           actualModel = generated.model;
           timings.first_token_ms = Date.now() - startTime;
           firstTokenRecorded = true;
@@ -1894,6 +2365,7 @@ chatRouter.post('/stream', async (c) => {
             userMessage: message,
             maxTokens: CHAT_MAX_OUTPUT_TOKENS,
           })) {
+            if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
             // Sentinel chunk carries the resolved model name — do not forward to client
             if (chunk.startsWith('\x00model:')) {
               actualModel = chunk.slice(7);
@@ -1930,36 +2402,24 @@ chatRouter.post('/stream', async (c) => {
         fullResponse = normalizeAssameseStreamChunk(fullResponse);
         assameseProseLeakage = !isReliableAssameseAnswer(fullResponse);
         if (assameseProseLeakage) {
-          const initialAssameseResponse = fullResponse;
-          let hasUsableAssameseFallback = false;
           try {
+            if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
             const repaired = await generateAssamese(c.env.AI, {
               systemPrompt: `${systemPrompt}\n\n## বাধ্যতামূলক ভাষা সংশোধন\nআগৰ খচৰা ব্যৱহাৰ নকৰিবা। কেৱল শুদ্ধ অসমীয়া লিপিত নতুনকৈ সম্পূৰ্ণ উত্তৰ লিখিবা। বাংলা, হিন্দী বা ইংৰাজী ব্যাখ্যামূলক বাক্য নিদিবা।`,
               userMessage: message,
               maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 640),
             }, 6_000);
             const repairedText = normalizeAssameseStreamChunk(repaired.text);
+            if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
             if (isReliableAssameseAnswer(repairedText)) {
               fullResponse = repairedText;
               actualModel = repaired.model;
               assameseProseLeakage = false;
-            } else if (isUsableAssameseAnswer(repairedText)) {
-              fullResponse = repairedText;
-              actualModel = repaired.model;
-              hasUsableAssameseFallback = true;
             }
           } catch (repairError) {
             console.warn('[chat] Assamese fallback-model repair failed:', repairError);
           }
-          if (
-            assameseProseLeakage
-            && !hasUsableAssameseFallback
-            && isUsableAssameseAnswer(initialAssameseResponse)
-          ) {
-            fullResponse = initialAssameseResponse;
-            hasUsableAssameseFallback = true;
-          }
-          if (assameseProseLeakage && !hasUsableAssameseFallback) {
+          if (assameseProseLeakage) {
             await write({
               ...terminalChatErrorEvent(
                 'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। অনুগ্ৰহ কৰি পুনৰ চেষ্টা কৰক।',
@@ -1982,6 +2442,7 @@ chatRouter.post('/stream', async (c) => {
       }
 
       // ── syrabit_done event ────────────────────────────────────────────────
+      if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
       const latencyMs = Date.now() - startTime;
       timings.total_ms = latencyMs;
       const doneEvent = {
@@ -2019,6 +2480,7 @@ chatRouter.post('/stream', async (c) => {
       // quota_usage was already incremented atomically in reserveAuthQuota /
       // reserveAnonQuota before streaming — do not increment again here.
       try {
+        if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
         await persistCompletedChat(c.env.DB, {
           userId,
           sessionId:         effectiveSessionId,
