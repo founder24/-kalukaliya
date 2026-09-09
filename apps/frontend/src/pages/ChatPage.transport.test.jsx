@@ -36,9 +36,9 @@ vi.mock('./chat/EmptyState', () => ({
 }));
 
 vi.mock('./chat/InputBar', () => ({
-  InputBar: ({ sendMsg }) => (
-    <button type="button" onClick={() => sendMsg('Explain gravity')}>
-      Send test message
+  InputBar: ({ sendMsg, handleStop, isLoading }) => (
+    <button type="button" onClick={() => isLoading ? handleStop() : sendMsg('Explain gravity')}>
+      {isLoading ? 'Stop generation' : 'Send test message'}
     </button>
   ),
 }));
@@ -60,7 +60,7 @@ vi.mock('./chat/MessageBubble', () => ({
         </div>
       )}
       {msg.isAiUnavailable && <div data-testid="ai-unavailable-card">AI unavailable</div>}
-      {!msg.isAiUnavailable && msg.role === 'assistant' && (
+      {msg.role === 'assistant' && msg.content && (
         <span data-testid="assistant-content">{msg.content}</span>
       )}
     </article>
@@ -236,8 +236,9 @@ describe('ChatPage transport recovery', () => {
     expect(await screen.findByText('Gravity attracts masses.')).toBeInTheDocument();
   });
 
-  it('keeps a terminal SSE error as an error card instead of overwriting it with an empty success', async () => {
+  it('keeps partial text visible when a terminal SSE error arrives', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => chunkedStream([
+      `data: ${JSON.stringify({ content: 'Useful partial answer.' })}\n\n`,
       `data: ${JSON.stringify({
         error: 'The AI provider is temporarily unavailable.',
         error_kind: 'provider_unavailable',
@@ -249,7 +250,55 @@ describe('ChatPage transport recovery', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
 
     expect(await screen.findByTestId('ai-unavailable-card')).toBeInTheDocument();
-    expect(screen.queryByTestId('assistant-content')).not.toBeInTheDocument();
+    expect(screen.getByTestId('assistant-content')).toHaveTextContent('Useful partial answer.');
+  });
+
+  it('sends server cancellation with the same logical request ID before stopping locally', async () => {
+    const encoder = new TextEncoder();
+    const fetchMock = vi.fn(async (url, options = {}) => {
+      if (String(url).endsWith('/chat/cancel')) {
+        return new Response(JSON.stringify({ cancelled: true }), { status: 202 });
+      }
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            event: 'source_card',
+            conversation_id: 'conversation-stop',
+          })}\n\n`));
+          options.signal?.addEventListener('abort', () => {
+            controller.error(new DOMException('Aborted', 'AbortError'));
+          });
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ChatPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
+    const stop = await screen.findByRole('button', { name: 'Stop generation' });
+    fireEvent.click(stop);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const streamBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const cancelBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(cancelBody.client_request_id).toBe(streamBody.client_request_id);
+  });
+
+  it('renders an ambiguous curriculum scope as assistant guidance, not an outage', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      detail: 'I could not identify one matching curriculum. Please include both your class and subject, for example “Class 11 Physics”.',
+      error_code: 'curriculum_scope_ambiguous',
+      failure_stage: 'curriculum_scope',
+    }), {
+      status: 422,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+    render(<ChatPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
+
+    expect(await screen.findByText(/Please include both your class and subject/)).toBeInTheDocument();
+    expect(screen.queryByTestId('ai-unavailable-card')).not.toBeInTheDocument();
   });
 
   it('parses fragmented UTF-8, CRLF framing, and a final unterminated event', async () => {
