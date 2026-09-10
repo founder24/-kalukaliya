@@ -14,6 +14,12 @@
 import process from 'node:process';
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
+import {
+  buildReport,
+  failedRouteMessages,
+  validateProbeEvents,
+  validateRouteResult,
+} from './worker-chat-performance-gate.mjs';
 
 function positiveInteger(name, raw, minimum = 1) {
   if (!/^\d+$/.test(raw)) throw new Error(`${name} must be a positive integer`);
@@ -119,16 +125,8 @@ async function probe(name, body) {
       }
     }
 
-    const sourceIndex = events.findIndex(event => event.event === 'source_card');
-    const tokenIndex = events.findIndex(event =>
-      typeof event.content === 'string' && event.content.length > 0 && !event.done);
-    const doneIndex = events.findIndex(event => event.event === 'syrabit_done');
-    if (!(sourceIndex === 0 && tokenIndex > sourceIndex && doneIndex > tokenIndex)) {
-      throw new Error(`${name} SSE order invalid: source=${sourceIndex}, token=${tokenIndex}, done=${doneIndex}`);
-    }
+    const { sourceCard, done } = validateProbeEvents(name, events);
     if (firstTokenMs === null) throw new Error(`${name} emitted no useful token`);
-    const sourceCard = events[sourceIndex];
-    const done = events[doneIndex];
     const result = {
       name,
       headers_ms: Math.round(headersMs),
@@ -146,9 +144,6 @@ async function probe(name, body) {
       worker_timings_ms: done?.route_trace?.timings_ms,
       model: done?.model,
     };
-    if (typeof result.model !== 'string' || !result.model.startsWith('@cf/')) {
-      throw new Error(`${name} did not report a native Workers AI model: ${result.model}`);
-    }
     return result;
   } finally {
     clearTimeout(timer);
@@ -168,9 +163,7 @@ for (let sample = 1; sample <= samples; sample += 1) {
       subject_id: subject.id,
       subject_name: subject.name,
     });
-    if (direct.rag_path !== 'chapter_direct') {
-      throw new Error(`Direct RAG probe used unexpected path: ${direct.rag_path}`);
-    }
+    validateRouteResult('direct', direct);
     directSamples.push(direct);
     console.error(`[chat-performance] ${direct.name}: first token ${direct.first_token_ms} ms`);
   }
@@ -185,47 +178,20 @@ for (let sample = 1; sample <= samples; sample += 1) {
       subject_id: subject.id,
       subject_name: subject.name,
     });
-    if (web.web_used !== true || web.web_status !== 'ok') {
-      throw new Error(`Web probe did not return attributed web context: ${JSON.stringify(web)}`);
-    }
+    validateRouteResult('web', web);
     webSamples.push(web);
     console.error(`[chat-performance] ${web.name}: first token ${web.first_token_ms} ms, web ${web.web_status}`);
   }
 }
 
-function summarize(results) {
-  const values = results.map(result => result.first_token_ms).sort((a, b) => a - b);
-  const passingSamples = values.filter(value => value <= targetMs).length;
-  const requiredPassingSamples = Math.floor(values.length / 2) + 1;
-  const medianIndex = Math.floor(values.length / 2);
-  const p95Index = Math.max(0, Math.ceil(values.length * 0.95) - 1);
-  return {
-    samples: values.length,
-    passing_samples: passingSamples,
-    required_passing_samples: requiredPassingSamples,
-    first_token_median_ms: values[medianIndex],
-    first_token_p95_ms: values[p95Index],
-    first_token_max_ms: values.at(-1),
-    passed: passingSamples >= requiredPassingSamples && values[medianIndex] <= targetMs,
-  };
-}
-
-const summary = {
-  ...(directSamples.length > 0 && { direct_chapter_rag: summarize(directSamples) }),
-  ...(webSamples.length > 0 && { rag_plus_bounded_web: summarize(webSamples) }),
-};
-const report = {
+const report = buildReport({
   origin,
-  first_token_target_ms: targetMs,
-  pass_rule: 'A strict majority of samples for each route must meet the target, and the median must be at or below the target.',
-  chapter: {
-    id: chapter.chapter_id,
-    title: chapter.title,
-    subject: subject.name,
-  },
-  summary,
-  probes: [...directSamples, ...webSamples],
-};
+  targetMs,
+  subject,
+  chapter,
+  directSamples,
+  webSamples,
+});
 const reportJson = `${JSON.stringify(report, null, 2)}\n`;
 console.log(reportJson.trimEnd());
 if (reportPath) await writeFile(reportPath, reportJson, 'utf8');
@@ -238,11 +204,7 @@ for (const result of report.probes) {
   );
 }
 
-const failedRoutes = Object.entries(summary)
-  .filter(([, routeSummary]) => !routeSummary.passed)
-  .map(([route, routeSummary]) =>
-    `${route} (${routeSummary.passing_samples}/${routeSummary.samples} samples met ${targetMs} ms; `
-    + `median ${routeSummary.first_token_median_ms} ms)`);
+const failedRoutes = failedRouteMessages(report.summary, targetMs);
 if (failedRoutes.length > 0) {
   throw new Error(`Persistent first-token regression: ${failedRoutes.join('; ')}`);
 }

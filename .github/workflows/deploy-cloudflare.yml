@@ -474,6 +474,9 @@ jobs:
           PY
           echo "Deep binding probes passed without production writes."
 
+      - name: Worker chat performance gate regression test
+        run: node --test scripts/worker-chat-performance-gate.test.mjs
+
       - name: Worker chat first-token performance gate
         env:
           CHAT_API_ORIGIN: ${{ env.API_WORKER_URL }}
