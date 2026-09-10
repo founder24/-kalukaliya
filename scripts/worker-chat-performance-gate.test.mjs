@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -183,4 +187,48 @@ test('missing and invalid older worker timing fields do not break recurring comp
   assert.equal(warning.affected_runs, 2);
   assert.equal(current.summary.direct_chapter_rag.passed, true);
   assert.equal(previous.summary.direct_chapter_rag.passed, true);
+});
+
+test('warning CLI emits actionable annotations while tolerating unreadable and timing-free history', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'chat-performance-warning-'));
+  const historyDirectory = join(directory, 'history');
+  const currentPath = join(directory, 'current.json');
+  const notificationStatePath = join(directory, 'notification-state.json');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  await mkdir(historyDirectory);
+  await Promise.all([
+    writeFile(currentPath, JSON.stringify(reportFor(
+      [1200, 4200, 1800],
+      [1500, 1700, 1900],
+      { direct: [{}, { auth_ms: 100, retrieval_ms: 2200, prompt_ms: 300 }] },
+    ))),
+    writeFile(
+      join(historyDirectory, '2026-09-08.json'),
+      JSON.stringify(reportFor([1100, 3900, 1600], [1500, 1700, 1900])),
+    ),
+    writeFile(join(historyDirectory, '2026-09-09.json'), '{not valid JSON'),
+  ]);
+
+  const result = spawnSync(
+    process.execPath,
+    [join(import.meta.dirname, 'warn-worker-chat-performance-history.mjs'), currentPath, historyDirectory],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CHAT_PERFORMANCE_NOTIFICATION_STATE_PATH: notificationStatePath,
+      },
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    result.stderr,
+    /::notice title=Chat performance history::Skipped unreadable report 2026-09-09\.json:/,
+  );
+  assert.match(result.stderr, /::warning title=Recurring Direct chapter RAG latency outliers::/);
+  assert.match(result.stderr, /dominant slow worker phase: retrieval_ms/);
+  assert.match(result.stderr, /Affected-run maxima: 4200, 3900 ms/);
+  assert.match(result.stderr, /The 3000 ms strict-majority release gate is unchanged\./);
 });
