@@ -108,7 +108,13 @@ try {
       throw new Error(`${label} triggered the global error boundary`);
     }
     if (await page.getByText(new RegExp(`${label} failed to load`, 'i')).count()) {
-      throw new Error(`${label} triggered its section error boundary`);
+      const body = (await page.locator('body').innerText().catch(() => '')).slice(0, 6_000);
+      throw new Error([
+        `${label} triggered its section error boundary`,
+        `Visible page text:\n${body || '(empty)'}`,
+        `Runtime errors:\n${runtimeErrors.join('\n') || '(none)'}`,
+        `Failed requests:\n${failedRequests.join('\n') || '(none)'}`,
+      ].join('\n\n'));
     }
     await page.getByTestId('admin-dashboard').waitFor({ state: 'visible' });
     console.log(`Staff portal read passed: ${label}`);
