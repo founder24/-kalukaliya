@@ -9,6 +9,19 @@ permissions:
   contents: read
 
 jobs:
+  chat-performance-gate:
+    name: Chat Performance Gate Regression Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run worker chat performance gate regression tests
+        run: node --test scripts/worker-chat-performance-gate.test.mjs
+
   lint-and-typecheck:
     name: Lint & Type Check
     runs-on: ubuntu-latest
@@ -53,6 +66,3 @@ jobs:
 
       - name: Run Tests
         run: pnpm --filter syrabit-edge test:ci
-
-      - name: Run worker chat performance gate regression tests
-        run: node --test scripts/worker-chat-performance-gate.test.mjs
