@@ -177,7 +177,10 @@ export const AuthProvider = ({ children }) => {
       await axios.post(
         `${API_BASE}/auth/logout`,
         { refresh_token: getRefreshToken() },
-        { withCredentials: true, headers },
+        // Never let a slow revocation endpoint trap the user in the staff
+        // portal. Local credentials are cleared below even when this request
+        // times out; the rotating refresh-token claim remains bounded.
+        { withCredentials: true, headers, timeout: 5000 },
       );
     } catch (err) {
       try { Analytics.track('logout_backend_error', { status: err?.response?.status }); } catch {}
