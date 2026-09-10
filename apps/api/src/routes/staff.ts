@@ -361,13 +361,9 @@ async function safeBody(c: Context<{ Bindings: Env }>): Promise<Record<string, u
 }
 
 type StaffCapability = 'analytics:read' | 'history:read' | 'content:edit' | 'content:publish' | 'rag:reindex' | 'content:delete';
-/** NULL capabilities is the pre-capability, fully trusted staff contract. */
+/** Staff and admin roles share the full unified control-center contract. */
 async function capabilityDenied(c: Context<{ Bindings: Env }>, auth: AuthPayload, capability: StaffCapability): Promise<Response | null> {
-  if (auth.role === 'admin') return null;
-  const row = await c.env.DB.prepare('SELECT capabilities FROM users WHERE id = ?').bind(auth.sub ?? '').first<{ capabilities: string | null }>();
-  if (!row || row.capabilities === null) return null;
-  const granted = safeParse<string[]>(row.capabilities) ?? [];
-  if (granted.includes(capability)) return null;
+  if (auth.role === 'admin' || auth.role === 'staff') return null;
   return c.json({ detail: `Missing staff capability: ${capability}`, capability }, 403);
 }
 

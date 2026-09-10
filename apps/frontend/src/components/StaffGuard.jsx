@@ -44,9 +44,7 @@ export const StaffGuard = ({ children }) => {
   }
 
   if (!hasStaffRole && !cookieAdmin) {
-    // A bearer-authenticated user belongs at the normal login page. With no
-    // bearer, this was an admin-cookie verification and belongs at admin login.
-    return <Navigate to={getToken() ? "/login" : "/admin/login"} replace />;
+    return <Navigate to="/login?next=/staff" replace />;
   }
   // Keep the cookie-derived privilege available to the staff shell. The admin
   // cookie is HttpOnly, so it cannot be copied into the AuthContext token.

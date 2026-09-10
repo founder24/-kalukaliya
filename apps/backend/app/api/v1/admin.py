@@ -123,7 +123,8 @@ async def _validate_admin_session(request: Request) -> dict:
                     if await _is_admin_token_blacklisted(token):
                         raise HTTPException(status_code=401, detail="Session revoked")
                     return payload
-                # For access tokens, verify user has admin role in DB
+                # The unified staff control center accepts authenticated staff
+                # and admin access tokens. Cookie/admin tokens remain admin-only.
                 if payload.get("type") == "access":
                     user_id = payload.get("sub")
                     if not user_id:
@@ -131,11 +132,11 @@ async def _validate_admin_session(request: Request) -> dict:
                             status_code=401, detail="Invalid token payload"
                         )
                     user = await User.get(user_id)
-                    if user and user.role == "admin":
+                    if user and user.role in ("admin", "staff"):
                         return {
                             "sub": str(user.id),
                             "type": "admin",
-                            "role": "admin",
+                            "role": user.role,
                         }
                 raise HTTPException(status_code=403, detail="Insufficient permissions")
             except HTTPException:

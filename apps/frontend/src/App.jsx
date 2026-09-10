@@ -1,10 +1,9 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { PageTracker } from "@/utils/usePageTracking";
 import { AuthProvider } from "@/context/AuthContext";
 import { LanguageProvider } from "@/context/LanguageContext";
 import { AuthGuard } from "@/components/AuthGuard";
-import { AdminGuard } from "@/components/AdminGuard";
 import { StaffGuard } from "@/components/StaffGuard";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./queryClient";
@@ -95,9 +94,7 @@ const MyMemoriesPage     = lazy(() => import("@/pages/MyMemoriesPage"));
 const TermsPage          = lazy(() => import("@/pages/TermsPage"));
 const PrivacyPage        = lazy(() => import("@/pages/PrivacyPage"));
 const NotFoundPage       = lazy(() => import("@/pages/NotFoundPage"));
-const AdminLoginPage     = lazy(() => import("@/pages/AdminLoginPage"));
 const AdminPage          = lazy(() => import("@/pages/AdminPage"));
-const StaffDashboard     = lazy(() => import("@/pages/staff/StaffDashboard"));
 const ExamRoutinePage    = lazy(() => import("@/pages/ExamRoutinePage"));
 const CurriculumMap      = lazy(() => import("@/pages/CurriculumMap"));
 const StatusPage         = lazy(() => import("@/pages/StatusPage"));
@@ -108,6 +105,11 @@ const AboutPage              = lazy(() => import("@/pages/AboutPage"));
 const TechnologyPage         = lazy(() => import("@/pages/TechnologyPage"));
 const BrowsePage             = lazy(() => import("@/pages/BrowsePage"));
 const BrowserPage            = lazy(() => import("@/pages/BrowserPage"));
+
+export function LegacyAdminRedirect() {
+  const location = useLocation();
+  return <Navigate to={`/staff${location.search}${location.hash}`} replace />;
+}
 const NotebookPage           = lazy(() => import("@/pages/NotebookPage"));
 const FlashcardsPage         = lazy(() => import("@/pages/FlashcardsPage"));
 const GuardianPage           = lazy(() => import("@/pages/GuardianPage"));
@@ -361,14 +363,12 @@ export function AppRoutes() {
         <Route path="/__test/study-harness" element={<StudyTestHarnessPage />} />
       )}
 
-      {/* ── Admin routes ── */}
-      <Route path="/admin/login" element={<AdminLoginPage />} />
-      <Route path="/admin"       element={<AdminGuard><AdminPage /></AdminGuard>} />
-
-      {/* ── Staff routes ── */}
-      <Route path="/staff" element={<StaffGuard><StaffDashboard /></StaffGuard>} />
-      <Route path="/staff/login" element={<Navigate to="/login" replace />} />
+      {/* ── Unified staff control center ── */}
+      <Route path="/staff" element={<StaffGuard><AdminPage /></StaffGuard>} />
+      <Route path="/staff/login" element={<Navigate to="/login?next=/staff" replace />} />
       <Route path="/staff/content-hub" element={<Navigate to="/staff" replace />} />
+      {/* Legacy admin links remain valid, but there is no separate admin UI. */}
+      <Route path="/admin/*" element={<LegacyAdminRedirect />} />
 
       {/* ── 404 ── */}
       <Route path="*" element={<NotFoundPage />} />

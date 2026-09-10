@@ -35,6 +35,16 @@ vi.mock('@/utils/api', () => ({
   adminLogsExportUrl: vi.fn(() => ''),
   adminLogsDownloadExport: vi.fn(() => Promise.resolve()),
   API_BASE: 'http://localhost:8000',
+  WORKER_API: 'http://localhost:8000',
+}));
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => ({
+    user: { name: 'Staff User', email: 'staff@example.test', role: 'staff' },
+    logout: vi.fn(() => Promise.resolve()),
+  }),
+}));
+vi.mock('@/hooks/useTokenManager', () => ({
+  getToken: () => 'header.payload.signature',
 }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));

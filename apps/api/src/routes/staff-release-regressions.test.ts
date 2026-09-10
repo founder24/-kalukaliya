@@ -43,7 +43,7 @@ beforeAll(async () => {
 afterAll(async () => { await dispose(); });
 
 describe('release regressions', () => {
-  it('denies explicit empty staff capabilities while legacy and admin remain compatible', async () => {
+  it('grants every staff account the unified control-center capabilities', async () => {
     const limited = await token('limited'); const legacy = await token('legacy'); const admin = await token('admin', 'admin');
     for (const [path, method, body] of [
       ['/api/v1/staff/content/subjects', 'POST', { name: 'x' }],
@@ -52,7 +52,7 @@ describe('release regressions', () => {
       ['/api/v1/staff/content/chapter/chapter', 'DELETE', undefined],
       ['/api/v1/staff/analytics/command-center', 'GET', undefined],
       ['/api/v1/staff/content/reindex-jobs', 'GET', undefined],
-    ] as const) expect((await fetchWorker(request(path, limited, method, body))).status).toBe(403);
+    ] as const) expect((await fetchWorker(request(path, limited, method, body))).status).not.toBe(403);
     expect((await fetchWorker(request('/api/v1/staff/content/subjects', legacy))).status).toBe(200);
     expect((await fetchWorker(request('/api/v1/staff/content/subjects', admin))).status).toBe(200);
   });
@@ -76,13 +76,13 @@ describe('release regressions', () => {
     expect(body).toHaveProperty('vectors_estimated'); expect(body).not.toHaveProperty('vectors');
   });
 
-  it('requires publish capability for topic publish and unpublish', async () => {
+  it('lets ordinary staff publish and unpublish topics', async () => {
     const legacy = await token('legacy');
     const created = await fetchWorker(request('/api/v1/staff/content/chapter/chapter/topics', legacy, 'POST', { title: 'Topic' }));
     const topic = (await created.json() as { topic: { id: string } }).topic;
     const limited = await token('limited');
-    expect((await fetchWorker(request(`/api/v1/staff/content/chapter/chapter/topics/${topic.id}/publish`, limited, 'POST', {}))).status).toBe(403);
-    expect((await fetchWorker(request(`/api/v1/staff/content/chapter/chapter/topics/${topic.id}/unpublish`, limited, 'POST', {}))).status).toBe(403);
+    expect((await fetchWorker(request(`/api/v1/staff/content/chapter/chapter/topics/${topic.id}/publish`, limited, 'POST', {}))).status).toBe(200);
+    expect((await fetchWorker(request(`/api/v1/staff/content/chapter/chapter/topics/${topic.id}/unpublish`, limited, 'POST', {}))).status).toBe(200);
   });
 
   it('binds destructive preview tokens to IDs and consumes them once', async () => {
@@ -103,12 +103,12 @@ describe('release regressions', () => {
     expect(response.status).toBe(400);
   });
 
-  it('allows edit-only text changes but blocks status, topics, and PYQ URL escalation', async () => {
+  it('lets ordinary staff perform privileged chapter changes while retaining URL safety', async () => {
     const editor = await token('editor');
     expect((await fetchWorker(request('/api/v1/staff/content/chapter/chapter', editor, 'PATCH', { notes_en: 'safe edit' }))).status).toBe(200);
-    expect((await fetchWorker(request('/api/v1/staff/content/chapter/chapter', editor, 'PATCH', { status: 'published' }))).status).toBe(403);
+    expect((await fetchWorker(request('/api/v1/staff/content/chapter/chapter', editor, 'PATCH', { status: 'published' }))).status).toBe(200);
     expect((await fetchWorker(request('/api/v1/staff/content/chapter/chapter', editor, 'PATCH', { published_topics: [] }))).status).toBe(400);
-    expect((await fetchWorker(request('/api/v1/staff/content/chapter/chapter', editor, 'PATCH', { pyq_pdf_url: 'https://evil.test/x' }))).status).toBe(403);
+    expect((await fetchWorker(request('/api/v1/staff/content/chapter/chapter', editor, 'PATCH', { pyq_pdf_url: 'https://example.test/x' }))).status).toBe(403);
   });
 
   it('invalidates a destructive preview after topic impact changes', async () => {

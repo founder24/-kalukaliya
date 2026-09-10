@@ -12,6 +12,8 @@ import { adminVerify, adminLogout, adminGetSettings, adminGetUnacknowledgedAlert
 import { toast } from 'sonner';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
+import { useAuth } from '@/context/AuthContext';
+import { getToken } from '@/hooks/useTokenManager';
 
 const AdminDashboard       = lazy(() => import('@/components/admin/AdminDashboard'));
 const AdminRoadmap         = lazy(() => import('@/components/admin/AdminRoadmap'));
@@ -117,7 +119,7 @@ export function resolveSectionRedirect(section, ctx = null) {
 // Rendered inside <SyraProvider> so it can read selectedEntity from context.
 // Toggle with Ctrl+Shift+D or the bug icon in the sidebar footer.
 // ─────────────────────────────────────────────────────────────────────────────
-function AdminShellDebug({ activeSection, navContext, adminEmail, adminName, sysStatus, onClose }) {
+function AdminShellDebug({ activeSection, navContext, adminEmail, adminName, authMode, sysStatus, onClose }) {
   const ctx = useSyraContext();
   const selectedEntity = ctx?.selectedEntity ?? null;
 
@@ -154,7 +156,7 @@ function AdminShellDebug({ activeSection, navContext, adminEmail, adminName, sys
         <Row label="sysStatus"      value={sysStatus}                            color="text-amber-400"  />
         <Row label="auth.email"     value={adminEmail || '(not available)'}      color="text-blue-400"   />
         <Row label="auth.name"      value={adminName  || '(not available)'}      color="text-blue-300"   />
-        <Row label="auth.mode"      value="httponly-cookie (no localStorage)"    color="text-gray-400"   />
+        <Row label="auth.mode"      value={authMode}                             color="text-gray-400"   />
         <Row
           label="navContext"
           value={navContext ? JSON.stringify(navContext, null, 2) : 'null'}
@@ -177,8 +179,9 @@ function AdminShellDebug({ activeSection, navContext, adminEmail, adminName, sys
   );
 }
 
-export default function AdminPage() {
+export default function AdminPage({ adminCookieAccess = false }) {
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Section state — URL-synced via ?s=<id>&t=<tab>&st=<subTab> so that:
@@ -219,8 +222,10 @@ export default function AdminPage() {
   const [sysStatus, setSysStatus]         = useState('ok');
 
   const [adminEmail, setAdminEmail] = useState('');
-  const [adminName,  setAdminName]  = useState('Admin');
-  const adminToken = verifying ? null : 'cookie';
+  const [adminName,  setAdminName]  = useState('Staff');
+  const bearerToken = getToken();
+  const adminToken = verifying ? null : (bearerToken || 'cookie');
+  const authMode = bearerToken ? 'staff access token' : 'secure admin cookie';
   const [unackAlertCount, setUnackAlertCount] = useState(0);
   const alertPollRef = useRef(null);
 
@@ -251,28 +256,28 @@ export default function AdminPage() {
   }, [adminToken, verifying]);
 
   useEffect(() => {
-    adminVerify()
+    adminVerify(bearerToken || undefined)
       .then((res) => {
-        if (res.data?.name) setAdminName(res.data.name);
-        if (res.data?.email) setAdminEmail(res.data.email);
+        setAdminName(user?.name || res.data?.name || (user?.role === 'admin' ? 'Admin' : 'Staff'));
+        setAdminEmail(user?.email || res.data?.email || '');
         setVerifying(false);
       })
       .catch(() => {
-        navigate('/admin/login');
+        navigate('/login?next=/staff');
       });
-  }, [navigate]);
+  }, [adminCookieAccess, bearerToken, navigate, user?.email, user?.name, user?.role]);
 
   useEffect(() => {
     if (verifying) return;
     const id = setInterval(() => {
-      adminVerify()
+      adminVerify(bearerToken || undefined)
         .catch(() => {
           toast.error('Session expired. Please log in again.');
-          navigate('/admin/login');
+          navigate('/login?next=/staff');
         });
     }, 12 * 60 * 60 * 1000);
     return () => clearInterval(id);
-  }, [verifying, navigate]);
+  }, [bearerToken, verifying, navigate]);
 
   useEffect(() => {
     if (verifying) return;
@@ -305,23 +310,24 @@ export default function AdminPage() {
   }, [verifying, adminToken]);
 
   const handleLogout = async () => {
-    await adminLogout().catch(() => {});
+    if (bearerToken) await logout();
+    else await adminLogout().catch(() => {});
     toast.success('Logged out');
-    navigate('/admin/login');
+    navigate('/login?next=/staff');
   };
 
   if (verifying) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
         <Loader2 className="w-8 h-8 animate-spin text-violet-500 mb-3" />
-        <p className="text-sm text-gray-400 mt-4">Verifying admin session...</p>
+        <p className="text-sm text-gray-400 mt-4">Verifying staff session...</p>
       </div>
     );
   }
 
   const ActiveComponent = SECTION_COMPONENTS[activeSection] || AdminDashboard;
   const activeLabel = SECTIONS.find((s) => s.id === activeSection)?.label
-    || (activeSection === 'roadmap' ? 'Roadmap' : 'Admin');
+    || (activeSection === 'roadmap' ? 'Roadmap' : 'Staff');
 
   const statusConfig = {
     ok:          { label: 'All Systems Operational', dot: 'bg-emerald-500', text: 'text-emerald-700', border: 'border-emerald-200', bg: 'bg-emerald-50' },
@@ -358,7 +364,7 @@ export default function AdminPage() {
               <div>
                 <p className="text-sm font-bold text-gray-900 tracking-tight" style={{ lineHeight: 1.2 }}>Syrabit.ai</p>
                 <p className="text-[9px] font-semibold tracking-[0.15em] text-violet-500 uppercase">
-                  Control Center
+                  Staff Control Center
                 </p>
               </div>
             </div>
@@ -521,6 +527,7 @@ export default function AdminPage() {
           navContext={navContext}
           adminEmail={adminEmail}
           adminName={adminName}
+          authMode={authMode}
           sysStatus={sysStatus}
           onClose={() => setDebugOpen(false)}
         />
