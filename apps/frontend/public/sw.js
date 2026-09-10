@@ -9,7 +9,9 @@
 //   carrying the legacy `active` status.
 // v20 (2026-09-10): evict login/staff navigation shells that referenced asset
 //   hashes removed by a later Pages deployment.
-const CACHE_VERSION = '20';
+// v21 (2026-09-10): evict staff shells loaded while preload recovery converted
+//   a rejected lazy import into an undefined module.
+const CACHE_VERSION = '21';
 const STATIC_CACHE = 'syrabit-static-v' + CACHE_VERSION;
 const RUNTIME_CACHE = 'syrabit-runtime-v' + CACHE_VERSION;
 const API_CACHE = 'syrabit-api-v' + CACHE_VERSION;
