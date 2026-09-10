@@ -38,7 +38,7 @@ vi.mock('@/lib/authErrors', () => ({
   formatAuthError: (_err, fallback) => fallback,
 }));
 
-import LoginPage from './LoginPage';
+import LoginPage, { redirectToStaffPortal } from './LoginPage';
 import { toast } from 'sonner';
 
 async function triggerLogin() {
@@ -68,6 +68,26 @@ afterEach(() => {
 });
 
 describe('LoginPage — handleSubmit redirect logic', () => {
+  it('uses a fresh document navigation for the production staff portal', () => {
+    const assign = vi.fn();
+    redirectToStaffPortal({
+      navigate: mockNavigate,
+      location: { assign },
+      production: true,
+    });
+    expect(assign).toHaveBeenCalledWith('/staff');
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('keeps client-side staff navigation in local tests and development', () => {
+    redirectToStaffPortal({
+      navigate: mockNavigate,
+      location: { assign: vi.fn() },
+      production: false,
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('/staff');
+  });
+
   it('navigates to /onboarding when onboarding_done is false', async () => {
     mockLogin.mockResolvedValueOnce({ role: '', onboarding_done: false });
     render(<LoginPage />);
