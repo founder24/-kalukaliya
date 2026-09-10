@@ -13,7 +13,10 @@ import { toast } from 'sonner';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import { useAuth } from '@/context/AuthContext';
 import { getToken } from '@/hooks/useTokenManager';
-import { STAFF_PORTAL_SECTIONS } from '@/config/staffPortalSections.mjs';
+import {
+  STAFF_PORTAL_SECTIONS,
+  assertStaffSectionMappings,
+} from '@/config/staffPortalSections.mjs';
 import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
 
 const AdminDashboard       = lazy(() => import('@/components/admin/AdminDashboard'));
@@ -28,7 +31,7 @@ import { SyraProvider, useSyraContext } from '@/components/admin/syra/SyraContex
 // in the current backend. The section was a frontend-only design stub — hiding
 // it prevents a 404 error on every visit and keeps the sidebar uncluttered.
 
-const SECTION_ICONS = {
+export const SECTION_ICONS = {
   dashboard: LayoutDashboard,
   contenthub: BookOpen,
   seomanager: Globe,
@@ -58,7 +61,7 @@ const GROUP_LABELS = {
 
 const GROUPS = ['main', 'audience', 'operations', 'system'];
 
-const SECTION_COMPONENTS = {
+export const SECTION_COMPONENTS = {
   dashboard:     AdminDashboard,
   contenthub:    AdminContentHub,
   seomanager:    AdminModuleUnavailable,
@@ -74,6 +77,13 @@ const SECTION_COMPONENTS = {
   settings:      AdminModuleUnavailable,
   roadmap:       AdminRoadmap,
 };
+
+assertStaffSectionMappings(
+  STAFF_PORTAL_SECTIONS,
+  SECTION_ICONS,
+  SECTION_COMPONENTS,
+  ['roadmap'],
+);
 
 export const SECTION_REDIRECTS = {
   apiconfig:    { section: 'ai',       tab: 'providers', subTab: 'apiconfig'    },

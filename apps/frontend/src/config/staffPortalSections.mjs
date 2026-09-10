@@ -28,3 +28,33 @@ export function assertStaffSectionCoverage(expectedSections, coveredSections) {
     );
   }
 }
+
+function assertExactSectionMapping(mappingName, expectedIds, mapping) {
+  const actualIds = Object.keys(mapping);
+  const missing = expectedIds.filter(id => !actualIds.includes(id));
+  const extra = actualIds.filter(id => !expectedIds.includes(id));
+
+  if (missing.length || extra.length) {
+    const details = [
+      missing.length ? `missing: ${missing.join(', ')}` : null,
+      extra.length ? `extra: ${extra.join(', ')}` : null,
+    ].filter(Boolean).join('; ');
+
+    throw new Error(`Staff portal ${mappingName} mapping is incomplete (${details}).`);
+  }
+}
+
+export function assertStaffSectionMappings(
+  sections,
+  iconMappings,
+  componentMappings,
+  additionalComponentIds = [],
+) {
+  const sectionIds = sections.map(({ id }) => id);
+  assertExactSectionMapping('icon', sectionIds, iconMappings);
+  assertExactSectionMapping(
+    'component',
+    [...sectionIds, ...additionalComponentIds],
+    componentMappings,
+  );
+}

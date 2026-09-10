@@ -130,11 +130,12 @@ jobs:
       - name: Test curriculum release guards
         run: pnpm --filter @workspace/syrabit test:release-guards
 
-      - name: Test disposable staff sign-in failure safety
+      - name: Test staff portal release guards
         run: |
           bash scripts/test-validate-cloudflare-api-cutover.sh
           node --test scripts/staff-portal-response-policy.test.mjs
           node --test scripts/staff-portal-sections.test.mjs
+          pnpm --filter @workspace/syrabit exec vitest run src/pages/AdminPage.sections.test.jsx
 
       - name: Test disposable staff-auth release cleanup
         run: bash scripts/test-release-staff-auth-reaper.sh
