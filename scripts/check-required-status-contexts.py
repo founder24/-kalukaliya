@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import re
 import sys
@@ -30,6 +31,57 @@ def _scalar(value: str) -> str:
     return value
 
 
+def _inline_list(value: str) -> list[str] | None:
+    value = _strip_yaml_comment(value).strip()
+    if not (value.startswith("[") and value.endswith("]")):
+        return None
+    return [_scalar(item) for item in value[1:-1].split(",") if item.strip()]
+
+
+def _matrix_contexts(
+    job_name: str,
+    axes: dict[str, list[str]],
+    excludes: list[dict[str, str]],
+    includes: list[dict[str, str]],
+) -> set[str]:
+    if not axes and not includes:
+        return {job_name}
+
+    axis_names = list(axes)
+    original_combinations = [
+        dict(zip(axis_names, values))
+        for values in itertools.product(*(axes[name] for name in axis_names))
+    ] if axes else []
+    original_combinations = [
+        combination
+        for combination in original_combinations
+        if not any(
+            all(combination.get(key) == value for key, value in exclusion.items())
+            for exclusion in excludes
+        )
+    ]
+    combinations = [combination.copy() for combination in original_combinations]
+    standalone_includes: list[dict[str, str]] = []
+    for included in includes:
+        merged = False
+        for index, original in enumerate(original_combinations):
+            if all(
+                key not in original or original[key] == value
+                for key, value in included.items()
+            ):
+                combinations[index].update(included)
+                merged = True
+        if not merged and included not in standalone_includes:
+            standalone_includes.append(included.copy())
+
+    combinations.extend(standalone_includes)
+
+    return {
+        f"{job_name} ({', '.join(combination[name] for name in combination)})"
+        for combination in combinations
+    }
+
+
 def workflow_contexts(path: Path) -> set[str]:
     """Return job display names from a workflow that handles pull requests."""
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -44,10 +96,29 @@ def workflow_contexts(path: Path) -> set[str]:
     in_jobs = False
     current_job: str | None = None
     current_name: str | None = None
+    matrix_axes: dict[str, list[str]] = {}
+    matrix_excludes: list[dict[str, str]] = []
+    matrix_includes: list[dict[str, str]] = []
+    matrix_section: str | None = None
+    matrix_item: dict[str, str] | None = None
+    matrix_axis: str | None = None
+    matrix_error: str | None = None
 
     def save_job() -> None:
         if current_job:
-            contexts.add(current_name or current_job)
+            if matrix_error:
+                raise RuntimeError(
+                    f"{path.name}: job {current_job} has a matrix that cannot be "
+                    f"statically expanded ({matrix_error})"
+                )
+            contexts.update(
+                _matrix_contexts(
+                    current_name or current_job,
+                    matrix_axes,
+                    matrix_excludes,
+                    matrix_includes,
+                )
+            )
 
     for line in lines:
         if re.match(r"^jobs:\s*(?:#.*)?$", line):
@@ -64,11 +135,89 @@ def workflow_contexts(path: Path) -> set[str]:
             save_job()
             current_job = job_match.group(1)
             current_name = None
+            matrix_axes = {}
+            matrix_excludes = []
+            matrix_includes = []
+            matrix_section = None
+            matrix_item = None
+            matrix_axis = None
+            matrix_error = None
             continue
 
         name_match = re.match(r"^    name:\s*(.+?)\s*$", line)
         if current_job and name_match:
             current_name = _scalar(name_match.group(1))
+            continue
+
+        matrix_match = re.match(r"^      matrix:\s*(.*?)\s*$", line)
+        if current_job and matrix_match:
+            matrix_section = "axes"
+            matrix_item = None
+            matrix_axis = None
+            matrix_value = _strip_yaml_comment(matrix_match.group(1)).strip()
+            if matrix_value:
+                matrix_error = f"unsupported inline or dynamic value: {matrix_value}"
+            continue
+
+        section_match = re.match(r"^        (include|exclude):\s*(?:#.*)?$", line)
+        if current_job and matrix_section and section_match:
+            matrix_section = section_match.group(1)
+            matrix_item = None
+            matrix_axis = None
+            continue
+
+        axis_match = re.match(r"^        ([A-Za-z0-9_-]+):(?:\s*(.+?))?\s*$", line)
+        if current_job and matrix_section is not None and axis_match:
+            matrix_section = "axes"
+            matrix_item = None
+            matrix_axis = axis_match.group(1)
+            value = axis_match.group(2) or ""
+            values = _inline_list(value)
+            if value and values is None:
+                matrix_error = f"axis {matrix_axis} is not a static list"
+                matrix_axes[matrix_axis] = []
+            elif values and any(
+                item.startswith(("{", "[")) or item.endswith(("}", "]"))
+                for item in values
+            ):
+                matrix_error = f"axis {matrix_axis} contains structured values"
+                matrix_axes[matrix_axis] = []
+            else:
+                matrix_axes[matrix_axis] = values or []
+            continue
+
+        axis_item_match = re.match(r"^          -\s+(.+?)\s*$", line)
+        if (
+            current_job
+            and matrix_section == "axes"
+            and matrix_axis
+            and axis_item_match
+        ):
+            item = _scalar(axis_item_match.group(1))
+            if (
+                item.startswith(("{", "["))
+                or item.endswith(("}", "]"))
+                or re.match(r"^[A-Za-z0-9_-]+:\s*", item)
+            ):
+                matrix_error = f"axis {matrix_axis} contains structured values"
+            else:
+                matrix_axes[matrix_axis].append(item)
+            continue
+
+        item_match = re.match(r"^          -\s+([A-Za-z0-9_-]+):\s*(.+?)\s*$", line)
+        if current_job and matrix_section in {"include", "exclude"} and item_match:
+            matrix_item = {item_match.group(1): _scalar(item_match.group(2))}
+            target = (
+                matrix_includes if matrix_section == "include" else matrix_excludes
+            )
+            target.append(matrix_item)
+            continue
+
+        item_field_match = re.match(
+            r"^            ([A-Za-z0-9_-]+):\s*(.+?)\s*$", line
+        )
+        if matrix_item is not None and item_field_match:
+            matrix_item[item_field_match.group(1)] = _scalar(item_field_match.group(2))
     else:
         save_job()
 
