@@ -35,6 +35,16 @@ vi.mock('@/utils/api', () => ({
   adminLogsExportUrl: vi.fn(() => ''),
   adminLogsDownloadExport: vi.fn(() => Promise.resolve()),
   API_BASE: 'http://localhost:8000',
+  WORKER_API: 'http://localhost:8000',
+}));
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => ({
+    user: { name: 'Staff User', email: 'staff@example.test', role: 'staff' },
+    logout: vi.fn(() => Promise.resolve()),
+  }),
+}));
+vi.mock('@/hooks/useTokenManager', () => ({
+  getToken: () => 'header.payload.signature',
 }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -56,6 +66,7 @@ vi.mock('@/components/admin/syra/SyraContext', () => ({
 vi.mock('@/components/admin/BreakGlassBanner', () => ({ default: () => null }));
 
 import AdminPage from './AdminPage';
+import { adminVerify } from '@/utils/api';
 
 function renderAdmin() {
   return render(
@@ -78,6 +89,12 @@ async function waitForVerifiedAdmin() {
 describe('AdminPage.handleNavigate integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('accepts a verified role=staff JWT without calling the legacy cookie verifier', async () => {
+    renderAdmin();
+    await waitForVerifiedAdmin();
+    expect(adminVerify).not.toHaveBeenCalled();
   });
 
   it('Conversations sidebar nav exposes the Feedback sub-tab (post-merge)', async () => {
