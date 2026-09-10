@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -217,12 +217,33 @@ test('warning CLI emits actionable annotations while tolerating unreadable and t
       encoding: 'utf8',
       env: {
         ...process.env,
+        CHAT_PERFORMANCE_NOTIFICATION_RUNS: '2',
         CHAT_PERFORMANCE_NOTIFICATION_STATE_PATH: notificationStatePath,
       },
     },
   );
 
   assert.equal(result.status, 0, result.stderr);
+  const notificationState = JSON.parse(await readFile(notificationStatePath, 'utf8'));
+  assert.deepEqual(notificationState, {
+    comparison_complete: true,
+    minimum_runs: 2,
+    compared_runs: 2,
+    indeterminate_routes: [],
+    active_warnings: [{
+      route: 'direct_chapter_rag',
+      label: 'Direct chapter RAG',
+      affected_runs: 2,
+      compared_runs: 2,
+      maxima_ms: [4200, 3900],
+      dominant_slow_phase: {
+        phase: 'retrieval_ms',
+        average_ms: 2200,
+        samples: 1,
+      },
+      message: 'Direct chapter RAG had a tolerated first-token outlier above the release target in 2/2 recent deployment runs; dominant slow worker phase: retrieval_ms (2200 ms average across 1 timed outliers)',
+    }],
+  });
   assert.match(
     result.stderr,
     /::notice title=Chat performance history::Skipped unreadable report 2026-09-09\.json:/,
@@ -231,4 +252,42 @@ test('warning CLI emits actionable annotations while tolerating unreadable and t
   assert.match(result.stderr, /dominant slow worker phase: retrieval_ms/);
   assert.match(result.stderr, /Affected-run maxima: 4200, 3900 ms/);
   assert.match(result.stderr, /The 3000 ms strict-majority release gate is unchanged\./);
+});
+
+test('warning CLI preserves indeterminate routes without changing notification state on insufficient history', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'chat-performance-warning-insufficient-'));
+  const historyDirectory = join(directory, 'history');
+  const currentPath = join(directory, 'current.json');
+  const notificationStatePath = join(directory, 'notification-state.json');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  const current = reportFor([4200, 4500, 1800], [1500, 1700, 1900]);
+  await mkdir(historyDirectory);
+  await writeFile(currentPath, JSON.stringify(current));
+
+  const result = spawnSync(
+    process.execPath,
+    [join(import.meta.dirname, 'warn-worker-chat-performance-history.mjs'), currentPath, historyDirectory],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CHAT_PERFORMANCE_NOTIFICATION_RUNS: '3',
+        CHAT_PERFORMANCE_NOTIFICATION_STATE_PATH: notificationStatePath,
+      },
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(await readFile(notificationStatePath, 'utf8')), {
+    comparison_complete: false,
+    minimum_runs: 3,
+    compared_runs: 1,
+    indeterminate_routes: ['direct_chapter_rag'],
+    active_warnings: [],
+  });
+  assert.match(
+    result.stderr,
+    /::notice title=Chat performance notification::Only 1\/3 required reports were available;/,
+  );
 });
