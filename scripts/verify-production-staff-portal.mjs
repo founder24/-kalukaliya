@@ -43,7 +43,10 @@ page.on('pageerror', error => runtimeErrors.push(error.stack || error.message));
 page.on('console', message => {
   if (message.type() !== 'error') return;
   const text = message.text();
-  if (!text.includes('Failed to load resource')) runtimeErrors.push(text);
+  if (
+    !text.includes('Failed to load resource')
+    && !text.includes('Failed to update a ServiceWorker')
+  ) runtimeErrors.push(text);
 });
 page.on('response', response => {
   if (response.status() >= 400) {

@@ -1,13 +1,11 @@
 const CHUNK_RELOAD_KEY = 'syrabit:chunk-reload-at';
 const RELOAD_COOLDOWN_MS = 30_000;
 
-export function handlePreloadError(event, {
+export function handlePreloadError(_event, {
   location = window.location,
   storage = window.sessionStorage,
   now = Date.now(),
 } = {}) {
-  event.preventDefault();
-
   let lastReload = 0;
   try {
     lastReload = Number(storage.getItem(CHUNK_RELOAD_KEY) || 0);
