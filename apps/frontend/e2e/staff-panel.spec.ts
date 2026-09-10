@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { STAFF_PORTAL_SECTIONS } from '../src/config/staffPortalSections.mjs';
 
 /**
  * Staff panel smoke tests — Task #256
@@ -231,21 +232,7 @@ test.describe('Staff panel — sidebar sections', () => {
     return match.id;
   };
 
-  const ALL_SECTIONS = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'contenthub', label: 'Content Editor' },
-    { id: 'seomanager', label: 'SEO Manager' },
-    { id: 'users', label: 'Users' },
-    { id: 'conversations', label: 'Conversations' },
-    { id: 'notifications', label: 'Notifications' },
-    { id: 'ai', label: 'AI & Automation' },
-    { id: 'analytics', label: 'Analytics' },
-    { id: 'security', label: 'Access & Security' },
-    { id: 'logs', label: 'Logs' },
-    { id: 'health', label: 'Health / Uptime' },
-    { id: 'ops', label: 'Ops Console' },
-    { id: 'settings', label: 'Site Settings' },
-  ];
+  const ALL_SECTIONS = STAFF_PORTAL_SECTIONS;
 
   // ──────────────────────────────────────────────────────────────────────────
   // Per-section tests

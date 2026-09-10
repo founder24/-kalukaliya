@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import { useAuth } from '@/context/AuthContext';
 import { getToken } from '@/hooks/useTokenManager';
+import { STAFF_PORTAL_SECTIONS } from '@/config/staffPortalSections.mjs';
 
 const AdminDashboard       = lazy(() => import('@/components/admin/AdminDashboard'));
 const AdminHealth          = lazy(() => import('@/components/admin/AdminHealth'));
@@ -26,21 +27,26 @@ import { SyraProvider, useSyraContext } from '@/components/admin/syra/SyraContex
 // in the current backend. The section was a frontend-only design stub — hiding
 // it prevents a 404 error on every visit and keeps the sidebar uncluttered.
 
-const SECTIONS = [
-  { id: 'dashboard',     icon: LayoutDashboard, label: 'Dashboard',         group: 'main'       },
-  { id: 'contenthub',    icon: BookOpen,        label: 'Content Editor',    group: 'main'       },
-  { id: 'seomanager',    icon: Globe,           label: 'SEO Manager',       group: 'main'       },
-  { id: 'users',         icon: Users,           label: 'Users',             group: 'audience'   },
-  { id: 'conversations', icon: MessageSquare,   label: 'Conversations',     group: 'audience'   },
-  { id: 'notifications', icon: Bell,            label: 'Notifications',     group: 'audience'   },
-  { id: 'ai',            icon: Cpu,             label: 'AI & Automation',   group: 'operations' },
-  { id: 'analytics',     icon: TrendingUp,      label: 'Analytics',         group: 'operations' },
-  { id: 'security',      icon: ShieldAlert,     label: 'Access & Security', group: 'system'     },
-  { id: 'logs',          icon: Activity,        label: 'Logs',              group: 'system'     },
-  { id: 'health',        icon: HeartPulse,      label: 'Health / Uptime',   group: 'system'     },
-  { id: 'ops',           icon: Gauge,           label: 'Ops Console',       group: 'system'     },
-  { id: 'settings',      icon: Settings,        label: 'Site Settings',     group: 'system'     },
-];
+const SECTION_ICONS = {
+  dashboard: LayoutDashboard,
+  contenthub: BookOpen,
+  seomanager: Globe,
+  users: Users,
+  conversations: MessageSquare,
+  notifications: Bell,
+  ai: Cpu,
+  analytics: TrendingUp,
+  security: ShieldAlert,
+  logs: Activity,
+  health: HeartPulse,
+  ops: Gauge,
+  settings: Settings,
+};
+
+const SECTIONS = STAFF_PORTAL_SECTIONS.map(section => ({
+  ...section,
+  icon: SECTION_ICONS[section.id],
+}));
 
 const GROUP_LABELS = {
   main:       '',

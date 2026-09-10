@@ -3,6 +3,10 @@ import {
   isExpectedPostLogoutAuthResponse,
   isPostLogoutAuthEndpoint,
 } from './staff-portal-response-policy.mjs';
+import {
+  STAFF_PORTAL_SECTIONS,
+  assertStaffSectionCoverage,
+} from '../apps/frontend/src/config/staffPortalSections.mjs';
 
 const required = [
   'CUTOVER_STAFF_EMAIL',
@@ -20,21 +24,9 @@ const accessHeaders = {
   'CF-Access-Client-Id': process.env.CF_ACCESS_CLIENT_ID,
   'CF-Access-Client-Secret': process.env.CF_ACCESS_CLIENT_SECRET,
 };
-const sections = [
-  ['dashboard', 'Dashboard'],
-  ['contenthub', 'Content Editor'],
-  ['seomanager', 'SEO Manager'],
-  ['users', 'Users'],
-  ['conversations', 'Conversations'],
-  ['notifications', 'Notifications'],
-  ['ai', 'AI & Automation'],
-  ['analytics', 'Analytics'],
-  ['security', 'Access & Security'],
-  ['logs', 'Logs'],
-  ['health', 'Health / Uptime'],
-  ['ops', 'Ops Console'],
-  ['settings', 'Site Settings'],
-];
+const verifierSections = STAFF_PORTAL_SECTIONS.map(({ id, label }) => ({ id, label }));
+assertStaffSectionCoverage(STAFF_PORTAL_SECTIONS, verifierSections);
+const sections = verifierSections.map(({ id, label }) => [id, label]);
 const requiredReads = {
   dashboard: ['/health', '/api/v1/staff/analytics/command-center'],
   contenthub: [

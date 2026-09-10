@@ -129,6 +129,7 @@ jobs:
         run: |
           bash scripts/test-validate-cloudflare-api-cutover.sh
           node --test scripts/staff-portal-response-policy.test.mjs
+          node --test scripts/staff-portal-sections.test.mjs
 
       - name: Test disposable staff-auth release cleanup
         run: bash scripts/test-release-staff-auth-reaper.sh
