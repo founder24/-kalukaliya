@@ -5,6 +5,11 @@ name: CI Retired Local Tooling — Lint & Test
 # deployment step; Cloudflare Workers are the only production runtime.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/backend/**'
+      - '.github/workflows/ci-backend.yml'
   pull_request:
     branches: [main]
     paths:

@@ -1,6 +1,12 @@
 name: CI Frontend — Lint & Test
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/frontend/**'
+      - '.github/workflows/ci-frontend.yml'
+      - 'pnpm-lock.yaml'
   pull_request:
     branches: [main]
     paths:
