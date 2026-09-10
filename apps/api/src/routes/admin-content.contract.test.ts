@@ -173,6 +173,22 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     expect(chapter?.status).toBe('draft');
   });
 
+  it('allows a staff access token to use the unified admin API surface', async () => {
+    await env.DB.prepare(`
+      INSERT INTO users (id, email, role, name)
+      VALUES ('native-staff', 'staff@example.test', 'staff', 'Native Staff')
+    `).run();
+    const staff = await new SignJWT({ role: 'staff', type: 'access' })
+      .setProtectedHeader({ alg: 'HS256' }).setSubject('native-staff')
+      .setIssuedAt().setExpirationTime('1h')
+      .sign(new TextEncoder().encode('ordinary-user-secret'));
+    const response = await workerFetch(new Request('http://worker/api/v1/admin/verify', {
+      headers: { Authorization: `Bearer ${staff}` },
+    }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ user_id: 'native-staff' });
+  });
+
   it('queues a publish job through the existing admin-session cookie', async () => {
     const response = await workerFetch(adminRequest(
       `/api/v1/admin/content/chapters/${chapterId}/publish`, 'POST',

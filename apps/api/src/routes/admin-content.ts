@@ -75,11 +75,11 @@ async function requireAdmin(c: Context<{ Bindings: Env }>): Promise<string | Res
       return response;
     }
   }
-  // Cloud Run also accepted a normal access token for a user whose role was
-  // admin. Preserve that bearer-only compatibility path.
+  // The unified staff control center uses normal access tokens for both staff
+  // and admin roles. Admin-cookie sessions remain admin-only.
   if (bearer) {
     const access = await verifyToken(bearer, c.env.JWT_SECRET);
-    if (access?.type === 'access' && access.role === 'admin' && access.sub
+    if (access?.type === 'access' && (access.role === 'admin' || access.role === 'staff') && access.sub
       && await isSessionValid(c.env.DB, access.sub, access.iat)) return access.sub;
   }
   return c.json({ detail: bearer || session ? 'Invalid or expired admin session' : 'Authentication required' }, 401);
