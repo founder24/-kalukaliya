@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'apps/edge/**'
+      - 'scripts/test-worker-chat-performance.mjs'
+      - 'scripts/worker-chat-performance-gate.mjs'
+      - 'scripts/worker-chat-performance-gate.test.mjs'
       - '.github/workflows/ci-edge.yml'
   workflow_dispatch:
 
@@ -56,3 +59,6 @@ jobs:
 
       - name: Run Tests
         run: pnpm --filter syrabit-edge test
+
+      - name: Run worker chat performance gate regression tests
+        run: node --test scripts/worker-chat-performance-gate.test.mjs
