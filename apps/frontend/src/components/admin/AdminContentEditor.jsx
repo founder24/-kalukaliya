@@ -190,10 +190,10 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     try {
       const cfg = authHeaders(adminToken);
       const [b, c, s, sub] = await Promise.all([
-        axios.get(`${API}/admin/content/boards`, cfg),
-        axios.get(`${API}/admin/content/classes`, cfg),
-        axios.get(`${API}/admin/content/streams`, cfg),
-        axios.get(`${API}/admin/content/subjects`, cfg),
+        axios.get(`${API}/staff/content/boards`, cfg),
+        axios.get(`${API}/staff/content/classes`, cfg),
+        axios.get(`${API}/staff/content/streams`, cfg),
+        axios.get(`${API}/staff/content/subjects`, cfg),
       ]);
       setBoards(b.data?.boards || b.data || []); setClasses(c.data?.classes || c.data || []); setStreams(s.data?.streams || s.data || []); setSubjects(sub.data?.subjects || sub.data || []);
     } catch { toast.error('Failed to load content data'); }

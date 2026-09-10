@@ -35,6 +35,28 @@ const sections = [
   ['ops', 'Ops Console'],
   ['settings', 'Site Settings'],
 ];
+const requiredReads = {
+  dashboard: ['/health', '/api/v1/staff/analytics/command-center'],
+  contenthub: [
+    '/api/v1/staff/content/boards',
+    '/api/v1/staff/content/classes',
+    '/api/v1/staff/content/streams',
+    '/api/v1/staff/content/subjects',
+  ],
+  analytics: ['/api/v1/staff/analytics/command-center'],
+};
+const unsupportedSections = new Set([
+  'seomanager',
+  'users',
+  'conversations',
+  'notifications',
+  'ai',
+  'security',
+  'logs',
+  'health',
+  'ops',
+  'settings',
+]);
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext();
@@ -45,6 +67,27 @@ const failedRequests = [];
 const postLogoutAuthResponses = [];
 const strippedApiAccessHeaders = [];
 let postLogoutProbe = false;
+let activeSection = 'dashboard';
+const successfulReads = new Map(sections.map(([id]) => [id, new Set()]));
+const apiReadsStarted = new Map(sections.map(([id]) => [id, []]));
+const requestSections = new WeakMap();
+const REQUIRED_READ_TIMEOUT_MS = 15_000;
+
+async function waitForRequiredReads(id, label) {
+  const expected = requiredReads[id] || [];
+  if (!expected.length) return;
+  const deadline = Date.now() + REQUIRED_READ_TIMEOUT_MS;
+  let missing = expected;
+  while (Date.now() < deadline) {
+    missing = expected.filter(path => !successfulReads.get(id)?.has(path));
+    if (!missing.length) return;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(
+    `${label} did not complete required read-only Worker requests within `
+      + `${REQUIRED_READ_TIMEOUT_MS}ms:\n${missing.join('\n')}`,
+  );
+}
 
 const isAccessServiceWorkerArtifact = text =>
   text.includes('Failed to update a ServiceWorker')
@@ -62,7 +105,16 @@ page.on('console', message => {
     && !isAccessServiceWorkerArtifact(text)
   ) runtimeErrors.push(text);
 });
+page.on('request', request => {
+  const section = activeSection;
+  requestSections.set(request, section);
+  const url = new URL(request.url());
+  if (request.method() === 'GET' && url.origin === edge) {
+    apiReadsStarted.get(section)?.push(url.pathname);
+  }
+});
 page.on('response', response => {
+  const responseSection = requestSections.get(response.request()) || activeSection;
   const isPostLogoutAuthProbe = isPostLogoutAuthEndpoint(response.url(), postLogoutProbe);
   const isExpectedPostLogoutDenial = isExpectedPostLogoutAuthResponse(
     response.url(),
@@ -75,14 +127,23 @@ page.on('response', response => {
     );
   }
   if (response.status() >= 400 && !isExpectedPostLogoutDenial) {
-    failedRequests.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    failedRequests.push(
+      `[${responseSection}] ${response.status()} ${response.request().method()} ${response.url()}`,
+    );
   }
   if ([401, 403].includes(response.status()) && !isExpectedPostLogoutDenial) {
     forbiddenRequests.push(`${response.status()} ${response.request().method()} ${response.url()}`);
   }
+  if (response.ok() && response.request().method() === 'GET') {
+    const url = new URL(response.url());
+    successfulReads.get(responseSection)?.add(url.pathname);
+  }
 });
 page.on('requestfailed', request => {
-  failedRequests.push(`NETWORK ${request.method()} ${request.url()} — ${request.failure()?.errorText || 'unknown error'}`);
+  const requestSection = requestSections.get(request) || activeSection;
+  failedRequests.push(
+    `[${requestSection}] NETWORK ${request.method()} ${request.url()} — ${request.failure()?.errorText || 'unknown error'}`,
+  );
 });
 
 // Cloudflare Access protects the Pages origin, but the public API uses the
@@ -154,9 +215,10 @@ try {
   }
 
   for (const [id, label] of sections) {
+    activeSection = id;
     await page.getByTestId(`admin-nav-${id}`).click();
     await page.waitForURL(url => url.pathname === '/staff' && url.searchParams.get('s') === id);
-    await page.waitForTimeout(800);
+    await waitForRequiredReads(id, label);
     if (await page.getByRole('heading', { name: 'Something went wrong' }).count()) {
       throw new Error(`${label} triggered the global error boundary`);
     }
@@ -183,7 +245,27 @@ try {
       ].join('\n\n'));
     }
     await page.getByTestId('admin-dashboard').waitFor({ state: 'visible' });
+    if (unsupportedSections.has(id)) {
+      await page.getByTestId(`admin-module-unavailable-${id}`).waitFor({ state: 'visible' });
+      const unexpectedReads = apiReadsStarted.get(id) || [];
+      if (unexpectedReads.length) {
+        throw new Error(
+          `${label} is documented as unsupported but initiated API reads:\n${unexpectedReads.join('\n')}`,
+        );
+      }
+    }
     console.log(`Staff portal read passed: ${label}`);
+  }
+
+  await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
+  for (const [id, label] of sections) {
+    if (!unsupportedSections.has(id)) continue;
+    const unexpectedReads = apiReadsStarted.get(id) || [];
+    if (unexpectedReads.length) {
+      throw new Error(
+        `${label} is documented as unsupported but initiated API reads:\n${unexpectedReads.join('\n')}`,
+      );
+    }
   }
 
   await page.goto(`${site}/admin?s=analytics&t=usage#report`, { waitUntil: 'domcontentloaded' });

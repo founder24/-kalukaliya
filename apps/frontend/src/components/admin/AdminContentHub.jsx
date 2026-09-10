@@ -117,10 +117,10 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
     const cfg = authHeaders(adminToken);
     try {
       const [b, c, s, sub] = await Promise.all([
-        axios.get(`${API}/admin/content/boards`, cfg),
-        axios.get(`${API}/admin/content/classes`, cfg),
-        axios.get(`${API}/admin/content/streams`, cfg),
-        axios.get(`${API}/admin/content/subjects`, cfg),
+        axios.get(`${API}/staff/content/boards`, cfg),
+        axios.get(`${API}/staff/content/classes`, cfg),
+        axios.get(`${API}/staff/content/streams`, cfg),
+        axios.get(`${API}/staff/content/subjects`, cfg),
       ]);
       setBoards(b.data || []);
       setClasses(c.data || []);

@@ -16,6 +16,7 @@ if (!_VITE_BACKEND) {
   }
 }
 export const API_BASE = `${BACKEND_URL}/api/v1`;
+export const HEALTH_API = `${BACKEND_URL}/health`;
 
 const _RENDER_URL = (import.meta.env.VITE_RENDER_API_URL || '').replace(/\/+$/, '');
 const _WORKER_URL = (import.meta.env.VITE_WORKER_API_URL || '').replace(/\/+$/, '');

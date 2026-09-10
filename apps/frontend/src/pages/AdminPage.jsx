@@ -8,28 +8,17 @@ import {
   ExternalLink, Gauge, Bug, FileText,
 } from 'lucide-react';
 import axios from 'axios';
-import { adminVerify, adminLogout, adminGetSettings, adminGetUnacknowledgedAlertCount, API_BASE } from '@/utils/api';
+import { adminVerify, adminLogout, HEALTH_API } from '@/utils/api';
 import { toast } from 'sonner';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
-import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
 import { useAuth } from '@/context/AuthContext';
 import { getToken } from '@/hooks/useTokenManager';
 
-const AdminDashboard       = lazy(() => import('@/components/admin/AdminDashboard'));
+const AdminDashboard       = lazy(() => import('@/components/admin/AdminAnalytics'));
 const AdminRoadmap         = lazy(() => import('@/components/admin/AdminRoadmap'));
 const AdminContentHub      = lazy(() => import('@/components/admin/AdminContentHub'));
-const AdminUsers           = lazy(() => import('@/components/admin/AdminUsers'));
-const AdminConversations   = lazy(() => import('@/components/admin/AdminConversations'));
 const AdminAnalytics       = lazy(() => import('@/components/admin/AdminAnalytics'));
-const AdminNotifications   = lazy(() => import('@/components/admin/AdminNotifications'));
-const AdminSettings        = lazy(() => import('@/components/admin/AdminSettings'));
-const AdminHealth          = lazy(() => import('@/components/admin/AdminHealth'));
-const AdminSeoManager      = lazy(() => import('@/components/admin/AdminSeoManager'));
-const AdminAiHub           = lazy(() => import('@/components/admin/AdminAiHub'));
-const AdminAccessSecurity  = lazy(() => import('@/components/admin/AdminAccessSecurity'));
-const AdminLogsExplorer    = lazy(() => import('@/components/admin/AdminLogsExplorer'));
-const AdminOpsConsole      = lazy(() => import('@/components/admin/AdminOpsConsole'));
-const SyraAssistant        = lazy(() => import('@/components/admin/SyraAssistant'));
+const AdminModuleUnavailable = lazy(() => import('@/components/admin/AdminModuleUnavailable'));
 import { SyraProvider, useSyraContext } from '@/components/admin/syra/SyraContext';
 
 // AWS-Native panel removed: /admin/aws-native/* endpoints are not implemented
@@ -64,17 +53,17 @@ const GROUPS = ['main', 'audience', 'operations', 'system'];
 const SECTION_COMPONENTS = {
   dashboard:     AdminDashboard,
   contenthub:    AdminContentHub,
-  seomanager:    AdminSeoManager,
-  users:         AdminUsers,
-  conversations: AdminConversations,
-  notifications: AdminNotifications,
-  ai:            AdminAiHub,
+  seomanager:    AdminModuleUnavailable,
+  users:         AdminModuleUnavailable,
+  conversations: AdminModuleUnavailable,
+  notifications: AdminModuleUnavailable,
+  ai:            AdminModuleUnavailable,
   analytics:     AdminAnalytics,
-  security:      AdminAccessSecurity,
-  logs:          AdminLogsExplorer,
-  health:        AdminHealth,
-  ops:           AdminOpsConsole,
-  settings:      AdminSettings,
+  security:      AdminModuleUnavailable,
+  logs:          AdminModuleUnavailable,
+  health:        AdminModuleUnavailable,
+  ops:           AdminModuleUnavailable,
+  settings:      AdminModuleUnavailable,
   roadmap:       AdminRoadmap,
 };
 
@@ -229,9 +218,6 @@ export default function AdminPage({ adminCookieAccess = false }) {
   );
   const adminToken = verifying ? null : (bearerToken || 'cookie');
   const authMode = bearerToken ? 'staff access token' : 'secure admin cookie';
-  const [unackAlertCount, setUnackAlertCount] = useState(0);
-  const alertPollRef = useRef(null);
-
   // Debug overlay state — toggled by Ctrl+Shift+D or sidebar bug icon.
   const [debugOpen, setDebugOpen] = useState(false);
 
@@ -245,18 +231,6 @@ export default function AdminPage({ adminCookieAccess = false }) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
-
-  useEffect(() => {
-    if (!adminToken || verifying) return;
-    const fetchCount = () => {
-      adminGetUnacknowledgedAlertCount(adminToken)
-        .then((res) => setUnackAlertCount(res.data?.count || 0))
-        .catch(() => {});
-    };
-    fetchCount();
-    alertPollRef.current = setInterval(fetchCount, 60_000);
-    return () => clearInterval(alertPollRef.current);
-  }, [adminToken, verifying]);
 
   useEffect(() => {
     if (hasJwtStaffSession) {
@@ -296,19 +270,9 @@ export default function AdminPage({ adminCookieAccess = false }) {
     if (verifying) return;
     const checkStatus = async () => {
       try {
-        const [healthRes, settingsRes] = await Promise.allSettled([
-          axios.get(`${API_BASE}/health`, { withCredentials: true }),
-          adminGetSettings(adminToken),
-        ]);
-
-        const settingsData = settingsRes.status === 'fulfilled' ? settingsRes.value?.data : null;
-        if (settingsData?.maintenance_mode) {
-          setSysStatus('maintenance');
-          return;
-        }
-
-        const healthData = healthRes.status === 'fulfilled' ? healthRes.value?.data : null;
-        if (!healthData || healthRes.status === 'rejected') {
+        const healthRes = await axios.get(HEALTH_API, { withCredentials: true });
+        const healthData = healthRes?.data;
+        if (!healthData) {
           setSysStatus('warn');
           return;
         }
@@ -320,7 +284,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
       }
     };
     checkStatus();
-  }, [verifying, adminToken]);
+  }, [verifying]);
 
   const handleLogout = async () => {
     if (bearerToken) await logout();
@@ -424,11 +388,6 @@ export default function AdminPage({ adminCookieAccess = false }) {
                       {!collapsed && (
                         <span className="text-[13px] truncate">{sectionLabel}</span>
                       )}
-                      {id === 'security' && unackAlertCount > 0 && (
-                        <span className="ml-auto flex-shrink-0 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
-                          {unackAlertCount > 99 ? '99+' : unackAlertCount}
-                        </span>
-                      )}
                     </button>
                   );
                 })}
@@ -504,8 +463,6 @@ export default function AdminPage({ adminCookieAccess = false }) {
           </div>
         </header>
 
-        <BreakGlassBanner adminToken={adminToken} />
-
         <main className={`flex-1 overflow-hidden flex flex-col ${activeSection === 'contenthub' ? '' : 'overflow-y-auto p-3 sm:p-4 md:p-6'}`}>
           <SectionErrorBoundary key={activeSection} name={activeLabel}>
             <Suspense fallback={
@@ -519,20 +476,12 @@ export default function AdminPage({ adminCookieAccess = false }) {
                 adminName={adminName}
                 onNavigate={handleNavigate}
                 navContext={SECTIONS_WITH_CONTEXT.has(activeSection) ? navContext : null}
+                moduleId={activeSection}
               />
             </Suspense>
           </SectionErrorBoundary>
         </main>
       </div>
-
-      <Suspense fallback={null}>
-        <SyraAssistant
-          activeSection={activeSection}
-          onNavigate={handleNavigate}
-          adminToken={adminToken}
-          adminEmail={adminEmail}
-        />
-      </Suspense>
 
       {debugOpen && (
         <AdminShellDebug

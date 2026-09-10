@@ -35,6 +35,7 @@ vi.mock('@/utils/api', () => ({
   adminLogsExportUrl: vi.fn(() => ''),
   adminLogsDownloadExport: vi.fn(() => Promise.resolve()),
   API_BASE: 'http://localhost:8000',
+  HEALTH_API: 'http://localhost:8000/health',
   WORKER_API: 'http://localhost:8000',
 }));
 vi.mock('@/context/AuthContext', () => ({
@@ -97,20 +98,16 @@ describe('AdminPage.handleNavigate integration', () => {
     expect(adminVerify).not.toHaveBeenCalled();
   });
 
-  it('Conversations sidebar nav exposes the Feedback sub-tab (post-merge)', async () => {
+  it('documents that conversation records are unavailable instead of calling retired reads', async () => {
     renderAdmin();
     await waitForVerifiedAdmin();
 
-    // Click the Conversations sidebar nav, then assert the Feedback
-    // sub-tab exists so we know the consolidated Conversations panel
-    // is hosting the feedback surface (rather than a retired sidebar id).
     fireEvent.click(screen.getByTestId('admin-nav-conversations'));
-    // The Conversations panel is React.lazy — wait long enough for the
-    // dynamic import + initial render to settle.
     await waitFor(
-      () => expect(screen.getByTestId('admin-conversations-tab-feedback')).toBeTruthy(),
+      () => expect(screen.getByTestId('admin-module-unavailable-conversations')).toBeTruthy(),
       { timeout: 5000 },
     );
+    expect(screen.getByText(/individual conversation records is not supported/i)).toBeTruthy();
   });
 
   it('resolveSectionRedirect("feedback") drives Conversations to the Feedback tab', async () => {
