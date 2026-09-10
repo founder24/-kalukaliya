@@ -273,6 +273,7 @@ describe('anonymous burst protection in the Workers runtime', () => {
           transaction: async (callback: (txn: unknown) => Promise<unknown>) => callback({
             get: async (key: string) => aggregateStorage.get(key),
             put: async (key: string, value: unknown) => aggregateStorage.set(key, value),
+            delete: async (key: string) => aggregateStorage.delete(key),
           }),
         },
       } as unknown as DurableObjectState;
@@ -333,6 +334,14 @@ describe('anonymous burst protection in the Workers runtime', () => {
         incident_count_buckets: [
           { started_at: '2026-09-09T12:10:00.000Z', count: 1 },
         ],
+        alert: {
+          enabled: false,
+          threshold: 3,
+          window_minutes: 60,
+          state: 'disabled',
+          last_fired_at: null,
+          window_expires_at: null,
+        },
       });
 
       vi.advanceTimersByTime(50 * 60_000);
@@ -370,10 +379,102 @@ describe('anonymous burst protection in the Workers runtime', () => {
           { started_at: '2026-09-09T12:10:00.000Z', count: 1 },
           { started_at: '2026-09-09T13:10:00.000Z', count: 1 },
         ],
+        alert: {
+          enabled: false,
+          threshold: 3,
+          window_minutes: 60,
+          state: 'disabled',
+          last_fired_at: null,
+          window_expires_at: null,
+        },
       });
     } finally {
       errorSpy.mockRestore();
       infoSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('alerts once per aggregate window and resets after recovery or expiry', async () => {
+    vi.useFakeTimers();
+    const webhook = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(webhook);
+    try {
+      vi.setSystemTime(new Date('2026-09-10T08:00:00.000Z'));
+      const values = new Map<string, unknown>();
+      const healthValues = new Map<string, string>();
+      const state = {
+        blockConcurrencyWhile: async (callback: () => Promise<unknown>) => callback(),
+        storage: {
+          get: async (key: string) => values.get(key),
+          put: async (key: string, value: unknown) => values.set(key, value),
+          delete: async (key: string) => values.delete(key),
+          transaction: async (callback: (txn: unknown) => Promise<unknown>) => callback({
+            get: async (key: string) => values.get(key),
+            put: async (key: string, value: unknown) => values.set(key, value),
+            delete: async (key: string) => values.delete(key),
+          }),
+        },
+      } as unknown as DurableObjectState;
+      const aggregate = new RateLimitDurableObject(state, {
+        RATE_LIMIT_KV: {
+          get: async (key: string) => healthValues.get(key) ?? null,
+          put: async (key: string, value: string) => {
+            healthValues.set(key, value);
+          },
+        } as unknown as KVNamespace,
+        RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL: 'https://alerts.example.test/cleanup',
+        RATE_LIMIT_CLEANUP_ALERT_THRESHOLD: '2',
+        RATE_LIMIT_CLEANUP_ALERT_WINDOW_MINUTES: '60',
+      });
+      const report = (action: 'failed' | 'recovered', incidentToken: string) =>
+        aggregate.fetch(new Request('https://rate-limit.internal/cleanup-health', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            incidentToken,
+            occurredAt: new Date().toISOString(),
+          }),
+        }));
+      const first = '00000000-0000-4000-8000-000000000001';
+      const second = '00000000-0000-4000-8000-000000000002';
+      const third = '00000000-0000-4000-8000-000000000003';
+
+      await report('failed', first);
+      await report('failed', second);
+      await report('failed', third);
+      expect(webhook).toHaveBeenCalledTimes(1);
+
+      const payload = JSON.parse(String(webhook.mock.calls[0]?.[1]?.body));
+      expect(payload).toEqual({
+        text: 'Chat-limit cleanup crossed the alert threshold: 2 incidents (threshold 2) from 2026-09-10T08:00:00.000Z to 2026-09-10T09:00:00.000Z; fired at 2026-09-10T08:00:00.000Z.',
+        event: 'rate_limit_cleanup_incident_threshold_crossed',
+        incident_count: 2,
+        threshold: 2,
+        window_started_at: '2026-09-10T08:00:00.000Z',
+        window_expires_at: '2026-09-10T09:00:00.000Z',
+        fired_at: '2026-09-10T08:00:00.000Z',
+      });
+      expect(JSON.stringify(payload)).not.toMatch(/student|bucket|incidentToken|identifier/i);
+
+      await report('recovered', first);
+      await report('recovered', second);
+      await report('recovered', third);
+      await report('failed', first);
+      expect(webhook).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(61 * 60_000);
+      await report('failed', second);
+      expect(webhook).toHaveBeenCalledTimes(3);
+      expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}').alert).toMatchObject({
+        enabled: true,
+        threshold: 2,
+        window_minutes: 60,
+        state: 'active',
+      });
+    } finally {
+      fetchSpy.mockRestore();
       vi.useRealTimers();
     }
   });
@@ -394,6 +495,7 @@ describe('anonymous burst protection in the Workers runtime', () => {
         transaction: async (callback: (txn: unknown) => Promise<unknown>) => callback({
           get: async (key: string) => aggregateValues.get(key),
           put: async (key: string, value: unknown) => aggregateValues.set(key, value),
+          delete: async (key: string) => aggregateValues.delete(key),
         }),
       },
     } as unknown as DurableObjectState, { RATE_LIMIT_KV: healthKv });
@@ -465,6 +567,7 @@ describe('anonymous burst protection in the Workers runtime', () => {
           transaction: async (callback: (txn: unknown) => Promise<unknown>) => callback({
             get: async (key: string) => aggregateValues.get(key),
             put: async (key: string, value: unknown) => aggregateValues.set(key, value),
+            delete: async (key: string) => aggregateValues.delete(key),
           }),
         },
       } as unknown as DurableObjectState, {

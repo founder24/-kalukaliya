@@ -339,6 +339,14 @@ export default {
           event: 'failed' | 'recovered';
           occurred_at: string;
         }>,
+        alert: {
+          enabled: false,
+          threshold: 3,
+          window_minutes: 60,
+          state: 'disabled' as 'disabled' | 'healthy' | 'active' | 'recovered' | 'expired' | 'delivery_failed',
+          last_fired_at: null as string | null,
+          window_expires_at: null as string | null,
+        },
       };
       const now = Date.now();
 
@@ -380,6 +388,7 @@ export default {
               ),
               history_window_hours: persisted.history_window_hours || 24,
               recent_transitions: recentTransitions,
+              alert: persisted.alert ?? rateLimitCleanup.alert,
             };
           }
         } catch {

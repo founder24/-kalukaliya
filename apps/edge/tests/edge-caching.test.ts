@@ -264,6 +264,14 @@ describe('/health - ISR_CACHE_KV Cache Layer', () => {
         { event: 'failed', occurred_at: failureAt },
         { event: 'recovered', occurred_at: recoveryAt },
       ],
+      alert: {
+        enabled: false,
+        threshold: 3,
+        window_minutes: 60,
+        state: 'disabled',
+        last_fired_at: null,
+        window_expires_at: null,
+      },
     });
     expect(JSON.stringify(body.rate_limit_cleanup)).not.toContain('student');
   });

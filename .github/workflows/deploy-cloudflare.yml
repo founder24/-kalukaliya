@@ -319,6 +319,7 @@ jobs:
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+          RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL: ${{ secrets.RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL }}
         run: |
           set -euo pipefail
           if [[ -n "$JWT_SECRET" ]]; then
@@ -330,6 +331,11 @@ jobs:
             printf '%s' "$EDGE_SHARED_SECRET" | pnpm exec wrangler secret put EDGE_SHARED_SECRET --env production >/dev/null
           else
             echo "EDGE_SHARED_SECRET not supplied; preserving the existing Cloudflare value."
+          fi
+          if [[ -n "$RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL" ]]; then
+            printf '%s' "$RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL" | pnpm exec wrangler secret put RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL --env production >/dev/null
+          else
+            echo "RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL not supplied; cleanup alerting remains disabled unless an existing Cloudflare value is present."
           fi
 
       - name: Verify edge Worker secret names

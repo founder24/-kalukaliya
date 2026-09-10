@@ -10,6 +10,8 @@ command = "npx tsc --noEmit"
 
 [vars]
 ALLOWED_ORIGIN = "https://syrabit.ai"
+RATE_LIMIT_CLEANUP_ALERT_THRESHOLD = "3"
+RATE_LIMIT_CLEANUP_ALERT_WINDOW_MINUTES = "60"
 
 # Top-level bindings (used by default env / Cloudflare Git integration)
 [[kv_namespaces]]
@@ -94,7 +96,10 @@ service = "syrabit-api-prod"
 #
 # OPTIONAL:
 #   JWT_PUBLIC_KEY      — RSA public key (PEM) for RS256 (not needed for HS256)
+#   RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL — on-call webhook for aggregate cleanup alerts
 # ──────────────────────────────────────────────────────────────────────────────
 
 [env.production.vars]
 ALLOWED_ORIGIN = "https://syrabit.ai"
+RATE_LIMIT_CLEANUP_ALERT_THRESHOLD = "3"
+RATE_LIMIT_CLEANUP_ALERT_WINDOW_MINUTES = "60"

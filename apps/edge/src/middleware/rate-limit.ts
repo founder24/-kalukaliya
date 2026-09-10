@@ -39,6 +39,9 @@ const CLEANUP_HEALTH_INCIDENTS_KEY = 'activeCleanupIncidents';
 const CLEANUP_HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
 const CLEANUP_HISTORY_MAX_ENTRIES = 20;
 const CLEANUP_COUNT_BUCKET_MS = 60 * 1000;
+const CLEANUP_AGGREGATE_ALERT_STATE_KEY = 'cleanupAggregateAlertState';
+const DEFAULT_CLEANUP_AGGREGATE_ALERT_THRESHOLD = 3;
+const DEFAULT_CLEANUP_AGGREGATE_ALERT_WINDOW_MS = 60 * 60 * 1000;
 export const RATE_LIMIT_CLEANUP_HEALTH_KEY = 'health:rate-limit-cleanup';
 
 interface CleanupHealthTransition {
@@ -60,6 +63,21 @@ interface CleanupHealthState {
   history_window_hours: number;
   recent_transitions: CleanupHealthTransition[];
   incident_count_buckets: CleanupIncidentCountBucket[];
+  alert: CleanupAggregateAlertSnapshot;
+}
+
+interface CleanupAggregateAlertState {
+  window_started_at: string;
+  last_fired_at: string;
+}
+
+interface CleanupAggregateAlertSnapshot {
+  enabled: boolean;
+  threshold: number;
+  window_minutes: number;
+  state: 'disabled' | 'healthy' | 'active' | 'recovered' | 'expired' | 'delivery_failed';
+  last_fired_at: string | null;
+  window_expires_at: string | null;
 }
 
 interface CleanupIncidentCommand {
@@ -232,8 +250,64 @@ export function rateLimitHeaders(result: RateLimitResult, limit: number = 30): R
 export class RateLimitDurableObject {
   constructor(
     private readonly state: DurableObjectState,
-    private readonly env?: Partial<Pick<Env, 'RATE_LIMIT_KV' | 'RATE_LIMIT_DO'>>,
+    private readonly env?: Partial<Pick<
+      Env,
+      'RATE_LIMIT_KV'
+      | 'RATE_LIMIT_DO'
+      | 'RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL'
+      | 'RATE_LIMIT_CLEANUP_ALERT_THRESHOLD'
+      | 'RATE_LIMIT_CLEANUP_ALERT_WINDOW_MINUTES'
+    >>,
   ) {}
+
+  private aggregateAlertConfig(): {
+    enabled: boolean;
+    threshold: number;
+    windowMs: number;
+  } {
+    const parsedThreshold = Number(this.env?.RATE_LIMIT_CLEANUP_ALERT_THRESHOLD);
+    const parsedWindowMinutes = Number(this.env?.RATE_LIMIT_CLEANUP_ALERT_WINDOW_MINUTES);
+    const threshold = Number.isSafeInteger(parsedThreshold) && parsedThreshold > 0
+      ? parsedThreshold
+      : DEFAULT_CLEANUP_AGGREGATE_ALERT_THRESHOLD;
+    const windowMinutes = Number.isFinite(parsedWindowMinutes) && parsedWindowMinutes > 0
+      ? parsedWindowMinutes
+      : DEFAULT_CLEANUP_AGGREGATE_ALERT_WINDOW_MS / 60_000;
+    return {
+      enabled: Boolean(this.env?.RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL),
+      threshold,
+      windowMs: windowMinutes * 60_000,
+    };
+  }
+
+  private async sendAggregateCleanupAlert(
+    incidentCount: number,
+    threshold: number,
+    windowStartedAt: string,
+    windowExpiresAt: string,
+    firedAt: string,
+  ): Promise<boolean> {
+    const webhookUrl = this.env?.RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL;
+    if (!webhookUrl) return false;
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `Chat-limit cleanup crossed the alert threshold: ${incidentCount} incidents (threshold ${threshold}) from ${windowStartedAt} to ${windowExpiresAt}; fired at ${firedAt}.`,
+          event: 'rate_limit_cleanup_incident_threshold_crossed',
+          incident_count: incidentCount,
+          threshold,
+          window_started_at: windowStartedAt,
+          window_expires_at: windowExpiresAt,
+          fired_at: firedAt,
+        }),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
 
   private async reportCleanupIncident(command: CleanupIncidentCommand): Promise<void> {
     if (!this.env?.RATE_LIMIT_DO) return;
@@ -266,14 +340,17 @@ export class RateLimitDurableObject {
       return Response.json({ error: 'Invalid cleanup incident' }, { status: 400 });
     }
 
-    const activeIncidentCount = await this.state.storage.transaction(async txn => {
+    const aggregateState = await this.state.storage.transaction(async txn => {
       const active = new Set(
         await txn.get<string[]>(CLEANUP_HEALTH_INCIDENTS_KEY) ?? [],
+      );
+      const alertState = await txn.get<CleanupAggregateAlertState>(
+        CLEANUP_AGGREGATE_ALERT_STATE_KEY,
       );
       if (command.action === 'failed') active.add(command.incidentToken);
       else active.delete(command.incidentToken);
       await txn.put(CLEANUP_HEALTH_INCIDENTS_KEY, [...active]);
-      return active.size;
+      return { activeIncidentCount: active.size, alertState };
     });
     let previous: CleanupHealthState | null = null;
     if (this.env?.RATE_LIMIT_KV) {
@@ -315,9 +392,9 @@ export class RateLimitDurableObject {
       if (existingBucket) existingBucket.count += 1;
       else incidentCountBuckets.push({ started_at: bucketStartedAt, count: 1 });
     }
-    const snapshot = {
-      degraded: activeIncidentCount > 0,
-      active_incidents: activeIncidentCount,
+    const snapshot: CleanupHealthState = {
+      degraded: aggregateState.activeIncidentCount > 0,
+      active_incidents: aggregateState.activeIncidentCount,
       latest_failure_at: command.action === 'failed'
         ? command.occurredAt
         : previous?.latest_failure_at ?? null,
@@ -331,7 +408,76 @@ export class RateLimitDurableObject {
       history_window_hours: CLEANUP_HISTORY_RETENTION_MS / (60 * 60 * 1000),
       recent_transitions: recentTransitions,
       incident_count_buckets: incidentCountBuckets,
-    } satisfies CleanupHealthState;
+      alert: {
+        enabled: false,
+        threshold: DEFAULT_CLEANUP_AGGREGATE_ALERT_THRESHOLD,
+        window_minutes: DEFAULT_CLEANUP_AGGREGATE_ALERT_WINDOW_MS / 60_000,
+        state: 'disabled',
+        last_fired_at: null,
+        window_expires_at: null,
+      },
+    };
+
+    const alertConfig = this.aggregateAlertConfig();
+    const now = Date.parse(command.occurredAt);
+    let alertState = aggregateState.alertState;
+    let alertStatus: CleanupAggregateAlertSnapshot['state'] = alertConfig.enabled
+      ? 'healthy'
+      : 'disabled';
+    if (alertState) {
+      const expiresAt = Date.parse(alertState.window_started_at) + alertConfig.windowMs;
+      if (now >= expiresAt) {
+        await this.state.storage.transaction(txn =>
+          txn.delete(CLEANUP_AGGREGATE_ALERT_STATE_KEY)
+        );
+        alertState = undefined;
+        alertStatus = alertConfig.enabled ? 'expired' : 'disabled';
+      } else if (snapshot.degraded) {
+        alertStatus = alertConfig.enabled ? 'active' : 'disabled';
+      } else {
+        await this.state.storage.transaction(txn =>
+          txn.delete(CLEANUP_AGGREGATE_ALERT_STATE_KEY)
+        );
+        alertState = undefined;
+        alertStatus = alertConfig.enabled ? 'recovered' : 'disabled';
+      }
+    }
+    if (
+      alertConfig.enabled
+      && command.action === 'failed'
+      && snapshot.rolling_incident_count >= alertConfig.threshold
+      && !alertState
+    ) {
+      const firedAt = command.occurredAt;
+      const windowStartedAt = firedAt;
+      const windowExpiresAt = new Date(now + alertConfig.windowMs).toISOString();
+      const delivered = await this.sendAggregateCleanupAlert(
+        snapshot.rolling_incident_count,
+        alertConfig.threshold,
+        windowStartedAt,
+        windowExpiresAt,
+        firedAt,
+      );
+      if (delivered) {
+        alertState = { window_started_at: windowStartedAt, last_fired_at: firedAt };
+        await this.state.storage.transaction(txn =>
+          txn.put(CLEANUP_AGGREGATE_ALERT_STATE_KEY, alertState as CleanupAggregateAlertState)
+        );
+        alertStatus = 'active';
+      } else {
+        alertStatus = 'delivery_failed';
+      }
+    }
+    snapshot.alert = {
+      enabled: alertConfig.enabled,
+      threshold: alertConfig.threshold,
+      window_minutes: alertConfig.windowMs / 60_000,
+      state: alertStatus,
+      last_fired_at: alertState?.last_fired_at ?? previous?.alert?.last_fired_at ?? null,
+      window_expires_at: alertState
+        ? new Date(Date.parse(alertState.window_started_at) + alertConfig.windowMs).toISOString()
+        : null,
+    };
     await this.env?.RATE_LIMIT_KV?.put(
       RATE_LIMIT_CLEANUP_HEALTH_KEY,
       JSON.stringify(snapshot),

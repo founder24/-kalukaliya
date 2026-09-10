@@ -90,6 +90,7 @@ export default function InfraTab({ adminToken, onNavigate, health, edgeHealth, l
             const incident = edgeHealth?.rate_limit_cleanup;
             const degraded = incident?.degraded === true;
             const unavailable = !incident;
+            const alert = incident?.alert;
             const recentTransitions = Array.isArray(incident?.recent_transitions)
               ? incident.recent_transitions.slice().reverse().slice(0, 5)
               : [];
@@ -148,6 +149,36 @@ export default function InfraTab({ adminToken, onNavigate, health, edgeHealth, l
                           {formatTimestamp(incident.latest_recovery_at)}
                         </p>
                       </div>
+                    </div>
+                    <div
+                      className={`rounded-xl border p-3 mt-3 text-xs ${
+                        alert?.state === 'active' || alert?.state === 'delivery_failed'
+                          ? 'bg-amber-50 border-amber-200'
+                          : 'bg-white border-gray-200'
+                      }`}
+                      data-testid="chat-limit-cleanup-alert-state"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400">On-call alert</p>
+                        <span className={`font-semibold ${
+                          alert?.state === 'active' || alert?.state === 'delivery_failed'
+                            ? 'text-amber-700'
+                            : 'text-gray-600'
+                        }`}>
+                          {!alert || alert.state === 'disabled'
+                            ? 'Disabled'
+                            : alert.state === 'delivery_failed'
+                              ? 'Delivery failed'
+                              : alert.state.charAt(0).toUpperCase() + alert.state.slice(1)}
+                        </span>
+                      </div>
+                      {alert && (
+                        <p className="mt-1 text-gray-500">
+                          Threshold {alert.threshold} incidents · {alert.window_minutes}m window
+                          {alert.last_fired_at ? ` · Last sent ${formatTimestamp(alert.last_fired_at)}` : ''}
+                          {alert.window_expires_at ? ` · Resets ${formatTimestamp(alert.window_expires_at)}` : ''}
+                        </p>
+                      )}
                     </div>
                     <div className="rounded-xl bg-white border border-gray-200 p-3 mt-3 text-xs">
                       <p className="text-[10px] uppercase tracking-wider text-gray-400">Recent transitions</p>
