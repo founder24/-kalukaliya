@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   buildReport,
   failedRouteMessages,
+  recurringOutlierWarnings,
   validateProbeEvents,
   validateRouteResult,
 } from './worker-chat-performance-gate.mjs';
@@ -95,4 +96,29 @@ test('web route still requires successful attributed web status', () => {
     web_used: false,
     web_status: 'skipped',
   }), /did not return attributed web context/);
+});
+
+test('recurring tolerated outliers warn separately by route without changing pass results', () => {
+  const current = reportFor([1200, 4200, 1800], [1500, 1700, 1900]);
+  const previous = reportFor([1100, 3900, 1600], [4100, 1400, 1700]);
+
+  assert.equal(current.summary.direct_chapter_rag.passed, true);
+  assert.equal(previous.summary.direct_chapter_rag.passed, true);
+  assert.deepEqual(recurringOutlierWarnings([current, previous]), [{
+    route: 'direct_chapter_rag',
+    label: 'Direct chapter RAG',
+    affected_runs: 2,
+    compared_runs: 2,
+    maxima_ms: [4200, 3900],
+    message: 'Direct chapter RAG had a tolerated first-token outlier above the release target in 2/2 recent deployment runs',
+  }]);
+});
+
+test('a single tolerated outlier or a failed run does not create a recurring warning', () => {
+  const clean = reportFor([1200, 1400, 1800], [1500, 1700, 1900]);
+  const oneOutlier = reportFor([1200, 4200, 1800], [1500, 1700, 1900]);
+  const failed = reportFor([4200, 4500, 1800], [1500, 1700, 1900]);
+
+  assert.deepEqual(recurringOutlierWarnings([clean, oneOutlier]), []);
+  assert.deepEqual(recurringOutlierWarnings([oneOutlier, failed]), []);
 });

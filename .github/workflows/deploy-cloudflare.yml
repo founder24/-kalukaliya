@@ -32,6 +32,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -477,6 +478,50 @@ jobs:
       - name: Worker chat performance gate regression test
         run: node --test scripts/worker-chat-performance-gate.test.mjs
 
+      - name: Download recent worker chat performance timings
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            fs.mkdirSync('chat-performance-history-zips', { recursive: true });
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const recent = artifacts
+              .filter(artifact =>
+                artifact.name.startsWith('worker-chat-performance-')
+                && !artifact.expired
+                && artifact.workflow_run?.id !== context.runId)
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+              .slice(0, 5);
+            for (const artifact of recent) {
+              const download = await github.rest.actions.downloadArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+                archive_format: 'zip',
+              });
+              fs.writeFileSync(
+                `chat-performance-history-zips/${artifact.id}.zip`,
+                Buffer.from(download.data),
+              );
+            }
+            core.notice(`Downloaded ${recent.length} recent chat performance artifact(s).`);
+
+      - name: Extract recent worker chat performance timings
+        continue-on-error: true
+        run: |
+          mkdir -p chat-performance-history
+          for archive in chat-performance-history-zips/*.zip; do
+            [[ -e "$archive" ]] || continue
+            artifact_id="$(basename "$archive" .zip)"
+            mkdir -p "chat-performance-history/$artifact_id"
+            unzip -q "$archive" -d "chat-performance-history/$artifact_id"
+          done
+
       - name: Worker chat first-token performance gate
         env:
           CHAT_API_ORIGIN: ${{ env.API_WORKER_URL }}
@@ -484,6 +529,12 @@ jobs:
           CHAT_PERFORMANCE_SAMPLES: '3'
           CHAT_PERFORMANCE_REPORT_PATH: chat-performance-report.json
         run: node scripts/test-worker-chat-performance.mjs
+
+      - name: Warn on recurring worker chat latency outliers
+        if: ${{ always() && hashFiles('chat-performance-report.json') != '' }}
+        env:
+          CHAT_PERFORMANCE_HISTORY_RUNS: '5'
+        run: node scripts/warn-worker-chat-performance-history.mjs chat-performance-report.json chat-performance-history
 
       - name: Upload worker chat performance timings
         if: ${{ always() }}

@@ -74,3 +74,29 @@ export function failedRouteMessages(summary, targetMs) {
       `${route} (${routeSummary.passing_samples}/${routeSummary.samples} samples met ${targetMs} ms; `
       + `median ${routeSummary.first_token_median_ms} ms)`);
 }
+
+export function recurringOutlierWarnings(reports, minimumRuns = 2) {
+  const routeLabels = {
+    direct_chapter_rag: 'Direct chapter RAG',
+    rag_plus_bounded_web: 'Bounded web retrieval',
+  };
+  const warnings = [];
+  for (const [route, label] of Object.entries(routeLabels)) {
+    const affected = reports.filter(report => {
+      const summary = report?.summary?.[route];
+      return summary?.passed === true
+        && summary.first_token_max_ms > report.first_token_target_ms;
+    });
+    if (affected.length < minimumRuns) continue;
+    warnings.push({
+      route,
+      label,
+      affected_runs: affected.length,
+      compared_runs: reports.length,
+      maxima_ms: affected.map(report => report.summary[route].first_token_max_ms),
+      message: `${label} had a tolerated first-token outlier above the release target in `
+        + `${affected.length}/${reports.length} recent deployment runs`,
+    });
+  }
+  return warnings;
+}
