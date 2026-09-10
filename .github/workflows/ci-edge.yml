@@ -3,12 +3,6 @@ name: CI Edge — Lint & Test
 on:
   pull_request:
     branches: [main]
-    paths:
-      - 'apps/edge/**'
-      - 'scripts/test-worker-chat-performance.mjs'
-      - 'scripts/worker-chat-performance-gate.mjs'
-      - 'scripts/worker-chat-performance-gate.test.mjs'
-      - '.github/workflows/ci-edge.yml'
   workflow_dispatch:
 
 permissions:
