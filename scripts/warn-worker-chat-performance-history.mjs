@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import process from 'node:process';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { recurringOutlierWarnings } from './worker-chat-performance-gate.mjs';
@@ -9,9 +9,18 @@ import { recurringOutlierWarnings } from './worker-chat-performance-gate.mjs';
 const currentPath = process.argv[2] || 'chat-performance-report.json';
 const historyDirectory = process.argv[3] || 'chat-performance-history';
 const recentReportLimit = Number(process.env.CHAT_PERFORMANCE_HISTORY_RUNS || '5');
+const notificationMinimumRuns = Number(process.env.CHAT_PERFORMANCE_NOTIFICATION_RUNS || '3');
+const notificationStatePath =
+  process.env.CHAT_PERFORMANCE_NOTIFICATION_STATE_PATH || 'chat-performance-notification-state.json';
 
 if (!Number.isSafeInteger(recentReportLimit) || recentReportLimit < 1) {
   throw new Error('CHAT_PERFORMANCE_HISTORY_RUNS must be a positive integer');
+}
+if (!Number.isSafeInteger(notificationMinimumRuns) || notificationMinimumRuns < 2) {
+  throw new Error('CHAT_PERFORMANCE_NOTIFICATION_RUNS must be an integer of at least 2');
+}
+if (notificationMinimumRuns > recentReportLimit + 1) {
+  throw new Error('CHAT_PERFORMANCE_NOTIFICATION_RUNS cannot exceed the available report window');
 }
 
 async function readReport(path) {
@@ -40,6 +49,25 @@ for (const path of historyFiles) {
 
 const reports = [currentReport, ...historicalReports].slice(0, recentReportLimit + 1);
 const warnings = recurringOutlierWarnings(reports);
+const notificationWarnings = recurringOutlierWarnings(reports, notificationMinimumRuns);
+const comparisonComplete = reports.length >= notificationMinimumRuns;
+const indeterminateRoutes = Object.entries(currentReport?.summary ?? {})
+  .filter(([, summary]) => summary?.passed !== true)
+  .map(([route]) => route);
+await writeFile(notificationStatePath, `${JSON.stringify({
+  comparison_complete: comparisonComplete,
+  minimum_runs: notificationMinimumRuns,
+  compared_runs: reports.length,
+  indeterminate_routes: indeterminateRoutes,
+  active_warnings: notificationWarnings,
+}, null, 2)}\n`);
+
+if (!comparisonComplete) {
+  console.error(
+    `::notice title=Chat performance notification::Only ${reports.length}/${notificationMinimumRuns} `
+    + 'required reports were available; maintainer notification state will not be changed.',
+  );
+}
 if (warnings.length === 0) {
   console.error(
     `::notice title=Chat performance history::Compared ${reports.length} deployment timing report(s); `
