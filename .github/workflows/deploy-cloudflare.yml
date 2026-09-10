@@ -416,6 +416,20 @@ jobs:
           ALLOW_INCOMPLETE_CURRICULUM_BUILD: 'false'
           REQUIRE_HYDRATION_BROWSER: 'true'
 
+      - name: Verify staff production chunks
+        run: pnpm --filter @workspace/syrabit run check:staff-chunks
+
+      - name: Upload staff production chunk diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: staff-production-chunk-diagnostics
+          path: |
+            apps/frontend/dist/.vite/manifest.json
+            apps/frontend/dist/assets/
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Verify hashed HTML assets before Pages publish
         run: pnpm --filter @workspace/syrabit run check:hashed-assets
 
