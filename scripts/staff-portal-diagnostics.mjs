@@ -46,16 +46,32 @@ export async function saveRedactedTrace(rawTracePath, tracePath, sensitiveValues
     const sanitizer = spawnSync('python3', [
       '-c',
       [
-        'import json, sys, zipfile',
+        'import json, re, sys, zipfile',
         'source, target, redactions_path = sys.argv[1:]',
         'with open(redactions_path, encoding="utf-8") as handle:',
         '    redactions = [value.encode() for value in json.load(handle) if value]',
+        'signatures = [',
+        '    ("authorization header", re.compile(rb"authorization[\'\\\" ]*[:=][ ]*[\'\\\"]?(?:bearer|basic)[ ]+(?!\\[REDACTED\\])[^\\s\'\\\",}]+", re.I)),',
+        '    ("authorization header record", re.compile(rb"[\'\\\"]name[\'\\\"]\\s*:\\s*[\'\\\"]authorization[\'\\\"].{0,160}?[\'\\\"]value[\'\\\"]\\s*:\\s*[\'\\\"](?:bearer|basic)\\s+(?!\\[REDACTED\\])[^\'\\\"]+", re.I | re.S)),',
+        '    ("JWT-shaped value", re.compile(rb"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])")),',
+        '    ("Cloudflare Access credential", re.compile(rb"cf-access-client-(?:id|secret)[\'\\\" ]*[:=][ ]*[\'\\\"]?(?!\\[REDACTED\\])[^\\s\'\\\",}]+", re.I)),',
+        '    ("Cloudflare Access header record", re.compile(rb"[\'\\\"]name[\'\\\"]\\s*:\\s*[\'\\\"]cf-access-client-(?:id|secret)[\'\\\"].{0,160}?[\'\\\"]value[\'\\\"]\\s*:\\s*[\'\\\"](?!\\[REDACTED\\])[^\'\\\"]+", re.I | re.S)),',
+        '    ("auth storage value", re.compile(rb"(?:access_token|refresh_token|authToken)[\'\\\" ]*[:=][ ]*[\'\\\"]?(?!\\[REDACTED\\])[^\\s\'\\\",}]+", re.I)),',
+        '    ("auth storage record", re.compile(rb"[\'\\\"]name[\'\\\"]\\s*:\\s*[\'\\\"](?:access_token|refresh_token|authToken)[\'\\\"].{0,160}?[\'\\\"]value[\'\\\"]\\s*:\\s*[\'\\\"](?!\\[REDACTED\\])[^\'\\\"]+", re.I | re.S)),',
+        ']',
+        'findings = set()',
         'with zipfile.ZipFile(source, "r") as incoming, zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as outgoing:',
         '    for info in incoming.infolist():',
         '        data = incoming.read(info.filename)',
         '        for value in redactions:',
         '            data = data.replace(value, b"[REDACTED]")',
+        '        for label, pattern in signatures:',
+        '            if pattern.search(data):',
+        '                findings.add((label, info.filename))',
         '        outgoing.writestr(info, data)',
+        'if findings:',
+        '    summary = ", ".join(f"{label} in {name}" for label, name in sorted(findings))',
+        '    raise SystemExit(f"unsafe credential signature(s) remained after trace sanitization: {summary}")',
       ].join('\n'),
       rawTracePath,
       tracePath,
@@ -64,6 +80,9 @@ export async function saveRedactedTrace(rawTracePath, tracePath, sensitiveValues
     if (sanitizer.status !== 0) {
       throw new Error(sanitizer.stderr.trim() || `trace sanitizer exited ${sanitizer.status}`);
     }
+  } catch (error) {
+    await rm(tracePath, { force: true });
+    throw error;
   } finally {
     await rm(redactionsPath, { force: true });
   }
