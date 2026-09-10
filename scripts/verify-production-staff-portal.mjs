@@ -38,6 +38,8 @@ const page = await context.newPage();
 const runtimeErrors = [];
 const forbiddenRequests = [];
 const failedRequests = [];
+const postLogoutAuthResponses = [];
+let postLogoutProbe = false;
 
 page.on('pageerror', error => runtimeErrors.push(error.stack || error.message));
 page.on('console', message => {
@@ -49,6 +51,14 @@ page.on('console', message => {
   ) runtimeErrors.push(text);
 });
 page.on('response', response => {
+  if (
+    postLogoutProbe
+    && (response.url().includes('/users/me') || response.url().includes('/admin/verify'))
+  ) {
+    postLogoutAuthResponses.push(
+      `${response.status()} ${response.request().method()} ${response.url()}`,
+    );
+  }
   if (response.status() >= 400) {
     failedRequests.push(`${response.status()} ${response.request().method()} ${response.url()}`);
   }
@@ -165,8 +175,31 @@ try {
   }
   await page.getByRole('button', { name: 'Logout' }).click();
   await page.waitForURL(url => url.pathname === '/login' && url.searchParams.get('next') === '/staff');
+  const remainingStorageKeys = await page.evaluate(() => ({
+    session: ['syrabit_token', 'syrabit_refresh_token'].filter(key => sessionStorage.getItem(key)),
+    local: ['syrabit_token', 'syrabit_refresh_token'].filter(key => localStorage.getItem(key)),
+  }));
+  postLogoutProbe = true;
   await page.goto(`${site}/staff`, { waitUntil: 'domcontentloaded' });
-  await page.waitForURL(url => url.pathname === '/login' && url.searchParams.get('next') === '/staff');
+  try {
+    await page.waitForURL(
+      url => url.pathname === '/login' && url.searchParams.get('next') === '/staff',
+      { timeout: 15_000 },
+    );
+  } catch (error) {
+    const body = (await page.locator('body').innerText().catch(() => '')).slice(0, 2_000);
+    const cookieNames = (await context.cookies())
+      .map(({ name, domain, path }) => `${name} (${domain}${path})`);
+    throw new Error([
+      `Protected route did not redirect after UI sign-out: ${page.url()}`,
+      `Stored auth keys: ${JSON.stringify(remainingStorageKeys)}`,
+      `Protected staff shell visible: ${Boolean(await page.getByTestId('admin-dashboard').count())}`,
+      `Post-logout auth responses:\n${postLogoutAuthResponses.join('\n') || '(none)'}`,
+      `Cookie names:\n${cookieNames.join('\n') || '(none)'}`,
+      `Visible page text:\n${body}`,
+      `Original wait failure: ${error.message}`,
+    ].join('\n\n'));
+  }
   if (await page.getByTestId('admin-dashboard').count()) {
     throw new Error('Protected staff content remained visible after UI sign-out');
   }
