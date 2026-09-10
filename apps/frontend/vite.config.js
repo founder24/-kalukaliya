@@ -724,7 +724,14 @@ export default defineConfig(({ mode }) => ({
           const has = (pkg) => id.includes(`/node_modules/${pkg}/`);
           const hasScope = (scope) => id.includes(`/node_modules/${scope}/`);
 
-          if (has('recharts') || hasScope('victory') || /\/node_modules\/d3-[^/]+\//.test(id) || id.includes('/node_modules/d3/')) return 'charts';
+          // Recharts depends on the unscoped `victory-vendor`, which in turn
+          // imports d3-* modules. Splitting victory-vendor into its own
+          // dep-victory-vendor chunk creates a charts ↔ victory cycle and a
+          // production TDZ crash ("Cannot access 'c' before initialization").
+          if (
+            has('recharts') || has('victory-vendor') || hasScope('victory') ||
+            /\/node_modules\/d3-[^/]+\//.test(id) || id.includes('/node_modules/d3/')
+          ) return 'charts';
           if (
             has('react-markdown') ||
             /\/node_modules\/(remark|rehype|micromark|mdast-util|unist-util|hast-util)(-[^/]+)?\//.test(id) ||
