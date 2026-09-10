@@ -37,6 +37,7 @@ const context = await browser.newContext({ extraHTTPHeaders: accessHeaders });
 const page = await context.newPage();
 const runtimeErrors = [];
 const forbiddenRequests = [];
+const failedRequests = [];
 
 page.on('pageerror', error => runtimeErrors.push(error.stack || error.message));
 page.on('console', message => {
@@ -45,9 +46,15 @@ page.on('console', message => {
   if (!text.includes('Failed to load resource')) runtimeErrors.push(text);
 });
 page.on('response', response => {
+  if (response.status() >= 400) {
+    failedRequests.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+  }
   if ([401, 403].includes(response.status())) {
     forbiddenRequests.push(`${response.status()} ${response.request().method()} ${response.url()}`);
   }
+});
+page.on('requestfailed', request => {
+  failedRequests.push(`NETWORK ${request.method()} ${request.url()} — ${request.failure()?.errorText || 'unknown error'}`);
 });
 
 try {
@@ -70,7 +77,18 @@ try {
   }, { accessToken: tokens.access_token, refreshToken: tokens.refresh_token });
 
   await page.goto(`${site}/staff`, { waitUntil: 'domcontentloaded' });
-  await page.getByTestId('admin-dashboard').waitFor({ state: 'visible', timeout: 30_000 });
+  try {
+    await page.getByTestId('admin-dashboard').waitFor({ state: 'visible', timeout: 30_000 });
+  } catch (error) {
+    const body = (await page.locator('body').innerText().catch(() => '')).slice(0, 4_000);
+    throw new Error([
+      `Staff shell unavailable at ${page.url()}`,
+      `Visible page text:\n${body || '(empty)'}`,
+      `Runtime errors:\n${runtimeErrors.join('\n') || '(none)'}`,
+      `Failed requests:\n${failedRequests.join('\n') || '(none)'}`,
+      `Original wait failure: ${error.message}`,
+    ].join('\n\n'));
+  }
 
   for (const [id, label] of sections) {
     await page.getByTestId(`admin-nav-${id}`).click();
