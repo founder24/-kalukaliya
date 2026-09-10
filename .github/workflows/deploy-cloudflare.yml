@@ -840,11 +840,23 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter @workspace/syrabit run playwright:install:chromium
 
+      - name: Test staff portal diagnostic privacy
+        run: node --test scripts/staff-portal-diagnostics.test.mjs
+
       - name: Create, validate, and always remove a temporary admin
         run: bash scripts/run-disposable-staff-auth-cutover.sh
 
       - name: Verify every production staff portal section read-only
         run: bash scripts/run-disposable-staff-portal-check.sh
+
+      - name: Upload failed staff portal browser diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: staff-portal-playwright-diagnostics-${{ github.run_attempt }}
+          path: staff-portal-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Always remove an interrupted staff portal fixture
         if: ${{ always() }}

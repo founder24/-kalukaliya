@@ -1,3 +1,6 @@
+import { mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { chromium } from '../apps/frontend/node_modules/@playwright/test/index.mjs';
 import {
   isExpectedPostLogoutAuthResponse,
@@ -7,6 +10,11 @@ import {
   STAFF_PORTAL_SECTIONS,
   assertStaffSectionCoverage,
 } from '../apps/frontend/src/config/staffPortalSections.mjs';
+import {
+  STAFF_PORTAL_TRACE_OPTIONS,
+  addLoginTokensToRedactions,
+  saveRedactedTrace,
+} from './staff-portal-diagnostics.mjs';
 
 const required = [
   'CUTOVER_STAFF_EMAIL',
@@ -53,6 +61,15 @@ const unsupportedSections = new Set([
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext();
 const page = await context.newPage();
+const diagnosticsDir = resolve(process.env.STAFF_PORTAL_DIAGNOSTICS_DIR || 'staff-portal-diagnostics');
+const sensitiveValues = new Set([
+  process.env.CUTOVER_STAFF_EMAIL,
+  process.env.CUTOVER_STAFF_PASSWORD,
+  process.env.CF_ACCESS_CLIENT_ID,
+  process.env.CF_ACCESS_CLIENT_SECRET,
+].filter(Boolean));
+await rm(diagnosticsDir, { recursive: true, force: true });
+let tracingStopped = false;
 const runtimeErrors = [];
 const forbiddenRequests = [];
 const failedRequests = [];
@@ -64,6 +81,8 @@ const successfulReads = new Map(sections.map(([id]) => [id, new Set()]));
 const apiReadsStarted = new Map(sections.map(([id]) => [id, []]));
 const requestSections = new WeakMap();
 const REQUIRED_READ_TIMEOUT_MS = 15_000;
+
+await context.tracing.start(STAFF_PORTAL_TRACE_OPTIONS);
 
 async function waitForRequiredReads(id, label) {
   const expected = requiredReads[id] || [];
@@ -168,6 +187,7 @@ try {
   });
   if (!login.ok()) throw new Error(`Staff login failed with HTTP ${login.status()}`);
   const tokens = await login.json();
+  addLoginTokensToRedactions(tokens, sensitiveValues);
   if (!tokens.access_token || !tokens.refresh_token) {
     throw new Error('Staff login did not return both session tokens');
   }
@@ -345,7 +365,58 @@ try {
     throw new Error(`Staff portal emitted runtime errors:\n${runtimeErrors.join('\n')}`);
   }
   console.log('Production staff portal browser lifecycle passed.');
+} catch (error) {
+  await mkdir(diagnosticsDir, { recursive: true });
+  const screenshotPath = resolve(diagnosticsDir, 'staff-portal-failure.png');
+  const tracePath = resolve(diagnosticsDir, 'staff-portal-trace.zip');
+  const rawTracePath = resolve(tmpdir(), `staff-portal-trace-${process.pid}.zip`);
+  const diagnosticErrors = [];
+
+  const pageRedacted = await page.evaluate(values => {
+    const replacements = values.filter(Boolean);
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (const value of replacements) {
+        node.textContent = node.textContent.replaceAll(value, '[REDACTED]');
+      }
+    }
+    for (const element of document.querySelectorAll('input, textarea')) {
+      for (const value of replacements) {
+        element.value = element.value.replaceAll(value, '[REDACTED]');
+      }
+    }
+    return true;
+  }, [...sensitiveValues]).catch(captureError => {
+    diagnosticErrors.push(`page redaction: ${captureError.message}`);
+    return false;
+  });
+  if (pageRedacted) {
+    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(captureError => {
+      diagnosticErrors.push(`screenshot: ${captureError.message}`);
+    });
+  } else {
+    await rm(screenshotPath, { force: true });
+  }
+  try {
+    await context.tracing.stop({ path: rawTracePath });
+    tracingStopped = true;
+    await saveRedactedTrace(rawTracePath, tracePath, [...sensitiveValues]);
+  } catch (captureError) {
+    diagnosticErrors.push(`trace: ${captureError.message}`);
+  } finally {
+    await rm(rawTracePath, { force: true });
+  }
+
+  if (diagnosticErrors.length) {
+    console.error(`Failed to preserve complete staff portal diagnostics: ${diagnosticErrors.join('; ')}`);
+  } else {
+    console.error(`Staff portal failure diagnostics saved to ${diagnosticsDir}`);
+  }
+  throw error;
 } finally {
+  if (!tracingStopped) {
+    await context.tracing.stop().catch(() => {});
+  }
   await context.close();
   await browser.close();
 }
