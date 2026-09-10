@@ -31,8 +31,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install trigger checker dependency
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+
       - name: Validate workflow files
         run: bash scripts/check-github-actions.sh
+
+      - name: Check critical CI trigger contracts
+        run: python3 scripts/check-edge-workflow-triggers.py
+
+      - name: Test critical CI trigger contract checker
+        run: python3 scripts/test-edge-workflow-triggers.py
 
       - name: Check actionlint release pin
         run: python3 scripts/update-actionlint.py

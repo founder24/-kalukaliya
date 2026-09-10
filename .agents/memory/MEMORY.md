@@ -79,3 +79,4 @@
 - [Workers rate-limit test clocks](workers-rate-limit-test-clocks.md) — isolate DO names per invocation and keep alarm reset windows ahead of the runtime clock.
 - [Production browser verification traps](production-browser-verification.md) — Preserve Vite preload rejections; seed auth fixtures once so logout checks remain valid.
 - [Release failure rehearsals](release-failure-rehearsals.md) — use test-only workflows so unrelated deploy gates cannot hide scheduling evidence.
+- [Workflow trigger contracts](workflow-trigger-contracts.md) — enforce GitHub Actions triggers from normalized YAML, not source-line regexes.

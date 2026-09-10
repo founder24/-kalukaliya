@@ -13,37 +13,142 @@ CHECKER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHECKER)
 
 
-def workflow(paths: list[str] | None = None, include_push: bool = True) -> str:
-    paths = paths or CHECKER.EXPECTED_PATHS
-    path_lines = "\n".join(f"      - '{path}'" for path in paths)
+def workflow(
+    paths: list[str] | None,
+    include_push: bool = True,
+    branches: list[str] | None = None,
+    ignored_filter: tuple[str, list[str]] | None = None,
+) -> str:
+    branch_list = ", ".join(branches or ["main"])
+    path_block = ""
+    if paths is not None:
+        path_lines = "\n".join(f"      - '{path}'" for path in paths)
+        path_block = f"    paths:\n{path_lines}\n"
+    ignored_block = ""
+    if ignored_filter is not None:
+        key, values = ignored_filter
+        value_lines = "\n".join(f"      - '{value}'" for value in values)
+        ignored_block = f"    {key}:\n{value_lines}\n"
     push = (
-        f"\n  push:\n    branches: [main]\n    paths:\n{path_lines}\n"
+        f"\n  push:\n    branches: [{branch_list}]\n{path_block}{ignored_block}"
         if include_push
         else ""
     )
     return (
         "name: Edge\non:\n"
-        f"  pull_request:\n    branches: [main]\n    paths:\n{path_lines}\n"
+        f"  pull_request:\n    branches: [{branch_list}]\n{path_block}{ignored_block}"
         f"{push}jobs: {{}}\n"
     )
 
 
-class EdgeWorkflowTriggerTests(unittest.TestCase):
-    def validate(self, content: str) -> list[str]:
+class CriticalWorkflowTriggerTests(unittest.TestCase):
+    def validate(self, content: str, expected_paths: list[str] | None) -> list[str]:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "ci-edge.yml"
+            path = Path(directory) / "workflow.yml"
             path.write_text(content, encoding="utf-8")
-            return CHECKER.validate_edge_triggers(path)
+            return CHECKER.validate_workflow_triggers(path, expected_paths)
 
-    def test_accepts_intended_scope(self) -> None:
-        self.assertEqual(self.validate(workflow()), [])
+    def test_accepts_every_repository_contract(self) -> None:
+        for path, expected_paths in CHECKER.WORKFLOW_CONTRACTS.items():
+            with self.subTest(workflow=path):
+                self.assertEqual(
+                    CHECKER.validate_workflow_triggers(Path(path), expected_paths), []
+                )
 
     def test_rejects_removed_path(self) -> None:
-        errors = self.validate(workflow(CHECKER.EXPECTED_PATHS[:-1]))
+        errors = self.validate(
+            workflow(CHECKER.EXPECTED_PATHS[:-1]), CHECKER.EXPECTED_PATHS
+        )
+        self.assertTrue(any("path scope" in error for error in errors))
+
+    def test_rejects_added_path(self) -> None:
+        errors = self.validate(
+            workflow([*CHECKER.EXPECTED_PATHS, "unexpected/**"]),
+            CHECKER.EXPECTED_PATHS,
+        )
         self.assertTrue(any("path scope" in error for error in errors))
 
     def test_rejects_missing_push_trigger(self) -> None:
-        self.assertIn("missing push trigger", self.validate(workflow(include_push=False)))
+        self.assertIn(
+            "missing push trigger",
+            self.validate(
+                workflow(CHECKER.EXPECTED_PATHS, include_push=False),
+                CHECKER.EXPECTED_PATHS,
+            ),
+        )
+
+    def test_rejects_missing_pull_request_trigger(self) -> None:
+        content = workflow(CHECKER.EXPECTED_PATHS).replace(
+            "  pull_request:", "  pull_request_disabled:"
+        )
+        self.assertIn(
+            "missing pull_request trigger",
+            self.validate(content, CHECKER.EXPECTED_PATHS),
+        )
+
+    def test_rejects_branch_scope_change(self) -> None:
+        errors = self.validate(
+            workflow(CHECKER.EXPECTED_PATHS, branches=["develop"]),
+            CHECKER.EXPECTED_PATHS,
+        )
+        self.assertTrue(any("branches must be exactly" in error for error in errors))
+
+    def test_rejects_unintended_api_path_filter(self) -> None:
+        errors = self.validate(workflow(["apps/edge/**"]), None)
+        self.assertTrue(any("path scope unfiltered" in error for error in errors))
+
+    def test_rejects_unintended_api_paths_ignore_filter(self) -> None:
+        errors = self.validate(
+            workflow(None, ignored_filter=("paths-ignore", ["docs/**"])), None
+        )
+        self.assertTrue(any("paths-ignore" in error for error in errors))
+
+    def test_rejects_quoted_api_paths_ignore_filter(self) -> None:
+        content = workflow(
+            None, ignored_filter=("paths-ignore", ["docs/**"])
+        ).replace("    paths-ignore:", "    'paths-ignore':")
+        errors = self.validate(content, None)
+        self.assertTrue(any("paths-ignore" in error for error in errors))
+
+    def test_rejects_branch_ignore_filter(self) -> None:
+        errors = self.validate(
+            workflow(
+                CHECKER.EXPECTED_PATHS,
+                ignored_filter=("branches-ignore", ["release/**"]),
+            ),
+            CHECKER.EXPECTED_PATHS,
+        )
+        self.assertTrue(any("branches-ignore" in error for error in errors))
+
+    def test_rejects_unintended_pull_request_types_filter(self) -> None:
+        content = workflow(
+            CHECKER.EXPECTED_PATHS, ignored_filter=("types", ["closed"])
+        )
+        errors = self.validate(content, CHECKER.EXPECTED_PATHS)
+        self.assertTrue(any("types" in error for error in errors))
+
+    def test_rejects_quoted_pull_request_types_filter(self) -> None:
+        content = workflow(
+            CHECKER.EXPECTED_PATHS, ignored_filter=("types", ["closed"])
+        ).replace("    types:", '    "types":')
+        errors = self.validate(content, CHECKER.EXPECTED_PATHS)
+        self.assertTrue(any("types" in error for error in errors))
+
+    def test_rejects_explicit_mapping_key_filter(self) -> None:
+        content = workflow(None).replace(
+            "    branches: [main]",
+            "    branches: [main]\n    ? paths-ignore\n    : [docs/**]",
+        )
+        errors = self.validate(content, None)
+        self.assertTrue(any("paths-ignore" in error for error in errors))
+
+    def test_rejects_duplicate_event_filter_keys(self) -> None:
+        content = workflow(CHECKER.EXPECTED_PATHS).replace(
+            "    branches: [main]",
+            "    branches: [main]\n    branches: [develop]",
+        )
+        errors = self.validate(content, CHECKER.EXPECTED_PATHS)
+        self.assertTrue(any("duplicate key" in error for error in errors))
 
 
 if __name__ == "__main__":
