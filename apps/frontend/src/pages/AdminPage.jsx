@@ -12,6 +12,7 @@ import { adminVerify, adminLogout, adminGetSettings, adminGetUnacknowledgedAlert
 import { toast } from 'sonner';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
+import AdminHealth from '@/components/admin/AdminHealth';
 import { useAuth } from '@/context/AuthContext';
 import { getToken } from '@/hooks/useTokenManager';
 
@@ -23,7 +24,6 @@ const AdminConversations   = lazy(() => import('@/components/admin/AdminConversa
 const AdminAnalytics       = lazy(() => import('@/components/admin/AdminAnalytics'));
 const AdminNotifications   = lazy(() => import('@/components/admin/AdminNotifications'));
 const AdminSettings        = lazy(() => import('@/components/admin/AdminSettings'));
-const AdminHealth          = lazy(() => import('@/components/admin/AdminHealth'));
 const AdminSeoManager      = lazy(() => import('@/components/admin/AdminSeoManager'));
 const AdminAiHub           = lazy(() => import('@/components/admin/AdminAiHub'));
 const AdminAccessSecurity  = lazy(() => import('@/components/admin/AdminAccessSecurity'));

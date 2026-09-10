@@ -33,10 +33,11 @@ const sections = [
 ];
 
 const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({ extraHTTPHeaders: accessHeaders });
+const context = await browser.newContext();
 const page = await context.newPage();
 const runtimeErrors = [];
 const forbiddenRequests = [];
+const failedRequests = [];
 
 page.on('pageerror', error => runtimeErrors.push(error.stack || error.message));
 page.on('console', message => {
@@ -45,9 +46,25 @@ page.on('console', message => {
   if (!text.includes('Failed to load resource')) runtimeErrors.push(text);
 });
 page.on('response', response => {
+  if (response.status() >= 400) {
+    failedRequests.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+  }
   if ([401, 403].includes(response.status())) {
     forbiddenRequests.push(`${response.status()} ${response.request().method()} ${response.url()}`);
   }
+});
+page.on('requestfailed', request => {
+  failedRequests.push(`NETWORK ${request.method()} ${request.url()} — ${request.failure()?.errorText || 'unknown error'}`);
+});
+
+// Cloudflare Access protects the Pages origin, but the public API uses the
+// application's bearer-token contract. Do not leak Access service-token
+// headers into cross-origin API preflights: browsers correctly reject those
+// headers because they are not part of the public API CORS allowlist.
+await page.route(`${site}/**`, async route => {
+  await route.continue({
+    headers: { ...route.request().headers(), ...accessHeaders },
+  });
 });
 
 try {
@@ -70,7 +87,18 @@ try {
   }, { accessToken: tokens.access_token, refreshToken: tokens.refresh_token });
 
   await page.goto(`${site}/staff`, { waitUntil: 'domcontentloaded' });
-  await page.getByTestId('admin-dashboard').waitFor({ state: 'visible', timeout: 30_000 });
+  try {
+    await page.getByTestId('admin-dashboard').waitFor({ state: 'visible', timeout: 30_000 });
+  } catch (error) {
+    const body = (await page.locator('body').innerText().catch(() => '')).slice(0, 4_000);
+    throw new Error([
+      `Staff shell unavailable at ${page.url()}`,
+      `Visible page text:\n${body || '(empty)'}`,
+      `Runtime errors:\n${runtimeErrors.join('\n') || '(none)'}`,
+      `Failed requests:\n${failedRequests.join('\n') || '(none)'}`,
+      `Original wait failure: ${error.message}`,
+    ].join('\n\n'));
+  }
 
   for (const [id, label] of sections) {
     await page.getByTestId(`admin-nav-${id}`).click();
@@ -80,7 +108,25 @@ try {
       throw new Error(`${label} triggered the global error boundary`);
     }
     if (await page.getByText(new RegExp(`${label} failed to load`, 'i')).count()) {
-      throw new Error(`${label} triggered its section error boundary`);
+      const alert = page.getByText(new RegExp(`${label} failed to load`, 'i')).first().locator('..');
+      const boundaryError = await alert.evaluate(element => {
+        const fiberKey = Object.keys(element).find(key => key.startsWith('__reactFiber$'));
+        let fiber = fiberKey ? element[fiberKey] : null;
+        while (fiber) {
+          const error = fiber.stateNode?.state?.error;
+          if (error) return `${error.name || 'Error'}: ${error.message || String(error)}\n${error.stack || ''}`;
+          fiber = fiber.return;
+        }
+        return '(React boundary error object unavailable)';
+      }).catch(() => '(React boundary inspection failed)');
+      const body = (await page.locator('body').innerText().catch(() => '')).slice(0, 6_000);
+      throw new Error([
+        `${label} triggered its section error boundary`,
+        `Boundary exception:\n${boundaryError}`,
+        `Visible page text:\n${body || '(empty)'}`,
+        `Runtime errors:\n${runtimeErrors.join('\n') || '(none)'}`,
+        `Failed requests:\n${failedRequests.join('\n') || '(none)'}`,
+      ].join('\n\n'));
     }
     await page.getByTestId('admin-dashboard').waitFor({ state: 'visible' });
     console.log(`Staff portal read passed: ${label}`);
