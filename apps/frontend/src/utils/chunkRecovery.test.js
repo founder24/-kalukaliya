@@ -12,7 +12,9 @@ describe('stale chunk recovery', () => {
     };
 
     expect(handlePreloadError(event, { location, storage, now: 50_000 })).toBe(true);
-    expect(event.preventDefault).toHaveBeenCalledOnce();
+    // Do not prevent Vite's rejection. preventDefault() makes Vite resolve the
+    // lazy import with undefined, which crashes React while reading .default.
+    expect(event.preventDefault).not.toHaveBeenCalled();
     expect(location.reload).toHaveBeenCalledOnce();
     expect(handlePreloadError(event, { location, storage, now: 55_000 })).toBe(false);
     expect(location.reload).toHaveBeenCalledOnce();

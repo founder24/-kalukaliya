@@ -168,6 +168,17 @@ authRouter.post('/login', async (c) => {
   });
 });
 
+// Expire any legacy admin session alongside a normal bearer logout. Keep this
+// response-only compatibility behavior outside the refresh-token rollout guard:
+// it does not alter D1/KV claim or replay semantics.
+authRouter.use('/logout', async (c, next) => {
+  await next();
+  c.res.headers.set(
+    'Set-Cookie',
+    'syrabit_admin_session=; Path=/api/; Max-Age=0; HttpOnly; SameSite=Lax',
+  );
+});
+
 // ── POST /v1/auth/logout ──────────────────────────────────────────────────────
 // REFRESH_TOKEN_ROLLOUT_GUARD: logout-route:start
 authRouter.post('/logout', async (c) => {

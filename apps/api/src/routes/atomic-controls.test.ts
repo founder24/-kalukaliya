@@ -493,6 +493,9 @@ describe('atomic refresh-token rotation', () => {
       env,
     );
     expect(logout.status).toBe(200);
+    expect(logout.headers.get('Set-Cookie')).toContain(
+      'syrabit_admin_session=; Path=/api/; Max-Age=0',
+    );
 
     const replay = await authRouter.fetch(
       new Request('https://api.example/refresh', {
