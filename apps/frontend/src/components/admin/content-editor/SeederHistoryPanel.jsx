@@ -548,9 +548,10 @@ export default function SeederHistoryPanel({ adminToken, onRetryWithIds }) {
         `${API}/admin/content/seed-notes/history?limit=20`,
         authHeaders(adminToken),
       );
-      setRuns(res.data?.runs || []);
+      const nextRuns = Array.isArray(res.data) ? res.data : (res.data?.runs || []);
+      setRuns(nextRuns);
       setError(null);
-      return res.data?.runs || [];
+      return nextRuns;
     } catch (err) {
       const msg = err?.response?.data?.detail || err?.message || 'Failed to load seeder history';
       setError(msg);

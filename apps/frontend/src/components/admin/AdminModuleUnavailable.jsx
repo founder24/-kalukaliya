@@ -51,6 +51,31 @@ const DETAILS = {
     description: 'Legacy mutable site settings are not exposed by the current backend.',
     available: 'No settings read or write is attempted from this module.',
   },
+  'content-cms': {
+    title: 'CMS / Docs',
+    description: 'CMS document editing is not available because several editor tools do not yet have Cloudflare-native staff routes.',
+    available: 'No retired CMS, syllabus, PDF, translation, or AI request is sent from this tab.',
+  },
+  'content-blog': {
+    title: 'Blog Publisher',
+    description: 'The blog publishing workflow is not available on the current Cloudflare-native backend.',
+    available: 'No retired content or CMS request is sent from this tab.',
+  },
+  'content-assamese': {
+    title: 'Assamese',
+    description: 'Bulk Assamese corpus progress and backfill are not available on the current Cloudflare-native backend.',
+    available: 'Per-chapter translation remains available in supported editor workflows. No retired corpus request is sent from this tab.',
+  },
+  'content-progress': {
+    title: 'Translation Progress',
+    description: 'Chapter-level translation progress is not available because the current Worker route provides aggregate totals only.',
+    available: 'No incompatible translation-progress request is sent from this tab.',
+  },
+  'content-rag-mirror': {
+    title: 'RAG Mirror',
+    description: 'Bulk RAG mirror controls are not available through staff bearer authentication.',
+    available: 'No cron-secret or retired RAG request is sent from this tab.',
+  },
 };
 
 export default function AdminModuleUnavailable({ moduleId }) {

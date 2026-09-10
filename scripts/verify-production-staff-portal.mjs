@@ -57,6 +57,19 @@ const unsupportedSections = new Set([
   'ops',
   'settings',
 ]);
+const contentHubTabs = [
+  { id: 'editor', label: 'Content Editor', requiredReads: [] },
+  { id: 'cms', label: 'CMS / Docs', unsupported: true },
+  { id: 'blog', label: 'Blog Publisher', unsupported: true },
+  { id: 'translation', label: 'Assamese', unsupported: true },
+  { id: 'progress', label: 'Translation Progress', unsupported: true },
+  {
+    id: 'seeder',
+    label: 'Seeder History',
+    requiredReads: ['/api/v1/admin/content/seed-notes/history'],
+  },
+  { id: 'rag-mirror', label: 'RAG Mirror', unsupported: true },
+];
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext();
@@ -75,6 +88,7 @@ const forbiddenRequests = [];
 const failedRequests = [];
 const postLogoutAuthResponses = [];
 const strippedApiAccessHeaders = [];
+const contentReadsWithoutBearer = [];
 let postLogoutProbe = false;
 let activeSection = 'dashboard';
 const successfulReads = new Map(sections.map(([id]) => [id, new Set()]));
@@ -122,6 +136,13 @@ page.on('request', request => {
   const url = new URL(request.url());
   if (request.method() === 'GET' && url.origin === edge) {
     apiReadsStarted.get(section)?.push(url.pathname);
+    if (
+      section === 'contenthub'
+      && url.pathname.startsWith('/api/v1/')
+      && !request.headers().authorization?.startsWith('Bearer ')
+    ) {
+      contentReadsWithoutBearer.push(url.pathname);
+    }
   }
 });
 page.on('response', response => {
@@ -266,6 +287,42 @@ try {
         );
       }
     }
+    if (id === 'contenthub') {
+      for (const tab of contentHubTabs) {
+        const readsBefore = apiReadsStarted.get(id)?.length || 0;
+        await page.getByTestId(`content-hub-tab-${tab.id}`).click();
+
+        if (tab.unsupported) {
+          await page.getByTestId(`admin-module-unavailable-content-${tab.id}`)
+            .waitFor({ state: 'visible' });
+          await page.waitForTimeout(250);
+          const unexpectedReads = (apiReadsStarted.get(id) || []).slice(readsBefore);
+          if (unexpectedReads.length) {
+            throw new Error(
+              `${tab.label} is documented as unsupported but initiated API reads:\n`
+                + unexpectedReads.join('\n'),
+            );
+          }
+          continue;
+        }
+
+        for (const path of tab.requiredReads || []) {
+          const deadline = Date.now() + REQUIRED_READ_TIMEOUT_MS;
+          while (Date.now() < deadline) {
+            const reads = (apiReadsStarted.get(id) || []).slice(readsBefore);
+            if (reads.includes(path) && successfulReads.get(id)?.has(path)) break;
+            await page.waitForTimeout(100);
+          }
+          const reads = (apiReadsStarted.get(id) || []).slice(readsBefore);
+          if (!reads.includes(path)) {
+            throw new Error(`${tab.label} did not initiate required Worker read ${path}`);
+          }
+          if (!successfulReads.get(id)?.has(path)) {
+            throw new Error(`${tab.label} did not complete required Worker read ${path}`);
+          }
+        }
+      }
+    }
     console.log(`Staff portal read passed: ${label}`);
   }
 
@@ -297,6 +354,11 @@ try {
   if (strippedApiAccessHeaders.length) {
     throw new Error(
       `Staff portal attempted to attach Cloudflare Access headers to the public API:\n${strippedApiAccessHeaders.join('\n')}`,
+    );
+  }
+  if (contentReadsWithoutBearer.length) {
+    throw new Error(
+      `Content Editor issued Worker reads without bearer authentication:\n${contentReadsWithoutBearer.join('\n')}`,
     );
   }
   forbiddenRequests.length = 0;

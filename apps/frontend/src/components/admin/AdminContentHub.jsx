@@ -9,12 +9,8 @@ import { API_BASE } from '@/utils/api';
 import { authHeaders } from '@/utils/adminHelpers';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
+import AdminModuleUnavailable from './AdminModuleUnavailable';
 const AdminContentEditor = lazy(() => import('./AdminContentEditor'));
-const AdminCmsDocEditor  = lazy(() => import('./AdminCmsDocEditor'));
-const BlogPublishWizard  = lazy(() => import('./BlogPublishWizard'));
-const AssameseBackfillPanel = lazy(() => import('./AssameseBackfillPanel'));
-const RagMirrorPanel        = lazy(() => import('./RagMirrorPanel'));
-const AdminTranslationProgress = lazy(() => import('./AdminTranslationProgress'));
 const SeederHistoryPanel = lazy(() => import('./content-editor/SeederHistoryPanel'));
 
 
@@ -190,6 +186,7 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
+                  data-testid={`content-hub-tab-${tab.id}`}
                   className={`flex items-center gap-2 h-10 px-4 rounded-t-lg border-b-2 transition-all text-sm font-medium ${
                     isActive
                       ? `${colors.active} bg-gray-50`
@@ -227,35 +224,26 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
             )}
 
             {activeTab === 'cms' && (
-              <div className="h-full overflow-hidden">
-                <AdminCmsDocEditor
-                  adminToken={adminToken}
-                  onNavigate={navigate}
-                  hubContext={hubContext}
-                />
+              <div className="h-full overflow-y-auto">
+                <AdminModuleUnavailable moduleId="content-cms" />
               </div>
             )}
 
             {activeTab === 'blog' && (
               <div className="h-full overflow-y-auto">
-                <BlogPublishWizard
-                  adminToken={adminToken}
-                  onNavigate={navigate}
-                  hubContext={hubContext}
-                  onHubContext={setHubContext}
-                />
+                <AdminModuleUnavailable moduleId="content-blog" />
               </div>
             )}
 
             {activeTab === 'translation' && (
               <div className="h-full overflow-y-auto p-4 sm:p-6">
-                <AssameseBackfillPanel adminToken={adminToken} />
+                <AdminModuleUnavailable moduleId="content-assamese" />
               </div>
             )}
 
             {activeTab === 'progress' && (
-              <div className="h-full overflow-hidden">
-                <AdminTranslationProgress adminToken={adminToken} />
+              <div className="h-full overflow-y-auto">
+                <AdminModuleUnavailable moduleId="content-progress" />
               </div>
             )}
 
@@ -282,9 +270,7 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
             )}
             {activeTab === 'rag-mirror' && (
               <div className="h-full overflow-y-auto">
-                <Suspense fallback={<div className="p-8 text-center text-sm text-gray-400"><Loader2 size={16} className="inline animate-spin mr-2" />Loading…</div>}>
-                  <RagMirrorPanel adminToken={adminToken} />
-                </Suspense>
+                <AdminModuleUnavailable moduleId="content-rag-mirror" />
               </div>
             )}
           </Suspense>
