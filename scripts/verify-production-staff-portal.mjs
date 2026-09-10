@@ -33,7 +33,7 @@ const sections = [
 ];
 
 const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({ extraHTTPHeaders: accessHeaders });
+const context = await browser.newContext();
 const page = await context.newPage();
 const runtimeErrors = [];
 const forbiddenRequests = [];
@@ -55,6 +55,16 @@ page.on('response', response => {
 });
 page.on('requestfailed', request => {
   failedRequests.push(`NETWORK ${request.method()} ${request.url()} — ${request.failure()?.errorText || 'unknown error'}`);
+});
+
+// Cloudflare Access protects the Pages origin, but the public API uses the
+// application's bearer-token contract. Do not leak Access service-token
+// headers into cross-origin API preflights: browsers correctly reject those
+// headers because they are not part of the public API CORS allowlist.
+await page.route(`${site}/**`, async route => {
+  await route.continue({
+    headers: { ...route.request().headers(), ...accessHeaders },
+  });
 });
 
 try {
