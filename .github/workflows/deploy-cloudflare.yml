@@ -126,7 +126,9 @@ jobs:
         run: pnpm --filter @workspace/syrabit test:release-guards
 
       - name: Test disposable staff sign-in failure safety
-        run: bash scripts/test-validate-cloudflare-api-cutover.sh
+        run: |
+          bash scripts/test-validate-cloudflare-api-cutover.sh
+          node --test scripts/staff-portal-response-policy.test.mjs
 
       - name: Test disposable staff-auth release cleanup
         run: bash scripts/test-release-staff-auth-reaper.sh
@@ -830,6 +832,10 @@ jobs:
 
       - name: Verify every production staff portal section read-only
         run: bash scripts/run-disposable-staff-portal-check.sh
+
+      - name: Always remove an interrupted staff portal fixture
+        if: ${{ always() }}
+        run: bash scripts/cleanup-disposable-staff-portal.sh "$RUNNER_TEMP/release-staff-portal-fixture.env"
 
   request-reset-email:
     name: Request fresh disposable password-reset email

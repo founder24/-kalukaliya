@@ -38,3 +38,7 @@ jobs:
 
       - name: Verify the deployed staff portal read-only
         run: bash scripts/run-disposable-staff-portal-check.sh
+
+      - name: Always remove an interrupted staff portal fixture
+        if: ${{ always() }}
+        run: bash scripts/cleanup-disposable-staff-portal.sh "$RUNNER_TEMP/release-staff-portal-fixture.env"

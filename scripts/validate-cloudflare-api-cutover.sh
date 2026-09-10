@@ -6,8 +6,7 @@
 # Optional: PUBLIC_SITE_URL, defaults to https://syrabit.ai
 # Optional: INDEXNOW_INTERNAL_SECRET enables authenticated IndexNow validation
 # Required for full validation: STUDENT_TOKEN, STAFF_TOKEN,
-# ADMIN_SESSION_TOKEN, EDGE_SHARED_SECRET, TRANSLATE_CRON_SECRET,
-# CF_ACCESS_CLIENT_ID, and CF_ACCESS_CLIENT_SECRET.
+# ADMIN_SESSION_TOKEN, EDGE_SHARED_SECRET, and TRANSLATE_CRON_SECRET.
 # Set CUTOVER_RESET_ONLY=true only in the post-deploy reset job. It requires
 # CUTOVER_RESET_EMAIL, CUTOVER_RESET_LINK, CUTOVER_RESET_PASSWORD, and the
 # fresh CUTOVER_RESET_NONCE emitted by the preceding reset-request job.
@@ -46,7 +45,7 @@ trap cleanup EXIT
 
 run_disposable_staff_auth_check() {
   local required_var cookie_jar login_body response headers status access_token refresh_token now
-  for required_var in CUTOVER_STAFF_EMAIL CUTOVER_STAFF_PASSWORD CUTOVER_STAFF_LEASE_EXPIRES_AT CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET; do
+  for required_var in CUTOVER_STAFF_EMAIL CUTOVER_STAFF_PASSWORD CUTOVER_STAFF_LEASE_EXPIRES_AT; do
     : "${!required_var:?Set ${required_var} for disposable staff authentication validation}"
   done
   if [[ "${CUTOVER_STAFF_EMAIL,,}" != *release-staff-auth* ]]; then
@@ -74,8 +73,6 @@ print(json.dumps({"email": os.environ["CUTOVER_STAFF_EMAIL"], "password": os.env
 
   status=$(curl --silent --show-error --max-time 30 \
     --request POST --header 'Content-Type: application/json' \
-    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     --data "$login_body" --cookie-jar "$cookie_jar" \
     --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/login")
@@ -97,8 +94,6 @@ PY
 
   for days in 7 30; do
     status=$(curl --silent --show-error --max-time 30 \
-      --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-      --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
       --cookie "$cookie_jar" --output "$response" --write-out '%{http_code}' \
       "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=${days}")
     test "$status" = "200" || {
@@ -116,8 +111,6 @@ PY
 
   status=$(curl --silent --show-error --max-time 30 \
     --request POST --header 'Content-Type: application/json' \
-    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     --data "$login_body" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/auth/login")
   test "$status" = "200" || {
@@ -144,8 +137,6 @@ PY
   refresh_token="${auth_tokens[1]}"
 
   status=$(curl --silent --show-error --max-time 30 \
-    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     --header "Authorization: Bearer ${access_token}" \
     --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=7")
@@ -166,8 +157,6 @@ print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
 ')
   status=$(curl --silent --show-error --max-time 30 \
     --request POST --header 'Content-Type: application/json' \
-    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     --header "Authorization: Bearer ${access_token}" \
     --data "$logout_body" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/auth/logout")
@@ -177,8 +166,7 @@ print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
   }
 
   status=$(curl --silent --show-error --max-time 30 \
-    --request POST --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    --request POST \
     --cookie "$cookie_jar" --cookie-jar "$cookie_jar" \
     --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/logout")
@@ -187,8 +175,6 @@ print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
     exit 1
   }
   status=$(curl --silent --show-error --max-time 30 \
-    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     --cookie "$cookie_jar" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=7")
   test "$status" = "401" || {
@@ -209,8 +195,6 @@ if [[ "$RESET_ONLY" != "true" && "${CUTOVER_STAGE:-full}" != "public" ]]; then
   : "${ADMIN_SESSION_TOKEN:?Set ADMIN_SESSION_TOKEN for admin workflow checks}"
   : "${EDGE_SHARED_SECRET:?Set EDGE_SHARED_SECRET for authenticated generation}"
   : "${TRANSLATE_CRON_SECRET:?Set TRANSLATE_CRON_SECRET for scheduled-operation checks}"
-  : "${CF_ACCESS_CLIENT_ID:?Set CF_ACCESS_CLIENT_ID for public-edge admin checks}"
-  : "${CF_ACCESS_CLIENT_SECRET:?Set CF_ACCESS_CLIENT_SECRET for public-edge admin checks}"
 fi
 
 native_get() {
@@ -312,8 +296,6 @@ edge_admin_get() {
   TMP_FILES+=("$output" "$headers")
   status=$(curl --silent --show-error --max-time 30 \
     --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
-    -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     -H "Cookie: syrabit_admin_session=${ADMIN_SESSION_TOKEN}" "${EDGE_BASE}/api/v1${path}")
   test "$status" = "200" || { cat "$output"; echo "Expected public-edge admin 200 for ${path}, got ${status}" >&2; exit 1; }
   grep -qi '^x-syrabit-route: worker-native' "$headers" || {
@@ -376,8 +358,6 @@ edge_admin_json_status() {
   TMP_FILES+=("$output" "$headers")
   status=$(curl --silent --show-error --max-time 30 \
     --request POST --header 'Content-Type: application/json' \
-    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     --header "Cookie: syrabit_admin_session=${ADMIN_SESSION_TOKEN}" --data "$data" \
     --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1${path}")
@@ -738,8 +718,6 @@ if [[ -n "${TRANSLATE_CRON_SECRET:-}" ]]; then
   for cron_path in /admin/cron/seed-notes/status /admin/cron/seed-assamese/status; do
     status=$(curl --silent --show-error --max-time 30 \
       --dump-header "$cron_headers" --output "$cron_output" --write-out '%{http_code}' \
-      -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-      -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
       -H "Authorization: Bearer ${TRANSLATE_CRON_SECRET}" "${EDGE_BASE}/api/v1${cron_path}")
     test "$status" = "200" || { cat "$cron_output"; echo "Native scheduled status failed for ${cron_path}" >&2; exit 1; }
     grep -qi '^x-syrabit-route: worker-native' "$cron_headers" || {

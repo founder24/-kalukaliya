@@ -43,10 +43,10 @@ async function setupMocks(page: import('@playwright/test').Page) {
 
   // Staff content loaded on StaffDashboard mount
   const staffContentRoutes = [
-    { pattern: '**/api/v1/staff/content/boards',   body: [] },
-    { pattern: '**/api/v1/staff/content/classes',  body: [] },
-    { pattern: '**/api/v1/staff/content/streams',  body: [] },
-    { pattern: '**/api/v1/staff/content/subjects', body: [] },
+    { pattern: '**/api/v1/staff/content/boards*',   body: [] },
+    { pattern: '**/api/v1/staff/content/classes*',  body: [] },
+    { pattern: '**/api/v1/staff/content/streams*',  body: [] },
+    { pattern: '**/api/v1/staff/content/subjects*', body: [] },
   ];
   for (const { pattern, body } of staffContentRoutes) {
     await page.route(pattern, (route) =>
@@ -84,6 +84,7 @@ async function setupMocks(page: import('@playwright/test').Page) {
     { pattern: '**/api/v1/admin/ci-status*', body: { configured: false } },
     { pattern: '**/api/v1/admin/vertex/probe-status*', body: { status: 'unknown' } },
     { pattern: '**/api/v1/admin/alerts/cooldowns*', body: { active: [], total: 0 } },
+    { pattern: '**/api/v1/admin/routing-config*', body: { pools: [] } },
   ];
 
   // AdminAnalytics endpoints
@@ -201,47 +202,50 @@ test.describe('Staff panel — sidebar sections', () => {
     await p.waitForTimeout(400);
   }
 
-  /**
-   * Assert the section is alive: its <h2> or a loading spinner must appear,
-   * and no error boundary message must be present.
-   *
-   * @param label     - Sidebar button label (used in error messages).
-   * @param h2Text    - The actual text of the <h2> the section renders.
-   *                    Defaults to `label` when omitted (Analytics/Users/Conversations).
-   *                    Pass explicitly when the section's <h2> differs from the label
-   *                    (e.g. Dashboard renders <h2>Overview</h2>).
-   */
+  /** Assert the selected section has visible content and no error boundary. */
   async function assertSectionAlive(
     p: import('@playwright/test').Page,
     label: string,
-    h2Text: string = label,
   ) {
     const main = p.locator('main');
 
     // Must not show a React error boundary
     const errorBoundaryCount = await main
-      .locator('text=/Something went wrong|could not be loaded/i')
+      .locator('text=/Something went wrong|failed to load|could not be loaded/i')
       .count();
     expect(
       errorBoundaryCount,
       `"${label}" must not show an error boundary message`,
     ).toBe(0);
 
-    // Either the heading or a spinner must be visible (loaded or in-flight)
-    const headingVisible = await main
-      .locator(`h2:has-text("${h2Text}")`)
-      .isVisible()
-      .catch(() => false);
-    const spinnerVisible = await main
-      .locator('.animate-spin')
-      .isVisible()
-      .catch(() => false);
-
-    expect(
-      headingVisible || spinnerVisible,
-      `"${label}" must show its heading or a loading spinner — not a blank/crashed page`,
-    ).toBe(true);
+    await expect(
+      p.getByTestId(`admin-nav-${sectionIdForLabel(label)}`),
+      `"${label}" navigation item must be selected`,
+    ).toHaveClass(/bg-violet-50/);
+    await expect(main, `"${label}" must not render a blank page`).not.toBeEmpty();
   }
+
+  const sectionIdForLabel = (label: string) => {
+    const match = ALL_SECTIONS.find((section) => section.label === label);
+    if (!match) throw new Error(`Unknown staff section: ${label}`);
+    return match.id;
+  };
+
+  const ALL_SECTIONS = [
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'contenthub', label: 'Content Editor' },
+    { id: 'seomanager', label: 'SEO Manager' },
+    { id: 'users', label: 'Users' },
+    { id: 'conversations', label: 'Conversations' },
+    { id: 'notifications', label: 'Notifications' },
+    { id: 'ai', label: 'AI & Automation' },
+    { id: 'analytics', label: 'Analytics' },
+    { id: 'security', label: 'Access & Security' },
+    { id: 'logs', label: 'Logs' },
+    { id: 'health', label: 'Health / Uptime' },
+    { id: 'ops', label: 'Ops Console' },
+    { id: 'settings', label: 'Site Settings' },
+  ];
 
   // ──────────────────────────────────────────────────────────────────────────
   // Per-section tests
@@ -250,8 +254,7 @@ test.describe('Staff panel — sidebar sections', () => {
   test('Dashboard section renders without blank page or uncaught errors', async ({ page }) => {
     await gotoStaff(page);
     await clickSidebar(page, 'Dashboard');
-    // AdminDashboard renders <h2>Overview</h2> — not "Dashboard"
-    await assertSectionAlive(page, 'Dashboard', 'Overview');
+    await assertSectionAlive(page, 'Dashboard');
     expect(consoleErrors, 'No uncaught console errors on Dashboard').toHaveLength(0);
   });
 
@@ -315,7 +318,7 @@ test.describe('Staff panel — sidebar sections', () => {
 
     await gotoStaff(page);
     await clickSidebar(page, 'Dashboard');
-    await assertSectionAlive(page, 'Dashboard', 'Overview');
+    await assertSectionAlive(page, 'Dashboard');
 
     // ── "Probe now" — exercises setSeoLive / setSeoLiveLoading / setSeoLiveError
     const probeBtn = page.locator('[data-testid="seo-live-refresh"]');
@@ -345,23 +348,17 @@ test.describe('Staff panel — sidebar sections', () => {
   // Combined navigation test
   // ──────────────────────────────────────────────────────────────────────────
 
-  test('all four sections render correctly when cycled in sequence', async ({ page }) => {
+  test('every control-center section renders correctly when cycled in sequence', async ({ page }) => {
     await gotoStaff(page);
 
-    for (const { label, h2Text } of [
-      // AdminDashboard renders <h2>Overview</h2>, not <h2>Dashboard</h2>
-      { label: 'Dashboard',     h2Text: 'Overview' },
-      { label: 'Analytics',     h2Text: 'Analytics' },
-      { label: 'Users',         h2Text: 'Users' },
-      { label: 'Conversations', h2Text: 'Conversations' },
-    ]) {
+    for (const { label } of ALL_SECTIONS) {
       await clickSidebar(page, label);
-      await assertSectionAlive(page, label, h2Text);
+      await assertSectionAlive(page, label);
     }
 
     expect(
       consoleErrors,
-      'No uncaught console errors while cycling through all four sections',
+      'No uncaught console errors while cycling through every section',
     ).toHaveLength(0);
   });
 });

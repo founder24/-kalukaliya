@@ -1,4 +1,8 @@
 import { chromium } from '../apps/frontend/node_modules/@playwright/test/index.mjs';
+import {
+  isExpectedPostLogoutAuthResponse,
+  isPostLogoutAuthEndpoint,
+} from './staff-portal-response-policy.mjs';
 
 const required = [
   'CUTOVER_STAFF_EMAIL',
@@ -39,6 +43,7 @@ const runtimeErrors = [];
 const forbiddenRequests = [];
 const failedRequests = [];
 const postLogoutAuthResponses = [];
+const strippedApiAccessHeaders = [];
 let postLogoutProbe = false;
 
 const isAccessServiceWorkerArtifact = text =>
@@ -58,18 +63,21 @@ page.on('console', message => {
   ) runtimeErrors.push(text);
 });
 page.on('response', response => {
-  if (
-    postLogoutProbe
-    && (response.url().includes('/users/me') || response.url().includes('/admin/verify'))
-  ) {
+  const isPostLogoutAuthProbe = isPostLogoutAuthEndpoint(response.url(), postLogoutProbe);
+  const isExpectedPostLogoutDenial = isExpectedPostLogoutAuthResponse(
+    response.url(),
+    response.status(),
+    postLogoutProbe,
+  );
+  if (isPostLogoutAuthProbe) {
     postLogoutAuthResponses.push(
       `${response.status()} ${response.request().method()} ${response.url()}`,
     );
   }
-  if (response.status() >= 400) {
+  if (response.status() >= 400 && !isExpectedPostLogoutDenial) {
     failedRequests.push(`${response.status()} ${response.request().method()} ${response.url()}`);
   }
-  if ([401, 403].includes(response.status())) {
+  if ([401, 403].includes(response.status()) && !isExpectedPostLogoutDenial) {
     forbiddenRequests.push(`${response.status()} ${response.request().method()} ${response.url()}`);
   }
 });
@@ -86,10 +94,20 @@ await page.route(`${site}/**`, async route => {
     headers: { ...route.request().headers(), ...accessHeaders },
   });
 });
+await page.route(`${edge}/**`, async route => {
+  const headers = { ...route.request().headers() };
+  for (const name of Object.keys(headers)) {
+    if (name.toLowerCase().startsWith('cf-access-client-')) {
+      strippedApiAccessHeaders.push(`${route.request().method()} ${route.request().url()}`);
+      delete headers[name];
+    }
+  }
+  await route.continue({ headers });
+});
 
 try {
   const login = await context.request.post(`${edge}/api/v1/auth/login`, {
-    headers: { ...accessHeaders, 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
     data: {
       email: process.env.CUTOVER_STAFF_EMAIL,
       password: process.env.CUTOVER_STAFF_PASSWORD,
@@ -142,8 +160,9 @@ try {
     if (await page.getByRole('heading', { name: 'Something went wrong' }).count()) {
       throw new Error(`${label} triggered the global error boundary`);
     }
-    if (await page.getByText(new RegExp(`${label} failed to load`, 'i')).count()) {
-      const alert = page.getByText(new RegExp(`${label} failed to load`, 'i')).first().locator('..');
+    const sectionBoundary = page.getByRole('alert').filter({ hasText: /failed to load/i }).first();
+    if (await sectionBoundary.count()) {
+      const alert = sectionBoundary;
       const boundaryError = await alert.evaluate(element => {
         const fiberKey = Object.keys(element).find(key => key.startsWith('__reactFiber$'));
         let fiber = fiberKey ? element[fiberKey] : null;
@@ -178,17 +197,36 @@ try {
   if (forbiddenRequests.length) {
     throw new Error(`Staff portal issued forbidden requests:\n${forbiddenRequests.join('\n')}`);
   }
+  if (failedRequests.length) {
+    throw new Error(`Staff portal issued failed requests:\n${failedRequests.join('\n')}`);
+  }
+  if (strippedApiAccessHeaders.length) {
+    throw new Error(
+      `Staff portal attempted to attach Cloudflare Access headers to the public API:\n${strippedApiAccessHeaders.join('\n')}`,
+    );
+  }
   forbiddenRequests.length = 0;
   const declineConsent = page.getByRole('button', { name: 'Decline', exact: true });
   if (await declineConsent.isVisible().catch(() => false)) {
     await declineConsent.click();
   }
-  await page.getByRole('button', { name: 'Logout' }).click();
+  const [logoutResponse] = await Promise.all([
+    page.waitForResponse(response =>
+      response.request().method() === 'POST'
+      && response.url().includes('/api/v1/auth/logout')),
+    page.getByRole('button', { name: 'Logout' }).click(),
+  ]);
+  if (!logoutResponse.ok()) {
+    throw new Error(`Staff logout failed with HTTP ${logoutResponse.status()}`);
+  }
   await page.waitForURL(url => url.pathname === '/login' && url.searchParams.get('next') === '/staff');
   const remainingStorageKeys = await page.evaluate(() => ({
     session: ['syrabit_token', 'syrabit_refresh_token'].filter(key => sessionStorage.getItem(key)),
     local: ['syrabit_token', 'syrabit_refresh_token'].filter(key => localStorage.getItem(key)),
   }));
+  if (remainingStorageKeys.session.length || remainingStorageKeys.local.length) {
+    throw new Error(`UI sign-out left authentication storage behind: ${JSON.stringify(remainingStorageKeys)}`);
+  }
   postLogoutProbe = true;
   await page.goto(`${site}/staff`, { waitUntil: 'domcontentloaded' });
   try {
@@ -212,6 +250,21 @@ try {
   }
   if (await page.getByTestId('admin-dashboard').count()) {
     throw new Error('Protected staff content remained visible after UI sign-out');
+  }
+  if (!postLogoutAuthResponses.length || postLogoutAuthResponses.some(item => !item.startsWith('401 '))) {
+    throw new Error(
+      `Post-logout authentication probes did not consistently return 401:\n${postLogoutAuthResponses.join('\n') || '(none)'}`,
+    );
+  }
+  if (forbiddenRequests.length || failedRequests.length) {
+    throw new Error([
+      forbiddenRequests.length
+        ? `Unexpected forbidden requests:\n${forbiddenRequests.join('\n')}`
+        : '',
+      failedRequests.length
+        ? `Unexpected failed requests:\n${failedRequests.join('\n')}`
+        : '',
+    ].filter(Boolean).join('\n\n'));
   }
 
   if (runtimeErrors.length) {

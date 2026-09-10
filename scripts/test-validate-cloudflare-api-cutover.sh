@@ -70,6 +70,10 @@ case "$url" in
   *) echo "unexpected fake curl URL" >&2; exit 97 ;;
 esac
 printf '%s\n' "$step" >>"${CURL_LOG:?}"
+if [[ " $* " == *" CF-Access-Client-"* ]]; then
+  echo "Cloudflare Access headers must never be sent to the public API host" >&2
+  exit 96
+fi
 status=200
 body='{}'
 case "$step" in
@@ -101,6 +105,13 @@ fi
 printf '%s' "$status"
 EOF
 
+cat >"$FAKE_BIN/node" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' browser >>"${BROWSER_LOG:?}"
+[[ "${SCENARIO:-}" != "browser_failure" ]]
+EOF
+
 chmod +x "$FAKE_BIN/"*
 
 assert_no_secrets() {
@@ -121,6 +132,7 @@ run_case() {
   export D1_LOG="$case_dir/d1.log"
   export CLEANUP_LOG="$case_dir/cleanup.log"
   export CURL_LOG="$case_dir/curl.log"
+  export BROWSER_LOG="$case_dir/browser.log"
   export COOKIE_LOGGED_OUT_FILE="$case_dir/logged-out"
   export COOKIE_VALUE="$COOKIE" ACCESS_VALUE="$ACCESS" REFRESH_VALUE="$REFRESH"
   export PASSWORD_VALUE="$PASSWORD" HASH_VALUE="$HASH"
@@ -144,6 +156,40 @@ run_case() {
   assert_no_secrets "$capture"
 }
 
+run_portal_case() {
+  local scenario="$1" expected="$2"
+  local case_dir="$SANDBOX/portal-$scenario"
+  mkdir -p "$case_dir"
+  export SCENARIO="$scenario"
+  export D1_LOG="$case_dir/d1.log"
+  export CLEANUP_LOG="$case_dir/cleanup.log"
+  export CURL_LOG="$case_dir/curl.log"
+  export BROWSER_LOG="$case_dir/browser.log"
+  export PASSWORD_VALUE="$PASSWORD" HASH_VALUE="$HASH"
+  export ACCESS_ID_VALUE="$ACCESS_ID" ACCESS_SECRET_VALUE="$ACCESS_SECRET"
+  local capture="$case_dir/capture.log" status=0
+  (
+    cd "$ROOT"
+    PATH="$FAKE_BIN:$PATH" \
+      PUBLIC_SITE_URL=https://site.invalid \
+      PUBLIC_EDGE_URL=https://api.invalid \
+      CF_ACCESS_CLIENT_ID="$ACCESS_ID" \
+      CF_ACCESS_CLIENT_SECRET="$ACCESS_SECRET" \
+      bash scripts/run-disposable-staff-portal-check.sh
+  ) >"$capture" 2>&1 || status=$?
+  if [[ "$expected" == success ]]; then
+    [[ "$status" -eq 0 ]] || { cat "$capture"; echo "portal $scenario unexpectedly failed" >&2; return 1; }
+  else
+    [[ "$status" -ne 0 ]] || { echo "portal $scenario unexpectedly passed" >&2; return 1; }
+  fi
+  grep -qx cleanup "$CLEANUP_LOG" || {
+    cat "$capture"
+    echo "portal $scenario did not attempt cleanup" >&2
+    return 1
+  }
+  assert_no_secrets "$capture"
+}
+
 run_case success success
 expected_steps=$'cookie_login\ncookie_read_7\ncookie_read_30\nbearer_login\nbearer_read\nbearer_logout\ncookie_logout\npost_logout'
 [[ "$(cat "$SANDBOX/success/curl.log")" == "$expected_steps" ]] || {
@@ -157,6 +203,12 @@ for scenario in \
   bearer_read bearer_logout cookie_logout post_logout
 do
   run_case "$scenario" failure
+done
+
+run_portal_case success success
+grep -qx browser "$SANDBOX/portal-success/browser.log"
+for scenario in create_d1_failure browser_failure cleanup_d1_failure; do
+  run_portal_case "$scenario" failure
 done
 
 echo "Disposable staff cutover fault-injection tests passed."
