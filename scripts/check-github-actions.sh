@@ -44,3 +44,5 @@ if [[ ! -x "${ACTIONLINT_BIN}" ]]; then
 fi
 
 "${ACTIONLINT_BIN}" -color
+python3 scripts/check-edge-workflow-triggers.py
+python3 scripts/test-edge-workflow-triggers.py

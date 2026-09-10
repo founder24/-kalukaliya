@@ -6,11 +6,15 @@ on:
     paths:
       - '.github/workflows/**'
       - 'scripts/check-github-actions.sh'
+      - 'scripts/check-edge-workflow-triggers.py'
+      - 'scripts/test-edge-workflow-triggers.py'
   push:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - 'scripts/check-github-actions.sh'
+      - 'scripts/check-edge-workflow-triggers.py'
+      - 'scripts/test-edge-workflow-triggers.py'
   workflow_dispatch:
 
 permissions:
