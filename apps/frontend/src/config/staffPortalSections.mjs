@@ -1,18 +1,67 @@
 export const STAFF_PORTAL_SECTIONS = Object.freeze([
-  { id: 'dashboard',     label: 'Dashboard',         group: 'main' },
-  { id: 'contenthub',    label: 'Content Editor',    group: 'main' },
-  { id: 'seomanager',    label: 'SEO Manager',       group: 'main' },
-  { id: 'users',         label: 'Users',             group: 'audience' },
-  { id: 'conversations', label: 'Conversations',     group: 'audience' },
-  { id: 'notifications', label: 'Notifications',     group: 'audience' },
-  { id: 'ai',            label: 'AI & Automation',   group: 'operations' },
-  { id: 'analytics',     label: 'Analytics',         group: 'operations' },
-  { id: 'security',      label: 'Access & Security', group: 'system' },
-  { id: 'logs',          label: 'Logs',              group: 'system' },
-  { id: 'health',        label: 'Health / Uptime',   group: 'system' },
-  { id: 'ops',           label: 'Ops Console',       group: 'system' },
-  { id: 'settings',      label: 'Site Settings',     group: 'system' },
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    group: 'main',
+    releaseCheck: {
+      supported: true,
+      requiredReads: ['/health', '/api/v1/staff/analytics/command-center'],
+    },
+  },
+  {
+    id: 'contenthub',
+    label: 'Content Editor',
+    group: 'main',
+    releaseCheck: {
+      supported: true,
+      requiredReads: [
+        '/api/v1/staff/content/boards',
+        '/api/v1/staff/content/classes',
+        '/api/v1/staff/content/streams',
+        '/api/v1/staff/content/subjects',
+      ],
+    },
+  },
+  { id: 'seomanager', label: 'SEO Manager', group: 'main', releaseCheck: { supported: false, requiredReads: [] } },
+  { id: 'users', label: 'Users', group: 'audience', releaseCheck: { supported: false, requiredReads: [] } },
+  { id: 'conversations', label: 'Conversations', group: 'audience', releaseCheck: { supported: false, requiredReads: [] } },
+  { id: 'notifications', label: 'Notifications', group: 'audience', releaseCheck: { supported: false, requiredReads: [] } },
+  { id: 'ai', label: 'AI & Automation', group: 'operations', releaseCheck: { supported: false, requiredReads: [] } },
+  {
+    id: 'analytics',
+    label: 'Analytics',
+    group: 'operations',
+    releaseCheck: {
+      supported: true,
+      requiredReads: ['/api/v1/staff/analytics/command-center'],
+    },
+  },
+  { id: 'security', label: 'Access & Security', group: 'system', releaseCheck: { supported: false, requiredReads: [] } },
+  { id: 'logs', label: 'Logs', group: 'system', releaseCheck: { supported: false, requiredReads: [] } },
+  { id: 'health', label: 'Health / Uptime', group: 'system', releaseCheck: { supported: false, requiredReads: [] } },
+  { id: 'ops', label: 'Ops Console', group: 'system', releaseCheck: { supported: false, requiredReads: [] } },
+  { id: 'settings', label: 'Site Settings', group: 'system', releaseCheck: { supported: false, requiredReads: [] } },
 ]);
+
+export function assertStaffSectionReleaseChecks(sections) {
+  for (const section of sections) {
+    const behavior = section.releaseCheck;
+    if (
+      !behavior
+      || typeof behavior.supported !== 'boolean'
+      || !Array.isArray(behavior.requiredReads)
+    ) {
+      throw new Error(
+        `Staff portal section "${section.id}" must declare releaseCheck.supported and releaseCheck.requiredReads.`,
+      );
+    }
+    if (!behavior.supported && behavior.requiredReads.length) {
+      throw new Error(
+        `Staff portal section "${section.id}" is unsupported but declares required API reads.`,
+      );
+    }
+  }
+}
 
 export function assertStaffSectionCoverage(expectedSections, coveredSections) {
   const serialize = sections => sections.map(({ id, label }) => `${id}:${label}`);

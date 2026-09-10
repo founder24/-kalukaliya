@@ -5,6 +5,7 @@ import {
   STAFF_PORTAL_SECTIONS,
   assertStaffSectionCoverage,
   assertStaffSectionMappings,
+  assertStaffSectionReleaseChecks,
 } from '../apps/frontend/src/config/staffPortalSections.mjs';
 
 test('staff release coverage rejects section-list drift', () => {
@@ -20,6 +21,36 @@ test('staff release coverage accepts the shared section list', () => {
   assert.doesNotThrow(
     () => assertStaffSectionCoverage(STAFF_PORTAL_SECTIONS, STAFF_PORTAL_SECTIONS),
   );
+});
+
+test('staff release checks reject an unclassified section', () => {
+  const sections = [
+    ...STAFF_PORTAL_SECTIONS,
+    { id: 'new-section', label: 'New Section', group: 'system' },
+  ];
+
+  assert.throws(
+    () => assertStaffSectionReleaseChecks(sections),
+    /section "new-section" must declare releaseCheck\.supported and releaseCheck\.requiredReads/,
+  );
+});
+
+test('staff release checks reject API reads on an unsupported section', () => {
+  const sections = [{
+    id: 'unsupported',
+    label: 'Unsupported',
+    group: 'system',
+    releaseCheck: { supported: false, requiredReads: ['/api/v1/staff/example'] },
+  }];
+
+  assert.throws(
+    () => assertStaffSectionReleaseChecks(sections),
+    /section "unsupported" is unsupported but declares required API reads/,
+  );
+});
+
+test('staff release checks accept every shared section declaration', () => {
+  assert.doesNotThrow(() => assertStaffSectionReleaseChecks(STAFF_PORTAL_SECTIONS));
 });
 
 const completeMappings = Object.fromEntries(

@@ -9,6 +9,7 @@ import {
 import {
   STAFF_PORTAL_SECTIONS,
   assertStaffSectionCoverage,
+  assertStaffSectionReleaseChecks,
 } from '../apps/frontend/src/config/staffPortalSections.mjs';
 import {
   STAFF_PORTAL_TRACE_OPTIONS,
@@ -32,31 +33,14 @@ const accessHeaders = {
   'CF-Access-Client-Id': process.env.CF_ACCESS_CLIENT_ID,
   'CF-Access-Client-Secret': process.env.CF_ACCESS_CLIENT_SECRET,
 };
-const verifierSections = STAFF_PORTAL_SECTIONS.map(({ id, label }) => ({ id, label }));
+assertStaffSectionReleaseChecks(STAFF_PORTAL_SECTIONS);
+const verifierSections = STAFF_PORTAL_SECTIONS.map(({ id, label, releaseCheck }) => ({
+  id,
+  label,
+  releaseCheck,
+}));
 assertStaffSectionCoverage(STAFF_PORTAL_SECTIONS, verifierSections);
-const sections = verifierSections.map(({ id, label }) => [id, label]);
-const requiredReads = {
-  dashboard: ['/health', '/api/v1/staff/analytics/command-center'],
-  contenthub: [
-    '/api/v1/staff/content/boards',
-    '/api/v1/staff/content/classes',
-    '/api/v1/staff/content/streams',
-    '/api/v1/staff/content/subjects',
-  ],
-  analytics: ['/api/v1/staff/analytics/command-center'],
-};
-const unsupportedSections = new Set([
-  'seomanager',
-  'users',
-  'conversations',
-  'notifications',
-  'ai',
-  'security',
-  'logs',
-  'health',
-  'ops',
-  'settings',
-]);
+const sections = verifierSections.map(({ id, label, releaseCheck }) => [id, label, releaseCheck]);
 const contentHubTabs = [
   { id: 'editor', label: 'Content Editor', requiredReads: [] },
   { id: 'cms', label: 'CMS / Docs', unsupported: true },
@@ -98,8 +82,7 @@ const REQUIRED_READ_TIMEOUT_MS = 15_000;
 
 await context.tracing.start(STAFF_PORTAL_TRACE_OPTIONS);
 
-async function waitForRequiredReads(id, label) {
-  const expected = requiredReads[id] || [];
+async function waitForRequiredReads(id, label, expected) {
   if (!expected.length) return;
   const deadline = Date.now() + REQUIRED_READ_TIMEOUT_MS;
   let missing = expected;
@@ -247,11 +230,11 @@ try {
     ].join('\n\n'));
   }
 
-  for (const [id, label] of sections) {
+  for (const [id, label, releaseCheck] of sections) {
     activeSection = id;
     await page.getByTestId(`admin-nav-${id}`).click();
     await page.waitForURL(url => url.pathname === '/staff' && url.searchParams.get('s') === id);
-    await waitForRequiredReads(id, label);
+    await waitForRequiredReads(id, label, releaseCheck.requiredReads);
     if (await page.getByRole('heading', { name: 'Something went wrong' }).count()) {
       throw new Error(`${label} triggered the global error boundary`);
     }
@@ -278,7 +261,7 @@ try {
       ].join('\n\n'));
     }
     await page.getByTestId('admin-dashboard').waitFor({ state: 'visible' });
-    if (unsupportedSections.has(id)) {
+    if (!releaseCheck.supported) {
       await page.getByTestId(`admin-module-unavailable-${id}`).waitFor({ state: 'visible' });
       const unexpectedReads = apiReadsStarted.get(id) || [];
       if (unexpectedReads.length) {
@@ -327,8 +310,8 @@ try {
   }
 
   await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
-  for (const [id, label] of sections) {
-    if (!unsupportedSections.has(id)) continue;
+  for (const [id, label, releaseCheck] of sections) {
+    if (releaseCheck.supported) continue;
     const unexpectedReads = apiReadsStarted.get(id) || [];
     if (unexpectedReads.length) {
       throw new Error(
