@@ -10,6 +10,15 @@ import { RateLimitDurableObject } from '../src/middleware/rate-limit';
 
 const EDGE_SECRET = 'edge-runtime-test-secret-at-least-32-characters';
 const JWT_SECRET = 'edge-runtime-jwt-secret-at-least-32-characters';
+const TEST_RUN_ID = `${Date.now()}-${crypto.randomUUID()}`;
+const rateLimitNamespace = {
+  idFromName(name: string) {
+    return env.RATE_LIMIT_DO.idFromName(`test:${TEST_RUN_ID}:${name}`);
+  },
+  get(id: DurableObjectId) {
+    return env.RATE_LIMIT_DO.get(id);
+  },
+} as unknown as DurableObjectNamespace;
 
 function context(): ExecutionContext {
   return {
@@ -94,6 +103,7 @@ function runtimeEnv(apiFetch: (request: Request) => Promise<Response>): Env {
     EDGE_SHARED_SECRET: EDGE_SECRET,
     ALLOWED_ORIGIN: 'https://syrabit.ai',
     API_WORKER: { fetch: apiFetch },
+    RATE_LIMIT_DO: rateLimitNamespace,
   } as unknown as Env;
 }
 
@@ -149,9 +159,10 @@ describe('anonymous burst protection in the Workers runtime', () => {
   });
 
   it('admits a fresh request after the one-minute window alarm clears persisted buckets', async () => {
+    const windowStart = (Math.floor(Date.now() / 60_000) + 2) * 60_000;
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(new Date('2026-09-09T12:00:59.500Z'));
+      vi.setSystemTime(windowStart);
       const cookie = await signedAnonymousCookie(
         'anon_fedcba9876543210fedcba9876543210',
       );
@@ -172,13 +183,14 @@ describe('anonymous burst protection in the Workers runtime', () => {
       for (let index = 0; index < 6; index += 1) {
         admitted.push(await worker.fetch(request(), environment, context()));
       }
+      vi.setSystemTime(windowStart + 59_500);
       const blocked = await worker.fetch(request(), environment, context());
 
       expect(admitted.every(response => response.status === 200)).toBe(true);
       expect(blocked.status).toBe(429);
       expect(blocked.headers.get('X-RateLimit-Limit')).toBe('6');
       expect(blocked.headers.get('X-RateLimit-Remaining')).toBe('0');
-      expect(blocked.headers.get('X-RateLimit-Reset')).toBe('1788955260');
+      expect(blocked.headers.get('X-RateLimit-Reset')).toBe(String((windowStart + 60_000) / 1000));
       expect(blocked.headers.get('Retry-After')).toBe('1');
       expect(apiFetch).toHaveBeenCalledTimes(6);
 
@@ -189,7 +201,7 @@ describe('anonymous burst protection in the Workers runtime', () => {
       ];
       const alarmsRan = await Promise.all(bucketNames.map(name =>
         runDurableObjectAlarm(
-          env.RATE_LIMIT_DO.get(env.RATE_LIMIT_DO.idFromName(name)),
+          rateLimitNamespace.get(rateLimitNamespace.idFromName(name)),
         )
       ));
       expect(alarmsRan).toEqual([true, true]);
@@ -200,7 +212,7 @@ describe('anonymous burst protection in the Workers runtime', () => {
       expect(restored.status).toBe(200);
       expect(restored.headers.get('X-RateLimit-Limit')).toBe('6');
       expect(restored.headers.get('X-RateLimit-Remaining')).toBe('5');
-      expect(restored.headers.get('X-RateLimit-Reset')).toBe('1788955320');
+      expect(restored.headers.get('X-RateLimit-Reset')).toBe(String((windowStart + 120_000) / 1000));
       expect(apiFetch).toHaveBeenCalledTimes(7);
     } finally {
       vi.useRealTimers();
@@ -337,9 +349,10 @@ describe('anonymous burst protection in the Workers runtime', () => {
 
 describe('authenticated per-language limits in the Workers runtime', () => {
   it('restores both English and Assamese allowances after the minute boundary', async () => {
+    const windowStart = (Math.floor(Date.now() / 60_000) + 2) * 60_000;
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(new Date('2026-09-09T12:00:59.500Z'));
+      vi.setSystemTime(windowStart + 59_500);
       const userId = 'student-both-language-reset';
       const token = await authenticatedToken(userId);
       const forwardedLanguages: string[] = [];
@@ -366,8 +379,8 @@ describe('authenticated per-language limits in the Workers runtime', () => {
       const windowKey = Math.floor(Date.now() / 60_000);
       const alarmsRan = await Promise.all((['en', 'as'] as const).map(lang =>
         runDurableObjectAlarm(
-          env.RATE_LIMIT_DO.get(
-            env.RATE_LIMIT_DO.idFromName(`rl:${userId}:${lang}:${windowKey}`),
+          rateLimitNamespace.get(
+            rateLimitNamespace.idFromName(`rl:${userId}:${lang}:${windowKey}`),
           ),
         )
       ));
