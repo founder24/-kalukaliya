@@ -37,21 +37,6 @@ const BENEFITS = [
   },
 ];
 
-export function redirectToStaffPortal({
-  navigate,
-  location = window.location,
-  production = import.meta.env.PROD,
-}) {
-  if (production) {
-    // /staff is protected by Cloudflare Access and must start from a fresh
-    // navigation document. An SPA transition can keep an older login shell's
-    // chunk map alive across a Pages deploy and request removed assets.
-    location.assign('/staff');
-    return;
-  }
-  navigate('/staff');
-}
-
 export default function LoginPage() {
   const publicStats = usePublicStats();
   const userCount = publicStats?.total_users || 100;
@@ -96,7 +81,7 @@ export default function LoginPage() {
       setTimeout(() => {
         const role = user.role || '';
         if (role === 'staff' || role === 'admin') {
-          redirectToStaffPortal({ navigate });
+          navigate('/staff');
         } else if (!user.onboarding_done) {
           navigate('/onboarding');
         } else {

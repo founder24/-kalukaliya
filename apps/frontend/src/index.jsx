@@ -4,6 +4,9 @@ import "./index.css";
 import App, { preloadPageForKind } from "./App";
 import { initWebVitals } from "./utils/webVitals";
 import Analytics from "./utils/analytics";
+import { installChunkRecovery } from "./utils/chunkRecovery";
+
+installChunkRecovery();
 
 // Sentry is deferred until after the page is interactive so its ~60 kB
 // SDK does not sit on the critical JS path. PageSpeed measured it as
