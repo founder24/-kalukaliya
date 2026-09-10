@@ -7,7 +7,9 @@
 //   by a newer Pages deploy, breaking responsive layout until a second reload.
 // v19 (2026-09-08): invalidate library bundles that omitted public chapters
 //   carrying the legacy `active` status.
-const CACHE_VERSION = '19';
+// v20 (2026-09-10): evict login/staff navigation shells that referenced asset
+//   hashes removed by a later Pages deployment.
+const CACHE_VERSION = '20';
 const STATIC_CACHE = 'syrabit-static-v' + CACHE_VERSION;
 const RUNTIME_CACHE = 'syrabit-runtime-v' + CACHE_VERSION;
 const API_CACHE = 'syrabit-api-v' + CACHE_VERSION;

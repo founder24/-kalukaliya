@@ -66,6 +66,7 @@ vi.mock('@/components/admin/syra/SyraContext', () => ({
 vi.mock('@/components/admin/BreakGlassBanner', () => ({ default: () => null }));
 
 import AdminPage from './AdminPage';
+import { adminVerify } from '@/utils/api';
 
 function renderAdmin() {
   return render(
@@ -88,6 +89,12 @@ async function waitForVerifiedAdmin() {
 describe('AdminPage.handleNavigate integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('accepts a verified role=staff JWT without calling the legacy cookie verifier', async () => {
+    renderAdmin();
+    await waitForVerifiedAdmin();
+    expect(adminVerify).not.toHaveBeenCalled();
   });
 
   it('Conversations sidebar nav exposes the Feedback sub-tab (post-merge)', async () => {

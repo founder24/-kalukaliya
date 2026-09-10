@@ -224,6 +224,9 @@ export default function AdminPage({ adminCookieAccess = false }) {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminName,  setAdminName]  = useState('Staff');
   const bearerToken = getToken();
+  const hasJwtStaffSession = Boolean(
+    bearerToken && (user?.role === 'staff' || user?.role === 'admin'),
+  );
   const adminToken = verifying ? null : (bearerToken || 'cookie');
   const authMode = bearerToken ? 'staff access token' : 'secure admin cookie';
   const [unackAlertCount, setUnackAlertCount] = useState(0);
@@ -256,6 +259,13 @@ export default function AdminPage({ adminCookieAccess = false }) {
   }, [adminToken, verifying]);
 
   useEffect(() => {
+    if (hasJwtStaffSession) {
+      setAdminName(user?.name || (user?.role === 'admin' ? 'Admin' : 'Staff'));
+      setAdminEmail(user?.email || '');
+      setVerifying(false);
+      return;
+    }
+
     adminVerify(bearerToken || undefined)
       .then((res) => {
         setAdminName(user?.name || res.data?.name || (user?.role === 'admin' ? 'Admin' : 'Staff'));
@@ -265,10 +275,13 @@ export default function AdminPage({ adminCookieAccess = false }) {
       .catch(() => {
         navigate('/login?next=/staff');
       });
-  }, [adminCookieAccess, bearerToken, navigate, user?.email, user?.name, user?.role]);
+  }, [adminCookieAccess, bearerToken, hasJwtStaffSession, navigate, user?.email, user?.name, user?.role]);
 
   useEffect(() => {
-    if (verifying) return;
+    // JWT-backed staff sessions are kept current by AuthContext and normal API
+    // token refresh. The legacy verifier only understands cookie-admin
+    // sessions and rejects valid role=staff access tokens.
+    if (verifying || hasJwtStaffSession) return;
     const id = setInterval(() => {
       adminVerify(bearerToken || undefined)
         .catch(() => {
@@ -277,7 +290,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
         });
     }, 12 * 60 * 60 * 1000);
     return () => clearInterval(id);
-  }, [bearerToken, verifying, navigate]);
+  }, [bearerToken, hasJwtStaffSession, verifying, navigate]);
 
   useEffect(() => {
     if (verifying) return;
