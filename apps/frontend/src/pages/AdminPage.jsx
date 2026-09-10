@@ -14,7 +14,8 @@ import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import { useAuth } from '@/context/AuthContext';
 import { getToken } from '@/hooks/useTokenManager';
 
-const AdminDashboard       = lazy(() => import('@/components/admin/AdminAnalytics'));
+const AdminDashboard       = lazy(() => import('@/components/admin/AdminDashboard'));
+const AdminHealth          = lazy(() => import('@/components/admin/AdminHealth'));
 const AdminRoadmap         = lazy(() => import('@/components/admin/AdminRoadmap'));
 const AdminContentHub      = lazy(() => import('@/components/admin/AdminContentHub'));
 const AdminAnalytics       = lazy(() => import('@/components/admin/AdminAnalytics'));
@@ -61,7 +62,7 @@ const SECTION_COMPONENTS = {
   analytics:     AdminAnalytics,
   security:      AdminModuleUnavailable,
   logs:          AdminModuleUnavailable,
-  health:        AdminModuleUnavailable,
+  health:        AdminHealth,
   ops:           AdminModuleUnavailable,
   settings:      AdminModuleUnavailable,
   roadmap:       AdminRoadmap,

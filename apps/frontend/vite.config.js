@@ -735,7 +735,7 @@ export default defineConfig(({ mode }) => ({
           if (
             has('react-markdown') ||
             /\/node_modules\/(remark|rehype|micromark|mdast-util|unist-util|hast-util)(-[^/]+)?\//.test(id) ||
-            has('unified') || has('vfile') || has('devlop') || has('bail') ||
+            has('unified') || has('vfile') || has('vfile-message') || has('devlop') || has('bail') ||
             has('trough') || has('character-entities') || has('character-entities-html4') ||
             has('character-entities-legacy') || has('character-reference-invalid') ||
             has('decode-named-character-reference') || has('zwitch') ||

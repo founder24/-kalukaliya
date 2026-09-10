@@ -6,6 +6,7 @@ on:
     paths:
       - 'apps/frontend/**'
       - '.github/workflows/ci-frontend.yml'
+      - 'pnpm-lock.yaml'
   workflow_dispatch:
 
 permissions:
@@ -56,3 +57,32 @@ jobs:
 
       - name: Run Tests
         run: pnpm --filter @workspace/syrabit test
+
+  production-staff-chunks:
+    name: Verify Production Staff Chunks
+    needs: lint-and-typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup PNPM
+        run: corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @workspace/syrabit run playwright:install:chromium
+
+      - name: Build Production Frontend Bundle
+        run: pnpm --filter @workspace/syrabit run build:client
+
+      - name: Load Staff Dashboard and Health Chunks
+        run: pnpm --filter @workspace/syrabit run check:staff-chunks
