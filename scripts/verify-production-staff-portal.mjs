@@ -95,8 +95,11 @@ try {
   }
 
   await page.addInitScript(({ accessToken, refreshToken }) => {
+    const seedMarker = 'syrabit:staff-verifier-seeded';
+    if (sessionStorage.getItem(seedMarker)) return;
     sessionStorage.setItem('syrabit_token', accessToken);
     localStorage.setItem('syrabit_refresh_token', refreshToken);
+    sessionStorage.setItem(seedMarker, '1');
   }, { accessToken: tokens.access_token, refreshToken: tokens.refresh_token });
 
   await page.goto(`${site}/staff`, { waitUntil: 'domcontentloaded' });
