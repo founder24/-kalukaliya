@@ -168,6 +168,17 @@ authRouter.post('/login', async (c) => {
   });
 });
 
+// Expire any legacy admin session alongside a normal bearer logout. Keep this
+// response-only compatibility behavior outside the refresh-token rollout guard:
+// it does not alter D1/KV claim or replay semantics.
+authRouter.use('/logout', async (c, next) => {
+  await next();
+  c.res.headers.set(
+    'Set-Cookie',
+    'syrabit_admin_session=; Path=/api/; Max-Age=0; HttpOnly; SameSite=Lax',
+  );
+});
+
 // ── POST /v1/auth/logout ──────────────────────────────────────────────────────
 // REFRESH_TOKEN_ROLLOUT_GUARD: logout-route:start
 authRouter.post('/logout', async (c) => {
@@ -225,16 +236,7 @@ authRouter.post('/logout', async (c) => {
       // REFRESH_TOKEN_ROLLOUT_GUARD: logout-kv:end
     }
   }
-  const response = c.json({ message: 'Logged out successfully' });
-  // The unified staff portal accepts either a normal staff bearer session or
-  // the legacy HttpOnly admin cookie. Logging out of the bearer session must
-  // also expire that cookie or a stale admin session can immediately grant
-  // access to /staff again after local tokens are cleared.
-  response.headers.set(
-    'Set-Cookie',
-    'syrabit_admin_session=; Path=/api/; Max-Age=0; HttpOnly; SameSite=Lax',
-  );
-  return response;
+  return c.json({ message: 'Logged out successfully' });
 });
 // REFRESH_TOKEN_ROLLOUT_GUARD: logout-route:end
 
