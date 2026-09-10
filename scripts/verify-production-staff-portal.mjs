@@ -90,9 +90,21 @@ try {
   try {
     await page.getByTestId('admin-dashboard').waitFor({ state: 'visible', timeout: 30_000 });
   } catch (error) {
+    const globalAlert = page.getByRole('alert').first();
+    const boundaryError = await globalAlert.evaluate(element => {
+      const fiberKey = Object.keys(element).find(key => key.startsWith('__reactFiber$'));
+      let fiber = fiberKey ? element[fiberKey] : null;
+      while (fiber) {
+        const caught = fiber.stateNode?.state?.error;
+        if (caught) return `${caught.name || 'Error'}: ${caught.message || String(caught)}\n${caught.stack || ''}`;
+        fiber = fiber.return;
+      }
+      return '(React boundary error object unavailable)';
+    }).catch(() => '(React boundary inspection failed)');
     const body = (await page.locator('body').innerText().catch(() => '')).slice(0, 4_000);
     throw new Error([
       `Staff shell unavailable at ${page.url()}`,
+      `Boundary exception:\n${boundaryError}`,
       `Visible page text:\n${body || '(empty)'}`,
       `Runtime errors:\n${runtimeErrors.join('\n') || '(none)'}`,
       `Failed requests:\n${failedRequests.join('\n') || '(none)'}`,
