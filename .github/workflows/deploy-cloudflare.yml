@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      rehearse_chat_latency_failure:
+        description: 'Rehearsal only: fail the chat latency job after its production-safe checks'
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       validate_authenticated:
@@ -786,6 +791,12 @@ jobs:
           path: chat-performance-report.json
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Force chat latency failure for dependency rehearsal
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.rehearse_chat_latency_failure }}
+        run: |
+          echo "::error::Manual rehearsal forced the chat latency result to fail after normal checks; production traffic was not modified."
+          exit 1
 
   post-native-smoke:
     name: Confirm native routing

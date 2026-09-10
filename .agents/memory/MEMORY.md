@@ -78,3 +78,4 @@
 - [Chat performance gate](chat-performance-gate.md) — freshness probes need explicit curriculum binding and must not require removed raw web-source URLs.
 - [Workers rate-limit test clocks](workers-rate-limit-test-clocks.md) — isolate DO names per invocation and keep alarm reset windows ahead of the runtime clock.
 - [Production browser verification traps](production-browser-verification.md) — Preserve Vite preload rejections; seed auth fixtures once so logout checks remain valid.
+- [Release failure rehearsals](release-failure-rehearsals.md) — use test-only workflows so unrelated deploy gates cannot hide scheduling evidence.
