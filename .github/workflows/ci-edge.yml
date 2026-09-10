@@ -8,7 +8,10 @@ on:
       - 'scripts/test-worker-chat-performance.mjs'
       - 'scripts/worker-chat-performance-gate.mjs'
       - 'scripts/worker-chat-performance-gate.test.mjs'
+      - 'scripts/check-required-status-contexts.py'
+      - 'scripts/test-required-status-contexts.py'
       - '.github/workflows/ci-edge.yml'
+      - '.github/workflows/required-status-contexts.yml'
   push:
     branches: [main]
     paths:
@@ -16,7 +19,10 @@ on:
       - 'scripts/test-worker-chat-performance.mjs'
       - 'scripts/worker-chat-performance-gate.mjs'
       - 'scripts/worker-chat-performance-gate.test.mjs'
+      - 'scripts/check-required-status-contexts.py'
+      - 'scripts/test-required-status-contexts.py'
       - '.github/workflows/ci-edge.yml'
+      - '.github/workflows/required-status-contexts.yml'
   workflow_dispatch:
 
 permissions:
