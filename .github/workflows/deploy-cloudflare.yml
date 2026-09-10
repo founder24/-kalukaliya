@@ -478,6 +478,144 @@ jobs:
           PY
           echo "Deep binding probes passed without production writes."
 
+      - name: Public edge is reachable
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/edge.headers -o /tmp/edge.json -w '%{http_code}' \
+            "${PUBLIC_EDGE_URL}/health" --max-time 30)"
+          test "$status" = "200"
+          echo "Public edge health passed: HTTP ${status}"
+
+      - name: D1 content and anonymous credits work on the deployed API Worker
+        run: |
+          set -euo pipefail
+          curl -sS --max-time 20 "${API_WORKER_URL}/api/v1/content/library-bundle?slim=1" \
+            | python3 -c 'import json,sys; p=json.load(sys.stdin); assert all(k in p for k in ("boards","classes","streams","subjects")), p'
+          anon_id="anon_$(openssl rand -hex 16)"
+          curl -sS --max-time 20 -H "X-Anon-ID: ${anon_id}" \
+            "${API_WORKER_URL}/api/v1/users/credits" \
+            | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["credits_remaining"] >= 0 and p["anon_id"].startswith("anon_"), p'
+
+      - name: Public edge CORS contract is intact
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/cors.headers -o /dev/null -w '%{http_code}' --max-time 20 -X OPTIONS \
+            -H 'Origin: https://syrabit.ai' \
+            -H 'Access-Control-Request-Method: POST' \
+            -H 'Access-Control-Request-Headers: content-type,authorization,x-anon-id' \
+            "${PUBLIC_EDGE_URL}/api/v1/chat")"
+          test "$status" = "200" || test "$status" = "204"
+          grep -qi '^access-control-allow-origin: https://syrabit.ai' /tmp/cors.headers
+          grep -qi '^access-control-allow-methods:.*POST' /tmp/cors.headers
+          grep -qi '^access-control-allow-headers:.*authorization' /tmp/cors.headers
+          grep -qi '^access-control-allow-headers:.*x-anon-id' /tmp/cors.headers
+
+      - name: Frontend is reachable
+        run: |
+          status="$(curl -sS -L -o /dev/null -w '%{http_code}' "${FRONTEND_URL}" --max-time 30)"
+          test "$status" = "200"
+          echo "Frontend reachability passed: HTTP ${status}"
+
+      - name: Pages serves the IndexNow ownership file
+        env:
+          INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
+        run: |
+          set -euo pipefail
+          : "${INDEXNOW_API_KEY:?INDEXNOW_API_KEY is required for the Pages ownership-file smoke test}"
+          expected="/tmp/indexnow-ownership.expected"
+          actual="/tmp/indexnow-ownership.actual"
+          printf '%s' "$INDEXNOW_API_KEY" > "$expected"
+          if ! status="$(curl -sS -o "$actual" -w '%{http_code}' --max-time 30 \
+            "${FRONTEND_URL}/${INDEXNOW_API_KEY}.txt")"; then
+            echo "::error::Cloudflare Pages could not serve the configured IndexNow ownership-file URL; this is a Pages availability or routing failure, not an IndexNow provider outage."
+            exit 1
+          fi
+          if [[ "$status" != "200" ]]; then
+            echo "::error::Cloudflare Pages returned HTTP ${status} for the configured IndexNow ownership-file URL; this is a Pages serving or routing failure, not an IndexNow provider outage."
+            exit 1
+          fi
+          if ! cmp -s "$expected" "$actual"; then
+            echo "::error::Cloudflare Pages returned an unexpected body for the configured IndexNow ownership file; this is a Pages serving or routing failure, not an IndexNow provider outage."
+            exit 1
+          fi
+          echo "Cloudflare Pages ownership-file routing passed with HTTP 200 and the exact configured body."
+
+      - name: Pages serves crawler artifacts and true 404s
+        run: |
+          set -euo pipefail
+          bot_ua='Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+          curl -sS -D /tmp/crawler.headers -o /tmp/crawler.html --max-time 30 \
+            -A "$bot_ua" -H 'Accept: text/html' "${FRONTEND_URL}/library"
+          grep -qi '^x-source: \(prerender\|bot-render\)' /tmp/crawler.headers
+          grep -qi '<title' /tmp/crawler.html
+          for path in sitemap-index.xml feed.xml feed/notes.xml feed.json llms.txt llms-full.txt; do
+            headers="/tmp/${path//\//-}.headers"
+            output="/tmp/${path//\//-}.body"
+            status="$(curl -sS -D "$headers" -o "$output" -w '%{http_code}' --max-time 30 \
+              "${FRONTEND_URL}/${path}")"
+            test "$status" = "200" || { echo "${path} returned ${status}"; exit 1; }
+            ! grep -qi '^x-robots-tag:.*noindex' "$headers"
+            case "$path" in
+              *.xml) grep -Eqi '^content-type: application/(rss\+)?xml' "$headers"; grep -Eq '<rss|<sitemapindex' "$output" ;;
+              *.json) grep -qi '^content-type: application/' "$headers"; python3 -m json.tool "$output" >/dev/null ;;
+              *.txt) grep -qi '^content-type: text/plain' "$headers"; test -s "$output" ;;
+            esac
+          done
+          plugin_status="$(curl -sS -D /tmp/ai-plugin.headers -o /tmp/ai-plugin.json \
+            -w '%{http_code}' --max-time 30 \
+            "${FRONTEND_URL}/.well-known/ai-plugin.json")"
+          test "$plugin_status" = "200" || {
+            cat /tmp/ai-plugin.json
+            echo "AI plugin manifest returned ${plugin_status}"
+            exit 1
+          }
+          grep -qi '^content-type: application/json' /tmp/ai-plugin.headers
+          python3 - /tmp/ai-plugin.json <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as f:
+              plugin = json.load(f)
+          assert plugin["schema_version"] == "v1", plugin
+          assert plugin["name_for_human"] == "Syrabit.ai", plugin
+          assert plugin["name_for_model"] == "syrabit_ai", plugin
+          assert plugin["url"] == "https://syrabit.ai", plugin
+          assert plugin["api"]["url"] == "https://syrabit.ai/.well-known/openapi.json", plugin
+          assert plugin["api"]["base_url"] == "https://api.syrabit.ai", plugin
+          assert plugin["contact_email"] == "founder@syrabit.ai", plugin
+          assert "<div" not in json.dumps(plugin).lower(), plugin
+          PY
+          schema_status="$(curl -sS -D /tmp/ai-plugin-openapi.headers \
+            -o /tmp/ai-plugin-openapi.json -w '%{http_code}' --max-time 30 \
+            "${FRONTEND_URL}/.well-known/openapi.json")"
+          test "$schema_status" = "200"
+          grep -qi '^content-type: application/json' /tmp/ai-plugin-openapi.headers
+          python3 - /tmp/ai-plugin-openapi.json <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as f:
+              schema = json.load(f)
+          assert schema["openapi"].startswith("3."), schema
+          assert {"url": "https://api.syrabit.ai", "description": "Syrabit.ai production API"} in schema["servers"], schema
+          operation = schema["paths"]["/api/v1/content/search"]["get"]
+          assert operation["operationId"] == "searchSyrabitContent", operation
+          PY
+          missing="/release-health-missing-$(openssl rand -hex 12)"
+          status="$(curl -sS -D /tmp/missing.headers -o /tmp/missing.html -w '%{http_code}' \
+            --max-time 30 -A "$bot_ua" -H 'Accept: text/html' "${FRONTEND_URL}${missing}")"
+          test "$status" = "404" || { cat /tmp/missing.html; echo "Expected true 404, got ${status}"; exit 1; }
+          grep -qi '^x-source: bot-render-not-found' /tmp/missing.headers
+          ! grep -q 'id="root"\|id="app"' /tmp/missing.html
+
+  chat-performance:
+    name: Worker chat first-token performance
+    runs-on: ubuntu-latest
+    needs: [deploy-api, deploy-edge, deploy-frontend]
+    if: |
+      always() &&
+      needs.deploy-api.result == 'success' &&
+      needs.deploy-edge.result == 'success' &&
+      needs.deploy-frontend.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Worker chat performance gate regression test
         run: node --test scripts/worker-chat-performance-gate.test.mjs
 
@@ -634,132 +772,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Public edge is reachable
-        run: |
-          set -euo pipefail
-          status="$(curl -sS -D /tmp/edge.headers -o /tmp/edge.json -w '%{http_code}' \
-            "${PUBLIC_EDGE_URL}/health" --max-time 30)"
-          test "$status" = "200"
-          echo "Public edge health passed: HTTP ${status}"
-
-      - name: D1 content and anonymous credits work on the deployed API Worker
-        run: |
-          set -euo pipefail
-          curl -sS --max-time 20 "${API_WORKER_URL}/api/v1/content/library-bundle?slim=1" \
-            | python3 -c 'import json,sys; p=json.load(sys.stdin); assert all(k in p for k in ("boards","classes","streams","subjects")), p'
-          anon_id="anon_$(openssl rand -hex 16)"
-          curl -sS --max-time 20 -H "X-Anon-ID: ${anon_id}" \
-            "${API_WORKER_URL}/api/v1/users/credits" \
-            | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["credits_remaining"] >= 0 and p["anon_id"].startswith("anon_"), p'
-
-      - name: Public edge CORS contract is intact
-        run: |
-          set -euo pipefail
-          status="$(curl -sS -D /tmp/cors.headers -o /dev/null -w '%{http_code}' --max-time 20 -X OPTIONS \
-            -H 'Origin: https://syrabit.ai' \
-            -H 'Access-Control-Request-Method: POST' \
-            -H 'Access-Control-Request-Headers: content-type,authorization,x-anon-id' \
-            "${PUBLIC_EDGE_URL}/api/v1/chat")"
-          test "$status" = "200" || test "$status" = "204"
-          grep -qi '^access-control-allow-origin: https://syrabit.ai' /tmp/cors.headers
-          grep -qi '^access-control-allow-methods:.*POST' /tmp/cors.headers
-          grep -qi '^access-control-allow-headers:.*authorization' /tmp/cors.headers
-          grep -qi '^access-control-allow-headers:.*x-anon-id' /tmp/cors.headers
-
-      - name: Frontend is reachable
-        run: |
-          status="$(curl -sS -L -o /dev/null -w '%{http_code}' "${FRONTEND_URL}" --max-time 30)"
-          test "$status" = "200"
-          echo "Frontend reachability passed: HTTP ${status}"
-
-      - name: Pages serves the IndexNow ownership file
-        env:
-          INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
-        run: |
-          set -euo pipefail
-          : "${INDEXNOW_API_KEY:?INDEXNOW_API_KEY is required for the Pages ownership-file smoke test}"
-          expected="/tmp/indexnow-ownership.expected"
-          actual="/tmp/indexnow-ownership.actual"
-          printf '%s' "$INDEXNOW_API_KEY" > "$expected"
-          if ! status="$(curl -sS -o "$actual" -w '%{http_code}' --max-time 30 \
-            "${FRONTEND_URL}/${INDEXNOW_API_KEY}.txt")"; then
-            echo "::error::Cloudflare Pages could not serve the configured IndexNow ownership-file URL; this is a Pages availability or routing failure, not an IndexNow provider outage."
-            exit 1
-          fi
-          if [[ "$status" != "200" ]]; then
-            echo "::error::Cloudflare Pages returned HTTP ${status} for the configured IndexNow ownership-file URL; this is a Pages serving or routing failure, not an IndexNow provider outage."
-            exit 1
-          fi
-          if ! cmp -s "$expected" "$actual"; then
-            echo "::error::Cloudflare Pages returned an unexpected body for the configured IndexNow ownership file; this is a Pages serving or routing failure, not an IndexNow provider outage."
-            exit 1
-          fi
-          echo "Cloudflare Pages ownership-file routing passed with HTTP 200 and the exact configured body."
-
-      - name: Pages serves crawler artifacts and true 404s
-        run: |
-          set -euo pipefail
-          bot_ua='Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
-          curl -sS -D /tmp/crawler.headers -o /tmp/crawler.html --max-time 30 \
-            -A "$bot_ua" -H 'Accept: text/html' "${FRONTEND_URL}/library"
-          grep -qi '^x-source: \(prerender\|bot-render\)' /tmp/crawler.headers
-          grep -qi '<title' /tmp/crawler.html
-          for path in sitemap-index.xml feed.xml feed/notes.xml feed.json llms.txt llms-full.txt; do
-            headers="/tmp/${path//\//-}.headers"
-            output="/tmp/${path//\//-}.body"
-            status="$(curl -sS -D "$headers" -o "$output" -w '%{http_code}' --max-time 30 \
-              "${FRONTEND_URL}/${path}")"
-            test "$status" = "200" || { echo "${path} returned ${status}"; exit 1; }
-            ! grep -qi '^x-robots-tag:.*noindex' "$headers"
-            case "$path" in
-              *.xml) grep -Eqi '^content-type: application/(rss\+)?xml' "$headers"; grep -Eq '<rss|<sitemapindex' "$output" ;;
-              *.json) grep -qi '^content-type: application/' "$headers"; python3 -m json.tool "$output" >/dev/null ;;
-              *.txt) grep -qi '^content-type: text/plain' "$headers"; test -s "$output" ;;
-            esac
-          done
-          plugin_status="$(curl -sS -D /tmp/ai-plugin.headers -o /tmp/ai-plugin.json \
-            -w '%{http_code}' --max-time 30 \
-            "${FRONTEND_URL}/.well-known/ai-plugin.json")"
-          test "$plugin_status" = "200" || {
-            cat /tmp/ai-plugin.json
-            echo "AI plugin manifest returned ${plugin_status}"
-            exit 1
-          }
-          grep -qi '^content-type: application/json' /tmp/ai-plugin.headers
-          python3 - /tmp/ai-plugin.json <<'PY'
-          import json, sys
-          with open(sys.argv[1], encoding="utf-8") as f:
-              plugin = json.load(f)
-          assert plugin["schema_version"] == "v1", plugin
-          assert plugin["name_for_human"] == "Syrabit.ai", plugin
-          assert plugin["name_for_model"] == "syrabit_ai", plugin
-          assert plugin["url"] == "https://syrabit.ai", plugin
-          assert plugin["api"]["url"] == "https://syrabit.ai/.well-known/openapi.json", plugin
-          assert plugin["api"]["base_url"] == "https://api.syrabit.ai", plugin
-          assert plugin["contact_email"] == "founder@syrabit.ai", plugin
-          assert "<div" not in json.dumps(plugin).lower(), plugin
-          PY
-          schema_status="$(curl -sS -D /tmp/ai-plugin-openapi.headers \
-            -o /tmp/ai-plugin-openapi.json -w '%{http_code}' --max-time 30 \
-            "${FRONTEND_URL}/.well-known/openapi.json")"
-          test "$schema_status" = "200"
-          grep -qi '^content-type: application/json' /tmp/ai-plugin-openapi.headers
-          python3 - /tmp/ai-plugin-openapi.json <<'PY'
-          import json, sys
-          with open(sys.argv[1], encoding="utf-8") as f:
-              schema = json.load(f)
-          assert schema["openapi"].startswith("3."), schema
-          assert {"url": "https://api.syrabit.ai", "description": "Syrabit.ai production API"} in schema["servers"], schema
-          operation = schema["paths"]["/api/v1/content/search"]["get"]
-          assert operation["operationId"] == "searchSyrabitContent", operation
-          PY
-          missing="/release-health-missing-$(openssl rand -hex 12)"
-          status="$(curl -sS -D /tmp/missing.headers -o /tmp/missing.html -w '%{http_code}' \
-            --max-time 30 -A "$bot_ua" -H 'Accept: text/html' "${FRONTEND_URL}${missing}")"
-          test "$status" = "404" || { cat /tmp/missing.html; echo "Expected true 404, got ${status}"; exit 1; }
-          grep -qi '^x-source: bot-render-not-found' /tmp/missing.headers
-          ! grep -q 'id="root"\|id="app"' /tmp/missing.html
-
   post-native-smoke:
     name: Confirm native routing
     runs-on: ubuntu-latest
@@ -836,6 +848,34 @@ jobs:
       - name: Always remove an interrupted staff portal fixture
         if: ${{ always() }}
         run: bash scripts/cleanup-disposable-staff-portal.sh "$RUNNER_TEMP/release-staff-portal-fixture.env"
+
+  release-check-summary:
+    name: Summarize independent release checks
+    runs-on: ubuntu-latest
+    needs: [chat-performance, disposable-staff-auth]
+    if: ${{ always() }}
+    steps:
+      - name: Report chat latency and staff access separately
+        env:
+          CHAT_PERFORMANCE_RESULT: ${{ needs.chat-performance.result }}
+          STAFF_ACCESS_RESULT: ${{ needs.disposable-staff-auth.result }}
+        run: |
+          {
+            echo "## Independent release checks"
+            echo
+            echo "| Check | Result |"
+            echo "| --- | --- |"
+            echo "| Chat first-token latency | ${CHAT_PERFORMANCE_RESULT} |"
+            echo "| Disposable staff access | ${STAFF_ACCESS_RESULT} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$CHAT_PERFORMANCE_RESULT" != "success" ]]; then
+            echo "::error::Chat first-token latency check result: ${CHAT_PERFORMANCE_RESULT}"
+          fi
+          if [[ "$STAFF_ACCESS_RESULT" != "success" ]]; then
+            echo "::error::Disposable staff access check result: ${STAFF_ACCESS_RESULT}"
+          fi
+          [[ "$CHAT_PERFORMANCE_RESULT" == "success" && "$STAFF_ACCESS_RESULT" == "success" ]]
 
   request-reset-email:
     name: Request fresh disposable password-reset email
