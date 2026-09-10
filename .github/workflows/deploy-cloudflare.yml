@@ -473,7 +473,17 @@ jobs:
           CHAT_API_ORIGIN: ${{ env.API_WORKER_URL }}
           CHAT_FIRST_TOKEN_TARGET_MS: '3000'
           CHAT_PERFORMANCE_SAMPLES: '3'
+          CHAT_PERFORMANCE_REPORT_PATH: chat-performance-report.json
         run: node scripts/test-worker-chat-performance.mjs
+
+      - name: Upload worker chat performance timings
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-chat-performance-${{ github.run_attempt }}
+          path: chat-performance-report.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Public edge is reachable
         run: |

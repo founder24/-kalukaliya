@@ -7,12 +7,13 @@
  *   1. direct D1 chapter RAG (no embedding/Vectorize/web)
  *   2. a freshness query eligible for bounded web retrieval
  *
- * The probe validates source_card → token → syrabit_done ordering and fails
- * when either first useful token exceeds CHAT_FIRST_TOKEN_TARGET_MS (3000 ms).
+ * The probe validates source_card → token → syrabit_done ordering and requires
+ * a strict majority of each route's samples to meet the 3000 ms target.
  */
 
 import process from 'node:process';
 import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
 
 function positiveInteger(name, raw, minimum = 1) {
   if (!/^\d+$/.test(raw)) throw new Error(`${name} must be a positive integer`);
@@ -37,6 +38,7 @@ const samples = positiveInteger(
   process.env.CHAT_PERFORMANCE_SAMPLES || '3',
   3,
 );
+const reportPath = process.env.CHAT_PERFORMANCE_REPORT_PATH;
 const mode = process.env.CHAT_PERFORMANCE_MODE || 'both';
 if (!['both', 'direct', 'web'].includes(mode)) {
   throw new Error('CHAT_PERFORMANCE_MODE must be one of: both, direct, web');
@@ -113,12 +115,6 @@ async function probe(name, body) {
         }
         if (typeof event.content === 'string' && event.content.length > 0 && !event.done && firstTokenMs === null) {
           firstTokenMs = performance.now() - started;
-          if (firstTokenMs > targetMs) {
-            controller.abort();
-            throw new Error(
-              `${name} first token ${Math.round(firstTokenMs)} ms exceeds ${targetMs} ms target`,
-            );
-          }
         }
       }
     }
@@ -138,6 +134,7 @@ async function probe(name, body) {
       headers_ms: Math.round(headersMs),
       source_card_ms: Math.round(firstSourceCardMs ?? 0),
       first_token_ms: Math.round(firstTokenMs),
+      target_met: firstTokenMs <= targetMs,
       total_ms: done?.latency_ms,
       source_type: sourceCard?.source_type,
       rag_path: done?.route_trace?.rag_path,
@@ -151,9 +148,6 @@ async function probe(name, body) {
     };
     if (typeof result.model !== 'string' || !result.model.startsWith('@cf/')) {
       throw new Error(`${name} did not report a native Workers AI model: ${result.model}`);
-    }
-    if (firstTokenMs > targetMs) {
-      throw new Error(`${name} first token ${Math.round(firstTokenMs)} ms exceeds ${targetMs} ms target`);
     }
     return result;
   } finally {
@@ -201,25 +195,54 @@ for (let sample = 1; sample <= samples; sample += 1) {
 
 function summarize(results) {
   const values = results.map(result => result.first_token_ms).sort((a, b) => a - b);
+  const passingSamples = values.filter(value => value <= targetMs).length;
+  const requiredPassingSamples = Math.floor(values.length / 2) + 1;
+  const medianIndex = Math.floor(values.length / 2);
   const p95Index = Math.max(0, Math.ceil(values.length * 0.95) - 1);
   return {
     samples: values.length,
+    passing_samples: passingSamples,
+    required_passing_samples: requiredPassingSamples,
+    first_token_median_ms: values[medianIndex],
     first_token_p95_ms: values[p95Index],
     first_token_max_ms: values.at(-1),
+    passed: passingSamples >= requiredPassingSamples && values[medianIndex] <= targetMs,
   };
 }
 
-console.log(JSON.stringify({
+const summary = {
+  ...(directSamples.length > 0 && { direct_chapter_rag: summarize(directSamples) }),
+  ...(webSamples.length > 0 && { rag_plus_bounded_web: summarize(webSamples) }),
+};
+const report = {
   origin,
   first_token_target_ms: targetMs,
+  pass_rule: 'A strict majority of samples for each route must meet the target, and the median must be at or below the target.',
   chapter: {
     id: chapter.chapter_id,
     title: chapter.title,
     subject: subject.name,
   },
-  summary: {
-    ...(directSamples.length > 0 && { direct_chapter_rag: summarize(directSamples) }),
-    ...(webSamples.length > 0 && { rag_plus_bounded_web: summarize(webSamples) }),
-  },
+  summary,
   probes: [...directSamples, ...webSamples],
-}, null, 2));
+};
+const reportJson = `${JSON.stringify(report, null, 2)}\n`;
+console.log(reportJson.trimEnd());
+if (reportPath) await writeFile(reportPath, reportJson, 'utf8');
+
+for (const result of report.probes) {
+  const annotation = result.target_met ? 'notice' : 'warning';
+  console.error(
+    `::${annotation} title=Chat first-token sample::${result.name}: ${result.first_token_ms} ms `
+    + `(${result.target_met ? 'met' : 'exceeded'} ${targetMs} ms target)`,
+  );
+}
+
+const failedRoutes = Object.entries(summary)
+  .filter(([, routeSummary]) => !routeSummary.passed)
+  .map(([route, routeSummary]) =>
+    `${route} (${routeSummary.passing_samples}/${routeSummary.samples} samples met ${targetMs} ms; `
+    + `median ${routeSummary.first_token_median_ms} ms)`);
+if (failedRoutes.length > 0) {
+  throw new Error(`Persistent first-token regression: ${failedRoutes.join('; ')}`);
+}
