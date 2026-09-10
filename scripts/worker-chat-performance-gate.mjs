@@ -75,6 +75,45 @@ export function failedRouteMessages(summary, targetMs) {
       + `median ${routeSummary.first_token_median_ms} ms)`);
 }
 
+const NON_PHASE_TIMINGS = new Set(['first_token_ms', 'total_ms']);
+
+function probeMatchesRoute(probe, route) {
+  if (route === 'direct_chapter_rag') return probe?.rag_path === 'chapter_direct';
+  if (route === 'rag_plus_bounded_web') {
+    return probe?.web_used === true && probe?.web_status === 'ok';
+  }
+  return false;
+}
+
+function dominantSlowPhase(affectedReports, route) {
+  const phases = new Map();
+  for (const report of affectedReports) {
+    for (const probe of report?.probes ?? []) {
+      if (!probeMatchesRoute(probe, route)
+          || !(probe.first_token_ms > report.first_token_target_ms)) continue;
+      for (const [phase, durationMs] of Object.entries(probe.worker_timings_ms ?? {})) {
+        if (NON_PHASE_TIMINGS.has(phase)
+            || typeof durationMs !== 'number'
+            || !Number.isFinite(durationMs)
+            || durationMs < 0) continue;
+        const aggregate = phases.get(phase) ?? { total_ms: 0, samples: 0 };
+        aggregate.total_ms += durationMs;
+        aggregate.samples += 1;
+        phases.set(phase, aggregate);
+      }
+    }
+  }
+  const ranked = [...phases.entries()]
+    .map(([phase, aggregate]) => ({
+      phase,
+      average_ms: Math.round(aggregate.total_ms / aggregate.samples),
+      samples: aggregate.samples,
+    }))
+    .sort((left, right) =>
+      right.average_ms - left.average_ms || left.phase.localeCompare(right.phase));
+  return ranked[0];
+}
+
 export function recurringOutlierWarnings(reports, minimumRuns = 2) {
   const routeLabels = {
     direct_chapter_rag: 'Direct chapter RAG',
@@ -88,14 +127,20 @@ export function recurringOutlierWarnings(reports, minimumRuns = 2) {
         && summary.first_token_max_ms > report.first_token_target_ms;
     });
     if (affected.length < minimumRuns) continue;
+    const dominantPhase = dominantSlowPhase(affected, route);
     warnings.push({
       route,
       label,
       affected_runs: affected.length,
       compared_runs: reports.length,
       maxima_ms: affected.map(report => report.summary[route].first_token_max_ms),
+      ...(dominantPhase && { dominant_slow_phase: dominantPhase }),
       message: `${label} had a tolerated first-token outlier above the release target in `
-        + `${affected.length}/${reports.length} recent deployment runs`,
+        + `${affected.length}/${reports.length} recent deployment runs`
+        + (dominantPhase
+          ? `; dominant slow worker phase: ${dominantPhase.phase} `
+            + `(${dominantPhase.average_ms} ms average across ${dominantPhase.samples} timed outliers)`
+          : ''),
     });
   }
   return warnings;

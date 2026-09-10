@@ -18,14 +18,22 @@ const sample = (name, firstTokenMs, extra = {}) => ({
   ...extra,
 });
 
-function reportFor(directTimings, webTimings) {
+function reportFor(directTimings, webTimings, workerTimings = {}) {
   const directSamples = directTimings.map((timing, index) =>
-    sample(`direct_chapter_rag_${index + 1}`, timing, { rag_path: 'chapter_direct' }));
+    sample(`direct_chapter_rag_${index + 1}`, timing, {
+      rag_path: 'chapter_direct',
+      ...(workerTimings.direct?.[index] && {
+        worker_timings_ms: workerTimings.direct[index],
+      }),
+    }));
   const webSamples = webTimings.map((timing, index) =>
     sample(`rag_plus_bounded_web_${index + 1}`, timing, {
       web_used: true,
       web_status: 'ok',
       attributed_web_sources: 1,
+      ...(workerTimings.web?.[index] && {
+        worker_timings_ms: workerTimings.web[index],
+      }),
     }));
   directSamples.forEach(result => validateRouteResult('direct', result));
   webSamples.forEach(result => validateRouteResult('web', result));
@@ -121,4 +129,58 @@ test('a single tolerated outlier or a failed run does not create a recurring war
 
   assert.deepEqual(recurringOutlierWarnings([clean, oneOutlier]), []);
   assert.deepEqual(recurringOutlierWarnings([oneOutlier, failed]), []);
+});
+
+test('recurring warnings name each route dominant slow phase from timed outliers', () => {
+  const current = reportFor(
+    [1200, 4200, 1800],
+    [4100, 1400, 1700],
+    {
+      direct: [{}, { auth_ms: 100, retrieval_ms: 2200, prompt_ms: 300 }],
+      web: [{ retrieval_ms: 2400, web_ms: 1800, prompt_ms: 200 }],
+    },
+  );
+  const previous = reportFor(
+    [1100, 3900, 1600],
+    [4300, 1500, 1800],
+    {
+      direct: [{}, { auth_ms: 200, retrieval_ms: 1800, prompt_ms: 400 }],
+      web: [{ retrieval_ms: 2600, web_ms: 2100, prompt_ms: 300 }],
+    },
+  );
+
+  const warnings = recurringOutlierWarnings([current, previous]);
+  assert.deepEqual(warnings.map(warning => ({
+    route: warning.route,
+    dominant_slow_phase: warning.dominant_slow_phase,
+  })), [
+    {
+      route: 'direct_chapter_rag',
+      dominant_slow_phase: { phase: 'retrieval_ms', average_ms: 2000, samples: 2 },
+    },
+    {
+      route: 'rag_plus_bounded_web',
+      dominant_slow_phase: { phase: 'retrieval_ms', average_ms: 2500, samples: 2 },
+    },
+  ]);
+  assert.match(warnings[0].message, /dominant slow worker phase: retrieval_ms/);
+});
+
+test('missing and invalid older worker timing fields do not break recurring comparison', () => {
+  const current = reportFor(
+    [1200, 4200, 1800],
+    [1500, 1700, 1900],
+    { direct: [{}, { retrieval_ms: 2100, total_ms: 4100, prompt_ms: Number.NaN }] },
+  );
+  const previous = reportFor([1100, 3900, 1600], [1500, 1700, 1900]);
+
+  const [warning] = recurringOutlierWarnings([current, previous]);
+  assert.deepEqual(warning.dominant_slow_phase, {
+    phase: 'retrieval_ms',
+    average_ms: 2100,
+    samples: 1,
+  });
+  assert.equal(warning.affected_runs, 2);
+  assert.equal(current.summary.direct_chapter_rag.passed, true);
+  assert.equal(previous.summary.direct_chapter_rag.passed, true);
 });
