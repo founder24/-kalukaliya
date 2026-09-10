@@ -76,3 +76,4 @@
 - [Exact vector grounding](rag-exact-vector-grounding.md) — preserve matched passage order; never replace semantic matches with chapter openings.
 - [Chat cancellation state](chat-cancellation-state.md) — quota, cancellation, and persistence must compete through one conditional D1 claim state.
 - [Chat performance gate](chat-performance-gate.md) — freshness probes need explicit curriculum binding and must not require removed raw web-source URLs.
+- [Workers rate-limit test clocks](workers-rate-limit-test-clocks.md) — isolate DO names per invocation and keep alarm reset windows ahead of the runtime clock.
