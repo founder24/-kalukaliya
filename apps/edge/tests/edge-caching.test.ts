@@ -228,8 +228,18 @@ describe('/health - ISR_CACHE_KV Cache Layer', () => {
       get: vi.fn(async (key: string) => key === 'health:rate-limit-cleanup'
         ? JSON.stringify({
             degraded: false,
+            active_incidents: 0,
             latest_failure_at: failureAt,
             latest_recovery_at: recoveryAt,
+            rolling_incident_count: 2,
+            history_window_hours: 24,
+            recent_transitions: [
+              { event: 'failed', occurred_at: failureAt },
+              { event: 'recovered', occurred_at: recoveryAt },
+            ],
+            incident_count_buckets: [
+              { started_at: failureAt, count: 2 },
+            ],
           })
         : null),
       put: vi.fn(async () => {}),
@@ -245,10 +255,67 @@ describe('/health - ISR_CACHE_KV Cache Layer', () => {
 
     expect(body.rate_limit_cleanup).toEqual({
       degraded: false,
+      active_incidents: 0,
       latest_failure_at: failureAt,
       latest_recovery_at: recoveryAt,
+      rolling_incident_count: 2,
+      history_window_hours: 24,
+      recent_transitions: [
+        { event: 'failed', occurred_at: failureAt },
+        { event: 'recovered', occurred_at: recoveryAt },
+      ],
     });
     expect(JSON.stringify(body.rate_limit_cleanup)).not.toContain('student');
+  });
+
+  it('keeps a prolonged active cleanup incident degraded after history expires', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-09T12:00:00.000Z'));
+      const expiredAt = '2026-09-08T11:59:00.000Z';
+      const rateLimitKv = {
+        get: vi.fn(async (key: string) => key === 'health:rate-limit-cleanup'
+          ? JSON.stringify({
+              degraded: true,
+              active_incidents: 1,
+              latest_failure_at: expiredAt,
+              latest_recovery_at: null,
+              rolling_incident_count: 1,
+              history_window_hours: 24,
+              recent_transitions: [
+                { event: 'failed', occurred_at: expiredAt },
+              ],
+              incident_count_buckets: [
+                { started_at: expiredAt, count: 1 },
+              ],
+            })
+          : null),
+        put: vi.fn(async () => {}),
+        delete: vi.fn(async () => {}),
+      } as unknown as KVNamespace;
+      const response = await worker.fetch(
+        new Request('https://api.syrabit.ai/health'),
+        createMockEnv({ RATE_LIMIT_KV: rateLimitKv }),
+        createMockCtx(),
+      );
+      const body = await response.json<{
+        rate_limit_cleanup: {
+          degraded: boolean;
+          active_incidents: number;
+          rolling_incident_count: number;
+          recent_transitions: unknown[];
+        };
+      }>();
+
+      expect(body.rate_limit_cleanup).toMatchObject({
+        degraded: true,
+        active_incidents: 1,
+        rolling_incident_count: 0,
+        recent_transitions: [],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('probes the API Worker binding when KV cache is empty', async () => {

@@ -325,6 +325,14 @@ describe('anonymous burst protection in the Workers runtime', () => {
         active_incidents: 1,
         latest_failure_at: '2026-09-09T12:10:00.000Z',
         latest_recovery_at: null,
+        rolling_incident_count: 1,
+        history_window_hours: 24,
+        recent_transitions: [
+          { event: 'failed', occurred_at: '2026-09-09T12:10:00.000Z' },
+        ],
+        incident_count_buckets: [
+          { started_at: '2026-09-09T12:10:00.000Z', count: 1 },
+        ],
       });
 
       vi.advanceTimersByTime(50 * 60_000);
@@ -351,6 +359,17 @@ describe('anonymous burst protection in the Workers runtime', () => {
         active_incidents: 0,
         latest_failure_at: '2026-09-09T13:10:00.000Z',
         latest_recovery_at: '2026-09-09T13:10:00.000Z',
+        rolling_incident_count: 2,
+        history_window_hours: 24,
+        recent_transitions: [
+          { event: 'failed', occurred_at: '2026-09-09T12:10:00.000Z' },
+          { event: 'failed', occurred_at: '2026-09-09T13:10:00.000Z' },
+          { event: 'recovered', occurred_at: '2026-09-09T13:10:00.000Z' },
+        ],
+        incident_count_buckets: [
+          { started_at: '2026-09-09T12:10:00.000Z', count: 1 },
+          { started_at: '2026-09-09T13:10:00.000Z', count: 1 },
+        ],
       });
     } finally {
       errorSpy.mockRestore();
@@ -414,7 +433,77 @@ describe('anonymous burst protection in the Workers runtime', () => {
     expect(persisted).not.toContain('11111111-1111-4111-8111-111111111111');
     expect(persisted).not.toContain('22222222-2222-4222-8222-222222222222');
     expect(persisted).not.toContain('student');
-    expect(persisted).not.toContain('bucket');
+    expect(persisted).not.toContain('rl:');
+  });
+
+  it('caps cleanup transition history, prunes expired entries, and counts beyond the display cap', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-09T12:00:00.000Z'));
+      const healthValues = new Map<string, string>();
+      healthValues.set('health:rate-limit-cleanup', JSON.stringify({
+        degraded: false,
+        active_incidents: 0,
+        latest_failure_at: '2026-09-08T11:59:59.000Z',
+        latest_recovery_at: null,
+        rolling_incident_count: 1,
+        history_window_hours: 24,
+        recent_transitions: [
+          { event: 'failed', occurred_at: '2026-09-08T11:59:59.000Z' },
+        ],
+        incident_count_buckets: [
+          { started_at: '2026-09-08T11:59:00.000Z', count: 9 },
+        ],
+      }));
+      const put = vi.fn(async (key: string, value: string) => {
+        healthValues.set(key, value);
+      });
+      const aggregateValues = new Map<string, unknown>();
+      const aggregate = new RateLimitDurableObject({
+        blockConcurrencyWhile: async (callback: () => Promise<unknown>) => callback(),
+        storage: {
+          transaction: async (callback: (txn: unknown) => Promise<unknown>) => callback({
+            get: async (key: string) => aggregateValues.get(key),
+            put: async (key: string, value: unknown) => aggregateValues.set(key, value),
+          }),
+        },
+      } as unknown as DurableObjectState, {
+        RATE_LIMIT_KV: {
+          get: async (key: string) => healthValues.get(key) ?? null,
+          put,
+        } as unknown as KVNamespace,
+      });
+
+      for (let index = 0; index < 22; index += 1) {
+        const action = index % 2 === 0 ? 'failed' : 'recovered';
+        await aggregate.fetch(new Request('https://rate-limit.internal/cleanup-health', {
+          method: 'POST',
+          body: JSON.stringify({
+            action,
+            incidentToken: '11111111-1111-4111-8111-111111111111',
+            occurredAt: new Date(Date.now() + index * 1000).toISOString(),
+          }),
+        }));
+      }
+
+      const persisted = healthValues.get('health:rate-limit-cleanup') ?? '{}';
+      const snapshot = JSON.parse(persisted);
+      expect(snapshot.recent_transitions).toHaveLength(20);
+      expect(snapshot.recent_transitions[0].occurred_at).toBe('2026-09-09T12:00:02.000Z');
+      expect(snapshot.rolling_incident_count).toBe(11);
+      expect(snapshot.incident_count_buckets).toEqual([
+        { started_at: '2026-09-09T12:00:00.000Z', count: 11 },
+      ]);
+      expect(persisted).not.toContain('incidentToken');
+      expect(persisted).not.toContain('student');
+      expect(persisted).not.toContain('rl:');
+      expect(put).toHaveBeenLastCalledWith(
+        'health:rate-limit-cleanup',
+        expect.any(String),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

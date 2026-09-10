@@ -36,13 +36,30 @@ const CLEANUP_ALERTED_AT_KEY = 'cleanupAlertedAt';
 const CLEANUP_INCIDENT_TOKEN_KEY = 'cleanupIncidentToken';
 const CLEANUP_HEALTH_AGGREGATE_NAME = 'rate-limit-cleanup-health-aggregate';
 const CLEANUP_HEALTH_INCIDENTS_KEY = 'activeCleanupIncidents';
+const CLEANUP_HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
+const CLEANUP_HISTORY_MAX_ENTRIES = 20;
+const CLEANUP_COUNT_BUCKET_MS = 60 * 1000;
 export const RATE_LIMIT_CLEANUP_HEALTH_KEY = 'health:rate-limit-cleanup';
+
+interface CleanupHealthTransition {
+  event: 'failed' | 'recovered';
+  occurred_at: string;
+}
+
+interface CleanupIncidentCountBucket {
+  started_at: string;
+  count: number;
+}
 
 interface CleanupHealthState {
   degraded: boolean;
   active_incidents: number;
   latest_failure_at: string | null;
   latest_recovery_at: string | null;
+  rolling_incident_count: number;
+  history_window_hours: number;
+  recent_transitions: CleanupHealthTransition[];
+  incident_count_buckets: CleanupIncidentCountBucket[];
 }
 
 interface CleanupIncidentCommand {
@@ -267,6 +284,37 @@ export class RateLimitDurableObject {
         // The serialized aggregate remains authoritative if telemetry KV is unavailable.
       }
     }
+    const retentionCutoff = Date.now() - CLEANUP_HISTORY_RETENTION_MS;
+    const recentTransitions = [
+      ...(Array.isArray(previous?.recent_transitions) ? previous.recent_transitions : []),
+      { event: command.action, occurred_at: command.occurredAt },
+    ]
+      .filter(transition => (
+        (transition.event === 'failed' || transition.event === 'recovered')
+        && typeof transition.occurred_at === 'string'
+        && Date.parse(transition.occurred_at) >= retentionCutoff
+      ))
+      .slice(-CLEANUP_HISTORY_MAX_ENTRIES);
+    const incidentCountBuckets = (Array.isArray(previous?.incident_count_buckets)
+      ? previous.incident_count_buckets
+      : [])
+      .filter(bucket => (
+        typeof bucket.started_at === 'string'
+        && Date.parse(bucket.started_at) >= retentionCutoff
+        && Number.isSafeInteger(bucket.count)
+        && bucket.count > 0
+      ));
+    if (command.action === 'failed') {
+      const occurredAt = Date.parse(command.occurredAt);
+      const bucketStartedAt = new Date(
+        Math.floor(occurredAt / CLEANUP_COUNT_BUCKET_MS) * CLEANUP_COUNT_BUCKET_MS,
+      ).toISOString();
+      const existingBucket = incidentCountBuckets.find(
+        bucket => bucket.started_at === bucketStartedAt,
+      );
+      if (existingBucket) existingBucket.count += 1;
+      else incidentCountBuckets.push({ started_at: bucketStartedAt, count: 1 });
+    }
     const snapshot = {
       degraded: activeIncidentCount > 0,
       active_incidents: activeIncidentCount,
@@ -276,6 +324,13 @@ export class RateLimitDurableObject {
       latest_recovery_at: command.action === 'recovered'
         ? command.occurredAt
         : previous?.latest_recovery_at ?? null,
+      rolling_incident_count: incidentCountBuckets.reduce(
+        (total, bucket) => total + bucket.count,
+        0,
+      ),
+      history_window_hours: CLEANUP_HISTORY_RETENTION_MS / (60 * 60 * 1000),
+      recent_transitions: recentTransitions,
+      incident_count_buckets: incidentCountBuckets,
     } satisfies CleanupHealthState;
     await this.env?.RATE_LIMIT_KV?.put(
       RATE_LIMIT_CLEANUP_HEALTH_KEY,
