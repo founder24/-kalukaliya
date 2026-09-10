@@ -1,11 +1,14 @@
 name: Validate GitHub Actions
 
 on:
+  schedule:
+    - cron: '17 3 * * 2'
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - 'scripts/check-github-actions.sh'
+      - 'scripts/update-actionlint.py'
       - 'scripts/check-edge-workflow-triggers.py'
       - 'scripts/test-edge-workflow-triggers.py'
   push:
@@ -13,6 +16,7 @@ on:
     paths:
       - '.github/workflows/**'
       - 'scripts/check-github-actions.sh'
+      - 'scripts/update-actionlint.py'
       - 'scripts/check-edge-workflow-triggers.py'
       - 'scripts/test-edge-workflow-triggers.py'
   workflow_dispatch:
@@ -29,3 +33,6 @@ jobs:
 
       - name: Validate workflow files
         run: bash scripts/check-github-actions.sh
+
+      - name: Check actionlint release pin
+        run: python3 scripts/update-actionlint.py
