@@ -30,6 +30,9 @@ def main() -> int:
     routes = json.loads((ROOT / "apps/frontend/public/_routes.json").read_text())
     worker = (ROOT / "apps/frontend/public/_worker.js").read_text()
     release = (ROOT / ".github/workflows/deploy-cloudflare.yml").read_text()
+    staff_rehearsal = (
+        ROOT / ".github/workflows/verify-production-staff-portal.yml"
+    ).read_text()
     indexnow_submitter = (ROOT / "apps/frontend/scripts/indexnow-submit.mjs").read_text()
     errors: list[str] = []
 
@@ -68,6 +71,56 @@ def main() -> int:
     ):
         if marker not in release:
             errors.append(f"Cloudflare release is missing required IndexNow wiring: {marker}")
+    for marker in (
+        "rehearse_chat_latency_failure:",
+        "github.event_name == 'workflow_dispatch' && inputs.rehearse_chat_latency_failure",
+        "needs: [chat-performance, disposable-staff-auth]",
+        "CHAT_PERFORMANCE_RESULT: ${{ needs.chat-performance.result }}",
+        "STAFF_ACCESS_RESULT: ${{ needs.disposable-staff-auth.result }}",
+        'echo "| Chat first-token latency | ${CHAT_PERFORMANCE_RESULT} |"',
+        'echo "| Disposable staff access | ${STAFF_ACCESS_RESULT} |"',
+    ):
+        if marker not in release:
+            errors.append(
+                "Cloudflare release is missing required independent-check rehearsal wiring: "
+                + marker
+            )
+    staff_job = release.partition("  disposable-staff-auth:")[2].partition(
+        "  release-check-summary:"
+    )[0]
+    if "needs: post-native-smoke" not in staff_job:
+        errors.append(
+            "Disposable staff verification must depend on post-native-smoke, not chat performance"
+        )
+    if "needs: chat-performance" in staff_job:
+        errors.append(
+            "Disposable staff verification must remain independent of chat performance"
+        )
+    for marker in (
+        "bash scripts/run-disposable-staff-portal-check.sh",
+        "if: ${{ always() }}",
+        'bash scripts/cleanup-disposable-staff-portal.sh "$RUNNER_TEMP/release-staff-portal-fixture.env"',
+    ):
+        if marker not in staff_job:
+            errors.append(
+                "Disposable staff verification is missing required lease/cleanup wiring: "
+                + marker
+            )
+    for marker in (
+        "rehearse_chat_latency_failure:",
+        "needs: confirm-production",
+        "needs: [chat-performance, staff-portal]",
+        "CHAT_PERFORMANCE_RESULT: ${{ needs.chat-performance.result }}",
+        "STAFF_ACCESS_RESULT: ${{ needs.staff-portal.result }}",
+        'echo "| Chat first-token latency | ${CHAT_PERFORMANCE_RESULT} |"',
+        'echo "| Disposable staff access | ${STAFF_ACCESS_RESULT} |"',
+        'bash scripts/cleanup-disposable-staff-portal.sh "$RUNNER_TEMP/release-staff-portal-fixture.env"',
+    ):
+        if marker not in staff_rehearsal:
+            errors.append(
+                "Staff verification rehearsal is missing required independent-check wiring: "
+                + marker
+            )
     if 'process.env.INDEXNOW_BACKEND_URL || "https://api.syrabit.ai"' not in indexnow_submitter:
         errors.append("IndexNow submitter must default to the production API origin")
 
