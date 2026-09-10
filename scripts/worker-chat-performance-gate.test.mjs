@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,7 @@ import {
   validateProbeEvents,
   validateRouteResult,
 } from './worker-chat-performance-gate.mjs';
+import { atomicWriteJson } from './warn-worker-chat-performance-history.mjs';
 
 const targetMs = 3000;
 const sample = (name, firstTokenMs, extra = {}) => ({
@@ -252,6 +253,27 @@ test('warning CLI emits actionable annotations while tolerating unreadable and t
   assert.match(result.stderr, /dominant slow worker phase: retrieval_ms/);
   assert.match(result.stderr, /Affected-run maxima: 4200, 3900 ms/);
   assert.match(result.stderr, /The 3000 ms strict-majority release gate is unchanged\./);
+});
+
+test('atomic notification write preserves complete JSON and cleans up after an interrupted write', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'chat-performance-warning-atomic-'));
+  const statePath = join(directory, 'notification-state.json');
+  const previousState = { active_warnings: [{ route: 'direct_chapter_rag' }] };
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(statePath, `${JSON.stringify(previousState)}\n`);
+
+  await assert.rejects(
+    atomicWriteJson(statePath, { active_warnings: [] }, {
+      writeFile: async temporaryPath => {
+        await writeFile(temporaryPath, '{"active_warnings":');
+        throw new Error('simulated interrupted write');
+      },
+    }),
+    /simulated interrupted write/,
+  );
+
+  assert.deepEqual(JSON.parse(await readFile(statePath, 'utf8')), previousState);
+  assert.deepEqual(await readdir(directory), ['notification-state.json']);
 });
 
 test('warning CLI preserves indeterminate routes without changing notification state on insufficient history', async t => {
