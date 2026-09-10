@@ -108,9 +108,21 @@ try {
       throw new Error(`${label} triggered the global error boundary`);
     }
     if (await page.getByText(new RegExp(`${label} failed to load`, 'i')).count()) {
+      const alert = page.getByText(new RegExp(`${label} failed to load`, 'i')).first().locator('..');
+      const boundaryError = await alert.evaluate(element => {
+        const fiberKey = Object.keys(element).find(key => key.startsWith('__reactFiber$'));
+        let fiber = fiberKey ? element[fiberKey] : null;
+        while (fiber) {
+          const error = fiber.stateNode?.state?.error;
+          if (error) return `${error.name || 'Error'}: ${error.message || String(error)}\n${error.stack || ''}`;
+          fiber = fiber.return;
+        }
+        return '(React boundary error object unavailable)';
+      }).catch(() => '(React boundary inspection failed)');
       const body = (await page.locator('body').innerText().catch(() => '')).slice(0, 6_000);
       throw new Error([
         `${label} triggered its section error boundary`,
+        `Boundary exception:\n${boundaryError}`,
         `Visible page text:\n${body || '(empty)'}`,
         `Runtime errors:\n${runtimeErrors.join('\n') || '(none)'}`,
         `Failed requests:\n${failedRequests.join('\n') || '(none)'}`,
