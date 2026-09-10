@@ -896,6 +896,26 @@ contentRouter.get('/cms-library',       (c) => c.json({ items: [], total: 0 }));
 contentRouter.get('/cms/posts',         (c) => c.json({ items: [], total: 0 }));
 contentRouter.get('/cms/personalize',   (c) => c.json({ recommendations: [], total: 0 }));
 
+contentRouter.get('/cms/post/:subjectId', async c => {
+  const subjectId = c.req.param('subjectId');
+  const row = await c.env.DB.prepare(
+    `SELECT data, created_at, updated_at
+     FROM cms_documents
+     WHERE id = ? AND status = 'published'`,
+  ).bind(`subject-blog:${subjectId}`).first<{ data: string; created_at: number; updated_at: number }>();
+  if (!row) return c.json({ detail: 'Published subject blog not found' }, 404);
+  const data = safeParse<Record<string, unknown>>(row.data);
+  if (!data || data.document_type !== 'subject_blog' || data.subject_id !== subjectId) {
+    return c.json({ detail: 'Published subject blog not found' }, 404);
+  }
+  c.header('Cache-Control', 'public, max-age=60, s-maxage=300');
+  return c.json({
+    ...data,
+    created_at: new Date(row.created_at * 1000).toISOString(),
+    updated_at: new Date(row.updated_at * 1000).toISOString(),
+  });
+});
+
 // Published CMS documents are stored as JSON records in D1 by the native admin
 // CMS editor. Find by slug without exposing draft documents.
 contentRouter.get('/cms-documents/:slug', async c => {

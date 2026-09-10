@@ -965,6 +965,83 @@ adminContentRouter.post('/content/bulk-status', async c => {
   return c.json({ modified: result.meta.changes ?? 0 });
 });
 
+async function publishSubjectBlog(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  const body = await safeBody(c);
+  const requested = Array.isArray(body.chapter_ids) ? body.chapter_ids.filter((id): id is string => typeof id === 'string') : [];
+  const subjectId = c.req.param('subjectId') as string;
+  const subject = await createDb(c.env.DB).select({ id: subjects.id, name: subjects.name })
+    .from(subjects).where(eq(subjects.id, subjectId)).get();
+  if (!subject) return c.json({ detail: 'Subject not found' }, 404);
+  const rows = requested.length
+    ? await createDb(c.env.DB).select({
+      id: chapters.id, title: chapters.title, chapterNumber: chapters.chapterNumber, notes: chapters.notesEn,
+    }).from(chapters)
+      .where(and(eq(chapters.subjectId, subjectId), inArray(chapters.id, requested)))
+    : await createDb(c.env.DB).select({
+      id: chapters.id, title: chapters.title, chapterNumber: chapters.chapterNumber, notes: chapters.notesEn,
+    }).from(chapters).where(eq(chapters.subjectId, subjectId)).orderBy(chapters.chapterNumber);
+  if (requested.length && rows.length !== new Set(requested).size) {
+    return c.json({ detail: 'Every requested chapter must belong to the destination subject.' }, 422);
+  }
+  const orderedRows = [...rows].sort(
+    (left, right) => (left.chapterNumber ?? Number.MAX_SAFE_INTEGER) - (right.chapterNumber ?? Number.MAX_SAFE_INTEGER),
+  );
+  const mergeableRows = orderedRows.filter(row => row.notes?.trim());
+  const headings = mergeableRows.map(row => ({
+    level: 2,
+    text: row.title,
+    anchor: slugify(row.title),
+  }));
+  const mergedMarkdown = mergeableRows
+    .map(row => `## ${row.title}\n\n${row.notes!.trim()}`)
+    .join('\n\n---\n\n');
+  if (!mergedMarkdown) return c.json({ detail: 'No chapter notes are available to publish.' }, 422);
+  const wordCount = mergedMarkdown.split(/\s+/).filter(Boolean).length;
+  const documentId = `subject-blog:${subjectId}`;
+  const publishedAt = now();
+  const document = {
+    document_type: 'subject_blog',
+    subject_id: subject.id,
+    title: `${subject.name} Complete Study Guide`,
+    merged_md: mergedMarkdown,
+    headings: JSON.stringify(headings),
+    chapter_count: orderedRows.length,
+    word_count: wordCount,
+    published_at: new Date(publishedAt * 1000).toISOString(),
+  };
+  await c.env.DB.prepare(`
+    INSERT INTO cms_documents (id, data, status, created_at, updated_at)
+    VALUES (?, ?, 'published', ?, ?)
+    ON CONFLICT(id) DO UPDATE SET data = excluded.data, status = 'published', updated_at = excluded.updated_at
+  `).bind(documentId, JSON.stringify(document), publishedAt, publishedAt).run();
+  const jobIds: string[] = [];
+  for (const row of orderedRows) {
+    const id = crypto.randomUUID();
+    const result = await c.env.DB.prepare(`
+      INSERT INTO publish_jobs (id, chapter_id, status, progress, created_at, updated_at)
+      SELECT ?, ?, 'pending', '[]', ?, ? WHERE NOT EXISTS
+      (SELECT 1 FROM publish_jobs WHERE chapter_id = ? AND status IN ('pending','running','partial'))
+    `).bind(id, row.id, now(), now(), row.id).run();
+    if ((result.meta.changes ?? 0) === 1) {
+      jobIds.push(id);
+      c.executionCtx.waitUntil(runPublish(c.env, id, row.id));
+    }
+  }
+  return c.json({
+    subject_id: subject.id,
+    subject_name: subject.name,
+    document_id: documentId,
+    status: 'published',
+    chapter_count: orderedRows.length,
+    word_count: wordCount,
+    queued: jobIds.length,
+    job_ids: jobIds,
+  });
+}
+
+adminContentRouter.post('/content/subjects/:subjectId/blog-publish', publishSubjectBlog);
+
 adminContentRouter.post('/content/subjects/:subjectId/bulk-publish', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
   const body = await safeBody(c);

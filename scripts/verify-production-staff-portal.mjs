@@ -44,7 +44,16 @@ const sections = verifierSections.map(({ id, label, releaseCheck }) => [id, labe
 const contentHubTabs = [
   { id: 'editor', label: 'Content Editor', requiredReads: [] },
   { id: 'cms', label: 'CMS / Docs', unsupported: true },
-  { id: 'blog', label: 'Blog Publisher', unsupported: true },
+  {
+    id: 'blog',
+    label: 'Blog Publisher',
+    requiredReads: [
+      '/api/v1/staff/content/boards',
+      '/api/v1/staff/content/classes',
+      '/api/v1/staff/content/streams',
+      '/api/v1/staff/content/subjects',
+    ],
+  },
   { id: 'translation', label: 'Assamese', unsupported: true },
   { id: 'progress', label: 'Translation Progress', unsupported: true },
   {

@@ -252,6 +252,70 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     expect((await publicResponse.json() as { title: string }).title).toBe('Native CMS document');
   });
 
+  it('persists and publicly serves a merged subject blog through the Worker contract', async () => {
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO chapters (id, subject_id, title, slug, status, notes_en, chapter_number)
+        VALUES ('blog-chapter-one', 'subject', 'Blog chapter one', 'blog-chapter-one', 'draft', ?, 1)
+      `).bind('## Motion\n\nVelocity and acceleration.'),
+      env.DB.prepare(`
+        INSERT INTO chapters (id, subject_id, title, slug, status, notes_en, chapter_number)
+        VALUES ('blog-chapter-two', 'subject', 'Blog chapter two', 'blog-chapter-two', 'draft', ?, 2)
+      `).bind('## Force\n\nNewton laws of motion.'),
+    ]);
+
+    const anonymous = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/subjects/subject/blog-publish',
+      { method: 'POST' },
+    ));
+    expect(anonymous.status).toBe(401);
+
+    const published = await workerFetch(adminRequest(
+      '/api/v1/admin/content/subjects/subject/blog-publish',
+      'POST',
+      { chapter_ids: ['blog-chapter-one', 'blog-chapter-two'] },
+    ));
+    expect(published.status).toBe(200);
+    await expect(published.json()).resolves.toMatchObject({
+      subject_id: 'subject',
+      status: 'published',
+      chapter_count: 2,
+      queued: 2,
+    });
+
+    const publicResponse = await workerFetch(new Request(
+      'http://worker/api/v1/content/cms/post/subject',
+    ));
+    expect(publicResponse.status).toBe(200);
+    const blog = await publicResponse.json() as {
+      subject_id: string; merged_md: string; chapter_count: number; word_count: number;
+    };
+    expect(blog.subject_id).toBe('subject');
+    expect(blog.chapter_count).toBe(2);
+    expect(blog.word_count).toBeGreaterThan(0);
+    expect(blog.merged_md).toContain('# Blog chapter one');
+    expect(blog.merged_md).toContain('# Blog chapter two');
+
+    await env.DB.prepare(`
+      INSERT INTO chapters (id, subject_id, title, slug, status)
+      VALUES ('bulk-empty-chapter', 'subject', 'Bulk empty chapter', 'bulk-empty-chapter', 'draft')
+    `).run();
+    const bulkPublished = await workerFetch(adminRequest(
+      '/api/v1/admin/content/subjects/subject/bulk-publish',
+      'POST',
+      { chapter_ids: ['bulk-empty-chapter'] },
+    ));
+    expect(bulkPublished.status).toBe(200);
+    await expect(bulkPublished.json()).resolves.toMatchObject({ queued: 1 });
+
+    const afterBulkResponse = await workerFetch(new Request(
+      'http://worker/api/v1/content/cms/post/subject',
+    ));
+    expect(afterBulkResponse.status).toBe(200);
+    const afterBulk = await afterBulkResponse.json() as { merged_md: string };
+    expect(afterBulk.merged_md).toBe(blog.merged_md);
+  });
+
   it('uses the separate cron secret and rejects a concurrent seed launch', async () => {
     const headers = { Authorization: `Bearer ${CRON_SECRET}`, 'Content-Type': 'application/json' };
     const first = await workerFetch(new Request('http://worker/api/v1/admin/cron/seed-notes', {

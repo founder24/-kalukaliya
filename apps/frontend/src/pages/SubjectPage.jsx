@@ -97,11 +97,14 @@ function useCmsPost(subjectId, enabled) {
   return { post, loading, error };
 }
 
-function BlogView({ subject, subjectId }) {
+function markdownHeadingId(children) {
+  return String(children).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+export function BlogView({ subject, subjectId }) {
   const { post, loading, error } = useCmsPost(subjectId, true);
   const articleRef = useRef(null);
   const [activeId,  setActiveId]  = useState('');
-  const [merging,   setMerging]   = useState(false);
   const { sharing, share: handleShare } = useShare();
 
   const headings = useMemo(() => {
@@ -133,16 +136,6 @@ function BlogView({ subject, subjectId }) {
     return () => observer.disconnect();
   }, [headings]);
 
-  const handleMerge = async () => {
-    if (!subjectId) return;
-    setMerging(true);
-    try {
-      await apiClient().post(`/admin/cms/merge/${subjectId}`);
-      toast.success('Merged & published — reload to see Blog View');
-    } catch { toast.error('Merge failed (admin access needed)'); }
-    finally { setMerging(false); }
-  };
-
   if (loading) return (
     <div className="space-y-5 max-w-3xl mx-auto px-4">
       {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-5 w-full" style={{ width: `${60 + (i % 3) * 15}%` }} />)}
@@ -155,15 +148,9 @@ function BlogView({ subject, subjectId }) {
       <p className="text-sm" style={{ color: 'rgba(232,232,232,0.50)' }}>
         Blog view not yet generated for this subject.
       </p>
-      <button
-        onClick={handleMerge}
-        disabled={merging}
-        className="h-9 px-4 rounded-xl text-sm font-medium text-white flex items-center gap-2 disabled:opacity-50"
-        style={{ background: 'rgba(149,117,224,0.20)', border: '1px solid rgba(149,117,224,0.30)' }}
-      >
-        {merging ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-        Generate Blog View (admin)
-      </button>
+      <p className="text-xs" style={{ color: 'rgba(232,232,232,0.35)' }}>
+        A staff editor can publish this subject from the Content Editor.
+      </p>
     </div>
   );
 
@@ -208,7 +195,13 @@ function BlogView({ subject, subjectId }) {
           ) : (
             <div className="learn-article"
               style={{ background: '#ffffff', color: '#1a1a1a', fontSize: '15px', lineHeight: '1.7', padding: 'clamp(1rem, 4vw, 2.5rem) clamp(0.75rem, 4vw, 2.5rem) 2.5rem', boxShadow: '0 1px 12px rgba(0,0,0,0.09)', borderRadius: '0 0 4px 4px', maxWidth: 'none' }}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeSanitize]}
+                components={{
+                  h2: ({ children }) => <h2 id={markdownHeadingId(children)}>{children}</h2>,
+                }}
+              >
                 {post.merged_md || ''}
               </ReactMarkdown>
             </div>
@@ -427,6 +420,7 @@ export default function SubjectPage() {
       { key: 'notes',           label: 'Notes',      chapters: notesChs, pyqGroups: null,  accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
       { key: 'qa',              label: 'Questions',  chapters: qaChs,    pyqGroups: null,  accent: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' },
       { key: 'question_paper',  label: 'PYQs',       chapters: [],       pyqGroups,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.25)' },
+      { key: 'blog',            label: 'Blog View',  chapters: [],       pyqGroups: null,  accent: '#0284c7', bg: 'rgba(2,132,199,0.08)',   border: 'rgba(2,132,199,0.25)' },
     ];
   }, [chapters, subject?.pyq_papers]);
 
@@ -623,7 +617,9 @@ export default function SubjectPage() {
         )}
 
         {/* PYQ section — expandable paper cards with page image grids */}
-        {activeSectionKey === 'question_paper' ? (
+        {activeSectionKey === 'blog' ? (
+          <BlogView subject={subject} subjectId={subjectId} />
+        ) : activeSectionKey === 'question_paper' ? (
           (() => {
             const groups = activeSecObj?.pyqGroups || [];
             if (groups.length === 0) return (

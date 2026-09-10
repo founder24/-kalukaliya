@@ -12,6 +12,7 @@ import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import AdminModuleUnavailable from './AdminModuleUnavailable';
 const AdminContentEditor = lazy(() => import('./AdminContentEditor'));
 const SeederHistoryPanel = lazy(() => import('./content-editor/SeederHistoryPanel'));
+const BlogPublishWizard = lazy(() => import('./BlogPublishWizard'));
 
 
 const API = API_BASE;
@@ -231,7 +232,11 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
 
             {activeTab === 'blog' && (
               <div className="h-full overflow-y-auto">
-                <AdminModuleUnavailable moduleId="content-blog" />
+                <BlogPublishWizard
+                  adminToken={adminToken}
+                  hubContext={hubContext}
+                  onHubContext={setHubContext}
+                />
               </div>
             )}
 

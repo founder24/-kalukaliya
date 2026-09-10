@@ -19,18 +19,19 @@ export default function BlogPublishWizard({ adminToken, hubContext, onHubContext
   const [lastResult, setLastResult] = useState(null);
 
   useEffect(() => {
+    const cfg = authHeaders(adminToken);
     Promise.all([
-      axios.get(`${API}/content/boards`),
-      axios.get(`${API}/content/classes`),
-      axios.get(`${API}/content/streams`),
-      axios.get(`${API}/content/subjects`),
+      axios.get(`${API}/staff/content/boards`, cfg),
+      axios.get(`${API}/staff/content/classes`, cfg),
+      axios.get(`${API}/staff/content/streams`, cfg),
+      axios.get(`${API}/staff/content/subjects`, cfg),
     ]).then(([b, c, s, sub]) => {
       setBoards(b.data || []);
       setClasses(c.data || []);
       setStreams(s.data || []);
       setSubjects(sub.data || []);
     }).catch(() => toast.error('Failed to load content hierarchy'));
-  }, []);
+  }, [adminToken]);
 
   useEffect(() => {
     if (hubContext?.subjectId && !selSubject) {
@@ -51,7 +52,11 @@ export default function BlogPublishWizard({ adminToken, hubContext, onHubContext
     setPublishing(true);
     setLastResult(null);
     try {
-      const res = await axios.post(`${API}/admin/cms/merge/${selSubject}`, {}, authHeaders(adminToken));
+      const res = await axios.post(
+        `${API}/admin/content/subjects/${selSubject}/blog-publish`,
+        {},
+        authHeaders(adminToken),
+      );
       setLastResult({ success: true, data: res.data });
       toast.success(`Published "${selectedSubject?.name || 'Subject'}" — blog view ready`);
     } catch (e) {
@@ -153,9 +158,10 @@ export default function BlogPublishWizard({ adminToken, hubContext, onHubContext
               {lastResult.success ? 'Published successfully' : 'Publish failed'}
             </p>
           </div>
-          {lastResult.success && lastResult.data?.word_count && (
+          {lastResult.success && (
             <p className="text-xs text-gray-500 mt-1">
-              {lastResult.data.word_count.toLocaleString()} words merged
+              {(lastResult.data?.word_count || 0).toLocaleString()} words across{' '}
+              {lastResult.data?.chapter_count || 0} chapters · {lastResult.data?.queued || 0} publish jobs queued
             </p>
           )}
           {lastResult.error && (
