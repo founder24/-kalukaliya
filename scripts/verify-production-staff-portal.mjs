@@ -41,13 +41,20 @@ const failedRequests = [];
 const postLogoutAuthResponses = [];
 let postLogoutProbe = false;
 
-page.on('pageerror', error => runtimeErrors.push(error.stack || error.message));
+const isAccessServiceWorkerArtifact = text =>
+  text.includes('Failed to update a ServiceWorker')
+  && text.includes('object is in an invalid state');
+
+page.on('pageerror', error => {
+  const text = error.stack || error.message;
+  if (!isAccessServiceWorkerArtifact(text)) runtimeErrors.push(text);
+});
 page.on('console', message => {
   if (message.type() !== 'error') return;
   const text = message.text();
   if (
     !text.includes('Failed to load resource')
-    && !text.includes('Failed to update a ServiceWorker')
+    && !isAccessServiceWorkerArtifact(text)
   ) runtimeErrors.push(text);
 });
 page.on('response', response => {
