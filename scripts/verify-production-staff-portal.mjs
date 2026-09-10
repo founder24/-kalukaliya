@@ -159,6 +159,10 @@ try {
     throw new Error(`Staff portal issued forbidden requests:\n${forbiddenRequests.join('\n')}`);
   }
   forbiddenRequests.length = 0;
+  const declineConsent = page.getByRole('button', { name: 'Decline', exact: true });
+  if (await declineConsent.isVisible().catch(() => false)) {
+    await declineConsent.click();
+  }
   await page.getByRole('button', { name: 'Logout' }).click();
   await page.waitForURL(url => url.pathname === '/login' && url.searchParams.get('next') === '/staff');
   await page.goto(`${site}/staff`, { waitUntil: 'domcontentloaded' });
