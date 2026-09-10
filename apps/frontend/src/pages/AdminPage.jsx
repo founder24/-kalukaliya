@@ -14,6 +14,7 @@ import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import { useAuth } from '@/context/AuthContext';
 import { getToken } from '@/hooks/useTokenManager';
 import { STAFF_PORTAL_SECTIONS } from '@/config/staffPortalSections.mjs';
+import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
 
 const AdminDashboard       = lazy(() => import('@/components/admin/AdminDashboard'));
 const AdminHealth          = lazy(() => import('@/components/admin/AdminHealth'));
@@ -451,6 +452,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <BreakGlassBanner adminToken={adminToken} />
         <header
           className="flex items-center justify-between px-6 border-b border-gray-200 flex-shrink-0 z-10 bg-white"
           style={{ height: 60 }}

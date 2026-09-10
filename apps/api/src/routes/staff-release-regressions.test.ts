@@ -43,6 +43,28 @@ beforeAll(async () => {
 afterAll(async () => { await dispose(); });
 
 describe('release regressions', () => {
+  it('exposes only staff-authorized Cloudflare Access bypass status', async () => {
+    const originalEnv = env.APP_ENV;
+    env.APP_ENV = 'production';
+    try {
+      const jwt = await token('legacy');
+      const bypassed = await fetchWorker(request('/api/v1/admin/break-glass-status', jwt));
+      expect(bypassed.status).toBe(200);
+      expect(await bypassed.json()).toEqual({ active: true });
+
+      const protectedRequest = request('/api/v1/admin/break-glass-status', jwt);
+      protectedRequest.headers.set('Cf-Access-Jwt-Assertion', 'signed-access-assertion');
+      const protectedResponse = await fetchWorker(protectedRequest);
+      expect(protectedResponse.status).toBe(200);
+      expect(await protectedResponse.json()).toEqual({ active: false });
+
+      const anonymous = await fetchWorker(new Request('http://worker/api/v1/admin/break-glass-status'));
+      expect(anonymous.status).toBe(401);
+    } finally {
+      env.APP_ENV = originalEnv;
+    }
+  });
+
   it('grants every staff account the unified control-center capabilities', async () => {
     const limited = await token('limited'); const legacy = await token('legacy'); const admin = await token('admin', 'admin');
     for (const [path, method, body] of [

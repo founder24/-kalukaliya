@@ -459,11 +459,11 @@ export const adminAdsenseSync = (token, days = 7) =>
 export const adminGetSettings = (token) =>
   axios.get(`${API_BASE}/admin/settings`, { headers: adminHeaders(token), withCredentials: true });
 
-export const adminGetDiagnostics = (token) =>
-  axios.get(`${API_BASE}/admin/diagnostics`, { headers: adminHeaders(token), withCredentials: true });
-
-export const adminDisableBreakGlass = (token) =>
-  axios.post(`${API_BASE}/admin/break-glass/disable`, {}, { headers: adminHeaders(token), withCredentials: true });
+export const adminGetBreakGlassStatus = (token) =>
+  axios.get(`${API_BASE}/admin/break-glass-status`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+  });
 
 export const adminUpdateSettings = (token, data) =>
   axios.put(`${API_BASE}/admin/settings`, data, { headers: adminHeaders(token), withCredentials: true });
