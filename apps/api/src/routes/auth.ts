@@ -225,7 +225,16 @@ authRouter.post('/logout', async (c) => {
       // REFRESH_TOKEN_ROLLOUT_GUARD: logout-kv:end
     }
   }
-  return c.json({ message: 'Logged out successfully' });
+  const response = c.json({ message: 'Logged out successfully' });
+  // The unified staff portal accepts either a normal staff bearer session or
+  // the legacy HttpOnly admin cookie. Logging out of the bearer session must
+  // also expire that cookie or a stale admin session can immediately grant
+  // access to /staff again after local tokens are cleared.
+  response.headers.set(
+    'Set-Cookie',
+    'syrabit_admin_session=; Path=/api/; Max-Age=0; HttpOnly; SameSite=Lax',
+  );
+  return response;
 });
 // REFRESH_TOKEN_ROLLOUT_GUARD: logout-route:end
 
