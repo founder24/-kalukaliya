@@ -80,3 +80,4 @@
 - [Production browser verification traps](production-browser-verification.md) — Preserve Vite preload rejections; seed auth fixtures once so logout checks remain valid.
 - [Release failure rehearsals](release-failure-rehearsals.md) — use test-only workflows so unrelated deploy gates cannot hide scheduling evidence.
 - [Workflow trigger contracts](workflow-trigger-contracts.md) — enforce GitHub Actions triggers from normalized YAML, not source-line regexes.
+- [Access bypass rehearsals](access-bypass-rehearsals.md) — TEST-NET proves policy cleanup only; warning activation requires a temporary real operator /32.

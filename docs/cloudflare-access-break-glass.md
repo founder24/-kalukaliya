@@ -93,4 +93,29 @@ Rehearse with the reserved, non-routable TEST-NET address `192.0.2.1/32`.
 Create the policy, confirm ordinary public traffic still receives the Access
 redirect, delete the policy, and confirm there are no remaining bypass
 policies. This validates creation and cleanup without granting any real client
-access.
+access. Because no request can originate from TEST-NET, this check cannot
+activate `/api/v1/admin/break-glass-status` or the staff banner.
+
+## Full warning rehearsal
+
+To verify the production warning, repeat the procedure with the operator's
+verified public IPv4 `/32` (or IPv6 `/128`) only after the TEST-NET rehearsal
+has passed:
+
+1. Start an independent 15-minute cleanup watchdog before creating the policy.
+2. Confirm an Access-authenticated staff request reports `{"active":false}`.
+3. Create the operator-IP bypass and confirm a request from that same network
+   reports `{"active":true}`.
+4. Open `/staff` from that network and confirm the persistent red warning is
+   visible.
+5. From a different network, confirm `/staff` and the protected admin API still
+   receive the Access login redirect.
+6. Delete the bypass immediately, stop the watchdog, and confirm the status
+   returns to `{"active":false}` for an Access-authenticated request.
+7. Refresh `/staff` and confirm the warning disappears.
+8. Confirm no bypass policies, temporary credentials, or disposable staff
+   fixtures remain.
+
+Use leased disposable application credentials for rehearsals. Do not reset or
+reuse a real staff member's password, and do not leave a service-auth policy in
+place after the check.
