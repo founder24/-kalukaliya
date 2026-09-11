@@ -11,6 +11,8 @@ on:
       - 'scripts/update-actionlint.py'
       - 'scripts/check-edge-workflow-triggers.py'
       - 'scripts/test-edge-workflow-triggers.py'
+      - 'scripts/check-ci-workflow-concurrency.py'
+      - 'scripts/test-ci-workflow-concurrency.py'
       - 'scripts/check-staff-chunk-release-gate.py'
       - 'scripts/test-staff-chunk-release-gate.py'
   push:
@@ -21,6 +23,8 @@ on:
       - 'scripts/update-actionlint.py'
       - 'scripts/check-edge-workflow-triggers.py'
       - 'scripts/test-edge-workflow-triggers.py'
+      - 'scripts/check-ci-workflow-concurrency.py'
+      - 'scripts/test-ci-workflow-concurrency.py'
       - 'scripts/check-staff-chunk-release-gate.py'
       - 'scripts/test-staff-chunk-release-gate.py'
   workflow_dispatch:
@@ -46,6 +50,12 @@ jobs:
 
       - name: Test critical CI trigger contract checker
         run: python3 scripts/test-edge-workflow-triggers.py
+
+      - name: Check CI concurrency contracts
+        run: python3 scripts/check-ci-workflow-concurrency.py
+
+      - name: Test CI concurrency contract checker
+        run: python3 scripts/test-ci-workflow-concurrency.py
 
       - name: Check staff chunk release gate contract
         run: python3 scripts/check-staff-chunk-release-gate.py
