@@ -19,6 +19,7 @@ import {
 import {
   STAFF_PORTAL_TRACE_OPTIONS,
   addLoginTokensToRedactions,
+  saveSafeStaffPortalScreenshot,
   saveRedactedTrace,
 } from './staff-portal-diagnostics.mjs';
 
@@ -433,31 +434,10 @@ try {
   const rawTracePath = resolve(tmpdir(), `staff-portal-trace-${process.pid}.zip`);
   const diagnosticErrors = [];
 
-  const pageRedacted = await page.evaluate(values => {
-    const replacements = values.filter(Boolean);
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      for (const value of replacements) {
-        node.textContent = node.textContent.replaceAll(value, '[REDACTED]');
-      }
-    }
-    for (const element of document.querySelectorAll('input, textarea')) {
-      for (const value of replacements) {
-        element.value = element.value.replaceAll(value, '[REDACTED]');
-      }
-    }
-    return true;
-  }, [...sensitiveValues]).catch(captureError => {
-    diagnosticErrors.push(`page redaction: ${captureError.message}`);
-    return false;
-  });
-  if (pageRedacted) {
-    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(captureError => {
+  await saveSafeStaffPortalScreenshot(page, screenshotPath, [...sensitiveValues])
+    .catch(captureError => {
       diagnosticErrors.push(`screenshot: ${captureError.message}`);
     });
-  } else {
-    await rm(screenshotPath, { force: true });
-  }
   try {
     await context.tracing.stop({ path: rawTracePath });
     tracingStopped = true;

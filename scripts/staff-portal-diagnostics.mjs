@@ -17,6 +17,173 @@ export function addLoginTokensToRedactions(tokens, sensitiveValues) {
   }
 }
 
+export async function saveSafeStaffPortalScreenshot(page, screenshotPath, sensitiveValues = []) {
+  try {
+    const knownRedactions = [
+      ...new Set(sensitiveValues.filter(Boolean).flatMap(sensitiveVariants).filter(Boolean)),
+    ];
+    await page.evaluate(() => {
+      window.__staffPortalScreenshotMutationCount = 0;
+      new MutationObserver(() => {
+        window.__staffPortalScreenshotMutationCount += 1;
+      }).observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        characterData: true,
+      });
+    });
+    await page.waitForTimeout(100);
+
+    const result = await page.evaluate(knownValues => {
+      const isVisible = element => {
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== 'none'
+          && style.visibility !== 'hidden'
+          && Number(style.opacity) !== 0
+          && rect.width > 0
+          && rect.height > 0;
+      };
+      if (window.__staffPortalScreenshotMutationCount) {
+        return { safe: false, reason: 'page changed while preparing diagnostic snapshot' };
+      }
+      const sensitiveName = /(?:pass(?:word)?|token|secret|authorization|credential|api[-_]?key|session|cookie)/i;
+      const visibleElements = [...document.querySelectorAll('*')].filter(isVisible);
+      const visibleControls = visibleElements
+        .filter(element => element.matches('input, textarea, select'));
+      const sensitiveControls = visibleControls
+        .filter(element =>
+          element.type === 'password'
+          || sensitiveName.test([
+            element.name,
+            element.id,
+            element.autocomplete,
+            element.getAttribute('aria-label'),
+            element.getAttribute('placeholder'),
+          ].filter(Boolean).join(' ')));
+      if (sensitiveControls.length) {
+        return { safe: false, reason: 'visible sensitive authentication control' };
+      }
+      const hasOpaqueRendering = visibleElements.some(element => {
+        if (element.matches('iframe, frame, canvas, video, object, embed')) return true;
+        const style = getComputedStyle(element);
+        const before = getComputedStyle(element, '::before').content;
+        const after = getComputedStyle(element, '::after').content;
+        return style.backgroundImage !== 'none'
+          || (before !== 'none' && before !== 'normal')
+          || (after !== 'none' && after !== 'normal');
+      });
+      if (hasOpaqueRendering) {
+        return { safe: false, reason: 'opaque rendered content cannot be sanitized' };
+      }
+
+      const storageValues = [];
+      for (const storage of [localStorage, sessionStorage]) {
+        for (let index = 0; index < storage.length; index += 1) {
+          const key = storage.key(index);
+          const value = key && storage.getItem(key);
+          if (value && (sensitiveName.test(key) || value.length >= 16)) storageValues.push(value);
+        }
+      }
+      const browserSensitiveVariants = value => {
+        const bytes = new TextEncoder().encode(value);
+        let binary = '';
+        for (const byte of bytes) binary += String.fromCharCode(byte);
+        const base64 = btoa(binary);
+        return [
+          value,
+          encodeURIComponent(value),
+          base64,
+          base64.replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, ''),
+          JSON.stringify(value).slice(1, -1),
+        ];
+      };
+      const replacements = [
+        ...new Set([
+          ...knownValues,
+          ...storageValues.flatMap(browserSensitiveVariants),
+        ].filter(Boolean)),
+      ];
+      const redact = input => {
+        let output = input || '';
+        for (const value of replacements) {
+          output = output.replaceAll(value, '[REDACTED]');
+        }
+        return output;
+      };
+
+      const unsafeSignatures = [
+        /\b(?:bearer|basic)\s+(?!\[REDACTED\])\S+/i,
+        /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/,
+        /\b(?:pass(?:word)?|secret|api[-_ ]?key|session|cookie|credential|authorization|(?:access|refresh|auth)[-_ ]?token|cf-access-client-(?:id|secret))\b\s*[:=]\s*(?!\[REDACTED\])\S+/i,
+      ];
+      const visibleControlContent = visibleControls
+        .flatMap(element => element instanceof HTMLSelectElement
+          ? [element.value, ...[...element.selectedOptions].map(option => option.textContent || '')]
+          : [
+              element.value,
+              element.getAttribute('placeholder') || '',
+              element.getAttribute('title') || '',
+              element.getAttribute('aria-label') || '',
+            ])
+        .map(redact)
+        .filter(Boolean);
+      const renderedContent = [
+        redact(document.body?.innerText || ''),
+        redact(document.title),
+        redact(`${location.origin}${location.pathname}`),
+        ...visibleControlContent,
+      ];
+      if (renderedContent.some(content =>
+        unsafeSignatures.some(pattern => pattern.test(content)))) {
+        return { safe: false, reason: 'credential-shaped visible page content' };
+      }
+      if (renderedContent.some(content =>
+        replacements.some(value => content.includes(value)))) {
+        return { safe: false, reason: 'authentication storage value remained visible' };
+      }
+      return {
+        safe: true,
+        snapshot: {
+          title: renderedContent[1] || 'Staff portal failure',
+          location: renderedContent[2],
+          text: renderedContent[0] || '(No visible page text)',
+        },
+      };
+    }, knownRedactions);
+
+    if (!result.safe) throw new Error(`unsafe staff portal screenshot: ${result.reason}`);
+    const escapeHtml = value => value.replace(/[&<>"']/g, character => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    })[character]);
+    await page.setContent(`<!doctype html>
+      <meta charset="utf-8">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+      <title>Sanitized staff portal diagnostic</title>
+      <style>
+        body { margin: 0; padding: 32px; background: #f8fafc; color: #172033; font: 16px/1.5 system-ui, sans-serif; }
+        main { max-width: 1100px; margin: auto; background: white; border: 1px solid #d9e1ec; border-radius: 12px; padding: 28px; }
+        h1 { margin-top: 0; font-size: 24px; }
+        .location { color: #526078; overflow-wrap: anywhere; }
+        pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+      </style>
+      <main>
+        <h1>${escapeHtml(result.snapshot.title)}</h1>
+        <p class="location">${escapeHtml(result.snapshot.location)}</p>
+        <pre>${escapeHtml(result.snapshot.text)}</pre>
+      </main>`);
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+  } catch (error) {
+    await rm(screenshotPath, { force: true });
+    throw error;
+  }
+}
+
 function sensitiveVariants(value) {
   const buffer = Buffer.from(value);
   return [
