@@ -59,6 +59,7 @@
 - [Frontend undefined identifiers](frontend-undefined-identifiers.md) — Vite builds do not catch unbound JSX names; extracted admin tabs need render coverage or static checks.
 - [Prerender canonical counts](prerender-canonical-counts.md) — Release manifests must count unique canonical output paths, not duplicate source records.
 - [Prerender backend signals](prerender-backend-signals.md) — Coalesce concurrent schema probes, but never TTL-cache completed signals across cache reads.
+- [Prerender request concurrency](prerender-request-concurrency.md) — enforce one process-wide backend request pool; nested route loops otherwise multiply fan-out.
 - [Cloudflare account API contracts](cloudflare-account-api-contracts.md) — R2 custom domains and Access writes require current, resource-specific API fields and permissions.
 - [Chat transport retry identity](chat-transport-retry-identity.md) — Keep one stable logical request key across bounded transport retries so quota is reserved only once.
 - [Worker chat web egress and latency](worker-chat-web-egress-latency.md) — Wikimedia is blocked from Workers; Crossref works, and the fast Llama model meets the first-token target.

@@ -421,6 +421,10 @@ jobs:
           CLOUDFLARE_RELEASE_BUILD: 'true'
           ALLOW_INCOMPLETE_CURRICULUM_BUILD: 'false'
           REQUIRE_HYDRATION_BROWSER: 'true'
+          BUILD_BUDGET_MS: '1800000'
+          PRERENDER_BUDGET_MS: '1080000'
+          PRERENDER_STEP_BUDGET_MS: '1140000'
+          PRERENDER_FETCH_CONCURRENCY: '4'
 
       - name: Verify staff production chunks
         run: pnpm --filter @workspace/syrabit run check:staff-chunks

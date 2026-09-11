@@ -1,7 +1,7 @@
 // Task #535: top-level build orchestrator with hard wall-clock budget.
 //
-// The Cloudflare Pages build wall is 35 minutes. We aim for < 8 min
-// worst-case (typical < 5 min) and abort with a clear error well
+// The Cloudflare Pages build wall is 35 minutes. We aim for < 30 min
+// worst-case and abort with a clear error well
 // before that ceiling so the actual failure cause is in the log
 // instead of an opaque "build killed" line.
 //
@@ -30,9 +30,9 @@ const repoRoot = path.resolve(__dirname, "..");
 const BUDGET_MS = (() => {
   const raw = process.env.BUILD_BUDGET_MS;
   const n = raw ? Number.parseInt(raw, 10) : NaN;
-  // Task #544: default 12 min (was 8 min). Pages free-plan wall is
-  // 20 min; we leave 8 min slack for verifier + precache. Hard floor
-  // 2 min, hard ceiling 30 min.
+  // Keep five minutes below the Cloudflare wall. The frontend release
+  // workflow sets this explicitly so full strict prerender coverage has a
+  // stable, documented deadline.
   return Number.isFinite(n) && n >= 120_000 && n <= 30 * 60_000
     ? n
     : 1_500_000;
@@ -183,11 +183,13 @@ async function main() {
   summary.push({ label: "vite parallel", elapsed: Date.now() - clientStart });
 
   // 4. Prerender — orchestrator pre-warms the backend cache then
-  //    spawns the four prerender scripts in parallel.
+  //    spawns the four prerender scripts in parallel. Full curriculum
+  //    coverage has an 18-minute internal budget and a 19-minute child
+  //    deadline, leaving one minute here for orderly failure reporting.
   await record(
     "prerender",
     node(path.join(__dirname, "prerender-all.mjs"), [], {
-      budgetMs: 8 * 60_000,
+      budgetMs: 20 * 60_000,
     }),
   );
 
