@@ -54,8 +54,19 @@ const contentHubTabs = [
       '/api/v1/staff/content/subjects',
     ],
   },
-  { id: 'translation', label: 'Assamese', unsupported: true },
-  { id: 'progress', label: 'Translation Progress', unsupported: true },
+  {
+    id: 'translation',
+    label: 'Assamese',
+    requiredReads: [
+      '/api/v1/admin/content/assamese/coverage',
+      '/api/v1/admin/content/assamese/progress',
+    ],
+  },
+  {
+    id: 'progress',
+    label: 'Translation Progress',
+    requiredReads: ['/api/v1/admin/content/assamese/coverage'],
+  },
   {
     id: 'seeder',
     label: 'Seeder History',

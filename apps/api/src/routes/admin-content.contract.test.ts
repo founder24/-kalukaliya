@@ -189,6 +189,70 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     await expect(response.json()).resolves.toMatchObject({ user_id: 'native-staff' });
   });
 
+  it('serves read-only Assamese coverage and progress, then launches a staff backfill job', async () => {
+    await env.DB.prepare(`UPDATE chapters SET notes_en = 'English source notes' WHERE id = 'chapter-cache'`).run();
+    const staff = await new SignJWT({ role: 'staff', type: 'access' })
+      .setProtectedHeader({ alg: 'HS256' }).setSubject('native-staff')
+      .setIssuedAt().setExpirationTime('1h')
+      .sign(new TextEncoder().encode('ordinary-user-secret'));
+    const headers = { Authorization: `Bearer ${staff}` };
+    const countBefore = await env.DB.prepare(`SELECT COUNT(*) AS count FROM seed_runs`).first<{ count: number }>();
+
+    const coverage = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/assamese/coverage', { headers },
+    ));
+    const progress = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/assamese/progress', { headers },
+    ));
+    expect(coverage.status).toBe(200);
+    await expect(coverage.json()).resolves.toMatchObject({
+      total: 1, translated: 0, missing: 1,
+      subjects: [{ subject_id: 'subject', missing: 1 }],
+    });
+    expect(progress.status).toBe(200);
+    await expect(progress.json()).resolves.toEqual({ running: false, run: null });
+    const countAfterReads = await env.DB.prepare(`SELECT COUNT(*) AS count FROM seed_runs`).first<{ count: number }>();
+    expect(countAfterReads?.count).toBe(countBefore?.count);
+
+    const launch = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/assamese/backfill',
+      {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 1, force: false }),
+      },
+    ));
+    expect(launch.status).toBe(200);
+    await expect(launch.clone().json()).resolves.toMatchObject({ job: 'started', total_queued: 1 });
+    await Promise.allSettled(background);
+
+    const completedProgress = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/assamese/progress', { headers },
+    ));
+    expect(completedProgress.status).toBe(200);
+    await expect(completedProgress.json()).resolves.toMatchObject({
+      running: false,
+      run: { status: 'completed', total: 1, completed: 1, failed: 0, queued: 0 },
+    });
+
+    const forceLaunch = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/assamese/backfill',
+      {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 200, force: true }),
+      },
+    ));
+    expect(forceLaunch.status).toBe(200);
+    const forceBody = await forceLaunch.json() as { run_id: string; total_queued: number };
+    expect(forceBody.total_queued).toBe(1);
+    await Promise.allSettled(background);
+    const forced = await env.DB.prepare(`SELECT log FROM seed_runs WHERE id = ?`)
+      .bind(forceBody.run_id).first<{ log: string }>();
+    expect(JSON.parse(forced?.log ?? '[]').map((entry: { chapter_id: string }) => entry.chapter_id))
+      .toEqual(['chapter-cache']);
+  });
+
   it('queues a publish job through the existing admin-session cookie', async () => {
     const response = await workerFetch(adminRequest(
       `/api/v1/admin/content/chapters/${chapterId}/publish`, 'POST',

@@ -526,12 +526,26 @@ async function launchSeed(c: Context<{ Bindings: Env }>, medium: 'en' | 'as'): P
   const db = createDb(c.env.DB);
 
   let candidateIds: string[] = [];
-  if (!requested.length) {
+  if (requested.length) {
+    if (medium === 'as') {
+      const placeholders = requested.map(() => '?').join(', ');
+      const eligible = await c.env.DB.prepare(
+        `SELECT id FROM chapters
+         WHERE id IN (${placeholders})
+           AND notes_en IS NOT NULL AND TRIM(notes_en) != ''`,
+      ).bind(...requested).all<{ id: string }>();
+      const eligibleIds = new Set((eligible.results ?? []).map(row => row.id));
+      candidateIds = requested.filter(id => eligibleIds.has(id));
+    } else {
+      candidateIds = requested;
+    }
+  } else {
     const field = medium === 'en' ? 'notes_en' : 'notes_as';
     const subject = typeof body.subject === 'string' ? body.subject.trim() : '';
     const board = typeof body.board === 'string' ? body.board.trim() : '';
     const predicates = [
       !force ? `(c.${field} IS NULL OR TRIM(c.${field}) = '')` : '1 = 1',
+      medium === 'as' ? `(c.notes_en IS NOT NULL AND TRIM(c.notes_en) != '')` : '1 = 1',
       subject ? '(s.id = ? OR s.slug = ?)' : '1 = 1',
       board ? '(b.id = ? OR b.slug = ?)' : '1 = 1',
     ];
@@ -550,7 +564,7 @@ async function launchSeed(c: Context<{ Bindings: Env }>, medium: 'en' | 'as'): P
     ).bind(...bindings).all<{ id: string }>();
     candidateIds = (result.results ?? []).map((row: { id: string }) => row.id);
   }
-  const chapterIds = requested.length ? requested : candidateIds;
+  const chapterIds = candidateIds;
   if (!chapterIds.length) {
     return c.json({ job: 'nothing_to_do', total_queued: 0, message: 'No chapters need this seed run.' });
   }
@@ -669,6 +683,74 @@ adminContentRouter.get('/content/translation-progress', async c => {
   const total = Number(row?.total ?? 0);
   const translated = Number(row?.translated ?? 0);
   return c.json({ total, translated, missing: total - translated, progress: total ? Math.round(translated * 100 / total) : 0 });
+});
+
+adminContentRouter.get('/content/assamese/coverage', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  const rows = await c.env.DB.prepare(`
+    SELECT c.id, c.title, c.chapter_number, c.status, c.notes_as,
+           s.id AS subject_id, s.name AS subject_name
+    FROM chapters c
+    JOIN subjects s ON s.id = c.subject_id
+    WHERE c.notes_en IS NOT NULL AND TRIM(c.notes_en) != ''
+    ORDER BY s.name, c.chapter_number, c.title
+  `).all<{
+    id: string; title: string; chapter_number: number | null; status: string | null;
+    notes_as: string | null; subject_id: string; subject_name: string;
+  }>();
+  const chaptersWithEnglish = rows.results ?? [];
+  const translated = chaptersWithEnglish.filter(row => Boolean(row.notes_as?.trim())).length;
+  const groups = new Map<string, {
+    subject_id: string; subject_name: string; total: number; translated: number;
+    missing: number; chapters: Array<{ id: string; title: string; chapter_number: number | null; status: string | null }>;
+  }>();
+  for (const row of chaptersWithEnglish) {
+    const group = groups.get(row.subject_id) ?? {
+      subject_id: row.subject_id, subject_name: row.subject_name,
+      total: 0, translated: 0, missing: 0, chapters: [],
+    };
+    group.total++;
+    if (row.notes_as?.trim()) {
+      group.translated++;
+    } else {
+      group.missing++;
+      group.chapters.push({
+        id: row.id, title: row.title, chapter_number: row.chapter_number, status: row.status,
+      });
+    }
+    groups.set(row.subject_id, group);
+  }
+  const total = chaptersWithEnglish.length;
+  return c.json({
+    total, translated, missing: total - translated,
+    progress: total ? Math.round(translated * 100 / total) : 0,
+    ratio: total ? translated / total : 0,
+    subjects: [...groups.values()],
+  });
+});
+
+adminContentRouter.get('/content/assamese/progress', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  const run = await createDb(c.env.DB).select().from(seedRuns)
+    .where(eq(seedRuns.medium, 'as')).orderBy(desc(seedRuns.startedAt)).limit(1).get();
+  if (!run) return c.json({ running: false, run: null });
+  const log = parseJson<SeedLog[]>(run.log, []);
+  const queued = log.filter(entry => entry.status === 'queued' || entry.status === 'running').length;
+  return c.json({
+    running: run.status === 'queued' || run.status === 'running',
+    run: {
+      id: run.id, status: run.status, total: run.totalChapters,
+      completed: run.processed, failed: run.failed, queued,
+      started_at: run.startedAt ? new Date(run.startedAt * 1000).toISOString() : null,
+      finished_at: run.completedAt ? new Date(run.completedAt * 1000).toISOString() : null,
+      errors: log.filter(entry => entry.status === 'failed'),
+    },
+  });
+});
+
+adminContentRouter.post('/content/assamese/backfill', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  return launchSeed(c, 'as');
 });
 
 adminContentRouter.get('/content/draft-served-subjects', async c => {

@@ -13,6 +13,8 @@ import AdminModuleUnavailable from './AdminModuleUnavailable';
 const AdminContentEditor = lazy(() => import('./AdminContentEditor'));
 const SeederHistoryPanel = lazy(() => import('./content-editor/SeederHistoryPanel'));
 const BlogPublishWizard = lazy(() => import('./BlogPublishWizard'));
+const AssameseBackfillPanel = lazy(() => import('./AssameseBackfillPanel'));
+const AdminTranslationProgress = lazy(() => import('./AdminTranslationProgress'));
 
 
 const API = API_BASE;
@@ -242,13 +244,13 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
 
             {activeTab === 'translation' && (
               <div className="h-full overflow-y-auto p-4 sm:p-6">
-                <AdminModuleUnavailable moduleId="content-assamese" />
+                <AssameseBackfillPanel adminToken={adminToken} />
               </div>
             )}
 
             {activeTab === 'progress' && (
               <div className="h-full overflow-y-auto">
-                <AdminModuleUnavailable moduleId="content-progress" />
+                <AdminTranslationProgress adminToken={adminToken} />
               </div>
             )}
 

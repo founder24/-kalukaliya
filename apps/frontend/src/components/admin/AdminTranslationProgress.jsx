@@ -171,7 +171,7 @@ export default function AdminTranslationProgress({ adminToken }) {
     setError(null);
     try {
       const res = await axios.get(
-        `${API_BASE}/admin/content/translation-progress`,
+        `${API_BASE}/admin/content/assamese/coverage`,
         authHeaders(adminToken),
       );
       if (mountedRef.current) setData(res.data);
