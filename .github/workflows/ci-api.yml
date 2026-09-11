@@ -31,6 +31,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install trigger checker dependency
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+      - name: Check critical CI trigger contracts
+        run: python3 scripts/check-edge-workflow-triggers.py
+
+      - name: Test critical CI trigger contract checker
+        run: python3 scripts/test-edge-workflow-triggers.py
+
       - name: Run D1 round-trip tests
         # Intentionally secrets-free and safe for fork PRs: the test forces
         # getPlatformProxy() to use only local Miniflare bindings

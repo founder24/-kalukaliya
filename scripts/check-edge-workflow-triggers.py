@@ -11,6 +11,17 @@ import yaml
 
 
 WORKFLOW_CONTRACTS: dict[str, list[str] | None] = {
+    ".github/workflows/validate-github-actions.yml": [
+        ".github/workflows/**",
+        "scripts/check-github-actions.sh",
+        "scripts/update-actionlint.py",
+        "scripts/check-edge-workflow-triggers.py",
+        "scripts/test-edge-workflow-triggers.py",
+        "scripts/check-ci-workflow-concurrency.py",
+        "scripts/test-ci-workflow-concurrency.py",
+        "scripts/check-staff-chunk-release-gate.py",
+        "scripts/test-staff-chunk-release-gate.py",
+    ],
     ".github/workflows/ci-api.yml": None,
     ".github/workflows/ci-backend.yml": [
         "apps/backend/**",
@@ -39,6 +50,14 @@ WORKFLOW_CONTRACTS: dict[str, list[str] | None] = {
 
 # Kept as a public alias for existing imports of this checker.
 EXPECTED_PATHS = WORKFLOW_CONTRACTS[".github/workflows/ci-edge.yml"]
+VALIDATOR_EXPECTED_PATHS = WORKFLOW_CONTRACTS[
+    ".github/workflows/validate-github-actions.yml"
+]
+INDEPENDENT_GUARD_WORKFLOW = Path(".github/workflows/ci-api.yml")
+REQUIRED_GUARD_COMMANDS = {
+    "python3 scripts/check-edge-workflow-triggers.py",
+    "python3 scripts/test-edge-workflow-triggers.py",
+}
 
 
 class ContractLoader(yaml.SafeLoader):
@@ -144,6 +163,34 @@ def validate_edge_triggers(workflow: Path) -> list[str]:
     return validate_workflow_triggers(workflow, EXPECTED_PATHS)
 
 
+def validate_independent_guard(workflow: Path) -> list[str]:
+    try:
+        document = yaml.load(
+            workflow.read_text(encoding="utf-8"), Loader=ContractLoader
+        )
+    except (OSError, yaml.YAMLError) as exc:
+        return [f"cannot parse independent guard workflow YAML: {exc}"]
+
+    jobs = document.get("jobs") if isinstance(document, dict) else None
+    if not isinstance(jobs, dict):
+        return ["independent guard workflow must define jobs"]
+
+    commands = {
+        step.get("run")
+        for job in jobs.values()
+        if isinstance(job, dict)
+        for step in job.get("steps", [])
+        if isinstance(step, dict) and isinstance(step.get("run"), str)
+    }
+    missing = REQUIRED_GUARD_COMMANDS - commands
+    if missing:
+        return [
+            "independent guard workflow must invoke: "
+            + ", ".join(sorted(missing))
+        ]
+    return []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -167,6 +214,10 @@ def main() -> int:
         for error in errors:
             print(f"{key} trigger check failed: {error}")
             failed = True
+
+    for error in validate_independent_guard(INDEPENDENT_GUARD_WORKFLOW):
+        print(f"Independent trigger guard check failed: {error}")
+        failed = True
 
     if failed:
         return 1

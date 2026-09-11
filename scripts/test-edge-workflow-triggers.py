@@ -55,6 +55,63 @@ class CriticalWorkflowTriggerTests(unittest.TestCase):
                     CHECKER.validate_workflow_triggers(Path(path), expected_paths), []
                 )
 
+    def test_unfiltered_api_ci_invokes_trigger_guard(self) -> None:
+        self.assertEqual(
+            CHECKER.validate_independent_guard(CHECKER.INDEPENDENT_GUARD_WORKFLOW),
+            [],
+        )
+
+    def test_rejects_independent_ci_without_trigger_guard(self) -> None:
+        content = Path(CHECKER.INDEPENDENT_GUARD_WORKFLOW).read_text(
+            encoding="utf-8"
+        ).replace(
+            "python3 scripts/check-edge-workflow-triggers.py",
+            "echo trigger-check-disabled",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ci-api.yml"
+            path.write_text(content, encoding="utf-8")
+            errors = CHECKER.validate_independent_guard(path)
+        self.assertTrue(any("must invoke" in error for error in errors))
+
+    def test_validator_contract_rejects_missing_pull_request_event(self) -> None:
+        content = workflow(CHECKER.VALIDATOR_EXPECTED_PATHS).replace(
+            "  pull_request:", "  pull_request_disabled:"
+        )
+        self.assertIn(
+            "missing pull_request trigger",
+            self.validate(content, CHECKER.VALIDATOR_EXPECTED_PATHS),
+        )
+
+    def test_validator_contract_rejects_missing_push_event(self) -> None:
+        self.assertIn(
+            "missing push trigger",
+            self.validate(
+                workflow(
+                    CHECKER.VALIDATOR_EXPECTED_PATHS,
+                    include_push=False,
+                ),
+                CHECKER.VALIDATOR_EXPECTED_PATHS,
+            ),
+        )
+
+    def test_validator_contract_rejects_branch_drift(self) -> None:
+        errors = self.validate(
+            workflow(
+                CHECKER.VALIDATOR_EXPECTED_PATHS,
+                branches=["develop"],
+            ),
+            CHECKER.VALIDATOR_EXPECTED_PATHS,
+        )
+        self.assertTrue(any("branches must be exactly" in error for error in errors))
+
+    def test_validator_contract_rejects_path_scope_change(self) -> None:
+        errors = self.validate(
+            workflow(CHECKER.VALIDATOR_EXPECTED_PATHS[:-1]),
+            CHECKER.VALIDATOR_EXPECTED_PATHS,
+        )
+        self.assertTrue(any("path scope" in error for error in errors))
+
     def test_rejects_removed_path(self) -> None:
         errors = self.validate(
             workflow(CHECKER.EXPECTED_PATHS[:-1]), CHECKER.EXPECTED_PATHS
