@@ -288,6 +288,7 @@ describe('React Router v7 Hydration Timing', () => {
 
 describe('X-API-Version Header Overhead', () => {
   it('adding X-API-Version header has negligible modeled overhead', () => {
+    // Model the fixed header setup cost; wall-clock microbenchmarks are unstable on shared CI runners.
     const baseRequestMs = 50;
     const headerSetupMs = 1;
     const resultWithout = {
