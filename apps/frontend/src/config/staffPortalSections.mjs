@@ -100,6 +100,15 @@ export function assertStaffSectionMappings(
   additionalComponentIds = [],
 ) {
   const sectionIds = sections.map(({ id }) => id);
+  const duplicateSectionIds = sectionIds.filter(
+    (id, index) => sectionIds.indexOf(id) !== index,
+  );
+  if (duplicateSectionIds.length) {
+    throw new Error(
+      `Staff portal section catalog contains duplicate section IDs: ${[...new Set(duplicateSectionIds)].join(', ')}.`,
+    );
+  }
+
   assertExactSectionMapping('icon', sectionIds, iconMappings);
   assertExactSectionMapping(
     'component',

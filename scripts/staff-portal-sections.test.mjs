@@ -93,6 +93,22 @@ test('staff section wiring rejects extra mappings with the affected section id',
   );
 });
 
+test('staff section wiring rejects duplicate catalog entries with the affected section id', () => {
+  const duplicatedSections = [
+    ...STAFF_PORTAL_SECTIONS,
+    STAFF_PORTAL_SECTIONS.find(({ id }) => id === 'analytics'),
+  ];
+
+  assert.throws(
+    () => assertStaffSectionMappings(
+      duplicatedSections,
+      completeMappings,
+      completeMappings,
+    ),
+    /section catalog contains duplicate section IDs: analytics/,
+  );
+});
+
 test('staff section wiring accepts complete icon and component mappings', () => {
   assert.doesNotThrow(
     () => assertStaffSectionMappings(
