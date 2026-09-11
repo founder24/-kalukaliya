@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import axios from 'axios';
 import { API_BASE } from '@/utils/api';
 import { authHeaders } from '@/utils/adminHelpers';
+import { CONTENT_HUB_TABS } from '@/config/contentHubTabs.mjs';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import AdminModuleUnavailable from './AdminModuleUnavailable';
@@ -20,15 +21,17 @@ const RagMirrorPanel = lazy(() => import('./RagMirrorPanel'));
 
 const API = API_BASE;
 
-const TABS = [
-  { id: 'editor',      label: 'Content Editor',  icon: PenTool,     color: 'violet',  desc: 'Write & edit chapter-level markdown content' },
-  { id: 'cms',         label: 'CMS / Docs',      icon: FileText,    color: 'emerald', desc: 'Manage published pages, SEO docs & blog posts' },
-  { id: 'blog',        label: 'Blog Publisher',  icon: Globe,       color: 'sky',     desc: 'SEO & GEO-rich 5-step blog publish wizard' },
-  { id: 'translation', label: 'Assamese',            icon: Languages,  color: 'amber',   desc: 'Bulk translate English chapters to Assamese via Sarvam AI' },
-  { id: 'progress',    label: 'Translation Progress', icon: BarChart2,  color: 'rose',    desc: 'Track which chapters still lack Assamese translation' },
-  { id: 'seeder',      label: 'Seeder History',  icon: History,     color: 'indigo',  desc: 'Review past seed-notes runs, failures, and retry stats' },
-  { id: 'rag-mirror',  label: 'RAG Mirror',      icon: Sparkles,    color: 'emerald', desc: 'Bulk auto-generate RAG sections from chapter notes via heading splits' },
-];
+const TAB_PRESENTATION = {
+  editor:      { icon: PenTool,    color: 'violet',  desc: 'Write & edit chapter-level markdown content' },
+  cms:         { icon: FileText,   color: 'emerald', desc: 'Manage published pages, SEO docs & blog posts' },
+  blog:        { icon: Globe,      color: 'sky',     desc: 'SEO & GEO-rich 5-step blog publish wizard' },
+  translation: { icon: Languages,  color: 'amber',   desc: 'Bulk translate English chapters to Assamese via Sarvam AI' },
+  progress:    { icon: BarChart2,  color: 'rose',    desc: 'Track which chapters still lack Assamese translation' },
+  seeder:      { icon: History,    color: 'indigo',  desc: 'Review past seed-notes runs, failures, and retry stats' },
+  'rag-mirror': { icon: Sparkles,  color: 'emerald', desc: 'Bulk auto-generate RAG sections from chapter notes via heading splits' },
+};
+
+const TABS = CONTENT_HUB_TABS.map(tab => ({ ...tab, ...TAB_PRESENTATION[tab.id] }));
 
 const FLOW = [
   { label: 'Editor',        sub: 'Write content',      tab: 'editor',      arrow: true  },
@@ -72,7 +75,7 @@ function loadPersistedCtx() {
   } catch { return EMPTY_CTX; }
 }
 
-const INTERNAL_TABS = new Set(['editor', 'cms', 'blog', 'translation', 'progress', 'seeder', 'rag-mirror']);
+const INTERNAL_TABS = new Set(CONTENT_HUB_TABS.map(({ id }) => id));
 
 export default function AdminContentHub({ adminToken, onNavigate: topNavigate, navContext }) {
   const [activeTab, setActiveTab] = useState(navContext?.initialTab || 'editor');
@@ -216,7 +219,7 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
 
           <Suspense fallback={<div className="flex items-center justify-center py-12 text-gray-400 text-sm"><Loader2 size={16} className="animate-spin mr-2" />Loading…</div>}>
             {activeTab === 'editor' && (
-              <div className="h-full overflow-hidden">
+              <div className="h-full overflow-hidden" data-testid="content-hub-panel-editor">
                 <AdminContentEditor
                   adminToken={adminToken}
                   onNavigate={navigate}
@@ -228,13 +231,13 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
             )}
 
             {activeTab === 'cms' && (
-              <div className="h-full overflow-y-auto">
+              <div className="h-full overflow-y-auto" data-testid="content-hub-panel-cms">
                 <AdminModuleUnavailable moduleId="content-cms" />
               </div>
             )}
 
             {activeTab === 'blog' && (
-              <div className="h-full overflow-y-auto">
+              <div className="h-full overflow-y-auto" data-testid="content-hub-panel-blog">
                 <BlogPublishWizard
                   adminToken={adminToken}
                   hubContext={hubContext}
@@ -244,19 +247,19 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
             )}
 
             {activeTab === 'translation' && (
-              <div className="h-full overflow-y-auto p-4 sm:p-6">
+              <div className="h-full overflow-y-auto p-4 sm:p-6" data-testid="content-hub-panel-translation">
                 <AssameseBackfillPanel adminToken={adminToken} />
               </div>
             )}
 
             {activeTab === 'progress' && (
-              <div className="h-full overflow-y-auto">
+              <div className="h-full overflow-y-auto" data-testid="content-hub-panel-progress">
                 <AdminTranslationProgress adminToken={adminToken} />
               </div>
             )}
 
             {activeTab === 'seeder' && (
-              <div className="h-full overflow-y-auto">
+              <div className="h-full overflow-y-auto" data-testid="content-hub-panel-seeder">
                 <SeederHistoryPanel
                   adminToken={adminToken}
                   onRetryWithIds={(failedIds) => {
@@ -277,7 +280,7 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
               </div>
             )}
             {activeTab === 'rag-mirror' && (
-              <div className="h-full overflow-y-auto">
+              <div className="h-full overflow-y-auto" data-testid="content-hub-panel-rag-mirror">
                 <RagMirrorPanel adminToken={adminToken} />
               </div>
             )}

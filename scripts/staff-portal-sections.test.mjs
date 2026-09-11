@@ -7,6 +7,11 @@ import {
   assertStaffSectionMappings,
   assertStaffSectionReleaseChecks,
 } from '../apps/frontend/src/config/staffPortalSections.mjs';
+import {
+  CONTENT_HUB_TABS,
+  assertContentHubTabReadEvidence,
+  assertContentHubTabReleaseChecks,
+} from '../apps/frontend/src/config/contentHubTabs.mjs';
 
 test('staff release coverage rejects section-list drift', () => {
   const missingLastSection = STAFF_PORTAL_SECTIONS.slice(0, -1);
@@ -51,6 +56,61 @@ test('staff release checks reject API reads on an unsupported section', () => {
 
 test('staff release checks accept every shared section declaration', () => {
   assert.doesNotThrow(() => assertStaffSectionReleaseChecks(STAFF_PORTAL_SECTIONS));
+});
+
+test('Content Editor release checks reject an unclassified tab', () => {
+  const tabs = [
+    ...CONTENT_HUB_TABS,
+    { id: 'new-tab', label: 'New Tab' },
+  ];
+
+  assert.throws(
+    () => assertContentHubTabReleaseChecks(tabs),
+    /tab "new-tab" must declare releaseCheck\.supported and releaseCheck\.requiredReads/,
+  );
+});
+
+test('Content Editor release checks reject API reads on an unsupported tab', () => {
+  const tabs = [{
+    id: 'unsupported',
+    label: 'Unsupported',
+    releaseCheck: { supported: false, requiredReads: ['/api/v1/staff/example'] },
+  }];
+
+  assert.throws(
+    () => assertContentHubTabReleaseChecks(tabs),
+    /tab "unsupported" is unsupported but declares required API reads/,
+  );
+});
+
+test('Content Editor release checks reject a supported tab without proof reads', () => {
+  const tabs = [{
+    id: 'unproven',
+    label: 'Unproven',
+    releaseCheck: { supported: true, requiredReads: [] },
+  }];
+
+  assert.throws(
+    () => assertContentHubTabReleaseChecks(tabs),
+    /tab "unproven" is supported but declares no required API reads/,
+  );
+});
+
+test('Content Editor release checks accept every shared tab declaration', () => {
+  assert.doesNotThrow(() => assertContentHubTabReleaseChecks(CONTENT_HUB_TABS));
+});
+
+test('Content Editor tab proof rejects identical reads completed by an earlier tab', () => {
+  const blogTab = CONTENT_HUB_TABS.find(({ id }) => id === 'blog');
+  const earlierTabReads = [...blogTab.releaseCheck.requiredReads];
+
+  assert.doesNotThrow(
+    () => assertContentHubTabReadEvidence(blogTab, earlierTabReads, earlierTabReads),
+  );
+  assert.throws(
+    () => assertContentHubTabReadEvidence(blogTab, [], []),
+    /Blog Publisher did not initiate required Worker read/,
+  );
 });
 
 test('staff release checks wait for reads in the section that initiates them', () => {

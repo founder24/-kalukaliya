@@ -12,6 +12,11 @@ import {
   assertStaffSectionReleaseChecks,
 } from '../apps/frontend/src/config/staffPortalSections.mjs';
 import {
+  CONTENT_HUB_TABS,
+  assertContentHubTabReadEvidence,
+  assertContentHubTabReleaseChecks,
+} from '../apps/frontend/src/config/contentHubTabs.mjs';
+import {
   STAFF_PORTAL_TRACE_OPTIONS,
   addLoginTokensToRedactions,
   saveRedactedTrace,
@@ -41,43 +46,7 @@ const verifierSections = STAFF_PORTAL_SECTIONS.map(({ id, label, releaseCheck })
 }));
 assertStaffSectionCoverage(STAFF_PORTAL_SECTIONS, verifierSections);
 const sections = verifierSections.map(({ id, label, releaseCheck }) => [id, label, releaseCheck]);
-const contentHubTabs = [
-  { id: 'editor', label: 'Content Editor', requiredReads: [] },
-  { id: 'cms', label: 'CMS / Docs', unsupported: true },
-  {
-    id: 'blog',
-    label: 'Blog Publisher',
-    requiredReads: [
-      '/api/v1/staff/content/boards',
-      '/api/v1/staff/content/classes',
-      '/api/v1/staff/content/streams',
-      '/api/v1/staff/content/subjects',
-    ],
-  },
-  {
-    id: 'translation',
-    label: 'Assamese',
-    requiredReads: [
-      '/api/v1/admin/content/assamese/coverage',
-      '/api/v1/admin/content/assamese/progress',
-    ],
-  },
-  {
-    id: 'progress',
-    label: 'Translation Progress',
-    requiredReads: ['/api/v1/admin/content/assamese/coverage'],
-  },
-  {
-    id: 'seeder',
-    label: 'Seeder History',
-    requiredReads: ['/api/v1/admin/content/seed-notes/history'],
-  },
-  {
-    id: 'rag-mirror',
-    label: 'RAG Mirror',
-    requiredReads: ['/api/v1/admin/content/rag/reindex/status'],
-  },
-];
+assertContentHubTabReleaseChecks(CONTENT_HUB_TABS);
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext();
@@ -99,9 +68,13 @@ const strippedApiAccessHeaders = [];
 const contentReadsWithoutBearer = [];
 let postLogoutProbe = false;
 let activeSection = 'dashboard';
+let activeContentHubTab = null;
 const successfulReads = new Map(sections.map(([id]) => [id, new Set()]));
 const apiReadsStarted = new Map(sections.map(([id]) => [id, []]));
+const contentHubReadsStarted = new Map(CONTENT_HUB_TABS.map(({ id }) => [id, []]));
+const contentHubSuccessfulReads = new Map(CONTENT_HUB_TABS.map(({ id }) => [id, new Set()]));
 const requestSections = new WeakMap();
+const requestContentHubTabs = new WeakMap();
 const REQUIRED_READ_TIMEOUT_MS = 15_000;
 
 await context.tracing.start(STAFF_PORTAL_TRACE_OPTIONS);
@@ -140,9 +113,14 @@ page.on('console', message => {
 page.on('request', request => {
   const section = activeSection;
   requestSections.set(request, section);
+  if (section === 'contenthub' && activeContentHubTab) {
+    requestContentHubTabs.set(request, activeContentHubTab);
+  }
   const url = new URL(request.url());
   if (request.method() === 'GET' && url.origin === edge) {
     apiReadsStarted.get(section)?.push(url.pathname);
+    const contentHubTab = requestContentHubTabs.get(request);
+    if (contentHubTab) contentHubReadsStarted.get(contentHubTab)?.push(url.pathname);
     if (
       section === 'contenthub'
       && url.pathname.startsWith('/api/v1/')
@@ -154,6 +132,7 @@ page.on('request', request => {
 });
 page.on('response', response => {
   const responseSection = requestSections.get(response.request()) || activeSection;
+  const responseContentHubTab = requestContentHubTabs.get(response.request());
   const isPostLogoutAuthProbe = isPostLogoutAuthEndpoint(response.url(), postLogoutProbe);
   const isExpectedPostLogoutDenial = isExpectedPostLogoutAuthResponse(
     response.url(),
@@ -176,6 +155,9 @@ page.on('response', response => {
   if (response.ok() && response.request().method() === 'GET') {
     const url = new URL(response.url());
     successfulReads.get(responseSection)?.add(url.pathname);
+    if (responseContentHubTab) {
+      contentHubSuccessfulReads.get(responseContentHubTab)?.add(url.pathname);
+    }
   }
 });
 page.on('requestfailed', request => {
@@ -295,15 +277,22 @@ try {
       }
     }
     if (id === 'contenthub') {
-      for (const tab of contentHubTabs) {
-        const readsBefore = apiReadsStarted.get(id)?.length || 0;
-        await page.getByTestId(`content-hub-tab-${tab.id}`).click();
+      // Editor mounts by default while the parent hierarchy is loading. Leave it
+      // first so clicking Editor below remounts it and produces tab-attributed proof.
+      activeContentHubTab = 'cms';
+      await page.getByTestId('content-hub-tab-cms').click();
+      await page.getByTestId('content-hub-panel-cms').waitFor({ state: 'visible' });
 
-        if (tab.unsupported) {
+      for (const tab of CONTENT_HUB_TABS) {
+        activeContentHubTab = tab.id;
+        await page.getByTestId(`content-hub-tab-${tab.id}`).click();
+        await page.getByTestId(`content-hub-panel-${tab.id}`).waitFor({ state: 'visible' });
+
+        if (!tab.releaseCheck.supported) {
           await page.getByTestId(`admin-module-unavailable-content-${tab.id}`)
             .waitFor({ state: 'visible' });
           await page.waitForTimeout(250);
-          const unexpectedReads = (apiReadsStarted.get(id) || []).slice(readsBefore);
+          const unexpectedReads = contentHubReadsStarted.get(tab.id) || [];
           if (unexpectedReads.length) {
             throw new Error(
               `${tab.label} is documented as unsupported but initiated API reads:\n`
@@ -313,22 +302,25 @@ try {
           continue;
         }
 
-        for (const path of tab.requiredReads || []) {
+        for (const path of tab.releaseCheck.requiredReads) {
           const deadline = Date.now() + REQUIRED_READ_TIMEOUT_MS;
           while (Date.now() < deadline) {
-            const reads = (apiReadsStarted.get(id) || []).slice(readsBefore);
-            if (reads.includes(path) && successfulReads.get(id)?.has(path)) break;
+            const reads = contentHubReadsStarted.get(tab.id) || [];
+            if (reads.includes(path) && contentHubSuccessfulReads.get(tab.id)?.has(path)) break;
             await page.waitForTimeout(100);
           }
-          const reads = (apiReadsStarted.get(id) || []).slice(readsBefore);
-          if (!reads.includes(path)) {
-            throw new Error(`${tab.label} did not initiate required Worker read ${path}`);
-          }
-          if (!successfulReads.get(id)?.has(path)) {
-            throw new Error(`${tab.label} did not complete required Worker read ${path}`);
-          }
+        }
+        assertContentHubTabReadEvidence(
+          tab,
+          contentHubReadsStarted.get(tab.id) || [],
+          [...(contentHubSuccessfulReads.get(tab.id) || [])],
+        );
+        const tabBoundary = page.getByRole('alert').filter({ hasText: /failed to load/i }).first();
+        if (await tabBoundary.count()) {
+          throw new Error(`${tab.label} triggered the Content Editor section error boundary`);
         }
       }
+      activeContentHubTab = null;
     }
     console.log(`Staff portal read passed: ${label}`);
   }
