@@ -72,7 +72,11 @@ const contentHubTabs = [
     label: 'Seeder History',
     requiredReads: ['/api/v1/admin/content/seed-notes/history'],
   },
-  { id: 'rag-mirror', label: 'RAG Mirror', unsupported: true },
+  {
+    id: 'rag-mirror',
+    label: 'RAG Mirror',
+    requiredReads: ['/api/v1/admin/content/rag/reindex/status'],
+  },
 ];
 
 const browser = await chromium.launch({ headless: true });

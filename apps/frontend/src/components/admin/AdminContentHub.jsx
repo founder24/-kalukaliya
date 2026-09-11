@@ -15,6 +15,7 @@ const SeederHistoryPanel = lazy(() => import('./content-editor/SeederHistoryPane
 const BlogPublishWizard = lazy(() => import('./BlogPublishWizard'));
 const AssameseBackfillPanel = lazy(() => import('./AssameseBackfillPanel'));
 const AdminTranslationProgress = lazy(() => import('./AdminTranslationProgress'));
+const RagMirrorPanel = lazy(() => import('./RagMirrorPanel'));
 
 
 const API = API_BASE;
@@ -277,7 +278,7 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
             )}
             {activeTab === 'rag-mirror' && (
               <div className="h-full overflow-y-auto">
-                <AdminModuleUnavailable moduleId="content-rag-mirror" />
+                <RagMirrorPanel adminToken={adminToken} />
               </div>
             )}
           </Suspense>

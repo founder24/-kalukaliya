@@ -189,6 +189,90 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     await expect(response.json()).resolves.toMatchObject({ user_id: 'native-staff' });
   });
 
+  it('keeps browser RAG Mirror jobs on staff auth and cron routes on cron auth', async () => {
+    await env.DB.prepare(`
+      INSERT OR IGNORE INTO users (id, email, role, name)
+      VALUES ('native-staff', 'staff@example.test', 'staff', 'Native Staff')
+    `).run();
+    await env.DB.prepare(`
+      UPDATE chapters SET rag_indexed_at = 2147483647, rag_updated_at = NULL
+      WHERE subject_id = 'subject'
+    `).run();
+    await env.DB.prepare(`
+      UPDATE chapters
+      SET notes_en = '## First section\nBody', rag_sections_en = NULL, rag_indexed_at = 1
+      WHERE id = 'chapter'
+    `).run();
+    const staff = await new SignJWT({ role: 'staff', type: 'access' })
+      .setProtectedHeader({ alg: 'HS256' }).setSubject('native-staff')
+      .setIssuedAt().setExpirationTime('1h')
+      .sign(new TextEncoder().encode('ordinary-user-secret'));
+    const staffHeaders = { Authorization: `Bearer ${staff}` };
+
+    const status = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/rag/reindex/status', { headers: staffHeaders },
+    ));
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({ running: false });
+
+    const cronOnBrowserRoute = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/rag/reindex/status',
+      { headers: { Authorization: `Bearer ${CRON_SECRET}` } },
+    ));
+    expect(cronOnBrowserRoute.status).toBe(401);
+
+    const staffOnCronRoute = await workerFetch(new Request(
+      'http://worker/api/v1/admin/cron/bulk-reindex/status', { headers: staffHeaders },
+    ));
+    expect(staffOnCronRoute.status).toBe(401);
+
+    const mirror = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/rag/mirror?subject_id=subject&limit=100&force=true',
+      { method: 'POST', headers: staffHeaders },
+    ));
+    expect(mirror.status).toBe(200);
+    await expect(mirror.json()).resolves.toMatchObject({ processed: 1, errors: [] });
+    const chapter = await env.DB.prepare('SELECT rag_sections_en FROM chapters WHERE id = ?')
+      .bind('chapter').first<{ rag_sections_en: string }>();
+    expect(JSON.parse(chapter?.rag_sections_en ?? '[]')).toEqual([
+      { id: 'chapter-0', content: 'First section\nBody' },
+    ]);
+
+    const originalVectorize = env.VECTORIZE;
+    env.VECTORIZE = {
+      upsert: async () => ({ count: 1 }),
+      deleteByIds: async () => ({ count: 0 }),
+    } as unknown as VectorizeIndex;
+    const reindex = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/rag/reindex?subject_id=subject&limit=1',
+      { method: 'POST', headers: staffHeaders },
+    ));
+    expect(reindex.status).toBe(200);
+    await expect(reindex.clone().json()).resolves.toMatchObject({
+      job: 'started', total_queued: 1,
+    });
+    await Promise.allSettled(background);
+    const completed = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/rag/reindex/status', { headers: staffHeaders },
+    ));
+    await expect(completed.json()).resolves.toMatchObject({
+      job: 'done', running: false, total: 1, processed: 1, errors: [],
+    });
+    const indexed = await env.DB.prepare('SELECT rag_indexed_at, rag_updated_at FROM chapters WHERE id = ?')
+      .bind('chapter').first<{ rag_indexed_at: number; rag_updated_at: number }>();
+    expect(indexed?.rag_indexed_at).toBeGreaterThanOrEqual(indexed?.rag_updated_at ?? Number.MAX_SAFE_INTEGER);
+    env.VECTORIZE = originalVectorize;
+
+    await env.DB.prepare(`
+      UPDATE chapters
+      SET notes_en = CASE WHEN id = 'chapter' THEN NULL ELSE notes_en END,
+          rag_sections_en = CASE WHEN id = 'chapter' THEN NULL ELSE rag_sections_en END,
+          rag_indexed_at = NULL,
+          rag_updated_at = NULL
+      WHERE subject_id = 'subject'
+    `).run();
+  });
+
   it('serves read-only Assamese coverage and progress, then launches a staff backfill job', async () => {
     await env.DB.prepare(`UPDATE chapters SET notes_en = 'English source notes' WHERE id = 'chapter-cache'`).run();
     const staff = await new SignJWT({ role: 'staff', type: 'access' })

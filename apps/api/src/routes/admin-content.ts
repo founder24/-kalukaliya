@@ -7,7 +7,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, chapters, publishJobs, seedRuns, streams, subjects, users } from '../db/schema';
 import { extractBearer, isSessionValid, sessionIssuedAt, signAdminToken, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
@@ -15,6 +15,7 @@ import { generate } from '../services/ai';
 import { reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env } from '../types';
+import { runRagJob } from './staff';
 
 export const adminContentRouter = new Hono<{ Bindings: Env }>();
 
@@ -84,11 +85,6 @@ async function requireAdmin(c: Context<{ Bindings: Env }>): Promise<string | Res
   }
   return c.json({ detail: bearer || session ? 'Invalid or expired admin session' : 'Authentication required' }, 401);
 }
-async function cronOrAdminAuthorized(c: Context<{ Bindings: Env }>): Promise<boolean> {
-  if (cronAuthorized(c)) return true;
-  return typeof (await requireAdmin(c)) === 'string';
-}
-
 function adminCookie(token: string, secure: boolean): string {
   return `syrabit_admin_session=${token}; Path=/api/; Max-Age=28800; HttpOnly; SameSite=${secure ? 'Strict; Secure' : 'Lax'}`;
 }
@@ -1246,12 +1242,7 @@ function cronAuthorized(c: Context<{ Bindings: Env }>): boolean {
   const supplied = extractBearer(c.req.header('Authorization') ?? null);
   return Boolean(supplied && c.env.TRANSLATE_CRON_SECRET && supplied === c.env.TRANSLATE_CRON_SECRET);
 }
-let bulkReindexStatus: { running: boolean; total: number; processed: number; skipped: number; errors: string[] } = {
-  running: false, total: 0, processed: 0, skipped: 0, errors: [],
-};
-
-adminContentRouter.post('/cron/bulk-mirror-rag', async c => {
-  if (!(await cronOrAdminAuthorized(c))) return c.json({ detail: 'Admin session or valid TRANSLATE_CRON_SECRET required' }, 401);
+async function bulkMirrorRag(c: Context<{ Bindings: Env }>) {
   const limit = Math.max(1, Math.min(Number(c.req.query('limit') ?? 100), 200));
   const subjectId = c.req.query('subject_id');
   const force = c.req.query('force') === 'true';
@@ -1270,37 +1261,97 @@ adminContentRouter.post('/cron/bulk-mirror-rag', async c => {
     processed++;
   }
   return c.json({ processed, skipped, no_headings: noHeadings.length, no_headings_list: noHeadings.map(chapter_id => ({ chapter_id })), errors: [] });
+}
+
+async function startBulkReindex(c: Context<{ Bindings: Env }>) {
+  const limit = Math.max(1, Math.min(Number(c.req.query('limit') ?? 50), 100));
+  const subjectId = c.req.query('subject_id');
+  const force = c.req.query('force') === 'true';
+  const rows = await createDb(c.env.DB).select({
+    id: chapters.id,
+  }).from(chapters).where(and(
+    subjectId ? eq(chapters.subjectId, subjectId) : undefined,
+    force ? undefined : or(
+      isNull(chapters.ragIndexedAt),
+      and(isNotNull(chapters.ragUpdatedAt), lt(chapters.ragIndexedAt, chapters.ragUpdatedAt)),
+    ),
+  )).limit(limit);
+  if (!rows.length) return c.json({ job: 'nothing_to_do', total_queued: 0 });
+
+  const jobId = crypto.randomUUID();
+  const items = rows.map(row => ({ chapter_id: row.id, scopes: ['notes'], status: 'pending' }));
+  const created = await c.env.DB.prepare(`
+    INSERT INTO rag_reindex_jobs (id, actor_id, status, requested_scopes, items, created_at, updated_at)
+    SELECT ?, ?, 'pending', '["notes"]', ?, ?, ?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM rag_reindex_jobs WHERE status IN ('pending', 'running')
+    )
+  `).bind(jobId, null, JSON.stringify(items), now(), now()).run();
+  if ((created.meta.changes ?? 0) !== 1) {
+    return c.json({ detail: 'A bulk-reindex job is already running.' }, 409);
+  }
+  c.executionCtx.waitUntil(runRagJob(c.env, jobId));
+  return c.json({ job: 'started', job_id: jobId, total_queued: rows.length });
+}
+
+async function bulkReindexJobStatus(c: Context<{ Bindings: Env }>) {
+  const job = await c.env.DB.prepare(`
+    SELECT id, status, items, error_log, created_at, updated_at, completed_at
+    FROM rag_reindex_jobs ORDER BY created_at DESC LIMIT 1
+  `).first<{
+    id: string; status: string; items: string; error_log: string | null;
+    created_at: number | null; updated_at: number | null; completed_at: number | null;
+  }>();
+  if (!job) {
+    return c.json({ running: false, total: 0, processed: 0, skipped: 0, errors: [] });
+  }
+  const items = parseJson<Array<{ status?: string; error?: string }>>(job.items, []);
+  return c.json({
+    job_id: job.id,
+    job: job.status,
+    running: job.status === 'pending' || job.status === 'running',
+    total: items.length,
+    processed: items.filter(item => item.status === 'done').length,
+    skipped: 0,
+    errors: items.filter(item => item.status === 'failed').map(item => item.error || 'RAG reindex failed'),
+    created_at: job.created_at,
+    updated_at: job.updated_at,
+    completed_at: job.completed_at,
+  });
+}
+
+// Browser-facing RAG Mirror controls use the same staff bearer token as the
+// rest of the Content Hub. Cron credentials never cross into frontend code.
+adminContentRouter.post('/content/rag/mirror', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  return bulkMirrorRag(c);
+});
+adminContentRouter.post('/content/rag/reindex', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  return startBulkReindex(c);
+});
+adminContentRouter.get('/content/rag/reindex/status', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  return bulkReindexJobStatus(c);
+});
+
+adminContentRouter.post('/cron/bulk-mirror-rag', async c => {
+  if (!cronAuthorized(c)) return c.json({ detail: 'Valid TRANSLATE_CRON_SECRET required' }, 401);
+  return bulkMirrorRag(c);
 });
 
 adminContentRouter.post('/cron/bulk-reindex', async c => {
-  if (!(await cronOrAdminAuthorized(c))) return c.json({ detail: 'Admin session or valid TRANSLATE_CRON_SECRET required' }, 401);
-  if (bulkReindexStatus.running) return c.json({ detail: 'A bulk-reindex job is already running.' }, 409);
-  const limit = Math.max(1, Math.min(Number(c.req.query('limit') ?? 50), 100));
-  const subjectId = c.req.query('subject_id');
-  const rows = await createDb(c.env.DB).select({
-    id: chapters.id, subjectId: chapters.subjectId, notesEn: chapters.notesEn, notesAs: chapters.notesAs,
-  }).from(chapters).where(subjectId ? eq(chapters.subjectId, subjectId) : undefined).limit(limit);
-  bulkReindexStatus = { running: true, total: rows.length, processed: 0, skipped: 0, errors: [] };
-  c.executionCtx.waitUntil((async () => {
-    for (const row of rows) {
-      try {
-        const result = await runNativeReindex(c.env, row);
-        if (result.status === 'skipped') bulkReindexStatus.skipped++;
-        else bulkReindexStatus.processed++;
-      } catch (error) { bulkReindexStatus.errors.push(error instanceof Error ? error.message : String(error)); }
-    }
-    bulkReindexStatus.running = false;
-  })());
-  return c.json({ job: rows.length ? 'started' : 'nothing_to_do', total_queued: rows.length });
+  if (!cronAuthorized(c)) return c.json({ detail: 'Valid TRANSLATE_CRON_SECRET required' }, 401);
+  return startBulkReindex(c);
 });
 adminContentRouter.get('/cron/bulk-reindex/status', async c => {
-  if (!(await cronOrAdminAuthorized(c))) return c.json({ detail: 'Admin session or valid TRANSLATE_CRON_SECRET required' }, 401);
-  return c.json(bulkReindexStatus);
+  if (!cronAuthorized(c)) return c.json({ detail: 'Valid TRANSLATE_CRON_SECRET required' }, 401);
+  return bulkReindexJobStatus(c);
 });
 // Existing Content Editor alias; retain it without reintroducing a Cloud Run route.
 adminContentRouter.post('/rag/bulk-reindex', async c => {
-  if (!(await cronOrAdminAuthorized(c))) return c.json({ detail: 'Admin session or valid TRANSLATE_CRON_SECRET required' }, 401);
-  return c.redirect(new URL(`/api/v1/admin/cron/bulk-reindex${new URL(c.req.url).search}`, c.req.url).toString(), 307);
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  return startBulkReindex(c);
 });
 
 // Scheduled callers use a dedicated secret; they never inherit the browser
