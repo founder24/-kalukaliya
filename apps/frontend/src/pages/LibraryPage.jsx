@@ -350,6 +350,10 @@ export default function LibraryPage() {
   const handleResetFilters = useCallback(() => { setSearchQuery(''); setActiveFilter('all'); }, []);
 
   const searchTimerRef = useRef(null);
+  useEffect(() => () => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+  }, []);
+
   const handleSearchChange = useCallback((e) => {
     const val = e.target.value;
     setSearchQuery(val);
@@ -501,7 +505,7 @@ export default function LibraryPage() {
       chaptersBySubject, activeBoardId, streamMap, classMap, enrichedSubjects,
       searchScore, deferredQuery]);
 
-  const browserSubjects = useMemo(() => {
+  const groupBrowserSubjects = useCallback((subjectsToGroup) => {
     const groups = [
       ['hs 1st year', 'class 11'],
       ['hs 2nd year', 'class 12'],
@@ -510,14 +514,49 @@ export default function LibraryPage() {
       ['5th semester'],
     ];
 
-    return groups.flatMap((classNames) => rankedSubjects
+    return groups.flatMap((classNames) => subjectsToGroup
       .filter((subject) => {
         const stream = streamMap.get(subject.stream_id);
         const cls = classMap.get(stream?.class_id);
         return classNames.includes(String(cls?.name || '').trim().toLowerCase());
       })
       .slice(0, 10));
-  }, [rankedSubjects, streamMap, classMap]);
+  }, [streamMap, classMap]);
+
+  // Keep the SSR-visible cards in filtered API order for the lifetime of the
+  // current filter/search result. Personalization may reorder only the
+  // below-fold remainder after hydration. This prevents React from replacing
+  // an already-painted LCP card when localStorage ranking becomes available.
+  const stableBrowserSubjects = useMemo(
+    () => groupBrowserSubjects(filteredSubjects),
+    [filteredSubjects, groupBrowserSubjects],
+  );
+  const rankedBrowserSubjects = useMemo(
+    () => groupBrowserSubjects(rankedSubjects),
+    [rankedSubjects, groupBrowserSubjects],
+  );
+  const browserSubjects = useMemo(() => {
+    const stableFirstChunk = stableBrowserSubjects.slice(0, VIRTUAL_CHUNK);
+    // If the grouped catalogue has fewer than one full static chunk, keep the
+    // whole result stable. Introducing personalized cards here would put them
+    // above the virtualizer boundary and recreate the hydration/LCP shift.
+    if (stableBrowserSubjects.length <= VIRTUAL_CHUNK) {
+      return stableBrowserSubjects;
+    }
+    const firstChunkIds = new Set(stableFirstChunk.map((subject) => subject.id));
+    const stableResultIds = new Set(stableBrowserSubjects.map((subject) => subject.id));
+    const rankedRemainder = rankedBrowserSubjects.filter(
+      (subject) => stableResultIds.has(subject.id) && !firstChunkIds.has(subject.id),
+    );
+    const rankedRemainderIds = new Set(rankedRemainder.map((subject) => subject.id));
+    return [
+      ...stableFirstChunk,
+      ...rankedRemainder,
+      ...stableBrowserSubjects.filter(
+        (subject) => !firstChunkIds.has(subject.id) && !rankedRemainderIds.has(subject.id),
+      ),
+    ];
+  }, [stableBrowserSubjects, rankedBrowserSubjects]);
 
   const visibleSubjects = useMemo(
     () => browserSubjects.slice(0, renderLimit),
@@ -551,7 +590,11 @@ export default function LibraryPage() {
           url={LIBRARY_SEO_URL}
           keywords={seoKeywords}
         />
-        <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
+        <div
+          className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center"
+          role="alert"
+          aria-live="assertive"
+        >
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5" style={{ background: 'rgba(239,68,68,0.1)' }}>
             <BookOpen size={28} className="text-red-400" />
           </div>
@@ -560,6 +603,7 @@ export default function LibraryPage() {
             {contentLang === 'as' ? 'ছাৰ্ভাৰৰ সৈতে সংযোগ কৰিব পৰা নগ\'ল। আপোনাৰ সংযোগ পৰীক্ষা কৰি পুনৰ চেষ্টা কৰক।' : 'We couldn\'t reach the server. Please check your connection and try again.'}
           </p>
           <button
+            type="button"
             onClick={() => { refetchSlim(); refetchBundle(); }}
             className="h-11 px-5 rounded-xl text-sm font-medium text-white bg-violet-600 hover:bg-violet-500 transition-all flex items-center gap-2 active:scale-95"
           >
@@ -812,11 +856,10 @@ export default function LibraryPage() {
                   VIRTUAL_CHUNK onwards, those cards are never replaced after
                   hydration → Chrome registers LCP at FCP time not at ~4 s.
 
-                  filteredSubjects (stable API order) is used here intentionally
-                  — not rankedSubjects — because ranking reads localStorage which
-                  differs between SSR and client. Using the unranked slice ensures
-                  SSR and the initial client render produce identical DOM so
-                  hydrateRoot succeeds without touching the card grid.
+                  stableBrowserSubjects (filtered API order) supplies this chunk
+                  for the lifetime of the current result. Personalization only
+                  reorders the below-fold remainder, so hydration never replaces
+                  an already-painted LCP card.
                   ──────────────────────────────────────────────────────────────
                 */}
                 <div

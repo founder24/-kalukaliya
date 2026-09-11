@@ -110,8 +110,8 @@
          rel="preload" as="style" loads the @font-face CSS non-blocking; the onload
          swaps it to a live stylesheet once downloaded. Using preload (not the
          media="print" trick) avoids Vite's HTML transformer rewriting the link.
-         font-display:swap in the CSS means text paints immediately with a system
-         fallback while the woff2 is in-flight — no FOIT, no render-blocking. -->
+          font-display:fallback in the CSS bounds the swap window so a late font
+          cannot shift the page after it becomes interactive. -->
     <link rel="preload" href="/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/space-grotesk.css" as="style" onload="this.onload=null;this.rel='stylesheet'" />
     <noscript><link rel="stylesheet" href="/fonts/space-grotesk.css" /></noscript>
