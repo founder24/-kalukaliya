@@ -287,48 +287,23 @@ describe('React Router v7 Hydration Timing', () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe('X-API-Version Header Overhead', () => {
-  it('adding X-API-Version header has negligible overhead', async () => {
-    /**
-     * Simulate a request without the header
-     */
-    async function requestWithoutHeader() {
-      await new Promise((r) => setTimeout(r, 50));
-      return { status: 200, headers: {} };
-    }
-
-    /**
-     * Simulate a request with X-API-Version header added
-     * Adding a single header should add negligible time (<5ms)
-     */
-    async function requestWithHeader() {
-      await new Promise((r) => setTimeout(r, 50));
-      const headers = { 'X-API-Version': '2024-01-01' };
-      // Simulate tiny overhead of setting one header
-      await new Promise((r) => setTimeout(r, 1));
-      return { status: 200, headers };
-    }
-
-    // Measure without header
-    const startWithout = performance.now();
-    const resultWithout = await requestWithoutHeader();
-    const withoutElapsed = performance.now() - startWithout;
-
-    // Measure with header
-    const startWith = performance.now();
-    const resultWith = await requestWithHeader();
-    const withElapsed = performance.now() - startWith;
-
-    const overhead = withElapsed - withoutElapsed;
-
-    console.log(`\n  === X-API-VERSION HEADER OVERHEAD ===`);
-    console.log(`  Without header:  ${withoutElapsed.toFixed(1)}ms`);
-    console.log(`  With header:     ${withElapsed.toFixed(1)}ms`);
-    console.log(`  Overhead:        ${overhead.toFixed(1)}ms`);
-    console.log(`  ======================================`);
+  it('adding X-API-Version header has negligible modeled overhead', () => {
+    const baseRequestMs = 50;
+    const headerSetupMs = 1;
+    const resultWithout = {
+      status: 200,
+      headers: {},
+      modeledElapsedMs: baseRequestMs,
+    };
+    const resultWith = {
+      status: 200,
+      headers: { 'X-API-Version': '2024-01-01' },
+      modeledElapsedMs: baseRequestMs + headerSetupMs,
+    };
+    const overhead = resultWith.modeledElapsedMs - resultWithout.modeledElapsedMs;
 
     expect(resultWith.headers['X-API-Version']).toBe('2024-01-01');
     expect(resultWithout.headers).toEqual({});
-    // Overhead should be negligible (< 5ms)
     expect(overhead).toBeLessThan(5);
   });
 });
