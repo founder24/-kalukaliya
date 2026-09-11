@@ -1,0 +1,35 @@
+name: Required Status Context Guard
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-required-contexts:
+    name: Verify Required Status Contexts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read required contexts from main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh api \
+              "repos/${GITHUB_REPOSITORY}/contents/.github/required-status-contexts.json?ref=main" \
+              --jq .content | base64 --decode > "$RUNNER_TEMP/required-status-contexts.json"; then
+            echo "::warning::Required-context manifest is not on main yet; using the checked-out bootstrap copy."
+            cp .github/required-status-contexts.json "$RUNNER_TEMP/required-status-contexts.json"
+          fi
+
+      - name: Compare branch protection with PR workflow jobs
+        run: |
+          python3 scripts/check-required-status-contexts.py \
+            --required-contexts-file "$RUNNER_TEMP/required-status-contexts.json"
+
+      - name: Run checker regression tests
+        run: python3 scripts/test-required-status-contexts.py

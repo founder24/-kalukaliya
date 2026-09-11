@@ -102,6 +102,19 @@ async function guard(c: Context<{ Bindings: Env }>): Promise<AuthPayload | null>
 
 const ANALYTICS_MAX_DAYS = 90;
 
+/**
+ * Cloudflare Access strips untrusted client copies of its assertion header and
+ * adds a signed assertion after a normal Access login. A matching bypass policy
+ * reaches the Worker without that assertion. Keep this endpoint read-only and
+ * intentionally return only the boolean needed by the persistent staff banner.
+ */
+staffRouter.get('/break-glass-status', async (c) => {
+  const auth = await guard(c); if (!auth) return c.res;
+  const active = c.env.APP_ENV === 'production'
+    && !c.req.header('Cf-Access-Jwt-Assertion');
+  return c.json({ active });
+});
+
 function analyticsDays(value: string | undefined): number | null {
   if (value === undefined) return 30;
   if (!/^\d{1,3}$/.test(value)) return null;

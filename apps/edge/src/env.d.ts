@@ -33,6 +33,7 @@ interface Env {
   // ── Secrets (set via `npx wrangler secret put <NAME>`) ──
   JWT_SECRET: string;
   EDGE_SHARED_SECRET: string;
+  RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL?: string;
 
   // ── JWT Configuration ──
   // Optional: algorithm auto-detected from token header ('HS256' | 'RS256')
@@ -45,6 +46,8 @@ interface Env {
 
   // Optional: bound service-to-service response-header timeout (milliseconds).
   SERVICE_BINDING_TIMEOUT_MS?: string;
+  RATE_LIMIT_CLEANUP_ALERT_THRESHOLD?: string;
+  RATE_LIMIT_CLEANUP_ALERT_WINDOW_MINUTES?: string;
 
   // ── Bindings ──
   R2_BUCKET: R2Bucket;

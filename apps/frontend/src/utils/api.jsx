@@ -16,6 +16,7 @@ if (!_VITE_BACKEND) {
   }
 }
 export const API_BASE = `${BACKEND_URL}/api/v1`;
+export const HEALTH_API = `${BACKEND_URL}/health`;
 
 const _RENDER_URL = (import.meta.env.VITE_RENDER_API_URL || '').replace(/\/+$/, '');
 const _WORKER_URL = (import.meta.env.VITE_WORKER_API_URL || '').replace(/\/+$/, '');
@@ -458,11 +459,11 @@ export const adminAdsenseSync = (token, days = 7) =>
 export const adminGetSettings = (token) =>
   axios.get(`${API_BASE}/admin/settings`, { headers: adminHeaders(token), withCredentials: true });
 
-export const adminGetDiagnostics = (token) =>
-  axios.get(`${API_BASE}/admin/diagnostics`, { headers: adminHeaders(token), withCredentials: true });
-
-export const adminDisableBreakGlass = (token) =>
-  axios.post(`${API_BASE}/admin/break-glass/disable`, {}, { headers: adminHeaders(token), withCredentials: true });
+export const adminGetBreakGlassStatus = (token) =>
+  axios.get(`${API_BASE}/admin/break-glass-status`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+  });
 
 export const adminUpdateSettings = (token, data) =>
   axios.put(`${API_BASE}/admin/settings`, data, { headers: adminHeaders(token), withCredentials: true });

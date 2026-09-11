@@ -5,6 +5,11 @@ name: CI Retired Local Tooling — Lint & Test
 # deployment step; Cloudflare Workers are the only production runtime.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/backend/**'
+      - '.github/workflows/ci-backend.yml'
   pull_request:
     branches: [main]
     paths:
@@ -14,6 +19,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      rehearse_chat_latency_failure:
+        description: 'Rehearsal only: fail the chat latency job after its production-safe checks'
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       validate_authenticated:
@@ -32,6 +37,8 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  issues: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -123,8 +130,12 @@ jobs:
       - name: Test curriculum release guards
         run: pnpm --filter @workspace/syrabit test:release-guards
 
-      - name: Test disposable staff sign-in failure safety
-        run: bash scripts/test-validate-cloudflare-api-cutover.sh
+      - name: Test staff portal release guards
+        run: |
+          bash scripts/test-validate-cloudflare-api-cutover.sh
+          node --test scripts/staff-portal-response-policy.test.mjs
+          node --test scripts/staff-portal-sections.test.mjs
+          pnpm --filter @workspace/syrabit exec vitest run src/pages/AdminPage.sections.test.jsx
 
       - name: Test disposable staff-auth release cleanup
         run: bash scripts/test-release-staff-auth-reaper.sh
@@ -319,6 +330,7 @@ jobs:
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+          RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL: ${{ secrets.RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL }}
         run: |
           set -euo pipefail
           if [[ -n "$JWT_SECRET" ]]; then
@@ -330,6 +342,11 @@ jobs:
             printf '%s' "$EDGE_SHARED_SECRET" | pnpm exec wrangler secret put EDGE_SHARED_SECRET --env production >/dev/null
           else
             echo "EDGE_SHARED_SECRET not supplied; preserving the existing Cloudflare value."
+          fi
+          if [[ -n "$RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL" ]]; then
+            printf '%s' "$RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL" | pnpm exec wrangler secret put RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL --env production >/dev/null
+          else
+            echo "RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL not supplied; cleanup alerting remains disabled unless an existing Cloudflare value is present."
           fi
 
       - name: Verify edge Worker secret names
@@ -404,6 +421,27 @@ jobs:
           CLOUDFLARE_RELEASE_BUILD: 'true'
           ALLOW_INCOMPLETE_CURRICULUM_BUILD: 'false'
           REQUIRE_HYDRATION_BROWSER: 'true'
+          BUILD_BUDGET_MS: '1800000'
+          PRERENDER_BUDGET_MS: '1080000'
+          PRERENDER_STEP_BUDGET_MS: '1140000'
+          PRERENDER_FETCH_CONCURRENCY: '4'
+
+      - name: Verify staff production chunks
+        run: pnpm --filter @workspace/syrabit run check:staff-chunks
+
+      - name: Upload staff production chunk diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: staff-production-chunk-diagnostics
+          path: |
+            apps/frontend/dist/.vite/manifest.json
+            apps/frontend/dist/assets/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Verify hashed HTML assets before Pages publish
+        run: pnpm --filter @workspace/syrabit run check:hashed-assets
 
       - name: Verify built IndexNow ownership file
         env:
@@ -464,13 +502,6 @@ jobs:
           assert all(item["status"] == "healthy" for item in payload["checks"].values()), payload
           PY
           echo "Deep binding probes passed without production writes."
-
-      - name: Worker chat first-token performance gate
-        env:
-          CHAT_API_ORIGIN: ${{ env.API_WORKER_URL }}
-          CHAT_FIRST_TOKEN_TARGET_MS: '3000'
-          CHAT_PERFORMANCE_SAMPLES: '3'
-        run: node scripts/test-worker-chat-performance.mjs
 
       - name: Public edge is reachable
         run: |
@@ -598,6 +629,180 @@ jobs:
           grep -qi '^x-source: bot-render-not-found' /tmp/missing.headers
           ! grep -q 'id="root"\|id="app"' /tmp/missing.html
 
+  chat-performance:
+    name: Worker chat first-token performance
+    runs-on: ubuntu-latest
+    needs: [deploy-api, deploy-edge, deploy-frontend]
+    if: |
+      always() &&
+      needs.deploy-api.result == 'success' &&
+      needs.deploy-edge.result == 'success' &&
+      needs.deploy-frontend.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Worker chat performance gate regression test
+        run: node --test scripts/worker-chat-performance-gate.test.mjs
+
+      - name: Download recent worker chat performance timings
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            fs.mkdirSync('chat-performance-history-zips', { recursive: true });
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const recent = artifacts
+              .filter(artifact =>
+                artifact.name.startsWith('worker-chat-performance-')
+                && !artifact.expired
+                && artifact.workflow_run?.id !== context.runId)
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+              .slice(0, 5);
+            for (const artifact of recent) {
+              const download = await github.rest.actions.downloadArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+                archive_format: 'zip',
+              });
+              fs.writeFileSync(
+                `chat-performance-history-zips/${artifact.id}.zip`,
+                Buffer.from(download.data),
+              );
+            }
+            core.notice(`Downloaded ${recent.length} recent chat performance artifact(s).`);
+
+      - name: Extract recent worker chat performance timings
+        continue-on-error: true
+        run: |
+          mkdir -p chat-performance-history
+          for archive in chat-performance-history-zips/*.zip; do
+            [[ -e "$archive" ]] || continue
+            artifact_id="$(basename "$archive" .zip)"
+            mkdir -p "chat-performance-history/$artifact_id"
+            unzip -q "$archive" -d "chat-performance-history/$artifact_id"
+          done
+
+      - name: Worker chat first-token performance gate
+        env:
+          CHAT_API_ORIGIN: ${{ env.API_WORKER_URL }}
+          CHAT_FIRST_TOKEN_TARGET_MS: '3000'
+          CHAT_PERFORMANCE_SAMPLES: '3'
+          CHAT_PERFORMANCE_REPORT_PATH: chat-performance-report.json
+        run: node scripts/test-worker-chat-performance.mjs
+
+      - name: Warn on recurring worker chat latency outliers
+        if: ${{ always() && hashFiles('chat-performance-report.json') != '' }}
+        env:
+          CHAT_PERFORMANCE_HISTORY_RUNS: '5'
+          CHAT_PERFORMANCE_NOTIFICATION_RUNS: '3'
+          CHAT_PERFORMANCE_NOTIFICATION_STATE_PATH: chat-performance-notification-state.json
+        run: node scripts/warn-worker-chat-performance-history.mjs chat-performance-report.json chat-performance-history
+
+      - name: Notify maintainers of persistent worker chat latency
+        if: ${{ always() && hashFiles('chat-performance-notification-state.json') != '' }}
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const state = JSON.parse(fs.readFileSync(
+              'chat-performance-notification-state.json',
+              'utf8',
+            ));
+            if (!state.comparison_complete) {
+              core.notice(
+                `Chat latency notification state unchanged: only ${state.compared_runs}/${state.minimum_runs} reports were available.`,
+              );
+              return;
+            }
+
+            const routes = {
+              direct_chapter_rag: 'Direct chapter RAG',
+              rag_plus_bounded_web: 'Bounded web retrieval',
+            };
+            const activeByRoute = new Map(
+              state.active_warnings.map(warning => [warning.route, warning]),
+            );
+            const indeterminateRoutes = new Set(state.indeterminate_routes || []);
+            const runUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            for (const [route, label] of Object.entries(routes)) {
+              if (indeterminateRoutes.has(route)) {
+                core.notice(
+                  `${label} did not pass the current release gate; preserving its existing notification state.`,
+                );
+                continue;
+              }
+              const marker = `<!-- chat-latency-warning:${route} -->`;
+              const issues = await github.paginate(github.rest.issues.listForRepo, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                per_page: 100,
+              });
+              const existing = issues.find(issue =>
+                !issue.pull_request && issue.body?.includes(marker));
+              const warning = activeByRoute.get(route);
+
+              if (warning && !existing) {
+                const phase = warning.dominant_slow_phase
+                  ? `\n- Dominant slow phase: \`${warning.dominant_slow_phase.phase}\` (${warning.dominant_slow_phase.average_ms} ms average)`
+                  : '';
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `[Chat latency] Persistent ${label} outliers`,
+                  body: [
+                    marker,
+                    `The ${label} route has exceeded the first-token target in tolerated outliers across ${warning.affected_runs}/${warning.compared_runs} recent releases.`,
+                    '',
+                    `- Affected-run maxima: ${warning.maxima_ms.join(', ')} ms${phase}`,
+                    `- Detection run: ${runUrl}`,
+                    '',
+                    'The release gate still passed. This issue is deduplicated and will close automatically after recovery.',
+                  ].join('\n'),
+                });
+                core.warning(`Opened a maintainer notification for persistent ${label} latency.`);
+              } else if (!warning && existing) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  body: `Recovery detected in [workflow run ${context.runNumber}](${runUrl}): this route no longer meets the persistent-warning threshold.`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  state: 'closed',
+                  state_reason: 'completed',
+                });
+                core.notice(`Closed the active ${label} latency notification after recovery.`);
+              }
+            }
+
+      - name: Upload worker chat performance timings
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-chat-performance-${{ github.run_attempt }}
+          path: chat-performance-report.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Force chat latency failure for dependency rehearsal
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.rehearse_chat_latency_failure }}
+        run: |
+          echo "::error::Manual rehearsal forced the chat latency result to fail after normal checks; production traffic was not modified."
+          exit 1
+
   post-native-smoke:
     name: Confirm native routing
     runs-on: ubuntu-latest
@@ -665,11 +870,55 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter @workspace/syrabit run playwright:install:chromium
 
+      - name: Test staff portal diagnostic privacy
+        run: node --test scripts/staff-portal-diagnostics.test.mjs
+
       - name: Create, validate, and always remove a temporary admin
         run: bash scripts/run-disposable-staff-auth-cutover.sh
 
       - name: Verify every production staff portal section read-only
         run: bash scripts/run-disposable-staff-portal-check.sh
+
+      - name: Upload failed staff portal browser diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: staff-portal-playwright-diagnostics-${{ github.run_attempt }}
+          path: staff-portal-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Always remove an interrupted staff portal fixture
+        if: ${{ always() }}
+        run: bash scripts/cleanup-disposable-staff-portal.sh "$RUNNER_TEMP/release-staff-portal-fixture.env"
+
+  release-check-summary:
+    name: Summarize independent release checks
+    runs-on: ubuntu-latest
+    needs: [chat-performance, disposable-staff-auth]
+    if: ${{ always() }}
+    steps:
+      - name: Report chat latency and staff access separately
+        env:
+          CHAT_PERFORMANCE_RESULT: ${{ needs.chat-performance.result }}
+          STAFF_ACCESS_RESULT: ${{ needs.disposable-staff-auth.result }}
+        run: |
+          {
+            echo "## Independent release checks"
+            echo
+            echo "| Check | Result |"
+            echo "| --- | --- |"
+            echo "| Chat first-token latency | ${CHAT_PERFORMANCE_RESULT} |"
+            echo "| Disposable staff access | ${STAFF_ACCESS_RESULT} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$CHAT_PERFORMANCE_RESULT" != "success" ]]; then
+            echo "::error::Chat first-token latency check result: ${CHAT_PERFORMANCE_RESULT}"
+          fi
+          if [[ "$STAFF_ACCESS_RESULT" != "success" ]]; then
+            echo "::error::Disposable staff access check result: ${STAFF_ACCESS_RESULT}"
+          fi
+          [[ "$CHAT_PERFORMANCE_RESULT" == "success" && "$STAFF_ACCESS_RESULT" == "success" ]]
 
   request-reset-email:
     name: Request fresh disposable password-reset email

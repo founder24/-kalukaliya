@@ -7,13 +7,13 @@ import { API_BASE } from '@/utils/api';
  * RagMirrorPanel — two-step workflow:
  *
  * Step 1 — Mirror: splits notes_en by ## headings → rag_sections_en in MongoDB.
- *   POST /api/v1/admin/cron/bulk-mirror-rag
+ *   POST /api/v1/admin/content/rag/mirror
  *
  * Step 2 — Reindex: pushes rag_sections_en to Cloudflare Vectorize as
  *   individual topic-section chunks.
- *   POST /api/v1/admin/cron/bulk-reindex
+ *   POST /api/v1/admin/content/rag/reindex
  *
- * Auth: Bearer TRANSLATE_CRON_SECRET for both endpoints.
+ * Auth: the normal staff access token for all browser requests.
  */
 
 function OptionPanel({ children }) {
@@ -64,11 +64,31 @@ export default function RagMirrorPanel({ adminToken }) {
   const [reindexResult,      setReindexResult]      = useState(null);  // final status when done
   const [reindexError,       setReindexError]       = useState(null);
   const [reindexForce,       setReindexForce]       = useState(false);
-  const [reindexConcurrency, setReindexConcurrency] = useState('3');
   const pollRef = useRef(null);
 
-  // Clean up poller on unmount
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  // Inspect the current job on mount and resume polling after navigation.
+  useEffect(() => {
+    let cancelled = false;
+    axios.get(
+      `${API_BASE}/admin/content/rag/reindex/status`,
+      { headers: { Authorization: `Bearer ${adminToken}` } },
+    ).then(({ data }) => {
+      if (cancelled) return;
+      setReindexProgress(data);
+      if (data.running) {
+        setReindexRunning(true);
+        pollRef.current = setInterval(() => pollStatus(adminToken), 3000);
+      } else if (data.total > 0) {
+        setReindexResult(data);
+      }
+    }).catch(err => {
+      if (!cancelled) setReindexError(err?.response?.data?.detail || err.message || 'Could not inspect reindex job');
+    });
+    return () => {
+      cancelled = true;
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [adminToken]);
 
   const runMirror = async () => {
     if (mirrorRunning) return;
@@ -81,7 +101,7 @@ export default function RagMirrorPanel({ adminToken }) {
       if (limit.trim())     params.set('limit', limit.trim());
       if (subjectId.trim()) params.set('subject_id', subjectId.trim());
       const { data } = await axios.post(
-        `${API_BASE}/admin/cron/bulk-mirror-rag?${params}`,
+        `${API_BASE}/admin/content/rag/mirror?${params}`,
         {},
         { headers: { Authorization: `Bearer ${adminToken}` } },
       );
@@ -100,7 +120,7 @@ export default function RagMirrorPanel({ adminToken }) {
   const pollStatus = async (token) => {
     try {
       const { data } = await axios.get(
-        `${API_BASE}/admin/cron/bulk-reindex/status`,
+        `${API_BASE}/admin/content/rag/reindex/status`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       setReindexProgress(data);
@@ -127,9 +147,8 @@ export default function RagMirrorPanel({ adminToken }) {
       if (reindexForce)              params.set('force', 'true');
       if (subjectId.trim())          params.set('subject_id', subjectId.trim());
       if (limit.trim())              params.set('limit', limit.trim());
-      if (reindexConcurrency.trim()) params.set('concurrency', reindexConcurrency.trim());
       const { data } = await axios.post(
-        `${API_BASE}/admin/cron/bulk-reindex?${params}`,
+        `${API_BASE}/admin/content/rag/reindex?${params}`,
         {},
         { headers: { Authorization: `Bearer ${adminToken}` } },
       );
@@ -308,15 +327,6 @@ export default function RagMirrorPanel({ adminToken }) {
             </span>
           </label>
 
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Concurrency <span className="text-gray-400 font-normal">(1–6, default 3)</span>
-            </label>
-            <input type="number" value={reindexConcurrency}
-              onChange={e => setReindexConcurrency(e.target.value)}
-              min="1" max="6" placeholder="3"
-              className="w-28 px-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
-          </div>
         </OptionPanel>
 
         <button onClick={runReindex} disabled={reindexRunning}

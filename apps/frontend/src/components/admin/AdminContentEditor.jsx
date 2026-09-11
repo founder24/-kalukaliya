@@ -40,7 +40,6 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const [saving, setSaving] = useState(false);
   const [chapterStats, setChapterStats] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [aiParsing, setAiParsing] = useState(false);
   const [generatingNotes, setGeneratingNotes] = useState(new Set());
   const fileInputRef = useRef(null);
   const editorRef = useRef(null);
@@ -173,27 +172,14 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
   }, [adminToken, selSubject, loadChapterStats]);
 
-  const handleAiParse = useCallback(async () => {
-    if (!contentForm.content.trim()) return toast.error('Add content first');
-    setAiParsing(true);
-    try {
-      const res = await axios.post(`${API}/admin/studio/parse`, { raw_text: contentForm.content, subject: subjects.find(s => s.id === selSubject)?.name || '', chapter: contentForm.title || '' }, authHeaders(adminToken));
-      const blocks = res.data.blocks || [];
-      if (blocks.length === 0) return toast.error('AI could not parse content');
-      setContentForm(f => ({ ...f, content: blocks.map(b => `## ${b.title}\n\n${b.content}`).join('\n\n---\n\n') }));
-      toast.success(`AI structured ${blocks.length} blocks`);
-    } catch (e) { toast.error(e.response?.data?.detail || 'AI parsing failed'); }
-    finally { setAiParsing(false); }
-  }, [contentForm.content, contentForm.title, selSubject, subjects]);
-
   const load = useCallback(async () => {
     try {
       const cfg = authHeaders(adminToken);
       const [b, c, s, sub] = await Promise.all([
-        axios.get(`${API}/admin/content/boards`, cfg),
-        axios.get(`${API}/admin/content/classes`, cfg),
-        axios.get(`${API}/admin/content/streams`, cfg),
-        axios.get(`${API}/admin/content/subjects`, cfg),
+        axios.get(`${API}/staff/content/boards`, cfg),
+        axios.get(`${API}/staff/content/classes`, cfg),
+        axios.get(`${API}/staff/content/streams`, cfg),
+        axios.get(`${API}/staff/content/subjects`, cfg),
       ]);
       setBoards(b.data?.boards || b.data || []); setClasses(c.data?.classes || c.data || []); setStreams(s.data?.streams || s.data || []); setSubjects(sub.data?.subjects || sub.data || []);
     } catch { toast.error('Failed to load content data'); }
@@ -735,7 +721,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                 onSave={editView === 'edit-chapter' ? handleUpdateChapter : handleCreateChapter}
                 onCancel={() => { setEditView(null); setEditTarget(null); setChapterStats(null); }}
                 onFileAttach={handleFileAttach} uploading={uploading}
-                onAiParse={handleAiParse} aiParsing={aiParsing} onLoadChapterStats={loadChapterStats}
+                onLoadChapterStats={loadChapterStats}
                 editorRef={editorRef} editorKey={editorKey} setEditorKey={setEditorKey}
                 showPreview={showPreview} setShowPreview={setShowPreview}
                 fileInputRef={fileInputRef}

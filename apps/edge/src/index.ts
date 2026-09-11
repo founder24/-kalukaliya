@@ -330,8 +330,23 @@ export default {
       let backendReachable = false;
       let rateLimitCleanup = {
         degraded: false,
+        active_incidents: 0,
         latest_failure_at: null as string | null,
         latest_recovery_at: null as string | null,
+        rolling_incident_count: 0,
+        history_window_hours: 24,
+        recent_transitions: [] as Array<{
+          event: 'failed' | 'recovered';
+          occurred_at: string;
+        }>,
+        alert: {
+          enabled: false,
+          threshold: 3,
+          window_minutes: 60,
+          state: 'disabled' as 'disabled' | 'healthy' | 'active' | 'recovered' | 'expired' | 'delivery_failed',
+          last_fired_at: null as string | null,
+          window_expires_at: null as string | null,
+        },
       };
       const now = Date.now();
 
@@ -339,9 +354,43 @@ export default {
         try {
           const raw = await env.RATE_LIMIT_KV.get(RATE_LIMIT_CLEANUP_HEALTH_KEY);
           const persisted = raw
-            ? JSON.parse(raw) as typeof rateLimitCleanup
+            ? JSON.parse(raw) as typeof rateLimitCleanup & {
+              incident_count_buckets?: Array<{ started_at: string; count: number }>;
+            }
             : null;
-          if (persisted) rateLimitCleanup = persisted;
+          if (persisted) {
+            const retentionCutoff = now - (persisted.history_window_hours || 24) * 60 * 60 * 1000;
+            const recentTransitions = Array.isArray(persisted.recent_transitions)
+              ? persisted.recent_transitions.filter(transition => (
+                (transition.event === 'failed' || transition.event === 'recovered')
+                && typeof transition.occurred_at === 'string'
+                && Date.parse(transition.occurred_at) >= retentionCutoff
+              ))
+              : [];
+            const incidentCountBuckets = Array.isArray(persisted.incident_count_buckets)
+              ? persisted.incident_count_buckets.filter(bucket => (
+                typeof bucket.started_at === 'string'
+                && Date.parse(bucket.started_at) >= retentionCutoff
+                && Number.isSafeInteger(bucket.count)
+                && bucket.count > 0
+              ))
+              : [];
+            rateLimitCleanup = {
+              degraded: persisted.degraded === true,
+              active_incidents: Number.isSafeInteger(persisted.active_incidents)
+                ? persisted.active_incidents
+                : 0,
+              latest_failure_at: persisted.latest_failure_at ?? null,
+              latest_recovery_at: persisted.latest_recovery_at ?? null,
+              rolling_incident_count: incidentCountBuckets.reduce(
+                (total, bucket) => total + bucket.count,
+                0,
+              ),
+              history_window_hours: persisted.history_window_hours || 24,
+              recent_transitions: recentTransitions,
+              alert: persisted.alert ?? rateLimitCleanup.alert,
+            };
+          }
         } catch {
           // Incident telemetry must not make the health endpoint unavailable.
         }

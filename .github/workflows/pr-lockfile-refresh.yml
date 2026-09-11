@@ -55,13 +55,15 @@ jobs:
           VITE_BACKEND_URL: https://api.syrabit.ai
 
       - name: Commit refreshed lockfile if changed
+        env:
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           if [[ -n "$(git status --porcelain pnpm-lock.yaml)" ]]; then
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git config user.name "github-actions[bot]"
             git add pnpm-lock.yaml
             git commit -m "chore: regenerate pnpm-lock.yaml"
-            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+            git push origin "HEAD:${PR_HEAD_REF}"
           else
             echo "pnpm-lock.yaml is already up to date."
           fi

@@ -189,6 +189,154 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     await expect(response.json()).resolves.toMatchObject({ user_id: 'native-staff' });
   });
 
+  it('keeps browser RAG Mirror jobs on staff auth and cron routes on cron auth', async () => {
+    await env.DB.prepare(`
+      INSERT OR IGNORE INTO users (id, email, role, name)
+      VALUES ('native-staff', 'staff@example.test', 'staff', 'Native Staff')
+    `).run();
+    await env.DB.prepare(`
+      UPDATE chapters SET rag_indexed_at = 2147483647, rag_updated_at = NULL
+      WHERE subject_id = 'subject'
+    `).run();
+    await env.DB.prepare(`
+      UPDATE chapters
+      SET notes_en = '## First section\nBody', rag_sections_en = NULL, rag_indexed_at = 1
+      WHERE id = 'chapter'
+    `).run();
+    const staff = await new SignJWT({ role: 'staff', type: 'access' })
+      .setProtectedHeader({ alg: 'HS256' }).setSubject('native-staff')
+      .setIssuedAt().setExpirationTime('1h')
+      .sign(new TextEncoder().encode('ordinary-user-secret'));
+    const staffHeaders = { Authorization: `Bearer ${staff}` };
+
+    const status = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/rag/reindex/status', { headers: staffHeaders },
+    ));
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({ running: false });
+
+    const cronOnBrowserRoute = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/rag/reindex/status',
+      { headers: { Authorization: `Bearer ${CRON_SECRET}` } },
+    ));
+    expect(cronOnBrowserRoute.status).toBe(401);
+
+    const staffOnCronRoute = await workerFetch(new Request(
+      'http://worker/api/v1/admin/cron/bulk-reindex/status', { headers: staffHeaders },
+    ));
+    expect(staffOnCronRoute.status).toBe(401);
+
+    const mirror = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/rag/mirror?subject_id=subject&limit=100&force=true',
+      { method: 'POST', headers: staffHeaders },
+    ));
+    expect(mirror.status).toBe(200);
+    await expect(mirror.json()).resolves.toMatchObject({ processed: 1, errors: [] });
+    const chapter = await env.DB.prepare('SELECT rag_sections_en FROM chapters WHERE id = ?')
+      .bind('chapter').first<{ rag_sections_en: string }>();
+    expect(JSON.parse(chapter?.rag_sections_en ?? '[]')).toEqual([
+      { id: 'chapter-0', content: 'First section\nBody' },
+    ]);
+
+    const originalVectorize = env.VECTORIZE;
+    env.VECTORIZE = {
+      upsert: async () => ({ count: 1 }),
+      deleteByIds: async () => ({ count: 0 }),
+    } as unknown as VectorizeIndex;
+    const reindex = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/rag/reindex?subject_id=subject&limit=1',
+      { method: 'POST', headers: staffHeaders },
+    ));
+    expect(reindex.status).toBe(200);
+    await expect(reindex.clone().json()).resolves.toMatchObject({
+      job: 'started', total_queued: 1,
+    });
+    await Promise.allSettled(background);
+    const completed = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/rag/reindex/status', { headers: staffHeaders },
+    ));
+    await expect(completed.json()).resolves.toMatchObject({
+      job: 'done', running: false, total: 1, processed: 1, errors: [],
+    });
+    const indexed = await env.DB.prepare('SELECT rag_indexed_at, rag_updated_at FROM chapters WHERE id = ?')
+      .bind('chapter').first<{ rag_indexed_at: number; rag_updated_at: number }>();
+    expect(indexed?.rag_indexed_at).toBeGreaterThanOrEqual(indexed?.rag_updated_at ?? Number.MAX_SAFE_INTEGER);
+    env.VECTORIZE = originalVectorize;
+
+    await env.DB.prepare(`
+      UPDATE chapters
+      SET notes_en = CASE WHEN id = 'chapter' THEN NULL ELSE notes_en END,
+          rag_sections_en = CASE WHEN id = 'chapter' THEN NULL ELSE rag_sections_en END,
+          rag_indexed_at = NULL,
+          rag_updated_at = NULL
+      WHERE subject_id = 'subject'
+    `).run();
+  });
+
+  it('serves read-only Assamese coverage and progress, then launches a staff backfill job', async () => {
+    await env.DB.prepare(`UPDATE chapters SET notes_en = 'English source notes' WHERE id = 'chapter-cache'`).run();
+    const staff = await new SignJWT({ role: 'staff', type: 'access' })
+      .setProtectedHeader({ alg: 'HS256' }).setSubject('native-staff')
+      .setIssuedAt().setExpirationTime('1h')
+      .sign(new TextEncoder().encode('ordinary-user-secret'));
+    const headers = { Authorization: `Bearer ${staff}` };
+    const countBefore = await env.DB.prepare(`SELECT COUNT(*) AS count FROM seed_runs`).first<{ count: number }>();
+
+    const coverage = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/assamese/coverage', { headers },
+    ));
+    const progress = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/assamese/progress', { headers },
+    ));
+    expect(coverage.status).toBe(200);
+    await expect(coverage.json()).resolves.toMatchObject({
+      total: 1, translated: 0, missing: 1,
+      subjects: [{ subject_id: 'subject', missing: 1 }],
+    });
+    expect(progress.status).toBe(200);
+    await expect(progress.json()).resolves.toEqual({ running: false, run: null });
+    const countAfterReads = await env.DB.prepare(`SELECT COUNT(*) AS count FROM seed_runs`).first<{ count: number }>();
+    expect(countAfterReads?.count).toBe(countBefore?.count);
+
+    const launch = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/assamese/backfill',
+      {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 1, force: false }),
+      },
+    ));
+    expect(launch.status).toBe(200);
+    await expect(launch.clone().json()).resolves.toMatchObject({ job: 'started', total_queued: 1 });
+    await Promise.allSettled(background);
+
+    const completedProgress = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/assamese/progress', { headers },
+    ));
+    expect(completedProgress.status).toBe(200);
+    await expect(completedProgress.json()).resolves.toMatchObject({
+      running: false,
+      run: { status: 'completed', total: 1, completed: 1, failed: 0, queued: 0 },
+    });
+
+    const forceLaunch = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/assamese/backfill',
+      {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 200, force: true }),
+      },
+    ));
+    expect(forceLaunch.status).toBe(200);
+    const forceBody = await forceLaunch.json() as { run_id: string; total_queued: number };
+    expect(forceBody.total_queued).toBe(1);
+    await Promise.allSettled(background);
+    const forced = await env.DB.prepare(`SELECT log FROM seed_runs WHERE id = ?`)
+      .bind(forceBody.run_id).first<{ log: string }>();
+    expect(JSON.parse(forced?.log ?? '[]').map((entry: { chapter_id: string }) => entry.chapter_id))
+      .toEqual(['chapter-cache']);
+  });
+
   it('queues a publish job through the existing admin-session cookie', async () => {
     const response = await workerFetch(adminRequest(
       `/api/v1/admin/content/chapters/${chapterId}/publish`, 'POST',
@@ -250,6 +398,70 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     const publicResponse = await workerFetch(new Request('http://worker/api/v1/content/cms-documents/native-cms-document'));
     expect(publicResponse.status).toBe(200);
     expect((await publicResponse.json() as { title: string }).title).toBe('Native CMS document');
+  });
+
+  it('persists and publicly serves a merged subject blog through the Worker contract', async () => {
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO chapters (id, subject_id, title, slug, status, notes_en, chapter_number)
+        VALUES ('blog-chapter-one', 'subject', 'Blog chapter one', 'blog-chapter-one', 'draft', ?, 1)
+      `).bind('## Motion\n\nVelocity and acceleration.'),
+      env.DB.prepare(`
+        INSERT INTO chapters (id, subject_id, title, slug, status, notes_en, chapter_number)
+        VALUES ('blog-chapter-two', 'subject', 'Blog chapter two', 'blog-chapter-two', 'draft', ?, 2)
+      `).bind('## Force\n\nNewton laws of motion.'),
+    ]);
+
+    const anonymous = await workerFetch(new Request(
+      'http://worker/api/v1/admin/content/subjects/subject/blog-publish',
+      { method: 'POST' },
+    ));
+    expect(anonymous.status).toBe(401);
+
+    const published = await workerFetch(adminRequest(
+      '/api/v1/admin/content/subjects/subject/blog-publish',
+      'POST',
+      { chapter_ids: ['blog-chapter-one', 'blog-chapter-two'] },
+    ));
+    expect(published.status).toBe(200);
+    await expect(published.json()).resolves.toMatchObject({
+      subject_id: 'subject',
+      status: 'published',
+      chapter_count: 2,
+      queued: 2,
+    });
+
+    const publicResponse = await workerFetch(new Request(
+      'http://worker/api/v1/content/cms/post/subject',
+    ));
+    expect(publicResponse.status).toBe(200);
+    const blog = await publicResponse.json() as {
+      subject_id: string; merged_md: string; chapter_count: number; word_count: number;
+    };
+    expect(blog.subject_id).toBe('subject');
+    expect(blog.chapter_count).toBe(2);
+    expect(blog.word_count).toBeGreaterThan(0);
+    expect(blog.merged_md).toContain('# Blog chapter one');
+    expect(blog.merged_md).toContain('# Blog chapter two');
+
+    await env.DB.prepare(`
+      INSERT INTO chapters (id, subject_id, title, slug, status)
+      VALUES ('bulk-empty-chapter', 'subject', 'Bulk empty chapter', 'bulk-empty-chapter', 'draft')
+    `).run();
+    const bulkPublished = await workerFetch(adminRequest(
+      '/api/v1/admin/content/subjects/subject/bulk-publish',
+      'POST',
+      { chapter_ids: ['bulk-empty-chapter'] },
+    ));
+    expect(bulkPublished.status).toBe(200);
+    await expect(bulkPublished.json()).resolves.toMatchObject({ queued: 1 });
+
+    const afterBulkResponse = await workerFetch(new Request(
+      'http://worker/api/v1/content/cms/post/subject',
+    ));
+    expect(afterBulkResponse.status).toBe(200);
+    const afterBulk = await afterBulkResponse.json() as { merged_md: string };
+    expect(afterBulk.merged_md).toBe(blog.merged_md);
   });
 
   it('uses the separate cron secret and rejects a concurrent seed launch', async () => {

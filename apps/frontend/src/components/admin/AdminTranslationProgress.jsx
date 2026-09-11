@@ -6,6 +6,7 @@ import {
 import axios from 'axios';
 import { toast } from 'sonner';
 import { API_BASE } from '@/utils/api';
+import { authHeaders } from '@/utils/adminHelpers';
 
 const fmtPct = (n, d) =>
   d > 0 ? `${((n / d) * 100).toFixed(1)}%` : '—';
@@ -31,12 +32,10 @@ function ChapterRow({ chapter, subjectId, adminToken, onDone }) {
   const generate = useCallback(async () => {
     setLoading(true);
     try {
-      const headers = { 'Content-Type': 'application/json' };
-      if (adminToken) headers['X-Admin-Token'] = adminToken;
       const res = await axios.post(
         `${API_BASE}/admin/content/chapters/${chapter.id}/generate-notes/as`,
         { force: false },
-        { headers, withCredentials: true },
+        authHeaders(adminToken),
       );
       if (res.data?.status === 'translated') {
         setDone(true);
@@ -167,19 +166,13 @@ export default function AdminTranslationProgress({ adminToken }) {
     return () => { mountedRef.current = false; };
   }, []);
 
-  const headers = useCallback(() => {
-    const h = {};
-    if (adminToken) h['X-Admin-Token'] = adminToken;
-    return h;
-  }, [adminToken]);
-
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await axios.get(
-        `${API_BASE}/admin/content/translation-progress`,
-        { headers: headers(), withCredentials: true },
+        `${API_BASE}/admin/content/assamese/coverage`,
+        authHeaders(adminToken),
       );
       if (mountedRef.current) setData(res.data);
     } catch (e) {
@@ -188,7 +181,7 @@ export default function AdminTranslationProgress({ adminToken }) {
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [headers]);
+  }, [adminToken]);
 
   useEffect(() => { load(); }, [load, version]);
 

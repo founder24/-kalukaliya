@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { axe, toHaveNoViolations } from 'jest-axe';
-import { render, act } from '@testing-library/react';
+import { render, act, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 expect.extend(toHaveNoViolations);
@@ -35,7 +35,7 @@ vi.mock('@/components/seo/PageMeta', () => ({
 }));
 
 vi.mock('@/utils/analytics', () => ({
-  Analytics: { page: vi.fn(), event: vi.fn() },
+  Analytics: { page: vi.fn(), event: vi.fn(), searchUsed: vi.fn() },
 }));
 
 vi.mock('@/hooks/useContent', () => ({
@@ -51,7 +51,7 @@ vi.mock('@/hooks/useUser', () => ({
 }));
 
 vi.mock('./library/SubjectCard', () => ({
-  default: () => <div />,
+  default: ({ sub }) => <div data-testid="library-subject-card" data-subject-id={sub.id} />,
 }));
 
 vi.mock('./library/VirtualSubjectGrid', () => ({
@@ -100,6 +100,8 @@ import {
   useSavedSubjects,
 } from '@/hooks/useContent';
 import { useToggleSavedSubject } from '@/hooks/useUser';
+import { getRecentChapters } from '@/utils/recentChapters';
+import { Analytics } from '@/utils/analytics';
 
 const SAMPLE_BUNDLE = {
   boards:   [{ id: 'b1', name: 'AHSEC' }],
@@ -166,5 +168,73 @@ describe('LibraryPage — axe accessibility audit', () => {
     });
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it('keeps the first twenty SSR-visible cards stable after personalized ranking hydrates', async () => {
+    const subjects = Array.from({ length: 22 }, (_, index) => ({
+      id: `sub${index + 1}`,
+      slug: `subject-${index + 1}`,
+      name: `Subject ${index + 1}`,
+      class_id: index < 11 ? 'cl1' : 'cl2',
+      stream_id: index < 11 ? 's1' : 's2',
+      board_id: 'b1',
+      chapter_count: 1,
+    }));
+    const bundle = {
+      ...SAMPLE_BUNDLE,
+      classes: [
+        { id: 'cl1', name: 'Class 11', board_id: 'b1' },
+        { id: 'cl2', name: 'Class 12', board_id: 'b1' },
+      ],
+      streams: [
+        { id: 's1', name: 'Arts', class_id: 'cl1' },
+        { id: 's2', name: 'Science', class_id: 'cl2' },
+      ],
+      subjects,
+    };
+    vi.mocked(getRecentChapters).mockReturnValue([
+      { subject: 'Subject 22', path: '/ahsec/class-11/subject-22/chapter-1' },
+    ]);
+    vi.mocked(useLibraryBundleSlim).mockReturnValue({ data: bundle, isLoading: false });
+    vi.mocked(useLibraryBundleBoot).mockReturnValue({ data: bundle });
+    vi.mocked(useLibraryBundle).mockReturnValue({
+      data: bundle, isFetching: false, refetch: vi.fn(),
+    });
+
+    let container;
+    await act(async () => {
+      ({ container } = render(<LibraryPage />));
+    });
+
+    const firstChunkIds = [...container.querySelectorAll('[data-testid="library-subject-card"]')]
+      .map((card) => card.getAttribute('data-subject-id'));
+    expect(firstChunkIds).toEqual([
+      ...subjects.slice(0, 10),
+      ...subjects.slice(11, 21),
+    ].map((subject) => subject.id));
+  });
+
+  it('cancels pending search analytics when the page unmounts', async () => {
+    vi.useFakeTimers();
+    vi.mocked(useLibraryBundleSlim).mockReturnValue({ data: SAMPLE_BUNDLE, isLoading: false });
+    vi.mocked(useLibraryBundleBoot).mockReturnValue({ data: SAMPLE_BUNDLE });
+    vi.mocked(useLibraryBundle).mockReturnValue({
+      data: SAMPLE_BUNDLE, isFetching: false, refetch: vi.fn(),
+    });
+
+    let view;
+    await act(async () => {
+      view = render(<LibraryPage />);
+    });
+    fireEvent.change(view.getAllByTestId('library-search-input')[0], {
+      target: { value: 'English' },
+    });
+    view.unmount();
+    await act(async () => {
+      vi.runAllTimers();
+    });
+
+    expect(Analytics.searchUsed).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });

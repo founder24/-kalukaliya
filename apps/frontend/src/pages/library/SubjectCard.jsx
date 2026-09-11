@@ -254,11 +254,18 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         style={{ background: 'rgba(139,92,246,0.03)', border: '1px solid rgba(139,92,246,0.08)' }}
       >
         {/* Section tab pills */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1.5 overflow-x-auto scrollbar-none" style={{ borderBottom: '1px solid rgba(139,92,246,0.06)' }}>
+        <div
+          className="flex items-center gap-1.5 px-2.5 py-1.5 overflow-x-auto scrollbar-none"
+          style={{ borderBottom: '1px solid rgba(139,92,246,0.06)' }}
+          role="group"
+          aria-label={`${sub.name} content sections`}
+        >
           {SECTIONS.map(sec => (
             <button
+              type="button"
               key={sec.key}
               onClick={() => handleSectionChange(sec.key)}
+              aria-pressed={sec.key === activeSection}
               className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap"
               style={sec.key === activeSection
                 ? { background: sec.bg, color: sec.accent, border: `1px solid ${sec.accent}40` }
@@ -293,7 +300,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                     <div key={grp.id} style={{ borderBottom: i < visGroups.length - 1 ? '1px solid rgba(217,119,6,0.07)' : 'none' }}>
                       {/* Paper row — click to expand images */}
                       <button
+                        type="button"
                         onClick={(e) => { e.stopPropagation(); setExpandedPyqId(isOpen ? null : grp.id); }}
+                        aria-expanded={isOpen}
+                        aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${grp.title}`}
                         className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-xs transition-all hover:bg-amber-50/60 active:bg-amber-100/60 text-left cursor-pointer"
                       >
                         <span
@@ -365,6 +375,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                 })}
                 {moreCount > 0 && (
                   <button
+                    type="button"
                     onClick={() => setShowAllInSection(true)}
                     className="flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-medium transition-colors w-full"
                     style={{ borderTop: '1px solid rgba(217,119,6,0.07)', color: section.accent }}
@@ -428,6 +439,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
               })}
               {moreCount > 0 && (
                 <button
+                  type="button"
                   onClick={() => setShowAllInSection(true)}
                   className="flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-medium transition-colors w-full"
                   style={{ borderTop: '1px solid rgba(139,92,246,0.06)', color: section.accent }}
@@ -447,6 +459,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         style={{ borderTop: '1px solid hsl(var(--border) / 0.3)' }}
       >
         <button
+          type="button"
           onClick={() => { onToggleSave(sub.id); try { Analytics.subjectBookmarked(sub.name, !isSaved); } catch {} }}
           aria-label={isSaved ? `Unsave ${sub.name}` : `Save ${sub.name}`}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95"
@@ -484,6 +497,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         </Link>
 
         <button
+          type="button"
           onClick={() => {
             const activeSec = SECTIONS.find(s => s.key === activeSection);
             const firstChapterId = activeSec?.chapters?.[0]?.id || null;
@@ -504,6 +518,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         </button>
 
         <button
+          type="button"
           onClick={handleShare}
           disabled={sharing}
           aria-label={`Share ${sub.name}`}

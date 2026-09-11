@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback } from 'react';
 import {
   ArrowLeft, Save, Loader2, Eye, Link2, BarChart3,
-  Sparkles, RefreshCw, Layers, LayoutTemplate, Upload,
+  RefreshCw, Layers, LayoutTemplate, Upload,
   FileText, Globe, CheckCircle, Smartphone, Monitor,
   ImagePlus, Languages, Database, Clock,
 } from 'lucide-react';
@@ -29,7 +29,7 @@ export default function ChapterEditForm({
   editView, editTarget, contentForm, setContentForm,
   subjectData, saving, chapterStats,
   onSave, onCancel, onFileAttach, uploading,
-  onAiParse, aiParsing, onLoadChapterStats,
+  onLoadChapterStats,
   editorRef, editorKey, setEditorKey,
   showPreview, setShowPreview,
   fileInputRef,
@@ -406,15 +406,6 @@ export default function ChapterEditForm({
               >
                 <LayoutTemplate size={10} />
                 Templates
-              </button>
-              <button
-                onClick={onAiParse}
-                disabled={aiParsing}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold disabled:opacity-50 transition-all"
-                style={{ background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.20)', color: '#a78bfa' }}
-              >
-                {aiParsing ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                AI
               </button>
             </div>
             <div className="ml-auto flex items-center gap-1.5">

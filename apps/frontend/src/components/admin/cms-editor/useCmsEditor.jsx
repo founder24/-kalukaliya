@@ -90,10 +90,12 @@ export default function useCmsEditor(adminToken, onNavigate, hubContext) {
     } catch (err) {
       console.warn('useCmsEditor: prefill apply failed:', err);
     }
-  }, []);
+  }, [adminToken]);
 
   useEffect(() => {
-    axios.get(`${API}/content/boards`).then(r => setSpBoards(r.data || [])).catch(() => {});
+    axios.get(`${API}/staff/content/boards`, authHeaders(adminToken))
+      .then(r => setSpBoards(r.data?.boards || r.data || []))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -106,21 +108,27 @@ export default function useCmsEditor(adminToken, onNavigate, hubContext) {
 
   useEffect(() => {
     if (!spBoard) { setSpClasses([]); setSpClass(''); return; }
-    axios.get(`${API}/content/classes?board_id=${spBoard}`).then(r => setSpClasses(r.data || [])).catch(() => {});
+    axios.get(`${API}/staff/content/classes?board_id=${spBoard}`, authHeaders(adminToken))
+      .then(r => setSpClasses(r.data?.classes || r.data || []))
+      .catch(() => {});
     setSpClass(''); setSpStream(''); setSpSubject('');
-  }, [spBoard]);
+  }, [adminToken, spBoard]);
 
   useEffect(() => {
     if (!spClass) { setSpStreams([]); setSpStream(''); return; }
-    axios.get(`${API}/content/streams?class_id=${spClass}`).then(r => setSpStreams(r.data || [])).catch(() => {});
+    axios.get(`${API}/staff/content/streams?class_id=${spClass}`, authHeaders(adminToken))
+      .then(r => setSpStreams(r.data?.streams || r.data || []))
+      .catch(() => {});
     setSpStream(''); setSpSubject('');
-  }, [spClass]);
+  }, [adminToken, spClass]);
 
   useEffect(() => {
     if (!spStream) { setSpSubjects([]); setSpSubject(''); return; }
-    axios.get(`${API}/content/subjects?stream_id=${spStream}`).then(r => setSpSubjects(r.data || [])).catch(() => {});
+    axios.get(`${API}/staff/content/subjects?stream_id=${spStream}`, authHeaders(adminToken))
+      .then(r => setSpSubjects(r.data?.subjects || r.data || []))
+      .catch(() => {});
     setSpSubject('');
-  }, [spStream]);
+  }, [adminToken, spStream]);
 
   useEffect(() => {
     if (editDoc?.linked_scope) {
@@ -302,7 +310,7 @@ export default function useCmsEditor(adminToken, onNavigate, hubContext) {
       let url = `${API}/syllabi/${spBoard}/${spClass}`;
       if (spStream && spSubject) url = `${API}/syllabi/${spBoard}/${spClass}/${spStream}/${spSubject}`;
       else if (spStream) url = `${API}/syllabi/${spBoard}/${spClass}/${spStream}`;
-      const res = await axios.get(url, { withCredentials: true });
+      const res = await axios.get(url, authHeaders(adminToken));
       const syl = res.data;
       if (!syl?.content && !syl?.chapters?.length) { toast.error('No syllabus found for this scope'); return; }
       let block = `\n\n# Subject Syllabus\n\n`;

@@ -31,14 +31,13 @@
 //   PRERENDER_TRAFFIC_DAYS            (default 30)
 //   PRERENDER_BACKEND_URL / VITE_BACKEND_URL  (default https://syrabit.ai)
 //
-// Task #544: defaults were lowered to 20 subjects / 3 chapters to keep
-// the worklist under ~80 routes within the 12-min wall budget.
-// Task #2 (SEO Quick Wins): raised back to 50 subjects / 6 chapters
-// (50 + 50×6 = 350 routes). The 12-min PRERENDER_BUDGET_MS wall-clock
-// cap still applies. Development builds soft-fail gracefully on budget
-// overrun; release verification requires non-zero output. Override via env:
+// Release builds cover every published subject and sitemap chapter. The
+// request pool below bounds backend pressure independently from render
+// concurrency so full coverage does not create nested request bursts.
+// Development builds soft-fail gracefully on budget overrun; release
+// verification requires complete output. Override via env:
 //   PRERENDER_BUDGET_MS=<ms>  (max 30 min)
-// if 350 routes exceeds 12 min on a cold Cloudflare build.
+// if full coverage exceeds the configured release budget.
 
 import fs from "fs";
 import path from "path";
@@ -50,6 +49,7 @@ import {
   FETCH_TIMEOUT_MS as SHARED_TIMEOUT_MS,
 } from "./_prerender-data.mjs";
 import { injectPrerenderPath } from "./_prerender-marker.mjs";
+import { createJsonRequestPool } from "./_prerender-request-pool.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -98,11 +98,11 @@ const FETCH_TIMEOUT_MS = envInt(
   SHARED_TIMEOUT_MS,
   { min: 500, max: 60_000 },
 );
-// Task #522: bounded concurrency for backend fan-out. The previous
-// fully-serial loop (50 subjects × up to 7 fetches each = 350 serial
-// network round-trips, each capped at 8s) could blow past Cloudflare's
-// 35-min build wall whenever Railway was cold or rate-limiting.
-const FETCH_CONCURRENCY = envInt("PRERENDER_FETCH_CONCURRENCY", 8, {
+// This is a process-wide request cap, not a pMap worker count. Subject workers
+// launch chapter workers and each chapter launches three enrichment fetches;
+// limiting only either pMap allows that nested fan-out to burst well beyond
+// the advertised concurrency. Every backend request must acquire this pool.
+const FETCH_CONCURRENCY = envInt("PRERENDER_FETCH_CONCURRENCY", 4, {
   min: 1, max: 64,
 });
 // Global wall-clock budget for the entire prerender pass. If we exceed
@@ -135,20 +135,10 @@ function escapeHtml(s = "") {
     .replace(/'/g, "&#39;");
 }
 
-async function fetchJson(url) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      signal: ctrl.signal,
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
+const fetchJson = createJsonRequestPool({
+  concurrency: FETCH_CONCURRENCY,
+  timeoutMs: FETCH_TIMEOUT_MS,
+});
 
 // React Query's setQueryData rejects undefined values, so strip them
 // from inlined payloads. Keeps the wire format identical between SSR

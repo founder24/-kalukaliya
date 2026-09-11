@@ -8,49 +8,49 @@ import {
   ExternalLink, Gauge, Bug, FileText,
 } from 'lucide-react';
 import axios from 'axios';
-import { adminVerify, adminLogout, adminGetSettings, adminGetUnacknowledgedAlertCount, API_BASE } from '@/utils/api';
+import { adminVerify, adminLogout, HEALTH_API } from '@/utils/api';
 import { toast } from 'sonner';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
-import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
 import { useAuth } from '@/context/AuthContext';
 import { getToken } from '@/hooks/useTokenManager';
+import {
+  STAFF_PORTAL_SECTIONS,
+  assertStaffSectionMappings,
+} from '@/config/staffPortalSections.mjs';
+import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
 
 const AdminDashboard       = lazy(() => import('@/components/admin/AdminDashboard'));
+const AdminHealth          = lazy(() => import('@/components/admin/AdminHealth'));
 const AdminRoadmap         = lazy(() => import('@/components/admin/AdminRoadmap'));
 const AdminContentHub      = lazy(() => import('@/components/admin/AdminContentHub'));
-const AdminUsers           = lazy(() => import('@/components/admin/AdminUsers'));
-const AdminConversations   = lazy(() => import('@/components/admin/AdminConversations'));
 const AdminAnalytics       = lazy(() => import('@/components/admin/AdminAnalytics'));
-const AdminNotifications   = lazy(() => import('@/components/admin/AdminNotifications'));
-const AdminSettings        = lazy(() => import('@/components/admin/AdminSettings'));
-const AdminHealth          = lazy(() => import('@/components/admin/AdminHealth'));
-const AdminSeoManager      = lazy(() => import('@/components/admin/AdminSeoManager'));
-const AdminAiHub           = lazy(() => import('@/components/admin/AdminAiHub'));
-const AdminAccessSecurity  = lazy(() => import('@/components/admin/AdminAccessSecurity'));
-const AdminLogsExplorer    = lazy(() => import('@/components/admin/AdminLogsExplorer'));
-const AdminOpsConsole      = lazy(() => import('@/components/admin/AdminOpsConsole'));
-const SyraAssistant        = lazy(() => import('@/components/admin/SyraAssistant'));
+const AdminModuleUnavailable = lazy(() => import('@/components/admin/AdminModuleUnavailable'));
 import { SyraProvider, useSyraContext } from '@/components/admin/syra/SyraContext';
 
 // AWS-Native panel removed: /admin/aws-native/* endpoints are not implemented
 // in the current backend. The section was a frontend-only design stub — hiding
 // it prevents a 404 error on every visit and keeps the sidebar uncluttered.
 
-const SECTIONS = [
-  { id: 'dashboard',     icon: LayoutDashboard, label: 'Dashboard',         group: 'main'       },
-  { id: 'contenthub',    icon: BookOpen,        label: 'Content Editor',    group: 'main'       },
-  { id: 'seomanager',    icon: Globe,           label: 'SEO Manager',       group: 'main'       },
-  { id: 'users',         icon: Users,           label: 'Users',             group: 'audience'   },
-  { id: 'conversations', icon: MessageSquare,   label: 'Conversations',     group: 'audience'   },
-  { id: 'notifications', icon: Bell,            label: 'Notifications',     group: 'audience'   },
-  { id: 'ai',            icon: Cpu,             label: 'AI & Automation',   group: 'operations' },
-  { id: 'analytics',     icon: TrendingUp,      label: 'Analytics',         group: 'operations' },
-  { id: 'security',      icon: ShieldAlert,     label: 'Access & Security', group: 'system'     },
-  { id: 'logs',          icon: Activity,        label: 'Logs',              group: 'system'     },
-  { id: 'health',        icon: HeartPulse,      label: 'Health / Uptime',   group: 'system'     },
-  { id: 'ops',           icon: Gauge,           label: 'Ops Console',       group: 'system'     },
-  { id: 'settings',      icon: Settings,        label: 'Site Settings',     group: 'system'     },
-];
+export const SECTION_ICONS = {
+  dashboard: LayoutDashboard,
+  contenthub: BookOpen,
+  seomanager: Globe,
+  users: Users,
+  conversations: MessageSquare,
+  notifications: Bell,
+  ai: Cpu,
+  analytics: TrendingUp,
+  security: ShieldAlert,
+  logs: Activity,
+  health: HeartPulse,
+  ops: Gauge,
+  settings: Settings,
+};
+
+const SECTIONS = STAFF_PORTAL_SECTIONS.map(section => ({
+  ...section,
+  icon: SECTION_ICONS[section.id],
+}));
 
 const GROUP_LABELS = {
   main:       '',
@@ -61,22 +61,29 @@ const GROUP_LABELS = {
 
 const GROUPS = ['main', 'audience', 'operations', 'system'];
 
-const SECTION_COMPONENTS = {
+export const SECTION_COMPONENTS = {
   dashboard:     AdminDashboard,
   contenthub:    AdminContentHub,
-  seomanager:    AdminSeoManager,
-  users:         AdminUsers,
-  conversations: AdminConversations,
-  notifications: AdminNotifications,
-  ai:            AdminAiHub,
+  seomanager:    AdminModuleUnavailable,
+  users:         AdminModuleUnavailable,
+  conversations: AdminModuleUnavailable,
+  notifications: AdminModuleUnavailable,
+  ai:            AdminModuleUnavailable,
   analytics:     AdminAnalytics,
-  security:      AdminAccessSecurity,
-  logs:          AdminLogsExplorer,
+  security:      AdminModuleUnavailable,
+  logs:          AdminModuleUnavailable,
   health:        AdminHealth,
-  ops:           AdminOpsConsole,
-  settings:      AdminSettings,
+  ops:           AdminModuleUnavailable,
+  settings:      AdminModuleUnavailable,
   roadmap:       AdminRoadmap,
 };
+
+assertStaffSectionMappings(
+  STAFF_PORTAL_SECTIONS,
+  SECTION_ICONS,
+  SECTION_COMPONENTS,
+  ['roadmap'],
+);
 
 export const SECTION_REDIRECTS = {
   apiconfig:    { section: 'ai',       tab: 'providers', subTab: 'apiconfig'    },
@@ -229,9 +236,6 @@ export default function AdminPage({ adminCookieAccess = false }) {
   );
   const adminToken = verifying ? null : (bearerToken || 'cookie');
   const authMode = bearerToken ? 'staff access token' : 'secure admin cookie';
-  const [unackAlertCount, setUnackAlertCount] = useState(0);
-  const alertPollRef = useRef(null);
-
   // Debug overlay state — toggled by Ctrl+Shift+D or sidebar bug icon.
   const [debugOpen, setDebugOpen] = useState(false);
 
@@ -245,18 +249,6 @@ export default function AdminPage({ adminCookieAccess = false }) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
-
-  useEffect(() => {
-    if (!adminToken || verifying) return;
-    const fetchCount = () => {
-      adminGetUnacknowledgedAlertCount(adminToken)
-        .then((res) => setUnackAlertCount(res.data?.count || 0))
-        .catch(() => {});
-    };
-    fetchCount();
-    alertPollRef.current = setInterval(fetchCount, 60_000);
-    return () => clearInterval(alertPollRef.current);
-  }, [adminToken, verifying]);
 
   useEffect(() => {
     if (hasJwtStaffSession) {
@@ -296,19 +288,9 @@ export default function AdminPage({ adminCookieAccess = false }) {
     if (verifying) return;
     const checkStatus = async () => {
       try {
-        const [healthRes, settingsRes] = await Promise.allSettled([
-          axios.get(`${API_BASE}/health`, { withCredentials: true }),
-          adminGetSettings(adminToken),
-        ]);
-
-        const settingsData = settingsRes.status === 'fulfilled' ? settingsRes.value?.data : null;
-        if (settingsData?.maintenance_mode) {
-          setSysStatus('maintenance');
-          return;
-        }
-
-        const healthData = healthRes.status === 'fulfilled' ? healthRes.value?.data : null;
-        if (!healthData || healthRes.status === 'rejected') {
+        const healthRes = await axios.get(HEALTH_API, { withCredentials: true });
+        const healthData = healthRes?.data;
+        if (!healthData) {
           setSysStatus('warn');
           return;
         }
@@ -320,7 +302,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
       }
     };
     checkStatus();
-  }, [verifying, adminToken]);
+  }, [verifying]);
 
   const handleLogout = async () => {
     if (bearerToken) await logout();
@@ -424,11 +406,6 @@ export default function AdminPage({ adminCookieAccess = false }) {
                       {!collapsed && (
                         <span className="text-[13px] truncate">{sectionLabel}</span>
                       )}
-                      {id === 'security' && unackAlertCount > 0 && (
-                        <span className="ml-auto flex-shrink-0 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
-                          {unackAlertCount > 99 ? '99+' : unackAlertCount}
-                        </span>
-                      )}
                     </button>
                   );
                 })}
@@ -485,6 +462,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <BreakGlassBanner adminToken={adminToken} />
         <header
           className="flex items-center justify-between px-6 border-b border-gray-200 flex-shrink-0 z-10 bg-white"
           style={{ height: 60 }}
@@ -504,8 +482,6 @@ export default function AdminPage({ adminCookieAccess = false }) {
           </div>
         </header>
 
-        <BreakGlassBanner adminToken={adminToken} />
-
         <main className={`flex-1 overflow-hidden flex flex-col ${activeSection === 'contenthub' ? '' : 'overflow-y-auto p-3 sm:p-4 md:p-6'}`}>
           <SectionErrorBoundary key={activeSection} name={activeLabel}>
             <Suspense fallback={
@@ -519,20 +495,12 @@ export default function AdminPage({ adminCookieAccess = false }) {
                 adminName={adminName}
                 onNavigate={handleNavigate}
                 navContext={SECTIONS_WITH_CONTEXT.has(activeSection) ? navContext : null}
+                moduleId={activeSection}
               />
             </Suspense>
           </SectionErrorBoundary>
         </main>
       </div>
-
-      <Suspense fallback={null}>
-        <SyraAssistant
-          activeSection={activeSection}
-          onNavigate={handleNavigate}
-          adminToken={adminToken}
-          adminEmail={adminEmail}
-        />
-      </Suspense>
 
       {debugOpen && (
         <AdminShellDebug

@@ -59,6 +59,7 @@
 - [Frontend undefined identifiers](frontend-undefined-identifiers.md) — Vite builds do not catch unbound JSX names; extracted admin tabs need render coverage or static checks.
 - [Prerender canonical counts](prerender-canonical-counts.md) — Release manifests must count unique canonical output paths, not duplicate source records.
 - [Prerender backend signals](prerender-backend-signals.md) — Coalesce concurrent schema probes, but never TTL-cache completed signals across cache reads.
+- [Prerender request concurrency](prerender-request-concurrency.md) — enforce one process-wide backend request pool; nested route loops otherwise multiply fan-out.
 - [Cloudflare account API contracts](cloudflare-account-api-contracts.md) — R2 custom domains and Access writes require current, resource-specific API fields and permissions.
 - [Chat transport retry identity](chat-transport-retry-identity.md) — Keep one stable logical request key across bounded transport retries so quota is reserved only once.
 - [Worker chat web egress and latency](worker-chat-web-egress-latency.md) — Wikimedia is blocked from Workers; Crossref works, and the fast Llama model meets the first-token target.
@@ -75,3 +76,9 @@
 - [Explicit curriculum scope](chat-curriculum-scope.md) — explicit class/subject wording must fail closed and every RAG source must pass full published-hierarchy validation.
 - [Exact vector grounding](rag-exact-vector-grounding.md) — preserve matched passage order; never replace semantic matches with chapter openings.
 - [Chat cancellation state](chat-cancellation-state.md) — quota, cancellation, and persistence must compete through one conditional D1 claim state.
+- [Chat performance gate](chat-performance-gate.md) — freshness probes need explicit curriculum binding and must not require removed raw web-source URLs.
+- [Workers rate-limit test clocks](workers-rate-limit-test-clocks.md) — isolate DO names per invocation and keep alarm reset windows ahead of the runtime clock.
+- [Production browser verification traps](production-browser-verification.md) — Preserve Vite preload rejections; seed auth fixtures once so logout checks remain valid.
+- [Release failure rehearsals](release-failure-rehearsals.md) — use test-only workflows so unrelated deploy gates cannot hide scheduling evidence.
+- [Workflow trigger contracts](workflow-trigger-contracts.md) — enforce GitHub Actions triggers from normalized YAML, not source-line regexes.
+- [Access bypass rehearsals](access-bypass-rehearsals.md) — TEST-NET proves policy cleanup only; warning activation requires a temporary real operator /32.

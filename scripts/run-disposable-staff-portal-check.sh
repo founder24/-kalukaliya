@@ -15,21 +15,17 @@ fixture_password="$(openssl rand -base64 36 | tr -d '\n')"
 telemetry_id="${fixture_id}-portal"
 telemetry_route="/release-staff-portal/${fixture_suffix}"
 lease_expires_at="$(( $(date -u +%s) + 3600 ))"
+fixture_metadata="${RUNNER_TEMP:-/tmp}/release-staff-portal-fixture.env"
 fixture_hash="$(CUTOVER_STAFF_PASSWORD="$fixture_password" pnpm --filter syrabit-api exec node -e '
   const bcrypt = require("bcryptjs");
   bcrypt.hash(process.env.CUTOVER_STAFF_PASSWORD, 12).then(hash => process.stdout.write(hash));
 ')"
 
 cleanup_fixture() {
-  local cleanup_sql
-  cleanup_sql="DELETE FROM refresh_token_claims WHERE user_id = '${fixture_id}';
-    DELETE FROM content_audit_log WHERE user_id = '${fixture_id}' OR target_id = '${fixture_id}';
-    DELETE FROM analytics_events WHERE id = '${telemetry_id}' OR route_path = '${telemetry_route}';
-    DELETE FROM users WHERE id = '${fixture_id}' OR email = '${fixture_email}';
-    DELETE FROM release_staff_auth_leases WHERE fixture_id = '${fixture_id}';"
-  pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db \
-    --remote --env production --command "$cleanup_sql" >/dev/null 2>&1
-  echo "Disposable staff portal fixture removed."
+  bash "$ROOT/scripts/cleanup-disposable-staff-portal.sh" "$fixture_metadata" || {
+    echo "::error::Disposable staff portal fixture cleanup failed."
+    return 1
+  }
 }
 
 finish() {
@@ -39,6 +35,19 @@ finish() {
   exit "$status"
 }
 trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+printf "fixture_id=%q\nfixture_email=%q\ntelemetry_id=%q\ntelemetry_route=%q\n" \
+  "$fixture_id" "$fixture_email" "$telemetry_id" "$telemetry_route" >"$fixture_metadata"
+chmod 600 "$fixture_metadata"
+
+reaper_sql="$(cat "$ROOT/scripts/sql/reap-expired-release-staff-auth.sql")"
+pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db \
+  --remote --env production --command "$reaper_sql" >/dev/null 2>&1 || {
+  echo "::error::Expired disposable staff fixture cleanup failed."
+  exit 1
+}
 
 create_sql="INSERT INTO release_staff_auth_leases
     (fixture_id, telemetry_id, telemetry_route, expires_at)

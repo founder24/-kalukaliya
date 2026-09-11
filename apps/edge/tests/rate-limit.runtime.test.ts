@@ -133,29 +133,43 @@ function expectSixAdmissions(
 
 describe('anonymous burst protection in the Workers runtime', () => {
   it('admits exactly six concurrent English and Assamese requests for one signed browser', async () => {
-    const cookie = await signedAnonymousCookie(
-      'anon_0123456789abcdef0123456789abcdef',
-    );
-    const { responses, apiFetch } = await runConcurrentBurst(index =>
-      chatRequest(
-        index % 2 === 0 ? 'en' : 'as',
-        `203.0.113.${index + 10}`,
-        cookie,
-      )
-    );
+    const windowStart = (Math.floor(Date.now() / 60_000) + 2) * 60_000;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(windowStart);
+      const cookie = await signedAnonymousCookie(
+        'anon_0123456789abcdef0123456789abcdef',
+      );
+      const { responses, apiFetch } = await runConcurrentBurst(index =>
+        chatRequest(
+          index % 2 === 0 ? 'en' : 'as',
+          `203.0.113.${index + 10}`,
+          cookie,
+        )
+      );
 
-    expectSixAdmissions(responses, apiFetch);
+      expectSixAdmissions(responses, apiFetch);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('admits exactly six concurrent fresh identities on one trusted network', async () => {
-    const { responses, apiFetch } = await runConcurrentBurst(index =>
-      chatRequest(
-        index % 2 === 0 ? 'en' : 'as',
-        '198.51.100.45',
-      )
-    );
+    const windowStart = (Math.floor(Date.now() / 60_000) + 2) * 60_000;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(windowStart);
+      const { responses, apiFetch } = await runConcurrentBurst(index =>
+        chatRequest(
+          index % 2 === 0 ? 'en' : 'as',
+          '198.51.100.45',
+        )
+      );
 
-    expectSixAdmissions(responses, apiFetch);
+      expectSixAdmissions(responses, apiFetch);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('admits a fresh request after the one-minute window alarm clears persisted buckets', async () => {
@@ -278,6 +292,29 @@ describe('anonymous burst protection in the Workers runtime', () => {
           healthValues.set(key, value);
         }),
       };
+      const aggregateStorage = new Map<string, unknown>();
+      const aggregateState = {
+        blockConcurrencyWhile: async (callback: () => Promise<unknown>) => callback(),
+        storage: {
+          transaction: async (callback: (txn: unknown) => Promise<unknown>) => callback({
+            get: async (key: string) => aggregateStorage.get(key),
+            put: async (key: string, value: unknown) => aggregateStorage.set(key, value),
+            delete: async (key: string) => aggregateStorage.delete(key),
+          }),
+        },
+      } as unknown as DurableObjectState;
+      let aggregate: RateLimitDurableObject;
+      const namespace = {
+        idFromName: vi.fn(() => ({ toString: () => 'aggregate' })),
+        get: vi.fn(() => ({
+          fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+            aggregate.fetch(new Request(input, init)),
+        })),
+      } as unknown as DurableObjectNamespace;
+      aggregate = new RateLimitDurableObject(aggregateState, {
+        RATE_LIMIT_KV: healthKv as unknown as KVNamespace,
+        RATE_LIMIT_DO: namespace,
+      });
       let cleanupShouldFail = true;
       const storage = {
         get: vi.fn(async (key: string) => values.get(key)),
@@ -295,6 +332,7 @@ describe('anonymous burst protection in the Workers runtime', () => {
         storage,
       } as unknown as DurableObjectState, {
         RATE_LIMIT_KV: healthKv as unknown as KVNamespace,
+        RATE_LIMIT_DO: namespace,
       });
 
       for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -311,8 +349,25 @@ describe('anonymous burst protection in the Workers runtime', () => {
       expect(String(errorSpy.mock.calls[0]?.[0])).not.toContain('student');
       expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}')).toEqual({
         degraded: true,
+        active_incidents: 1,
         latest_failure_at: '2026-09-09T12:10:00.000Z',
         latest_recovery_at: null,
+        rolling_incident_count: 1,
+        history_window_hours: 24,
+        recent_transitions: [
+          { event: 'failed', occurred_at: '2026-09-09T12:10:00.000Z' },
+        ],
+        incident_count_buckets: [
+          { started_at: '2026-09-09T12:10:00.000Z', count: 1 },
+        ],
+        alert: {
+          enabled: false,
+          threshold: 3,
+          window_minutes: 60,
+          state: 'disabled',
+          last_fired_at: null,
+          window_expires_at: null,
+        },
       });
 
       vi.advanceTimersByTime(50 * 60_000);
@@ -336,12 +391,246 @@ describe('anonymous burst protection in the Workers runtime', () => {
       expect(storage.deleteAlarm).toHaveBeenCalledTimes(1);
       expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}')).toEqual({
         degraded: false,
+        active_incidents: 0,
         latest_failure_at: '2026-09-09T13:10:00.000Z',
         latest_recovery_at: '2026-09-09T13:10:00.000Z',
+        rolling_incident_count: 2,
+        history_window_hours: 24,
+        recent_transitions: [
+          { event: 'failed', occurred_at: '2026-09-09T12:10:00.000Z' },
+          { event: 'failed', occurred_at: '2026-09-09T13:10:00.000Z' },
+          { event: 'recovered', occurred_at: '2026-09-09T13:10:00.000Z' },
+        ],
+        incident_count_buckets: [
+          { started_at: '2026-09-09T12:10:00.000Z', count: 1 },
+          { started_at: '2026-09-09T13:10:00.000Z', count: 1 },
+        ],
+        alert: {
+          enabled: false,
+          threshold: 3,
+          window_minutes: 60,
+          state: 'disabled',
+          last_fired_at: null,
+          window_expires_at: null,
+        },
       });
     } finally {
       errorSpy.mockRestore();
       infoSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('alerts once per aggregate window and resets after recovery or expiry', async () => {
+    vi.useFakeTimers();
+    const webhook = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(webhook);
+    try {
+      vi.setSystemTime(new Date('2026-09-10T08:00:00.000Z'));
+      const values = new Map<string, unknown>();
+      const healthValues = new Map<string, string>();
+      const state = {
+        blockConcurrencyWhile: async (callback: () => Promise<unknown>) => callback(),
+        storage: {
+          get: async (key: string) => values.get(key),
+          put: async (key: string, value: unknown) => values.set(key, value),
+          delete: async (key: string) => values.delete(key),
+          transaction: async (callback: (txn: unknown) => Promise<unknown>) => callback({
+            get: async (key: string) => values.get(key),
+            put: async (key: string, value: unknown) => values.set(key, value),
+            delete: async (key: string) => values.delete(key),
+          }),
+        },
+      } as unknown as DurableObjectState;
+      const aggregate = new RateLimitDurableObject(state, {
+        RATE_LIMIT_KV: {
+          get: async (key: string) => healthValues.get(key) ?? null,
+          put: async (key: string, value: string) => {
+            healthValues.set(key, value);
+          },
+        } as unknown as KVNamespace,
+        RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL: 'https://alerts.example.test/cleanup',
+        RATE_LIMIT_CLEANUP_ALERT_THRESHOLD: '2',
+        RATE_LIMIT_CLEANUP_ALERT_WINDOW_MINUTES: '60',
+      });
+      const report = (action: 'failed' | 'recovered', incidentToken: string) =>
+        aggregate.fetch(new Request('https://rate-limit.internal/cleanup-health', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            incidentToken,
+            occurredAt: new Date().toISOString(),
+          }),
+        }));
+      const first = '00000000-0000-4000-8000-000000000001';
+      const second = '00000000-0000-4000-8000-000000000002';
+      const third = '00000000-0000-4000-8000-000000000003';
+
+      await report('failed', first);
+      await report('failed', second);
+      await report('failed', third);
+      expect(webhook).toHaveBeenCalledTimes(1);
+
+      const payload = JSON.parse(String(webhook.mock.calls[0]?.[1]?.body));
+      expect(payload).toEqual({
+        text: 'Chat-limit cleanup crossed the alert threshold: 2 incidents (threshold 2) from 2026-09-10T08:00:00.000Z to 2026-09-10T09:00:00.000Z; fired at 2026-09-10T08:00:00.000Z.',
+        event: 'rate_limit_cleanup_incident_threshold_crossed',
+        incident_count: 2,
+        threshold: 2,
+        window_started_at: '2026-09-10T08:00:00.000Z',
+        window_expires_at: '2026-09-10T09:00:00.000Z',
+        fired_at: '2026-09-10T08:00:00.000Z',
+      });
+      expect(JSON.stringify(payload)).not.toMatch(/student|bucket|incidentToken|identifier/i);
+
+      await report('recovered', first);
+      await report('recovered', second);
+      await report('recovered', third);
+      await report('failed', first);
+      expect(webhook).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(61 * 60_000);
+      await report('failed', second);
+      expect(webhook).toHaveBeenCalledTimes(3);
+      expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}').alert).toMatchObject({
+        enabled: true,
+        threshold: 2,
+        window_minutes: 60,
+        state: 'active',
+      });
+    } finally {
+      fetchSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['first then second', [0, 1]],
+    ['second then first', [1, 0]],
+  ])('keeps overlapping cleanup incidents degraded when recovering %s', async (_label, recoveryOrder) => {
+    const healthValues = new Map<string, string>();
+    const healthKv = {
+      get: async (key: string) => healthValues.get(key) ?? null,
+      put: async (key: string, value: string) => { healthValues.set(key, value); },
+    } as unknown as KVNamespace;
+    const aggregateValues = new Map<string, unknown>();
+    const aggregate = new RateLimitDurableObject({
+      blockConcurrencyWhile: async (callback: () => Promise<unknown>) => callback(),
+      storage: {
+        transaction: async (callback: (txn: unknown) => Promise<unknown>) => callback({
+          get: async (key: string) => aggregateValues.get(key),
+          put: async (key: string, value: unknown) => aggregateValues.set(key, value),
+          delete: async (key: string) => aggregateValues.delete(key),
+        }),
+      },
+    } as unknown as DurableObjectState, { RATE_LIMIT_KV: healthKv });
+    const incidentTokens = [
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+    ];
+    const transition = (action: 'failed' | 'recovered', incidentToken: string) =>
+      aggregate.fetch(new Request('https://rate-limit.internal/cleanup-health', {
+        method: 'POST',
+        body: JSON.stringify({
+          action,
+          incidentToken,
+          occurredAt: new Date().toISOString(),
+        }),
+      }));
+
+    await transition('failed', incidentTokens[0]);
+    await transition('failed', incidentTokens[1]);
+    expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}')).toMatchObject({
+      degraded: true,
+      active_incidents: 2,
+    });
+
+    await transition('recovered', incidentTokens[recoveryOrder[0]]);
+    expect(JSON.parse(healthValues.get('health:rate-limit-cleanup') ?? '{}')).toMatchObject({
+      degraded: true,
+      active_incidents: 1,
+    });
+
+    await transition('recovered', incidentTokens[recoveryOrder[1]]);
+    const persisted = healthValues.get('health:rate-limit-cleanup') ?? '{}';
+    expect(JSON.parse(persisted)).toMatchObject({
+      degraded: false,
+      active_incidents: 0,
+    });
+    expect(persisted).not.toContain('11111111-1111-4111-8111-111111111111');
+    expect(persisted).not.toContain('22222222-2222-4222-8222-222222222222');
+    expect(persisted).not.toContain('student');
+    expect(persisted).not.toContain('rl:');
+  });
+
+  it('caps cleanup transition history, prunes expired entries, and counts beyond the display cap', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-09T12:00:00.000Z'));
+      const healthValues = new Map<string, string>();
+      healthValues.set('health:rate-limit-cleanup', JSON.stringify({
+        degraded: false,
+        active_incidents: 0,
+        latest_failure_at: '2026-09-08T11:59:59.000Z',
+        latest_recovery_at: null,
+        rolling_incident_count: 1,
+        history_window_hours: 24,
+        recent_transitions: [
+          { event: 'failed', occurred_at: '2026-09-08T11:59:59.000Z' },
+        ],
+        incident_count_buckets: [
+          { started_at: '2026-09-08T11:59:00.000Z', count: 9 },
+        ],
+      }));
+      const put = vi.fn(async (key: string, value: string) => {
+        healthValues.set(key, value);
+      });
+      const aggregateValues = new Map<string, unknown>();
+      const aggregate = new RateLimitDurableObject({
+        blockConcurrencyWhile: async (callback: () => Promise<unknown>) => callback(),
+        storage: {
+          transaction: async (callback: (txn: unknown) => Promise<unknown>) => callback({
+            get: async (key: string) => aggregateValues.get(key),
+            put: async (key: string, value: unknown) => aggregateValues.set(key, value),
+            delete: async (key: string) => aggregateValues.delete(key),
+          }),
+        },
+      } as unknown as DurableObjectState, {
+        RATE_LIMIT_KV: {
+          get: async (key: string) => healthValues.get(key) ?? null,
+          put,
+        } as unknown as KVNamespace,
+      });
+
+      for (let index = 0; index < 22; index += 1) {
+        const action = index % 2 === 0 ? 'failed' : 'recovered';
+        await aggregate.fetch(new Request('https://rate-limit.internal/cleanup-health', {
+          method: 'POST',
+          body: JSON.stringify({
+            action,
+            incidentToken: '11111111-1111-4111-8111-111111111111',
+            occurredAt: new Date(Date.now() + index * 1000).toISOString(),
+          }),
+        }));
+      }
+
+      const persisted = healthValues.get('health:rate-limit-cleanup') ?? '{}';
+      const snapshot = JSON.parse(persisted);
+      expect(snapshot.recent_transitions).toHaveLength(20);
+      expect(snapshot.recent_transitions[0].occurred_at).toBe('2026-09-09T12:00:02.000Z');
+      expect(snapshot.rolling_incident_count).toBe(11);
+      expect(snapshot.incident_count_buckets).toEqual([
+        { started_at: '2026-09-09T12:00:00.000Z', count: 11 },
+      ]);
+      expect(persisted).not.toContain('incidentToken');
+      expect(persisted).not.toContain('student');
+      expect(persisted).not.toContain('rl:');
+      expect(put).toHaveBeenLastCalledWith(
+        'health:rate-limit-cleanup',
+        expect.any(String),
+      );
+    } finally {
       vi.useRealTimers();
     }
   });
@@ -352,7 +641,7 @@ describe('authenticated per-language limits in the Workers runtime', () => {
     const windowStart = (Math.floor(Date.now() / 60_000) + 2) * 60_000;
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(windowStart + 59_500);
+      vi.setSystemTime(windowStart);
       const userId = 'student-both-language-reset';
       const token = await authenticatedToken(userId);
       const forwardedLanguages: string[] = [];
@@ -366,11 +655,13 @@ describe('authenticated per-language limits in the Workers runtime', () => {
         chatRequest(lang, '203.0.113.210', undefined, token);
 
       for (const lang of ['en', 'as'] as const) {
+        vi.setSystemTime(windowStart);
         const admitted = [];
         for (let index = 0; index < 6; index += 1) {
           admitted.push(await worker.fetch(request(lang), environment, context()));
         }
         expect(admitted.every(response => response.status === 200)).toBe(true);
+        vi.setSystemTime(windowStart + 59_500);
         expect((await worker.fetch(request(lang), environment, context())).status).toBe(429);
       }
       expect(forwardedLanguages.filter(lang => lang === 'en')).toHaveLength(6);
@@ -379,7 +670,7 @@ describe('authenticated per-language limits in the Workers runtime', () => {
       const windowKey = Math.floor(Date.now() / 60_000);
       const alarmsRan = await Promise.all((['en', 'as'] as const).map(lang =>
         runDurableObjectAlarm(
-          rateLimitNamespace.get(
+          env.RATE_LIMIT_DO.get(
             rateLimitNamespace.idFromName(`rl:${userId}:${lang}:${windowKey}`),
           ),
         )

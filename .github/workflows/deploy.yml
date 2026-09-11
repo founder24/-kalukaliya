@@ -30,6 +30,8 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  issues: write
 
 concurrency:
   group: deploy-${{ github.ref }}

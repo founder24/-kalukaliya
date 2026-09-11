@@ -8,10 +8,11 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { axe, toHaveNoViolations } from 'jest-axe';
-import { render, act } from '@testing-library/react';
+import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 
 expect.extend(toHaveNoViolations);
+const { mockApiGet } = vi.hoisted(() => ({ mockApiGet: vi.fn() }));
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ subjectId: 'english-class-11' }),
@@ -50,7 +51,7 @@ vi.mock('@/components/ui/accordion', () => ({
 vi.mock('@/utils/api', () => ({
   getChunks:              vi.fn(),
   getChapterTopicSummary: vi.fn(),
-  apiClient:              () => ({ get: vi.fn(), post: vi.fn() }),
+  apiClient:              () => ({ get: mockApiGet }),
 }));
 
 vi.mock('@/hooks/useShare', () => ({
@@ -92,6 +93,7 @@ const SAMPLE_CHAPTERS = [
 
 beforeEach(() => {
   vi.useRealTimers();
+  mockApiGet.mockReset();
   vi.mocked(useSubject).mockReturnValue({
     data:     undefined,
     isLoading: true,
@@ -147,5 +149,30 @@ describe('SubjectPage — axe accessibility audit', () => {
     });
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it('loads and renders the Worker-native merged blog when Blog View is selected', async () => {
+    vi.mocked(useSubject).mockReturnValue({
+      data: SAMPLE_SUBJECT,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    vi.mocked(useChapters).mockReturnValue({ data: SAMPLE_CHAPTERS, isLoading: false });
+    mockApiGet.mockResolvedValue({
+      data: {
+        title: 'English Complete Study Guide',
+        merged_md: '## Published chapter\n\nWorker-native study notes.',
+        headings: JSON.stringify([{ level: 2, text: 'Published chapter', anchor: 'published-chapter' }]),
+        word_count: 5,
+      },
+    });
+
+    render(<SubjectPage />);
+    fireEvent.click(screen.getByRole('button', { name: /Blog View/i }));
+
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/cms/post/english-class-11'));
+    expect(await screen.findByText('Worker-native study notes.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Published chapter' })).toHaveAttribute('id', 'published-chapter');
   });
 });

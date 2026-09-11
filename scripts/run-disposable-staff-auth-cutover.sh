@@ -53,6 +53,8 @@ finish() {
   exit "$status"
 }
 trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 reap_expired_fixtures
 

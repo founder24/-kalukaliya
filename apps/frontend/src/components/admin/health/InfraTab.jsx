@@ -90,6 +90,10 @@ export default function InfraTab({ adminToken, onNavigate, health, edgeHealth, l
             const incident = edgeHealth?.rate_limit_cleanup;
             const degraded = incident?.degraded === true;
             const unavailable = !incident;
+            const alert = incident?.alert;
+            const recentTransitions = Array.isArray(incident?.recent_transitions)
+              ? incident.recent_transitions.slice().reverse().slice(0, 5)
+              : [];
             const formatTimestamp = (value) => value
               ? new Date(value).toLocaleString()
               : 'Never';
@@ -120,25 +124,86 @@ export default function InfraTab({ adminToken, onNavigate, health, edgeHealth, l
                       Durable Object expired-bucket cleanup
                     </p>
                   </div>
-                  <button onClick={loadHealth} className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-white">
+                  <button onClick={loadHealth} className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-white" data-testid="button-refresh-chat-limit-cleanup">
                     <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
                   </button>
                 </div>
                 {!unavailable && (
-                  <div className="grid grid-cols-2 gap-3 mt-3 text-xs">
-                    <div className="rounded-xl bg-white border border-gray-200 p-3">
-                      <p className="text-[10px] uppercase tracking-wider text-gray-400">Latest failure</p>
-                      <p className="mt-1 font-medium text-gray-700" data-testid="chat-limit-cleanup-failure">
-                        {formatTimestamp(incident.latest_failure_at)}
-                      </p>
+                  <>
+                    <div className="grid grid-cols-3 gap-3 mt-3 text-xs">
+                      <div className="rounded-xl bg-white border border-gray-200 p-3">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400">Incidents · {incident.history_window_hours || 24}h</p>
+                        <p className="mt-1 font-semibold text-gray-700" data-testid="chat-limit-cleanup-incident-count">
+                          {incident.rolling_incident_count || 0}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-white border border-gray-200 p-3">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400">Latest failure</p>
+                        <p className="mt-1 font-medium text-gray-700" data-testid="chat-limit-cleanup-failure">
+                          {formatTimestamp(incident.latest_failure_at)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-white border border-gray-200 p-3">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400">Latest recovery</p>
+                        <p className="mt-1 font-medium text-gray-700" data-testid="chat-limit-cleanup-recovery">
+                          {formatTimestamp(incident.latest_recovery_at)}
+                        </p>
+                      </div>
                     </div>
-                    <div className="rounded-xl bg-white border border-gray-200 p-3">
-                      <p className="text-[10px] uppercase tracking-wider text-gray-400">Latest recovery</p>
-                      <p className="mt-1 font-medium text-gray-700" data-testid="chat-limit-cleanup-recovery">
-                        {formatTimestamp(incident.latest_recovery_at)}
-                      </p>
+                    <div
+                      className={`rounded-xl border p-3 mt-3 text-xs ${
+                        alert?.state === 'active' || alert?.state === 'delivery_failed'
+                          ? 'bg-amber-50 border-amber-200'
+                          : 'bg-white border-gray-200'
+                      }`}
+                      data-testid="chat-limit-cleanup-alert-state"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[10px] uppercase tracking-wider text-gray-400">On-call alert</p>
+                        <span className={`font-semibold ${
+                          alert?.state === 'active' || alert?.state === 'delivery_failed'
+                            ? 'text-amber-700'
+                            : 'text-gray-600'
+                        }`}>
+                          {!alert || alert.state === 'disabled'
+                            ? 'Disabled'
+                            : alert.state === 'delivery_failed'
+                              ? 'Delivery failed'
+                              : alert.state.charAt(0).toUpperCase() + alert.state.slice(1)}
+                        </span>
+                      </div>
+                      {alert && (
+                        <p className="mt-1 text-gray-500">
+                          Threshold {alert.threshold} incidents · {alert.window_minutes}m window
+                          {alert.last_fired_at ? ` · Last sent ${formatTimestamp(alert.last_fired_at)}` : ''}
+                          {alert.window_expires_at ? ` · Resets ${formatTimestamp(alert.window_expires_at)}` : ''}
+                        </p>
+                      )}
                     </div>
-                  </div>
+                    <div className="rounded-xl bg-white border border-gray-200 p-3 mt-3 text-xs">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400">Recent transitions</p>
+                      {recentTransitions.length > 0 ? (
+                        <div className="mt-2 space-y-1.5" data-testid="chat-limit-cleanup-history">
+                          {recentTransitions.map((transition, index) => (
+                            <div
+                              key={`${transition.occurred_at}-${transition.event}-${index}`}
+                              className="flex items-center justify-between gap-3"
+                              data-testid={`chat-limit-cleanup-transition-${index}`}
+                            >
+                              <span className={transition.event === 'failed' ? 'font-medium text-red-600' : 'font-medium text-emerald-600'}>
+                                {transition.event === 'failed' ? 'Failure' : 'Recovery'}
+                              </span>
+                              <span className="text-gray-500">{formatTimestamp(transition.occurred_at)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-1 text-gray-500" data-testid="chat-limit-cleanup-history-empty">
+                          No transitions in this window
+                        </p>
+                      )}
+                    </div>
+                  </>
                 )}
               </div>
             );

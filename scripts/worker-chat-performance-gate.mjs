@@ -1,0 +1,147 @@
+export const PASS_RULE =
+  'A strict majority of samples for each route must meet the target, and the median must be at or below the target.';
+
+export function validateProbeEvents(name, events) {
+  const sourceIndex = events.findIndex(event => event.event === 'source_card');
+  const tokenIndex = events.findIndex(event =>
+    typeof event.content === 'string' && event.content.length > 0 && !event.done);
+  const doneIndex = events.findIndex(event => event.event === 'syrabit_done');
+  if (!(sourceIndex === 0 && tokenIndex > sourceIndex && doneIndex > tokenIndex)) {
+    throw new Error(`${name} SSE order invalid: source=${sourceIndex}, token=${tokenIndex}, done=${doneIndex}`);
+  }
+
+  const sourceCard = events[sourceIndex];
+  const done = events[doneIndex];
+  if (typeof done?.model !== 'string' || !done.model.startsWith('@cf/')) {
+    throw new Error(`${name} did not report a native Workers AI model: ${done?.model}`);
+  }
+  return { sourceCard, done };
+}
+
+export function validateRouteResult(route, result) {
+  if (route === 'direct' && result.rag_path !== 'chapter_direct') {
+    throw new Error(`Direct RAG probe used unexpected path: ${result.rag_path}`);
+  }
+  if (route === 'web' && (result.web_used !== true || result.web_status !== 'ok')) {
+    throw new Error(`Web probe did not return attributed web context: ${JSON.stringify(result)}`);
+  }
+}
+
+export function summarizeRoute(results, targetMs) {
+  const values = results.map(result => result.first_token_ms).sort((a, b) => a - b);
+  const passingSamples = values.filter(value => value <= targetMs).length;
+  const requiredPassingSamples = Math.floor(values.length / 2) + 1;
+  const medianIndex = Math.floor(values.length / 2);
+  const p95Index = Math.max(0, Math.ceil(values.length * 0.95) - 1);
+  return {
+    samples: values.length,
+    passing_samples: passingSamples,
+    required_passing_samples: requiredPassingSamples,
+    first_token_median_ms: values[medianIndex],
+    first_token_p95_ms: values[p95Index],
+    first_token_max_ms: values.at(-1),
+    passed: passingSamples >= requiredPassingSamples && values[medianIndex] <= targetMs,
+  };
+}
+
+export function buildReport({ origin, targetMs, subject, chapter, directSamples, webSamples }) {
+  const summary = {
+    ...(directSamples.length > 0 && {
+      direct_chapter_rag: summarizeRoute(directSamples, targetMs),
+    }),
+    ...(webSamples.length > 0 && {
+      rag_plus_bounded_web: summarizeRoute(webSamples, targetMs),
+    }),
+  };
+  return {
+    origin,
+    first_token_target_ms: targetMs,
+    pass_rule: PASS_RULE,
+    chapter: {
+      id: chapter.chapter_id,
+      title: chapter.title,
+      subject: subject.name,
+    },
+    summary,
+    probes: [...directSamples, ...webSamples],
+  };
+}
+
+export function failedRouteMessages(summary, targetMs) {
+  return Object.entries(summary)
+    .filter(([, routeSummary]) => !routeSummary.passed)
+    .map(([route, routeSummary]) =>
+      `${route} (${routeSummary.passing_samples}/${routeSummary.samples} samples met ${targetMs} ms; `
+      + `median ${routeSummary.first_token_median_ms} ms)`);
+}
+
+const NON_PHASE_TIMINGS = new Set(['first_token_ms', 'total_ms']);
+
+function probeMatchesRoute(probe, route) {
+  if (route === 'direct_chapter_rag') return probe?.rag_path === 'chapter_direct';
+  if (route === 'rag_plus_bounded_web') {
+    return probe?.web_used === true && probe?.web_status === 'ok';
+  }
+  return false;
+}
+
+function dominantSlowPhase(affectedReports, route) {
+  const phases = new Map();
+  for (const report of affectedReports) {
+    for (const probe of report?.probes ?? []) {
+      if (!probeMatchesRoute(probe, route)
+          || !(probe.first_token_ms > report.first_token_target_ms)) continue;
+      for (const [phase, durationMs] of Object.entries(probe.worker_timings_ms ?? {})) {
+        if (NON_PHASE_TIMINGS.has(phase)
+            || typeof durationMs !== 'number'
+            || !Number.isFinite(durationMs)
+            || durationMs < 0) continue;
+        const aggregate = phases.get(phase) ?? { total_ms: 0, samples: 0 };
+        aggregate.total_ms += durationMs;
+        aggregate.samples += 1;
+        phases.set(phase, aggregate);
+      }
+    }
+  }
+  const ranked = [...phases.entries()]
+    .map(([phase, aggregate]) => ({
+      phase,
+      average_ms: Math.round(aggregate.total_ms / aggregate.samples),
+      samples: aggregate.samples,
+    }))
+    .sort((left, right) =>
+      right.average_ms - left.average_ms || left.phase.localeCompare(right.phase));
+  return ranked[0];
+}
+
+export function recurringOutlierWarnings(reports, minimumRuns = 2) {
+  const routeLabels = {
+    direct_chapter_rag: 'Direct chapter RAG',
+    rag_plus_bounded_web: 'Bounded web retrieval',
+  };
+  const warnings = [];
+  for (const [route, label] of Object.entries(routeLabels)) {
+    const affected = reports.filter(report => {
+      const summary = report?.summary?.[route];
+      return summary?.passed === true
+        && summary.first_token_max_ms > report.first_token_target_ms;
+    });
+    if (affected.length < minimumRuns) continue;
+    const dominantPhase = dominantSlowPhase(affected, route);
+    warnings.push({
+      route,
+      label,
+      affected_runs: affected.length,
+      compared_runs: reports.length,
+      maxima_ms: affected.map(report => report.summary[route].first_token_max_ms),
+      ...(dominantPhase && { dominant_slow_phase: dominantPhase }),
+      message: `${label} had a tolerated first-token outlier above the release target in `
+        + `${affected.length}/${reports.length} recent deployment runs`
+        + (dominantPhase
+          ? `; dominant slow worker phase: ${dominantPhase.phase} `
+            + `(${dominantPhase.average_ms} ms average across ${dominantPhase.samples} timed outliers)`
+          : ''),
+    });
+  }
+  return warnings;
+}

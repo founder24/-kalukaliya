@@ -49,5 +49,9 @@ describe('staff command-center navigation', () => {
     expect(await screen.findByText('Actions')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
     expect(screen.getByText('Publish Actions')).toBeInTheDocument();
+    expect(axiosGet).toHaveBeenCalledWith(
+      'https://api.example/api/v1/staff/analytics/command-center',
+      expect.objectContaining({ params: { days: 7 } }),
+    );
   });
 });

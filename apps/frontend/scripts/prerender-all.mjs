@@ -6,7 +6,7 @@
 // here, no script re-issues those fetches.
 //
 // Each child script is wrapped in its own per-step deadline
-// (PRERENDER_STEP_BUDGET_MS, default 6 minutes) so a single hung
+// (PRERENDER_STEP_BUDGET_MS, default 19 minutes) so a single hung
 // step cannot stall the build.
 //
 // Development builds soft-fail when individual scripts return non-zero because
@@ -56,22 +56,17 @@ export function applyPrerenderCachePolicy({
 const STEP_BUDGET_MS = (() => {
   const raw = process.env.PRERENDER_STEP_BUDGET_MS;
   const n = raw ? Number.parseInt(raw, 10) : NaN;
-  // Task #543: bumped default 6m → 8m to accommodate 429 retry-with-
-  // backoff in _prerender-data.mjs without prematurely SIGTERMing
-  // the child. build.mjs allots prerender 8m, which is the matching
-  // outer budget; the inner deadline is ε shorter to surface clean
-  // errors before the outer guard nukes the process.
+  // Full release coverage has an 18-minute route budget. Keep the child
+  // deadline one minute longer so the route script can write its manifest and
+  // report a strict coverage error before the outer stage deadline.
   return Number.isFinite(n) && n >= 30_000 && n <= 30 * 60_000
     ? n
-    : 1_200_000;
+    : 19 * 60_000;
 })();
 
-// Task #544: concurrency restored to 4 (run all scripts in parallel).
-// The earlier serialization (#543, cap=2) was hiding the real problem
-// — too many routes, not too many concurrent fetches. Now that the
-// route worklist is capped at ~80 (#544: SUBJECTS_LIMIT 50→20,
-// CHAPTERS_PER_SUBJECT 5→3) and _prerender-data.mjs has 429 retry-
-// with-backoff, full parallel fan-out is the fastest stable mode.
+// Run the independent scripts in parallel. The heavy route script applies a
+// process-wide backend request cap, so nested subject/chapter work cannot
+// multiply this orchestration concurrency into a backend burst.
 const CONCURRENCY = (() => {
   const raw = process.env.PRERENDER_CONCURRENCY;
   const n = raw ? Number.parseInt(raw, 10) : NaN;

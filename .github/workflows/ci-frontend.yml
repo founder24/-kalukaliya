@@ -1,15 +1,34 @@
 name: CI Frontend — Lint & Test
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/frontend/**'
+      - '.github/workflows/deploy-cloudflare.yml'
+      - '.github/workflows/ci-frontend.yml'
+      - 'scripts/check-edge-workflow-triggers.py'
+      - 'scripts/check-staff-chunk-release-gate.py'
+      - 'scripts/test-staff-chunk-release-gate.py'
+      - 'pnpm-lock.yaml'
   pull_request:
     branches: [main]
     paths:
       - 'apps/frontend/**'
+      - '.github/workflows/deploy-cloudflare.yml'
       - '.github/workflows/ci-frontend.yml'
+      - 'scripts/check-edge-workflow-triggers.py'
+      - 'scripts/check-staff-chunk-release-gate.py'
+      - 'scripts/test-staff-chunk-release-gate.py'
+      - 'pnpm-lock.yaml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint-and-typecheck:
@@ -56,3 +75,38 @@ jobs:
 
       - name: Run Tests
         run: pnpm --filter @workspace/syrabit test
+
+  production-staff-chunks:
+    name: Verify Production Staff Chunks
+    needs: lint-and-typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install workflow contract checker dependency
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+      - name: Test staff chunk release gate contract
+        run: python3 scripts/test-staff-chunk-release-gate.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup PNPM
+        run: corepack prepare pnpm@10.26.1 --activate
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @workspace/syrabit run playwright:install:chromium
+
+      - name: Build Production Frontend Bundle
+        run: pnpm --filter @workspace/syrabit run build:client
+
+      - name: Load Staff Dashboard and Health Chunks
+        run: pnpm --filter @workspace/syrabit run check:staff-chunks

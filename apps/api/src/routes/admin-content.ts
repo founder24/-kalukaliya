@@ -7,7 +7,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, chapters, publishJobs, seedRuns, streams, subjects, users } from '../db/schema';
 import { extractBearer, isSessionValid, sessionIssuedAt, signAdminToken, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
@@ -15,6 +15,7 @@ import { generate } from '../services/ai';
 import { reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env } from '../types';
+import { runRagJob } from './staff';
 
 export const adminContentRouter = new Hono<{ Bindings: Env }>();
 
@@ -84,11 +85,6 @@ async function requireAdmin(c: Context<{ Bindings: Env }>): Promise<string | Res
   }
   return c.json({ detail: bearer || session ? 'Invalid or expired admin session' : 'Authentication required' }, 401);
 }
-async function cronOrAdminAuthorized(c: Context<{ Bindings: Env }>): Promise<boolean> {
-  if (cronAuthorized(c)) return true;
-  return typeof (await requireAdmin(c)) === 'string';
-}
-
 function adminCookie(token: string, secure: boolean): string {
   return `syrabit_admin_session=${token}; Path=/api/; Max-Age=28800; HttpOnly; SameSite=${secure ? 'Strict; Secure' : 'Lax'}`;
 }
@@ -526,12 +522,26 @@ async function launchSeed(c: Context<{ Bindings: Env }>, medium: 'en' | 'as'): P
   const db = createDb(c.env.DB);
 
   let candidateIds: string[] = [];
-  if (!requested.length) {
+  if (requested.length) {
+    if (medium === 'as') {
+      const placeholders = requested.map(() => '?').join(', ');
+      const eligible = await c.env.DB.prepare(
+        `SELECT id FROM chapters
+         WHERE id IN (${placeholders})
+           AND notes_en IS NOT NULL AND TRIM(notes_en) != ''`,
+      ).bind(...requested).all<{ id: string }>();
+      const eligibleIds = new Set((eligible.results ?? []).map(row => row.id));
+      candidateIds = requested.filter(id => eligibleIds.has(id));
+    } else {
+      candidateIds = requested;
+    }
+  } else {
     const field = medium === 'en' ? 'notes_en' : 'notes_as';
     const subject = typeof body.subject === 'string' ? body.subject.trim() : '';
     const board = typeof body.board === 'string' ? body.board.trim() : '';
     const predicates = [
       !force ? `(c.${field} IS NULL OR TRIM(c.${field}) = '')` : '1 = 1',
+      medium === 'as' ? `(c.notes_en IS NOT NULL AND TRIM(c.notes_en) != '')` : '1 = 1',
       subject ? '(s.id = ? OR s.slug = ?)' : '1 = 1',
       board ? '(b.id = ? OR b.slug = ?)' : '1 = 1',
     ];
@@ -550,7 +560,7 @@ async function launchSeed(c: Context<{ Bindings: Env }>, medium: 'en' | 'as'): P
     ).bind(...bindings).all<{ id: string }>();
     candidateIds = (result.results ?? []).map((row: { id: string }) => row.id);
   }
-  const chapterIds = requested.length ? requested : candidateIds;
+  const chapterIds = candidateIds;
   if (!chapterIds.length) {
     return c.json({ job: 'nothing_to_do', total_queued: 0, message: 'No chapters need this seed run.' });
   }
@@ -669,6 +679,74 @@ adminContentRouter.get('/content/translation-progress', async c => {
   const total = Number(row?.total ?? 0);
   const translated = Number(row?.translated ?? 0);
   return c.json({ total, translated, missing: total - translated, progress: total ? Math.round(translated * 100 / total) : 0 });
+});
+
+adminContentRouter.get('/content/assamese/coverage', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  const rows = await c.env.DB.prepare(`
+    SELECT c.id, c.title, c.chapter_number, c.status, c.notes_as,
+           s.id AS subject_id, s.name AS subject_name
+    FROM chapters c
+    JOIN subjects s ON s.id = c.subject_id
+    WHERE c.notes_en IS NOT NULL AND TRIM(c.notes_en) != ''
+    ORDER BY s.name, c.chapter_number, c.title
+  `).all<{
+    id: string; title: string; chapter_number: number | null; status: string | null;
+    notes_as: string | null; subject_id: string; subject_name: string;
+  }>();
+  const chaptersWithEnglish = rows.results ?? [];
+  const translated = chaptersWithEnglish.filter(row => Boolean(row.notes_as?.trim())).length;
+  const groups = new Map<string, {
+    subject_id: string; subject_name: string; total: number; translated: number;
+    missing: number; chapters: Array<{ id: string; title: string; chapter_number: number | null; status: string | null }>;
+  }>();
+  for (const row of chaptersWithEnglish) {
+    const group = groups.get(row.subject_id) ?? {
+      subject_id: row.subject_id, subject_name: row.subject_name,
+      total: 0, translated: 0, missing: 0, chapters: [],
+    };
+    group.total++;
+    if (row.notes_as?.trim()) {
+      group.translated++;
+    } else {
+      group.missing++;
+      group.chapters.push({
+        id: row.id, title: row.title, chapter_number: row.chapter_number, status: row.status,
+      });
+    }
+    groups.set(row.subject_id, group);
+  }
+  const total = chaptersWithEnglish.length;
+  return c.json({
+    total, translated, missing: total - translated,
+    progress: total ? Math.round(translated * 100 / total) : 0,
+    ratio: total ? translated / total : 0,
+    subjects: [...groups.values()],
+  });
+});
+
+adminContentRouter.get('/content/assamese/progress', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  const run = await createDb(c.env.DB).select().from(seedRuns)
+    .where(eq(seedRuns.medium, 'as')).orderBy(desc(seedRuns.startedAt)).limit(1).get();
+  if (!run) return c.json({ running: false, run: null });
+  const log = parseJson<SeedLog[]>(run.log, []);
+  const queued = log.filter(entry => entry.status === 'queued' || entry.status === 'running').length;
+  return c.json({
+    running: run.status === 'queued' || run.status === 'running',
+    run: {
+      id: run.id, status: run.status, total: run.totalChapters,
+      completed: run.processed, failed: run.failed, queued,
+      started_at: run.startedAt ? new Date(run.startedAt * 1000).toISOString() : null,
+      finished_at: run.completedAt ? new Date(run.completedAt * 1000).toISOString() : null,
+      errors: log.filter(entry => entry.status === 'failed'),
+    },
+  });
+});
+
+adminContentRouter.post('/content/assamese/backfill', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  return launchSeed(c, 'as');
 });
 
 adminContentRouter.get('/content/draft-served-subjects', async c => {
@@ -965,6 +1043,83 @@ adminContentRouter.post('/content/bulk-status', async c => {
   return c.json({ modified: result.meta.changes ?? 0 });
 });
 
+async function publishSubjectBlog(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  const body = await safeBody(c);
+  const requested = Array.isArray(body.chapter_ids) ? body.chapter_ids.filter((id): id is string => typeof id === 'string') : [];
+  const subjectId = c.req.param('subjectId') as string;
+  const subject = await createDb(c.env.DB).select({ id: subjects.id, name: subjects.name })
+    .from(subjects).where(eq(subjects.id, subjectId)).get();
+  if (!subject) return c.json({ detail: 'Subject not found' }, 404);
+  const rows = requested.length
+    ? await createDb(c.env.DB).select({
+      id: chapters.id, title: chapters.title, chapterNumber: chapters.chapterNumber, notes: chapters.notesEn,
+    }).from(chapters)
+      .where(and(eq(chapters.subjectId, subjectId), inArray(chapters.id, requested)))
+    : await createDb(c.env.DB).select({
+      id: chapters.id, title: chapters.title, chapterNumber: chapters.chapterNumber, notes: chapters.notesEn,
+    }).from(chapters).where(eq(chapters.subjectId, subjectId)).orderBy(chapters.chapterNumber);
+  if (requested.length && rows.length !== new Set(requested).size) {
+    return c.json({ detail: 'Every requested chapter must belong to the destination subject.' }, 422);
+  }
+  const orderedRows = [...rows].sort(
+    (left, right) => (left.chapterNumber ?? Number.MAX_SAFE_INTEGER) - (right.chapterNumber ?? Number.MAX_SAFE_INTEGER),
+  );
+  const mergeableRows = orderedRows.filter(row => row.notes?.trim());
+  const headings = mergeableRows.map(row => ({
+    level: 2,
+    text: row.title,
+    anchor: slugify(row.title),
+  }));
+  const mergedMarkdown = mergeableRows
+    .map(row => `## ${row.title}\n\n${row.notes!.trim()}`)
+    .join('\n\n---\n\n');
+  if (!mergedMarkdown) return c.json({ detail: 'No chapter notes are available to publish.' }, 422);
+  const wordCount = mergedMarkdown.split(/\s+/).filter(Boolean).length;
+  const documentId = `subject-blog:${subjectId}`;
+  const publishedAt = now();
+  const document = {
+    document_type: 'subject_blog',
+    subject_id: subject.id,
+    title: `${subject.name} Complete Study Guide`,
+    merged_md: mergedMarkdown,
+    headings: JSON.stringify(headings),
+    chapter_count: orderedRows.length,
+    word_count: wordCount,
+    published_at: new Date(publishedAt * 1000).toISOString(),
+  };
+  await c.env.DB.prepare(`
+    INSERT INTO cms_documents (id, data, status, created_at, updated_at)
+    VALUES (?, ?, 'published', ?, ?)
+    ON CONFLICT(id) DO UPDATE SET data = excluded.data, status = 'published', updated_at = excluded.updated_at
+  `).bind(documentId, JSON.stringify(document), publishedAt, publishedAt).run();
+  const jobIds: string[] = [];
+  for (const row of orderedRows) {
+    const id = crypto.randomUUID();
+    const result = await c.env.DB.prepare(`
+      INSERT INTO publish_jobs (id, chapter_id, status, progress, created_at, updated_at)
+      SELECT ?, ?, 'pending', '[]', ?, ? WHERE NOT EXISTS
+      (SELECT 1 FROM publish_jobs WHERE chapter_id = ? AND status IN ('pending','running','partial'))
+    `).bind(id, row.id, now(), now(), row.id).run();
+    if ((result.meta.changes ?? 0) === 1) {
+      jobIds.push(id);
+      c.executionCtx.waitUntil(runPublish(c.env, id, row.id));
+    }
+  }
+  return c.json({
+    subject_id: subject.id,
+    subject_name: subject.name,
+    document_id: documentId,
+    status: 'published',
+    chapter_count: orderedRows.length,
+    word_count: wordCount,
+    queued: jobIds.length,
+    job_ids: jobIds,
+  });
+}
+
+adminContentRouter.post('/content/subjects/:subjectId/blog-publish', publishSubjectBlog);
+
 adminContentRouter.post('/content/subjects/:subjectId/bulk-publish', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
   const body = await safeBody(c);
@@ -1087,12 +1242,7 @@ function cronAuthorized(c: Context<{ Bindings: Env }>): boolean {
   const supplied = extractBearer(c.req.header('Authorization') ?? null);
   return Boolean(supplied && c.env.TRANSLATE_CRON_SECRET && supplied === c.env.TRANSLATE_CRON_SECRET);
 }
-let bulkReindexStatus: { running: boolean; total: number; processed: number; skipped: number; errors: string[] } = {
-  running: false, total: 0, processed: 0, skipped: 0, errors: [],
-};
-
-adminContentRouter.post('/cron/bulk-mirror-rag', async c => {
-  if (!(await cronOrAdminAuthorized(c))) return c.json({ detail: 'Admin session or valid TRANSLATE_CRON_SECRET required' }, 401);
+async function bulkMirrorRag(c: Context<{ Bindings: Env }>) {
   const limit = Math.max(1, Math.min(Number(c.req.query('limit') ?? 100), 200));
   const subjectId = c.req.query('subject_id');
   const force = c.req.query('force') === 'true';
@@ -1111,37 +1261,97 @@ adminContentRouter.post('/cron/bulk-mirror-rag', async c => {
     processed++;
   }
   return c.json({ processed, skipped, no_headings: noHeadings.length, no_headings_list: noHeadings.map(chapter_id => ({ chapter_id })), errors: [] });
+}
+
+async function startBulkReindex(c: Context<{ Bindings: Env }>) {
+  const limit = Math.max(1, Math.min(Number(c.req.query('limit') ?? 50), 100));
+  const subjectId = c.req.query('subject_id');
+  const force = c.req.query('force') === 'true';
+  const rows = await createDb(c.env.DB).select({
+    id: chapters.id,
+  }).from(chapters).where(and(
+    subjectId ? eq(chapters.subjectId, subjectId) : undefined,
+    force ? undefined : or(
+      isNull(chapters.ragIndexedAt),
+      and(isNotNull(chapters.ragUpdatedAt), lt(chapters.ragIndexedAt, chapters.ragUpdatedAt)),
+    ),
+  )).limit(limit);
+  if (!rows.length) return c.json({ job: 'nothing_to_do', total_queued: 0 });
+
+  const jobId = crypto.randomUUID();
+  const items = rows.map(row => ({ chapter_id: row.id, scopes: ['notes'], status: 'pending' }));
+  const created = await c.env.DB.prepare(`
+    INSERT INTO rag_reindex_jobs (id, actor_id, status, requested_scopes, items, created_at, updated_at)
+    SELECT ?, ?, 'pending', '["notes"]', ?, ?, ?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM rag_reindex_jobs WHERE status IN ('pending', 'running')
+    )
+  `).bind(jobId, null, JSON.stringify(items), now(), now()).run();
+  if ((created.meta.changes ?? 0) !== 1) {
+    return c.json({ detail: 'A bulk-reindex job is already running.' }, 409);
+  }
+  c.executionCtx.waitUntil(runRagJob(c.env, jobId));
+  return c.json({ job: 'started', job_id: jobId, total_queued: rows.length });
+}
+
+async function bulkReindexJobStatus(c: Context<{ Bindings: Env }>) {
+  const job = await c.env.DB.prepare(`
+    SELECT id, status, items, error_log, created_at, updated_at, completed_at
+    FROM rag_reindex_jobs ORDER BY created_at DESC LIMIT 1
+  `).first<{
+    id: string; status: string; items: string; error_log: string | null;
+    created_at: number | null; updated_at: number | null; completed_at: number | null;
+  }>();
+  if (!job) {
+    return c.json({ running: false, total: 0, processed: 0, skipped: 0, errors: [] });
+  }
+  const items = parseJson<Array<{ status?: string; error?: string }>>(job.items, []);
+  return c.json({
+    job_id: job.id,
+    job: job.status,
+    running: job.status === 'pending' || job.status === 'running',
+    total: items.length,
+    processed: items.filter(item => item.status === 'done').length,
+    skipped: 0,
+    errors: items.filter(item => item.status === 'failed').map(item => item.error || 'RAG reindex failed'),
+    created_at: job.created_at,
+    updated_at: job.updated_at,
+    completed_at: job.completed_at,
+  });
+}
+
+// Browser-facing RAG Mirror controls use the same staff bearer token as the
+// rest of the Content Hub. Cron credentials never cross into frontend code.
+adminContentRouter.post('/content/rag/mirror', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  return bulkMirrorRag(c);
+});
+adminContentRouter.post('/content/rag/reindex', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  return startBulkReindex(c);
+});
+adminContentRouter.get('/content/rag/reindex/status', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  return bulkReindexJobStatus(c);
+});
+
+adminContentRouter.post('/cron/bulk-mirror-rag', async c => {
+  if (!cronAuthorized(c)) return c.json({ detail: 'Valid TRANSLATE_CRON_SECRET required' }, 401);
+  return bulkMirrorRag(c);
 });
 
 adminContentRouter.post('/cron/bulk-reindex', async c => {
-  if (!(await cronOrAdminAuthorized(c))) return c.json({ detail: 'Admin session or valid TRANSLATE_CRON_SECRET required' }, 401);
-  if (bulkReindexStatus.running) return c.json({ detail: 'A bulk-reindex job is already running.' }, 409);
-  const limit = Math.max(1, Math.min(Number(c.req.query('limit') ?? 50), 100));
-  const subjectId = c.req.query('subject_id');
-  const rows = await createDb(c.env.DB).select({
-    id: chapters.id, subjectId: chapters.subjectId, notesEn: chapters.notesEn, notesAs: chapters.notesAs,
-  }).from(chapters).where(subjectId ? eq(chapters.subjectId, subjectId) : undefined).limit(limit);
-  bulkReindexStatus = { running: true, total: rows.length, processed: 0, skipped: 0, errors: [] };
-  c.executionCtx.waitUntil((async () => {
-    for (const row of rows) {
-      try {
-        const result = await runNativeReindex(c.env, row);
-        if (result.status === 'skipped') bulkReindexStatus.skipped++;
-        else bulkReindexStatus.processed++;
-      } catch (error) { bulkReindexStatus.errors.push(error instanceof Error ? error.message : String(error)); }
-    }
-    bulkReindexStatus.running = false;
-  })());
-  return c.json({ job: rows.length ? 'started' : 'nothing_to_do', total_queued: rows.length });
+  if (!cronAuthorized(c)) return c.json({ detail: 'Valid TRANSLATE_CRON_SECRET required' }, 401);
+  return startBulkReindex(c);
 });
 adminContentRouter.get('/cron/bulk-reindex/status', async c => {
-  if (!(await cronOrAdminAuthorized(c))) return c.json({ detail: 'Admin session or valid TRANSLATE_CRON_SECRET required' }, 401);
-  return c.json(bulkReindexStatus);
+  if (!cronAuthorized(c)) return c.json({ detail: 'Valid TRANSLATE_CRON_SECRET required' }, 401);
+  return bulkReindexJobStatus(c);
 });
 // Existing Content Editor alias; retain it without reintroducing a Cloud Run route.
 adminContentRouter.post('/rag/bulk-reindex', async c => {
-  if (!(await cronOrAdminAuthorized(c))) return c.json({ detail: 'Admin session or valid TRANSLATE_CRON_SECRET required' }, 401);
-  return c.redirect(new URL(`/api/v1/admin/cron/bulk-reindex${new URL(c.req.url).search}`, c.req.url).toString(), 307);
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  return startBulkReindex(c);
 });
 
 // Scheduled callers use a dedicated secret; they never inherit the browser

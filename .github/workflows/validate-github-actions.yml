@@ -1,0 +1,67 @@
+name: Validate GitHub Actions
+
+on:
+  schedule:
+    - cron: '17 3 * * 2'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - 'scripts/check-github-actions.sh'
+      - 'scripts/update-actionlint.py'
+      - 'scripts/check-edge-workflow-triggers.py'
+      - 'scripts/test-edge-workflow-triggers.py'
+      - 'scripts/check-ci-workflow-concurrency.py'
+      - 'scripts/test-ci-workflow-concurrency.py'
+      - 'scripts/check-staff-chunk-release-gate.py'
+      - 'scripts/test-staff-chunk-release-gate.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - 'scripts/check-github-actions.sh'
+      - 'scripts/update-actionlint.py'
+      - 'scripts/check-edge-workflow-triggers.py'
+      - 'scripts/test-edge-workflow-triggers.py'
+      - 'scripts/check-ci-workflow-concurrency.py'
+      - 'scripts/test-ci-workflow-concurrency.py'
+      - 'scripts/check-staff-chunk-release-gate.py'
+      - 'scripts/test-staff-chunk-release-gate.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: Check workflow syntax and semantics
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install trigger checker dependency
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+      - name: Validate workflow files
+        run: bash scripts/check-github-actions.sh
+
+      - name: Check critical CI trigger contracts
+        run: python3 scripts/check-edge-workflow-triggers.py
+
+      - name: Test critical CI trigger contract checker
+        run: python3 scripts/test-edge-workflow-triggers.py
+
+      - name: Check CI concurrency contracts
+        run: python3 scripts/check-ci-workflow-concurrency.py
+
+      - name: Test CI concurrency contract checker
+        run: python3 scripts/test-ci-workflow-concurrency.py
+
+      - name: Check staff chunk release gate contract
+        run: python3 scripts/check-staff-chunk-release-gate.py
+
+      - name: Test staff chunk release gate checker
+        run: python3 scripts/test-staff-chunk-release-gate.py
+
+      - name: Check actionlint release pin
+        run: python3 scripts/update-actionlint.py

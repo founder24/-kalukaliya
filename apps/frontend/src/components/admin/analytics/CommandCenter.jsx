@@ -80,7 +80,7 @@ export default function CommandCenter() {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const response = await axios.get(`${WORKER_API}/admin/analytics/command-center`, {
+      const response = await axios.get(`${WORKER_API}/staff/analytics/command-center`, {
         params: { days },
         ...commandCenterAuthConfig(getToken()),
       });

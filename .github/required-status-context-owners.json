@@ -1,0 +1,4 @@
+{
+  "Run Tests": ["ci-edge.yml"],
+  "Verify Required Status Contexts": ["required-status-contexts.yml"]
+}
