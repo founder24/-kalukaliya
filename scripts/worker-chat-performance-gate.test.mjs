@@ -276,6 +276,89 @@ test('atomic notification write preserves complete JSON and cleans up after an i
   assert.deepEqual(await readdir(directory), ['notification-state.json']);
 });
 
+test('atomic notification write syncs the temporary file before rename and the directory afterward', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'chat-performance-warning-sync-'));
+  const statePath = join(directory, 'notification-state.json');
+  const events = [];
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  await atomicWriteJson(statePath, { active_warnings: [] }, {
+    open: async path => ({
+      sync: async () => events.push(`sync:${path === directory ? 'directory' : 'temporary'}`),
+      close: async () => events.push(`close:${path === directory ? 'directory' : 'temporary'}`),
+    }),
+    rename: async (source, destination) => {
+      events.push('rename');
+      const contents = await readFile(source);
+      await writeFile(destination, contents);
+      await rm(source);
+    },
+  });
+
+  assert.deepEqual(events, [
+    'sync:temporary',
+    'close:temporary',
+    'rename',
+    'sync:directory',
+    'close:directory',
+  ]);
+  assert.deepEqual(JSON.parse(await readFile(statePath, 'utf8')), { active_warnings: [] });
+  assert.deepEqual(await readdir(directory), ['notification-state.json']);
+});
+
+test('atomic notification write tolerates unsupported directory sync and closes the directory', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'chat-performance-warning-dir-sync-'));
+  const statePath = join(directory, 'notification-state.json');
+  let directoryClosed = false;
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  await atomicWriteJson(statePath, { active_warnings: [] }, {
+    open: async path => ({
+      sync: async () => {
+        if (path === directory) {
+          const error = new Error('directory sync unsupported');
+          error.code = 'EINVAL';
+          throw error;
+        }
+      },
+      close: async () => {
+        if (path === directory) directoryClosed = true;
+      },
+    }),
+  });
+
+  assert.equal(directoryClosed, true);
+  assert.deepEqual(JSON.parse(await readFile(statePath, 'utf8')), { active_warnings: [] });
+  assert.deepEqual(await readdir(directory), ['notification-state.json']);
+});
+
+test('atomic notification write treats temporary-file sync failure as fatal and removes the temporary file', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'chat-performance-warning-file-sync-'));
+  const statePath = join(directory, 'notification-state.json');
+  const previousState = { active_warnings: [{ route: 'rag_plus_bounded_web' }] };
+  let temporaryClosed = false;
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(statePath, `${JSON.stringify(previousState)}\n`);
+
+  await assert.rejects(
+    atomicWriteJson(statePath, { active_warnings: [] }, {
+      open: async () => ({
+        sync: async () => {
+          throw new Error('simulated file sync failure');
+        },
+        close: async () => {
+          temporaryClosed = true;
+        },
+      }),
+    }),
+    /simulated file sync failure/,
+  );
+
+  assert.equal(temporaryClosed, true);
+  assert.deepEqual(JSON.parse(await readFile(statePath, 'utf8')), previousState);
+  assert.deepEqual(await readdir(directory), ['notification-state.json']);
+});
+
 test('warning CLI rebuilds active alerts from a pre-existing truncated notification file', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'chat-performance-warning-recovery-'));
   const historyDirectory = join(directory, 'history');

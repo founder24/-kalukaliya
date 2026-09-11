@@ -2,7 +2,7 @@
 
 import process from 'node:process';
 import { randomUUID } from 'node:crypto';
-import { readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { open, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,6 +31,7 @@ export async function atomicWriteJson(path, value, operations = {}) {
   const write = operations.writeFile ?? writeFile;
   const move = operations.rename ?? rename;
   const remove = operations.unlink ?? unlink;
+  const openPath = operations.open ?? open;
   const temporaryPath = resolve(
     dirname(path),
     `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`,
@@ -38,7 +39,23 @@ export async function atomicWriteJson(path, value, operations = {}) {
 
   try {
     await write(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx' });
+    const temporaryFile = await openPath(temporaryPath, 'r');
+    try {
+      await temporaryFile.sync();
+    } finally {
+      await temporaryFile.close();
+    }
     await move(temporaryPath, path);
+
+    let directory;
+    try {
+      directory = await openPath(dirname(path), 'r');
+      await directory.sync();
+    } catch (error) {
+      if (!['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM'].includes(error?.code)) throw error;
+    } finally {
+      await directory?.close();
+    }
   } catch (error) {
     try {
       await remove(temporaryPath);
