@@ -5,7 +5,7 @@ export const STAFF_PORTAL_SECTIONS = Object.freeze([
     group: 'main',
     releaseCheck: {
       supported: true,
-      requiredReads: ['/health', '/api/v1/staff/analytics/command-center'],
+      requiredReads: ['/health'],
     },
   },
   {

@@ -76,7 +76,10 @@ jobs:
         run: pnpm --filter @workspace/syrabit run playwright:install:chromium
 
       - name: Test staff portal diagnostic privacy
-        run: node --test scripts/staff-portal-diagnostics.test.mjs
+        run: |
+          node --test \
+            scripts/staff-portal-diagnostics.test.mjs \
+            scripts/staff-portal-sections.test.mjs
 
       - name: Verify the deployed staff portal read-only
         run: bash scripts/run-disposable-staff-portal-check.sh

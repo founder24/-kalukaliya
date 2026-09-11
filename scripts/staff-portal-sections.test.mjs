@@ -53,6 +53,18 @@ test('staff release checks accept every shared section declaration', () => {
   assert.doesNotThrow(() => assertStaffSectionReleaseChecks(STAFF_PORTAL_SECTIONS));
 });
 
+test('staff release checks wait for reads in the section that initiates them', () => {
+  const releaseChecks = Object.fromEntries(
+    STAFF_PORTAL_SECTIONS.map(({ id, releaseCheck }) => [id, releaseCheck.requiredReads]),
+  );
+
+  assert.deepEqual(releaseChecks.dashboard, ['/health']);
+  assert.deepEqual(
+    releaseChecks.analytics,
+    ['/api/v1/staff/analytics/command-center'],
+  );
+});
+
 const completeMappings = Object.fromEntries(
   STAFF_PORTAL_SECTIONS.map(({ id }) => [id, Symbol(id)]),
 );
