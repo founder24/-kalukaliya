@@ -249,7 +249,7 @@ class RequiredStatusContextsTest(unittest.TestCase):
         self.assertIn("cannot be statically expanded", result.stderr)
         self.assertIn("unsupported inline or dynamic value", result.stderr)
 
-    def test_object_valued_matrix_axis_fails_closed(self) -> None:
+    def test_object_valued_matrix_axis_matches_github_context(self) -> None:
         result = self.run_checker(
             "Run Tests",
             strategy=(
@@ -258,11 +258,81 @@ class RequiredStatusContextsTest(unittest.TestCase):
                 "        node:\n"
                 "          - version: 20\n"
                 "            experimental: false\n"
+                "            labels: [lts, linux]\n"
+            ),
+            required_context=(
+                'Run Tests ({"version":20,"experimental":false,'
+                '"labels":["lts","linux"]})'
             ),
         )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("cannot be statically expanded", result.stderr)
-        self.assertIn("axis node contains structured values", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_inline_object_axis_matches_github_context(self) -> None:
+        result = self.run_checker(
+            "Run Tests",
+            strategy=(
+                "    strategy:\n"
+                "      matrix:\n"
+                "        node: [{version: 20, env: production}, {version: 22, env: test}]\n"
+            ),
+            required_context='Run Tests ({"version":22,"env":"test"})',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_colon_containing_block_axis_values_remain_scalars(self) -> None:
+        strategy = (
+            "    strategy:\n"
+            "      matrix:\n"
+            "        target:\n"
+            "          - node:20\n"
+            "          - https://example.test\n"
+        )
+        image_tag = self.run_checker(
+            "Run Tests",
+            strategy=strategy,
+            required_context="Run Tests (node:20)",
+        )
+        url = self.run_checker(
+            "Run Tests",
+            strategy=strategy,
+            required_context="Run Tests (https://example.test)",
+        )
+        self.assertEqual(image_tag.returncode, 0, image_tag.stderr)
+        self.assertEqual(url.returncode, 0, url.stderr)
+
+    def test_structured_axis_include_and_exclude(self) -> None:
+        strategy = (
+            "    strategy:\n"
+            "      matrix:\n"
+            "        node:\n"
+            "          - version: 20\n"
+            "            env: production\n"
+            "          - version: 22\n"
+            "            env: test\n"
+            "        os: [ubuntu-latest, windows-latest]\n"
+            "        exclude:\n"
+            "          - node: {version: 20, env: production}\n"
+            "            os: windows-latest\n"
+            "        include:\n"
+            "          - node: {version: 24, env: canary}\n"
+            "            os: ubuntu-latest\n"
+        )
+        included = self.run_checker(
+            "Run Tests",
+            strategy=strategy,
+            required_context=(
+                'Run Tests ({"version":24,"env":"canary"}, ubuntu-latest)'
+            ),
+        )
+        excluded = self.run_checker(
+            "Run Tests",
+            strategy=strategy,
+            required_context=(
+                'Run Tests ({"version":20,"env":"production"}, windows-latest)'
+            ),
+        )
+        self.assertEqual(included.returncode, 0, included.stderr)
+        self.assertEqual(excluded.returncode, 1)
 
     def test_exclude_before_axis_still_expands_matrix(self) -> None:
         strategy = (

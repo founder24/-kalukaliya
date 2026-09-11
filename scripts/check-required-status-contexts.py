@@ -9,9 +9,13 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import TypeAlias
 
 
 WORKFLOW_SUFFIXES = {".yml", ".yaml"}
+MatrixValue: TypeAlias = (
+    str | int | float | bool | None | list["MatrixValue"] | dict[str, "MatrixValue"]
+)
 
 
 def _strip_yaml_comment(value: str) -> str:
@@ -31,18 +35,94 @@ def _scalar(value: str) -> str:
     return value
 
 
-def _inline_list(value: str) -> list[str] | None:
+def _split_inline(value: str) -> list[str]:
+    items: list[str] = []
+    start = 0
+    depth = 0
+    quote = None
+    for index, char in enumerate(value):
+        if char in {"'", '"'}:
+            quote = None if quote == char else char if quote is None else quote
+        elif quote is None:
+            if char in "[{":
+                depth += 1
+            elif char in "]}":
+                depth -= 1
+            elif char == "," and depth == 0:
+                items.append(value[start:index].strip())
+                start = index + 1
+    items.append(value[start:].strip())
+    return [item for item in items if item]
+
+
+def _split_mapping_field(value: str) -> tuple[str, str] | None:
+    depth = 0
+    quote = None
+    for index, char in enumerate(value):
+        if char in {"'", '"'}:
+            quote = None if quote == char else char if quote is None else quote
+        elif quote is None:
+            if char in "[{":
+                depth += 1
+            elif char in "]}":
+                depth -= 1
+            elif (
+                char == ":"
+                and depth == 0
+                and (index + 1 == len(value) or value[index + 1].isspace())
+            ):
+                return _scalar(value[:index]), value[index + 1 :].strip()
+    return None
+
+
+def _value(value: str) -> MatrixValue:
+    value = _strip_yaml_comment(value).strip()
+    if value.startswith("[") and value.endswith("]"):
+        return [_value(item) for item in _split_inline(value[1:-1])]
+    if value.startswith("{") and value.endswith("}"):
+        result: dict[str, MatrixValue] = {}
+        for field in _split_inline(value[1:-1]):
+            pair = _split_mapping_field(field)
+            if pair is None:
+                raise ValueError(f"invalid inline matrix object field: {field}")
+            key, field_value = pair
+            result[key] = _value(field_value)
+        return result
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return _scalar(value)
+    if value in {"true", "false"}:
+        return value == "true"
+    if value in {"null", "~"}:
+        return None
+    if re.fullmatch(r"-?(?:0|[1-9][0-9]*)", value):
+        return int(value)
+    if re.fullmatch(r"-?(?:0|[1-9][0-9]*)\.[0-9]+", value):
+        return float(value)
+    return _scalar(value)
+
+
+def _inline_list(value: str) -> list[MatrixValue] | None:
     value = _strip_yaml_comment(value).strip()
     if not (value.startswith("[") and value.endswith("]")):
         return None
-    return [_scalar(item) for item in value[1:-1].split(",") if item.strip()]
+    return [_value(item) for item in _split_inline(value[1:-1])]
+
+
+def _render_matrix_value(value: MatrixValue) -> str:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+    if isinstance(value, bool):
+        return str(value).lower()
+    if value is None:
+        return "null"
+    return str(value)
 
 
 def _matrix_contexts(
     job_name: str,
-    axes: dict[str, list[str]],
-    excludes: list[dict[str, str]],
-    includes: list[dict[str, str]],
+    axes: dict[str, list[MatrixValue]],
+    excludes: list[dict[str, MatrixValue]],
+    includes: list[dict[str, MatrixValue]],
 ) -> set[str]:
     if not axes and not includes:
         return {job_name}
@@ -61,7 +141,7 @@ def _matrix_contexts(
         )
     ]
     combinations = [combination.copy() for combination in original_combinations]
-    standalone_includes: list[dict[str, str]] = []
+    standalone_includes: list[dict[str, MatrixValue]] = []
     for included in includes:
         merged = False
         for index, original in enumerate(original_combinations):
@@ -77,7 +157,8 @@ def _matrix_contexts(
     combinations.extend(standalone_includes)
 
     return {
-        f"{job_name} ({', '.join(combination[name] for name in combination)})"
+        f"{job_name} "
+        f"({', '.join(_render_matrix_value(combination[name]) for name in combination)})"
         for combination in combinations
     }
 
@@ -96,11 +177,12 @@ def workflow_contexts(path: Path) -> set[str]:
     in_jobs = False
     current_job: str | None = None
     current_name: str | None = None
-    matrix_axes: dict[str, list[str]] = {}
-    matrix_excludes: list[dict[str, str]] = []
-    matrix_includes: list[dict[str, str]] = []
+    matrix_axes: dict[str, list[MatrixValue]] = {}
+    matrix_excludes: list[dict[str, MatrixValue]] = []
+    matrix_includes: list[dict[str, MatrixValue]] = []
     matrix_section: str | None = None
-    matrix_item: dict[str, str] | None = None
+    matrix_item: dict[str, MatrixValue] | None = None
+    matrix_axis_item: dict[str, MatrixValue] | None = None
     matrix_axis: str | None = None
     matrix_error: str | None = None
 
@@ -140,6 +222,7 @@ def workflow_contexts(path: Path) -> set[str]:
             matrix_includes = []
             matrix_section = None
             matrix_item = None
+            matrix_axis_item = None
             matrix_axis = None
             matrix_error = None
             continue
@@ -153,6 +236,7 @@ def workflow_contexts(path: Path) -> set[str]:
         if current_job and matrix_match:
             matrix_section = "axes"
             matrix_item = None
+            matrix_axis_item = None
             matrix_axis = None
             matrix_value = _strip_yaml_comment(matrix_match.group(1)).strip()
             if matrix_value:
@@ -163,6 +247,7 @@ def workflow_contexts(path: Path) -> set[str]:
         if current_job and matrix_section and section_match:
             matrix_section = section_match.group(1)
             matrix_item = None
+            matrix_axis_item = None
             matrix_axis = None
             continue
 
@@ -170,17 +255,12 @@ def workflow_contexts(path: Path) -> set[str]:
         if current_job and matrix_section is not None and axis_match:
             matrix_section = "axes"
             matrix_item = None
+            matrix_axis_item = None
             matrix_axis = axis_match.group(1)
             value = axis_match.group(2) or ""
             values = _inline_list(value)
             if value and values is None:
                 matrix_error = f"axis {matrix_axis} is not a static list"
-                matrix_axes[matrix_axis] = []
-            elif values and any(
-                item.startswith(("{", "[")) or item.endswith(("}", "]"))
-                for item in values
-            ):
-                matrix_error = f"axis {matrix_axis} contains structured values"
                 matrix_axes[matrix_axis] = []
             else:
                 matrix_axes[matrix_axis] = values or []
@@ -193,20 +273,33 @@ def workflow_contexts(path: Path) -> set[str]:
             and matrix_axis
             and axis_item_match
         ):
-            item = _scalar(axis_item_match.group(1))
-            if (
-                item.startswith(("{", "["))
-                or item.endswith(("}", "]"))
-                or re.match(r"^[A-Za-z0-9_-]+:\s*", item)
-            ):
-                matrix_error = f"axis {matrix_axis} contains structured values"
+            item_text = axis_item_match.group(1)
+            pair = _split_mapping_field(item_text)
+            if pair:
+                key, field_value = pair
+                matrix_axis_item = {key: _value(field_value)}
+                matrix_axes[matrix_axis].append(matrix_axis_item)
             else:
-                matrix_axes[matrix_axis].append(item)
+                matrix_axis_item = None
+                matrix_axes[matrix_axis].append(_value(item_text))
+            continue
+
+        axis_item_field_match = re.match(
+            r"^            ([A-Za-z0-9_-]+):\s*(.+?)\s*$", line
+        )
+        if (
+            matrix_section == "axes"
+            and matrix_axis_item is not None
+            and axis_item_field_match
+        ):
+            matrix_axis_item[axis_item_field_match.group(1)] = _value(
+                axis_item_field_match.group(2)
+            )
             continue
 
         item_match = re.match(r"^          -\s+([A-Za-z0-9_-]+):\s*(.+?)\s*$", line)
         if current_job and matrix_section in {"include", "exclude"} and item_match:
-            matrix_item = {item_match.group(1): _scalar(item_match.group(2))}
+            matrix_item = {item_match.group(1): _value(item_match.group(2))}
             target = (
                 matrix_includes if matrix_section == "include" else matrix_excludes
             )
@@ -217,7 +310,7 @@ def workflow_contexts(path: Path) -> set[str]:
             r"^            ([A-Za-z0-9_-]+):\s*(.+?)\s*$", line
         )
         if matrix_item is not None and item_field_match:
-            matrix_item[item_field_match.group(1)] = _scalar(item_field_match.group(2))
+            matrix_item[item_field_match.group(1)] = _value(item_field_match.group(2))
     else:
         save_job()
 
