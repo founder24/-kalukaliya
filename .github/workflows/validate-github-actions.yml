@@ -11,6 +11,8 @@ on:
       - 'scripts/update-actionlint.py'
       - 'scripts/check-edge-workflow-triggers.py'
       - 'scripts/test-edge-workflow-triggers.py'
+      - 'scripts/check-staff-chunk-release-gate.py'
+      - 'scripts/test-staff-chunk-release-gate.py'
   push:
     branches: [main]
     paths:
@@ -19,6 +21,8 @@ on:
       - 'scripts/update-actionlint.py'
       - 'scripts/check-edge-workflow-triggers.py'
       - 'scripts/test-edge-workflow-triggers.py'
+      - 'scripts/check-staff-chunk-release-gate.py'
+      - 'scripts/test-staff-chunk-release-gate.py'
   workflow_dispatch:
 
 permissions:
@@ -42,6 +46,12 @@ jobs:
 
       - name: Test critical CI trigger contract checker
         run: python3 scripts/test-edge-workflow-triggers.py
+
+      - name: Check staff chunk release gate contract
+        run: python3 scripts/check-staff-chunk-release-gate.py
+
+      - name: Test staff chunk release gate checker
+        run: python3 scripts/test-staff-chunk-release-gate.py
 
       - name: Check actionlint release pin
         run: python3 scripts/update-actionlint.py

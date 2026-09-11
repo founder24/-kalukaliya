@@ -28,7 +28,11 @@ WORKFLOW_CONTRACTS: dict[str, list[str] | None] = {
     ],
     ".github/workflows/ci-frontend.yml": [
         "apps/frontend/**",
+        ".github/workflows/deploy-cloudflare.yml",
         ".github/workflows/ci-frontend.yml",
+        "scripts/check-edge-workflow-triggers.py",
+        "scripts/check-staff-chunk-release-gate.py",
+        "scripts/test-staff-chunk-release-gate.py",
         "pnpm-lock.yaml",
     ],
 }

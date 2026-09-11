@@ -5,13 +5,21 @@ on:
     branches: [main]
     paths:
       - 'apps/frontend/**'
+      - '.github/workflows/deploy-cloudflare.yml'
       - '.github/workflows/ci-frontend.yml'
+      - 'scripts/check-edge-workflow-triggers.py'
+      - 'scripts/check-staff-chunk-release-gate.py'
+      - 'scripts/test-staff-chunk-release-gate.py'
       - 'pnpm-lock.yaml'
   pull_request:
     branches: [main]
     paths:
       - 'apps/frontend/**'
+      - '.github/workflows/deploy-cloudflare.yml'
       - '.github/workflows/ci-frontend.yml'
+      - 'scripts/check-edge-workflow-triggers.py'
+      - 'scripts/check-staff-chunk-release-gate.py'
+      - 'scripts/test-staff-chunk-release-gate.py'
       - 'pnpm-lock.yaml'
   workflow_dispatch:
 
@@ -74,6 +82,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install workflow contract checker dependency
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+      - name: Test staff chunk release gate contract
+        run: python3 scripts/test-staff-chunk-release-gate.py
 
       - uses: actions/setup-node@v4
         with:
