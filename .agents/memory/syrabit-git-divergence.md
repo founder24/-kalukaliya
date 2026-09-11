@@ -6,7 +6,21 @@ description: How to handle diverged histories between Replit local main and GitH
 # Syrabit Git Divergence Pattern
 
 ## The rule
-Replit sandbox blocks `git push` (treated as destructive). When you need to push code to trigger GitHub Actions deploys, use the **GitHub Git Data API** (blob → tree → commit → PATCH ref).
+Prefer a normal PAT-backed Git push for a large diverged history. Git smart HTTP
+may reject a valid token sent as Bearer authentication; use the standard Basic
+form with `x-access-token` as the username. Never print the encoded header.
+
+`main` is protected. After reconciling locally, push a temporary branch, open a
+pull request, wait for the required status contexts, merge normally, then fetch
+and fast-forward local `main` to the merge commit.
+
+**Why:** a direct push successfully uploaded every object but GitHub rejected the
+ref update because protected `main` required checks. The same token worked with
+Basic authentication after Bearer authentication was reported as invalid.
+
+**How to apply:** create a backup branch before merging, keep user attachments
+untracked, use the pull-request path when direct `main` is protected, and confirm
+`git rev-list --left-right --count main...origin/main` returns `0 0`.
 
 The Replit GitHub OAuth connector does not authenticate the workspace's normal
 Git remote. Its API proxy can also trigger Replit's Cloudflare protection during
@@ -59,8 +73,9 @@ Replit auto-commits at end of each task, creating further divergence.
 
 ## After divergence
 The next Replit push (if sandbox allows) will fail due to non-fast-forward.
-Fix: force-push from Replit when sandbox restrictions are lifted,
-OR just keep using the Git Data API pattern for subsequent pushes.
+Merge the live remote tip locally; never force-push over task-agent or GitHub
+history. If `main` is protected, publish the merge on a temporary branch and use
+a pull request.
 
 When a task merge exists only in local history, create the reconciliation
 tree against the current GitHub tree and publish it as a new non-force commit.
@@ -72,8 +87,12 @@ deletion entry.
 does not exist in the base tree. Omitting the local-only path preserves the
 remote state without publishing user screenshots or blocking the sync.
 
-**Why:** Replit sandbox detects git push as potentially destructive; the only
-non-interactive way to push code from the agent is the REST API.
+Replit can auto-commit an uploaded conflict screenshot while a sync branch is
+open. Check the branch tip after pushing and remove the path from Git tracking
+before merging; keep the local file untracked if it is still useful.
+
+**Why:** the screenshot was automatically committed after the initial sync
+branch push even though it had been intentionally excluded from the merge.
 
 ## Reconciling a Replit “merge conflict” banner
 When GitHub `main` and local `main` have diverged after API-created commits,
