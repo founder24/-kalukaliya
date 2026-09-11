@@ -8,7 +8,7 @@
     "build": "tsc --noEmit",
     "deploy": "wrangler deploy --env production",
     "test": "vitest run && pnpm run test:runtime",
-    "test:ci": "vitest run && pnpm run test:runtime && pnpm run test:runtime",
+    "test:ci": "vitest run && pnpm run test:runtime",
     "test:runtime": "vitest run --config vitest.runtime.config.mts"
   },
   "devDependencies": {

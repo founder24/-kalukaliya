@@ -65,6 +65,7 @@ describe('CF Cache API - Frontend GET Redirect Caching', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('checks CF Cache API for non-API GET requests', async () => {
@@ -189,6 +190,7 @@ describe('/health - ISR_CACHE_KV Cache Layer', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('reads health from ISR_CACHE_KV when KV has cached value', async () => {
@@ -222,6 +224,8 @@ describe('/health - ISR_CACHE_KV Cache Layer', () => {
   });
 
   it('includes the durable chat-limit cleanup incident without identity data', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-09T12:20:00.000Z'));
     const failureAt = '2026-09-09T12:10:00.000Z';
     const recoveryAt = '2026-09-09T12:15:00.000Z';
     const rateLimitKv = {
