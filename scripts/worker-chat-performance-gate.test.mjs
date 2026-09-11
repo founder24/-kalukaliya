@@ -276,6 +276,50 @@ test('atomic notification write preserves complete JSON and cleans up after an i
   assert.deepEqual(await readdir(directory), ['notification-state.json']);
 });
 
+test('warning CLI rebuilds active alerts from a pre-existing truncated notification file', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'chat-performance-warning-recovery-'));
+  const historyDirectory = join(directory, 'history');
+  const currentPath = join(directory, 'current.json');
+  const notificationStatePath = join(directory, 'notification-state.json');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  await mkdir(historyDirectory);
+  await Promise.all([
+    writeFile(currentPath, JSON.stringify(reportFor([1200, 4200, 1800], [1500, 1700, 1900]))),
+    writeFile(
+      join(historyDirectory, 'previous.json'),
+      JSON.stringify(reportFor([1100, 3900, 1600], [1500, 1700, 1900])),
+    ),
+    writeFile(notificationStatePath, '{"comparison_complete":true,"active_warnings":['),
+  ]);
+
+  const result = spawnSync(
+    process.execPath,
+    [join(import.meta.dirname, 'warn-worker-chat-performance-history.mjs'), currentPath, historyDirectory],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CHAT_PERFORMANCE_NOTIFICATION_RUNS: '2',
+        CHAT_PERFORMANCE_NOTIFICATION_STATE_PATH: notificationStatePath,
+      },
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const notificationState = JSON.parse(await readFile(notificationStatePath, 'utf8'));
+  assert.equal(notificationState.comparison_complete, true);
+  assert.deepEqual(
+    notificationState.active_warnings.map(warning => warning.route),
+    ['direct_chapter_rag'],
+  );
+  assert.match(
+    result.stderr,
+    /::warning title=Chat performance notification state recovery::Malformed existing notification state/,
+  );
+  assert.match(result.stderr, /Rebuilding it from the current report comparison\./);
+});
+
 test('warning CLI preserves indeterminate routes without changing notification state on insufficient history', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'chat-performance-warning-insufficient-'));
   const historyDirectory = join(directory, 'history');

@@ -12,6 +12,21 @@ async function readReport(path) {
   return JSON.parse(await readFile(path, 'utf8'));
 }
 
+async function detectMalformedNotificationState(path) {
+  try {
+    JSON.parse(await readFile(path, 'utf8'));
+    return false;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    if (!(error instanceof SyntaxError)) throw error;
+    console.error(
+      `::warning title=Chat performance notification state recovery::Malformed existing notification state `
+      + `at ${path}: ${error.message}. Rebuilding it from the current report comparison.`,
+    );
+    return true;
+  }
+}
+
 export async function atomicWriteJson(path, value, operations = {}) {
   const write = operations.writeFile ?? writeFile;
   const move = operations.rename ?? rename;
@@ -55,6 +70,7 @@ async function main() {
   }
 
   const currentReport = await readReport(currentPath);
+  await detectMalformedNotificationState(notificationStatePath);
   let historyFiles = [];
   try {
     historyFiles = (await readdir(historyDirectory, { recursive: true }))
