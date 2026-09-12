@@ -684,7 +684,11 @@ adminContentRouter.get('/content/translation-progress', async c => {
 adminContentRouter.get('/content/assamese/coverage', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
   const rows = await c.env.DB.prepare(`
-    SELECT c.id, c.title, c.chapter_number, c.status, c.notes_as,
+    SELECT c.id, c.title, c.chapter_number, c.status,
+           CASE
+             WHEN c.notes_as IS NOT NULL AND TRIM(c.notes_as) != '' THEN 1
+             ELSE 0
+           END AS has_assamese,
            s.id AS subject_id, s.name AS subject_name
     FROM chapters c
     JOIN subjects s ON s.id = c.subject_id
@@ -692,21 +696,22 @@ adminContentRouter.get('/content/assamese/coverage', async c => {
     ORDER BY s.name, c.chapter_number, c.title
   `).all<{
     id: string; title: string; chapter_number: number | null; status: string | null;
-    notes_as: string | null; subject_id: string; subject_name: string;
+    has_assamese: number; subject_id: string; subject_name: string;
   }>();
   const chaptersWithEnglish = rows.results ?? [];
-  const translated = chaptersWithEnglish.filter(row => Boolean(row.notes_as?.trim())).length;
+  const translated = chaptersWithEnglish.filter(row => Number(row.has_assamese) === 1).length;
   const groups = new Map<string, {
     subject_id: string; subject_name: string; total: number; translated: number;
     missing: number; chapters: Array<{ id: string; title: string; chapter_number: number | null; status: string | null }>;
   }>();
   for (const row of chaptersWithEnglish) {
+    const hasAssamese = Number(row.has_assamese) === 1;
     const group = groups.get(row.subject_id) ?? {
       subject_id: row.subject_id, subject_name: row.subject_name,
       total: 0, translated: 0, missing: 0, chapters: [],
     };
     group.total++;
-    if (row.notes_as?.trim()) {
+    if (hasAssamese) {
       group.translated++;
     } else {
       group.missing++;
