@@ -15,6 +15,9 @@ concurrency:
 jobs:
   backend-quality:
     name: Backend Quality Checks
+    # apps/backend is retained only for manually-invoked local tooling
+    # diagnostics. It is not part of the Cloudflare production quality gate.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     services:
       mongodb:
