@@ -45,9 +45,17 @@ trap cleanup EXIT
 
 run_disposable_staff_auth_check() {
   local required_var cookie_jar login_body response headers status access_token refresh_token now
-  for required_var in CUTOVER_STAFF_EMAIL CUTOVER_STAFF_PASSWORD CUTOVER_STAFF_LEASE_EXPIRES_AT; do
+  local -a access_headers
+  for required_var in \
+    CUTOVER_STAFF_EMAIL CUTOVER_STAFF_PASSWORD CUTOVER_STAFF_LEASE_EXPIRES_AT \
+    CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET
+  do
     : "${!required_var:?Set ${required_var} for disposable staff authentication validation}"
   done
+  access_headers=(
+    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"
+    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"
+  )
   if [[ "${CUTOVER_STAFF_EMAIL,,}" != *release-staff-auth* ]]; then
     echo "CUTOVER_STAFF_EMAIL must identify a disposable release-staff-auth fixture." >&2
     exit 1
@@ -72,6 +80,7 @@ print(json.dumps({"email": os.environ["CUTOVER_STAFF_EMAIL"], "password": os.env
 ')
 
   status=$(curl --silent --show-error --max-time 30 \
+    "${access_headers[@]}" \
     --request POST --header 'Content-Type: application/json' \
     --data "$login_body" --cookie-jar "$cookie_jar" \
     --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
@@ -94,6 +103,7 @@ PY
 
   for days in 7 30; do
     status=$(curl --silent --show-error --max-time 30 \
+      "${access_headers[@]}" \
       --cookie "$cookie_jar" --output "$response" --write-out '%{http_code}' \
       "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=${days}")
     test "$status" = "200" || {
@@ -110,6 +120,7 @@ PY
   done
 
   status=$(curl --silent --show-error --max-time 30 \
+    "${access_headers[@]}" \
     --request POST --header 'Content-Type: application/json' \
     --data "$login_body" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/auth/login")
@@ -137,6 +148,7 @@ PY
   refresh_token="${auth_tokens[1]}"
 
   status=$(curl --silent --show-error --max-time 30 \
+    "${access_headers[@]}" \
     --header "Authorization: Bearer ${access_token}" \
     --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=7")
@@ -156,6 +168,7 @@ import json, os
 print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
 ')
   status=$(curl --silent --show-error --max-time 30 \
+    "${access_headers[@]}" \
     --request POST --header 'Content-Type: application/json' \
     --header "Authorization: Bearer ${access_token}" \
     --data "$logout_body" --output "$response" --write-out '%{http_code}' \
@@ -166,6 +179,7 @@ print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
   }
 
   status=$(curl --silent --show-error --max-time 30 \
+    "${access_headers[@]}" \
     --request POST \
     --cookie "$cookie_jar" --cookie-jar "$cookie_jar" \
     --output "$response" --write-out '%{http_code}' \
@@ -175,6 +189,7 @@ print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
     exit 1
   }
   status=$(curl --silent --show-error --max-time 30 \
+    "${access_headers[@]}" \
     --cookie "$cookie_jar" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=7")
   test "$status" = "401" || {

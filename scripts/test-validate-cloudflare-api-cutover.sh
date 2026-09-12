@@ -70,8 +70,9 @@ case "$url" in
   *) echo "unexpected fake curl URL" >&2; exit 97 ;;
 esac
 printf '%s\n' "$step" >>"${CURL_LOG:?}"
-if [[ " $* " == *" CF-Access-Client-"* ]]; then
-  echo "Cloudflare Access headers must never be sent to the public API host" >&2
+if [[ " $* " != *" CF-Access-Client-Id: ${ACCESS_ID_VALUE:?}"* \
+   || " $* " != *" CF-Access-Client-Secret: ${ACCESS_SECRET_VALUE:?}"* ]]; then
+  echo "Cloudflare Access service headers are required on disposable staff API requests" >&2
   exit 96
 fi
 status=200
