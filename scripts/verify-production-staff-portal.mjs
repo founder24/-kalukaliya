@@ -10,6 +10,7 @@ import {
   STAFF_PORTAL_SECTIONS,
   assertStaffSectionCoverage,
   assertStaffSectionReleaseChecks,
+  isStaffReleaseReadPath,
 } from '../apps/frontend/src/config/staffPortalSections.mjs';
 import {
   CONTENT_HUB_TABS,
@@ -118,7 +119,11 @@ page.on('request', request => {
     requestContentHubTabs.set(request, activeContentHubTab);
   }
   const url = new URL(request.url());
-  if (request.method() === 'GET' && url.origin === edge) {
+  if (
+    request.method() === 'GET'
+    && url.origin === edge
+    && isStaffReleaseReadPath(url.pathname)
+  ) {
     apiReadsStarted.get(section)?.push(url.pathname);
     const contentHubTab = requestContentHubTabs.get(request);
     if (contentHubTab) contentHubReadsStarted.get(contentHubTab)?.push(url.pathname);
@@ -155,6 +160,7 @@ page.on('response', response => {
   }
   if (response.ok() && response.request().method() === 'GET') {
     const url = new URL(response.url());
+    if (url.origin !== edge || !isStaffReleaseReadPath(url.pathname)) return;
     successfulReads.get(responseSection)?.add(url.pathname);
     if (responseContentHubTab) {
       contentHubSuccessfulReads.get(responseContentHubTab)?.add(url.pathname);

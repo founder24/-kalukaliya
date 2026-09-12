@@ -43,6 +43,10 @@ export const STAFF_PORTAL_SECTIONS = Object.freeze([
   { id: 'settings', label: 'Site Settings', group: 'system', releaseCheck: { supported: false, requiredReads: [] } },
 ]);
 
+export function isStaffReleaseReadPath(pathname) {
+  return pathname === '/health' || pathname.startsWith('/api/v1/');
+}
+
 export function assertStaffSectionReleaseChecks(sections) {
   for (const section of sections) {
     const behavior = section.releaseCheck;

@@ -6,6 +6,7 @@ import {
   assertStaffSectionCoverage,
   assertStaffSectionMappings,
   assertStaffSectionReleaseChecks,
+  isStaffReleaseReadPath,
 } from '../apps/frontend/src/config/staffPortalSections.mjs';
 import {
   CONTENT_HUB_TABS,
@@ -56,6 +57,15 @@ test('staff release checks reject API reads on an unsupported section', () => {
 
 test('staff release checks accept every shared section declaration', () => {
   assert.doesNotThrow(() => assertStaffSectionReleaseChecks(STAFF_PORTAL_SECTIONS));
+});
+
+test('staff release evidence excludes universal public API warm-ups', () => {
+  assert.equal(isStaffReleaseReadPath('/health'), true);
+  assert.equal(isStaffReleaseReadPath('/api/v1/staff/analytics/command-center'), true);
+  assert.equal(isStaffReleaseReadPath('/api/v1/admin/content/assamese/coverage'), true);
+  assert.equal(isStaffReleaseReadPath('/api/content/library-bundle'), false);
+  assert.equal(isStaffReleaseReadPath('/api/analytics/events'), false);
+  assert.equal(isStaffReleaseReadPath('/assets/app.js'), false);
 });
 
 test('Content Editor release checks reject an unclassified tab', () => {
