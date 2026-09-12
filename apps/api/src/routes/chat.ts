@@ -1062,6 +1062,17 @@ export function shouldResolveCurriculumScopeForChat(
   return !directChapterId || authoritativeIntent !== null;
 }
 
+export function shouldStartWebSearchForChat(
+  providerEnabled: boolean,
+  directChapterId: string | undefined,
+  authoritativeIntent: AuthoritativeIntent,
+  requestedWebIntent: boolean,
+): boolean {
+  return providerEnabled
+    && (!directChapterId || requestedWebIntent)
+    && (!authoritativeIntent || requestedWebIntent);
+}
+
 export async function fetchMatchedChunkContext(
   d1: D1Database,
   matches: VectorizeMatch[],
@@ -2005,8 +2016,12 @@ chatRouter.post('/stream', async (c) => {
   // request with web snippets unless the student explicitly asks for current
   // information. Freshness-qualified syllabus requests use both sources, with
   // D1 curriculum content remaining authoritative if they conflict.
-  const webSearchEnabled = c.env.WEB_SEARCH_ENABLED === 'true'
-    && (!authoritativeIntent || requestedWebIntent);
+  const webSearchEnabled = shouldStartWebSearchForChat(
+    c.env.WEB_SEARCH_ENABLED === 'true',
+    directChapterId,
+    authoritativeIntent,
+    requestedWebIntent,
+  );
   // Keep intent independent from provider availability. If verified current
   // retrieval is disabled, the answer-level gate must still fail closed.
   const explicitWebIntent = requestedWebIntent;

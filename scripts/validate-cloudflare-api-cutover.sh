@@ -711,14 +711,14 @@ else
 fi
 
 if [[ -n "${TRANSLATE_CRON_SECRET:-}" ]]; then
-  echo "Checking native scheduled seed and translation status routes through the public edge"
+  echo "Checking native scheduled seed and translation status routes through the API Worker origin"
   cron_headers=$(mktemp)
   cron_output=$(mktemp)
   TMP_FILES+=("$cron_headers" "$cron_output")
   for cron_path in /admin/cron/seed-notes/status /admin/cron/seed-assamese/status; do
     status=$(curl --silent --show-error --max-time 30 \
       --dump-header "$cron_headers" --output "$cron_output" --write-out '%{http_code}' \
-      -H "Authorization: Bearer ${TRANSLATE_CRON_SECRET}" "${EDGE_BASE}/api/v1${cron_path}")
+      -H "Authorization: Bearer ${TRANSLATE_CRON_SECRET}" "${BASE}${cron_path}")
     test "$status" = "200" || { cat "$cron_output"; echo "Native scheduled status failed for ${cron_path}" >&2; exit 1; }
     grep -qi '^x-syrabit-route: worker-native' "$cron_headers" || {
       cat "$cron_headers"; echo "Scheduled status used a fallback route for ${cron_path}" >&2; exit 1;

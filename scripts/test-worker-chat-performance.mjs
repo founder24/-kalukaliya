@@ -150,12 +150,35 @@ async function probe(name, body) {
   }
 }
 
+async function collectProbeSample(route, name, body) {
+  try {
+    const result = await probe(name, body);
+    validateRouteResult(route, result);
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `::warning title=Chat probe sample failed::${name}: ${message}`,
+    );
+    return {
+      name,
+      // Count an invalid or incomplete stream as a failed sample while still
+      // collecting the remaining samples needed by the strict-majority rule.
+      first_token_ms: targetMs + 1,
+      target_met: false,
+      probe_error: message,
+      web_used: false,
+      web_status: 'error',
+    };
+  }
+}
+
 const { subject, chapter } = await discoverGeneratedChapter();
 const directSamples = [];
 const webSamples = [];
 for (let sample = 1; sample <= samples; sample += 1) {
   if (mode !== 'web') {
-    const direct = await probe(`direct_chapter_rag_${sample}`, {
+    const direct = await collectProbeSample('direct', `direct_chapter_rag_${sample}`, {
       message: `Explain the main idea of ${chapter.title} in two sentences.`,
       lang: 'en',
       chapter_id: chapter.chapter_id,
@@ -163,13 +186,12 @@ for (let sample = 1; sample <= samples; sample += 1) {
       subject_id: subject.id,
       subject_name: subject.name,
     });
-    validateRouteResult('direct', direct);
     directSamples.push(direct);
     console.error(`[chat-performance] ${direct.name}: first token ${direct.first_token_ms} ms`);
   }
 
   if (mode !== 'direct') {
-    const web = await probe(`rag_plus_bounded_web_${sample}`, {
+    const web = await collectProbeSample('web', `rag_plus_bounded_web_${sample}`, {
       // Keep the freshness probe inside the same discovered curriculum.
       // Use the institution abbreviation so "Education Council" is not
       // misread as an explicit request for the school subject "Education".
@@ -178,7 +200,6 @@ for (let sample = 1; sample <= samples; sample += 1) {
       subject_id: subject.id,
       subject_name: subject.name,
     });
-    validateRouteResult('web', web);
     webSamples.push(web);
     console.error(`[chat-performance] ${web.name}: first token ${web.first_token_ms} ms, web ${web.web_status}`);
   }
