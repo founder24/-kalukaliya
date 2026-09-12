@@ -69,6 +69,8 @@ describe('scheduled Cloudflare audit contract', () => {
     const query = buildCloudflareAnalyticsHealthQuery('2026-09-01T12:00:00.000Z');
     expect(query).toContain('httpRequests1hGroups');
     expect(query).toContain('uniqueVisitors: httpRequestsAdaptiveGroups');
+    expect(query).toContain('sum { visits }');
+    expect(query).not.toContain('uniq { uniques }');
     expect(query).toContain('datetime_geq: "2026-08-31T12:00:00.000Z"');
     expect(query).toContain('datetime_lt: "2026-09-01T12:00:00.000Z"');
   });
@@ -82,6 +84,18 @@ describe('scheduled Cloudflare audit contract', () => {
     expect(analyticsWorkflow).toContain('CLOUDFLARE_ANALYTICS_CONTRACT.endpoint');
     expect(analyticsWorkflow).not.toContain('/api/v1/admin/cron/cloudflare-analytics-health');
     expect(analyticsWorkflow).toContain('/api/v1/admin/cron/cloudflare-analytics-result');
+    expect(analyticsWorkflow).toContain(
+      'https://syrabit-api-prod.axomxplain.workers.dev/api/v1/admin/cron/cloudflare-analytics-result',
+    );
+    expect(analyticsWorkflow).toContain('secrets.CF_ANALYTICS_TOKEN');
+    expect(analyticsWorkflow).toContain('secrets.CF_API_TOKEN');
+    expect(analyticsWorkflow).toContain('vars.CF_ZONE_ID');
+    expect(analyticsWorkflow).toContain(
+      'https://api.cloudflare.com/client/v4/zones?name=',
+    );
+    expect(analyticsWorkflow).toContain('Missing Cloudflare analytics configuration');
+    expect(analyticsWorkflow).not.toContain('CF-Access-Client-Id');
+    expect(analyticsWorkflow).not.toContain('CF-Access-Client-Secret');
     expect(analyticsWorkflow).toContain('continue-on-error: true');
     expect(analyticsWorkflow).toContain('the Cloudflare probe result remains authoritative');
     expect(analyticsWorkflow).toMatch(
@@ -98,6 +112,50 @@ describe('scheduled Cloudflare audit contract', () => {
     );
     expect(uptimeWorkflow).toContain('Notification result (non-blocking)');
     expect(uptimeWorkflow).toContain('Production uptime probes failed');
+
+    const uptimeScript = fs.readFileSync(
+      path.join(repoRoot, 'scripts/uptime-check.sh'),
+      'utf8',
+    );
+    expect(uptimeScript).toContain(
+      'https://syrabit-api-prod.axomxplain.workers.dev',
+    );
+    expect(uptimeScript).not.toContain('/health/deep');
+    expect(uptimeScript).not.toContain('/api/v1/health/circuit-breakers');
+
+    const translationWorkflow = fs.readFileSync(
+      path.join(repoRoot, '.github/workflows/agent-translate-content.yml'),
+      'utf8',
+    );
+    expect(translationWorkflow).toContain(
+      'https://syrabit-api-prod.axomxplain.workers.dev',
+    );
+    expect(translationWorkflow).toContain('Authorization: Bearer');
+    expect(translationWorkflow).not.toContain('CF-Access-Client-Id');
+    expect(translationWorkflow).not.toContain('CF-Access-Client-Secret');
+
+    const backendWorkflow = fs.readFileSync(
+      path.join(repoRoot, '.github/workflows/ci-backend.yml'),
+      'utf8',
+    );
+    expect(backendWorkflow).toContain('workflow_dispatch:');
+    expect(backendWorkflow).not.toContain('pull_request:');
+    expect(backendWorkflow).not.toContain('push:');
+
+    const pagesCleanup = fs.readFileSync(
+      path.join(repoRoot, 'apps/frontend/scripts/remove-pages-legacy-env.mjs'),
+      'utf8',
+    );
+    expect(pagesCleanup).toContain('syrabitfrontend');
+    expect(pagesCleanup).toContain('BACKEND_BOT_URL: null');
+
+    const deployWorkflow = fs.readFileSync(
+      path.join(repoRoot, '.github/workflows/deploy-cloudflare.yml'),
+      'utf8',
+    );
+    expect(deployWorkflow).toContain(
+      'node apps/frontend/scripts/remove-pages-legacy-env.mjs',
+    );
   });
 
   it.each(scheduledAudits)('%s consumes the shared service and binding contract', (fileName) => {

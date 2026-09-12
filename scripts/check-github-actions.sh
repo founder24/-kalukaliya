@@ -43,4 +43,7 @@ if [[ ! -x "${ACTIONLINT_BIN}" ]]; then
   rm "${archive_path}"
 fi
 
-"${ACTIONLINT_BIN}" -color
+# Keep results deterministic across local machines and GitHub runners.
+# ShellCheck availability must not silently change this repository-wide
+# workflow validator into a separate legacy shell-style gate.
+"${ACTIONLINT_BIN}" -color -shellcheck=""

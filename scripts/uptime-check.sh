@@ -7,12 +7,15 @@
 
 set -euo pipefail
 
+# Keep these probes on routes that are intentionally public and served by the
+# current Workers deployment.  Authenticated binding diagnostics and retired
+# circuit-breaker routes are intentionally excluded.
+API_WORKER_ORIGIN="${API_WORKER_ORIGIN:-https://syrabit-api-prod.axomxplain.workers.dev}"
+PUBLIC_EDGE_ORIGIN="${PUBLIC_EDGE_ORIGIN:-https://api.syrabit.ai}"
 ENDPOINTS=(
-  "https://api.syrabit.ai/health"
-  "https://api.syrabit.ai/health/deep"
-  "https://syrabit.ai"
-  "https://api.syrabit.ai/api/v1/content/library-bundle?slim=1"
-  "https://api.syrabit.ai/api/v1/health/circuit-breakers"
+  "${API_WORKER_ORIGIN%/}/health"
+  "${PUBLIC_EDGE_ORIGIN%/}/health"
+  "${PUBLIC_EDGE_ORIGIN%/}/api/v1/content/library-bundle?slim=1"
 )
 
 TIMEOUT=10

@@ -990,18 +990,25 @@ async function queryVectorize(
  * Mirrors the Python ChatService.retrieve_context_from_chapter() fallback chain
  * documented in syrabit-rag-v2.md and rag-field-priority.md.
  */
-async function fetchChapterContent(
+export async function fetchChapterContent(
   d1: D1Database,
   chapterId: string,
   lang: 'en' | 'as',
   subjectId?: string,
 ): Promise<{ content: string; language: 'assamese' | 'english' } | null> {
+  // The direct chapter path is latency-sensitive. Do not transfer the other
+  // language's (often very large) generated fields when English is requested.
+  // Assamese still selects English fields because English is its documented
+  // final fallback.
+  const contentColumns = lang === 'as'
+    ? `chapters.rag_sections_as AS ragSectionsAs,
+       chapters.rag_text_as AS ragTextAs, chapters.notes_as AS notesAs,
+       chapters.rag_sections_en AS ragSectionsEn,
+       chapters.rag_text AS ragText, chapters.notes_en AS notesEn`
+    : `chapters.rag_sections_en AS ragSectionsEn,
+       chapters.rag_text AS ragText, chapters.notes_en AS notesEn`;
   const row = await d1.prepare(`
-    SELECT chapters.rag_sections_en AS ragSectionsEn,
-           chapters.rag_sections_as AS ragSectionsAs,
-           chapters.rag_text AS ragText, chapters.rag_text_as AS ragTextAs,
-           chapters.notes_en AS notesEn, chapters.notes_as AS notesAs,
-           chapters.title AS title
+    SELECT ${contentColumns}
     FROM chapters
     JOIN subjects ON subjects.id = chapters.subject_id
     LEFT JOIN streams ON streams.id = subjects.stream_id
@@ -1021,7 +1028,6 @@ async function fetchChapterContent(
     ragTextAs: string | null;
     notesEn: string | null;
     notesAs: string | null;
-    title: string;
   }>();
 
   if (!row) return null;
@@ -1041,6 +1047,19 @@ async function fetchChapterContent(
   if (row.ragText) return { content: row.ragText, language: 'english' };
   if (row.notesEn) return { content: row.notesEn, language: 'english' };
   return null;
+}
+
+/**
+ * A caller-provided chapter is already an exact grounding scope. Resolving
+ * every published subject before reading that chapter adds a full hierarchy
+ * scan to the first-token critical path. Keep the resolver for semantic and
+ * authoritative requests, where it is needed to disambiguate scope.
+ */
+export function shouldResolveCurriculumScopeForChat(
+  directChapterId: string | undefined,
+  authoritativeIntent: AuthoritativeIntent,
+): boolean {
+  return !directChapterId || authoritativeIntent !== null;
 }
 
 export async function fetchMatchedChunkContext(
@@ -1155,8 +1174,29 @@ async function buildSourceEntries(
   chunks: ContextChunk[],
   webResults: WebSearchResult[],
   lang: 'en' | 'as',
+  options: { skipHierarchyForDirect?: boolean } = {},
 ): Promise<SourceEntry[]> {
   const curriculumCandidates = await Promise.all(chunks.map(async (chunk): Promise<SourceEntry | null> => {
+    const snippet = chunk.content.replace(/\s+/g, ' ').trim().slice(0, 360);
+    // fetchChapterContent has already verified publication and exact chapter
+    // identity. Avoid a second hierarchy query before source_card for this
+    // direct path; semantic matches still use the richer hierarchy lookup.
+    if (options.skipHierarchyForDirect && chunk.sourceType?.startsWith('chapter_direct')) {
+      return {
+        id: `chapter:${chunk.chapterId}`,
+        title: chunk.chapterTitle,
+        kind: 'curriculum' as const,
+        url: null,
+        snippet,
+        matched_passage: snippet,
+        chapter_id: chunk.chapterId,
+        retrieval_method: chunk.sourceType,
+        confidence: chunk.score,
+        medium: chunk.medium ?? (lang === 'as' ? 'assamese' : 'english'),
+        source_type: chunk.sourceType,
+        score: chunk.score,
+      };
+    }
     const row = await d1.prepare(`
       SELECT chapters.slug AS chapter_slug, subjects.slug AS subject_slug,
              classes.slug AS class_slug, boards.slug AS board_slug,
@@ -1191,8 +1231,8 @@ async function buildSourceEntries(
       title: chunk.chapterTitle,
       kind: 'curriculum' as const,
       url: path,
-      snippet: chunk.content.replace(/\s+/g, ' ').trim().slice(0, 360),
-      matched_passage: chunk.content.replace(/\s+/g, ' ').trim().slice(0, 360),
+      snippet,
+      matched_passage: snippet,
       chapter_id: chunk.chapterId,
       retrieval_method: chunk.sourceType ?? 'rag_chapter',
       confidence: chunk.score,
@@ -1908,6 +1948,7 @@ chatRouter.post('/stream', async (c) => {
   let topChapterId: string | undefined;
   let topChapterTitle: string | undefined;
   let topSubjectId: string | undefined;
+  let directChapterContent: { content: string; language: 'assamese' | 'english' } | null = null;
   let history = '';
   let memories = '';
   let webResults: WebSearchResult[] = [];
@@ -1919,15 +1960,28 @@ chatRouter.post('/stream', async (c) => {
   const directChapterId = body.chapter_id?.trim() || undefined;
   const authoritativeIntent = detectAuthoritativeIntent(message);
   let curriculumScope: CurriculumScope;
-  try {
-    curriculumScope = await resolveCurriculumScope(c.env.DB, message, body.subject_id);
-  } catch (error) {
-    console.warn('[chat] Curriculum scope resolution failed:', error);
+  if (!shouldResolveCurriculumScopeForChat(directChapterId, authoritativeIntent)) {
+    // The chapter lookup below verifies this exact published chapter. Reuse
+    // page-provided scope metadata instead of scanning the hierarchy first.
     curriculumScope = {
       ...(body.subject_id && { subjectId: body.subject_id }),
-      explicit: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
-      unresolved: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
+      ...(body.subject_name && { subjectName: body.subject_name }),
+      ...(body.class_name && { className: body.class_name }),
+      ...(body.board_name && { boardName: body.board_name }),
+      explicit: false,
+      unresolved: false,
     };
+  } else {
+    try {
+      curriculumScope = await resolveCurriculumScope(c.env.DB, message, body.subject_id);
+    } catch (error) {
+      console.warn('[chat] Curriculum scope resolution failed:', error);
+      curriculumScope = {
+        ...(body.subject_id && { subjectId: body.subject_id }),
+        explicit: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
+        unresolved: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
+      };
+    }
   }
   const scopedSubjectId = curriculumScope.unresolved
     ? undefined
@@ -1996,7 +2050,7 @@ chatRouter.post('/stream', async (c) => {
   if (!authoritativeIntent && directChapterId) {
     const [directHistoryResult, directContentResult, directMemoryResult] = await Promise.allSettled([
       loadHistory(db, sessionId, userId),
-      fetchChapterContent(c.env.DB, directChapterId, lang, curriculumScope.explicit ? scopedSubjectId : undefined),
+      fetchChapterContent(c.env.DB, directChapterId, lang, body.subject_id ?? scopedSubjectId),
       memoryPromise,
     ]);
     if (directHistoryResult.status === 'fulfilled') {
@@ -2004,7 +2058,7 @@ chatRouter.post('/stream', async (c) => {
       historyLoaded = true;
     }
     if (directMemoryResult.status === 'fulfilled') memories = directMemoryResult.value;
-    const directChapterContent = directContentResult.status === 'fulfilled'
+    directChapterContent = directContentResult.status === 'fulfilled'
       ? directContentResult.value
       : null;
     if (
@@ -2159,7 +2213,8 @@ chatRouter.post('/stream', async (c) => {
   // Card-context fallback — when RAG missed but chapter_id provided by frontend
   if (!authoritativeIntent && contextChunks.length === 0 && directChapterId) {
     try {
-      const chapterContent = await fetchChapterContent(c.env.DB, directChapterId, lang, curriculumScope.explicit ? scopedSubjectId : undefined);
+      const chapterContent = directChapterContent
+        ?? await fetchChapterContent(c.env.DB, directChapterId, lang, body.subject_id ?? scopedSubjectId);
       if (chapterContent) {
         topChapterId    = directChapterId;
         topChapterTitle = body.chapter_name;
@@ -2236,7 +2291,13 @@ chatRouter.post('/stream', async (c) => {
   // the ID from the first SSE event. We must mint here (not in waitUntil) so
   // history and persistence both use the same ID and the client learns it early.
   const effectiveSessionId: string = sessionId ?? crypto.randomUUID();
-  const sourceEntries = await buildSourceEntries(c.env.DB, contextChunks, webResults, lang);
+  const sourceEntries = await buildSourceEntries(
+    c.env.DB,
+    contextChunks,
+    webResults,
+    lang,
+    { skipHierarchyForDirect: Boolean(directChapterId) },
+  );
   const primaryCurriculumSource = sourceEntries.find(entry => entry.kind === 'curriculum');
 
   // ── 8. Source card (emitted as the very first SSE event) ────────────────────

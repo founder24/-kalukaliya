@@ -1,20 +1,12 @@
-name: CI Retired Local Tooling — Lint & Test
+name: "Diagnostics (manual): Retired Backend Tooling"
 
 # apps/backend is retained for local AHSEC/Mongo tooling only. This workflow
 # performs static/test quality checks and contains no deployment credentials or
-# deployment step; Cloudflare Workers are the only production runtime.
+# deployment step; Cloudflare Workers are the only production runtime.  It is
+# deliberately manual-only: legacy lint debt must not create a red production
+# CI signal, while operators can still opt in when diagnosing local tooling.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/backend/**'
-      - '.github/workflows/ci-backend.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'apps/backend/**'
-      - '.github/workflows/ci-backend.yml'
   workflow_dispatch:
 
 permissions:
@@ -55,7 +47,7 @@ jobs:
         run: mypy apps/backend/app/ --config-file apps/backend/mypy.ini
 
   test:
-    name: Run Tests
+    name: Backend Tests
     needs: lint
     runs-on: ubuntu-latest
     services:

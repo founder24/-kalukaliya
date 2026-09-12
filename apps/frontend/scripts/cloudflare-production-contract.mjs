@@ -52,13 +52,12 @@ export function buildCloudflareAnalyticsHealthQuery(now = new Date()) {
           ) {
             dimensions { ${CLOUDFLARE_ANALYTICS_CONTRACT.dimensions} }
             sum { requests pageViews threats bytes }
-            uniq { uniques }
           }
           uniqueVisitors: httpRequestsAdaptiveGroups(
             limit: 1
             filter: {datetime_geq: "${sinceIso}", datetime_lt: "${untilIso}"}
           ) {
-            uniq { uniques }
+            sum { visits }
           }
         }
       }

@@ -177,11 +177,100 @@ staffRouter.get('/analytics/aggregates/:metric', async (c) => {
 
 type CommandCenterRow = Record<string, number | string | null>;
 
-function numericSummary(row: CommandCenterRow | null | undefined): Record<string, number> {
+function numericSummary(
+  row: CommandCenterRow | null | undefined,
+  fields?: readonly string[],
+): Record<string, number> {
   if (!row) return {};
+  const entries = fields
+    ? fields.map(key => [key, row[key] ?? 0] as const)
+    : Object.entries(row);
   return Object.fromEntries(
-    Object.entries(row).map(([key, value]) => [key, Number(value ?? 0)]),
+    entries.map(([key, value]) => [key, Number(value ?? 0)]),
   );
+}
+
+const COMMAND_CENTER_MEMORY_CACHE_TTL_SECONDS = 15;
+// Cloudflare KV rejects expirationTtl values below 60 seconds.
+const COMMAND_CENTER_KV_CACHE_TTL_SECONDS = 60;
+const COMMAND_CENTER_CACHE_MAX_ENTRIES = 8;
+type CommandCenterPayload = Record<string, unknown>;
+const commandCenterMemoryCache = new Map<string, {
+  expiresAt: number;
+  payload: CommandCenterPayload;
+}>();
+
+export function commandCenterCacheKey(days: number): string {
+  return `staff:analytics:command-center:v1:${days}`;
+}
+
+function readCommandCenterMemoryCache(
+  key: string,
+  now: number,
+): CommandCenterPayload | null {
+  const cached = commandCenterMemoryCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= now) {
+    commandCenterMemoryCache.delete(key);
+    return null;
+  }
+  return cached.payload;
+}
+
+function writeCommandCenterMemoryCache(
+  key: string,
+  payload: CommandCenterPayload,
+  now: number,
+): void {
+  commandCenterMemoryCache.set(key, {
+    expiresAt: now + COMMAND_CENTER_MEMORY_CACHE_TTL_SECONDS,
+    payload,
+  });
+  while (commandCenterMemoryCache.size > COMMAND_CENTER_CACHE_MAX_ENTRIES) {
+    const oldest = commandCenterMemoryCache.keys().next().value;
+    if (typeof oldest !== 'string') break;
+    commandCenterMemoryCache.delete(oldest);
+  }
+}
+
+async function readCommandCenterCache(
+  env: Env,
+  days: number,
+  now: number,
+): Promise<CommandCenterPayload | null> {
+  const key = commandCenterCacheKey(days);
+  const memory = readCommandCenterMemoryCache(key, now);
+  if (memory) return memory;
+  try {
+    const cached = await env.CONTENT_KV.get(key, 'json') as unknown;
+    if (
+      cached
+      && typeof cached === 'object'
+      && (cached as { days?: unknown }).days === days
+    ) {
+      const payload = cached as CommandCenterPayload;
+      writeCommandCenterMemoryCache(key, payload, now);
+      return payload;
+    }
+  } catch {
+    // KV is an optimization only. Fall through to the authoritative D1 data.
+  }
+  return null;
+}
+
+function writeCommandCenterCache(
+  env: Env,
+  days: number,
+  payload: CommandCenterPayload,
+  now: number,
+): Promise<void> {
+  const key = commandCenterCacheKey(days);
+  writeCommandCenterMemoryCache(key, payload, now);
+  return env.CONTENT_KV.put(key, JSON.stringify(payload), {
+    expirationTtl: COMMAND_CENTER_KV_CACHE_TTL_SECONDS,
+  }).catch(() => {
+    // D1 remains the source of truth when KV writes are unavailable.
+  });
 }
 
 /**
@@ -198,6 +287,8 @@ staffRouter.get('/analytics/command-center', async (c) => {
   }
 
   const now = Math.floor(Date.now() / 1000);
+  const cached = await readCommandCenterCache(c.env, days, now);
+  if (cached) return c.json(cached);
   const since = now - (days * 24 * 60 * 60);
   try {
     const results = await c.env.DB.batch<CommandCenterRow>([
@@ -231,26 +322,22 @@ staffRouter.get('/analytics/command-center', async (c) => {
       `),
       c.env.DB.prepare(`
         SELECT
-          COALESCE(SUM(CASE WHEN event_subtype = 'chat_completion' THEN 1 ELSE 0 END), 0) AS completions,
-          COALESCE(SUM(CASE WHEN event_subtype = 'chat_failure' THEN 1 ELSE 0 END), 0) AS failures,
-          COALESCE(ROUND(AVG(CASE WHEN event_subtype = 'chat_completion'
+          COALESCE(SUM(CASE WHEN classification = 'essential_operational'
+            AND event_subtype = 'chat_completion' THEN 1 ELSE 0 END), 0) AS completions,
+          COALESCE(SUM(CASE WHEN classification = 'essential_operational'
+            AND event_subtype = 'chat_failure' THEN 1 ELSE 0 END), 0) AS failures,
+          COALESCE(ROUND(AVG(CASE WHEN classification = 'essential_operational'
+            AND event_subtype = 'chat_completion'
             THEN CAST(json_extract(payload, '$.latency_ms') AS REAL) END)), 0) AS average_latency_ms,
-          COALESCE(SUM(CASE WHEN event_subtype = 'chat_completion'
+          COALESCE(SUM(CASE WHEN classification = 'essential_operational'
+            AND event_subtype = 'chat_completion'
             AND CAST(json_extract(payload, '$.source_coverage') AS INTEGER) > 0
-            THEN 1 ELSE 0 END), 0) AS sourced_completions
-        FROM analytics_events
-        WHERE classification = 'essential_operational' AND created_at >= ?
-      `).bind(since),
-      c.env.DB.prepare(`
-        SELECT
-          COALESCE(SUM(CASE WHEN event_subtype = 'ad_slot_viewed' THEN 1 ELSE 0 END), 0) AS slot_views,
-          COUNT(DISTINCT CASE WHEN event_subtype = 'ad_slot_viewed'
-            THEN json_extract(payload, '$.placement') END) AS active_placements
-        FROM analytics_events
-        WHERE classification = 'optional_analytics' AND created_at >= ?
-      `).bind(since),
-      c.env.DB.prepare(`
-        SELECT
+            THEN 1 ELSE 0 END), 0) AS sourced_completions,
+          COALESCE(SUM(CASE WHEN classification = 'optional_analytics'
+            AND event_subtype = 'ad_slot_viewed' THEN 1 ELSE 0 END), 0) AS slot_views,
+          COUNT(DISTINCT CASE WHEN classification = 'optional_analytics'
+            AND event_subtype = 'ad_slot_viewed'
+            THEN json_extract(payload, '$.placement') END) AS active_placements,
           COALESCE(SUM(CASE WHEN event_subtype = 'consent_granted' THEN 1 ELSE 0 END), 0) AS granted,
           COALESCE(SUM(CASE WHEN event_subtype = 'consent_declined' THEN 1 ELSE 0 END), 0) AS declined,
           COALESCE(ROUND(100.0 * SUM(CASE WHEN event_subtype = 'consent_granted' THEN 1 ELSE 0 END)
@@ -279,18 +366,20 @@ staffRouter.get('/analytics/command-center', async (c) => {
     ]);
 
     const rows = results.map(result => result.results[0] ?? null);
-    return c.json({
+    const payload = {
       generated_at: new Date(now * 1000).toISOString(),
       days,
       users: numericSummary(rows[0]),
       content: numericSummary(rows[1]),
       rag: numericSummary(rows[2]),
-      chat: numericSummary(rows[3]),
-      ads: numericSummary(rows[4]),
-      consent: numericSummary(rows[5]),
-      incidents: numericSummary(rows[6]),
-      audit: numericSummary(rows[7]),
-    });
+      chat: numericSummary(rows[3], ['completions', 'failures', 'average_latency_ms', 'sourced_completions']),
+      ads: numericSummary(rows[3], ['slot_views', 'active_placements']),
+      consent: numericSummary(rows[3], ['granted', 'declined', 'consent_rate']),
+      incidents: numericSummary(rows[4]),
+      audit: numericSummary(rows[5]),
+    };
+    c.executionCtx.waitUntil(writeCommandCenterCache(c.env, days, payload, now));
+    return c.json(payload);
   } catch (error) {
     console.error('[staff analytics] command center unavailable', error);
     return c.json({ detail: 'Command-center analytics unavailable' }, 503);

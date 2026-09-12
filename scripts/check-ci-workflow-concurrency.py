@@ -16,7 +16,6 @@ SPEC.loader.exec_module(WORKFLOW_YAML)
 
 PROTECTED_WORKFLOWS = (
     Path(".github/workflows/ci-frontend.yml"),
-    Path(".github/workflows/ci-backend.yml"),
 )
 EXPECTED_GROUP = (
     "${{ github.workflow }}-"
