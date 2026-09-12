@@ -267,9 +267,20 @@ describe('Staff command-center analytics through D1', () => {
       average_latency_ms: 240,
       sourced_completions: 1,
     });
+    expect(body.chat).not.toHaveProperty('slot_views');
+    expect(body.ads).not.toHaveProperty('completions');
     expect(body.consent.declined).toBe(1);
     expect(body.ads).toMatchObject({ slot_views: 1, active_placements: 1 });
     expect(body.audit).toMatchObject({ actions: 1, publish_actions: 1 });
+
+    // Dashboard polling should use the bounded aggregate cache rather than
+    // rerunning every full-table aggregate on each request.
+    const cachedResponse = await sharedWorkerFetch(new Request(
+      'http://worker/api/v1/admin/analytics/command-center?days=7',
+      { headers: authHeaders(sharedToken) },
+    ));
+    expect(cachedResponse.status).toBe(200);
+    expect(await cachedResponse.json()).toEqual(body);
   });
 });
 

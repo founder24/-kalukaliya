@@ -448,6 +448,9 @@ jobs:
           INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
         run: node apps/frontend/scripts/indexnow-submit.mjs --verify-key-file apps/frontend/dist
 
+      - name: Remove retired Pages backend override
+        run: node apps/frontend/scripts/remove-pages-legacy-env.mjs
+
       - name: Deploy to Cloudflare Pages
         run: |
           cd apps/edge

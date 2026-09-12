@@ -4,9 +4,11 @@ import {
   chooseAssameseRetrievalLanguage,
   detectCurriculumClass,
   fetchAuthoritativeIntentContext,
+  fetchChapterContent,
   detectAuthoritativeIntent,
   semanticRetrievalFilters,
   shouldBypassSemanticRetrieval,
+  shouldResolveCurriculumScopeForChat,
   terminalChatErrorEvent,
 } from './chat';
 
@@ -36,6 +38,12 @@ describe('chapter-scoped chat retrieval', () => {
 
   it('bypasses embedding and Vectorize only for usable explicit chapter content', () => {
     expect(shouldBypassSemanticRetrieval('chapter-1', 'Chapter notes')).toBe(true);
+  });
+
+  it('does not scan the curriculum hierarchy before a direct chapter turn', () => {
+    expect(shouldResolveCurriculumScopeForChat('chapter-1', null)).toBe(false);
+    expect(shouldResolveCurriculumScopeForChat('chapter-1', 'syllabus')).toBe(true);
+    expect(shouldResolveCurriculumScopeForChat(undefined, null)).toBe(true);
   });
 
   it.each([
@@ -108,5 +116,26 @@ describe('chapter-scoped chat retrieval', () => {
     expect(query).toContain('chapters.id = ?');
     expect(query).toContain('chapters.subject_id = ?');
     expect(bind).toHaveBeenCalledWith('page-chapter', 'class-11-physics', 30);
+  });
+
+  it('selects only the required language fields for direct English chapter RAG', async () => {
+    let query = '';
+    const first = vi.fn(async () => ({
+      ragSectionsEn: JSON.stringify([{ content: 'Newton notes' }]),
+      ragText: null,
+      notesEn: null,
+    }));
+    const d1 = {
+      prepare: vi.fn((sql: string) => {
+        query = sql;
+        return { bind: vi.fn(() => ({ first })) };
+      }),
+    };
+
+    await fetchChapterContent(d1 as unknown as D1Database, 'chapter-1', 'en', 'physics');
+
+    expect(query).toContain('rag_sections_en');
+    expect(query).not.toContain('rag_sections_as');
+    expect(query).not.toContain('notes_as');
   });
 });
