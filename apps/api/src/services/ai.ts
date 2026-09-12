@@ -278,9 +278,18 @@ export async function* streamGenerate(
     if (tokensEmitted > 0) throw primaryErr;
     console.warn('[ai] Primary stream model failed, trying fallback:', primaryErr);
     usedModel = fallbackModel;
-    for await (const chunk of streamModel(ai, fallbackModel, opts)) {
+    try {
+      for await (const chunk of streamModel(ai, fallbackModel, opts)) {
+        tokensEmitted++;
+        yield chunk;
+      }
+    } catch (fallbackErr) {
+      if (tokensEmitted > 0) throw fallbackErr;
+      console.warn('[ai] Both stream models failed, trying buffered generation:', fallbackErr);
+      const buffered = await generate(ai, opts);
+      usedModel = buffered.model;
       tokensEmitted++;
-      yield chunk;
+      yield buffered.text;
     }
   }
 
