@@ -253,6 +253,31 @@ describe('streamGenerate fallback behavior', () => {
     expect(calls).toEqual([AI_MODEL_PRIMARY, AI_MODEL_FALLBACK]);
   });
 
+  it('uses buffered generation when both stream models fail before content', async () => {
+    const calls: Array<{ model: string; stream: boolean }> = [];
+    const ai = {
+      run: async (model: string, input: { stream?: boolean }) => {
+        calls.push({ model, stream: input.stream === true });
+        if (input.stream) throw new Error('stream transport unavailable');
+        if (model === AI_MODEL_PRIMARY) return { response: 'Buffered recovery answer' };
+        throw new Error('unexpected buffered fallback call');
+      },
+    } as unknown as Ai;
+
+    await expect(collect(streamGenerate(ai, {
+      systemPrompt: 'system',
+      userMessage: 'hello',
+    }))).resolves.toEqual([
+      'Buffered recovery answer',
+      `\x00model:${AI_MODEL_PRIMARY}`,
+    ]);
+    expect(calls).toEqual([
+      { model: AI_MODEL_PRIMARY, stream: true },
+      { model: AI_MODEL_FALLBACK, stream: true },
+      { model: AI_MODEL_PRIMARY, stream: false },
+    ]);
+  });
+
   it('adapts a complete Workers AI response object to a stream', async () => {
     const ai = {
       run: async () => ({ response: 'Buffered but valid answer' }),

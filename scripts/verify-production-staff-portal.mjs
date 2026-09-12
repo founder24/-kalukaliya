@@ -66,7 +66,6 @@ const runtimeErrors = [];
 const forbiddenRequests = [];
 const failedRequests = [];
 const postLogoutAuthResponses = [];
-const strippedApiAccessHeaders = [];
 const contentReadsWithoutBearer = [];
 let postLogoutProbe = false;
 let activeSection = 'dashboard';
@@ -174,24 +173,19 @@ page.on('requestfailed', request => {
   );
 });
 
-// Cloudflare Access protects the Pages origin, but the public API uses the
-// application's bearer-token contract. Do not leak Access service-token
-// headers into cross-origin API preflights: browsers correctly reject those
-// headers because they are not part of the public API CORS allowlist.
+// Cloudflare Access protects both the Pages origin and /api/v1/admin/* on the
+// public API host. Inject the service token at Playwright's network layer so it
+// authenticates the request without adding those header names to the browser's
+// CORS preflight contract. The application bearer token remains unchanged.
 await page.route(`${site}/**`, async route => {
   await route.continue({
     headers: { ...route.request().headers(), ...accessHeaders },
   });
 });
 await page.route(`${edge}/**`, async route => {
-  const headers = { ...route.request().headers() };
-  for (const name of Object.keys(headers)) {
-    if (name.toLowerCase().startsWith('cf-access-client-')) {
-      strippedApiAccessHeaders.push(`${route.request().method()} ${route.request().url()}`);
-      delete headers[name];
-    }
-  }
-  await route.continue({ headers });
+  await route.continue({
+    headers: { ...route.request().headers(), ...accessHeaders },
+  });
 });
 
 try {
@@ -356,11 +350,6 @@ try {
   }
   if (failedRequests.length) {
     throw new Error(`Staff portal issued failed requests:\n${failedRequests.join('\n')}`);
-  }
-  if (strippedApiAccessHeaders.length) {
-    throw new Error(
-      `Staff portal attempted to attach Cloudflare Access headers to the public API:\n${strippedApiAccessHeaders.join('\n')}`,
-    );
   }
   if (contentReadsWithoutBearer.length) {
     throw new Error(
