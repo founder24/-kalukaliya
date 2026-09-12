@@ -9,6 +9,7 @@ import {
   buildReport,
   failedRouteMessages,
   recurringOutlierWarnings,
+  summarizeRoute,
   validateProbeEvents,
   validateRouteResult,
 } from './worker-chat-performance-gate.mjs';
@@ -62,6 +63,22 @@ test('one slow sample out of three passes for both routes and remains in the rep
   assert.equal(report.probes.length, 6);
   assert.match(JSON.stringify(report), /rag_plus_bounded_web_3/);
   assert.deepEqual(failedRouteMessages(report.summary, targetMs), []);
+});
+
+test('one invalid stream is a failed sample without aborting the majority rule', () => {
+  const summary = summarizeRoute([
+    sample('rag_plus_bounded_web_1', targetMs + 1, {
+      target_met: false,
+      probe_error: 'incomplete SSE stream',
+    }),
+    sample('rag_plus_bounded_web_2', 1700),
+    sample('rag_plus_bounded_web_3', 2100),
+  ], targetMs);
+
+  assert.equal(summary.samples, 3);
+  assert.equal(summary.passing_samples, 2);
+  assert.equal(summary.first_token_median_ms, 2100);
+  assert.equal(summary.passed, true);
 });
 
 test('two slow samples out of three fail only the affected route', () => {

@@ -9,6 +9,7 @@ import {
   semanticRetrievalFilters,
   shouldBypassSemanticRetrieval,
   shouldResolveCurriculumScopeForChat,
+  shouldStartWebSearchForChat,
   terminalChatErrorEvent,
 } from './chat';
 
@@ -44,6 +45,14 @@ describe('chapter-scoped chat retrieval', () => {
     expect(shouldResolveCurriculumScopeForChat('chapter-1', null)).toBe(false);
     expect(shouldResolveCurriculumScopeForChat('chapter-1', 'syllabus')).toBe(true);
     expect(shouldResolveCurriculumScopeForChat(undefined, null)).toBe(true);
+  });
+
+  it('skips bounded web work for direct chapter turns unless freshness is explicit', () => {
+    expect(shouldStartWebSearchForChat(true, 'chapter-1', null, false)).toBe(false);
+    expect(shouldStartWebSearchForChat(true, 'chapter-1', null, true)).toBe(true);
+    expect(shouldStartWebSearchForChat(true, undefined, null, false)).toBe(true);
+    expect(shouldStartWebSearchForChat(true, undefined, 'syllabus', false)).toBe(false);
+    expect(shouldStartWebSearchForChat(false, undefined, null, true)).toBe(false);
   });
 
   it.each([
