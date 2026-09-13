@@ -20,7 +20,6 @@ import {
 import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
 
 const AdminDashboard       = lazy(() => import('@/components/admin/AdminDashboard'));
-const AdminHealth          = lazy(() => import('@/components/admin/AdminHealth'));
 const AdminRoadmap         = lazy(() => import('@/components/admin/AdminRoadmap'));
 const AdminContentHub      = lazy(() => import('@/components/admin/AdminContentHub'));
 const AdminAnalytics       = lazy(() => import('@/components/admin/AdminAnalytics'));
@@ -72,7 +71,7 @@ export const SECTION_COMPONENTS = {
   analytics:     AdminAnalytics,
   security:      AdminModuleUnavailable,
   logs:          AdminModuleUnavailable,
-  health:        AdminHealth,
+  health:        AdminModuleUnavailable,
   ops:           AdminModuleUnavailable,
   settings:      AdminModuleUnavailable,
   roadmap:       AdminRoadmap,
