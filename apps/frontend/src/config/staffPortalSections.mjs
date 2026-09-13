@@ -43,7 +43,14 @@ export const STAFF_PORTAL_SECTIONS = Object.freeze([
   { id: 'settings', label: 'Site Settings', group: 'system', releaseCheck: { supported: false, requiredReads: [] } },
 ]);
 
+const STAFF_SHARED_READ_PATHS = new Set([
+  // The frontend warms the public library bundle while the staff shell mounts.
+  // This request is independent of the active staff section or content tab.
+  '/api/v1/content/library-bundle',
+]);
+
 export function isStaffReleaseReadPath(pathname) {
+  if (STAFF_SHARED_READ_PATHS.has(pathname)) return false;
   return pathname === '/health' || pathname.startsWith('/api/v1/');
 }
 
