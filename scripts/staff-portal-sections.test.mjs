@@ -63,6 +63,7 @@ test('staff release evidence excludes universal public API warm-ups', () => {
   assert.equal(isStaffReleaseReadPath('/health'), true);
   assert.equal(isStaffReleaseReadPath('/api/v1/staff/analytics/command-center'), true);
   assert.equal(isStaffReleaseReadPath('/api/v1/admin/content/assamese/coverage'), true);
+  assert.equal(isStaffReleaseReadPath('/api/v1/content/library-bundle'), false);
   assert.equal(isStaffReleaseReadPath('/api/content/library-bundle'), false);
   assert.equal(isStaffReleaseReadPath('/api/analytics/events'), false);
   assert.equal(isStaffReleaseReadPath('/assets/app.js'), false);
