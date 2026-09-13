@@ -3,10 +3,7 @@ export const STAFF_PORTAL_SECTIONS = Object.freeze([
     id: 'dashboard',
     label: 'Dashboard',
     group: 'main',
-    releaseCheck: {
-      supported: true,
-      requiredReads: ['/health'],
-    },
+    releaseCheck: { supported: false, requiredReads: [] },
   },
   {
     id: 'contenthub',

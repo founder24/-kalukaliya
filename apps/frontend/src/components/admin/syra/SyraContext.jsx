@@ -27,8 +27,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import { adminSyraGetPrefs, adminSyraSavePrefs } from '@/utils/api';
-
 const PREFS_KEY_PREFIX = 'syra:prefs:v2:';
 
 export const DEFAULT_PREFS = {
@@ -75,7 +73,7 @@ function persistLocalPrefs(email, next) {
 
 const SyraContext = createContext(null);
 
-export function SyraProvider({ activeSection, adminToken, adminEmail, children }) {
+export function SyraProvider({ activeSection, adminEmail, children }) {
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [filters, setFilters] = useState(null);
   const [visibleError, setVisibleError] = useState(null);
@@ -86,46 +84,16 @@ export function SyraProvider({ activeSection, adminToken, adminEmail, children }
   const prefsRef = useRef(prefs);
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
 
-  // Server load: replace local-first paint with the canonical per-admin
-  // record once we have a verified session. Failures fall back silently
-  // to the local cache (already in state) so the orb keeps working.
-  useEffect(() => {
-    if (!adminToken) return;
-    let cancelled = false;
-    adminSyraGetPrefs(adminToken)
-      .then((res) => {
-        if (cancelled) return;
-        const remote = res?.data?.prefs || {};
-        const merged = { ...DEFAULT_PREFS, ...remote };
-        setPrefsState(merged);
-        persistLocalPrefs(adminEmail, merged);
-      })
-      .catch(() => { /* keep local-cached prefs */ });
-    return () => { cancelled = true; };
-  }, [adminToken, adminEmail]);
-
-  // Debounced server save — coalesces rapid toggles (e.g. dragging the
-  // voice-rate slider) into a single PUT.
-  const saveTimerRef = useRef(null);
-  const queueServerSave = useCallback((next) => {
-    if (!adminToken) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      adminSyraSavePrefs(adminToken, next).catch(() => {});
-    }, 600);
-  }, [adminToken]);
-  useEffect(() => () => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-  }, []);
-
+  // The Cloudflare-native staff backend does not expose the retired Syra
+  // preferences route. Keep preferences explicitly local until that route
+  // exists instead of issuing a request that deterministically returns 404.
   const setPrefs = useCallback((patch) => {
     setPrefsState((prev) => {
       const next = { ...prev, ...(typeof patch === 'function' ? patch(prev) : patch) };
       persistLocalPrefs(adminEmail, next);
-      queueServerSave(next);
       return next;
     });
-  }, [adminEmail, queueServerSave]);
+  }, [adminEmail]);
 
   const toggleMute = useCallback((category) => {
     setPrefs((p) => {

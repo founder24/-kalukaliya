@@ -61,7 +61,7 @@ const GROUP_LABELS = {
 const GROUPS = ['main', 'audience', 'operations', 'system'];
 
 export const SECTION_COMPONENTS = {
-  dashboard:     AdminDashboard,
+  dashboard:     AdminModuleUnavailable,
   contenthub:    AdminContentHub,
   seomanager:    AdminModuleUnavailable,
   users:         AdminModuleUnavailable,

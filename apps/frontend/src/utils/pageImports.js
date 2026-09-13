@@ -29,7 +29,7 @@ export function prefetchCriticalRoutes() {
     // useStreams and useSubjects on every page (navbar, breadcrumbs, subject pages).
     // Warm it everywhere so the backend has a hot response ready for the SW v17 cache
     // fill and for first-visit visitors. Delay 2 s so it never competes with hydration.
-    schedule(() => warmApiCache(['/api/content/library-bundle?slim=1']), 2000);
+    schedule(() => warmApiCache(['/api/v1/content/library-bundle?slim=1']), 2000);
 
     // Landing/chat: defer aggressively so prefetch never competes with hydration
     // (was: 200ms library + 800ms chapter — caused TBT 1.8s and TTI 14s on slow devices).
