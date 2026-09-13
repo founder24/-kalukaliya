@@ -128,6 +128,20 @@ describe('Assamese public content metadata', () => {
     });
   });
 
+  it('searches published subjects as well as chapter titles', async () => {
+    const response = await get('/api/v1/content/search?q=physics');
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      query: 'physics',
+      total: 2,
+      results: [
+        { title: 'Motion', snippet: 'Physics — Motion' },
+        { title: 'Force', snippet: 'Physics — Force' },
+      ],
+      available: true,
+    });
+  });
+
   it('localizes the topics-published query and preserves English fallbacks', async () => {
     const response = await get('/api/v1/content/chapters/translated/topics-published?lang=as');
     expect(response.status).toBe(200);
