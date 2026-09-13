@@ -6,6 +6,8 @@
 // instead of an opaque "build killed" line.
 //
 // Stages (each is an individually runnable npm script too):
+//   0. hydration-browser   — provision the pinned Chromium binary when
+//                            release validation requires browser coverage
 //   1. build:env           — fail fast on missing/invalid env vars
 //   2. build:lint          — ad-policy linter (cheap)
 //   3. build:client + build:ssr — Vite client and SSR builds, IN
@@ -41,6 +43,8 @@ const BUDGET_MS = (() => {
 const ALLOW_INCOMPLETE_CURRICULUM_BUILD =
   process.env.ALLOW_INCOMPLETE_CURRICULUM_BUILD === "true";
 const STRICT_CURRICULUM_BUILD = isStrictCurriculumBuild();
+const REQUIRE_HYDRATION_BROWSER =
+  process.env.REQUIRE_HYDRATION_BROWSER === "true";
 
 const overallStart = Date.now();
 let timedOut = false;
@@ -128,6 +132,23 @@ async function main() {
     const r = await p;
     summary.push({ label, elapsed: r?.elapsed ?? 0 });
   };
+
+  // Release validation must never silently downgrade to structural-only
+  // verification. The package script is tied to the installed Playwright
+  // version, so its Chromium revision stays pinned by the lockfile. The
+  // browser-only install reuses a workflow-provisioned browser and does not
+  // require a package manager such as apt on Replit or Pages runners.
+  if (REQUIRE_HYDRATION_BROWSER) {
+    await record(
+      "hydration-browser",
+      runStep(
+        "install Playwright Chromium",
+        "pnpm",
+        ["exec", "playwright", "install", "chromium"],
+        { cwd: repoRoot, budgetMs: 5 * 60_000 },
+      ),
+    );
+  }
 
   // 1. Env check — must come before anything that produces output.
   await record(

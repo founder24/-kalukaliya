@@ -751,12 +751,56 @@ PYEOF
 # SECTION 10 — BACKEND PYTEST  (skipped in --smoke mode)
 # =============================================================================
 if [ "$SMOKE" = false ]; then
-  header "10  BACKEND  (pytest)"
+  header "10  BACKEND  (importer startup + pytest)"
   cd "$ROOT/apps/backend"
 
   echo "  → Installing backend requirements..."
-  pip install -r requirements.txt --quiet --disable-pip-version-check 2>&1 | tail -3
+  if _pip_output=$(python3 -m pip install -r requirements.txt --quiet --disable-pip-version-check 2>&1); then
+    printf '%s\n' "$_pip_output" | tail -3
+  else
+    printf '%s\n' "$_pip_output"
+    fail "Backend requirements install failed"
+  fi
   export PATH="$HOME/.local/bin:$PATH"
+
+  # Importing the CLI and asking argparse for help must not construct the
+  # Cloudflare client, contact D1/Workers AI/Vectorize, or require credentials.
+  # Keep this separate from pytest so a dependency regression is reported
+  # before the larger backend suite runs.
+  _report_ahsec_importer_failure() {
+    local phase="$1" output="$2" missing_module
+    printf '%s\n' "$output"
+    missing_module=$(printf '%s\n' "$output" \
+      | sed -nE "s/.*No module named ['\"]([^'\"]+)['\"].*/\1/p" \
+      | head -1)
+    if [ -n "$missing_module" ]; then
+      fail "AHSEC importer ${phase} — missing Python dependency '${missing_module}'; reinstall apps/backend/requirements.txt"
+    else
+      fail "AHSEC importer ${phase} — offline startup failed (see output above)"
+    fi
+  }
+
+  _ahsec_env=(
+    env
+    -u CLOUDFLARE_ACCOUNT_ID
+    -u CLOUDFLARE_API_TOKEN
+    -u CF_ACCOUNT_ID
+    -u CF_API_TOKEN
+    -u CF_WORKER_AI_TOKEN
+    -u SYRABIT_D1_DATABASE_ID
+    -u CF_VECTORIZE_INDEX_NAME
+  )
+  if _import_output=$("${_ahsec_env[@]}" python3 -c 'import scripts.ahsec_d1_import' 2>&1); then
+    if _help_output=$("${_ahsec_env[@]}" python3 -m scripts.ahsec_d1_import --help 2>&1) \
+      && printf '%s\n' "$_help_output" | grep -q -- "--dry-run" \
+      && printf '%s\n' "$_help_output" | grep -q -- "--confirm-production-write"; then
+      ok "AHSEC D1 importer import + --help startup check (offline, no credentials)"
+    else
+      _report_ahsec_importer_failure "--help" "${_help_output:-No help output was produced}"
+    fi
+  else
+    _report_ahsec_importer_failure "import" "$_import_output"
+  fi
 
   echo "  → Running pytest..."
   if python3 -m pytest tests/ --tb=short -q 2>&1; then

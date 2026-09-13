@@ -637,9 +637,17 @@ adminContentRouter.post('/content/chapters/:chapterId/generate-notes', async c =
       userMessage: `Create study notes for the chapter titled "${chapter.title}". Begin directly with the first ## heading.`,
       maxTokens: 1800,
     });
-    await db.update(chapters).set({ notesEn: sanitizeGeneratedNotes(result.text), ragUpdatedAt: now(), updatedAt: now() })
+    const content = sanitizeGeneratedNotes(result.text);
+    await db.update(chapters).set({ notesEn: content, ragUpdatedAt: now(), updatedAt: now() })
       .where(eq(chapters.id, chapter.id));
-    return c.json({ status: 'generated', chapter_id: chapter.id, model: result.model });
+    return c.json({
+      status: 'generated',
+      chapter_id: chapter.id,
+      model: result.model,
+      content,
+      notes_en: content,
+      word_count: content.split(/\s+/).filter(Boolean).length,
+    });
   } catch (error) {
     return c.json({ detail: error instanceof Error ? error.message : 'Notes generation failed' }, 502);
   }

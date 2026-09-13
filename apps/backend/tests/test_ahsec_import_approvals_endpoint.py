@@ -1,0 +1,171 @@
+import json
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
+import jwt
+import pytest
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture
+def client():
+    from app.main import app
+
+    return TestClient(app)
+
+
+@pytest.fixture
+def admin_cookie():
+    from app.config import settings
+
+    expires = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=8)
+    token = jwt.encode(
+        {"sub": "admin-test", "type": "admin", "role": "admin", "exp": expires},
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    return {"syrabit_admin_session": token}
+
+
+def _write_jsonl(path, *records):
+    path.write_text(
+        "\n".join(
+            record if isinstance(record, str) else json.dumps(record)
+            for record in records
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_import_approvals_show_safe_metadata_and_linked_progress(
+    client, admin_cookie, tmp_path
+):
+    import app.api.v1.admin_content as admin_content
+
+    run_id = "run-new"
+    _write_jsonl(
+        tmp_path / "approvals.jsonl",
+        "not-json",
+        {
+            "event": "production_write_approved",
+            "run_id": "run-old",
+            "operator": "old-operator",
+            "started_at": "2026-09-10T10:00:00+00:00",
+            "scope": {"subject": "physics"},
+        },
+        {
+            "event": "production_write_approved",
+            "run_id": run_id,
+            "operator": "curriculum-reviewer",
+            "started_at": "2026-09-13T10:00:00+00:00",
+            "scope": {
+                "class": "11",
+                "subject": "chemistry",
+                "limit": 2,
+                "restart": False,
+                "skip_index": True,
+                "clean_preambles": False,
+                "CLOUDFLARE_API_TOKEN": "should-not-leak",
+            },
+            "CLOUDFLARE_API_TOKEN": "should-not-leak",
+        },
+    )
+    _write_jsonl(
+        tmp_path / "progress.jsonl",
+        {
+            "run_id": run_id,
+            "chapter_id": "chapter-1",
+            "status": "done",
+            "timestamp": "2026-09-13T10:02:00+00:00",
+            "notes_en": "backup note contents must not be exposed",
+        },
+        {
+            "run_id": run_id,
+            "chapter_id": "chapter-2",
+            "status": "error",
+            "timestamp": "2026-09-13T10:03:00+00:00",
+            "error": "credential-like detail must not be exposed",
+        },
+    )
+
+    with (
+        patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", tmp_path / "approvals.jsonl"),
+        patch.object(
+            admin_content,
+            "_AHSEC_D1_IMPORT_PROGRESS_FILE",
+            tmp_path / "progress.jsonl",
+        ),
+    ):
+        response = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/approvals?limit=1",
+            cookies=admin_cookie,
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["file_exists"] is True
+    assert len(body["approvals"]) == 1
+    approval = body["approvals"][0]
+    assert approval == {
+        "run_id": run_id,
+        "operator": "curriculum-reviewer",
+        "started_at": "2026-09-13T10:00:00+00:00",
+        "scope": {
+            "class": "11",
+            "subject": "chemistry",
+            "limit": 2,
+            "restart": False,
+            "skip_index": True,
+            "clean_preambles": False,
+        },
+        "progress": {
+            "status": "partial",
+            "chapters": 2,
+            "completed": 1,
+            "failed": 1,
+            "last_updated_at": "2026-09-13T10:03:00+00:00",
+        },
+    }
+    response_text = response.text
+    assert "CLOUDFLARE_API_TOKEN" not in response_text
+    assert "should-not-leak" not in response_text
+    assert "backup note contents" not in response_text
+    assert "credential-like detail" not in response_text
+
+
+def test_import_approvals_report_pending_run_without_progress(
+    client, admin_cookie, tmp_path
+):
+    import app.api.v1.admin_content as admin_content
+
+    approvals = tmp_path / "approvals.jsonl"
+    _write_jsonl(
+        approvals,
+        {
+            "event": "production_write_approved",
+            "run_id": "run-pending",
+            "operator": "operator",
+            "started_at": "2026-09-13T11:00:00+00:00",
+            "scope": {"subject": "biology"},
+        },
+    )
+
+    with patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", approvals), patch.object(
+        admin_content,
+        "_AHSEC_D1_IMPORT_PROGRESS_FILE",
+        tmp_path / "missing-progress.jsonl",
+    ):
+        response = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/approvals",
+            cookies=admin_cookie,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["approvals"][0]["progress"] == {
+        "status": "approved",
+        "chapters": 0,
+        "completed": 0,
+        "failed": 0,
+        "last_updated_at": None,
+    }

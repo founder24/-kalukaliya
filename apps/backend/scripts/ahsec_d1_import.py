@@ -10,12 +10,15 @@ This script intentionally does not import Beanie or initialize MongoDB. It:
   6. replaces the corresponding Vectorize vectors and D1 chunk mappings.
 
 Existing notes are backed up to JSONL before each write. Progress is also
-recorded as JSONL, making interrupted runs safe to resume.
+recorded as JSONL, making interrupted runs safe to resume. Confirmed production
+runs are recorded in a separate approval JSONL ledger and share a run ID with
+progress and backup records.
 
 Run from apps/backend:
   python3 -m scripts.ahsec_d1_import --dry-run
+  python3 -m scripts.ahsec_d1_import --clean-preambles --dry-run
   python3 -m scripts.ahsec_d1_import --limit 1
-  python3 -m scripts.ahsec_d1_import
+  python3 -m scripts.ahsec_d1_import --confirm-production-write --limit 1
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import difflib
+import getpass
 import json
 import logging
 import os
@@ -73,8 +77,10 @@ STATE_DIR = Path(
 )
 PROGRESS_FILE = STATE_DIR / "progress.jsonl"
 BACKUP_FILE = STATE_DIR / "notes-backup.jsonl"
+APPROVAL_FILE = STATE_DIR / "approvals.jsonl"
 MIN_SOURCE_CHARS = 500
 MIN_NOTES_CHARS = 800
+ACTIVE_RUN_ID: str | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -82,6 +88,21 @@ def parse_args() -> argparse.Namespace:
         description="Replace AHSEC chapter notes in Cloudflare D1 from official PDFs"
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--confirm-production-write",
+        action="store_true",
+        help=(
+            "Explicitly allow writes to live Cloudflare D1 and Vectorize. "
+            "Without this flag, non-dry-run execution is refused."
+        ),
+    )
+    parser.add_argument(
+        "--operator",
+        help=(
+            "Name or identifier recorded as the operator approving a production "
+            "write (defaults to the local OS user)"
+        ),
+    )
     parser.add_argument("--limit", type=int)
     parser.add_argument("--class", dest="class_level", choices=["11", "12"])
     parser.add_argument("--subject", help="D1 subject slug, for example chemistry")
@@ -99,7 +120,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--clean-preambles",
         action="store_true",
-        help="Remove model-introduction preambles from existing AHSEC notes",
+        help=(
+            "Clean model-introduction preambles from existing AHSEC notes; "
+            "combine with --dry-run to preview changes"
+        ),
     )
     return parser.parse_args()
 
@@ -273,15 +297,56 @@ def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def production_scope(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "class": args.class_level,
+        "subject": args.subject,
+        "limit": args.limit,
+        "restart": args.restart,
+        "skip_index": args.skip_index,
+        "clean_preambles": args.clean_preambles,
+    }
+
+
+def record_production_approval(args: argparse.Namespace) -> tuple[str, str]:
+    """Record a confirmed production run before any live data is touched."""
+    if args.dry_run or not args.confirm_production_write:
+        raise RuntimeError(
+            "Production approval records require explicit production-write confirmation"
+        )
+    run_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc).isoformat()
+    operator = (args.operator or getpass.getuser()).strip()
+    if not operator:
+        raise RuntimeError(
+            "An operator identifier is required for a production approval record"
+        )
+    append_jsonl(
+        APPROVAL_FILE,
+        {
+            "event": "production_write_approved",
+            "run_id": run_id,
+            "operator": operator,
+            "started_at": started_at,
+            "approved_at": started_at,
+            "scope": production_scope(args),
+        },
+    )
+    return run_id, started_at
+
+
 def record_progress(chapter_id: str, status: str, **details: Any) -> None:
+    payload: dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "chapter_id": chapter_id,
+        "status": status,
+        **details,
+    }
+    if ACTIVE_RUN_ID:
+        payload["run_id"] = ACTIVE_RUN_ID
     append_jsonl(
         PROGRESS_FILE,
-        {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "chapter_id": chapter_id,
-            "status": status,
-            **details,
-        },
+        payload,
     )
 
 
@@ -404,18 +469,18 @@ def build_prompt(chapter: dict[str, Any], source: dict[str, Any]) -> str:
 
 
 def backup_existing(chapter: dict[str, Any], source_url: str) -> None:
-    append_jsonl(
-        BACKUP_FILE,
-        {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "chapter_id": chapter["id"],
-            "subject_id": chapter["subject_id"],
-            "notes_en": chapter.get("notes_en"),
-            "rag_text": chapter.get("rag_text"),
-            "rag_sections_en": chapter.get("rag_sections_en"),
-            "source_pdf_url": source_url,
-        },
-    )
+    payload: dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "chapter_id": chapter["id"],
+        "subject_id": chapter["subject_id"],
+        "notes_en": chapter.get("notes_en"),
+        "rag_text": chapter.get("rag_text"),
+        "rag_sections_en": chapter.get("rag_sections_en"),
+        "source_pdf_url": source_url,
+    }
+    if ACTIVE_RUN_ID:
+        payload["run_id"] = ACTIVE_RUN_ID
+    append_jsonl(BACKUP_FILE, payload)
 
 
 def write_notes(
@@ -550,10 +615,11 @@ def replace_index(
     return len(rows)
 
 
-def clean_existing_preambles(
-    client: CloudflareClient, chapters: list[dict[str, Any]]
+def build_preamble_cleanup_plan(
+    chapters: list[dict[str, Any]], max_diff_lines: int = 20
 ) -> list[dict[str, Any]]:
-    affected: list[dict[str, Any]] = []
+    """Build the cleanup changes without mutating chapters or external state."""
+    planned: list[dict[str, Any]] = []
     for chapter in chapters:
         original = str(chapter.get("notes_en") or "")
         cleaned = clean_notes(original)
@@ -563,7 +629,58 @@ def clean_existing_preambles(
         if not sections:
             log.warning("Skipping cleanup for %s: no sections after scrub", chapter["id"])
             continue
-        backup_existing(chapter, "existing-d1-preamble-cleanup")
+        diff = list(
+            difflib.unified_diff(
+                original.splitlines(),
+                cleaned.splitlines(),
+                fromfile="before",
+                tofile="after",
+                lineterm="",
+                n=1,
+            )
+        )
+        changed_lines = [
+            line
+            for line in diff
+            if (line.startswith("+") and not line.startswith("+++"))
+            or (line.startswith("-") and not line.startswith("---"))
+        ]
+        planned.append(
+            {
+                **chapter,
+                "notes_en": cleaned,
+                "_cleanup_original_notes": original,
+                "_cleanup_sections": sections,
+                "_cleanup_diff": {
+                    "original_chars": len(original),
+                    "cleaned_chars": len(cleaned),
+                    "removed_chars": max(0, len(original) - len(cleaned)),
+                    "original_words": len(original.split()),
+                    "cleaned_words": len(cleaned.split()),
+                    "changed_lines": len(changed_lines),
+                    "preview": "\n".join(diff[:max_diff_lines]),
+                    "truncated": len(diff) > max_diff_lines,
+                },
+            }
+        )
+    return planned
+
+
+def apply_preamble_cleanup(
+    client: CloudflareClient, planned: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Apply a previously built cleanup plan to D1."""
+    affected: list[dict[str, Any]] = []
+    for chapter in planned:
+        cleaned = str(chapter["notes_en"])
+        sections = chapter["_cleanup_sections"]
+        backup_existing(
+            {
+                **chapter,
+                "notes_en": chapter["_cleanup_original_notes"],
+            },
+            "existing-d1-preamble-cleanup",
+        )
         now = int(time.time())
         client.execute(
             """
@@ -590,14 +707,98 @@ def clean_existing_preambles(
             """,
             [cleaned, now, f"ahsec-notes-en:{chapter['id']}"],
         )
-        affected.append({**chapter, "notes_en": cleaned})
+        affected.append(chapter)
         log.info("Removed preamble from %s (%s)", chapter["id"], chapter["title"])
         # The caller reindexes after all D1 updates so cleanup remains bounded.
     return affected
 
 
+def clean_existing_preambles(
+    client: CloudflareClient, chapters: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Compatibility wrapper that plans and applies cleanup in one call."""
+    return apply_preamble_cleanup(client, build_preamble_cleanup_plan(chapters))
+
+
+def cleanup_preview_record(chapter: dict[str, Any]) -> dict[str, Any]:
+    diff = chapter["_cleanup_diff"]
+    return {
+        "chapter_id": str(chapter["id"]),
+        "class_name": chapter.get("class_name"),
+        "subject": chapter.get("subject_name"),
+        "title": chapter.get("title"),
+        **diff,
+    }
+
+
+def write_cleanup_preview_report(planned: list[dict[str, Any]]) -> Path:
+    """Persist a bounded, non-D1 preview report for operators and automation."""
+    report_path = STATE_DIR / "preamble-cleanup-preview.json"
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "mode": "preview",
+                "changed": len(planned),
+                "chapter_ids": [str(chapter["id"]) for chapter in planned],
+                "changes": [cleanup_preview_record(chapter) for chapter in planned],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return report_path
+
+
+def log_cleanup_preview(planned: list[dict[str, Any]]) -> None:
+    log.info("Preamble cleanup preview: changed=%d", len(planned))
+    for chapter in planned:
+        diff = chapter["_cleanup_diff"]
+        log.info(
+            "CLEANUP PREVIEW chapter_id=%s title=%s chars=%d -> %d "
+            "(removed=%d, changed_lines=%d)",
+            chapter["id"],
+            chapter["title"],
+            diff["original_chars"],
+            diff["cleaned_chars"],
+            diff["removed_chars"],
+            diff["changed_lines"],
+        )
+        if diff["preview"]:
+            for line in diff["preview"].splitlines():
+                log.info("  %s", line)
+        if diff["truncated"]:
+            log.info("  ... diff truncated in preview report")
+
+
 async def main() -> int:
+    global ACTIVE_RUN_ID
     args = parse_args()
+    ACTIVE_RUN_ID = None
+    if not args.dry_run and not args.confirm_production_write:
+        log.error(
+            "Refusing to write live curriculum data without explicit confirmation."
+        )
+        log.error(
+            "Run with --dry-run for a read-only import, or add "
+            "--confirm-production-write for a deliberate production import."
+        )
+        return 2
+    if args.dry_run:
+        log.info(
+            "Read-only dry-run: no Cloudflare D1 or Vectorize writes will be made. "
+            "Use --confirm-production-write only for a deliberate production import."
+        )
+    else:
+        ACTIVE_RUN_ID, started_at = record_production_approval(args)
+        log.info(
+            "Production write approved by %s (run_id=%s, started_at=%s)",
+            args.operator or getpass.getuser(),
+            ACTIVE_RUN_ID,
+            started_at,
+        )
     client = CloudflareClient()
     chapters = fetch_chapters(client)
     if args.class_level:
@@ -607,7 +808,13 @@ async def main() -> int:
         chapters = [row for row in chapters if row["subject_slug"] == args.subject]
 
     if args.clean_preambles:
-        affected = await asyncio.to_thread(clean_existing_preambles, client, chapters)
+        planned = await asyncio.to_thread(build_preamble_cleanup_plan, chapters)
+        if args.dry_run:
+            log_cleanup_preview(planned)
+            report_path = write_cleanup_preview_report(planned)
+            log.info("Cleanup preview report: %s", report_path)
+            return 0
+        affected = await asyncio.to_thread(apply_preamble_cleanup, client, planned)
         if not args.skip_index:
             for chapter in affected:
                 await asyncio.to_thread(

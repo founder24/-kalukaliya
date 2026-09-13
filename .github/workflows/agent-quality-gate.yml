@@ -114,6 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_BACKEND_URL: https://api.syrabit.ai
+      REQUIRE_HYDRATION_BROWSER: 'true'
     outputs:
       bundle_size_kb: ${{ steps.bundle-size.outputs.size_kb }}
       bundle_exceeded: ${{ steps.bundle-size.outputs.exceeded }}
@@ -133,6 +134,9 @@ jobs:
       - name: Install dependencies
         # Use --no-frozen-lockfile because PRs may have package.json changes pending lockfile refresh
         run: pnpm install --no-frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @workspace/syrabit run playwright:install:chromium
 
       - name: Build frontend
         run: pnpm --filter @workspace/syrabit run build

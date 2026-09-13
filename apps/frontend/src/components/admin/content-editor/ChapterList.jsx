@@ -40,6 +40,7 @@ export default function ChapterList({
     <>
       <button
         onClick={onCreateNew}
+        data-testid="create-chapter"
         className="w-full p-5 rounded-xl border border-dashed border-violet-500/30 hover:border-violet-500/60 bg-violet-500/5 hover:bg-violet-500/10 text-center transition-colors"
       >
         <BookOpen size={28} className="mx-auto text-violet-400 mb-2" />
@@ -181,6 +182,7 @@ export default function ChapterList({
                 <div className="flex gap-0.5 flex-shrink-0 ml-1">
                   <button
                     onClick={() => onGenerateNotes(ch.id, ch.title)}
+                    data-testid={`generate-notes-${ch.id}`}
                     disabled={generatingNotes.has(ch.id)}
                     className="flex items-center gap-1 h-6 px-2 rounded-lg text-[10px] font-semibold disabled:opacity-40 transition-all hover:brightness-110"
                     style={hasNotes
@@ -193,9 +195,9 @@ export default function ChapterList({
                       : <><Sparkles size={10} /> {hasNotes ? 'Regen' : 'AI ⚡'}</>}
                   </button>
                   <button onClick={() => onViewChapter(ch)} className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-400" title="Preview lesson" data-testid={`open-chapter-${ch.id}`}><Eye size={13} /></button>
-                  <button onClick={() => onEditChapter(ch)}
+                  <button onClick={() => onEditChapter(ch)} data-testid={`edit-chapter-${ch.id}`}
                     className="p-1.5 rounded-lg hover:bg-violet-500/10 text-gray-400 hover:text-violet-400" title="Edit chapter"><Edit2 size={13} /></button>
-                  <button onClick={() => onDeleteChapter(ch.id)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400" title="Delete chapter"><Trash2 size={13} /></button>
+                  <button onClick={() => onDeleteChapter(ch.id)} data-testid={`delete-chapter-${ch.id}`} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400" title="Delete chapter"><Trash2 size={13} /></button>
                   {onPublishChapter && (
                     <button
                       onClick={(e) => { e.stopPropagation(); onPublishChapter(ch.id); }}

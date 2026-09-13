@@ -8,20 +8,7 @@ channel = "stable-25_05"
 packages = ["cargo", "freetype", "lcms2", "libiconv", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "libyaml", "openjpeg", "openssl", "pkg-config", "rustc", "tcl", "tesseract", "tk", "zlib"]
 
 [workflows]
-runButton = "Project"
-
-[[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start application"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "AHSEC D1 Notes Import"
+runButton = "Start application"
 
 [[workflows.workflow]]
 name = "Start application"
@@ -41,7 +28,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd apps/backend && python3 -m scripts.ahsec_d1_import --delay 1"
+args = "cd apps/backend && python3 -m pip install --user --requirement requirements.txt --quiet && python3 -m scripts.ahsec_d1_import --dry-run --delay 1"
 
 [workflows.workflow.metadata]
 outputType = "console"

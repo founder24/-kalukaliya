@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from app.models.user import User
 from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.core.anon import resolve_anon_id
+from app.utils.privacy import redact_email, redact_identifier
 
 # AI-credit limits per tier (authoritative — matches billing pipeline)
 CREDITS_LIMITS: dict[str, int] = {
@@ -111,7 +112,7 @@ async def delete_account(user: User = Depends(get_current_user)):
 
     await user.delete()
 
-    logger.info(f"User account deleted: {user.email}")
+    logger.info("User account deleted", extra={"user": redact_email(user.email)})
     return {"status": "success", "message": "Account deleted"}
 
 
@@ -233,7 +234,13 @@ async def delete_account_alias(user: User = Depends(get_current_user)):
         }
     })
 
-    logger.info(f"Account deletion scheduled: {user.email} — hard_delete_at={hard_delete_at.isoformat()}")
+    logger.info(
+        "Account deletion scheduled",
+        extra={
+            "user": redact_email(user.email),
+            "hard_delete_at": hard_delete_at.isoformat(),
+        },
+    )
     return {
         "status":          "pending_deletion",
         "hard_delete_at":  hard_delete_at.isoformat(),
@@ -248,7 +255,7 @@ async def cancel_account_deletion(user: User = Depends(get_current_user)):
         "$set":   {"deletion_requested": False},
         "$unset": {"deletion_scheduled_at": ""},
     })
-    logger.info(f"Account deletion cancelled: {user.email}")
+    logger.info("Account deletion cancelled", extra={"user": redact_email(user.email)})
     return {"status": "success", "message": "Account deletion cancelled"}
 
 
@@ -347,7 +354,10 @@ async def delete_all_memories(user: User = Depends(get_current_user)):
         logger.error(f"delete_all_memories error: {e}")
         deleted = 0
 
-    logger.info(f"Deleted {deleted} memories for user {user.id}")
+    logger.info(
+        "Deleted memories",
+        extra={"count": deleted, "user_id": redact_identifier(str(user.id))},
+    )
     return {"status": "success", "deleted": deleted}
 
 

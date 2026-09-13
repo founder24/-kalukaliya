@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_BACKEND_URL: https://api.syrabit.ai
+      REQUIRE_HYDRATION_BROWSER: 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +35,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @workspace/syrabit run playwright:install:chromium
 
       - name: Build frontend
         run: pnpm --filter @workspace/syrabit run build

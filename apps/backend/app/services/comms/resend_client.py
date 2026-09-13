@@ -9,6 +9,7 @@ from typing import Optional
 from urllib.parse import quote as url_quote
 
 from app.config import settings
+from app.utils.privacy import redact_email
 
 logger = logging.getLogger(__name__)
 
@@ -301,7 +302,10 @@ async def _send_email(to: str, subject: str, html_body: str) -> bool:
         return False
 
     if not await _check_rate_limit(to):
-        logger.warning(f"Rate limit exceeded for {to} - email not sent")
+        logger.warning(
+            "Email rate limit exceeded",
+            extra={"recipient": redact_email(to)},
+        )
         return False
 
     client = _get_client()
@@ -331,7 +335,10 @@ async def _send_email(to: str, subject: str, html_body: str) -> bool:
         response.raise_for_status()
         return True
     except Exception as e:
-        logger.error(f"Failed to send email to {to}: {e}")
+        logger.error(
+            "Failed to send email",
+            extra={"recipient": redact_email(to), "error": str(e)},
+        )
         await _record_email_failure()
         return False
 
@@ -349,7 +356,7 @@ async def send_welcome_email(email: str, name: str = None) -> bool:
     """
     result = await _send_email(email, "Welcome to Syrabit! \U0001f393", email_html)
     if result:
-        logger.info(f"Welcome email sent to {email}")
+        logger.info("Welcome email sent", extra={"recipient": redact_email(email)})
     return result
 
 
@@ -380,7 +387,7 @@ async def send_receipt_email(email: str, amount: int, event_id: str) -> bool:
     """
     result = await _send_email(email, "Renewal Receipt - Syrabit Pro", email_html)
     if result:
-        logger.info(f"Receipt email sent to {email}")
+        logger.info("Receipt email sent", extra={"recipient": redact_email(email)})
     return result
 
 
@@ -417,7 +424,10 @@ async def send_first_purchase_receipt_email(
     """
     result = await _send_email(email, "Welcome to Syrabit Pro \U0001f389", email_html)
     if result:
-        logger.info(f"First-purchase receipt email sent to {email}")
+        logger.info(
+            "First-purchase receipt email sent",
+            extra={"recipient": redact_email(email)},
+        )
     return result
 
 
@@ -456,7 +466,10 @@ async def send_credit_topup_receipt_email(
         email, f"{credits} Credits Added to Your Syrabit Account", email_html
     )
     if result:
-        logger.info(f"Credit top-up receipt email sent to {email}")
+        logger.info(
+            "Credit top-up receipt email sent",
+            extra={"recipient": redact_email(email)},
+        )
     return result
 
 
@@ -475,5 +488,8 @@ async def send_password_reset_email(email: str, reset_token: str) -> bool:
     """
     result = await _send_email(email, "Password Reset Request - Syrabit", email_html)
     if result:
-        logger.info(f"Password reset email sent to {email}")
+        logger.info(
+            "Password reset email sent",
+            extra={"recipient": redact_email(email)},
+        )
     return result

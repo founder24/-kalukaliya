@@ -750,6 +750,13 @@ console.log(
 // ── Run hydration headless-browser check in parallel (best-effort) ──
 async function runHydration() {
   if (process.env.SKIP_VERIFY_HYDRATION === "1") {
+    if (process.env.REQUIRE_HYDRATION_BROWSER === "true") {
+      console.error(
+        "[verify-all] FAIL: SKIP_VERIFY_HYDRATION=1 is incompatible with " +
+          "REQUIRE_HYDRATION_BROWSER=true; release validation must run Chromium",
+      );
+      return 1;
+    }
     console.log("[verify-all] SKIP_VERIFY_HYDRATION=1 — skipping browser check");
     return 0;
   }
