@@ -1,6 +1,11 @@
 import { Info } from 'lucide-react';
 
 const DETAILS = {
+  dashboard: {
+    title: 'Dashboard',
+    description: 'The legacy provider dashboard is not available on the Cloudflare-native staff backend.',
+    available: 'Use Analytics and the supported Content Editor routes for current operational data.',
+  },
   seomanager: {
     title: 'SEO Manager',
     description: 'Detailed SEO administration is not available on the current Cloudflare-native backend.',

@@ -129,7 +129,7 @@ test('staff release checks wait for reads in the section that initiates them', (
     STAFF_PORTAL_SECTIONS.map(({ id, releaseCheck }) => [id, releaseCheck.requiredReads]),
   );
 
-  assert.deepEqual(releaseChecks.dashboard, ['/health']);
+  assert.deepEqual(releaseChecks.dashboard, []);
   assert.deepEqual(
     releaseChecks.analytics,
     ['/api/v1/staff/analytics/command-center'],

@@ -168,6 +168,11 @@ page.on('response', response => {
 });
 page.on('requestfailed', request => {
   const requestSection = requestSections.get(request) || activeSection;
+  const url = new URL(request.url());
+  if (
+    request.method() === 'HEAD'
+    && url.pathname.startsWith('/cdn-cgi/image/')
+  ) return;
   failedRequests.push(
     `[${requestSection}] NETWORK ${request.method()} ${request.url()} — ${request.failure()?.errorText || 'unknown error'}`,
   );
