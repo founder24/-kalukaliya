@@ -4,7 +4,7 @@ import { chromium } from 'playwright';
 
 const TARGETS = [
   'src/components/admin/AdminDashboard.jsx',
-  'src/components/admin/AdminHealth.jsx',
+  'src/components/admin/AdminAnalytics.jsx',
 ];
 const TDZ_ERROR = /cannot access .+ before initialization|can't access lexical declaration|temporal dead zone/i;
 const port = Number(process.env.STAFF_CHUNK_SMOKE_PORT || 4173);
