@@ -979,10 +979,13 @@ contentRouter.get('/search', async (c) => {
      JOIN streams str ON str.id = s.stream_id
      JOIN classes cl ON cl.id = str.class_id
      JOIN boards b ON b.id = cl.board_id
-     WHERE c.status = 'published' AND c.title LIKE ?
+     WHERE c.status = 'published'
+       AND (c.title LIKE ? OR s.name LIKE ? OR s.slug LIKE ?)
      ${boardId ? 'AND b.id = ?' : ''}
      ORDER BY c.chapter_number ASC LIMIT ?`
-  ).bind(...(boardId ? [pattern, boardId, limit] : [pattern, limit])).all<{
+  ).bind(...(boardId
+    ? [pattern, pattern, pattern, boardId, limit]
+    : [pattern, pattern, pattern, limit])).all<{
     id: string; title: string; slug: string; subject_id: string;
     subject_name: string; subject_slug: string; board_slug: string; class_slug: string;
   }>();
