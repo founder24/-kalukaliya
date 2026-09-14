@@ -74,6 +74,7 @@ export interface ReferralGateEvidenceInput {
   settlementHealthy: boolean;
   recordedAt: number;
   expiresAt: number;
+  fundedCapInr?: number;
 }
 
 interface InfluencerRow {
@@ -139,7 +140,15 @@ export async function recordReferralGateEvidence(
       settlementHealthy: input.settlementHealthy,
     },
   };
-  const gateResult = evaluateWeekOpening(gate);
+  const requiredReserveInr = input.fundedCapInr ?? REFERRAL_POLICY.maximumWeeklyRewardExposureInr;
+  if (
+    !Number.isSafeInteger(requiredReserveInr)
+    || requiredReserveInr < 0
+    || requiredReserveInr > REFERRAL_POLICY.maximumWeeklyRewardExposureInr
+  ) {
+    throw new Error('Invalid funded referral cap');
+  }
+  const gateResult = evaluateWeekOpening(gate, { requiredReserveInr });
   const evidenceInsert = db.prepare(`
     INSERT INTO referral_gate_evidence
       (id, provider, provider_evidence_id, finalized_through_at,
@@ -1669,6 +1678,26 @@ export async function pauseReferralProgram(
       effectiveAt,
       REFERRAL_POLICY_VERSION,
     ),
+    db.prepare(`
+      UPDATE referral_accrual_intervals
+      SET state = 'paused', ends_at = ?, pause_reason = ?, actor_id = ?
+      WHERE week_id = (
+        SELECT id FROM referral_weeks
+        WHERE state = 'paused' AND starts_at <= ? AND ends_at > ?
+        ORDER BY starts_at DESC LIMIT 1
+      )
+        AND state = 'open'
+        AND starts_at <= ?
+        AND (ends_at IS NULL OR ends_at > ?)
+    `).bind(
+      effectiveAt,
+      boundedReason,
+      actorId,
+      effectiveAt,
+      effectiveAt,
+      effectiveAt,
+      effectiveAt,
+    ),
   ]);
   return results[0]?.meta.changes === 1;
 }
@@ -1679,6 +1708,7 @@ export async function advanceReferralLifecycle(
     actorId: string;
     effectiveAt: number;
     evidenceId: string;
+    fundedCapInr?: number;
   },
 ): Promise<ReferralLifecycleResult> {
   const week = referralWeekBounds(input.effectiveAt);
@@ -1689,7 +1719,10 @@ export async function advanceReferralLifecycle(
       activatedAdvancedPositions: 0, reasons: ['authoritative-evidence-not-found'],
     };
   }
-  const gate = evaluateWeekOpening(evidence.gate);
+  const gate = evaluateWeekOpening(
+    evidence.gate,
+    input.fundedCapInr === undefined ? {} : { requiredReserveInr: input.fundedCapInr },
+  );
   if (!gate.allowed) {
     return {
       opened: false,
@@ -1854,11 +1887,21 @@ export async function resumeReferralProgram(
     actorId: string;
     effectiveAt: number;
     evidenceId: string;
+    fundedCapInr?: number;
   },
 ): Promise<{ resumed: boolean; reasons: string[] }> {
   const evidence = await loadReferralGate(db, input.evidenceId, input.effectiveAt);
   if (!evidence) return { resumed: false, reasons: ['authoritative-evidence-not-found'] };
-  const gate = evaluateWeekOpening(evidence.gate);
+  const envelope = await db.prepare(`
+    SELECT funded_cap_inr FROM referral_weekly_envelopes
+    WHERE status IN ('paused', 'funded')
+    ORDER BY opened_at DESC LIMIT 1
+  `).first<{ funded_cap_inr: number }>();
+  const requiredReserveInr = input.fundedCapInr ?? envelope?.funded_cap_inr;
+  const gate = evaluateWeekOpening(
+    evidence.gate,
+    requiredReserveInr === undefined ? {} : { requiredReserveInr },
+  );
   if (!gate.allowed) return { resumed: false, reasons: gate.reasons };
   const serializedGate = evidence.serialized;
   if (serializedGate.length > 8_192) {
@@ -1917,6 +1960,20 @@ export async function resumeReferralProgram(
       input.effectiveAt,
       serializedGate,
       REFERRAL_POLICY_VERSION,
+      input.effectiveAt,
+    ),
+    db.prepare(`
+      INSERT OR IGNORE INTO referral_accrual_intervals
+        (id, week_id, generation, starts_at, state, actor_id, created_at)
+      SELECT ?, id, accrual_generation, ?, 'open', ?, ?
+      FROM referral_weeks
+      WHERE state = 'open' AND starts_at <= ? AND ends_at > ?
+    `).bind(
+      crypto.randomUUID(),
+      input.effectiveAt,
+      input.actorId,
+      input.effectiveAt,
+      input.effectiveAt,
       input.effectiveAt,
     ),
   ]);

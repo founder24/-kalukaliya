@@ -4,7 +4,7 @@ import {
   LayoutDashboard, BookOpen, Users,
   MessageSquare, TrendingUp, Bell, Settings, HeartPulse, LogOut,
   ChevronLeft, ChevronRight, Loader2, Globe,
-  Cpu, Activity, ShieldAlert, UserRoundCheck,
+  Cpu, Activity, ShieldAlert, UserRoundCheck, WalletCards,
   ExternalLink, Gauge, Bug, FileText,
 } from 'lucide-react';
 import axios from 'axios';
@@ -25,6 +25,7 @@ const AdminContentHub      = lazy(() => import('@/components/admin/AdminContentH
 const AdminAnalytics       = lazy(() => import('@/components/admin/AdminAnalytics'));
 const AdminModuleUnavailable = lazy(() => import('@/components/admin/AdminModuleUnavailable'));
 const ReferralAdmissions = lazy(() => import('@/components/admin/ReferralAdmissions'));
+const ReferralSettlements = lazy(() => import('@/pages/referrals/ReferralSettlements'));
 import { SyraProvider, useSyraContext } from '@/components/admin/syra/SyraContext';
 
 // AWS-Native panel removed: /admin/aws-native/* endpoints are not implemented
@@ -37,6 +38,7 @@ export const SECTION_ICONS = {
   seomanager: Globe,
   users: Users,
   referrals: UserRoundCheck,
+  referralsettlements: WalletCards,
   conversations: MessageSquare,
   notifications: Bell,
   ai: Cpu,
@@ -68,6 +70,7 @@ export const SECTION_COMPONENTS = {
   seomanager:    AdminModuleUnavailable,
   users:         AdminModuleUnavailable,
   referrals:     ReferralAdmissions,
+  referralsettlements: ReferralSettlements,
   conversations: AdminModuleUnavailable,
   notifications: AdminModuleUnavailable,
   ai:            AdminModuleUnavailable,

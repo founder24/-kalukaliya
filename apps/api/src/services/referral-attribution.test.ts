@@ -25,6 +25,14 @@ import {
   weeklyReferralMetrics,
 } from './referral-attribution';
 import {
+  approveSettlementStatement,
+  openWeeklySettlement,
+  recordBeneficiary,
+  recordSettlementPayout,
+  reviewBeneficiary,
+  settleReferralWeek,
+} from './referral-settlement';
+import {
   activateReferralApplication,
   expireReferralApplication,
   referralExperience,
@@ -66,6 +74,15 @@ async function resetReferralState(): Promise<void> {
     env.DB.prepare('DELETE FROM referral_advanced_reviews'),
     env.DB.prepare('DELETE FROM referral_program_transitions'),
     env.DB.prepare('DELETE FROM referral_weekly_progress'),
+    env.DB.prepare('DELETE FROM referral_settlement_audits'),
+    env.DB.prepare('DELETE FROM referral_payment_receipts'),
+    env.DB.prepare('DELETE FROM referral_payouts'),
+    env.DB.prepare('DELETE FROM referral_statement_claims'),
+    env.DB.prepare('DELETE FROM referral_weekly_statements'),
+    env.DB.prepare('DELETE FROM referral_weekly_tier_snapshots'),
+    env.DB.prepare('DELETE FROM referral_accrual_intervals'),
+    env.DB.prepare('DELETE FROM referral_weekly_envelopes'),
+    env.DB.prepare('DELETE FROM referral_beneficiaries'),
     env.DB.prepare('DELETE FROM referral_weekly_claims'),
     env.DB.prepare(`
       UPDATE referral_advanced_positions
@@ -1840,5 +1857,209 @@ describe('referral onboarding and activation', () => {
     });
     const replacement = await admitOne('slot-reuse-after-advanced-close');
     expect(replacement.slotNo).toBe(suspendedSlotNo);
+  });
+});
+
+describe('weekly referral settlement controls', () => {
+  async function openSettlementFixture() {
+    const influencer = await admitOne(`settlement-${crypto.randomUUID()}`);
+    const week = await openTestWeek(TEST_TIME);
+    const evidenceId = await gateEvidence(TEST_TIME + 100, `settlement-${week.key}`);
+    await openWeeklySettlement(env.DB, {
+      weekId: week.id,
+      evidenceId,
+      actorId: 'referral-audit-operator',
+      openedAt: TEST_TIME + 100,
+    });
+    return { influencer, week };
+  }
+
+  async function insertMatureClaim(
+    weekId: string,
+    influencerSlot: number,
+    firstSeenAt: number,
+    suffix: string,
+  ) {
+    const id = crypto.randomUUID();
+    await env.DB.prepare(`
+      INSERT INTO referral_weekly_claims
+        (id, week_id, identity_hash, credited_influencer_slot, identity_confidence,
+         state, first_seen_at, last_seen_at, matured_at, maturity_token,
+         quality_evidence_id, progress_counted, accrual_generation, event_count,
+         quality_evidence, policy_version, expires_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'browser', 'mature', ?, ?, ?, ?, ?, 1, 0, 1, '{}', ?, ?, ?, ?)
+    `).bind(
+      id,
+      weekId,
+      `settlement-identity-${suffix}`,
+      influencerSlot,
+      firstSeenAt,
+      firstSeenAt,
+      firstSeenAt + 1,
+      `maturity-${suffix}`,
+      `quality-${suffix}`,
+      REFERRAL_POLICY_VERSION,
+      firstSeenAt + 400 * 24 * 60 * 60,
+      firstSeenAt,
+      firstSeenAt,
+    ).run();
+    return id;
+  }
+
+  it('caps basic statements and keeps claim settlement unique under retries', async () => {
+    const { influencer, week } = await openSettlementFixture();
+    await env.DB.batch(Array.from({ length: 101 }, (_, index) =>
+      env.DB.prepare(`
+        INSERT INTO referral_weekly_claims
+          (id, week_id, identity_hash, credited_influencer_slot, identity_confidence,
+           state, first_seen_at, last_seen_at, matured_at, maturity_token,
+           quality_evidence_id, progress_counted, accrual_generation, event_count,
+           quality_evidence, policy_version, expires_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'browser', 'mature', ?, ?, ?, ?, ?, 1, 0, 1, '{}', ?, ?, ?, ?)
+      `).bind(
+        crypto.randomUUID(),
+        week.id,
+        `cap-identity-${index}`,
+        influencer.slotNo,
+        TEST_TIME,
+        TEST_TIME,
+        TEST_TIME + 1,
+        `cap-maturity-${index}`,
+        `cap-quality-${index}`,
+        REFERRAL_POLICY_VERSION,
+        week.endsAt + 400 * 24 * 60 * 60,
+        TEST_TIME,
+        TEST_TIME,
+      ),
+    ));
+    const settled = await settleReferralWeek(env.DB, {
+      weekId: week.id,
+      actorId: 'referral-audit-operator',
+      settledAt: week.endsAt + 1,
+    });
+    expect(settled).toMatchObject({ status: 'held', totalInr: 100, idempotent: false });
+    const statement = await env.DB.prepare(`
+      SELECT gross_amount_inr, mature_verified_count, payable_claim_count
+      FROM referral_weekly_statements WHERE week_id = ?
+    `).bind(week.id).first<Record<string, number>>();
+    expect(statement).toEqual({
+      gross_amount_inr: 100,
+      mature_verified_count: 101,
+      payable_claim_count: 100,
+    });
+    const ledger = await env.DB.prepare(`
+      SELECT COUNT(*) AS count FROM referral_statement_claims
+      WHERE statement_id = (SELECT id FROM referral_weekly_statements WHERE week_id = ?)
+    `).bind(week.id).first<{ count: number }>();
+    expect(ledger?.count).toBe(100);
+    await expect(settleReferralWeek(env.DB, {
+      weekId: week.id,
+      actorId: 'referral-audit-operator',
+      settledAt: week.endsAt + 2,
+    })).resolves.toMatchObject({ idempotent: true, totalInr: 100 });
+  });
+
+  it('excludes post-pause claims while preserving the immutable funded envelope', async () => {
+    const { influencer, week } = await openSettlementFixture();
+    const pauseAt = TEST_TIME + 200;
+    await pauseReferralProgram(
+      env.DB,
+      'referral-audit-operator',
+      'Fraud evidence needs a fresh review before accrual continues.',
+      pauseAt,
+    );
+    await insertMatureClaim(week.id, influencer.slotNo, pauseAt + 1, 'post-pause');
+    await settleReferralWeek(env.DB, {
+      weekId: week.id,
+      actorId: 'referral-audit-operator',
+      settledAt: week.endsAt + 1,
+    });
+    const statement = await env.DB.prepare(`
+      SELECT gross_amount_inr, mature_verified_count, payable_claim_count
+      FROM referral_weekly_statements WHERE week_id = ?
+    `).bind(week.id).first<Record<string, number>>();
+    expect(statement).toEqual({
+      gross_amount_inr: 0,
+      mature_verified_count: 0,
+      payable_claim_count: 0,
+    });
+    const envelope = await env.DB.prepare(`
+      SELECT funded_cap_inr, worst_case_exposure_inr, reserved_inr
+      FROM referral_weekly_envelopes WHERE week_id = ?
+    `).bind(week.id).first<Record<string, number>>();
+    expect(envelope).toEqual({
+      funded_cap_inr: 37000,
+      worst_case_exposure_inr: 37000,
+      reserved_inr: 0,
+    });
+  });
+
+  it('requires beneficiary separation and payment evidence before a retry-safe payout', async () => {
+    const { influencer, week } = await openSettlementFixture();
+    await insertMatureClaim(week.id, influencer.slotNo, TEST_TIME, 'payout');
+    await settleReferralWeek(env.DB, {
+      weekId: week.id,
+      actorId: 'referral-audit-operator',
+      settledAt: week.endsAt + 1,
+    });
+    const statement = await env.DB.prepare(`
+      SELECT id FROM referral_weekly_statements WHERE week_id = ?
+    `).bind(week.id).first<{ id: string }>();
+    if (!statement) throw new Error('Expected settlement statement');
+    const beneficiaryActor = await createUser(`beneficiary-enterer-${crypto.randomUUID()}`, 'staff', ['referral:settle']);
+    const payoutActor = await createUser(`payout-reviewer-${crypto.randomUUID()}`, 'staff', ['referral:settle']);
+    const beneficiary = await recordBeneficiary(env.DB, {
+      userId: influencer.userId,
+      actorId: beneficiaryActor,
+      details: { name: 'Verified student', payment_reference: 'private-reference' },
+      occurredAt: week.endsAt + 2,
+    });
+    await expect(reviewBeneficiary(env.DB, {
+      beneficiaryId: beneficiary.id,
+      actorId: beneficiaryActor,
+      approved: true,
+      reason: 'The submitting operator cannot verify their own beneficiary record.',
+      occurredAt: week.endsAt + 3,
+    })).rejects.toThrow('Separation of duties');
+    await expect(reviewBeneficiary(env.DB, {
+      beneficiaryId: beneficiary.id,
+      actorId: payoutActor,
+      approved: true,
+      reason: 'Independent review matched the private beneficiary evidence.',
+      occurredAt: week.endsAt + 4,
+    })).resolves.toMatchObject({ status: 'verified' });
+    await approveSettlementStatement(env.DB, {
+      statementId: statement.id,
+      actorId: payoutActor,
+      reason: 'Mature verified claim and beneficiary review are complete.',
+      approvedAt: week.endsAt + 5,
+    });
+    await expect(recordSettlementPayout(env.DB, {
+      statementId: statement.id,
+      actorId: payoutActor,
+      status: 'paid',
+      idempotencyKey: 'payout-missing-utr',
+      reason: 'Attempted payment without bank reference evidence.',
+      occurredAt: week.endsAt + 6,
+    })).rejects.toThrow('UTR/reference');
+    const payout = await recordSettlementPayout(env.DB, {
+      statementId: statement.id,
+      actorId: payoutActor,
+      status: 'paid',
+      idempotencyKey: 'payout-retry-safe-001',
+      utrReference: 'UTR-SETTLEMENT-001',
+      reason: 'Payment reference recorded after independent review.',
+      occurredAt: week.endsAt + 7,
+    });
+    expect(payout.status).toBe('paid');
+    await expect(recordSettlementPayout(env.DB, {
+      statementId: statement.id,
+      actorId: payoutActor,
+      status: 'paid',
+      idempotencyKey: 'payout-retry-safe-001',
+      utrReference: 'UTR-SETTLEMENT-001',
+      reason: 'Retry of the same payment evidence.',
+      occurredAt: week.endsAt + 8,
+    })).resolves.toMatchObject({ payoutId: payout.payoutId, idempotent: true });
   });
 });

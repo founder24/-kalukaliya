@@ -2,7 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageTitle } from '@/components/PageTitle';
 import { useAuth } from '@/context/AuthContext';
-import { activateReferralApplication, getReferralExperience, submitReferralApplication } from '@/utils/api';
+import {
+  activateReferralApplication,
+  getReferralExperience,
+  getReferralStatements,
+  submitReferralApplication,
+} from '@/utils/api';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
 import {
@@ -41,6 +46,7 @@ function ProgressBar({ value, label }) {
 export default function ReferralExperience() {
   const { user } = useAuth();
   const [experience, setExperience] = useState(null);
+  const [statements, setStatements] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -52,6 +58,12 @@ export default function ReferralExperience() {
     try {
       const result = unwrap(await getReferralExperience());
       setExperience(result);
+      try {
+        const statementResult = unwrap(await getReferralStatements());
+        setStatements(statementResult.statements || []);
+      } catch {
+        setStatements([]);
+      }
       const policy = result.policy || {};
       setForm((current) => ({ ...current, terms_version: policy.version || '', privacy_version: policy.version || '' }));
     } catch {
@@ -117,6 +129,8 @@ export default function ReferralExperience() {
         {isPaused && <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><Clock3 className="mt-0.5 shrink-0" size={18} /><div><b>Referrals are paused{program.pause_effective_at ? ` since ${date(program.pause_effective_at)}` : ''}.</b><p className="mt-1 text-amber-800">Your progress is preserved and new earnings stop during the pause. We will show a new activation date here when the program resumes.</p></div></div>}
 
         {dashboard?.referral && <Card className="border-violet-200 bg-violet-50/70"><div className="flex flex-col gap-5 sm:flex-row sm:items-center"><div className="flex-1"><div className="mb-2 flex items-center gap-2 text-violet-700"><Link2 size={17} /><span className="text-xs font-bold uppercase tracking-widest">Your safe sharing kit</span></div><h2 className="text-lg font-bold text-slate-900">Share only when it feels useful</h2><p className="mt-1 text-sm text-slate-600">Your identity is not shown publicly. Avoid bulk messages or claims about guaranteed money.</p><div className="mt-4 flex flex-col gap-2 sm:flex-row"><code className="min-w-0 flex-1 truncate rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-xs text-slate-600">{dashboard.referral.link}</code><button onClick={copy} data-testid="button-copy-referral-link" className="inline-flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-white px-4 py-2 text-xs font-bold text-violet-700">{copied ? <Check size={15} /> : <Clipboard size={15} />}{copied ? 'Copied' : 'Copy link'}</button><button onClick={share} data-testid="button-share-referral-link" className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-xs font-bold text-white"><ExternalLink size={15} /> Share</button></div></div><div className="hidden rounded-xl bg-white p-3 shadow-sm sm:block"><QRCodeSVG value={dashboard.referral.link} size={112} bgColor="#ffffff" fgColor="#241b4b" /></div></div></Card>}
+
+        {statements.length > 0 && <Card data-testid="referral-statements"><div className="flex items-start justify-between gap-4"><div><p className="text-[11px] font-bold uppercase tracking-[.18em] text-violet-600">Settlement statements</p><h2 className="mt-1 text-lg font-bold text-slate-900">Verified activity, shown week by week</h2><p className="mt-1 text-sm text-slate-500">Statements remain held while quality, fraud, beneficiary, and staff review controls complete.</p></div><WalletCards className="text-violet-500" size={22} /></div><div className="mt-4 space-y-2">{statements.map((statement) => <div key={statement.id} className="flex flex-col gap-2 rounded-2xl border border-slate-100 bg-slate-50/80 p-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><b className="text-sm text-slate-800">{statement.tier === 'advanced' ? 'Advanced' : 'Basic'} week</b><StatusPill status={statement.status} /></div><p className="mt-1 text-xs text-slate-500">{statement.mature_verified_count || 0} mature verified visitors · {statement.payable_claim_count || 0} payable claims</p></div><strong className="text-sm text-slate-900">{money(statement.gross_amount_inr)}</strong></div>)}</div></Card>}
 
         {dashboard && <div className="grid gap-5 lg:grid-cols-[1.35fr_.65fr]"><Card><div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-violet-600">This week</p><h2 className="mt-1 text-xl font-bold text-slate-900">Verified earnings</h2></div><WalletCards className="text-violet-500" size={22} /></div><div className="mt-6 flex items-end justify-between"><div><p className="text-4xl font-bold tracking-tight text-[#241b4b]" data-testid="text-authoritative-reward">{money(currentWeek?.authoritative_reward_inr)}</p><p className="mt-1 text-xs text-slate-500">Authoritative reward · settles after verification</p></div>{rewardCap != null && <span className="rounded-xl bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700">Cap {money(rewardCap)}</span>}</div><div className="mt-6 grid grid-cols-3 gap-3 border-t border-slate-100 pt-4 text-xs"><div><p className="text-slate-500">Mature verified</p><b className="text-slate-800">{currentWeek?.mature_verified ?? 0}</b></div><div><p className="text-slate-500">Pending</p><b className="text-amber-700">{currentWeek?.pending ?? 0}</b></div><div><p className="text-slate-500">Rejected</p><b className="text-slate-700">{currentWeek?.rejected ?? 0}</b></div></div></Card><Card><p className="text-xs font-bold uppercase tracking-widest text-violet-600">Advanced qualification</p><h2 className="mt-1 text-xl font-bold text-slate-900">Progress, not a promise</h2><p className="mt-3 text-sm text-slate-600">The server decides qualification and available positions.</p><div className="mt-6 flex items-end justify-between"><b className="text-2xl text-[#241b4b]">{qualification?.mature_verified ?? 0} <span className="text-sm font-medium text-slate-500">/ {qualification?.target ?? policy.advanced_target ?? 500}</span></b><span className="text-xs font-bold text-violet-600">{Math.round(qualificationPercent)}%</span></div><div className="mt-2"><ProgressBar value={qualificationPercent} label="Advanced qualification progress" /></div><p className="mt-4 text-xs leading-5 text-slate-500">{qualification?.remaining_advanced_positions ?? 0} positions remaining · {qualification?.status || 'Qualification is server-controlled'}</p></Card></div>}
 

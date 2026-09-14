@@ -30,6 +30,15 @@ export const STAFF_PORTAL_SECTIONS = Object.freeze([
       requiredReads: ['/api/v1/admin/referrals/applications'],
     },
   },
+  {
+    id: 'referralsettlements',
+    label: 'Referral Settlements',
+    group: 'operations',
+    releaseCheck: {
+      supported: true,
+      requiredReads: ['/api/v1/admin/referrals/settlements'],
+    },
+  },
   { id: 'conversations', label: 'Conversations', group: 'audience', releaseCheck: { supported: false, requiredReads: [] } },
   { id: 'notifications', label: 'Notifications', group: 'audience', releaseCheck: { supported: false, requiredReads: [] } },
   { id: 'ai', label: 'AI & Automation', group: 'operations', releaseCheck: { supported: false, requiredReads: [] } },

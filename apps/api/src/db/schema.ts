@@ -760,6 +760,161 @@ export const referralVisitRateLimits = sqliteTable('referral_visit_rate_limits',
   index('referral_visit_rate_limits_expiry_idx').on(t.expiresAt),
 ]);
 
+export const referralWeeklyEnvelopes = sqliteTable('referral_weekly_envelopes', {
+  weekId: text('week_id').primaryKey().references(() => referralWeeks.id),
+  worstCaseExposureInr: integer('worst_case_exposure_inr').notNull().default(37000),
+  fundedCapInr: integer('funded_cap_inr').notNull(),
+  reservedInr: integer('reserved_inr').notNull().default(0),
+  status: text('status').notNull().default('paused'),
+  providerEvidenceId: text('provider_evidence_id').notNull(),
+  qualityEvidenceId: text('quality_evidence_id').notNull(),
+  gateEvidenceId: text('gate_evidence_id').notNull(),
+  finalizedThroughAt: integer('finalized_through_at').notNull(),
+  qualityMeasuredAt: integer('quality_measured_at').notNull(),
+  openedAt: integer('opened_at').notNull(),
+  closedAt: integer('closed_at'),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+});
+
+export const referralAccrualIntervals = sqliteTable('referral_accrual_intervals', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  generation: integer('generation').notNull(),
+  startsAt: integer('starts_at').notNull(),
+  endsAt: integer('ends_at'),
+  state: text('state').notNull(),
+  pauseReason: text('pause_reason'),
+  actorId: text('actor_id'),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_accrual_interval_generation_idx').on(t.weekId, t.generation),
+  index('referral_accrual_interval_time_idx').on(t.weekId, t.startsAt, t.endsAt),
+]);
+
+export const referralWeeklyTierSnapshots = sqliteTable('referral_weekly_tier_snapshots', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  influencerSlot: integer('influencer_slot').notNull().references(() => referralInfluencerSlots.slotNo),
+  userId: text('user_id').references(() => users.id),
+  tier: text('tier').notNull(),
+  qualifyingWeek: integer('qualifying_week').notNull().default(0),
+  effectiveAt: integer('effective_at').notNull(),
+  policyVersion: text('policy_version').notNull(),
+}, (t) => [
+  uniqueIndex('referral_weekly_tier_snapshot_idx').on(t.weekId, t.influencerSlot),
+]);
+
+export const referralWeeklyStatements = sqliteTable('referral_weekly_statements', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  influencerSlot: integer('influencer_slot').notNull().references(() => referralInfluencerSlots.slotNo),
+  userId: text('user_id').notNull().references(() => users.id),
+  tier: text('tier').notNull(),
+  qualifyingWeek: integer('qualifying_week').notNull().default(0),
+  matureVerifiedCount: integer('mature_verified_count').notNull().default(0),
+  payableClaimCount: integer('payable_claim_count').notNull().default(0),
+  rateInr: integer('rate_inr').notNull().default(1),
+  grossAmountInr: integer('gross_amount_inr').notNull().default(0),
+  fundedCapInr: integer('funded_cap_inr').notNull(),
+  status: text('status').notNull().default('held'),
+  qualityHoldReleasedAt: integer('quality_hold_released_at').notNull(),
+  accrualGeneration: integer('accrual_generation').notNull().default(0),
+  evidenceSnapshot: text('evidence_snapshot').notNull().default('{}'),
+  approvedBy: text('approved_by'),
+  approvedAt: integer('approved_at'),
+  paidAt: integer('paid_at'),
+  failureReason: text('failure_reason'),
+  correctionOf: text('correction_of'),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_weekly_statement_slot_idx').on(t.weekId, t.influencerSlot),
+  index('referral_weekly_statement_user_idx').on(t.userId, t.weekId),
+]);
+
+export const referralStatementClaims = sqliteTable('referral_statement_claims', {
+  statementId: text('statement_id').notNull().references(() => referralWeeklyStatements.id),
+  claimId: text('claim_id').notNull().references(() => referralWeeklyClaims.id),
+  amountInr: integer('amount_inr').notNull().default(1),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_statement_claim_idx').on(t.statementId, t.claimId),
+  uniqueIndex('referral_statement_claim_once_idx').on(t.claimId),
+]);
+
+export const referralBeneficiaries = sqliteTable('referral_beneficiaries', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  status: text('status').notNull().default('pending'),
+  detailsSnapshot: text('details_snapshot').notNull(),
+  submittedBy: text('submitted_by').notNull().references(() => users.id),
+  verifiedBy: text('verified_by'),
+  verifiedAt: integer('verified_at'),
+  decisionReason: text('decision_reason'),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+});
+
+export const referralPayouts = sqliteTable('referral_payouts', {
+  id: text('id').primaryKey(),
+  statementId: text('statement_id').notNull().references(() => referralWeeklyStatements.id),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  influencerSlot: integer('influencer_slot').notNull().references(() => referralInfluencerSlots.slotNo),
+  userId: text('user_id').notNull().references(() => users.id),
+  beneficiaryId: text('beneficiary_id'),
+  amountInr: integer('amount_inr').notNull(),
+  status: text('status').notNull().default('pending'),
+  idempotencyKey: text('idempotency_key').notNull(),
+  utrReference: text('utr_reference'),
+  providerReference: text('provider_reference'),
+  failureReason: text('failure_reason'),
+  attempts: integer('attempts').notNull().default(0),
+  paidAt: integer('paid_at'),
+  failedAt: integer('failed_at'),
+  reversedAt: integer('reversed_at'),
+  createdBy: text('created_by').notNull().references(() => users.id),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_payout_statement_idx').on(t.statementId),
+  uniqueIndex('referral_payout_idempotency_idx').on(t.idempotencyKey),
+  index('referral_payout_user_idx').on(t.userId, t.weekId),
+]);
+
+export const referralPaymentReceipts = sqliteTable('referral_payment_receipts', {
+  id: text('id').primaryKey(),
+  payoutId: text('payout_id').notNull().references(() => referralPayouts.id),
+  objectKey: text('object_key').notNull(),
+  originalName: text('original_name').notNull(),
+  contentType: text('content_type').notNull(),
+  byteSize: integer('byte_size').notNull(),
+  sha256: text('sha256').notNull(),
+  uploadedBy: text('uploaded_by').notNull().references(() => users.id),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_receipt_object_idx').on(t.objectKey),
+  uniqueIndex('referral_receipt_hash_idx').on(t.sha256),
+]);
+
+export const referralSettlementAudits = sqliteTable('referral_settlement_audits', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').references(() => referralWeeks.id),
+  statementId: text('statement_id').references(() => referralWeeklyStatements.id),
+  payoutId: text('payout_id').references(() => referralPayouts.id),
+  influencerSlot: integer('influencer_slot'),
+  action: text('action').notNull(),
+  fromStatus: text('from_status'),
+  toStatus: text('to_status'),
+  actorId: text('actor_id').notNull(),
+  reason: text('reason').notNull(),
+  metadata: text('metadata').notNull().default('{}'),
+  policyVersion: text('policy_version').notNull(),
+  evidenceSnapshot: text('evidence_snapshot').notNull().default('{}'),
+  occurredAt: integer('occurred_at').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  index('referral_settlement_audit_week_idx').on(t.weekId, t.occurredAt),
+]);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // OPERATIONAL
 // ─────────────────────────────────────────────────────────────────────────────

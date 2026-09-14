@@ -215,6 +215,9 @@ export const saveOnboarding = (data) =>
 export const getReferralExperience = () =>
   axios.get(`${API_BASE}/referrals/me`, authConfig());
 
+export const getReferralStatements = () =>
+  axios.get(`${API_BASE}/referrals/me/statements`, authConfig());
+
 export const submitReferralApplication = (data) =>
   axios.post(`${API_BASE}/referrals/applications`, data, authConfig());
 
@@ -247,6 +250,70 @@ export const adminGetReferralApplicationAudits = (token, applicationId) =>
     `${API_BASE}/admin/referrals/applications/${encodeURIComponent(applicationId)}/audits`,
     { headers: adminHeaders(token), withCredentials: true },
   );
+
+export const adminGetReferralSettlements = (token, weekId) =>
+  axios.get(`${API_BASE}/admin/referrals/settlements`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+    params: weekId ? { week_id: weekId } : {},
+  });
+
+export const adminSettleReferralWeek = (token, weekId, data = {}) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/weeks/${encodeURIComponent(weekId)}/settle`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminApproveReferralStatement = (token, statementId, data) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/statements/${encodeURIComponent(statementId)}/approve`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminRecordReferralBeneficiary = (token, data) =>
+  axios.post(`${API_BASE}/admin/referrals/beneficiaries`, data, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+  });
+
+export const adminGetReferralBeneficiaries = (token) =>
+  axios.get(`${API_BASE}/admin/referrals/beneficiaries`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+  });
+
+export const adminReviewReferralBeneficiary = (token, beneficiaryId, data) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/beneficiaries/${encodeURIComponent(beneficiaryId)}/review`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminRecordReferralPayout = (token, statementId, data) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/statements/${encodeURIComponent(statementId)}/payout`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminTransitionReferralPayout = (token, payoutId, data) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/payouts/${encodeURIComponent(payoutId)}/transition`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminUploadReferralReceipt = (token, payoutId, file) => {
+  const form = new FormData();
+  form.append('receipt', file);
+  return axios.post(
+    `${API_BASE}/admin/referrals/payouts/${encodeURIComponent(payoutId)}/receipt`,
+    form,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+};
 
 export const adminLogin = (email, password) => {
   return axios.post(

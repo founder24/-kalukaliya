@@ -29,6 +29,21 @@ import {
   reviewReferralApplication,
   submitReferralApplication,
 } from '../services/referral-onboarding';
+import {
+  approveSettlementStatement,
+  listSettlementStatements,
+  listBeneficiaries,
+  listStatementsForUser,
+  openWeeklySettlement,
+  recordBeneficiary,
+  recordSettlementPayout,
+  reviewBeneficiary,
+  settleReferralWeek,
+  settlementAudits,
+  transitionSettlementPayout,
+  validatePrivateReceipt,
+  MAX_RECEIPT_BYTES,
+} from '../services/referral-settlement';
 import type { Env, JwtPayload } from '../types';
 
 export const referralRouter = new Hono<{ Bindings: Env }>();
@@ -249,6 +264,16 @@ referralRouter.get('/me', async (c) => {
   }
 });
 
+referralRouter.get('/me/statements', async (c) => {
+  const auth = await requireAccessUser(c);
+  if (auth instanceof Response) return auth;
+  try {
+    return c.json({ statements: await listStatementsForUser(c.env.DB, auth.sub) });
+  } catch {
+    return c.json({ detail: 'Referral statements unavailable' }, 503);
+  }
+});
+
 referralRouter.post('/applications', async (c) => {
   const auth = await requireAccessUser(c);
   if (auth instanceof Response) return auth;
@@ -414,6 +439,9 @@ adminReferralRouter.post('/program/resume', async (c) => {
       actorId: auth.actorId,
       effectiveAt,
       evidenceId,
+      ...(body?.funded_cap_inr === undefined
+        ? {}
+        : { fundedCapInr: Number(body.funded_cap_inr) }),
     });
     return result.resumed
       ? c.json({ status: 'active', accrual_resumed_at: effectiveAt })
@@ -437,15 +465,30 @@ adminReferralRouter.post('/program/open-week', async (c) => {
       actorId: auth.actorId,
       effectiveAt,
       evidenceId,
+      ...(body?.funded_cap_inr === undefined
+        ? {}
+        : { fundedCapInr: Number(body.funded_cap_inr) }),
     });
-    return result.opened || result.alreadyOpen
-      ? c.json({
+    if (!(result.opened || result.alreadyOpen)) {
+      return c.json({ detail: 'Week-opening gate rejected', reasons: result.reasons }, 409);
+    }
+    const envelope = await openWeeklySettlement(c.env.DB, {
+      weekId: result.week.id,
+      evidenceId,
+      actorId: auth.actorId,
+      openedAt: effectiveAt,
+      ...(body?.funded_cap_inr === undefined
+        ? {}
+        : { fundedCapInr: Number(body.funded_cap_inr) }),
+    });
+    return c.json({
           status: 'active',
           week: result.week,
           opened: result.opened,
           activated_advanced_positions: result.activatedAdvancedPositions,
-        })
-      : c.json({ detail: 'Week-opening gate rejected', reasons: result.reasons }, 409);
+          funded_cap_inr: envelope.fundedCapInr,
+          settlement_status: envelope.status,
+        });
   } catch {
     return c.json({ detail: 'Referral week lifecycle unavailable' }, 503);
   }
@@ -515,6 +558,230 @@ adminReferralRouter.get('/weeks/:weekId/influencers/:slot/metrics', async (c) =>
   }
 });
 
+adminReferralRouter.get('/settlements', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  try {
+    return c.json({
+      statements: await listSettlementStatements(c.env.DB, c.req.query('week_id')),
+    });
+  } catch {
+    return c.json({ detail: 'Settlement statements unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.post('/weeks/:weekId/settle', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  const body = await requestBody(c);
+  try {
+    const result = await settleReferralWeek(c.env.DB, {
+      weekId: c.req.param('weekId'),
+      actorId: auth.actorId,
+      settledAt: Math.floor(Date.now() / 1000),
+      ...(typeof body?.reason === 'string' ? { reason: body.reason } : {}),
+    });
+    return c.json(result);
+  } catch (error) {
+    return c.json({ detail: error instanceof Error ? error.message : 'Settlement unavailable' }, 409);
+  }
+});
+
+adminReferralRouter.post('/statements/:statementId/approve', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  const body = await requestBody(c);
+  if (typeof body?.reason !== 'string') return c.json({ detail: 'Approval reason is required' }, 422);
+  try {
+    return c.json(await approveSettlementStatement(c.env.DB, {
+      statementId: c.req.param('statementId'),
+      actorId: auth.actorId,
+      reason: body.reason,
+      approvedAt: Math.floor(Date.now() / 1000),
+    }));
+  } catch (error) {
+    return c.json({ detail: error instanceof Error ? error.message : 'Statement approval unavailable' }, 409);
+  }
+});
+
+adminReferralRouter.post('/beneficiaries', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  const body = await requestBody(c);
+  if (typeof body?.user_id !== 'string' || !body.details) {
+    return c.json({ detail: 'user_id and private beneficiary details are required' }, 422);
+  }
+  try {
+    return c.json(await recordBeneficiary(c.env.DB, {
+      userId: body.user_id,
+      actorId: auth.actorId,
+      details: body.details,
+      occurredAt: Math.floor(Date.now() / 1000),
+    }), 201);
+  } catch (error) {
+    return c.json({ detail: error instanceof Error ? error.message : 'Beneficiary unavailable' }, 409);
+  }
+});
+
+adminReferralRouter.get('/beneficiaries', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  try {
+    return c.json({ beneficiaries: await listBeneficiaries(c.env.DB) });
+  } catch {
+    return c.json({ detail: 'Beneficiary records unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.post('/beneficiaries/:beneficiaryId/review', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  const body = await requestBody(c);
+  if (typeof body?.approved !== 'boolean' || typeof body.reason !== 'string') {
+    return c.json({ detail: 'approved and reason are required' }, 422);
+  }
+  try {
+    return c.json(await reviewBeneficiary(c.env.DB, {
+      beneficiaryId: c.req.param('beneficiaryId'),
+      actorId: auth.actorId,
+      approved: body.approved,
+      reason: body.reason,
+      occurredAt: Math.floor(Date.now() / 1000),
+    }));
+  } catch (error) {
+    return c.json({ detail: error instanceof Error ? error.message : 'Beneficiary review unavailable' }, 409);
+  }
+});
+
+adminReferralRouter.post('/statements/:statementId/payout', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  const body = await requestBody(c);
+  const status = body?.status;
+  if (status !== 'paid' && status !== 'failed') {
+    return c.json({ detail: 'Payout status must be paid or failed' }, 422);
+  }
+  try {
+    return c.json(await recordSettlementPayout(c.env.DB, {
+      statementId: c.req.param('statementId'),
+      actorId: auth.actorId,
+      status,
+      idempotencyKey: String(body?.idempotency_key ?? ''),
+      reason: String(body?.reason ?? ''),
+      occurredAt: Math.floor(Date.now() / 1000),
+      ...(typeof body?.utr_reference === 'string' ? { utrReference: body.utr_reference } : {}),
+      ...(typeof body?.provider_reference === 'string'
+        ? { providerReference: body.provider_reference }
+        : {}),
+    }));
+  } catch (error) {
+    return c.json({ detail: error instanceof Error ? error.message : 'Payout unavailable' }, 409);
+  }
+});
+
+adminReferralRouter.post('/payouts/:payoutId/transition', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  const body = await requestBody(c);
+  if (!['corrected', 'reversed', 'clawed_back'].includes(String(body?.status))
+    || typeof body?.reason !== 'string') {
+    return c.json({ detail: 'A correction status and reason are required' }, 422);
+  }
+  try {
+    return c.json(await transitionSettlementPayout(c.env.DB, {
+      payoutId: c.req.param('payoutId'),
+      actorId: auth.actorId,
+      status: body.status as 'corrected' | 'reversed' | 'clawed_back',
+      reason: body.reason,
+      occurredAt: Math.floor(Date.now() / 1000),
+    }));
+  } catch (error) {
+    return c.json({ detail: error instanceof Error ? error.message : 'Payout transition unavailable' }, 409);
+  }
+});
+
+adminReferralRouter.post('/payouts/:payoutId/receipt', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  const form = await c.req.formData();
+  const file = form.get('receipt');
+  if (!file || typeof file === 'string') {
+    return c.json({ detail: 'A receipt file is required' }, 422);
+  }
+  const upload = file as unknown as {
+    name: string;
+    type: string;
+    size: number;
+    arrayBuffer: () => Promise<ArrayBuffer>;
+  };
+  try {
+    validatePrivateReceipt(upload);
+    if (upload.size > MAX_RECEIPT_BYTES) return c.json({ detail: 'Receipt is too large' }, 422);
+    const bytes = new Uint8Array(await upload.arrayBuffer());
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+    const extension = upload.type === 'application/pdf' ? 'pdf' : upload.type === 'image/png' ? 'png' : 'jpg';
+    const objectKey = `private/referral-receipts/${c.req.param('payoutId')}/${hash}.${extension}`;
+    await c.env.R2_BUCKET.put(objectKey, bytes, {
+      httpMetadata: { contentType: upload.type, cacheControl: 'private, no-store' },
+      customMetadata: { sha256: hash, uploadedBy: auth.actorId },
+    });
+    await c.env.DB.prepare(`
+      INSERT INTO referral_payment_receipts
+        (id, payout_id, object_key, original_name, content_type, byte_size, sha256, uploaded_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      crypto.randomUUID(),
+      c.req.param('payoutId'),
+      objectKey,
+      upload.name,
+      upload.type,
+      upload.size,
+      hash,
+      auth.actorId,
+    ).run();
+    return c.json({ status: 'stored', sha256: hash, private: true }, 201);
+  } catch (error) {
+    return c.json({ detail: error instanceof Error ? error.message : 'Receipt upload unavailable' }, 422);
+  }
+});
+
+adminReferralRouter.get('/payouts/:payoutId/receipt', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  const receipt = await c.env.DB.prepare(`
+    SELECT object_key, original_name, content_type, sha256
+    FROM referral_payment_receipts
+    WHERE payout_id = ?
+    ORDER BY created_at DESC LIMIT 1
+  `).bind(c.req.param('payoutId')).first<{
+    object_key: string;
+    original_name: string;
+    content_type: string;
+    sha256: string;
+  }>();
+  if (!receipt) return c.json({ detail: 'Private receipt not found' }, 404);
+  const object = await c.env.R2_BUCKET.get(receipt.object_key);
+  if (!object) return c.json({ detail: 'Private receipt object is unavailable' }, 404);
+  const headers = new Headers();
+  headers.set('Content-Type', receipt.content_type);
+  headers.set('Content-Length', String(object.size));
+  headers.set('Content-Disposition', `attachment; filename="${receipt.original_name.replace(/[^A-Za-z0-9._-]/g, '_')}"`);
+  headers.set('Cache-Control', 'private, no-store');
+  headers.set('X-Content-SHA256', receipt.sha256);
+  return new Response(object.body, { headers });
+});
+
+adminReferralRouter.get('/settlements/audits', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  try {
+    return c.json({ audits: await settlementAudits(c.env.DB, c.req.query('week_id')) });
+  } catch {
+    return c.json({ detail: 'Settlement audit history unavailable' }, 503);
+  }
+});
+
 internalReferralRouter.post('/gate-evidence', async (c) => {
   if (!await internalAuthorized(c)) return c.json({ detail: 'Unauthorized' }, 401);
   const body = await requestBody(c);
@@ -533,6 +800,9 @@ internalReferralRouter.post('/gate-evidence', async (c) => {
       settlementHealthy: body.settlement_healthy === true,
       recordedAt: Number(body.recorded_at),
       expiresAt: Number(body.expires_at),
+      ...(body.funded_cap_inr === undefined
+        ? {}
+        : { fundedCapInr: Number(body.funded_cap_inr) }),
     });
     return c.json({ evidence_id: evidenceId }, 201);
   } catch {

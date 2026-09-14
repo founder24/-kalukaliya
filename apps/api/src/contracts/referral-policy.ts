@@ -154,13 +154,19 @@ function freshAt(
   return Number.isFinite(age) && age >= 0 && age <= maximumAgeSeconds;
 }
 
-export function evaluateWeekOpening(gate: ReferralEvidenceGate): ReferralGateResult {
+export function evaluateWeekOpening(
+  gate: ReferralEvidenceGate,
+  options: { requiredReserveInr?: number } = {},
+): ReferralGateResult {
   const reasons: string[] = [];
+  const requiredReserveInr = Number.isSafeInteger(options.requiredReserveInr)
+    ? Math.max(0, options.requiredReserveInr as number)
+    : REFERRAL_POLICY.maximumWeeklyRewardExposureInr;
 
   if (gate.programState !== 'active') reasons.push(`program-${gate.programState}`);
   if (
     !Number.isFinite(gate.unencumberedReserveInr)
-    || gate.unencumberedReserveInr < REFERRAL_POLICY.maximumWeeklyRewardExposureInr
+    || gate.unencumberedReserveInr < requiredReserveInr
   ) {
     reasons.push('reserve-shortfall');
   }
