@@ -23,6 +23,8 @@ description: How this monorepo is configured to run in the Replit environment
 ## Dependencies
 - Frontend: `pnpm install` in `apps/frontend`
 - Backend: `pip install -r apps/backend/requirements.txt`
+- Backend test collection may require the optional PDF dependency (`fitz`) even
+  when focused credential-free generation tests can run without it.
 - Replit blocks `playwright install --with-deps` because it cannot use apt/sudo; use browser-only Playwright installation locally and keep OS dependency provisioning in Ubuntu CI.
 
 ## Dev behavior without full secrets

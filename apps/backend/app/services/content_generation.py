@@ -203,7 +203,11 @@ class ContentGenerationService:
 
         # ── 2. English content via Workers AI ─────────────────────────────────
         logger.info(f"Generating English notes for {chapter.title!r}")
-        content_en = await workers_ai_client.generate(system_prompt, user_message)
+        content_en = await workers_ai_client.generate_curriculum_notes(
+            system_prompt,
+            user_message,
+            record_id=f"{chapter.id} ({chapter.title})",
+        )
         chapter.content_en = content_en
 
         # ── 3. Extract per-topic definitions from generated content ───────────

@@ -57,6 +57,10 @@ from scripts.ahsec_ingest import (
     notes_to_rag_sections,
     split_into_chapters,
 )
+from app.services.ai.note_quality import (
+    ModelPreambleError,
+    validate_generated_notes as _validate_generated_notes,
+)
 
 
 log = logging.getLogger("ahsec_d1_import")
@@ -94,15 +98,9 @@ CLEANUP_PREVIEW_MAX_AGE_SECONDS = int(
 )
 MIN_SOURCE_CHARS = 500
 MIN_NOTES_CHARS = 800
-MAX_PREAMBLE_DIFF_LINES = 8
-MAX_PREAMBLE_DIFF_LINE_CHARS = 240
 TERMINAL_SUMMARY_EVENT = "import_terminal_summary"
 ACTIVE_RUN_ID: str | None = None
 ACTIVE_RUN_COUNTS = {"completed": 0, "failed": 0}
-
-
-class ModelPreambleError(RuntimeError):
-    """Raised when Workers AI adds assistant-style introduction text."""
 
 
 def parse_args() -> argparse.Namespace:
@@ -306,80 +304,13 @@ def clean_notes(text: str) -> str:
     return text
 
 
-_MODEL_PREAMBLE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    (
-        "notes_introduction",
-        re.compile(
-            r"^\s*(?:here|below|the following)\s+(?:are|is)\b"
-            r".{0,180}\b(?:study\s+)?notes?\b",
-            flags=re.I | re.S,
-        ),
-    ),
-    (
-        "assistant_acknowledgement",
-        re.compile(
-            r"^\s*(?:sure|certainly|of course|absolutely)[!,.]?\s+"
-            r"(?:here|below|i(?:'ll| will)\b)",
-            flags=re.I,
-        ),
-    ),
-    (
-        "ai_disclaimer",
-        re.compile(r"^\s*as an ai(?:\s+language)?\s+model\b", flags=re.I),
-    ),
-    (
-        "first_person_offer",
-        re.compile(
-            r"^\s*i\s+(?:will|'ll)\s+(?:provide|present|give|create)\b",
-            flags=re.I,
-        ),
-    ),
-    (
-        "notes_summary_introduction",
-        re.compile(
-            r"^\s*(?:these|the following)\s+(?:study\s+)?notes?\s+"
-            r"(?:provide|cover|include|summarize)\b",
-            flags=re.I,
-        ),
-    ),
-)
-
-
-def _bounded_diff_preview(before: str, after: str) -> tuple[str, bool]:
-    diff = list(
-        difflib.unified_diff(
-            before.splitlines(),
-            after.splitlines(),
-            fromfile="model-output",
-            tofile="normalized-output",
-            lineterm="",
-            n=1,
-        )
-    )
-    preview_lines = [
-        line[:MAX_PREAMBLE_DIFF_LINE_CHARS]
-        for line in diff[:MAX_PREAMBLE_DIFF_LINES]
-    ]
-    return "\n".join(preview_lines), len(diff) > MAX_PREAMBLE_DIFF_LINES
-
-
 def validate_generated_notes(chapter_id: str, raw_notes: str) -> None:
     """Reject known model introductions before notes can reach D1."""
-    candidate = raw_notes.lstrip()[:1000]
-    for pattern_name, pattern in _MODEL_PREAMBLE_PATTERNS:
-        if not pattern.search(candidate):
-            continue
-        normalized = clean_notes(raw_notes)
-        preview, truncated = _bounded_diff_preview(raw_notes, normalized)
-        diff_summary = preview or "(normalizer produced no diff)"
-        if truncated:
-            diff_summary += "\n... diff truncated ..."
-        raise ModelPreambleError(
-            f"Generated notes rejected for chapter {chapter_id}: "
-            f"model preamble '{pattern_name}' detected; "
-            f"raw_chars={len(raw_notes)} normalized_chars={len(normalized)}; "
-            f"bounded_diff:\n{diff_summary}"
-        )
+    _validate_generated_notes(
+        chapter_id,
+        raw_notes,
+        normalizer=clean_notes,
+    )
 
 
 def normalize(value: str) -> str:

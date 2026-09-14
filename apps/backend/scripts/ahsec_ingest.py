@@ -43,6 +43,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from app.services.ai.note_quality import validate_generated_notes
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -1683,7 +1685,11 @@ async def generate_notes(
             )
             continue
 
-        result = _clean_notes_output(result.strip())
+        raw_result = result.strip()
+        # Validate before cleanup. A known assistant introduction must fail the
+        # generation rather than being silently stripped and persisted.
+        validate_generated_notes(chapter_title, raw_result)
+        result = _clean_notes_output(raw_result)
         # Post-generation guard: publication-page content leaked through prelim filter.
         if _notes_start_with_prelim(result):
             log.warning(

@@ -12,6 +12,7 @@ _BACKEND_DIR = Path(__file__).parent.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.services.ai.note_quality import ModelPreambleError
 from scripts.ahsec_ingest import NotesProviderUnavailableError, generate_notes
 
 _SHORT = "too short"
@@ -78,3 +79,23 @@ async def test_notes_surface_worker_failure_after_all_retries():
 
     assert worker.generate.await_count == 3
     assert exc_info.value.reason == "provider_error"
+
+
+@pytest.mark.anyio
+async def test_notes_reject_model_preamble_before_cleanup():
+    worker = _worker(
+        "Here are comprehensive study notes for the chapter Motion.\n\n" + _LONG
+    )
+
+    with pytest.raises(ModelPreambleError, match="Preamble Chapter"):
+        await generate_notes(
+            worker,
+            body_text="Chapter body text " * 20,
+            chapter_title="Preamble Chapter",
+            subject_name="Physics",
+            medium="en",
+        )
+
+    # A known contract violation is rejected immediately rather than retried
+    # or silently repaired by _clean_notes_output().
+    worker.generate.assert_awaited_once()

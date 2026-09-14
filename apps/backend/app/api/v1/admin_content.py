@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from app.api.v1.admin import require_admin_session, csrf_guard
 from app.models.content import Board, Class, Stream, Subject, Chapter, Topic, ContentAuditLog
 from app.models.user import User
+from app.services.ai.note_quality import ModelPreambleError
 from app.services.content_generation import content_generation_service
 from app.services.content_publisher import content_publisher_service
 
@@ -1856,6 +1857,9 @@ async def generate_notes(request: Request, chapter_id: str, body: GenerateNotesR
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ModelPreambleError as e:
+        logger.warning(f"Generate notes rejected for chapter {chapter_id}: {e}")
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.error(f"Generate notes error: {e}")
         raise HTTPException(status_code=500, detail="Generation failed")
