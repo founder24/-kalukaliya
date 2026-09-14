@@ -61,6 +61,35 @@ gh workflow run deploy-all.yml --ref main
 gh workflow run ci-backend.yml --ref main
 ```
 
+## Archive AHSEC D1 Import History
+
+The AHSEC D1 importer keeps 90 days of approval, progress, and notes-backup
+JSONL records in `apps/backend/.ahsec_d1_state/`. Older records can be moved
+into a timestamped archive directory without losing their shared `run_id`.
+Archived progress remains part of resume lookup, so a later import does not
+repeat chapters only because their old progress was archived.
+
+Preview the operation first:
+
+```bash
+cd apps/backend
+python3 -m scripts.ahsec_d1_import \
+  --archive-history --archive-before-days 90 --dry-run
+```
+
+Apply the archive after reviewing the reported run and record counts:
+
+```bash
+python3 -m scripts.ahsec_d1_import \
+  --archive-history --archive-before-days 90
+```
+
+Each archive contains `approvals.jsonl`, `progress.jsonl`,
+`notes-backup.jsonl`, and `manifest.json`. The importer writes an
+`active-run.json` marker before approving a production run and never archives
+that run. If the process is interrupted, the marker intentionally remains so
+an operator can inspect and recover the run before archiving again.
+
 ## Emergency Contacts / Escalation
 
 - **P1 (site down)**: Page on-call immediately via PagerDuty/Opsgenie

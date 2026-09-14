@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -91,8 +92,17 @@ def test_progress_and_backup_records_share_approval_run_id(monkeypatch, tmp_path
 
     assert read_jsonl(progress_file)[0]["run_id"] == run_id
     assert read_jsonl(backup_file)[0]["run_id"] == run_id
+    assert json.loads((tmp_path / "active-run.json").read_text())["run_id"] == run_id
 
-
+def approval_record(run_id, started_at):
+    return {
+        "event": "production_write_approved",
+        "run_id": run_id,
+        "operator": "curriculum-reviewer",
+        "started_at": started_at,
+        "approved_at": started_at,
+        "scope": {"subject": "chemistry"},
+    }
 @pytest.mark.parametrize(
     "preamble",
     [
@@ -314,3 +324,98 @@ def test_cleanup_apply_requires_production_confirmation(monkeypatch):
     monkeypatch.setattr(importer, "parse_args", lambda: args)
 
     assert asyncio.run(importer.main()) == 2
+
+def test_archive_history_keeps_active_run_and_correlated_ledgers(
+    monkeypatch, tmp_path
+):
+    now = datetime.now(timezone.utc)
+    old_started = (now - timedelta(days=120)).isoformat()
+    recent_started = (now - timedelta(days=2)).isoformat()
+    old_run = "run-old"
+    active_run = "run-active"
+    recent_run = "run-recent"
+    approval_file = tmp_path / "approvals.jsonl"
+    progress_file = tmp_path / "progress.jsonl"
+    backup_file = tmp_path / "notes-backup.jsonl"
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "APPROVAL_FILE", approval_file)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "BACKUP_FILE", backup_file)
+
+    approval_file.write_text(
+        "\n".join(
+            [
+                json.dumps(approval_record(old_run, old_started)),
+                json.dumps(approval_record(active_run, old_started)),
+                json.dumps(approval_record(recent_run, recent_started)),
+            ]
+        )
+        + "\nnot-json\n",
+        encoding="utf-8",
+    )
+    progress_file.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "run_id": old_run,
+                        "chapter_id": "chapter-old",
+                        "status": "done",
+                        "timestamp": old_started,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "run_id": active_run,
+                        "chapter_id": "chapter-active",
+                        "status": "done",
+                        "timestamp": old_started,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "run_id": recent_run,
+                        "chapter_id": "chapter-recent",
+                        "status": "done",
+                        "timestamp": recent_started,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    backup_file.write_text(
+        json.dumps({"run_id": old_run, "chapter_id": "chapter-old"}) + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "active-run.json").write_text(
+        json.dumps({"run_id": active_run, "started_at": old_started}) + "\n",
+        encoding="utf-8",
+    )
+
+    preview = importer.archive_history(90, dry_run=True)
+    assert preview["archivable_runs"] == 1
+    assert preview["protected_runs"] == [active_run]
+    assert preview["records"] == {
+        "approvals": 1,
+        "progress": 1,
+        "notes-backup": 1,
+    }
+    assert "run-old" in approval_file.read_text(encoding="utf-8")
+
+    result = importer.archive_history(90)
+    archive_dir = tmp_path / "archive" / result["archive_dir"].split("/")[-1]
+    assert json.loads((archive_dir / "manifest.json").read_text())["run_ids"] == [
+        old_run
+    ]
+    for name in ("approvals.jsonl", "progress.jsonl", "notes-backup.jsonl"):
+        assert json.loads((archive_dir / name).read_text())["run_id"] == old_run
+
+    live_approval_text = approval_file.read_text(encoding="utf-8")
+    assert old_run not in live_approval_text
+    assert active_run in live_approval_text
+    assert recent_run in live_approval_text
+    assert "not-json" in live_approval_text
+    assert active_run in (tmp_path / "active-run.json").read_text(encoding="utf-8")
+    assert "chapter-old" in importer.load_done()

@@ -44,7 +44,7 @@ import time
 import unicodedata
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +87,7 @@ STATE_DIR = Path(
 PROGRESS_FILE = STATE_DIR / "progress.jsonl"
 BACKUP_FILE = STATE_DIR / "notes-backup.jsonl"
 APPROVAL_FILE = STATE_DIR / "approvals.jsonl"
+ARCHIVE_RETENTION_DAYS = int(os.getenv("AHSEC_D1_ARCHIVE_RETENTION_DAYS", "90"))
 CLEANUP_PREVIEW_FILENAME = "preamble-cleanup-preview.json"
 CLEANUP_PREVIEW_MAX_AGE_SECONDS = int(
     os.getenv("AHSEC_CLEANUP_PREVIEW_MAX_AGE_SECONDS", "86400")
@@ -142,6 +143,23 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Clean model-introduction preambles from existing AHSEC notes; "
             "combine with --dry-run to preview changes"
+        ),
+    )
+    parser.add_argument(
+        "--archive-history",
+        action="store_true",
+        help=(
+            "Archive approval, progress, and backup records older than the "
+            "retention window; combine with --dry-run to preview only"
+        ),
+    )
+    parser.add_argument(
+        "--archive-before-days",
+        type=int,
+        default=ARCHIVE_RETENTION_DAYS,
+        help=(
+            "Keep this many days of live audit history when --archive-history "
+            "is used (default: %(default)s)"
         ),
     )
     return parser.parse_args()
@@ -384,16 +402,21 @@ def chunk_text(text: str, max_words: int = 400, overlap: int = 50) -> list[str]:
 
 
 def load_done() -> set[str]:
-    if not PROGRESS_FILE.exists():
-        return set()
     done: set[str] = set()
-    for line in PROGRESS_FILE.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
+    progress_files = [PROGRESS_FILE]
+    archive_dir = STATE_DIR / "archive"
+    if archive_dir.exists():
+        progress_files.extend(sorted(archive_dir.glob("*/progress.jsonl")))
+    for progress_file in progress_files:
+        if not progress_file.exists():
             continue
-        if row.get("status") == "done" and row.get("chapter_id"):
-            done.add(str(row["chapter_id"]))
+        for line in progress_file.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("status") == "done" and row.get("chapter_id"):
+                done.add(str(row["chapter_id"]))
     return done
 
 
@@ -401,6 +424,181 @@ def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _active_run_path() -> Path:
+    return STATE_DIR / "active-run.json"
+
+
+def _set_active_run(run_id: str, started_at: str) -> None:
+    """Publish the run before its approval record so archival fails closed."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    path = _active_run_path()
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(
+            {"run_id": run_id, "started_at": started_at, "pid": os.getpid()},
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _clear_active_run(run_id: str | None = None) -> None:
+    path = _active_run_path()
+    if not path.exists():
+        return
+    try:
+        active = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if run_id and str(active.get("run_id") or "") != run_id:
+        return
+    path.unlink(missing_ok=True)
+
+
+def _active_run_ids() -> set[str]:
+    active_ids: set[str] = set()
+    if ACTIVE_RUN_ID:
+        active_ids.add(ACTIVE_RUN_ID)
+    path = _active_run_path()
+    if not path.exists():
+        return active_ids
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"*"}
+    run_id = str(record.get("run_id") or "").strip()
+    if run_id:
+        active_ids.add(run_id)
+    return active_ids
+
+
+def _jsonl_lines(path: Path) -> list[tuple[str, dict[str, Any] | None]]:
+    if not path.exists():
+        return []
+    lines: list[tuple[str, dict[str, Any] | None]] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines(keepends=True):
+        try:
+            record = json.loads(raw_line)
+        except json.JSONDecodeError:
+            record = None
+        lines.append((raw_line, record if isinstance(record, dict) else None))
+    return lines
+
+
+def _approval_run_ids_before(
+    cutoff: datetime,
+    approval_lines: list[tuple[str, dict[str, Any] | None]],
+) -> set[str]:
+    eligible: set[str] = set()
+    for _, record in approval_lines:
+        if not record or record.get("event") != "production_write_approved":
+            continue
+        run_id = str(record.get("run_id") or "").strip()
+        started_at = record.get("started_at")
+        if not run_id or not isinstance(started_at, str):
+            continue
+        try:
+            approved_at = datetime.fromisoformat(started_at)
+        except ValueError:
+            continue
+        if approved_at.tzinfo is None:
+            approved_at = approved_at.replace(tzinfo=timezone.utc)
+        if approved_at.astimezone(timezone.utc) < cutoff:
+            eligible.add(run_id)
+    return eligible
+
+
+def archive_history(before_days: int, dry_run: bool = False) -> dict[str, Any]:
+    """Archive old audit records while preserving active-run state."""
+    if before_days < 1:
+        raise ValueError("--archive-before-days must be at least 1")
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=before_days)
+    approval_lines = _jsonl_lines(APPROVAL_FILE)
+    candidate_run_ids = _approval_run_ids_before(cutoff, approval_lines)
+    protected_run_ids = _active_run_ids()
+    eligible_run_ids = (
+        set()
+        if "*" in protected_run_ids
+        else candidate_run_ids - protected_run_ids
+    )
+
+    files = {
+        "approvals": APPROVAL_FILE,
+        "progress": PROGRESS_FILE,
+        "notes-backup": BACKUP_FILE,
+    }
+    selected: dict[str, list[str]] = {}
+    retained: dict[Path, list[str]] = {}
+    counts: dict[str, int] = {}
+    for name, path in files.items():
+        selected[name] = []
+        retained[path] = []
+        for raw_line, record in _jsonl_lines(path):
+            run_id = str(record.get("run_id") or "").strip() if record else ""
+            if run_id in eligible_run_ids:
+                selected[name].append(raw_line)
+            else:
+                retained[path].append(raw_line)
+        counts[name] = len(selected[name])
+
+    summary: dict[str, Any] = {
+        "before_days": before_days,
+        "cutoff": cutoff.isoformat(),
+        "candidate_runs": len(candidate_run_ids),
+        "archivable_runs": len(eligible_run_ids),
+        "protected_runs": sorted(
+            run_id for run_id in protected_run_ids if run_id != "*"
+        ),
+        "records": counts,
+        "dry_run": dry_run,
+    }
+    if dry_run or not eligible_run_ids:
+        return summary
+
+    archive_root = STATE_DIR / "archive"
+    archive_root.mkdir(parents=True, exist_ok=True)
+    batch_name = now.strftime("%Y%m%dT%H%M%SZ")
+    batch_dir = archive_root / batch_name
+    suffix = 1
+    while batch_dir.exists():
+        batch_dir = archive_root / f"{batch_name}-{suffix}"
+        suffix += 1
+    batch_dir.mkdir()
+
+    for name, lines in selected.items():
+        if lines:
+            (batch_dir / f"{name}.jsonl").write_text(
+                "".join(lines), encoding="utf-8"
+            )
+
+    manifest = {
+        "archived_at": now.isoformat(),
+        "cutoff": cutoff.isoformat(),
+        "before_days": before_days,
+        "run_ids": sorted(eligible_run_ids),
+        "records": counts,
+        "source_files": {name: str(path) for name, path in files.items()},
+        "active_runs_protected": summary["protected_runs"],
+    }
+    (batch_dir / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    for path, lines in retained.items():
+        if not path.exists():
+            continue
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        temporary.write_text("".join(lines), encoding="utf-8")
+        os.replace(temporary, path)
+    summary["archive_dir"] = str(batch_dir)
+    return summary
 
 
 def production_scope(args: argparse.Namespace) -> dict[str, Any]:
@@ -444,6 +642,7 @@ def record_production_approval(
         raise RuntimeError(
             "An operator identifier is required for a production approval record"
         )
+    _set_active_run(run_id, started_at)
     scope = production_scope(args)
     if extra_scope:
         scope.update(extra_scope)
@@ -989,6 +1188,27 @@ async def main() -> int:
     global ACTIVE_RUN_ID
     args = parse_args()
     ACTIVE_RUN_ID = None
+    if getattr(args, "archive_history", False):
+        try:
+            summary = archive_history(
+                getattr(args, "archive_before_days", ARCHIVE_RETENTION_DAYS),
+                dry_run=args.dry_run,
+            )
+        except ValueError as exc:
+            log.error("%s", exc)
+            return 2
+        action = "would archive" if args.dry_run else "archived"
+        log.info(
+            "Audit history %s: runs=%d records=%s protected=%s%s",
+            action,
+            summary["archivable_runs"],
+            summary["records"],
+            summary["protected_runs"],
+            f" archive_dir={summary['archive_dir']}"
+            if summary.get("archive_dir")
+            else "",
+        )
+        return 0
     if not args.dry_run and not args.confirm_production_write:
         log.error(
             "Refusing to write live curriculum data without explicit confirmation."
@@ -1052,6 +1272,7 @@ async def main() -> int:
                     "existing-d1-preamble-cleanup",
                 )
         log.info("Preamble cleanup complete: changed=%d", len(affected))
+        _clear_active_run(ACTIVE_RUN_ID)
         return 0
 
     if not args.dry_run:
@@ -1186,6 +1407,7 @@ async def main() -> int:
         await asyncio.sleep(max(0.0, args.delay))
 
     log.info("Run complete: updated=%d failed=%d", processed, failed)
+    _clear_active_run(ACTIVE_RUN_ID)
     return 1 if failed else 0
 
 
