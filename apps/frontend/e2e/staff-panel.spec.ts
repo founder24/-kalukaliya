@@ -492,6 +492,33 @@ test.describe('Staff panel — sidebar sections', () => {
   // Per-section tests
   // ──────────────────────────────────────────────────────────────────────────
 
+  test('active break-glass status shows the operator warning and recovery controls', async ({ page }) => {
+    // Playwright uses the most recently registered matching route first. This
+    // intentionally overrides the shared inactive shell fixture without
+    // contacting the real admin status endpoint.
+    await page.route('**/api/v1/admin/break-glass-status', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ active: true }),
+      }),
+    );
+
+    await gotoStaff(page);
+
+    const banner = page.getByTestId('break-glass-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText(/Cloudflare Access is bypassed/i);
+    await expect(banner).toContainText(/Break-glass mode is active/i);
+    await expect(page.getByTestId('break-glass-banner-recheck')).toBeVisible();
+
+    const runbook = page.getByTestId('break-glass-banner-runbook');
+    await expect(runbook).toBeVisible();
+    await expect(runbook).toHaveAttribute('href', /cloudflare-access-break-glass\.md/);
+    await expect(page.getByTestId('break-glass-banner-stale')).toHaveCount(0);
+    expect(consoleErrors, 'No uncaught console errors in the active break-glass preview').toHaveLength(0);
+  });
+
   test('Dashboard section renders without blank page or uncaught errors', async ({ page }) => {
     staffMocks.enableStrictUnexpectedApiRequests();
     await gotoStaff(page);
