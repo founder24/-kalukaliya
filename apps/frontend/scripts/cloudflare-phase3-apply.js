@@ -123,6 +123,9 @@ async function ensureAccessApp() {
     http_only_cookie_attribute:  true,
     same_site_cookie_attribute:  'strict',
     enable_binding_cookie:       true,
+    // Let browser CORS preflights reach the Worker. The actual staff/admin
+    // request remains protected by the Access session or service token.
+    options_preflight_bypass:     true,
     app_launcher_visible:        false,
     auto_redirect_to_identity:   false,
     allowed_idps: [],
@@ -136,7 +139,9 @@ async function ensureAccessApp() {
       .sort();
     const needsPatch = (
       JSON.stringify(currentDestinations) !== JSON.stringify([...ADMIN_DESTINATIONS].sort()) ||
-      existing.session_duration !== '8h'
+      existing.session_duration !== '8h' ||
+      existing.enable_binding_cookie !== true ||
+      existing.options_preflight_bypass !== true
     );
     if (needsPatch) {
       console.log(`  ⚠  Drift detected: destinations=${currentDestinations.join(',')} session=${existing.session_duration} — patching`);

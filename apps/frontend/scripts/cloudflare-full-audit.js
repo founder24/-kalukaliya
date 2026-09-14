@@ -385,6 +385,8 @@ async function auditItem8ZeroTrust() {
   }
   const sub = [];
   if (app.session_duration !== '8h') sub.push(`session=${app.session_duration} (want: 8h)`);
+  if (app.options_preflight_bypass !== true) sub.push('browser CORS preflight bypass is disabled');
+  if (app.enable_binding_cookie !== true) sub.push('binding cookie protection is disabled');
   const destinations = (app.destinations || [])
     .filter(destination => destination.type === 'public')
     .map(destination => destination.uri);
