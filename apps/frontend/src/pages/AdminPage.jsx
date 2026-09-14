@@ -26,6 +26,7 @@ const AdminAnalytics       = lazy(() => import('@/components/admin/AdminAnalytic
 const AdminModuleUnavailable = lazy(() => import('@/components/admin/AdminModuleUnavailable'));
 const ReferralAdmissions = lazy(() => import('@/components/admin/ReferralAdmissions'));
 const ReferralSettlements = lazy(() => import('@/pages/referrals/ReferralSettlements'));
+const ReferralROI = lazy(() => import('@/pages/referrals/ReferralROI'));
 import { SyraProvider, useSyraContext } from '@/components/admin/syra/SyraContext';
 
 // AWS-Native panel removed: /admin/aws-native/* endpoints are not implemented
@@ -39,6 +40,7 @@ export const SECTION_ICONS = {
   users: Users,
   referrals: UserRoundCheck,
   referralsettlements: WalletCards,
+  referralroi: TrendingUp,
   conversations: MessageSquare,
   notifications: Bell,
   ai: Cpu,
@@ -71,6 +73,7 @@ export const SECTION_COMPONENTS = {
   users:         AdminModuleUnavailable,
   referrals:     ReferralAdmissions,
   referralsettlements: ReferralSettlements,
+  referralroi: ReferralROI,
   conversations: AdminModuleUnavailable,
   notifications: AdminModuleUnavailable,
   ai:            AdminModuleUnavailable,

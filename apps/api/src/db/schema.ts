@@ -482,6 +482,60 @@ export const analyticsEvents = sqliteTable('analytics_events', {
   index('analytics_events_route_created_idx').on(t.routePath, t.createdAt),
 ]);
 
+// Aggregate provider evidence used for ad-funded referral ROI. This ledger
+// deliberately has no user-level advertising identifiers.
+export const adNetworkInventory = sqliteTable('ad_network_inventory', {
+  network: text('network').primaryKey(),
+  status: text('status').notNull(),
+  configured: integer('configured').notNull().default(0),
+  placementsJson: text('placements_json').notNull().default('[]'),
+  policyNotes: text('policy_notes').notNull().default(''),
+  updatedBy: text('updated_by'),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+});
+
+export const adRevenueReports = sqliteTable('ad_revenue_reports', {
+  id: text('id').primaryKey(),
+  network: text('network').notNull().references(() => adNetworkInventory.network),
+  periodStart: integer('period_start').notNull(),
+  periodEnd: integer('period_end').notNull(),
+  settlementPeriod: text('settlement_period').notNull(),
+  currency: text('currency').notNull().default('INR'),
+  grossRevenuePaise: integer('gross_revenue_paise').notNull(),
+  adjustmentsPaise: integer('adjustments_paise').notNull().default(0),
+  providerFeesPaise: integer('provider_fees_paise').notNull().default(0),
+  netRevenuePaise: integer('net_revenue_paise').notNull(),
+  monetizedImpressions: integer('monetized_impressions').notNull(),
+  finalized: integer('finalized').notNull(),
+  finalizedThroughAt: integer('finalized_through_at').notNull(),
+  fetchedAt: integer('fetched_at').notNull(),
+  freshnessExpiresAt: integer('freshness_expires_at').notNull(),
+  sourceReference: text('source_reference').notNull(),
+  evidenceHash: text('evidence_hash').notNull(),
+  importedBy: text('imported_by').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('ad_revenue_source_ref_idx').on(t.sourceReference),
+  index('ad_revenue_period_idx').on(t.network, t.periodStart, t.periodEnd, t.finalized),
+]);
+
+export const referralRoiControls = sqliteTable('referral_roi_controls', {
+  id: text('id').primaryKey(),
+  reserveHealthy: integer('reserve_healthy').notNull().default(0),
+  revenueFresh: integer('revenue_fresh').notNull().default(0),
+  invalidTrafficHealthy: integer('invalid_traffic_healthy').notNull().default(0),
+  adAccountHealthy: integer('ad_account_healthy').notNull().default(0),
+  contributionMarginHealthy: integer('contribution_margin_healthy').notNull().default(0),
+  identityResetsHealthy: integer('identity_resets_healthy').notNull().default(0),
+  fraudHealthy: integer('fraud_healthy').notNull().default(0),
+  exposureHealthy: integer('exposure_healthy').notNull().default(0),
+  evidenceId: text('evidence_id').notNull(),
+  warningsJson: text('warnings_json').notNull().default('[]'),
+  updatedBy: text('updated_by').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // RECURRING REFERRAL ATTRIBUTION
 // ─────────────────────────────────────────────────────────────────────────────
@@ -515,6 +569,39 @@ export const referralWeeks = sqliteTable('referral_weeks', {
   uniqueIndex('referral_weeks_start_idx').on(t.startsAt),
   uniqueIndex('referral_weeks_end_idx').on(t.endsAt),
   index('referral_weeks_state_time_idx').on(t.state, t.startsAt, t.endsAt),
+]);
+
+export const referralWeeklyRoiReports = sqliteTable('referral_weekly_roi_reports', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  revenueReportId: text('revenue_report_id').references(() => adRevenueReports.id),
+  referralClicks: integer('referral_clicks').notNull().default(0),
+  uniqueBrowserIdentities: integer('unique_browser_identities').notNull().default(0),
+  authenticatedAccounts: integer('authenticated_accounts').notNull().default(0),
+  matureVerifiedVisitors: integer('mature_verified_visitors').notNull().default(0),
+  repeatWeekVisitors: integer('repeat_week_visitors').notNull().default(0),
+  payableStatements: integer('payable_statements').notNull().default(0),
+  cashPaidInr: integer('cash_paid_inr').notNull().default(0),
+  reservedRewardsInr: integer('reserved_rewards_inr').notNull().default(0),
+  reviewCostInr: integer('review_cost_inr').notNull().default(0),
+  fraudCostInr: integer('fraud_cost_inr').notNull().default(0),
+  reversalCostInr: integer('reversal_cost_inr').notNull().default(0),
+  supportCostInr: integer('support_cost_inr').notNull().default(0),
+  operatingCostInr: integer('operating_cost_inr').notNull().default(0),
+  trueProgramCostInr: integer('true_program_cost_inr').notNull().default(0),
+  actualMonetizedImpressions: integer('actual_monetized_impressions').notNull().default(0),
+  finalizedNetAdRevenuePaise: integer('finalized_net_ad_revenue_paise'),
+  contributionMarginPaise: integer('contribution_margin_paise'),
+  paybackRatioMilli: integer('payback_ratio_milli'),
+  dataQuality: text('data_quality').notNull(),
+  pauseRecommended: integer('pause_recommended').notNull().default(1),
+  warningsJson: text('warnings_json').notNull().default('[]'),
+  generatedBy: text('generated_by').notNull(),
+  generatedAt: integer('generated_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (t) => [
+  uniqueIndex('referral_weekly_roi_week_idx').on(t.weekId),
+  index('referral_weekly_roi_quality_idx').on(t.dataQuality, t.pauseRecommended, t.generatedAt),
 ]);
 
 export const referralInfluencerSlots = sqliteTable('referral_influencer_slots', {

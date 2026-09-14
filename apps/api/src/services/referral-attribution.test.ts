@@ -33,6 +33,12 @@ import {
   settleReferralWeek,
 } from './referral-settlement';
 import {
+  calculateWeeklyRoi,
+  ingestAdRevenueReport,
+  listAdNetworkInventory,
+  recordRoiControls,
+} from './referral-roi';
+import {
   activateReferralApplication,
   expireReferralApplication,
   referralExperience,
@@ -76,6 +82,14 @@ async function resetReferralState(): Promise<void> {
     env.DB.prepare('DELETE FROM referral_weekly_progress'),
     env.DB.prepare('DELETE FROM referral_settlement_audits'),
     env.DB.prepare('DELETE FROM referral_payment_receipts'),
+    env.DB.prepare('DELETE FROM referral_weekly_roi_reports'),
+    env.DB.prepare(`UPDATE referral_roi_controls SET
+      reserve_healthy = 0, revenue_fresh = 0, invalid_traffic_healthy = 0,
+      ad_account_healthy = 0, contribution_margin_healthy = 0,
+      identity_resets_healthy = 0, fraud_healthy = 0, exposure_healthy = 0,
+      evidence_id = 'missing', warnings_json = '[]', updated_by = 'reset',
+      updated_at = 0, expires_at = 0 WHERE id = 'singleton'`),
+    env.DB.prepare('DELETE FROM ad_revenue_reports'),
     env.DB.prepare('DELETE FROM referral_payouts'),
     env.DB.prepare('DELETE FROM referral_statement_claims'),
     env.DB.prepare('DELETE FROM referral_weekly_statements'),
@@ -246,8 +260,28 @@ function validApplication(idempotencyKey = crypto.randomUUID()) {
 }
 
 async function gateEvidence(effectiveAt: number, suffix: string): Promise<string> {
+  const sourceReference = `adsense:${effectiveAt}-${suffix}`;
+  await env.DB.prepare(`
+    INSERT OR IGNORE INTO ad_revenue_reports
+      (id, network, period_start, period_end, settlement_period, currency,
+       gross_revenue_paise, adjustments_paise, provider_fees_paise, net_revenue_paise,
+       monetized_impressions, finalized, finalized_through_at, fetched_at,
+       freshness_expires_at, source_reference, evidence_hash, imported_by)
+    VALUES (?, 'adsense', ?, ?, ?, 'INR', 5000000, 0, 0, 5000000, 1000, 1, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    crypto.randomUUID(),
+    effectiveAt - 86_400,
+    effectiveAt,
+    `test-${effectiveAt}-${suffix}`,
+    effectiveAt,
+    effectiveAt,
+    effectiveAt + 3_600,
+    sourceReference,
+    'a'.repeat(64),
+    'referral-audit-operator',
+  ).run();
   return recordReferralGateEvidence(env.DB, {
-    providerEvidenceId: `adsense:${effectiveAt}-${suffix}`,
+    providerEvidenceId: sourceReference,
     finalizedThroughAt: effectiveAt,
     grossReserveInr: 50_000,
     outstandingObligationsInr: 13_000,
@@ -386,6 +420,24 @@ describe('weekly referral attribution ledger', () => {
     await openTestWeek();
     const influencer = await admitOne();
     const initial = await createBrowserClaim(influencer.code, TEST_TIME);
+    await env.DB.prepare(`
+      INSERT INTO ad_revenue_reports
+        (id, network, period_start, period_end, settlement_period, currency,
+         gross_revenue_paise, adjustments_paise, provider_fees_paise, net_revenue_paise,
+         monetized_impressions, finalized, finalized_through_at, fetched_at,
+         freshness_expires_at, source_reference, evidence_hash, imported_by)
+      VALUES (?, 'adsense', ?, ?, 'test-midweek', 'INR', 5000000, 0, 0, 5000000, 1000, 1, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      crypto.randomUUID(),
+      TEST_TIME,
+      TEST_TIME + 1_000,
+      TEST_TIME + 10,
+      TEST_TIME + 10,
+      TEST_TIME + 70,
+      'adsense:midweek-failure-001',
+      'b'.repeat(64),
+      'referral-audit-operator',
+    ).run();
     const evidenceId = await recordReferralGateEvidence(env.DB, {
       providerEvidenceId: 'adsense:midweek-failure-001',
       finalizedThroughAt: TEST_TIME + 10,
@@ -2061,5 +2113,142 @@ describe('weekly referral settlement controls', () => {
       reason: 'Retry of the same payment evidence.',
       occurredAt: week.endsAt + 8,
     })).resolves.toMatchObject({ payoutId: payout.payoutId, idempotent: true });
+  });
+});
+
+describe('ad-funded referral ROI controls', () => {
+  async function roiFixture() {
+    const influencer = await admitOne(`roi-${crypto.randomUUID()}`);
+    const week = await openTestWeek(TEST_TIME);
+    await openWeeklySettlement(env.DB, {
+      weekId: week.id,
+      evidenceId: await gateEvidence(TEST_TIME + 100, `roi-${week.key}`),
+      actorId: 'referral-audit-operator',
+      openedAt: TEST_TIME + 100,
+    });
+    return { influencer, week };
+  }
+
+  async function insertFinalizedRevenue(week: ReturnType<typeof referralWeekBounds>) {
+    return ingestAdRevenueReport(env.DB, {
+      network: 'adsense',
+      periodStart: week.startsAt,
+      periodEnd: week.endsAt,
+      settlementPeriod: `roi-${week.key}`,
+      grossRevenuePaise: 25_000,
+      adjustmentsPaise: 2_000,
+      providerFeesPaise: 1_000,
+      monetizedImpressions: 432,
+      finalized: true,
+      finalizedThroughAt: week.endsAt,
+      fetchedAt: week.endsAt + 100,
+      freshnessExpiresAt: week.endsAt + 3_600,
+      sourceReference: `adsense-roi-${week.key}-${crypto.randomUUID()}`,
+      evidenceHash: 'c'.repeat(64),
+      importedBy: 'referral-audit-operator',
+    });
+  }
+
+  async function passRoiControls(at: number, expiresAt: number) {
+    return recordRoiControls(env.DB, {
+      reserveHealthy: true,
+      revenueFresh: true,
+      invalidTrafficHealthy: true,
+      adAccountHealthy: true,
+      contributionMarginHealthy: true,
+      identityResetsHealthy: true,
+      fraudHealthy: true,
+      exposureHealthy: true,
+      evidenceId: `roi-control-${at}`,
+      updatedBy: 'referral-audit-operator',
+      updatedAt: at,
+      expiresAt,
+    });
+  }
+
+  it('keeps blueprint-only and disabled networks out of authoritative inventory and revenue', async () => {
+    const inventory = await listAdNetworkInventory(env.DB);
+    expect(inventory.find(item => item.network === 'adsense')).toMatchObject({
+      status: 'enabled',
+      configured: true,
+      contributes_to_revenue: true,
+    });
+    expect(inventory.find(item => item.network === 'adsterra')).toMatchObject({
+      status: 'disabled',
+      contributes_to_revenue: false,
+    });
+    await expect(ingestAdRevenueReport(env.DB, {
+      network: 'adsterra',
+      periodStart: TEST_TIME,
+      periodEnd: TEST_TIME + 60,
+      settlementPeriod: 'disabled-network',
+      grossRevenuePaise: 100,
+      monetizedImpressions: 1,
+      finalized: true,
+      finalizedThroughAt: TEST_TIME,
+      fetchedAt: TEST_TIME,
+      freshnessExpiresAt: TEST_TIME + 60,
+      sourceReference: `adsterra-${crypto.randomUUID()}`,
+      evidenceHash: 'd'.repeat(64),
+      importedBy: 'referral-audit-operator',
+    })).rejects.toThrow('Only adsense provider reports');
+  });
+
+  it('calculates from finalized net provider revenue, not diagnostic impression beacons', async () => {
+    const { week } = await roiFixture();
+    await env.DB.prepare(`
+      INSERT INTO analytics_events
+        (id, event_name, event_subtype, classification, payload, created_at)
+      VALUES (?, 'ad-impression', 'ad_slot_viewed', 'optional_analytics',
+        '{"placement":"learn.inContent","network":"adsense"}', ?)
+    `).bind(crypto.randomUUID(), week.startsAt + 10).run();
+    const revenue = await insertFinalizedRevenue(week);
+    await passRoiControls(week.endsAt + 100, week.endsAt + 3_600);
+    const report = await calculateWeeklyRoi(env.DB, {
+      weekId: week.id,
+      actorId: 'referral-audit-operator',
+      calculatedAt: week.endsAt + 200,
+    });
+    expect(revenue.netRevenuePaise).toBe(22_000);
+    expect(report).toMatchObject({
+      data_quality: 'healthy',
+      pause_recommended: false,
+      actual_monetized_impressions: 432,
+      finalized_net_ad_revenue_paise: 22_000,
+    });
+    expect(report.referral_clicks).toBe(0);
+  });
+
+  it('fails closed and pauses accrual when provider revenue or controls are stale', async () => {
+    const { week } = await roiFixture();
+    await insertFinalizedRevenue(week);
+    await recordRoiControls(env.DB, {
+      reserveHealthy: true,
+      revenueFresh: false,
+      invalidTrafficHealthy: true,
+      adAccountHealthy: true,
+      contributionMarginHealthy: true,
+      identityResetsHealthy: true,
+      fraudHealthy: true,
+      exposureHealthy: true,
+      evidenceId: 'stale-control-evidence',
+      updatedBy: 'referral-audit-operator',
+      updatedAt: week.endsAt,
+      expiresAt: week.endsAt + 3_600,
+    });
+    const report = await calculateWeeklyRoi(env.DB, {
+      weekId: week.id,
+      actorId: 'referral-audit-operator',
+      calculatedAt: week.endsAt + 100,
+    });
+    expect(report).toMatchObject({
+      data_quality: 'blocked',
+      pause_recommended: true,
+    });
+    expect(report.warnings).toContain('revenue-freshness-failed');
+    const program = await env.DB.prepare(`
+      SELECT state, pause_effective_at FROM referral_program_state WHERE id = 'singleton'
+    `).first<{ state: string; pause_effective_at: number }>();
+    expect(program).toEqual({ state: 'paused', pause_effective_at: week.endsAt + 100 });
   });
 });

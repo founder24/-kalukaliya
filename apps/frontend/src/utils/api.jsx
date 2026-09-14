@@ -258,6 +258,20 @@ export const adminGetReferralSettlements = (token, weekId) =>
     params: weekId ? { week_id: weekId } : {},
   });
 
+export const adminGetReferralRoiDashboard = (token, limit = 12) =>
+  axios.get(`${API_BASE}/admin/referrals/roi/dashboard`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+    params: { limit },
+  });
+
+export const adminCalculateReferralRoi = (token, weekId, data = {}) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/roi/weeks/${encodeURIComponent(weekId)}/calculate`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
 export const adminSettleReferralWeek = (token, weekId, data = {}) =>
   axios.post(
     `${API_BASE}/admin/referrals/weeks/${encodeURIComponent(weekId)}/settle`,

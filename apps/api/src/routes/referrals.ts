@@ -44,6 +44,13 @@ import {
   validatePrivateReceipt,
   MAX_RECEIPT_BYTES,
 } from '../services/referral-settlement';
+import {
+  calculateWeeklyRoi,
+  ingestAdRevenueReport,
+  listAdNetworkInventory,
+  recordRoiControls,
+  roiDashboard,
+} from '../services/referral-roi';
 import type { Env, JwtPayload } from '../types';
 
 export const referralRouter = new Hono<{ Bindings: Env }>();
@@ -567,6 +574,107 @@ adminReferralRouter.get('/settlements', async (c) => {
     });
   } catch {
     return c.json({ detail: 'Settlement statements unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.get('/roi/dashboard', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  try {
+    return c.json(await roiDashboard(c.env.DB, Number(c.req.query('limit') ?? 12)));
+  } catch {
+    return c.json({ detail: 'Referral ROI dashboard unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.get('/roi/inventory', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  try {
+    return c.json({ inventory: await listAdNetworkInventory(c.env.DB) });
+  } catch {
+    return c.json({ detail: 'Ad network inventory unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.post('/roi/revenue', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  const body = await requestBody(c);
+  if (!body) return c.json({ detail: 'Provider report body required' }, 422);
+  try {
+    return c.json(await ingestAdRevenueReport(c.env.DB, {
+      network: String(body.network ?? ''),
+      periodStart: Number(body.period_start),
+      periodEnd: Number(body.period_end),
+      settlementPeriod: String(body.settlement_period ?? ''),
+      ...(body.currency === undefined ? {} : { currency: String(body.currency) }),
+      grossRevenuePaise: Number(body.gross_revenue_paise),
+      ...(body.adjustments_paise === undefined ? {} : { adjustmentsPaise: Number(body.adjustments_paise) }),
+      ...(body.provider_fees_paise === undefined ? {} : { providerFeesPaise: Number(body.provider_fees_paise) }),
+      monetizedImpressions: Number(body.monetized_impressions),
+      finalized: body.finalized === true,
+      finalizedThroughAt: Number(body.finalized_through_at),
+      fetchedAt: Number(body.fetched_at),
+      freshnessExpiresAt: Number(body.freshness_expires_at),
+      sourceReference: String(body.source_reference ?? ''),
+      evidenceHash: String(body.evidence_hash ?? ''),
+      importedBy: auth.actorId,
+    }), 201);
+  } catch (error) {
+    return c.json({ detail: error instanceof Error ? error.message : 'Provider revenue unavailable' }, 422);
+  }
+});
+
+adminReferralRouter.post('/roi/controls', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  const body = await requestBody(c);
+  if (!body) return c.json({ detail: 'ROI control evidence body required' }, 422);
+  try {
+    return c.json(await recordRoiControls(c.env.DB, {
+      reserveHealthy: body.reserve_healthy === true,
+      revenueFresh: body.revenue_fresh === true,
+      invalidTrafficHealthy: body.invalid_traffic_healthy === true,
+      adAccountHealthy: body.ad_account_healthy === true,
+      contributionMarginHealthy: body.contribution_margin_healthy === true,
+      identityResetsHealthy: body.identity_resets_healthy === true,
+      fraudHealthy: body.fraud_healthy === true,
+      exposureHealthy: body.exposure_healthy === true,
+      evidenceId: String(body.evidence_id ?? ''),
+      warnings: Array.isArray(body.warnings)
+        ? body.warnings.filter(item => typeof item === 'string') as string[]
+        : [],
+      updatedBy: auth.actorId,
+      updatedAt: Number(body.updated_at),
+      expiresAt: Number(body.expires_at),
+    }));
+  } catch (error) {
+    return c.json({ detail: error instanceof Error ? error.message : 'ROI controls unavailable' }, 422);
+  }
+});
+
+adminReferralRouter.post('/roi/weeks/:weekId/calculate', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  const body = await requestBody(c);
+  try {
+    return c.json(await calculateWeeklyRoi(c.env.DB, {
+      weekId: c.req.param('weekId'),
+      actorId: auth.actorId,
+      calculatedAt: Math.floor(Date.now() / 1000),
+      ...(body ? {
+        costs: {
+          ...(body.review_cost_inr === undefined ? {} : { reviewCostInr: Number(body.review_cost_inr) }),
+          ...(body.fraud_cost_inr === undefined ? {} : { fraudCostInr: Number(body.fraud_cost_inr) }),
+          ...(body.reversal_cost_inr === undefined ? {} : { reversalCostInr: Number(body.reversal_cost_inr) }),
+          ...(body.support_cost_inr === undefined ? {} : { supportCostInr: Number(body.support_cost_inr) }),
+          ...(body.operating_cost_inr === undefined ? {} : { operatingCostInr: Number(body.operating_cost_inr) }),
+        },
+      } : {}),
+    }));
+  } catch (error) {
+    return c.json({ detail: error instanceof Error ? error.message : 'Weekly ROI calculation unavailable' }, 409);
   }
 });
 

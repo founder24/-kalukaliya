@@ -119,6 +119,27 @@ export async function recordReferralGateEvidence(
   ) {
     throw new Error('Invalid authoritative referral gate evidence');
   }
+  const providerEvidence = await db.prepare(`
+    SELECT network, finalized, finalized_through_at, freshness_expires_at
+    FROM ad_revenue_reports
+    WHERE id = ? OR source_reference = ?
+    ORDER BY created_at DESC LIMIT 1
+  `).bind(input.providerEvidenceId, input.providerEvidenceId)
+    .first<{
+      network: string;
+      finalized: number;
+      finalized_through_at: number;
+      freshness_expires_at: number;
+    }>();
+  if (
+    !providerEvidence
+    || providerEvidence.network !== REFERRAL_POLICY.funding.approvedNetwork
+    || providerEvidence.finalized !== 1
+    || providerEvidence.finalized_through_at < input.finalizedThroughAt
+    || providerEvidence.freshness_expires_at <= input.recordedAt
+  ) {
+    throw new Error('Finalized, fresh provider revenue evidence is required');
+  }
   const id = crypto.randomUUID();
   const gate: ReferralEvidenceGate = {
     programState: 'active',
