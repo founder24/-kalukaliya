@@ -203,6 +203,8 @@ pymongo==4.17.0
     #   -r /home/runner/workspace/apps/backend/requirements.in
     #   beanie
     #   motor
+pymupdf==1.28.2
+    # via -r /home/runner/workspace/apps/backend/requirements.in
 pypdf==6.16.2
     # via -r /home/runner/workspace/apps/backend/requirements.in
 python-dateutil==2.9.0.post0

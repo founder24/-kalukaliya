@@ -11,6 +11,7 @@ import AdminAnalytics from '@/components/admin/AdminAnalytics';
 import AdminUsers from '@/components/admin/AdminUsers';
 import AdminConversations from '@/components/admin/AdminConversations';
 import StaffOperations from '@/components/staff/StaffOperations';
+import { canStaffCapability, isStaffOrAdmin } from '@/utils/staffAccess';
 
 const api = () => {
   const token = getToken();
@@ -145,7 +146,7 @@ function TopicManager({ chapterId, user, fallbackTopics = [] }) {
   const [busy, setBusy] = useState(null);
   // Match the worker contract exactly: null retains legacy full access, an
   // explicit empty list grants none, and absent identity data grants nothing.
-  const allowed = (cap) => user?.role === 'admin' || user?.capabilities === null || (Array.isArray(user?.capabilities) && user.capabilities.includes(cap));
+  const allowed = (cap) => canStaffCapability(user, cap);
   const load = useCallback(async () => {
     setLoading(true);
     try { const res = await api().get(`/staff/content/chapter/${chapterId}/topics`); setTopics(res.data?.topics || []); }
@@ -206,7 +207,7 @@ function Dot({ filled, label }) {
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
 function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
-  const isAdmin = user?.role === 'admin';
+  const hasStaffAccess = isStaffOrAdmin(user);
   return (
     <aside className="flex flex-col h-full bg-white border-r border-gray-100">
       <div className="flex items-center gap-3 px-5 py-5 border-b border-gray-100">
@@ -217,7 +218,7 @@ function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {isAdmin && <>
+        {hasStaffAccess && <>
           <SidebarLink active={view === 'dashboard'} icon={<DashboardIcon />} label="Dashboard" onClick={() => onViewChange('dashboard')} />
           <SidebarLink active={view === 'analytics'} icon={<AnalyticsIcon />} label="Command center" onClick={() => onViewChange('analytics')} />
           <SidebarLink active={view === 'users'} icon={<UsersIcon />} label="Users" onClick={() => onViewChange('users')} />
@@ -237,7 +238,7 @@ function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
             <div className="text-xs text-gray-400 truncate">{user?.email}</div>
           </div>
         </div>
-        <span className="inline-block mb-3 px-2 py-0.5 rounded-full text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-200">{isAdmin ? 'Admin' : 'Staff'}</span>
+        <span className="inline-block mb-3 px-2 py-0.5 rounded-full text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-200">{user?.role === 'admin' ? 'Admin' : 'Staff'}</span>
         <button onClick={onChangePassword} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-violet-50 hover:text-violet-700 transition-colors mb-1">
           <KeyIcon /><span>Change password</span>
         </button>
@@ -722,7 +723,7 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
   const [reindexing,setReindexing]= useState({});  // { notes: bool, qa: bool }
   const [tab,       setTab]       = useState('info');
   const [subTab,    setSubTab]    = useState({ notes: 'content', questions: 'content' });
-  const allowed = (cap) => user?.role === 'admin' || user?.capabilities === null || (Array.isArray(user?.capabilities) && user.capabilities.includes(cap));
+  const allowed = (cap) => canStaffCapability(user, cap);
   // pyqUploading / pyqFileRef removed — managed inside PyqPapersEditor
 
   // Load full chapter content on open
@@ -834,8 +835,11 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
       }
       return out.filter(s => s.content.length > 10);
     };
-    // Try H2/H3 first, fall back to H1
-    return build(/^#{2,3}\s+(.+)/) || build(/^#\s+(.+)/);
+    // Try H2/H3 first, but fall back to H1 when there are no H2/H3
+    // sections. An empty array is truthy, so `first || fallback` skips
+    // the fallback for H1-only notes.
+    const sections = build(/^#{2,3}\s+(.+)/);
+    return sections.length > 0 ? sections : build(/^#\s+(.+)/);
   };
 
   /** Auto-populate the current language's RAG sections from its notes field. */
@@ -2480,7 +2484,7 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
   const effectiveUser = user
     ? { ...user, capabilities: parsedCapabilities }
     : (adminCookieAccess ? { role: 'admin', name: 'Administrator', capabilities: null } : null);
-  const isAdmin = effectiveUser?.role === 'admin';
+  const hasStaffAccess = isStaffOrAdmin(effectiveUser);
   useEffect(() => {
     if (!sidebarOpen) return undefined;
     const onKeyDown = (event) => { if (event.key === 'Escape') { setSidebarOpen(false); mobileMenuButtonRef.current?.focus(); } };
@@ -2598,8 +2602,8 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
   }, []);
 
   const handleViewChange = (v) => {
-    if (['dashboard', 'analytics', 'users', 'conversations'].includes(v) && !isAdmin) {
-      toast.error('Dashboard, analytics, users, and conversations are available to administrators only.');
+    if (['dashboard', 'analytics', 'users', 'conversations'].includes(v) && !hasStaffAccess) {
+      toast.error('Dashboard, analytics, users, and conversations are available to staff and administrators.');
       return;
     }
     setView(v);

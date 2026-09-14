@@ -25,6 +25,7 @@
     "react-helmet-async": "3.0.0",
     "react-markdown": "^8.0.7",
     "react-router-dom": "^7.18.2",
+    "qrcode.react": "^4.2.0",
     "recharts": "^3.6.0",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^3.0.1",
@@ -46,7 +47,7 @@
     "check:undefined": "eslint --no-warn-ignored \"src/**/*.{js,jsx,mjs}\"",
     "validate": "pnpm run typecheck && pnpm run check:undefined",
     "test": "vitest run",
-    "test:release-guards": "vitest run src/test/curriculum-release-guards.test.js",
+    "test:release-guards": "vitest run src/test/curriculum-release-guards.test.js src/test/verify-hydration-policy.test.js",
     "test:all": "bash scripts/test-all.sh",
     "test:e2e": "bash scripts/run-e2e.sh",
     "test:e2e:chat-ads": "bash scripts/run-chat-ads-e2e.sh"
@@ -76,6 +77,6 @@
     "tailwindcss": "^3.4.0",
     "typescript": "~5.8.3",
     "vite": "^7.3.5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

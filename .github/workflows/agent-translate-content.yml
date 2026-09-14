@@ -23,9 +23,23 @@ permissions: {}
 
 jobs:
   translate:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify translation cron secret alignment
+        env:
+          # The direct Worker origin avoids Cloudflare Access while exercising
+          # the same binding that owns the cron route.
+          API_ORIGIN: https://syrabit-api-prod.axomxplain.workers.dev
+          TRANSLATE_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+        run: bash scripts/check-translate-cron-secret.sh
+
       - name: Trigger bulk translation
         env:
           # Cron authentication is enforced by the API Worker itself.  Calling
@@ -73,9 +87,9 @@ jobs:
           if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
             JOB=$(echo "$RESPONSE" | jq -r '.job // "unknown"')
             RUN_ID=$(echo "$RESPONSE" | jq -r '.run_id // "none"')
-            echo "::notice::Native Assamese seed dispatch: $JOB (run: $RUN_ID)"
+            echo "::notice::Translation content dispatch succeeded: $JOB (run: $RUN_ID)"
           elif [[ "$HTTP_STATUS" == "401" || "$HTTP_STATUS" == "403" ]]; then
-            echo "::error::Authentication failed (HTTP ${HTTP_STATUS}) — check TRANSLATE_CRON_SECRET."
+            echo "::error::Translation content dispatch was rejected after alignment probe (HTTP ${HTTP_STATUS})."
             exit 1
           else
             echo "::error::Unexpected HTTP ${HTTP_STATUS} from translation endpoint — potential backend error."

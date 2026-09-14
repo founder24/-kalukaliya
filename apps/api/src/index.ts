@@ -19,6 +19,7 @@ import { api } from './routes/index';
 import type { Env } from './types';
 import { resumePublishJobs, resumeSeedRuns } from './routes/admin-content';
 import { resumeRagReindexJobs } from './routes/staff';
+import { enforceReferralGateFreshness } from './services/referral-attribution';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -100,6 +101,10 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
 
   // ── Hourly: clean up expired TTL records ──────────────────────────────────
   if (cronExpr === '0 * * * *') {
+    await runTask(
+      'referral gate freshness',
+      () => enforceReferralGateFreshness(env.DB, now),
+    );
     const tables = [
       'email_failure_events',
       'payments_pending',
@@ -112,6 +117,9 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
       'seed_runs',
       'chats',
       'chat_request_claims',
+      'referral_claim_events',
+      'referral_weekly_claims',
+      'referral_visit_rate_limits',
     ];
 
     for (const table of tables) {

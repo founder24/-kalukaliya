@@ -33,6 +33,13 @@ Two-layer defence:
 1. `_clean_notes_output()` — strips reasoning preamble before first `##`, converts `**Topic N: Name**` → `## Name`, drops meta-commentary lines and meta `##` headings (Draft, Word Count, CRITICAL FORMATTING RULES, Content Analysis, Plan for Notes, etc.)
 2. `extract_topics_from_notes()` — `_META_HEADING_RE` filters meta headings from topic list (Draft, Word Count Check, Mental Sandbox, FORMATTING RULES, etc.); does NOT filter on `title.endswith(":")` — legitimate headings use colons
 
+## Generation-boundary preamble validation
+**Rule:** Validate raw model output for known assistant-style introductions before cleanup, section extraction, or D1 writes; include the chapter ID and a bounded diff summary in the failure.
+
+**Why:** Cleanup is useful for legacy notes but can hide a new model regression. Rejecting raw output prevents contaminated notes from being accepted while keeping the diagnostic small enough for logs and progress records.
+
+**How to apply:** Keep the fixture set credential-free and pass the destination chapter ID into the generation boundary; do not rely on live D1, Workers AI, or Vectorize to test this guard.
+
 ## System prompt lesson
 The notes system prompt must NOT use structured sections (numbered rules, "CRITICAL FORMATTING RULES:" headers) because the model echoes those back as `## CRITICAL FORMATTING RULES:` headings in the output. Use plain paragraph instructions instead.
 

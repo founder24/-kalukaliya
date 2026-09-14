@@ -165,7 +165,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       toast.success(`File attached (${res.data.text_extracted} chars extracted)`);
       refreshChapters(selSubject);
       if (chapterId) loadChapterStats(chapterId);
-      const freshChapter = await axios.get(`${API}/admin/content/chapters?subject_id=${selSubject}`, authHeaders(adminToken));
+      const freshChapter = await axios.get(`${API}/staff/content/chapters/${encodeURIComponent(selSubject)}`, authHeaders(adminToken));
       const updated = (freshChapter.data?.chapters || freshChapter.data || []).find(c => c.id === chapterId);
       if (updated) setContentForm(f => ({ ...f, content: updated.content || f.content }));
     } catch (e) { toast.error(e.response?.data?.detail || 'File upload failed'); }
@@ -205,7 +205,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
 
   const refreshChapters = (subjectId) => {
     setChaptersLoading(true);
-    axios.get(`${API}/admin/content/chapters?subject_id=${subjectId}`, authHeaders(adminToken))
+    axios.get(`${API}/staff/content/chapters/${encodeURIComponent(subjectId)}`, authHeaders(adminToken))
       .then(r => {
         setChapters(r.data?.chapters || r.data || []);
         axios.get(`${API}/admin/content/subject/${subjectId}/coverage`, authHeaders(adminToken))
@@ -226,7 +226,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const handleCreateBoard = async (name, desc, status = 'published') => { await axios.post(`${API}/admin/content/boards`, { name, description: desc, status }, authHeaders(adminToken)); await reloadAll(); toast.success('Board created'); };
   const handleCreateClass = async (name, desc, status = 'published') => { if (!selBoard) return toast.error('Select a board first'); await axios.post(`${API}/admin/content/classes`, { board_id: selBoard, name, description: desc, status }, authHeaders(adminToken)); await reloadAll(); toast.success('Class created'); };
   const handleCreateStream = async (name, desc, status = 'published') => { if (!selClass) return toast.error('Select a class first'); await axios.post(`${API}/admin/content/streams`, { class_id: selClass, name, description: desc, status }, authHeaders(adminToken)); await reloadAll(); toast.success('Stream created'); };
-  const handleCreateSubject = async (name, desc, status = 'published') => { if (!selStream) return toast.error('Select a stream first'); await axios.post(`${API}/admin/content/subjects`, { stream_id: selStream, name, description: desc, tags: '', status }, authHeaders(adminToken)); await reloadAll(); toast.success('Subject created'); };
+  const handleCreateSubject = async (name, desc, status = 'published') => { if (!selStream) return toast.error('Select a stream first'); await axios.post(`${API}/staff/content/subjects`, { stream_id: selStream, name, description: desc, tags: '', status }, authHeaders(adminToken)); await reloadAll(); toast.success('Subject created'); };
 
   const handleUpdateHierarchyStatus = async (type, id, status) => {
     const endpoint = type === 'class' ? 'classes' : `${type}s`;
@@ -249,7 +249,8 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       onConfirm: async () => {
         setConfirmDialog(d => ({ ...d, open: false }));
         try {
-          await axios.delete(`${API}/admin/content/${type}s/${id}`, authHeaders(adminToken));
+          const resource = type === 'subject' ? 'subjects' : `${type}s`;
+          await axios.delete(`${API}/staff/content/${resource}/${id}`, authHeaders(adminToken));
           if (type === 'board') { if (selBoard === id) { setSelBoard(null); setSelClass(null); setSelStream(null); setSelSubject(null); } }
           if (type === 'classe') { if (selClass === id) { setSelClass(null); setSelStream(null); setSelSubject(null); } }
           if (type === 'stream') { setSelStream(null); setSelSubject(null); }
@@ -267,7 +268,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       const slug = contentForm.slug || autoSlug(contentForm.title);
       const topics = (contentForm.topics || []).filter(Boolean);
       const createPayload = { subject_id: selSubject, title: contentForm.title, slug, description: contentForm.description, content: contentForm.notes_en || contentForm.content, notes_en: contentForm.notes_en, notes_as: contentForm.notes_as, content_as: contentForm.content_as, rag_text_en: contentForm.rag_text_en, rag_text_as: contentForm.rag_text_as, qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as, qa_rag_text_en: contentForm.qa_rag_text_en, qa_rag_text_as: contentForm.qa_rag_text_as, pyq_pdf_url: contentForm.pyq_pdf_url, content_type: contentForm.content_type, chapter_number: contentForm.order, status: 'published', topics };
-      await axios.post(`${API}/admin/content/chapters`, createPayload, authHeaders(adminToken));
+      await axios.post(`${API}/staff/content/chapters`, createPayload, authHeaders(adminToken));
       toast.success('Chapter created successfully'); setEditView(null); setContentForm({ title: '', slug: '', description: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '' }); setChapterStats(null); refreshChapters(selSubject);
     } catch { toast.error('Failed to create chapter'); }
     finally { setSaving(false); }
@@ -288,7 +289,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
         qa_rag_text_en: contentForm.qa_rag_text_en, qa_rag_text_as: contentForm.qa_rag_text_as,
         pyq_pdf_url: contentForm.pyq_pdf_url };
       if (!force) updatePayload.version = contentForm.version ?? 0;
-      const res = await axios.patch(`${API}/admin/content/chapters/${editTarget.id}`, updatePayload, authHeaders(adminToken));
+      const res = await axios.patch(`${API}/staff/content/chapter/${editTarget.id}`, updatePayload, authHeaders(adminToken));
       const newVersion = res.data?.version ?? (contentForm.version + 1);
       setContentForm(f => ({ ...f, version: newVersion }));
       toast.success('Chapter updated successfully'); setEditView(null); setEditTarget(null); setContentForm({ title: '', slug: '', description: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '', version: 0 }); setChapterStats(null); refreshChapters(selSubject);
@@ -375,7 +376,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       message: 'This will permanently delete this chapter and all its associated data.',
       onConfirm: async () => {
         setConfirmDialog(d => ({ ...d, open: false }));
-        try { await axios.delete(`${API}/admin/content/chapters/${id}`, authHeaders(adminToken)); setChapters(p => p.filter(c => c.id !== id)); toast.success('Chapter deleted'); } catch { toast.error('Failed to delete'); }
+        try { await axios.delete(`${API}/staff/content/chapter/${id}`, authHeaders(adminToken)); setChapters(p => p.filter(c => c.id !== id)); toast.success('Chapter deleted'); } catch { toast.error('Failed to delete'); }
       },
     });
   };
@@ -384,9 +385,9 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     setGeneratingNotes(prev => new Set([...prev, chapterId]));
     try {
       const res = await axios.post(`${API}/admin/content/chapters/${chapterId}/generate-notes`, {}, authHeaders(adminToken));
-      const generated = res.data?.content;
+      const generated = res.data?.content || res.data?.notes_en;
       if (generated) {
-        const freshChapters = await axios.get(`${API}/admin/content/chapters?subject_id=${selSubject}`, authHeaders(adminToken));
+        const freshChapters = await axios.get(`${API}/staff/content/chapters/${encodeURIComponent(selSubject)}`, authHeaders(adminToken));
         const freshChapter = (freshChapters.data?.chapters || freshChapters.data || []).find(c => c.id === chapterId);
         setChapters(prev => prev.map(ch => ch.id === chapterId ? { ...ch, content: generated, content_as: freshChapter?.content_as || ch.content_as || '', content_type: 'notes', notes_generated: true, _word_count: res.data?.word_count } : ch));
         const asMsg = res.data?.content_as_words ? ` + ${res.data.content_as_words} অসমীয়া words` : '';
@@ -518,7 +519,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     const prev = subjects;
     setSubjects(p => p.map(s => s.id === subjectId ? { ...s, status: nextStatus } : s));
     try {
-      await axios.patch(`${API}/admin/content/subjects/${subjectId}`, { status: nextStatus }, authHeaders(adminToken));
+      await axios.patch(`${API}/staff/content/subjects/${subjectId}`, { status: nextStatus }, authHeaders(adminToken));
       toast.success(`Subject set to ${nextStatus}`);
     } catch (e) {
       setSubjects(prev);
@@ -530,7 +531,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     const prev = chapters;
     setChapters(p => p.map(c => c.id === chapterId ? { ...c, status: nextStatus } : c));
     try {
-      await axios.patch(`${API}/admin/content/chapters/${chapterId}`, { status: nextStatus }, authHeaders(adminToken));
+      await axios.patch(`${API}/staff/content/chapter/${chapterId}`, { status: nextStatus }, authHeaders(adminToken));
       toast.success(`Chapter set to ${nextStatus}`);
     } catch (e) {
       setChapters(prev);
@@ -542,7 +543,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     if (!editingSubject || !subjectEditForm.name.trim()) return;
     setSavingSubject(true);
     try {
-      await axios.patch(`${API}/admin/content/subjects/${editingSubject}`, { name: subjectEditForm.name.trim(), description: subjectEditForm.description.trim() }, authHeaders(adminToken));
+      await axios.patch(`${API}/staff/content/subjects/${editingSubject}`, { name: subjectEditForm.name.trim(), description: subjectEditForm.description.trim() }, authHeaders(adminToken));
       toast.success('Subject updated');
       setEditingSubject(null);
       await reloadAll();
@@ -799,7 +800,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {filteredSubjects.map(s => (
-                        <div key={s.id} className={`p-4 rounded-xl border bg-white text-left transition-colors group cursor-pointer shadow-sm ${selectedSubjectIds.has(s.id) ? 'border-violet-400 ring-2 ring-violet-200' : 'border-gray-200 hover:border-violet-300'}`} onClick={() => setSelSubject(s.id)}>
+                        <div key={s.id} data-testid={`subject-card-${s.id}`} className={`p-4 rounded-xl border bg-white text-left transition-colors group cursor-pointer shadow-sm ${selectedSubjectIds.has(s.id) ? 'border-violet-400 ring-2 ring-violet-200' : 'border-gray-200 hover:border-violet-300'}`} onClick={() => setSelSubject(s.id)}>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 min-w-0">
                               <input
@@ -819,8 +820,8 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                                 onChange={(next) => handleSubjectStatusChange(s.id, next)}
                                 testIdPrefix={`subject-status-toggle-${s.id}`}
                               />
-                              <button onClick={(e) => { e.stopPropagation(); setEditingSubject(s.id); setSubjectEditForm({ name: s.name || '', description: s.description || '' }); }} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-violet-600"><Edit2 size={12} /></button>
-                              <button onClick={(e) => { e.stopPropagation(); handleDelete('subject', s.id); }} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500"><Trash2 size={12} /></button>
+                              <button data-testid={`edit-subject-${s.id}`} onClick={(e) => { e.stopPropagation(); setEditingSubject(s.id); setSubjectEditForm({ name: s.name || '', description: s.description || '' }); }} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-violet-600"><Edit2 size={12} /></button>
+                              <button data-testid={`delete-subject-${s.id}`} onClick={(e) => { e.stopPropagation(); handleDelete('subject', s.id); }} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500"><Trash2 size={12} /></button>
                             </div>
                           </div>
                           {editingSubject === s.id ? (

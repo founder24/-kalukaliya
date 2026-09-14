@@ -4,7 +4,7 @@ import {
   LayoutDashboard, BookOpen, Users,
   MessageSquare, TrendingUp, Bell, Settings, HeartPulse, LogOut,
   ChevronLeft, ChevronRight, Loader2, Globe,
-  Cpu, Activity, ShieldAlert,
+  Cpu, Activity, ShieldAlert, UserRoundCheck, WalletCards,
   ExternalLink, Gauge, Bug, FileText,
 } from 'lucide-react';
 import axios from 'axios';
@@ -24,6 +24,9 @@ const AdminRoadmap         = lazy(() => import('@/components/admin/AdminRoadmap'
 const AdminContentHub      = lazy(() => import('@/components/admin/AdminContentHub'));
 const AdminAnalytics       = lazy(() => import('@/components/admin/AdminAnalytics'));
 const AdminModuleUnavailable = lazy(() => import('@/components/admin/AdminModuleUnavailable'));
+const ReferralAdmissions = lazy(() => import('@/components/admin/ReferralAdmissions'));
+const ReferralSettlements = lazy(() => import('@/pages/referrals/ReferralSettlements'));
+const ReferralROI = lazy(() => import('@/pages/referrals/ReferralROI'));
 import { SyraProvider, useSyraContext } from '@/components/admin/syra/SyraContext';
 
 // AWS-Native panel removed: /admin/aws-native/* endpoints are not implemented
@@ -35,6 +38,9 @@ export const SECTION_ICONS = {
   contenthub: BookOpen,
   seomanager: Globe,
   users: Users,
+  referrals: UserRoundCheck,
+  referralsettlements: WalletCards,
+  referralroi: TrendingUp,
   conversations: MessageSquare,
   notifications: Bell,
   ai: Cpu,
@@ -65,6 +71,9 @@ export const SECTION_COMPONENTS = {
   contenthub:    AdminContentHub,
   seomanager:    AdminModuleUnavailable,
   users:         AdminModuleUnavailable,
+  referrals:     ReferralAdmissions,
+  referralsettlements: ReferralSettlements,
+  referralroi: ReferralROI,
   conversations: AdminModuleUnavailable,
   notifications: AdminModuleUnavailable,
   ai:            AdminModuleUnavailable,
@@ -331,7 +340,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
   const sc = statusConfig[sysStatus];
 
   const SECTIONS_WITH_CONTEXT = new Set([
-    'users', 'contenthub', 'dashboard', 'conversations',
+    'users', 'referrals', 'contenthub', 'dashboard', 'conversations',
     'ai', 'security', 'logs',
   ]);
 

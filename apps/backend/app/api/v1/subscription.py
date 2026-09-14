@@ -8,6 +8,7 @@ from app.models.user import User
 from app.config import settings
 from app.api.v1.auth import get_current_user
 from app.services.payment.razorpay_client import PaymentNotConfiguredError
+from app.utils.privacy import redact_email
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,10 @@ async def cancel_subscription(user: User = Depends(get_current_user)):
     try:
         await cancel_razorpay_subscription(user.razorpay_subscription_id)
         await user.update({"$set": {"cancel_at_period_end": True}})
-        logger.info(f"Subscription cancelled for user {user.email}")
+        logger.info(
+            "Subscription cancelled",
+            extra={"user": redact_email(user.email)},
+        )
         return {"status": "success", "message": "Subscription will end at period end"}
     except PaymentNotConfiguredError as e:
         logger.error(f"Failed to cancel subscription: {e}")

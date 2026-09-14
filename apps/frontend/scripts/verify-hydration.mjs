@@ -8,27 +8,35 @@
 // broken SSR/CSR contract.
 //
 // This script closes that gap by:
-//   1. Picking one prerendered subject route and one prerendered chapter
-//      route from `dist/` (using the same data-hydrate marker scan as
-//      verify-all.mjs).
+//   1. Picking one representative public static route, one prerendered
+//      subject route, and one prerendered chapter route from `dist/`
+//      (using the same data-hydrate marker scan as verify-all.mjs).
 //   2. Serving `dist/` over a local static HTTP server.
 //   3. Loading each route in a real headless Chromium via Playwright.
-//   4. Failing the build if any console message or page error matches the
-//      well-known hydration mismatch signatures (React's plain-text
-//      warnings as well as minified production error codes #418/#423/#425).
+//   4. Failing the build if any console message matches the well-known
+//      hydration mismatch signatures (React's plain-text warnings as well as
+//      minified production error codes #418/#423/#425), or if a public static
+//      route raises an uncaught page error.
 //
-// Soft-fails (warns, exit 0) when there are no prerendered subject or
-// chapter routes to inspect — matches the soft-fail philosophy of
-// scripts/prerender-routes.mjs and scripts/verify-all.mjs so a
-// transient backend outage on the build host doesn't break deploys.
+// Soft-fails (warns, exit 0) when there are no routes to inspect — matches
+// the soft-fail philosophy of scripts/prerender-routes.mjs and
+// scripts/verify-all.mjs so a transient backend outage on the build host
+// doesn't break deploys.
 
 import fs from "fs";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  browserIssuesForTarget,
+} from "./verify-hydration-policy.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const distDir = path.resolve(__dirname, "..", "dist");
+// The fixture test points this at an isolated dist tree; release validation
+// leaves it unset and always checks the built application.
+const distDir = path.resolve(
+  process.env.VERIFY_HYDRATION_DIST_DIR || path.join(__dirname, "..", "dist"),
+);
 const manifestPath = path.join(distDir, "prerender-manifest.json");
 
 function warn(msg) {
@@ -39,21 +47,24 @@ function fail(msg) {
   process.exit(1);
 }
 
+let subjectsWritten = 0;
+let chaptersWritten = 0;
 if (!fs.existsSync(manifestPath)) {
-  warn("no prerender-manifest.json — prerender step likely soft-failed; skipping verification");
-  process.exit(0);
-}
-
-const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-const subjectsWritten = manifest?.counts?.subjects_written ?? 0;
-const chaptersWritten = manifest?.counts?.chapters_written ?? 0;
-if (subjectsWritten === 0 && chaptersWritten === 0) {
-  warn("manifest reports zero prerendered routes; nothing to verify");
-  process.exit(0);
+  warn("no prerender-manifest.json — prerender step likely soft-failed");
+} else {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  subjectsWritten = manifest?.counts?.subjects_written ?? 0;
+  chaptersWritten = manifest?.counts?.chapters_written ?? 0;
 }
 
 // Walk dist/ and bucket prerendered routes by data-hydrate kind so we can
 // pick one representative subject + chapter URL to load in the browser.
+const PUBLIC_STATIC_ROUTES = [
+  { kind: "static", route: "/home", file: "home/index.html" },
+  { kind: "static", route: "/login", file: "login/index.html" },
+  { kind: "static", route: "/terms", file: "terms/index.html" },
+];
+
 function* walk(dir, prefix = "") {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
@@ -90,35 +101,15 @@ else if (chaptersWritten > 0) {
   fail(`manifest claimed ${chaptersWritten} chapters written but none found on disk`);
 }
 
-if (targets.length === 0) {
-  warn("no prerendered subject or chapter routes found on disk; nothing to verify");
-  process.exit(0);
+for (const target of PUBLIC_STATIC_ROUTES) {
+  if (fs.existsSync(path.join(distDir, target.file))) {
+    targets.push(target);
+  }
 }
 
-// React hydration mismatch signatures. React 18/19 emits the plain-text
-// warnings in dev, and the production minified error codes in prod (which
-// is what we ship). Match all of them.
-const HYDRATION_PATTERNS = [
-  /Hydration failed/i,
-  /hydrating but the server rendered/i,
-  /did not match/i,
-  /Text content does not match/i,
-  /Text content did not match/i,
-  /Hydration completed but contains mismatches/i,
-  /There was an error while hydrating/i,
-  /server rendered HTML didn't match the client/i,
-  /Minified React error #418/i,
-  /Minified React error #421/i,
-  /Minified React error #422/i,
-  /Minified React error #423/i,
-  /Minified React error #425/i,
-  /reactjs\.org\/docs\/error-decoder\.html\?invariant=(?:418|421|422|423|425)/i,
-  /react\.dev\/errors\/(?:418|421|422|423|425)/i,
-];
-
-function looksLikeHydrationProblem(text) {
-  if (!text) return false;
-  return HYDRATION_PATTERNS.some((re) => re.test(text));
+if (targets.length === 0) {
+  warn("no public static, subject, or chapter routes found on disk; nothing to verify");
+  process.exit(0);
 }
 
 // --- Static server over dist/ -----------------------------------------------
@@ -195,11 +186,12 @@ function serveDist(rootDir) {
 
 // --- Browser check ----------------------------------------------------------
 
-// Task #543: detect Playwright environment problems (missing npm package
-// OR missing browser binary) separately from application hydration failures.
-// Local builds retain the best-effort soft-skip, while release CI sets
-// REQUIRE_HYDRATION_BROWSER=true after provisioning Chromium and turns an
-// unavailable browser into a clear environment failure.
+// Detect Playwright environment problems (missing npm package, browser binary,
+// or native browser runtime) separately from application hydration failures.
+// Local builds retain the best-effort soft-skip. Release workflows run the
+// native-runtime preflight before this script and set
+// REQUIRE_HYDRATION_BROWSER=true so an unavailable browser is a clear
+// environment failure rather than an application failure.
 function isPlaywrightEnvProblem(err) {
   const msg = String(err?.message || err || "");
   return (
@@ -263,35 +255,9 @@ async function main() {
   let browser;
   const findings = [];
   try {
-    // Playwright's bundled chrome-headless-shell on Replit/NixOS sometimes
-    // can't find libgbm.so.1 on the default loader path. Inject the Nix
-    // mesa lib directory into LD_LIBRARY_PATH so it can resolve.
-    const env = { ...process.env };
-    try {
-      const mesaLibs = fs
-        .readdirSync("/nix/store")
-        .filter((n) => /^[a-z0-9]+-mesa-\d/.test(n))
-        .map((n) => `/nix/store/${n}/lib`)
-        .filter((p) => {
-          try {
-            return fs.existsSync(`${p}/libgbm.so.1`);
-          } catch {
-            return false;
-          }
-        });
-      if (mesaLibs.length > 0) {
-        env.LD_LIBRARY_PATH = [env.LD_LIBRARY_PATH, ...mesaLibs]
-          .filter(Boolean)
-          .join(":");
-      }
-    } catch {
-      // /nix/store not present (non-Replit env) — skip the patch.
-    }
-
     try {
       browser = await chromium.launch({
         args: ["--no-sandbox", "--disable-dev-shm-usage"],
-        env,
       });
     } catch (launchErr) {
       // Tear down the static server before handling the environment failure
@@ -321,31 +287,39 @@ async function main() {
 
       console.log(`[verify-hydration] loading ${target.kind} route ${target.route}`);
       await page.goto(url, { waitUntil: "load", timeout: 30000 });
-      // Wait for the bootstrap to mark hydration complete
-      // (window.__SYRABIT_HYDRATED__, set by src/index.jsx right after the
-      // hydrateRoot call). Fall back to a fixed window if the flag never
-      // appears so we still capture console warnings on routes that may
-      // have fallen back to client rendering.
-      try {
-        await page.waitForFunction(() => window.__SYRABIT_HYDRATED__ === true, {
-          timeout: 8000,
-        });
-      } catch {
+      if (target.kind === "static") {
+        // Static public routes are intentionally SPA shell stubs and use
+        // createRoot rather than the prerendered hydrateRoot path. Give the
+        // client mount and its effects a short settle window before checking
+        // for uncaught page errors.
         await page.waitForTimeout(2000);
+      } else {
+        // Wait for the bootstrap to mark hydration complete
+        // (window.__SYRABIT_HYDRATED__, set by src/index.jsx right after the
+        // hydrateRoot call). Fall back to a fixed window if the flag never
+        // appears so we still capture console warnings on routes that may
+        // have fallen back to client rendering.
+        try {
+          await page.waitForFunction(() => window.__SYRABIT_HYDRATED__ === true, {
+            timeout: 8000,
+          });
+        } catch {
+          await page.waitForTimeout(2000);
+        }
       }
       // Final settle so any deferred warnings React logs after commit
       // (e.g. "Hydration completed but contains mismatches") land in our
       // console buffer before we tear the page down.
       await page.waitForTimeout(750);
 
-      const offenders = messages.filter((m) => looksLikeHydrationProblem(m.text));
+      const offenders = browserIssuesForTarget(target, messages);
       for (const o of offenders) {
         findings.push({ route: target.route, kind: target.kind, ...o });
       }
 
       await context.close();
       console.log(
-        `[verify-hydration] ${target.route}: ${messages.length} console msgs, ${offenders.length} hydration issues`,
+        `[verify-hydration] ${target.route}: ${messages.length} console msgs, ${offenders.length} browser issues`,
       );
     }
   } finally {
@@ -354,15 +328,15 @@ async function main() {
   }
 
   if (findings.length > 0) {
-    console.error("[verify-hydration] hydration mismatches detected:");
+    console.error("[verify-hydration] browser/hydration issues detected:");
     for (const f of findings) {
       console.error(`  - [${f.kind} ${f.route}] (${f.type}) ${f.text}`);
     }
-    fail(`${findings.length} hydration warning(s) across ${targets.length} prerendered route(s)`);
+    fail(`${findings.length} browser issue(s) across ${targets.length} checked route(s)`);
   }
 
   console.log(
-    `[verify-hydration] OK — ${targets.length} prerendered route(s) hydrated cleanly in headless Chromium`,
+    `[verify-hydration] OK — ${targets.length} route(s) checked in headless Chromium`,
   );
 }
 

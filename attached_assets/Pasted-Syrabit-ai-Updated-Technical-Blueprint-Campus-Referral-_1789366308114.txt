@@ -1,0 +1,806 @@
+Syrabit.ai — Updated Technical Blueprint
+
+Campus Referral + “Start Earning” System
+
+The system should be built so that the profile page is the entry point, while attribution, fraud detection, weekly tiers, payments, and analytics run in the backend.
+
+
+---
+
+1. User journey
+
+Student Profile
+      │
+      ▼
+┌──────────────────────────┐
+│ 💰 START EARNING         │
+│ Earn ₹1 / verified       │
+│ student you bring        │
+│ [ START EARNING → ]      │
+└──────────────────────────┘
+      │
+      ▼
+Referral Dashboard
+      │
+      ├── Get referral link
+      ├── Copy / Share
+      ├── Generate QR
+      ├── View visitors
+      ├── View earnings
+      └── View tier progress
+
+
+---
+
+2. Database architecture
+
+Use separate entities rather than putting everything into the student profile.
+
+users
+
+user_id
+name
+email
+phone
+college_id
+created_at
+
+campus_leads
+
+lead_id
+user_id
+college_id
+referral_code
+status
+tier
+joined_at
+upi_qr_path
+payment_status
+
+status:
+
+active
+suspended
+pending_review
+
+tier:
+
+trial
+full
+
+
+---
+
+3. Referral link
+
+Every lead receives:
+
+syrabit.ai/r/{referral_code}
+
+Example:
+
+syrabit.ai/r/SYR001
+
+The referral code should be unique and permanent.
+
+Do not change the code every week.
+
+
+---
+
+4. Referral click architecture
+
+When someone opens:
+
+/r/SYR001
+
+backend performs:
+
+Request
+   ↓
+Validate referral code
+   ↓
+Identify visitor/session
+   ↓
+Fraud checks
+   ↓
+Check existing attribution
+   ↓
+Assign attribution if eligible
+   ↓
+Record event
+   ↓
+Redirect to Syrabit
+
+
+---
+
+5. Visitor identity
+
+Do not use IP address as the sole unique-user identifier.
+
+Use a combination of:
+
+First-party referral cookie
+        +
+session/user identifier
+        +
+IP/network signal
+        +
+browser/device signals
+        +
+timestamp
+        +
+fraud signals
+
+For logged-in Syrabit students, the strongest identifier should be:
+
+Syrabit user_id
+
+This gives you much better deduplication.
+
+
+---
+
+6. Attribution rule
+
+Recommended rule:
+
+> First eligible promoter gets attribution for that visitor during the weekly attribution window.
+
+
+
+Example:
+
+Monday
+
+Student X
+   ↓
+CL001 link
+   ↓
+Attributed → CL001
+
+Later:
+
+Student X
+   ↓
+CL002 link
+   ↓
+Already attributed
+   ↓
+CL002 gets NO credit
+
+This prevents promoter competition over the same visitor.
+
+
+---
+
+7. Weekly attribution
+
+Use a weekly period:
+
+Monday 00:00
+       ↓
+     Sunday
+       ↓
+Weekly settlement
+       ↓
+Monday → new weekly counter
+
+But do not delete historical attribution records.
+
+You need historical records for:
+
+fraud investigation
+
+payment history
+
+lifetime statistics
+
+lead performance
+
+LTV/CAC analysis
+
+
+
+---
+
+8. Verified visitor event
+
+Create an event such as:
+
+verified_referral_visit
+
+A visitor becomes verified only after your validation rules are satisfied.
+
+Example:
+
+Referral click
+      ↓
+Page successfully loaded
+      ↓
+Engagement threshold
+      ↓
+Not duplicate
+      ↓
+Not bot/fraud
+      ↓
+VERIFIED
+
+The exact engagement threshold should be configurable rather than hard-coded.
+
+For example:
+
+minimum_session_seconds = 30
+
+You can later change it to 45/60 seconds without rebuilding the system.
+
+
+---
+
+9. Referral event table
+
+referral_events
+
+event_id
+lead_id
+visitor_id
+referral_code
+event_type
+timestamp
+week_id
+status
+fraud_score
+
+Example:
+
+EVT001
+CL001
+VIS98231
+SYR001
+verified_referral_visit
+2026-09-14 10:32
+2026-W38
+verified
+0.02
+
+
+---
+
+10. Weekly statistics
+
+Create a weekly aggregation:
+
+referral_weekly_stats
+
+week_id
+lead_id
+verified_visitors
+gross_earnings
+tier
+weekly_cap
+payable_amount
+status
+
+Example:
+
+Week: 2026-W38
+Lead: CL001
+
+Verified visitors: 742
+Tier: Full
+Rate: ₹1
+Gross: ₹742
+Cap: ₹1,000
+Payable: ₹742
+
+
+---
+
+11. Trial tier logic
+
+New lead:
+
+tier = TRIAL
+rate = ₹1
+weekly_cap = ₹100
+unlock_target = 500
+
+Therefore:
+
+visitors <= 100
+      ↓
+₹1 × visitors
+
+visitors > 100
+      ↓
+₹100 maximum
+
+
+---
+
+12. Unlock logic
+
+If:
+
+verified_visitors >= 500
+
+during a single weekly period:
+
+tier → FULL
+
+The Full Tier should then be permanently unlocked, unless you later introduce a separate quality/suspension policy.
+
+Importantly:
+
+> The weekly counter resets, but the tier does not.
+
+
+
+
+---
+
+13. Full tier
+
+tier = FULL
+rate = ₹1
+weekly_cap = ₹1,000
+
+Therefore:
+
+500 visitors → ₹500
+750 visitors → ₹750
+1,000 visitors → ₹1,000
+1,500 visitors → ₹1,000
+
+
+---
+
+14. Payment engine
+
+Every Sunday:
+
+Close week
+    ↓
+Freeze events
+    ↓
+Run fraud validation
+    ↓
+Calculate verified visitors
+    ↓
+Apply tier
+    ↓
+Apply weekly cap
+    ↓
+Generate payable amount
+    ↓
+Admin review
+    ↓
+UPI payment
+    ↓
+Upload proof
+    ↓
+Mark PAID
+
+payments
+
+payment_id
+lead_id
+week_id
+amount
+payment_method
+payment_reference
+proof_path
+paid_at
+status
+
+
+---
+
+15. Profile UI
+
+At the top of the normal profile:
+
+┌──────────────────────────────────┐
+│ 💰 START EARNING                 │
+│                                  │
+│ Earn ₹1 for every verified      │
+│ student you bring to Syrabit    │
+│                                  │
+│       [ START EARNING → ]       │
+└──────────────────────────────────┘
+
+The profile should not be overloaded with technical details.
+
+
+---
+
+16. Referral dashboard UI
+
+After clicking:
+
+START EARNING
+
+show:
+
+━━━━━━━━━━━━━━━━━━━━━━
+      START EARNING
+━━━━━━━━━━━━━━━━━━━━━━
+
+🟡 TRIAL TIER
+
+This week
+87 verified visitors
+
+₹87 earned
+
+Progress
+████████░░░░ 87 / 500
+
+Weekly trial limit
+₹100
+
+[ COPY LINK ]
+[ SHARE ]
+[ QR CODE ]
+
+Your referral link
+syrabit.ai/r/SYR001
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+HOW IT WORKS
+
+① Share your link
+② Students use Syrabit
+③ Verified visitors count
+④ Earn ₹1 each
+⑤ Get paid every Sunday
+
+🚀 Reach 500 verified visitors
+in one week to unlock:
+
+FULL TIER
+₹1 / verified visitor
+Up to ₹1,000/week
+━━━━━━━━━━━━━━━━━━━━━━
+
+
+---
+
+17. Full-tier dashboard
+
+Once unlocked:
+
+━━━━━━━━━━━━━━━━━━━━━━
+       FULL TIER 🟢
+━━━━━━━━━━━━━━━━━━━━━━
+
+This week
+
+742 verified visitors
+
+₹742 earned
+
+Progress
+██████████████░ 742 / 1,000
+
+Weekly maximum
+₹1,000
+
+[ COPY LINK ]
+[ SHARE ]
+[ QR CODE ]
+
+Lifetime visitors
+4,821
+
+Lifetime earnings
+₹4,321
+━━━━━━━━━━━━━━━━━━━━━━
+
+
+---
+
+18. Admin dashboard
+
+You need these sections:
+
+Overview
+
+Active campus leads
+Trial leads
+Full leads
+
+Visitors today
+Visitors this week
+Visitors this month
+
+Referral payouts
+Ad revenue
+CAC
+Revenue/user
+LTV
+LTV/CAC
+
+Lead management
+
+Lead
+College
+Tier
+Weekly visitors
+Weekly earnings
+Lifetime visitors
+Lifetime earnings
+Fraud status
+Payment status
+
+Fraud review
+
+Lead
+Visitor
+IP/network signal
+Device signal
+Session duration
+Referral events
+Fraud score
+Decision
+
+
+---
+
+19. Anti-fraud architecture
+
+Use a scoring system rather than a single rule.
+
+Referral
+                        │
+                        ▼
+                 Fraud engine
+                        │
+       ┌────────────────┼────────────────┐
+       ▼                ▼                ▼
+    Network           Device          Behaviour
+     signals           signals          signals
+       │                │                │
+       └────────────────┼────────────────┘
+                        ▼
+                   Fraud score
+                        │
+              ┌─────────┴─────────┐
+              ▼                   ▼
+           Normal              Suspicious
+              │                   │
+            Count                Review
+
+This is particularly important once you start paying dozens/hundreds of campus leads.
+
+
+---
+
+20. Analytics you should add from Day 1
+
+For every acquired cohort track:
+
+Referral lead
+        ↓
+Verified visitor
+        ↓
+First session
+        ↓
+Second session
+        ↓
+Active days
+        ↓
+Ad impressions
+        ↓
+Ad revenue
+
+Then calculate:
+
+CAC
+
+Referral payouts
+÷
+Verified acquired visitors
+
+Target:
+
+≈ ₹1
+
+Revenue/User
+
+Ad revenue
+÷
+Acquired users
+
+LTV
+
+Total revenue generated by cohort
+÷
+Users in cohort
+
+LTV/CAC
+
+LTV ÷ CAC
+
+This is ultimately the number that tells you whether to scale.
+
+
+---
+
+21. Example at scale
+
+Suppose:
+
+10 campus leads
+
+each generate:
+
+500 verified visitors/week
+
+Then:
+
+10 × 500
+= 5,000 verified visitors/week
+
+Referral payout:
+
+5,000 × ₹1
+= ₹5,000/week
+
+Approximately:
+
+₹20,000/month
+
+if you use four weeks for simple planning.
+
+But those 5,000 students can return repeatedly.
+
+For example, if the cohort averages 15 monetized active days/month and your realized revenue is ₹1.20–₹1.60 per active user-day:
+
+5,000 × 15 × ₹1.20
+= ₹90,000
+
+to
+
+5,000 × 15 × ₹1.60
+= ₹1,20,000
+
+So the illustrative relationship becomes:
+
+₹5,000 acquisition cost/week → potentially much larger cumulative ad revenue from repeated usage.
+
+
+---
+
+22. Recommended technical stack
+
+For your existing Syrabit.ai architecture, keep it simple:
+
+Frontend
+   ↓
+Referral UI
+   ↓
+Backend/API
+   ↓
+Referral Attribution Service
+   ↓
+Database
+   ↓
+Analytics/Fraud
+   ↓
+Admin Dashboard
+
+You don't need a separate microservice initially.
+
+Build the referral system as a module inside your existing Syrabit backend.
+
+Core modules
+
+/auth
+/profile
+/referral
+/attribution
+/analytics
+/fraud
+/payments
+/admin
+
+
+---
+
+23. Most important implementation rule
+
+Never calculate earnings directly from clicks.
+
+Use this hierarchy:
+
+CLICK
+  ↓
+VISIT
+  ↓
+ELIGIBLE VISITOR
+  ↓
+VERIFIED VISITOR
+  ↓
+PAYABLE VISITOR
+
+Only payable verified visitors affect the ₹1 payout.
+
+That protects Syrabit from bot traffic and protects you financially as the referral network grows.
+
+
+---
+
+Final architecture
+
+SYRABIT.AI
+                     │
+              Student Profile
+                     │
+            💰 START EARNING
+                     │
+                     ▼
+             Referral Dashboard
+                     │
+             Unique Link / QR
+                     │
+                     ▼
+              Student Visitor
+                     │
+                     ▼
+              Attribution Engine
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+       Eligible              Duplicate
+          │                     │
+          ▼                     ▼
+     Fraud Engine              Reject
+          │
+     ┌────┴─────┐
+     │          │
+   Clean    Suspicious
+     │          │
+     ▼          ▼
+  VERIFIED    REVIEW
+     │
+     ▼
+₹1 CREDIT
+     │
+     ▼
+Weekly Counter
+     │
+     ├── Trial → ₹100 cap
+     │
+     └── 500/week → Full Tier
+                       │
+                       ▼
+                   ₹1,000 cap
+                       │
+                       ▼
+                 Sunday Payment
+                       │
+                       ▼
+                     UPI
+
+Meanwhile:
+
+Verified User
+      ↓
+Notes / Questions / PYQs
+      ↓
+Repeated sessions
+      ↓
+Ad impressions
+      ↓
+Ad revenue
+      ↓
+LTV
+      ↓
+LTV ÷ ₹1 CAC
+      ↓
+Scale winning colleges
+
+This is the version I would hand to your developer/Replit agent: the ₹1 referral is an acquisition event, while user retention and repeated Syrabit sessions create the monetization LTV.

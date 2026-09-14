@@ -207,6 +207,18 @@ Browser
 | Email | Resend | Transactional email |
 | Observability | Sentry, PostHog, Cloudflare analytics, GitHub Actions | Errors, analytics, logs, scheduled monitors |
 
+### Referral program boundary
+
+The recurring influencer referral program is defined in
+[`docs/referral-program-policy.md`](docs/referral-program-policy.md). It is not
+yet open and no runtime referral or payout route is active. Future attribution,
+review, and settlement behavior must use the Cloudflare API Worker and D1 only;
+the retired Python backend cannot serve as a referral or payout control plane.
+
+The current approved advertising network is Google AdSense. Historical
+Adcash/Adsterra projections and client-side ad beacons are not funding evidence
+and cannot authorize rewards or settlements.
+
 ## Content Model
 
 ```text

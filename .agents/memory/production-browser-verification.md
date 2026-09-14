@@ -15,6 +15,12 @@ Browser init scripts used to inject disposable authentication must seed credenti
 
 **How to apply:** Store a session-scoped seed marker that logout does not remove, never log credential values, and verify storage is empty before testing protected access after sign-out.
 
+Playwright's downloaded Chromium can still fail to launch on Nix runners when the browser's shared-library search path is incomplete.
+
+**Why:** Installing the browser archive does not install or expose every system library required by the headless shell; the failure appears as a missing `.so` even though the browser download succeeded.
+
+**How to apply:** Treat browser installation and runtime-library provisioning as separate release prerequisites, and preserve the verifier's explicit environment-failure message rather than misclassifying it as an app regression.
+
 Cloudflare Access service-token headers belong only on the protected site origin, never on the public API origin.
 
 **Why:** Adding Access headers to cross-origin API requests triggers a browser preflight that the public API correctly rejects. Redirects can also carry overridden request headers farther than expected.

@@ -17,6 +17,7 @@ from app.services.comms.resend_client import (
     send_welcome_email,
     send_password_reset_email,
 )
+from app.utils.privacy import redact_email
 
 try:
     from beanie.exceptions import CollectionWasNotInitialized
@@ -590,10 +591,14 @@ async def signup(request_body: SignupRequest, request: Request):
     try:
         await send_welcome_email(email=request_body.email, name=request_body.name)
     except Exception as e:
-        logger.warning(f"Welcome email failed for {request_body.email}: {e}")
+        logger.warning(
+            "Welcome email failed",
+            extra={"recipient": redact_email(request_body.email), "error": str(e)},
+        )
 
     logger.info(
-        f"New user signed up: {request_body.email[:3]}***@{request_body.email.split('@')[1]}"
+        "New user signed up",
+        extra={"recipient": redact_email(request_body.email)},
     )
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
@@ -622,7 +627,8 @@ async def login(request_body: LoginRequest, request: Request):
     refresh_token = create_refresh_token(str(user.id))
 
     logger.info(
-        f"User logged in: {request_body.email[:3]}***@{request_body.email.split('@')[1]}"
+        "User logged in",
+        extra={"recipient": redact_email(request_body.email)},
     )
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
@@ -652,15 +658,20 @@ async def forgot_password(request_body: ForgotPasswordRequest, request: Request)
             await send_password_reset_email(
                 email=request_body.email, reset_token=reset_token
             )
-            logger.info(f"Password reset email sent to {request_body.email}")
+            logger.info(
+                "Password reset email sent",
+                extra={"recipient": redact_email(request_body.email)},
+            )
         except Exception as e:
             logger.error(
-                f"Failed to send password reset email to {request_body.email}: {e}"
+                "Failed to send password reset email",
+                extra={"recipient": redact_email(request_body.email), "error": str(e)},
             )
     else:
         # Don't reveal whether the email exists — log and return same response
         logger.info(
-            f"Password reset requested for non-existent/non-local email: {request_body.email}"
+            "Password reset requested for non-existent/non-local account",
+            extra={"recipient": redact_email(request_body.email)},
         )
 
     return MessageResponse(
@@ -753,7 +764,10 @@ async def reset_password(body: ResetPasswordRequest):
     except Exception as e:
         logger.error(f"Redis unavailable for marking reset token as used: {e}")
 
-    logger.info(f"Password reset successful for user {user.email}")
+    logger.info(
+        "Password reset successful",
+        extra={"recipient": redact_email(user.email)},
+    )
     return MessageResponse(
         message="Password reset successful. You can now log in with your new password."
     )

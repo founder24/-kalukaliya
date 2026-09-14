@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_BACKEND_URL: https://api.syrabit.ai
+      REQUIRE_HYDRATION_BROWSER: 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +35,27 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
+
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/frontend/node_modules/playwright/package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright Chromium
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright system dependencies
+        run: pnpm --filter @workspace/syrabit exec playwright install-deps chromium
+
+      - name: Install Playwright Chromium on cache miss
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm --filter @workspace/syrabit run playwright:install:chromium
 
       - name: Build frontend
         run: pnpm --filter @workspace/syrabit run build

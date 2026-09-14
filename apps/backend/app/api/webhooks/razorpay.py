@@ -7,6 +7,7 @@ Keep it only to interpret historical provider records.
 from fastapi import APIRouter, Request, HTTPException
 from app.config import settings
 from app.models.user import User
+from app.utils.privacy import redact_email, redact_identifier
 import hashlib
 import hmac
 import json
@@ -42,8 +43,8 @@ def _validate_subscription_id(value) -> str:
 
 @router.post("/razorpay")
 async def handle_razorpay_webhook(request: Request):
-"""
-RETIRED LOCAL HISTORICAL TOOLING — former Razorpay webhook handler, not mounted.
+    """
+    RETIRED LOCAL HISTORICAL TOOLING — former Razorpay webhook handler, not mounted.
 
     Handle Razorpay Payment Webhooks
     Verifies signature and updates subscription status
@@ -118,13 +119,15 @@ RETIRED LOCAL HISTORICAL TOOLING — former Razorpay webhook handler, not mounte
             return {"status": "ignored", "reason": "amount_below_expected"}
 
         # Find User
-        user = await User.find_one({"razorpay_subscription_id": sub_id})
+        user = await User.find_one(User.razorpay_subscription_id == sub_id)
 
         # Fallback: try looking up by payment order_id if subscription lookup failed
         if not user:
             order_id = payload.get("payment", {}).get("order_id")
             if order_id and _RAZORPAY_ORDER_ID_RE.fullmatch(order_id):
-                user = await User.find_one({"razorpay_subscription_id": order_id})
+                user = await User.find_one(
+                    User.razorpay_subscription_id == order_id
+                )
                 # Validate amount against user's plan tier before granting renewal
                 if user:
                     expected_prices = {"pro": 29900, "premium": 59900}
@@ -132,14 +135,22 @@ RETIRED LOCAL HISTORICAL TOOLING — former Razorpay webhook handler, not mounte
                     expected_amount = expected_prices.get(user_tier)
                     if expected_amount and amount != expected_amount:
                         logger.warning(
-                            f"Amount mismatch on order_id fallback: got {amount}, "
-                            f"expected {expected_amount} for tier '{user_tier}' "
-                            f"(user={user.email}, order_id={order_id})"
+                            "Amount mismatch on order_id fallback",
+                            extra={
+                                "amount": amount,
+                                "expected_amount": expected_amount,
+                                "tier": user_tier,
+                                "user": redact_email(user.email),
+                                "order_id": redact_identifier(order_id),
+                            },
                         )
                         return {"status": "ignored", "reason": "amount_mismatch"}
 
         if not user:
-            logger.error(f"User not found for sub {sub_id}")
+            logger.error(
+                "User not found for subscription",
+                extra={"subscription": redact_identifier(sub_id)},
+            )
             return {"status": "ignored", "reason": "user_not_found"}
 
         # Update Subscription Status
@@ -158,7 +169,10 @@ RETIRED LOCAL HISTORICAL TOOLING — former Razorpay webhook handler, not mounte
             from app.services.comms.resend_client import send_receipt_email
 
             await send_receipt_email(user.email, amount, event["id"])
-            logger.info(f"Subscription renewed for user {user.email}")
+            logger.info(
+                "Subscription renewed",
+                extra={"user": redact_email(user.email)},
+            )
         except Exception as e:
             logger.error(f"Failed to send receipt email: {e}")
 
@@ -173,7 +187,7 @@ RETIRED LOCAL HISTORICAL TOOLING — former Razorpay webhook handler, not mounte
         # Mark subscription as cancelled at period end
         sub_id = _validate_subscription_id(payload["subscription"]["id"])
 
-        user = await User.find_one({"razorpay_subscription_id": sub_id})
+        user = await User.find_one(User.razorpay_subscription_id == sub_id)
         if user:
             await user.update({"$set": {"cancel_at_period_end": True}})
         logger.info(f"Subscription cancelled: {sub_id}")
@@ -183,7 +197,7 @@ RETIRED LOCAL HISTORICAL TOOLING — former Razorpay webhook handler, not mounte
         # end date (the event name the dashboard exposes). "subscription.expired"
         # is an older alias kept for backwards compatibility.
         sub_id = _validate_subscription_id(payload["subscription"]["id"])
-        user = await User.find_one({"razorpay_subscription_id": sub_id})
+        user = await User.find_one(User.razorpay_subscription_id == sub_id)
         if user:
             await user.update(
                 {
@@ -195,11 +209,17 @@ RETIRED LOCAL HISTORICAL TOOLING — former Razorpay webhook handler, not mounte
                 }
             )
             logger.info(
-                f"Subscription completed/expired, user downgraded to free: "
-                f"{sub_id} ({user.email})"
+                "Subscription completed/expired; user downgraded to free",
+                extra={
+                    "subscription": redact_identifier(sub_id),
+                    "user": redact_email(user.email),
+                },
             )
         else:
-            logger.warning(f"subscription.completed: no user found for sub_id={sub_id}")
+            logger.warning(
+                "subscription.completed: no user found",
+                extra={"subscription": redact_identifier(sub_id)},
+            )
 
     # Mark as completed
     try:

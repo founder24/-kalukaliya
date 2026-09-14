@@ -69,6 +69,7 @@ async def main():
 
     # ── Hash password with bcrypt (no Beanie needed) ─────────────────────────
     import bcrypt
+    from app.utils.privacy import redact_email
 
     hashed_password = bcrypt.hashpw(
         admin_password.encode("utf-8"), bcrypt.gensalt()
@@ -101,7 +102,7 @@ async def main():
 
     if existing:
         current_role = existing.get("role", "none")
-        print(f"User found: {admin_email} (role: {current_role})")
+        print(f"User found: {redact_email(admin_email)} (role: {current_role})")
 
         if current_role == "admin" and not force_reset:
             print("Admin already exists and is active.")
@@ -116,7 +117,7 @@ async def main():
                 print("  Resetting password...")
 
         await users.update_one({"_id": existing["_id"]}, {"$set": update})
-        print(f"✓ Admin updated: {admin_email}")
+        print(f"✓ Admin updated: {redact_email(admin_email)}")
     else:
         doc = {
             "email": admin_email,
@@ -137,7 +138,10 @@ async def main():
             "updated_at": now,
         }
         result = await users.insert_one(doc)
-        print(f"✓ Admin created: {admin_email} (id: {result.inserted_id})")
+        print(
+            f"✓ Admin created: {redact_email(admin_email)} "
+            f"(id: {redact_email(str(result.inserted_id))})"
+        )
 
     print()
     print("Admin login endpoint : POST /api/v1/admin/login")

@@ -13,6 +13,7 @@ import asyncio
 import re
 
 from app.config import settings
+from app.utils.privacy import redact_email
 from app.db.mongo import init_mongo, close_mongo
 from app.api.v1 import (
     chat,
@@ -153,10 +154,14 @@ async def lifespan(app: FastAPI):
                     update["hashed_password"] = User.hash_password(
                         settings.ADMIN_PASSWORD
                     )
-                    logger.info(f"Admin password reset for: {settings.ADMIN_EMAIL}")
+                    logger.info(
+                        "Admin password reset",
+                        extra={"admin": redact_email(settings.ADMIN_EMAIL)},
+                    )
                 if existing.role != "admin":
                     logger.info(
-                        f"Promoted existing user to admin: {settings.ADMIN_EMAIL}"
+                        "Promoted existing user to admin",
+                        extra={"admin": redact_email(settings.ADMIN_EMAIL)},
                     )
                 await existing.update({"$set": update})
             else:
@@ -168,7 +173,10 @@ async def lifespan(app: FastAPI):
                     name="Admin",
                 )
                 await admin_user.insert()
-                logger.info(f"Admin user created: {settings.ADMIN_EMAIL}")
+                logger.info(
+                    "Admin user created",
+                    extra={"admin": redact_email(settings.ADMIN_EMAIL)},
+                )
         except Exception as e:
             logger.warning(f"Admin bootstrap skipped (DB may not be ready): {e}")
     # ─────────────────────────────────────────────────────────────────────────

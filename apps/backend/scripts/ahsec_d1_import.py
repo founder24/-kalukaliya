@@ -10,12 +10,23 @@ This script intentionally does not import Beanie or initialize MongoDB. It:
   6. replaces the corresponding Vectorize vectors and D1 chunk mappings.
 
 Existing notes are backed up to JSONL before each write. Progress is also
-recorded as JSONL, making interrupted runs safe to resume.
+recorded as JSONL, making interrupted runs safe to resume. Confirmed production
+runs are recorded in a separate approval JSONL ledger and share a run ID with
+progress and backup records.
 
 Run from apps/backend:
   python3 -m scripts.ahsec_d1_import --dry-run
+  python3 -m scripts.ahsec_d1_import --clean-preambles --dry-run
   python3 -m scripts.ahsec_d1_import --limit 1
-  python3 -m scripts.ahsec_d1_import
+  python3 -m scripts.ahsec_d1_import --confirm-production-write --limit 1
+
+Cleanup safety:
+  * `--clean-preambles --dry-run` creates the preview artifact.
+  * A production cleanup requires that artifact to be fresh and to match the
+    filters and chapter set being written.
+  * Normal imports do not require a cleanup preview. The low-level
+    `clean_existing_preambles(..., emergency=True)` compatibility helper is
+    reserved for an explicitly authorized emergency operation.
 """
 
 from __future__ import annotations
@@ -23,6 +34,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import difflib
+import getpass
+import hashlib
 import json
 import logging
 import os
@@ -31,7 +44,7 @@ import time
 import unicodedata
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +56,10 @@ from scripts.ahsec_ingest import (
     extract_pdf_text,
     notes_to_rag_sections,
     split_into_chapters,
+)
+from app.services.ai.note_quality import (
+    ModelPreambleError,
+    validate_generated_notes as _validate_generated_notes,
 )
 
 
@@ -73,8 +90,17 @@ STATE_DIR = Path(
 )
 PROGRESS_FILE = STATE_DIR / "progress.jsonl"
 BACKUP_FILE = STATE_DIR / "notes-backup.jsonl"
+APPROVAL_FILE = STATE_DIR / "approvals.jsonl"
+ARCHIVE_RETENTION_DAYS = int(os.getenv("AHSEC_D1_ARCHIVE_RETENTION_DAYS", "90"))
+CLEANUP_PREVIEW_FILENAME = "preamble-cleanup-preview.json"
+CLEANUP_PREVIEW_MAX_AGE_SECONDS = int(
+    os.getenv("AHSEC_CLEANUP_PREVIEW_MAX_AGE_SECONDS", "86400")
+)
 MIN_SOURCE_CHARS = 500
 MIN_NOTES_CHARS = 800
+TERMINAL_SUMMARY_EVENT = "import_terminal_summary"
+ACTIVE_RUN_ID: str | None = None
+ACTIVE_RUN_COUNTS = {"completed": 0, "failed": 0}
 
 
 def parse_args() -> argparse.Namespace:
@@ -82,6 +108,21 @@ def parse_args() -> argparse.Namespace:
         description="Replace AHSEC chapter notes in Cloudflare D1 from official PDFs"
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--confirm-production-write",
+        action="store_true",
+        help=(
+            "Explicitly allow writes to live Cloudflare D1 and Vectorize. "
+            "Without this flag, non-dry-run execution is refused."
+        ),
+    )
+    parser.add_argument(
+        "--operator",
+        help=(
+            "Name or identifier recorded as the operator approving a production "
+            "write (defaults to the local OS user)"
+        ),
+    )
     parser.add_argument("--limit", type=int)
     parser.add_argument("--class", dest="class_level", choices=["11", "12"])
     parser.add_argument("--subject", help="D1 subject slug, for example chemistry")
@@ -99,7 +140,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--clean-preambles",
         action="store_true",
-        help="Remove model-introduction preambles from existing AHSEC notes",
+        help=(
+            "Clean model-introduction preambles from existing AHSEC notes; "
+            "combine with --dry-run to preview changes"
+        ),
+    )
+    parser.add_argument(
+        "--cleanup-preview-report",
+        type=Path,
+        help=(
+            "Path to the cleanup preview JSON artifact. Preview mode writes to "
+            "this path and production cleanup reads the transferred artifact "
+            "from the same path; defaults to the local importer state directory."
+        ),
+    )
+    parser.add_argument(
+        "--archive-history",
+        action="store_true",
+        help=(
+            "Archive approval, progress, and backup records older than the "
+            "retention window; combine with --dry-run to preview only"
+        ),
+    )
+    parser.add_argument(
+        "--archive-before-days",
+        type=int,
+        default=ARCHIVE_RETENTION_DAYS,
+        help=(
+            "Keep this many days of live audit history when --archive-history "
+            "is used (default: %(default)s)"
+        ),
     )
     return parser.parse_args()
 
@@ -143,7 +213,13 @@ class CloudflareClient:
     def execute(self, sql: str, params: list[Any] | None = None) -> None:
         self.query(sql, params)
 
-    def generate(self, system_prompt: str, user_message: str) -> str:
+    def generate(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        chapter_id: str | None = None,
+    ) -> str:
         payload = {
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -158,12 +234,17 @@ class CloudflareClient:
             try:
                 body = self._post(f"{self.api}/ai/run/{model}", payload, timeout=180)
                 result = body.get("result") or {}
-                text = str(result.get("response") or "").strip()
+                raw_text = str(result.get("response") or "").strip()
+                if chapter_id is not None:
+                    validate_generated_notes(chapter_id, raw_text)
+                text = raw_text
                 text = clean_notes(text)
                 if len(text) > len(best):
                     best = text
                 if len(text) >= MIN_NOTES_CHARS and text.startswith("##"):
                     return text
+            except ModelPreambleError:
+                raise
             except Exception as exc:
                 errors.append(f"{model}: {exc}")
         if len(best) >= MIN_NOTES_CHARS:
@@ -232,6 +313,15 @@ def clean_notes(text: str) -> str:
     return text
 
 
+def validate_generated_notes(chapter_id: str, raw_notes: str) -> None:
+    """Reject known model introductions before notes can reach D1."""
+    _validate_generated_notes(
+        chapter_id,
+        raw_notes,
+        normalizer=clean_notes,
+    )
+
+
 def normalize(value: str) -> str:
     value = unicodedata.normalize("NFKD", value or "")
     value = "".join(ch for ch in value if not unicodedata.combining(ch))
@@ -254,16 +344,21 @@ def chunk_text(text: str, max_words: int = 400, overlap: int = 50) -> list[str]:
 
 
 def load_done() -> set[str]:
-    if not PROGRESS_FILE.exists():
-        return set()
     done: set[str] = set()
-    for line in PROGRESS_FILE.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
+    progress_files = [PROGRESS_FILE]
+    archive_dir = STATE_DIR / "archive"
+    if archive_dir.exists():
+        progress_files.extend(sorted(archive_dir.glob("*/progress.jsonl")))
+    for progress_file in progress_files:
+        if not progress_file.exists():
             continue
-        if row.get("status") == "done" and row.get("chapter_id"):
-            done.add(str(row["chapter_id"]))
+        for line in progress_file.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("status") == "done" and row.get("chapter_id"):
+                done.add(str(row["chapter_id"]))
     return done
 
 
@@ -273,14 +368,286 @@ def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def _active_run_path() -> Path:
+    return STATE_DIR / "active-run.json"
+
+
+def _set_active_run(run_id: str, started_at: str) -> None:
+    """Publish the run before its approval record so archival fails closed."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    path = _active_run_path()
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(
+            {"run_id": run_id, "started_at": started_at, "pid": os.getpid()},
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _clear_active_run(run_id: str | None = None) -> None:
+    path = _active_run_path()
+    if not path.exists():
+        return
+    try:
+        active = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if run_id and str(active.get("run_id") or "") != run_id:
+        return
+    path.unlink(missing_ok=True)
+
+
+def _active_run_ids() -> set[str]:
+    active_ids: set[str] = set()
+    if ACTIVE_RUN_ID:
+        active_ids.add(ACTIVE_RUN_ID)
+    path = _active_run_path()
+    if not path.exists():
+        return active_ids
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"*"}
+    run_id = str(record.get("run_id") or "").strip()
+    if run_id:
+        active_ids.add(run_id)
+    return active_ids
+
+
+def _jsonl_lines(path: Path) -> list[tuple[str, dict[str, Any] | None]]:
+    if not path.exists():
+        return []
+    lines: list[tuple[str, dict[str, Any] | None]] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines(keepends=True):
+        try:
+            record = json.loads(raw_line)
+        except json.JSONDecodeError:
+            record = None
+        lines.append((raw_line, record if isinstance(record, dict) else None))
+    return lines
+
+
+def _approval_run_ids_before(
+    cutoff: datetime,
+    approval_lines: list[tuple[str, dict[str, Any] | None]],
+) -> set[str]:
+    eligible: set[str] = set()
+    for _, record in approval_lines:
+        if not record or record.get("event") != "production_write_approved":
+            continue
+        run_id = str(record.get("run_id") or "").strip()
+        started_at = record.get("started_at")
+        if not run_id or not isinstance(started_at, str):
+            continue
+        try:
+            approved_at = datetime.fromisoformat(started_at)
+        except ValueError:
+            continue
+        if approved_at.tzinfo is None:
+            approved_at = approved_at.replace(tzinfo=timezone.utc)
+        if approved_at.astimezone(timezone.utc) < cutoff:
+            eligible.add(run_id)
+    return eligible
+
+
+def archive_history(before_days: int, dry_run: bool = False) -> dict[str, Any]:
+    """Archive old audit records while preserving active-run state."""
+    if before_days < 1:
+        raise ValueError("--archive-before-days must be at least 1")
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=before_days)
+    approval_lines = _jsonl_lines(APPROVAL_FILE)
+    candidate_run_ids = _approval_run_ids_before(cutoff, approval_lines)
+    protected_run_ids = _active_run_ids()
+    eligible_run_ids = (
+        set()
+        if "*" in protected_run_ids
+        else candidate_run_ids - protected_run_ids
+    )
+
+    files = {
+        "approvals": APPROVAL_FILE,
+        "progress": PROGRESS_FILE,
+        "notes-backup": BACKUP_FILE,
+    }
+    selected: dict[str, list[str]] = {}
+    retained: dict[Path, list[str]] = {}
+    counts: dict[str, int] = {}
+    for name, path in files.items():
+        selected[name] = []
+        retained[path] = []
+        for raw_line, record in _jsonl_lines(path):
+            run_id = str(record.get("run_id") or "").strip() if record else ""
+            if run_id in eligible_run_ids:
+                selected[name].append(raw_line)
+            else:
+                retained[path].append(raw_line)
+        counts[name] = len(selected[name])
+
+    summary: dict[str, Any] = {
+        "before_days": before_days,
+        "cutoff": cutoff.isoformat(),
+        "candidate_runs": len(candidate_run_ids),
+        "archivable_runs": len(eligible_run_ids),
+        "protected_runs": sorted(
+            run_id for run_id in protected_run_ids if run_id != "*"
+        ),
+        "records": counts,
+        "dry_run": dry_run,
+    }
+    if dry_run or not eligible_run_ids:
+        return summary
+
+    archive_root = STATE_DIR / "archive"
+    archive_root.mkdir(parents=True, exist_ok=True)
+    batch_name = now.strftime("%Y%m%dT%H%M%SZ")
+    batch_dir = archive_root / batch_name
+    suffix = 1
+    while batch_dir.exists():
+        batch_dir = archive_root / f"{batch_name}-{suffix}"
+        suffix += 1
+    batch_dir.mkdir()
+
+    for name, lines in selected.items():
+        if lines:
+            (batch_dir / f"{name}.jsonl").write_text(
+                "".join(lines), encoding="utf-8"
+            )
+
+    manifest = {
+        "archived_at": now.isoformat(),
+        "cutoff": cutoff.isoformat(),
+        "before_days": before_days,
+        "run_ids": sorted(eligible_run_ids),
+        "records": counts,
+        "source_files": {name: str(path) for name, path in files.items()},
+        "active_runs_protected": summary["protected_runs"],
+    }
+    (batch_dir / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    for path, lines in retained.items():
+        if not path.exists():
+            continue
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        temporary.write_text("".join(lines), encoding="utf-8")
+        os.replace(temporary, path)
+    summary["archive_dir"] = str(batch_dir)
+    return summary
+
+
+def production_scope(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "class": args.class_level,
+        "subject": args.subject,
+        "limit": args.limit,
+        "restart": args.restart,
+        "skip_index": args.skip_index,
+        "clean_preambles": args.clean_preambles,
+    }
+
+
+def cleanup_preview_scope(
+    args: argparse.Namespace, chapter_ids: list[str]
+) -> dict[str, Any]:
+    """Return the canonical filters and exact chapter set for cleanup."""
+    return {
+        **production_scope(args),
+        "chapter_ids": sorted({str(chapter_id) for chapter_id in chapter_ids}),
+    }
+
+
+def cleanup_preview_fingerprint(scope: dict[str, Any]) -> str:
+    encoded = json.dumps(scope, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def cleanup_preview_path(args: argparse.Namespace) -> Path:
+    """Resolve the preview artifact path shared by preview and apply runners."""
+    configured_path = getattr(args, "cleanup_preview_report", None)
+    if configured_path:
+        return Path(configured_path).expanduser()
+    return STATE_DIR / CLEANUP_PREVIEW_FILENAME
+
+
+def record_production_approval(
+    args: argparse.Namespace, extra_scope: dict[str, Any] | None = None
+) -> tuple[str, str]:
+    """Record a confirmed production run before any live data is touched."""
+    if args.dry_run or not args.confirm_production_write:
+        raise RuntimeError(
+            "Production approval records require explicit production-write confirmation"
+        )
+    run_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc).isoformat()
+    operator = (args.operator or getpass.getuser()).strip()
+    if not operator:
+        raise RuntimeError(
+            "An operator identifier is required for a production approval record"
+        )
+    _set_active_run(run_id, started_at)
+    scope = production_scope(args)
+    if extra_scope:
+        scope.update(extra_scope)
+    append_jsonl(
+        APPROVAL_FILE,
+        {
+            "event": "production_write_approved",
+            "run_id": run_id,
+            "operator": operator,
+            "started_at": started_at,
+            "approved_at": started_at,
+            "scope": scope,
+        },
+    )
+    return run_id, started_at
+
+
 def record_progress(chapter_id: str, status: str, **details: Any) -> None:
+    payload: dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "chapter_id": chapter_id,
+        "status": status,
+        **details,
+    }
+    if ACTIVE_RUN_ID:
+        payload["run_id"] = ACTIVE_RUN_ID
+    append_jsonl(
+        PROGRESS_FILE,
+        payload,
+    )
+
+
+def record_terminal_summary(
+    status: str,
+    *,
+    completed: int,
+    failed: int,
+) -> None:
+    """Append bounded run-level state without copying chapter data or errors."""
+    if not ACTIVE_RUN_ID:
+        return
+    if status not in {"completed", "failed"}:
+        raise ValueError(f"Unsupported terminal status: {status}")
+    completed = max(0, int(completed))
+    failed = max(0, int(failed))
     append_jsonl(
         PROGRESS_FILE,
         {
+            "event": TERMINAL_SUMMARY_EVENT,
+            "run_id": ACTIVE_RUN_ID,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "chapter_id": chapter_id,
             "status": status,
-            **details,
+            "chapters": completed + failed,
+            "completed": completed,
+            "failed": failed,
         },
     )
 
@@ -404,18 +771,18 @@ def build_prompt(chapter: dict[str, Any], source: dict[str, Any]) -> str:
 
 
 def backup_existing(chapter: dict[str, Any], source_url: str) -> None:
-    append_jsonl(
-        BACKUP_FILE,
-        {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "chapter_id": chapter["id"],
-            "subject_id": chapter["subject_id"],
-            "notes_en": chapter.get("notes_en"),
-            "rag_text": chapter.get("rag_text"),
-            "rag_sections_en": chapter.get("rag_sections_en"),
-            "source_pdf_url": source_url,
-        },
-    )
+    payload: dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "chapter_id": chapter["id"],
+        "subject_id": chapter["subject_id"],
+        "notes_en": chapter.get("notes_en"),
+        "rag_text": chapter.get("rag_text"),
+        "rag_sections_en": chapter.get("rag_sections_en"),
+        "source_pdf_url": source_url,
+    }
+    if ACTIVE_RUN_ID:
+        payload["run_id"] = ACTIVE_RUN_ID
+    append_jsonl(BACKUP_FILE, payload)
 
 
 def write_notes(
@@ -550,10 +917,11 @@ def replace_index(
     return len(rows)
 
 
-def clean_existing_preambles(
-    client: CloudflareClient, chapters: list[dict[str, Any]]
+def build_preamble_cleanup_plan(
+    chapters: list[dict[str, Any]], max_diff_lines: int = 20
 ) -> list[dict[str, Any]]:
-    affected: list[dict[str, Any]] = []
+    """Build the cleanup changes without mutating chapters or external state."""
+    planned: list[dict[str, Any]] = []
     for chapter in chapters:
         original = str(chapter.get("notes_en") or "")
         cleaned = clean_notes(original)
@@ -563,7 +931,66 @@ def clean_existing_preambles(
         if not sections:
             log.warning("Skipping cleanup for %s: no sections after scrub", chapter["id"])
             continue
-        backup_existing(chapter, "existing-d1-preamble-cleanup")
+        diff = list(
+            difflib.unified_diff(
+                original.splitlines(),
+                cleaned.splitlines(),
+                fromfile="before",
+                tofile="after",
+                lineterm="",
+                n=1,
+            )
+        )
+        changed_lines = [
+            line
+            for line in diff
+            if (line.startswith("+") and not line.startswith("+++"))
+            or (line.startswith("-") and not line.startswith("---"))
+        ]
+        planned.append(
+            {
+                **chapter,
+                "notes_en": cleaned,
+                "_cleanup_original_notes": original,
+                "_cleanup_sections": sections,
+                "_cleanup_diff": {
+                    "original_chars": len(original),
+                    "cleaned_chars": len(cleaned),
+                    "removed_chars": max(0, len(original) - len(cleaned)),
+                    "original_words": len(original.split()),
+                    "cleaned_words": len(cleaned.split()),
+                    "changed_lines": len(changed_lines),
+                    "preview": "\n".join(diff[:max_diff_lines]),
+                    "truncated": len(diff) > max_diff_lines,
+                },
+            }
+        )
+    return planned
+
+
+def apply_preamble_cleanup(
+    client: CloudflareClient,
+    planned: list[dict[str, Any]],
+    *,
+    preview: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Apply a cleanup plan after the caller proves preview evidence."""
+    if preview is None:
+        raise RuntimeError(
+            "Cleanup writes require a matching preview artifact. "
+            "Run --clean-preambles --dry-run first."
+        )
+    affected: list[dict[str, Any]] = []
+    for chapter in planned:
+        cleaned = str(chapter["notes_en"])
+        sections = chapter["_cleanup_sections"]
+        backup_existing(
+            {
+                **chapter,
+                "notes_en": chapter["_cleanup_original_notes"],
+            },
+            "existing-d1-preamble-cleanup",
+        )
         now = int(time.time())
         client.execute(
             """
@@ -590,14 +1017,203 @@ def clean_existing_preambles(
             """,
             [cleaned, now, f"ahsec-notes-en:{chapter['id']}"],
         )
-        affected.append({**chapter, "notes_en": cleaned})
+        affected.append(chapter)
         log.info("Removed preamble from %s (%s)", chapter["id"], chapter["title"])
         # The caller reindexes after all D1 updates so cleanup remains bounded.
     return affected
 
 
-async def main() -> int:
+def clean_existing_preambles(
+    client: CloudflareClient,
+    chapters: list[dict[str, Any]],
+    *,
+    emergency: bool = False,
+) -> list[dict[str, Any]]:
+    """Compatibility wrapper for an explicitly authorized emergency cleanup."""
+    if not emergency:
+        raise RuntimeError(
+            "The compatibility cleanup helper is emergency-only. "
+            "Use the preview workflow or pass emergency=True explicitly."
+        )
+    return apply_preamble_cleanup(
+        client,
+        build_preamble_cleanup_plan(chapters),
+        preview={"emergency": True},
+    )
+
+
+def cleanup_preview_record(chapter: dict[str, Any]) -> dict[str, Any]:
+    diff = chapter["_cleanup_diff"]
+    return {
+        "chapter_id": str(chapter["id"]),
+        "class_name": chapter.get("class_name"),
+        "subject": chapter.get("subject_name"),
+        "title": chapter.get("title"),
+        **diff,
+    }
+
+
+def write_cleanup_preview_report(
+    planned: list[dict[str, Any]],
+    scope: dict[str, Any] | None = None,
+    report_path: Path | None = None,
+) -> Path:
+    """Persist a bounded, non-D1 preview report for operators and automation."""
+    report_path = report_path or STATE_DIR / CLEANUP_PREVIEW_FILENAME
+    report_path = Path(report_path).expanduser()
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    chapter_ids = sorted({str(chapter["id"]) for chapter in planned})
+    resolved_scope = scope or {
+        "chapter_ids": chapter_ids,
+    }
+    generated_at = datetime.now(timezone.utc)
+    report = {
+        "generated_at": generated_at.isoformat(),
+        "mode": "preview",
+        "changed": len(planned),
+        "chapter_ids": chapter_ids,
+        "scope": resolved_scope,
+        "scope_fingerprint": cleanup_preview_fingerprint(resolved_scope),
+        "changes": [cleanup_preview_record(chapter) for chapter in planned],
+    }
+    temporary = report_path.with_name(f".{report_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, report_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return report_path
+
+
+def validate_cleanup_preview(
+    args: argparse.Namespace,
+    chapter_ids: list[str],
+    *,
+    report_path: Path | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Require a recent preview with the exact production cleanup scope."""
+    path = Path(report_path or cleanup_preview_path(args)).expanduser()
+    if not path.exists():
+        raise RuntimeError(
+            "Cleanup preview is required before a production cleanup. "
+            "Run --clean-preambles --dry-run with the same filters first."
+        )
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Cleanup preview cannot be read safely: {path}"
+        ) from exc
+    if report.get("mode") != "preview":
+        raise RuntimeError("Cleanup preview is invalid: expected mode=preview.")
+
+    generated_at_raw = report.get("generated_at")
+    try:
+        generated_at = datetime.fromisoformat(str(generated_at_raw))
+        if generated_at.tzinfo is None:
+            generated_at = generated_at.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "Cleanup preview is invalid: generated_at is missing or malformed."
+        ) from exc
+    current_time = now or datetime.now(timezone.utc)
+    age_seconds = (current_time - generated_at).total_seconds()
+    if age_seconds < 0 or age_seconds > CLEANUP_PREVIEW_MAX_AGE_SECONDS:
+        raise RuntimeError(
+            "Cleanup preview is stale or from the future. "
+            "Regenerate it with --clean-preambles --dry-run."
+        )
+
+    expected_scope = cleanup_preview_scope(args, chapter_ids)
+    expected_fingerprint = cleanup_preview_fingerprint(expected_scope)
+    report_scope = report.get("scope")
+    report_ids = report.get("chapter_ids")
+    changes = report.get("changes")
+    change_ids = [
+        str(change.get("chapter_id"))
+        for change in changes
+        if isinstance(change, dict) and change.get("chapter_id") is not None
+    ] if isinstance(changes, list) else None
+    if (
+        report_scope != expected_scope
+        or report_ids != expected_scope["chapter_ids"]
+        or report.get("scope_fingerprint") != expected_fingerprint
+        or report.get("changed") != len(expected_scope["chapter_ids"])
+        or not isinstance(changes, list)
+        or sorted(change_ids) != expected_scope["chapter_ids"]
+    ):
+        raise RuntimeError(
+            "Cleanup preview does not match the current filters or chapter set. "
+            "Regenerate it with --clean-preambles --dry-run."
+        )
+    return report
+
+
+def log_cleanup_preview(planned: list[dict[str, Any]]) -> None:
+    log.info("Preamble cleanup preview: changed=%d", len(planned))
+    for chapter in planned:
+        diff = chapter["_cleanup_diff"]
+        log.info(
+            "CLEANUP PREVIEW chapter_id=%s title=%s chars=%d -> %d "
+            "(removed=%d, changed_lines=%d)",
+            chapter["id"],
+            chapter["title"],
+            diff["original_chars"],
+            diff["cleaned_chars"],
+            diff["removed_chars"],
+            diff["changed_lines"],
+        )
+        if diff["preview"]:
+            for line in diff["preview"].splitlines():
+                log.info("  %s", line)
+        if diff["truncated"]:
+            log.info("  ... diff truncated in preview report")
+
+
+async def _run_main() -> int:
+    global ACTIVE_RUN_ID, ACTIVE_RUN_COUNTS
     args = parse_args()
+    ACTIVE_RUN_ID = None
+    ACTIVE_RUN_COUNTS = {"completed": 0, "failed": 0}
+    if getattr(args, "archive_history", False):
+        try:
+            summary = archive_history(
+                getattr(args, "archive_before_days", ARCHIVE_RETENTION_DAYS),
+                dry_run=args.dry_run,
+            )
+        except ValueError as exc:
+            log.error("%s", exc)
+            return 2
+        action = "would archive" if args.dry_run else "archived"
+        log.info(
+            "Audit history %s: runs=%d records=%s protected=%s%s",
+            action,
+            summary["archivable_runs"],
+            summary["records"],
+            summary["protected_runs"],
+            f" archive_dir={summary['archive_dir']}"
+            if summary.get("archive_dir")
+            else "",
+        )
+        return 0
+    if not args.dry_run and not args.confirm_production_write:
+        log.error(
+            "Refusing to write live curriculum data without explicit confirmation."
+        )
+        log.error(
+            "Run with --dry-run for a read-only import, or add "
+            "--confirm-production-write for a deliberate production import."
+        )
+        return 2
+    if args.dry_run:
+        log.info(
+            "Read-only dry-run: no Cloudflare D1 or Vectorize writes will be made. "
+            "Use --confirm-production-write only for a deliberate production import."
+        )
     client = CloudflareClient()
     chapters = fetch_chapters(client)
     if args.class_level:
@@ -607,7 +1223,45 @@ async def main() -> int:
         chapters = [row for row in chapters if row["subject_slug"] == args.subject]
 
     if args.clean_preambles:
-        affected = await asyncio.to_thread(clean_existing_preambles, client, chapters)
+        planned = await asyncio.to_thread(build_preamble_cleanup_plan, chapters)
+        chapter_ids = [str(chapter["id"]) for chapter in planned]
+        preview_scope = cleanup_preview_scope(args, chapter_ids)
+        if args.dry_run:
+            log_cleanup_preview(planned)
+            report_path = write_cleanup_preview_report(
+                planned,
+                preview_scope,
+                cleanup_preview_path(args),
+            )
+            log.info("Cleanup preview report: %s", report_path)
+            return 0
+        preview = validate_cleanup_preview(
+            args,
+            chapter_ids,
+            report_path=cleanup_preview_path(args),
+        )
+        ACTIVE_RUN_ID, started_at = record_production_approval(
+            args,
+            {
+                "cleanup_preview_fingerprint": preview["scope_fingerprint"],
+                "cleanup_preview_generated_at": preview["generated_at"],
+            },
+        )
+        log.info(
+            "Production cleanup approved by %s (run_id=%s, started_at=%s, "
+            "preview_fingerprint=%s)",
+            args.operator or getpass.getuser(),
+            ACTIVE_RUN_ID,
+            started_at,
+            preview["scope_fingerprint"],
+        )
+        affected = await asyncio.to_thread(
+            apply_preamble_cleanup,
+            client,
+            planned,
+            preview=preview,
+        )
+        ACTIVE_RUN_COUNTS["completed"] = len(affected)
         if not args.skip_index:
             for chapter in affected:
                 await asyncio.to_thread(
@@ -618,7 +1272,22 @@ async def main() -> int:
                     "existing-d1-preamble-cleanup",
                 )
         log.info("Preamble cleanup complete: changed=%d", len(affected))
+        record_terminal_summary(
+            "completed",
+            completed=len(affected),
+            failed=0,
+        )
+        _clear_active_run(ACTIVE_RUN_ID)
         return 0
+
+    if not args.dry_run:
+        ACTIVE_RUN_ID, started_at = record_production_approval(args)
+        log.info(
+            "Production write approved by %s (run_id=%s, started_at=%s)",
+            args.operator or getpass.getuser(),
+            ACTIVE_RUN_ID,
+            started_at,
+        )
 
     sources = await extract_sources(args)
     done = set() if args.restart else load_done()
@@ -700,6 +1369,7 @@ async def main() -> int:
                     client.generate,
                     _NOTES_SYSTEM_EN,
                     build_prompt(chapter, source),
+                    chapter_id=chapter_id,
                 )
                 sections = notes_to_rag_sections(notes)
                 if not sections:
@@ -734,15 +1404,38 @@ async def main() -> int:
                 chunks=chunk_count,
             )
             processed += 1
+            ACTIVE_RUN_COUNTS["completed"] = processed
             log.info("Updated %s (%d chars, %d chunks)", chapter_id, len(notes), chunk_count)
         except Exception as exc:
             failed += 1
+            ACTIVE_RUN_COUNTS["failed"] = failed
             record_progress(chapter_id, "error", error=str(exc))
             log.exception("Failed chapter %s: %s", chapter_id, exc)
         await asyncio.sleep(max(0.0, args.delay))
 
     log.info("Run complete: updated=%d failed=%d", processed, failed)
+    record_terminal_summary(
+        "failed" if failed else "completed",
+        completed=processed,
+        failed=failed,
+    )
+    _clear_active_run(ACTIVE_RUN_ID)
     return 1 if failed else 0
+
+
+async def main() -> int:
+    """Run an import and close an approved run even on an unexpected failure."""
+    try:
+        return await _run_main()
+    except Exception:
+        if ACTIVE_RUN_ID:
+            record_terminal_summary(
+                "failed",
+                completed=ACTIVE_RUN_COUNTS["completed"],
+                failed=ACTIVE_RUN_COUNTS["failed"],
+            )
+            _clear_active_run(ACTIVE_RUN_ID)
+        raise
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ from typing import AsyncGenerator
 import httpx
 
 from app.config import settings
+from app.services.ai.note_quality import validate_generated_notes
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,29 @@ class WorkersAIClient:
                 break
 
         raise RuntimeError(f"Workers AI generation failed: {last_error}") from last_error
+
+    async def generate_curriculum_notes(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        record_id: str,
+        is_assamese: bool = False,
+        max_tokens: int | None = None,
+    ) -> str:
+        """Generate notes and reject assistant preambles before persistence.
+
+        General-purpose generation remains unvalidated because chat and other
+        structured prompts can legitimately begin with conversational text.
+        """
+        text = await self.generate(
+            system_prompt,
+            user_message,
+            is_assamese=is_assamese,
+            max_tokens=max_tokens,
+        )
+        validate_generated_notes(record_id, text)
+        return text
 
     async def stream_generate_with_retry(
         self,

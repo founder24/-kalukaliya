@@ -41,6 +41,7 @@
 - [Profile page crash defensive fixes](profile-page-crash-defense.md) — Root cause unknown (no prod trace); added null guard + error state + loadProfile callback; subscription_tier Literal widened
 - [Prerender $X replacement corruption](prerender-replace-corruption.md) — html.replace(pattern, string) with $' in data corrupts HTML; always use () => replacement in prerender scripts
 - [AHSEC Q&A pipeline](ahsec-qa-pipeline.md) — exercise extraction fix, Q&A format, meta-commentary cleanup, system prompt lesson, backfill script
+- [AHSEC cleanup preview gate](ahsec-cleanup-preview-gate.md) — production preamble cleanup requires fresh, scope-matched preview evidence
 - [AHSEC Q&A pipeline disabled](syrabit-qa-pipeline-disabled.md) — Q&A + published_topics cleared from all 548 chapters; ingestion now writes notes only; re-enable by un-commenting generate_qa_from_notes() call
 - [AHSEC prelim-page detection](ahsec-prelim-signals.md) — _PRELIM_SIGNALS gaps that let "Textbook Publication Details/Educational Philosophy/NCF" pages become chapter notes; 16 chapters cleared Aug 2026
 - [RAG field priority](rag-field-priority.md) — retrieval paths must read rag_sections→rag_text→notes_en→content_en; notes_en was missing, silently returning 0 context
@@ -72,6 +73,7 @@
 - [Syllabus PDF alignment](syllabus-pdf-alignment.md) — catalog PDFs lack subject links; align by official structure and reject body-keyword guesses.
 - [IndexNow endpoint fallback](indexnow-endpoint-fallback.md) — Cloudflare egress can be rate-limited per provider; use bounded participant fallback.
 - [Cloudflare secret verification](cloudflare-secret-verification.md) — verify Worker secret names through bindings metadata when immediate Wrangler CI listing is inconsistent.
+- [Cloudflare analytics workflow permissions](cloudflare-analytics-workflow-permissions.md) — analytics GraphQL schema is valid, but the deployment token needs zone analytics read permission.
 - [Workers AI Assamese generation](workers-ai-assamese.md) — use SEA-LION non-streaming; Assamese/Bengali share script and danda must not trigger Hindi detection.
 - [Explicit curriculum scope](chat-curriculum-scope.md) — explicit class/subject wording must fail closed and every RAG source must pass full published-hierarchy validation.
 - [Exact vector grounding](rag-exact-vector-grounding.md) — preserve matched passage order; never replace semantic matches with chapter openings.
@@ -82,3 +84,11 @@
 - [Release failure rehearsals](release-failure-rehearsals.md) — use test-only workflows so unrelated deploy gates cannot hide scheduling evidence.
 - [Workflow trigger contracts](workflow-trigger-contracts.md) — enforce GitHub Actions triggers from normalized YAML, not source-line regexes.
 - [Access bypass rehearsals](access-bypass-rehearsals.md) — TEST-NET proves policy cleanup only; warning activation requires a temporary real operator /32.
+- [Staff content editor contract](staff-content-contract.md) — shared CRUD uses direct staff routes; admin-only jobs remain under admin routes.
+- [GitHub audit access](github-audit-access.md) — public PR/check data is available, but security alerts and branch protection require a working authenticated token
+- [Playwright route fixture matching](playwright-route-fixtures.md) — collection and nested REST URLs need separate route globs in stateful browser fixtures.
+- [Playwright runtime preflight](playwright-runtime-preflight.md) — validate the separately downloaded headless shell directly; regular Chromium checks can miss loader failures.
+- [AHSEC importer workflow runtime](syrabit-import-workflow-runtime.md) — local dry-runs need the PEP 668 install flag and the locked PyMuPDF dependency.
+- [Referral settlement controls](referral-settlement-controls.md) — fund and settle only frozen mature-claim statements with private payout evidence and immutable pause cutoffs
+- [Assamese translation boundary](assamese-translation-boundary.md) — validate raw translation chunks before cleanup, accumulation, or bilingual chapter writes
+- [Live staff Access boundary](staff-live-access-boundary.md) — production staff verification needs both application auth and Cloudflare Access credentials

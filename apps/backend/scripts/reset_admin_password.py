@@ -28,15 +28,18 @@ async def main():
     await init_mongo()
 
     from app.models.user import User, _bcrypt_safe
+    from app.utils.privacy import redact_email
     import bcrypt
 
     user = await User.find_one({"email": email})
     if not user:
-        print(f"No user found with email: {email}")
+        print(f"No user found with email fingerprint: {redact_email(email)}")
         sys.exit(1)
 
     if user.role != "admin":
-        print(f"User {email} has role '{user.role}', not 'admin'.")
+        print(
+            f"User {redact_email(email)} has role '{user.role}', not 'admin'."
+        )
         answer = input("Reset password anyway? [y/N] ").strip().lower()
         if answer != "y":
             sys.exit(0)
@@ -46,7 +49,10 @@ async def main():
     await user.save()
 
     ok = bcrypt.checkpw(_bcrypt_safe(new_password), new_hash.encode())
-    print(f"Password reset for {email}. Self-verify: {'OK ✓' if ok else 'FAILED ✗'}")
+    print(
+        f"Password reset for {redact_email(email)}. "
+        f"Self-verify: {'OK ✓' if ok else 'FAILED ✗'}"
+    )
 
 
 if __name__ == "__main__":

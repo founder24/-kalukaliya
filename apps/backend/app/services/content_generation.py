@@ -27,6 +27,7 @@ from beanie import PydanticObjectId
 
 from app.models.content import Chapter
 from app.services.ai.workers_ai_client import workers_ai_client
+from app.services.ai.note_quality import validate_generated_notes
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +204,11 @@ class ContentGenerationService:
 
         # ── 2. English content via Workers AI ─────────────────────────────────
         logger.info(f"Generating English notes for {chapter.title!r}")
-        content_en = await workers_ai_client.generate(system_prompt, user_message)
+        content_en = await workers_ai_client.generate_curriculum_notes(
+            system_prompt,
+            user_message,
+            record_id=f"{chapter.id} ({chapter.title})",
+        )
         chapter.content_en = content_en
 
         # ── 3. Extract per-topic definitions from generated content ───────────
@@ -405,6 +410,11 @@ class ContentGenerationService:
             )
             part = await workers_ai_client.generate(translate_prompt, chunk, is_assamese=True)
             if part and part.strip():
+                validate_generated_notes(
+                    f"{chapter_id} translation chunk {idx + 1}/{len(chunks)}",
+                    part,
+                    record_type="Assamese translation chunk",
+                )
                 translated_parts.append(part.strip())
 
         notes_as = "\n\n".join(translated_parts)

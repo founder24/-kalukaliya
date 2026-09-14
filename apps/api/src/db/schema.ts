@@ -482,6 +482,526 @@ export const analyticsEvents = sqliteTable('analytics_events', {
   index('analytics_events_route_created_idx').on(t.routePath, t.createdAt),
 ]);
 
+// Aggregate provider evidence used for ad-funded referral ROI. This ledger
+// deliberately has no user-level advertising identifiers.
+export const adNetworkInventory = sqliteTable('ad_network_inventory', {
+  network: text('network').primaryKey(),
+  status: text('status').notNull(),
+  configured: integer('configured').notNull().default(0),
+  placementsJson: text('placements_json').notNull().default('[]'),
+  policyNotes: text('policy_notes').notNull().default(''),
+  updatedBy: text('updated_by'),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+});
+
+export const adRevenueReports = sqliteTable('ad_revenue_reports', {
+  id: text('id').primaryKey(),
+  network: text('network').notNull().references(() => adNetworkInventory.network),
+  periodStart: integer('period_start').notNull(),
+  periodEnd: integer('period_end').notNull(),
+  settlementPeriod: text('settlement_period').notNull(),
+  currency: text('currency').notNull().default('INR'),
+  grossRevenuePaise: integer('gross_revenue_paise').notNull(),
+  adjustmentsPaise: integer('adjustments_paise').notNull().default(0),
+  providerFeesPaise: integer('provider_fees_paise').notNull().default(0),
+  netRevenuePaise: integer('net_revenue_paise').notNull(),
+  monetizedImpressions: integer('monetized_impressions').notNull(),
+  finalized: integer('finalized').notNull(),
+  finalizedThroughAt: integer('finalized_through_at').notNull(),
+  fetchedAt: integer('fetched_at').notNull(),
+  freshnessExpiresAt: integer('freshness_expires_at').notNull(),
+  sourceReference: text('source_reference').notNull(),
+  evidenceHash: text('evidence_hash').notNull(),
+  importedBy: text('imported_by').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('ad_revenue_source_ref_idx').on(t.sourceReference),
+  index('ad_revenue_period_idx').on(t.network, t.periodStart, t.periodEnd, t.finalized),
+]);
+
+export const referralRoiControls = sqliteTable('referral_roi_controls', {
+  id: text('id').primaryKey(),
+  reserveHealthy: integer('reserve_healthy').notNull().default(0),
+  revenueFresh: integer('revenue_fresh').notNull().default(0),
+  invalidTrafficHealthy: integer('invalid_traffic_healthy').notNull().default(0),
+  adAccountHealthy: integer('ad_account_healthy').notNull().default(0),
+  contributionMarginHealthy: integer('contribution_margin_healthy').notNull().default(0),
+  identityResetsHealthy: integer('identity_resets_healthy').notNull().default(0),
+  fraudHealthy: integer('fraud_healthy').notNull().default(0),
+  exposureHealthy: integer('exposure_healthy').notNull().default(0),
+  evidenceId: text('evidence_id').notNull(),
+  warningsJson: text('warnings_json').notNull().default('[]'),
+  updatedBy: text('updated_by').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RECURRING REFERRAL ATTRIBUTION
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const referralProgramState = sqliteTable('referral_program_state', {
+  id: text('id').primaryKey(),
+  state: text('state').notNull().default('paused'),
+  policyVersion: text('policy_version').notNull(),
+  pauseEffectiveAt: integer('pause_effective_at'),
+  resumedAt: integer('resumed_at'),
+  accrualGeneration: integer('accrual_generation').notNull().default(0),
+  updatedBy: text('updated_by'),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+});
+
+export const referralWeeks = sqliteTable('referral_weeks', {
+  id: text('id').primaryKey(),
+  weekKey: text('week_key').notNull(),
+  startsAt: integer('starts_at').notNull(),
+  endsAt: integer('ends_at').notNull(),
+  state: text('state').notNull().default('closed'),
+  policyVersion: text('policy_version').notNull(),
+  openedAt: integer('opened_at'),
+  pauseEffectiveAt: integer('pause_effective_at'),
+  resumedAt: integer('resumed_at'),
+  accrualGeneration: integer('accrual_generation').notNull().default(0),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_weeks_key_idx').on(t.weekKey),
+  uniqueIndex('referral_weeks_start_idx').on(t.startsAt),
+  uniqueIndex('referral_weeks_end_idx').on(t.endsAt),
+  index('referral_weeks_state_time_idx').on(t.state, t.startsAt, t.endsAt),
+]);
+
+export const referralWeeklyRoiReports = sqliteTable('referral_weekly_roi_reports', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  revenueReportId: text('revenue_report_id').references(() => adRevenueReports.id),
+  referralClicks: integer('referral_clicks').notNull().default(0),
+  uniqueBrowserIdentities: integer('unique_browser_identities').notNull().default(0),
+  authenticatedAccounts: integer('authenticated_accounts').notNull().default(0),
+  matureVerifiedVisitors: integer('mature_verified_visitors').notNull().default(0),
+  repeatWeekVisitors: integer('repeat_week_visitors').notNull().default(0),
+  payableStatements: integer('payable_statements').notNull().default(0),
+  cashPaidInr: integer('cash_paid_inr').notNull().default(0),
+  reservedRewardsInr: integer('reserved_rewards_inr').notNull().default(0),
+  reviewCostInr: integer('review_cost_inr').notNull().default(0),
+  fraudCostInr: integer('fraud_cost_inr').notNull().default(0),
+  reversalCostInr: integer('reversal_cost_inr').notNull().default(0),
+  supportCostInr: integer('support_cost_inr').notNull().default(0),
+  operatingCostInr: integer('operating_cost_inr').notNull().default(0),
+  trueProgramCostInr: integer('true_program_cost_inr').notNull().default(0),
+  actualMonetizedImpressions: integer('actual_monetized_impressions').notNull().default(0),
+  finalizedNetAdRevenuePaise: integer('finalized_net_ad_revenue_paise'),
+  contributionMarginPaise: integer('contribution_margin_paise'),
+  paybackRatioMilli: integer('payback_ratio_milli'),
+  dataQuality: text('data_quality').notNull(),
+  pauseRecommended: integer('pause_recommended').notNull().default(1),
+  warningsJson: text('warnings_json').notNull().default('[]'),
+  generatedBy: text('generated_by').notNull(),
+  generatedAt: integer('generated_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (t) => [
+  uniqueIndex('referral_weekly_roi_week_idx').on(t.weekId),
+  index('referral_weekly_roi_quality_idx').on(t.dataQuality, t.pauseRecommended, t.generatedAt),
+]);
+
+export const referralInfluencerSlots = sqliteTable('referral_influencer_slots', {
+  slotNo: integer('slot_no').primaryKey(),
+  userId: text('user_id').references(() => users.id),
+  referralCode: text('referral_code'),
+  status: text('status').notNull().default('available'),
+  tier: text('tier').notNull().default('basic'),
+  identityVerified: integer('identity_verified').notNull().default(0),
+  kycVerified: integer('kyc_verified').notNull().default(0),
+  academicSnapshot: text('academic_snapshot'),
+  eligibilityReviewedAt: integer('eligibility_reviewed_at'),
+  admittedAt: integer('admitted_at'),
+  inactiveAt: integer('inactive_at'),
+  suspendedAt: integer('suspended_at'),
+  removedAt: integer('removed_at'),
+  advancedEffectiveAt: integer('advanced_effective_at'),
+  policyVersion: text('policy_version').notNull().default('2026-09-14'),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_influencer_user_idx').on(t.userId),
+  uniqueIndex('referral_influencer_code_idx').on(t.referralCode),
+  index('referral_influencer_status_idx').on(t.status, t.slotNo),
+]);
+
+export const referralAdmissionAudits = sqliteTable('referral_admission_audits', {
+  id: text('id').primaryKey(),
+  influencerSlot: integer('influencer_slot').notNull(),
+  userId: text('user_id').notNull(),
+  actorId: text('actor_id').notNull(),
+  reason: text('reason').notNull(),
+  admittedAt: integer('admitted_at').notNull(),
+  policyVersion: text('policy_version').notNull(),
+}, (t) => [
+  index('referral_admission_audit_slot_idx').on(t.influencerSlot, t.admittedAt),
+]);
+
+export const referralApplications = sqliteTable('referral_applications', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  status: text('status').notNull().default('incomplete'),
+  institution: text('institution').notNull(),
+  className: text('class_name').notNull(),
+  streamName: text('stream_name').notNull(),
+  academicSnapshot: text('academic_snapshot').notNull(),
+  contactSnapshot: text('contact_snapshot').notNull(),
+  identityStatus: text('identity_status').notNull().default('pending'),
+  kycStatus: text('kyc_status').notNull().default('pending'),
+  ageEligible: integer('age_eligible').notNull(),
+  guardianConsentRequired: integer('guardian_consent_required').notNull().default(0),
+  guardianConsentConfirmed: integer('guardian_consent_confirmed').notNull().default(0),
+  eligibilityAcknowledged: integer('eligibility_acknowledged').notNull(),
+  conductAcknowledged: integer('conduct_acknowledged').notNull(),
+  privacyConsent: integer('privacy_consent').notNull(),
+  termsVersion: text('terms_version').notNull(),
+  privacyVersion: text('privacy_version').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  payloadFingerprint: text('payload_fingerprint').notNull(),
+  waitlistPriorityAt: integer('waitlist_priority_at'),
+  activationDeadlineAt: integer('activation_deadline_at'),
+  influencerSlot: integer('influencer_slot').references(() => referralInfluencerSlots.slotNo),
+  decisionReason: text('decision_reason'),
+  reviewedBy: text('reviewed_by').references(() => users.id),
+  reviewedAt: integer('reviewed_at'),
+  submittedAt: integer('submitted_at').notNull(),
+  activatedAt: integer('activated_at'),
+  suspendedAt: integer('suspended_at'),
+  closedAt: integer('closed_at'),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_application_user_idx').on(t.userId),
+  uniqueIndex('referral_application_idempotency_idx').on(t.userId, t.idempotencyKey),
+  index('referral_application_review_queue_idx').on(t.status, t.submittedAt, t.id),
+  index('referral_application_waitlist_idx').on(t.status, t.waitlistPriorityAt, t.submittedAt, t.id),
+  index('referral_application_activation_expiry_idx').on(t.status, t.activationDeadlineAt),
+]);
+
+export const referralApplicationAudits = sqliteTable('referral_application_audits', {
+  id: text('id').primaryKey(),
+  applicationId: text('application_id').notNull().references(() => referralApplications.id),
+  userId: text('user_id').notNull().references(() => users.id),
+  actorId: text('actor_id').notNull().references(() => users.id),
+  action: text('action').notNull(),
+  fromStatus: text('from_status'),
+  toStatus: text('to_status').notNull(),
+  reason: text('reason').notNull(),
+  policyVersion: text('policy_version').notNull(),
+  occurredAt: integer('occurred_at').notNull(),
+  metadata: text('metadata').notNull().default('{}'),
+}, (t) => [
+  index('referral_application_audit_app_idx').on(t.applicationId, t.occurredAt),
+]);
+
+export const referralWeeklyClaims = sqliteTable('referral_weekly_claims', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  identityHash: text('identity_hash').notNull(),
+  creditedInfluencerSlot: integer('credited_influencer_slot').notNull().references(() => referralInfluencerSlots.slotNo),
+  accountId: text('account_id').references(() => users.id),
+  identityConfidence: text('identity_confidence').notNull(),
+  state: text('state').notNull().default('pending'),
+  rejectionReason: text('rejection_reason'),
+  firstSeenAt: integer('first_seen_at').notNull(),
+  lastSeenAt: integer('last_seen_at').notNull(),
+  maturedAt: integer('matured_at'),
+  maturityToken: text('maturity_token'),
+  qualityEvidenceId: text('quality_evidence_id'),
+  reversalToken: text('reversal_token'),
+  reconciliationToken: text('reconciliation_token'),
+  progressCounted: integer('progress_counted').notNull().default(0),
+  accrualGeneration: integer('accrual_generation').notNull().default(0),
+  eventCount: integer('event_count').notNull().default(1),
+  qualityEvidence: text('quality_evidence').notNull().default('{}'),
+  policyVersion: text('policy_version').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_weekly_identity_claim_idx').on(t.weekId, t.identityHash),
+  uniqueIndex('referral_weekly_account_claim_idx')
+    .on(t.weekId, t.accountId)
+    .where(sql`${t.accountId} IS NOT NULL AND ${t.state} != 'rejected'`),
+  uniqueIndex('referral_weekly_maturity_token_idx').on(t.maturityToken),
+  uniqueIndex('referral_weekly_quality_evidence_idx').on(t.qualityEvidenceId),
+  uniqueIndex('referral_weekly_reversal_token_idx').on(t.reversalToken),
+  uniqueIndex('referral_weekly_reconciliation_token_idx').on(t.reconciliationToken),
+  index('referral_weekly_claim_influencer_idx').on(t.weekId, t.creditedInfluencerSlot, t.state),
+  index('referral_weekly_claim_maturity_idx').on(t.state, t.identityConfidence, t.firstSeenAt),
+  index('referral_weekly_claim_expiry_idx').on(t.expiresAt),
+]);
+
+export const referralClaimEvents = sqliteTable('referral_claim_events', {
+  id: text('id').primaryKey(),
+  claimId: text('claim_id').references(() => referralWeeklyClaims.id),
+  weekId: text('week_id').references(() => referralWeeks.id),
+  influencerSlot: integer('influencer_slot').notNull().references(() => referralInfluencerSlots.slotNo),
+  eventKey: text('event_key').notNull(),
+  eventType: text('event_type').notNull(),
+  identityConfidence: text('identity_confidence').notNull(),
+  occurredAt: integer('occurred_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_claim_event_key_idx').on(t.eventKey),
+  index('referral_claim_events_expiry_idx').on(t.expiresAt),
+  index('referral_claim_events_week_slot_idx').on(t.weekId, t.influencerSlot, t.occurredAt),
+]);
+
+export const referralWeeklyProgress = sqliteTable('referral_weekly_progress', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  influencerSlot: integer('influencer_slot').notNull().references(() => referralInfluencerSlots.slotNo),
+  matureVerifiedCount: integer('mature_verified_count').notNull().default(0),
+  rewardEligibleCount: integer('reward_eligible_count').notNull().default(0),
+  uniqueBrowserCount: integer('unique_browser_count').notNull().default(0),
+  authenticatedAccountCount: integer('authenticated_account_count').notNull().default(0),
+  lowConfidenceCount: integer('low_confidence_count').notNull().default(0),
+  provisionalQualifiedAt: integer('provisional_qualified_at'),
+  policyVersion: text('policy_version').notNull(),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_weekly_progress_slot_idx').on(t.weekId, t.influencerSlot),
+  index('referral_weekly_progress_qualification_idx').on(t.weekId, t.provisionalQualifiedAt),
+]);
+
+export const referralAdvancedPositions = sqliteTable('referral_advanced_positions', {
+  positionNo: integer('position_no').primaryKey(),
+  influencerSlot: integer('influencer_slot').references(() => referralInfluencerSlots.slotNo),
+  status: text('status').notNull().default('available'),
+  qualifiedWeekId: text('qualified_week_id').references(() => referralWeeks.id),
+  qualifiedAt: integer('qualified_at'),
+  reviewedBy: text('reviewed_by'),
+  reviewedAt: integer('reviewed_at'),
+  reviewReason: text('review_reason'),
+  activatesAt: integer('activates_at'),
+  policyVersion: text('policy_version').notNull().default('2026-09-14'),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_advanced_influencer_idx').on(t.influencerSlot),
+  index('referral_advanced_status_idx').on(t.status, t.positionNo),
+]);
+
+export const referralAdvancedReviews = sqliteTable('referral_advanced_reviews', {
+  id: text('id').primaryKey(),
+  positionNo: integer('position_no').notNull().references(() => referralAdvancedPositions.positionNo),
+  influencerSlot: integer('influencer_slot').notNull().references(() => referralInfluencerSlots.slotNo),
+  qualifiedWeekId: text('qualified_week_id').notNull().references(() => referralWeeks.id),
+  qualifiedAt: integer('qualified_at').notNull(),
+  decision: text('decision').notNull(),
+  reviewerId: text('reviewer_id').notNull(),
+  reason: text('reason').notNull(),
+  reviewedAt: integer('reviewed_at').notNull(),
+  activatesAt: integer('activates_at'),
+  policyVersion: text('policy_version').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  index('referral_advanced_reviews_influencer_idx').on(t.influencerSlot, t.reviewedAt),
+]);
+
+export const referralProgramTransitions = sqliteTable('referral_program_transitions', {
+  id: text('id').primaryKey(),
+  transition: text('transition').notNull(),
+  actorId: text('actor_id').notNull(),
+  reason: text('reason'),
+  effectiveAt: integer('effective_at').notNull(),
+  accrualGeneration: integer('accrual_generation').notNull(),
+  gateEvidence: text('gate_evidence'),
+  policyVersion: text('policy_version').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  index('referral_program_transitions_time_idx').on(t.effectiveAt, t.transition),
+  uniqueIndex('referral_program_transition_once_idx').on(t.transition, t.effectiveAt, t.accrualGeneration),
+]);
+
+export const referralGateEvidence = sqliteTable('referral_gate_evidence', {
+  id: text('id').primaryKey(),
+  provider: text('provider').notNull(),
+  providerEvidenceId: text('provider_evidence_id').notNull(),
+  finalizedThroughAt: integer('finalized_through_at').notNull(),
+  grossReserveInr: integer('gross_reserve_inr').notNull(),
+  outstandingObligationsInr: integer('outstanding_obligations_inr').notNull(),
+  qualityEvidenceId: text('quality_evidence_id').notNull(),
+  qualityMeasuredAt: integer('quality_measured_at').notNull(),
+  attributionHealthy: integer('attribution_healthy').notNull(),
+  deduplicationHealthy: integer('deduplication_healthy').notNull(),
+  fraudReviewHealthy: integer('fraud_review_healthy').notNull(),
+  settlementHealthy: integer('settlement_healthy').notNull(),
+  recordedAt: integer('recorded_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  policyVersion: text('policy_version').notNull(),
+}, (t) => [
+  uniqueIndex('referral_gate_provider_evidence_idx').on(t.providerEvidenceId),
+  uniqueIndex('referral_gate_quality_evidence_idx').on(t.qualityEvidenceId),
+  index('referral_gate_evidence_expiry_idx').on(t.expiresAt),
+]);
+
+export const referralVisitRateLimits = sqliteTable('referral_visit_rate_limits', {
+  bucketKey: text('bucket_key').primaryKey(),
+  requestCount: integer('request_count').notNull().default(1),
+  expiresAt: integer('expires_at').notNull(),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  index('referral_visit_rate_limits_expiry_idx').on(t.expiresAt),
+]);
+
+export const referralWeeklyEnvelopes = sqliteTable('referral_weekly_envelopes', {
+  weekId: text('week_id').primaryKey().references(() => referralWeeks.id),
+  worstCaseExposureInr: integer('worst_case_exposure_inr').notNull().default(37000),
+  fundedCapInr: integer('funded_cap_inr').notNull(),
+  reservedInr: integer('reserved_inr').notNull().default(0),
+  status: text('status').notNull().default('paused'),
+  providerEvidenceId: text('provider_evidence_id').notNull(),
+  qualityEvidenceId: text('quality_evidence_id').notNull(),
+  gateEvidenceId: text('gate_evidence_id').notNull(),
+  finalizedThroughAt: integer('finalized_through_at').notNull(),
+  qualityMeasuredAt: integer('quality_measured_at').notNull(),
+  openedAt: integer('opened_at').notNull(),
+  closedAt: integer('closed_at'),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+});
+
+export const referralAccrualIntervals = sqliteTable('referral_accrual_intervals', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  generation: integer('generation').notNull(),
+  startsAt: integer('starts_at').notNull(),
+  endsAt: integer('ends_at'),
+  state: text('state').notNull(),
+  pauseReason: text('pause_reason'),
+  actorId: text('actor_id'),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_accrual_interval_generation_idx').on(t.weekId, t.generation),
+  index('referral_accrual_interval_time_idx').on(t.weekId, t.startsAt, t.endsAt),
+]);
+
+export const referralWeeklyTierSnapshots = sqliteTable('referral_weekly_tier_snapshots', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  influencerSlot: integer('influencer_slot').notNull().references(() => referralInfluencerSlots.slotNo),
+  userId: text('user_id').references(() => users.id),
+  tier: text('tier').notNull(),
+  qualifyingWeek: integer('qualifying_week').notNull().default(0),
+  effectiveAt: integer('effective_at').notNull(),
+  policyVersion: text('policy_version').notNull(),
+}, (t) => [
+  uniqueIndex('referral_weekly_tier_snapshot_idx').on(t.weekId, t.influencerSlot),
+]);
+
+export const referralWeeklyStatements = sqliteTable('referral_weekly_statements', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  influencerSlot: integer('influencer_slot').notNull().references(() => referralInfluencerSlots.slotNo),
+  userId: text('user_id').notNull().references(() => users.id),
+  tier: text('tier').notNull(),
+  qualifyingWeek: integer('qualifying_week').notNull().default(0),
+  matureVerifiedCount: integer('mature_verified_count').notNull().default(0),
+  payableClaimCount: integer('payable_claim_count').notNull().default(0),
+  rateInr: integer('rate_inr').notNull().default(1),
+  grossAmountInr: integer('gross_amount_inr').notNull().default(0),
+  fundedCapInr: integer('funded_cap_inr').notNull(),
+  status: text('status').notNull().default('held'),
+  qualityHoldReleasedAt: integer('quality_hold_released_at').notNull(),
+  accrualGeneration: integer('accrual_generation').notNull().default(0),
+  evidenceSnapshot: text('evidence_snapshot').notNull().default('{}'),
+  approvedBy: text('approved_by'),
+  approvedAt: integer('approved_at'),
+  paidAt: integer('paid_at'),
+  failureReason: text('failure_reason'),
+  correctionOf: text('correction_of'),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_weekly_statement_slot_idx').on(t.weekId, t.influencerSlot),
+  index('referral_weekly_statement_user_idx').on(t.userId, t.weekId),
+]);
+
+export const referralStatementClaims = sqliteTable('referral_statement_claims', {
+  statementId: text('statement_id').notNull().references(() => referralWeeklyStatements.id),
+  claimId: text('claim_id').notNull().references(() => referralWeeklyClaims.id),
+  amountInr: integer('amount_inr').notNull().default(1),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_statement_claim_idx').on(t.statementId, t.claimId),
+  uniqueIndex('referral_statement_claim_once_idx').on(t.claimId),
+]);
+
+export const referralBeneficiaries = sqliteTable('referral_beneficiaries', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  status: text('status').notNull().default('pending'),
+  detailsSnapshot: text('details_snapshot').notNull(),
+  submittedBy: text('submitted_by').notNull().references(() => users.id),
+  verifiedBy: text('verified_by'),
+  verifiedAt: integer('verified_at'),
+  decisionReason: text('decision_reason'),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+});
+
+export const referralPayouts = sqliteTable('referral_payouts', {
+  id: text('id').primaryKey(),
+  statementId: text('statement_id').notNull().references(() => referralWeeklyStatements.id),
+  weekId: text('week_id').notNull().references(() => referralWeeks.id),
+  influencerSlot: integer('influencer_slot').notNull().references(() => referralInfluencerSlots.slotNo),
+  userId: text('user_id').notNull().references(() => users.id),
+  beneficiaryId: text('beneficiary_id'),
+  amountInr: integer('amount_inr').notNull(),
+  status: text('status').notNull().default('pending'),
+  idempotencyKey: text('idempotency_key').notNull(),
+  utrReference: text('utr_reference'),
+  providerReference: text('provider_reference'),
+  failureReason: text('failure_reason'),
+  attempts: integer('attempts').notNull().default(0),
+  paidAt: integer('paid_at'),
+  failedAt: integer('failed_at'),
+  reversedAt: integer('reversed_at'),
+  createdBy: text('created_by').notNull().references(() => users.id),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_payout_statement_idx').on(t.statementId),
+  uniqueIndex('referral_payout_idempotency_idx').on(t.idempotencyKey),
+  index('referral_payout_user_idx').on(t.userId, t.weekId),
+]);
+
+export const referralPaymentReceipts = sqliteTable('referral_payment_receipts', {
+  id: text('id').primaryKey(),
+  payoutId: text('payout_id').notNull().references(() => referralPayouts.id),
+  objectKey: text('object_key').notNull(),
+  originalName: text('original_name').notNull(),
+  contentType: text('content_type').notNull(),
+  byteSize: integer('byte_size').notNull(),
+  sha256: text('sha256').notNull(),
+  uploadedBy: text('uploaded_by').notNull().references(() => users.id),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_receipt_object_idx').on(t.objectKey),
+  uniqueIndex('referral_receipt_hash_idx').on(t.sha256),
+]);
+
+export const referralSettlementAudits = sqliteTable('referral_settlement_audits', {
+  id: text('id').primaryKey(),
+  weekId: text('week_id').references(() => referralWeeks.id),
+  statementId: text('statement_id').references(() => referralWeeklyStatements.id),
+  payoutId: text('payout_id').references(() => referralPayouts.id),
+  influencerSlot: integer('influencer_slot'),
+  action: text('action').notNull(),
+  fromStatus: text('from_status'),
+  toStatus: text('to_status'),
+  actorId: text('actor_id').notNull(),
+  reason: text('reason').notNull(),
+  metadata: text('metadata').notNull().default('{}'),
+  policyVersion: text('policy_version').notNull(),
+  evidenceSnapshot: text('evidence_snapshot').notNull().default('{}'),
+  occurredAt: integer('occurred_at').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  index('referral_settlement_audit_week_idx').on(t.weekId, t.occurredAt),
+]);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // OPERATIONAL
 // ─────────────────────────────────────────────────────────────────────────────
@@ -557,6 +1077,23 @@ export const cronAlertState = sqliteTable('cron_alert_state', {
   lastSuccessAt: integer('last_success_at'),
   lastAlertAt: integer('last_alert_at'),
   alertReason: text('alert_reason'),
+  updatedAt: integer('updated_at').default(sql`(unixepoch())`),
+});
+
+// Latest result from the GitHub Cloudflare Analytics contract probe. The
+// workflow is the source of the probe; this singleton is the Worker-owned
+// handoff consumed by the admin health banner.
+export const cloudflareAnalyticsHealth = sqliteTable('cloudflare_analytics_health', {
+  id: text('id').primaryKey().default('singleton'),
+  status: text('status').notNull(),                                    // healthy | unhealthy
+  checkedAt: text('checked_at').notNull(),
+  error: text('error'),
+  remediation: text('remediation'),
+  needsRotation: integer('needs_rotation').notNull().default(0),
+  hourlyBucketsReturned: integer('hourly_buckets_returned').notNull().default(0),
+  hourlyBucketCount: integer('hourly_bucket_count'),
+  uniqueVisitorsSupported: integer('unique_visitors_supported'),
+  consecutiveFailures: integer('consecutive_failures').notNull().default(0),
   updatedAt: integer('updated_at').default(sql`(unixepoch())`),
 });
 

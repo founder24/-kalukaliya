@@ -212,6 +212,123 @@ export const deleteAnonConversation = (id) =>
 export const saveOnboarding = (data) =>
   axios.post(`${API_BASE}/user/onboarding`, data, authConfig());
 
+export const getReferralExperience = () =>
+  axios.get(`${API_BASE}/referrals/me`, authConfig());
+
+export const getReferralStatements = () =>
+  axios.get(`${API_BASE}/referrals/me/statements`, authConfig());
+
+export const submitReferralApplication = (data) =>
+  axios.post(`${API_BASE}/referrals/applications`, data, authConfig());
+
+export const activateReferralApplication = () =>
+  axios.post(`${API_BASE}/referrals/activate`, {}, authConfig());
+
+export const adminGetReferralApplications = (token, status) =>
+  axios.get(`${API_BASE}/admin/referrals/applications`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+    params: status ? { status } : {},
+  });
+
+export const adminReviewReferralApplication = (token, applicationId, data) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/applications/${encodeURIComponent(applicationId)}/decision`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminExpireReferralApplication = (token, applicationId, reason) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/applications/${encodeURIComponent(applicationId)}/expire`,
+    { reason },
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminGetReferralApplicationAudits = (token, applicationId) =>
+  axios.get(
+    `${API_BASE}/admin/referrals/applications/${encodeURIComponent(applicationId)}/audits`,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminGetReferralSettlements = (token, weekId) =>
+  axios.get(`${API_BASE}/admin/referrals/settlements`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+    params: weekId ? { week_id: weekId } : {},
+  });
+
+export const adminGetReferralRoiDashboard = (token, limit = 12) =>
+  axios.get(`${API_BASE}/admin/referrals/roi/dashboard`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+    params: { limit },
+  });
+
+export const adminCalculateReferralRoi = (token, weekId, data = {}) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/roi/weeks/${encodeURIComponent(weekId)}/calculate`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminSettleReferralWeek = (token, weekId, data = {}) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/weeks/${encodeURIComponent(weekId)}/settle`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminApproveReferralStatement = (token, statementId, data) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/statements/${encodeURIComponent(statementId)}/approve`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminRecordReferralBeneficiary = (token, data) =>
+  axios.post(`${API_BASE}/admin/referrals/beneficiaries`, data, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+  });
+
+export const adminGetReferralBeneficiaries = (token) =>
+  axios.get(`${API_BASE}/admin/referrals/beneficiaries`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+  });
+
+export const adminReviewReferralBeneficiary = (token, beneficiaryId, data) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/beneficiaries/${encodeURIComponent(beneficiaryId)}/review`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminRecordReferralPayout = (token, statementId, data) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/statements/${encodeURIComponent(statementId)}/payout`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminTransitionReferralPayout = (token, payoutId, data) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/payouts/${encodeURIComponent(payoutId)}/transition`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminUploadReferralReceipt = (token, payoutId, file) => {
+  const form = new FormData();
+  form.append('receipt', file);
+  return axios.post(
+    `${API_BASE}/admin/referrals/payouts/${encodeURIComponent(payoutId)}/receipt`,
+    form,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+};
+
 export const adminLogin = (email, password) => {
   return axios.post(
     `${API_BASE}/admin/login`,

@@ -30,6 +30,7 @@ export interface Env {
   TRUSTPILOT_RATING_VALUE?: string;
   TRUSTPILOT_RATING_COUNT?: string;
   WEB_SEARCH_ENABLED?: string;
+  REFERRAL_PROGRAM_RUNTIME_ENABLED?: string;
 
   // R2 public URL base (e.g. https://assets.syrabit.ai) — required for file upload routes
   R2_PUBLIC_URL?: string;
@@ -38,6 +39,17 @@ export interface Env {
   ALLOWED_ORIGINS: string;
   APP_ENV: string;
 }
+
+export type CloudflareAnalyticsHealthResult = {
+  status: 'healthy' | 'unhealthy';
+  checked_at: string;
+  error: string | null;
+  remediation: string | null;
+  needs_rotation: boolean;
+  hourly_buckets_returned: boolean;
+  hourly_bucket_count?: number;
+  unique_visitors_supported: boolean | null;
+};
 
 export interface JwtPayload {
   sub: string;       // user id

@@ -15,6 +15,7 @@ import PrivacyControls from './profile/PrivacyControls';
 import EditFieldDialog from './profile/EditFieldDialog';
 import DeleteConfirmDialog from './profile/DeleteConfirmDialog';
 import { hydrateAdsOptOutFromServer } from '@/utils/adsConfig';
+import ReferralProfileCard from './profile/ReferralProfileCard';
 
 export default function ProfilePage() {
   const { user } = useAuth();
@@ -252,6 +253,7 @@ export default function ProfilePage() {
         <AcademicDetails profile={profile} isDegreeProfile={isDegreeProfile} openEdit={openEdit}
           onProfileUpdate={(updates) => setProfile((p) => ({ ...p, ...updates }))} />
         <AiCredits stats={stats} />
+        <ReferralProfileCard />
         <PrivacyControls profile={profile} />
         <DangerZone
           profile={profile} deletionPending={deletionPending}

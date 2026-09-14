@@ -5,8 +5,12 @@ force=False and the chapter already has notes_en OR content_en set.
 """
 
 import pytest
+import jwt
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.config import settings
+from app.services.ai.note_quality import ModelPreambleError
 from app.services.content_generation import ContentGenerationService
 
 
@@ -190,3 +194,73 @@ async def test_generate_notes_force_true_overwrites_existing_notes_en():
 
     # With force=True the AI must have been called despite notes_en being present
     mock_generate.assert_called()
+
+
+@pytest.mark.anyio
+async def test_generate_notes_rejects_model_preamble_with_chapter_identity():
+    chapter = _make_chapter()
+    service = ContentGenerationService()
+    raw_notes = (
+        "Certainly! Here are the notes for this chapter.\n\n"
+        "## Test Chapter\n\nGenerated content."
+    )
+
+    with (
+        patch(
+            "app.services.content_generation.Chapter.get",
+            new_callable=AsyncMock,
+            return_value=chapter,
+        ),
+        patch(
+            "app.services.content_generation.workers_ai_client.generate",
+            new_callable=AsyncMock,
+            return_value=raw_notes,
+        ) as mock_generate,
+    ):
+        with pytest.raises(ModelPreambleError) as exc_info:
+            await service.generate_notes(_CHAPTER_ID, force=True)
+
+    message = str(exc_info.value)
+    assert _CHAPTER_ID in message
+    assert "Test Chapter" in message
+    mock_generate.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_admin_generate_notes_returns_rejected_chapter_identity(client):
+    """The admin endpoint must surface model-preamble rejection for the chapter."""
+    chapter = _make_chapter()
+    rejection = ModelPreambleError(
+        f"Generated notes rejected for chapter {_CHAPTER_ID}: "
+        "model preamble 'assistant_acknowledgement' detected; title=Test Chapter"
+    )
+    expire = datetime.now(timezone.utc) + timedelta(hours=1)
+    token = jwt.encode(
+        {"sub": "test_admin_id", "type": "admin", "role": "admin", "exp": expire},
+        settings.JWT_SECRET,
+        algorithm="HS256",
+    )
+
+    with (
+        patch(
+            "app.api.v1.admin_content.Chapter.get",
+            new_callable=AsyncMock,
+            return_value=chapter,
+        ),
+        patch(
+            "app.api.v1.admin_content.content_generation_service.generate_notes",
+            new_callable=AsyncMock,
+            side_effect=rejection,
+        ) as mock_generate,
+    ):
+        response = await client.post(
+            f"/api/v1/admin/content/chapters/{_CHAPTER_ID}/generate-notes",
+            json={"force": True},
+            cookies={"syrabit_admin_session": token},
+        )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert _CHAPTER_ID in detail
+    assert "Test Chapter" in detail
+    mock_generate.assert_awaited_once_with(_CHAPTER_ID, force=True)

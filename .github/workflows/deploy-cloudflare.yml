@@ -399,8 +399,29 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright Chromium
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/frontend/node_modules/playwright/package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright Chromium
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright system dependencies
+        run: pnpm --filter @workspace/syrabit exec playwright install-deps chromium
+
+      - name: Install Playwright Chromium on cache miss
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: pnpm --filter @workspace/syrabit run playwright:install:chromium
+
+      - name: Verify Chromium runtime libraries
+        run: bash .github/scripts/verify-playwright-runtime.sh
 
       - name: Test chat ad interruption safeguards
         run: pnpm --filter @workspace/syrabit run test:e2e:chat-ads
@@ -451,10 +472,20 @@ jobs:
       - name: Remove retired Pages backend override
         run: node apps/frontend/scripts/remove-pages-legacy-env.mjs
 
+      - name: Verify clean release source
+        run: |
+          set -euo pipefail
+          if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+            echo "::error::Cloudflare Pages release source is dirty; refusing a non-reproducible deployment."
+            git status --short
+            exit 1
+          fi
+          echo "Deploying clean source commit $(git rev-parse HEAD)."
+
       - name: Deploy to Cloudflare Pages
         run: |
           cd apps/edge
-          pnpm exec wrangler pages deploy ../frontend/dist --project-name=syrabitfrontend --commit-dirty=true
+          pnpm exec wrangler pages deploy ../frontend/dist --project-name=syrabitfrontend --commit-dirty=false
 
       - name: Submit URLs to IndexNow
         run: node apps/frontend/scripts/indexnow-submit.mjs
@@ -537,6 +568,19 @@ jobs:
           grep -qi '^access-control-allow-methods:.*POST' /tmp/cors.headers
           grep -qi '^access-control-allow-headers:.*authorization' /tmp/cors.headers
           grep -qi '^access-control-allow-headers:.*x-anon-id' /tmp/cors.headers
+
+      - name: Protected staff admin API preflight is browser-safe
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/staff-admin-cors.headers -o /dev/null -w '%{http_code}' --max-time 20 -X OPTIONS \
+            -H 'Origin: https://syrabit.ai' \
+            -H 'Access-Control-Request-Method: GET' \
+            -H 'Access-Control-Request-Headers: content-type,authorization' \
+            "${PUBLIC_EDGE_URL}/api/v1/admin/referrals/settlements")"
+          test "$status" = "200" || test "$status" = "204"
+          grep -qi '^access-control-allow-origin: https://syrabit.ai' /tmp/staff-admin-cors.headers
+          grep -qi '^access-control-allow-credentials: true' /tmp/staff-admin-cors.headers
+          grep -qi '^access-control-allow-headers:.*authorization' /tmp/staff-admin-cors.headers
 
       - name: Frontend is reachable
         run: |
@@ -848,6 +892,23 @@ jobs:
           set -euo pipefail
           bash scripts/validate-cloudflare-api-cutover.sh
 
+  live-chat-contract:
+    name: Live chat and content contract
+    runs-on: ubuntu-latest
+    needs: post-native-smoke
+    if: |
+      always() &&
+      inputs.validate_authenticated &&
+      needs.post-native-smoke.result == 'success'
+    env:
+      PUBLIC_EDGE_URL: https://api.syrabit.ai
+      STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run live Worker chat contract
+        run: node scripts/test-live-chat-contract.mjs
+
   disposable-staff-auth:
     name: Prove disposable staff sign-in
     runs-on: ubuntu-latest
@@ -870,8 +931,29 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright Chromium
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/frontend/node_modules/playwright/package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright Chromium
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright system dependencies
+        run: pnpm --filter @workspace/syrabit exec playwright install-deps chromium
+
+      - name: Install Playwright Chromium on cache miss
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: pnpm --filter @workspace/syrabit run playwright:install:chromium
+
+      - name: Verify Chromium runtime libraries
+        run: bash .github/scripts/verify-playwright-runtime.sh
 
       - name: Test staff portal diagnostic privacy
         run: node --test scripts/staff-portal-diagnostics.test.mjs
@@ -898,12 +980,13 @@ jobs:
   release-check-summary:
     name: Summarize independent release checks
     runs-on: ubuntu-latest
-    needs: [chat-performance, disposable-staff-auth]
+    needs: [chat-performance, live-chat-contract, disposable-staff-auth]
     if: ${{ always() }}
     steps:
       - name: Report chat latency and staff access separately
         env:
           CHAT_PERFORMANCE_RESULT: ${{ needs.chat-performance.result }}
+          LIVE_CHAT_CONTRACT_RESULT: ${{ needs.live-chat-contract.result }}
           STAFF_ACCESS_RESULT: ${{ needs.disposable-staff-auth.result }}
         run: |
           {
@@ -912,16 +995,22 @@ jobs:
             echo "| Check | Result |"
             echo "| --- | --- |"
             echo "| Chat first-token latency | ${CHAT_PERFORMANCE_RESULT} |"
+            echo "| Live chat/content contract | ${LIVE_CHAT_CONTRACT_RESULT} |"
             echo "| Disposable staff access | ${STAFF_ACCESS_RESULT} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [[ "$CHAT_PERFORMANCE_RESULT" != "success" ]]; then
             echo "::error::Chat first-token latency check result: ${CHAT_PERFORMANCE_RESULT}"
           fi
+          if [[ "$LIVE_CHAT_CONTRACT_RESULT" != "success" ]]; then
+            echo "::error::Live chat/content contract result: ${LIVE_CHAT_CONTRACT_RESULT}"
+          fi
           if [[ "$STAFF_ACCESS_RESULT" != "success" ]]; then
             echo "::error::Disposable staff access check result: ${STAFF_ACCESS_RESULT}"
           fi
-          [[ "$CHAT_PERFORMANCE_RESULT" == "success" && "$STAFF_ACCESS_RESULT" == "success" ]]
+          [[ "$CHAT_PERFORMANCE_RESULT" == "success" \
+            && "$LIVE_CHAT_CONTRACT_RESULT" == "success" \
+            && "$STAFF_ACCESS_RESULT" == "success" ]]
 
   request-reset-email:
     name: Request fresh disposable password-reset email

@@ -21,6 +21,33 @@ export const STAFF_PORTAL_SECTIONS = Object.freeze([
   },
   { id: 'seomanager', label: 'SEO Manager', group: 'main', releaseCheck: { supported: false, requiredReads: [] } },
   { id: 'users', label: 'Users', group: 'audience', releaseCheck: { supported: false, requiredReads: [] } },
+  {
+    id: 'referrals',
+    label: 'Referral Admissions',
+    group: 'audience',
+    releaseCheck: {
+      supported: true,
+      requiredReads: ['/api/v1/admin/referrals/applications'],
+    },
+  },
+  {
+    id: 'referralsettlements',
+    label: 'Referral Settlements',
+    group: 'operations',
+    releaseCheck: {
+      supported: true,
+      requiredReads: ['/api/v1/admin/referrals/settlements'],
+    },
+  },
+  {
+    id: 'referralroi',
+    label: 'Referral ROI',
+    group: 'operations',
+    releaseCheck: {
+      supported: true,
+      requiredReads: ['/api/v1/admin/referrals/roi/dashboard'],
+    },
+  },
   { id: 'conversations', label: 'Conversations', group: 'audience', releaseCheck: { supported: false, requiredReads: [] } },
   { id: 'notifications', label: 'Notifications', group: 'audience', releaseCheck: { supported: false, requiredReads: [] } },
   { id: 'ai', label: 'AI & Automation', group: 'operations', releaseCheck: { supported: false, requiredReads: [] } },

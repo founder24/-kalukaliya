@@ -4,6 +4,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { API_BASE } from '@/utils/api';
 import { getToken } from '@/hooks/useTokenManager';
+import { canStaffCapability } from '@/utils/staffAccess';
 
 const client = () => axios.create({
   baseURL: API_BASE,
@@ -19,7 +20,7 @@ const scopes = [
 
 // Backend semantics: null is legacy full staff access; [] explicitly grants
 // nothing. Undefined identity data is never treated as a grant.
-const can = (user, capability) => user?.role === 'admin' || user?.capabilities === null || (Array.isArray(user?.capabilities) && user.capabilities.includes(capability));
+const can = canStaffCapability;
 const fmt = (value) => value ? new Date(value * 1000 || value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 
 function CapabilityNotice({ capability }) {
@@ -53,9 +54,63 @@ function JobRow({ job, onRetry, retrying }) {
   );
 }
 
+function ImportApprovalRow({ approval }) {
+  const scope = approval.scope || {};
+  const scopeParts = [
+    scope.class ? `Class ${scope.class}` : null,
+    scope.subject || null,
+    scope.limit != null ? `limit ${scope.limit}` : null,
+    scope.restart ? 'restart' : null,
+    scope.skip_index ? 'skip index' : null,
+    scope.clean_preambles ? 'clean preambles' : null,
+  ].filter(Boolean);
+  const progress = approval.progress || {};
+  const progressClass = progress.status === 'completed'
+    ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    : progress.status === 'failed'
+      ? 'bg-rose-100 text-rose-700 border-rose-200'
+      : progress.status === 'partial'
+        ? 'bg-amber-100 text-amber-700 border-amber-200'
+        : 'bg-slate-100 text-slate-600 border-slate-200';
+
+  return (
+    <article className="rounded-2xl border border-slate-200 bg-white p-4" data-testid={`import-approval-${approval.run_id}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900">
+            <span>{approval.operator || 'Unknown operator'}</span>
+            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${progressClass}`}>
+              {progress.status || 'unknown'}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Approved {fmt(approval.started_at)}
+            {progress.chapters != null ? ` · ${progress.completed || 0}/${progress.chapters} chapters linked` : ''}
+          </p>
+        </div>
+        <div className="max-w-full text-right">
+          <div className="text-[10px] uppercase tracking-wide text-slate-400">Run ID</div>
+          <div className="break-all font-mono text-[11px] text-slate-600">{approval.run_id}</div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-600">
+        <span className="font-semibold text-slate-500">Scope:</span>
+        {scopeParts.length ? scopeParts.map(part => (
+          <span key={part} className="rounded-md bg-slate-100 px-2 py-1">{part}</span>
+        )) : <span>Not specified</span>}
+      </div>
+      {progress.failed > 0 && (
+        <p className="mt-2 text-[11px] text-rose-600">{progress.failed} linked chapter(s) reported a non-success status.</p>
+      )}
+    </article>
+  );
+}
+
 export default function StaffOperations({ user, subjects = [], chapters = [], selectedSubject, onRefresh }) {
   const [jobList, setJobList] = useState(null);
   const [jobError, setJobError] = useState(null);
+  const [importApprovals, setImportApprovals] = useState(null);
+  const [importApprovalError, setImportApprovalError] = useState(null);
   const [selected, setSelected] = useState([]);
   const [selectedScopes, setSelectedScopes] = useState(['notes', 'qa', 'pyq']);
   const [loading, setLoading] = useState(false);
@@ -90,6 +145,21 @@ export default function StaffOperations({ user, subjects = [], chapters = [], se
     catch (error) { setJobError(error?.response?.data?.detail || 'RAG history is unavailable.'); }
   }, []);
   useEffect(() => { loadJobs(); const id = setInterval(loadJobs, 12000); return () => clearInterval(id); }, [loadJobs]);
+
+  const loadImportApprovals = useCallback(async () => {
+    setImportApprovalError(null);
+    try {
+      const res = await client().get('/admin/content/ahsec-d1-import/approvals?limit=20');
+      setImportApprovals(Array.isArray(res.data?.approvals) ? res.data.approvals : []);
+    } catch (error) {
+      setImportApprovalError(error?.response?.data?.detail || 'Import approval history is unavailable.');
+    }
+  }, []);
+  useEffect(() => {
+    loadImportApprovals();
+    const id = setInterval(loadImportApprovals, 12000);
+    return () => clearInterval(id);
+  }, [loadImportApprovals]);
 
   const toggle = (id) => setSelected(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   const toggleScope = (id) => setSelectedScopes(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
@@ -164,6 +234,27 @@ export default function StaffOperations({ user, subjects = [], chapters = [], se
       </section>
     </div>
     <section><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-bold text-slate-900">Durable job history</h3><span className="text-xs text-slate-400">polls every 12s</span></div>{jobError ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><AlertTriangle className="mr-2 inline" size={15} />{jobError} <button type="button" onClick={loadJobs} className="ml-2 font-bold underline">Retry</button></div> : !jobList ? <div className="h-24 animate-pulse rounded-2xl bg-slate-100" /> : jobList.length ? <div className="space-y-3">{jobList.map(job => <JobRow key={job.id} job={job} onRetry={retry} retrying={retrying === job.id} />)}</div> : <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No reindex jobs yet.</div>}</section>
+    <section>
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900">Production import approvals</h3>
+          <p className="mt-1 text-xs text-slate-400">Approval metadata and linked D1 import progress</p>
+        </div>
+        <button type="button" onClick={loadImportApprovals} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50" data-testid="button-refresh-import-approvals"><RefreshCw size={14} /> Refresh</button>
+      </div>
+      {importApprovalError ? (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+          <AlertTriangle className="mr-2 inline" size={15} />{importApprovalError}
+          <button type="button" onClick={loadImportApprovals} className="ml-2 font-bold underline">Retry</button>
+        </div>
+      ) : !importApprovals ? (
+        <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+      ) : importApprovals.length ? (
+        <div className="space-y-3">{importApprovals.map(approval => <ImportApprovalRow key={approval.run_id} approval={approval} />)}</div>
+      ) : (
+        <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No production import approvals yet.</div>
+      )}
+    </section>
     {previewOpen && preview && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label="Delete impact preview"><div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Confirm destructive delete</h3><button type="button" onClick={() => setPreviewOpen(false)} aria-label="Close impact preview"><X size={18} /></button></div><p className="mt-2 text-sm text-slate-500">This server-issued preview expires when the selection changes. Review a fresh preview before deleting.</p><div className="mt-4 grid grid-cols-2 gap-2">{[['Chapters', preview.chapters], ['Topics', preview.topics], ['PYQ papers', preview.pyqs], ['Chunks', preview.chunks], ['Estimated vectors', preview.vectors_estimated]].map(([label, value]) => <div key={label} className="rounded-xl bg-slate-50 p-3"><div className="text-[10px] uppercase tracking-wide text-slate-400">{label}</div><div className="mt-1 text-lg font-bold text-slate-900">{value ?? 0}</div></div>)}</div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setPreviewOpen(false)} className="rounded-xl px-3 py-2 text-xs font-semibold text-slate-600">Cancel</button><button type="button" onClick={runBulk} disabled={bulkBusy || !preview.preview_token || previewIds.join('|') !== selected.join('|')} className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50" data-testid="button-confirm-delete">{bulkBusy ? 'Deleting…' : 'Delete selected'}</button></div></div></div>}
   </div>;
 }

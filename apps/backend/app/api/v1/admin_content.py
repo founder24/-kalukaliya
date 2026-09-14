@@ -5,6 +5,8 @@ Layer 2: Topics, Content editing, Topic index
 Layer 3: AI generation, Publishing, FAQ
 """
 
+import json as _json
+import os as _os
 import re
 import logging
 import uuid as _uuid
@@ -18,6 +20,7 @@ from pydantic import BaseModel
 from app.api.v1.admin import require_admin_session, csrf_guard
 from app.models.content import Board, Class, Stream, Subject, Chapter, Topic, ContentAuditLog
 from app.models.user import User
+from app.services.ai.note_quality import ModelPreambleError
 from app.services.content_generation import content_generation_service
 from app.services.content_publisher import content_publisher_service
 
@@ -30,6 +33,11 @@ import pathlib as _pathlib
 _AHSEC_SCRIPTS_DIR   = _pathlib.Path(__file__).parent.parent.parent.parent / "scripts"
 _AHSEC_PROGRESS_FILE = _AHSEC_SCRIPTS_DIR / ".ahsec_ingest_progress.jsonl"
 _AHSEC_PROGRESS_LOCK = _AHSEC_SCRIPTS_DIR / ".ahsec_ingest_progress.lock"
+_AHSEC_D1_STATE_DIR = _pathlib.Path(
+    _os.getenv("AHSEC_D1_STATE_DIR", str(_AHSEC_SCRIPTS_DIR.parent / ".ahsec_d1_state"))
+)
+_AHSEC_D1_APPROVAL_FILE = _AHSEC_D1_STATE_DIR / "approvals.jsonl"
+_AHSEC_D1_IMPORT_PROGRESS_FILE = _AHSEC_D1_STATE_DIR / "progress.jsonl"
 
 
 # ── Seeder helpers ────────────────────────────────────────────────────────────
@@ -112,6 +120,138 @@ async def admin_seed_notes_history(request: Request, limit: int = 20):
             return {"runs": [], "error": str(e)}
 
     return {"runs": runs_out[:limit]}
+
+
+# ── AHSEC D1 import approval history ─────────────────────────────────────────
+
+def _read_jsonl_records(path: _pathlib.Path) -> list[dict]:
+    """Read complete JSON objects from an append-only ledger.
+
+    A process can be reading while the importer appends a line. Invalid or
+    incomplete lines are ignored so one interrupted write cannot blank the
+    operator history.
+    """
+    if not path.exists():
+        return []
+    try:
+        records = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                record = _json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(record, dict):
+                records.append(record)
+        return records
+    except OSError as exc:
+        logger.warning("admin_import_approvals: failed to read %s: %s", path, exc)
+        return []
+
+
+def _import_progress_summary(records: list[dict]) -> dict:
+    """Summarise one import run without returning progress details or errors."""
+    latest_by_chapter: dict[str, dict] = {}
+    terminal_summary: dict | None = None
+    for record in records:
+        if record.get("event") == "import_terminal_summary":
+            terminal_summary = record
+        chapter_id = str(record.get("chapter_id") or "").strip()
+        if chapter_id:
+            latest_by_chapter[chapter_id] = record
+
+    statuses = [str(record.get("status") or "").lower() for record in latest_by_chapter.values()]
+    done = sum(status == "done" for status in statuses)
+    failed = sum(status not in ("", "done") for status in statuses)
+    if terminal_summary is not None:
+        status = str(terminal_summary.get("status") or "").lower()
+        if status not in {"completed", "failed"}:
+            status = "failed"
+
+        def safe_count(value: object, fallback: int) -> int:
+            if isinstance(value, bool):
+                return fallback
+            try:
+                return max(0, int(value))
+            except (TypeError, ValueError):
+                return fallback
+
+        done = safe_count(terminal_summary.get("completed"), done)
+        failed = safe_count(terminal_summary.get("failed"), failed)
+        chapters = safe_count(terminal_summary.get("chapters"), done + failed)
+    else:
+        status = "running" if statuses else "approved"
+        chapters = len(statuses)
+
+    timestamps = [
+        record.get("timestamp")
+        for record in records
+        if isinstance(record.get("timestamp"), str)
+    ]
+    return {
+        "status": status,
+        "chapters": chapters,
+        "completed": done,
+        "failed": failed,
+        "last_updated_at": max(timestamps) if timestamps else None,
+    }
+
+
+def _safe_import_scope(scope: object) -> dict:
+    """Return only the importer scope fields intended for operator display."""
+    if not isinstance(scope, dict):
+        return {}
+    return {
+        key: scope.get(key)
+        for key in (
+            "class",
+            "subject",
+            "limit",
+            "restart",
+            "skip_index",
+            "clean_preambles",
+        )
+        if key in scope
+    }
+
+
+def _production_import_approvals(limit: int) -> list[dict]:
+    approvals = []
+    progress_by_run: dict[str, list[dict]] = {}
+    for record in _read_jsonl_records(_AHSEC_D1_IMPORT_PROGRESS_FILE):
+        run_id = str(record.get("run_id") or "").strip()
+        if run_id:
+            progress_by_run.setdefault(run_id, []).append(record)
+
+    for record in _read_jsonl_records(_AHSEC_D1_APPROVAL_FILE):
+        if record.get("event") != "production_write_approved":
+            continue
+        run_id = str(record.get("run_id") or "").strip()
+        if not run_id:
+            continue
+        # Deliberately construct a new object. Approval records are the only
+        # source exposed here; backup note contents and arbitrary ledger keys
+        # never cross the API boundary.
+        approvals.append(
+            {
+                "run_id": run_id,
+                "operator": str(record.get("operator") or ""),
+                "started_at": record.get("started_at"),
+                "scope": _safe_import_scope(record.get("scope")),
+                "progress": _import_progress_summary(progress_by_run.get(run_id, [])),
+            }
+        )
+
+    approvals.sort(key=lambda record: str(record.get("started_at") or ""), reverse=True)
+    return approvals[:limit]
+
+
+@router.get("/content/ahsec-d1-import/approvals")
+async def admin_ahsec_d1_import_approvals(limit: int = Query(20, ge=1, le=100)):
+    """Return recent production approvals and safe progress summaries."""
+    return {
+        "approvals": _production_import_approvals(limit),
+        "file_exists": _AHSEC_D1_APPROVAL_FILE.exists(),
+    }
 
 
 # ── Stuck chapters (notes_provider_unavailable) ───────────────────────────────
@@ -1717,6 +1857,9 @@ async def generate_notes(request: Request, chapter_id: str, body: GenerateNotesR
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ModelPreambleError as e:
+        logger.warning(f"Generate notes rejected for chapter {chapter_id}: {e}")
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.error(f"Generate notes error: {e}")
         raise HTTPException(status_code=500, detail="Generation failed")
