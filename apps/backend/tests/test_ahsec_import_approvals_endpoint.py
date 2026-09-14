@@ -225,6 +225,80 @@ def test_import_approvals_show_safe_metadata_and_linked_progress(
     assert "terminal summaries must not copy this" not in response_text
 
 
+def test_import_approvals_ignore_malformed_progress_lines(
+    client, admin_cookie, tmp_path
+):
+    import app.api.v1.admin_content as admin_content
+
+    run_id = "run-damaged-progress"
+    approvals = tmp_path / "approvals.jsonl"
+    progress = tmp_path / "progress.jsonl"
+    _write_jsonl(
+        approvals,
+        {
+            "event": "production_write_approved",
+            "run_id": run_id,
+            "operator": "curriculum-reviewer",
+            "started_at": "2026-09-14T10:00:00+00:00",
+            "scope": {"class": "11", "subject": "chemistry"},
+        },
+    )
+    _write_jsonl(
+        progress,
+        "malformed progress before valid records",
+        {
+            "run_id": run_id,
+            "chapter_id": "chapter-1",
+            "status": "done",
+            "timestamp": "2026-09-14T10:01:00+00:00",
+        },
+        '{"run_id": "incomplete"',
+        {
+            "run_id": run_id,
+            "chapter_id": "chapter-2",
+            "status": "error",
+            "timestamp": "2026-09-14T10:02:00+00:00",
+        },
+        {
+            "event": "import_terminal_summary",
+            "run_id": run_id,
+            "status": "failed",
+            "chapters": 2,
+            "completed": 1,
+            "failed": 1,
+            "timestamp": "2026-09-14T10:03:00+00:00",
+        },
+        "malformed progress after valid records",
+    )
+
+    with (
+        patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", approvals),
+        patch.object(admin_content, "_AHSEC_D1_IMPORT_PROGRESS_FILE", progress),
+    ):
+        response = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/approvals",
+            cookies=admin_cookie,
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["approvals"] == [
+        {
+            "run_id": run_id,
+            "operator": "curriculum-reviewer",
+            "started_at": "2026-09-14T10:00:00+00:00",
+            "scope": {"class": "11", "subject": "chemistry"},
+            "progress": {
+                "status": "failed",
+                "chapters": 2,
+                "completed": 1,
+                "failed": 1,
+                "last_updated_at": "2026-09-14T10:03:00+00:00",
+            },
+        }
+    ]
+
+
 def test_import_approvals_report_pending_run_without_progress(
     client, admin_cookie, tmp_path
 ):
