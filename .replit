@@ -28,7 +28,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd apps/backend && python3 -m pip install --user --requirement requirements.txt --quiet && python3 -m scripts.ahsec_d1_import --dry-run --delay 1"
+args = "cd apps/backend && python3 -m pip install --user --break-system-packages --requirement requirements.txt --quiet && python3 -m scripts.ahsec_d1_import --dry-run --delay 1"
 
 [workflows.workflow.metadata]
 outputType = "console"

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 const mockLibraryBundle = {
   boards: [
@@ -71,6 +71,18 @@ const mockLibraryBundleFull = {
   ],
 };
 
+const libraryViewports = [
+  { name: 'desktop', width: 1280, height: 900 },
+  { name: 'mobile', width: 390, height: 844 },
+];
+
+async function forEachLibraryViewport(page: Page, callback: (name: string) => Promise<void>) {
+  for (const viewport of libraryViewports) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await callback(viewport.name);
+  }
+}
+
 test.describe('Library Page - Deployment Verification', () => {
   test.beforeEach(async ({ page }) => {
     // Mock slim bundle (first fetch)
@@ -130,10 +142,12 @@ test.describe('Library Page - Deployment Verification', () => {
     });
   });
 
-  test('renders heading and subheading', async ({ page }) => {
-    await page.goto('/library');
-    await expect(page.getByText('Educational Browser')).toBeVisible();
-    await expect(page.getByText('For Assam Board Students')).toBeVisible();
+  test('renders heading and browse summary', async ({ page }) => {
+    await forEachLibraryViewport(page, async viewport => {
+      await page.goto('/library');
+      await expect(page.locator('h1:visible').filter({ hasText: 'Educational Browser' }), `${viewport}: visible Library heading`).toHaveCount(1);
+      await expect(page.locator('p:visible').filter({ hasText: /Browse\s+\d+\s+subjects/ }), `${viewport}: visible browse summary`).toHaveCount(1);
+    });
   });
 
   test('defaults to English when Assamese was previously selected', async ({ page }) => {
@@ -141,51 +155,54 @@ test.describe('Library Page - Deployment Verification', () => {
       localStorage.setItem('syrabit:content_lang', 'as');
     });
 
-    await page.goto('/library');
-
-    const englishToggle = page.getByRole('button', { name: 'Switch to English' }).first();
-    await expect(englishToggle).toHaveClass(/bg-violet-600/);
-    await expect(page.getByRole('button', { name: 'Switch to Assamese' }).first()).not.toHaveClass(/bg-violet-600/);
+    await forEachLibraryViewport(page, async viewport => {
+      await page.goto('/library');
+      const englishToggle = page.locator('button:visible[aria-label="Switch to English"]');
+      await expect(englishToggle, `${viewport}: English toggle`).toHaveClass(/bg-violet-600/);
+      await expect(page.locator('button:visible[aria-label="Switch to Assamese"]'), `${viewport}: Assamese toggle`).not.toHaveClass(/bg-violet-600/);
+    });
   });
 
   test('renders subject cards with names from mock data', async ({ page }) => {
-    await page.goto('/library');
-    // Wait for subjects to render - use heading elements in subject cards
-    // Subject cards render the name as an h3 element
-    await expect(page.locator('h3').filter({ hasText: 'Physics' })).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('h3').filter({ hasText: 'Chemistry' })).toBeVisible();
-    await expect(page.locator('h3').filter({ hasText: 'History' })).toBeVisible();
+    await forEachLibraryViewport(page, async viewport => {
+      await page.goto('/library');
+      // Subject cards render the name as an h3 element. Only assert against
+      // the visible card tree because the page can retain an offscreen chunk.
+      await expect(page.locator('h3:visible').filter({ hasText: 'Physics' }), `${viewport}: Physics card`).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('h3:visible').filter({ hasText: 'Chemistry' }), `${viewport}: Chemistry card`).toBeVisible();
+      await expect(page.locator('h3:visible').filter({ hasText: 'History' }), `${viewport}: History card`).toBeVisible();
+    });
   });
 
   test('displays search input', async ({ page }) => {
-    await page.goto('/library');
-    const searchInput = page.locator('[data-testid="library-search-input"]');
-    await expect(searchInput).toBeVisible();
+    await forEachLibraryViewport(page, async viewport => {
+      await page.goto('/library');
+      await expect(page.locator('[data-testid="library-search-input"]:visible'), `${viewport}: search input`).toHaveCount(1);
+    });
   });
 
   test('displays browse subjects count text', async ({ page }) => {
-    await page.goto('/library');
-    // The text is "Browse 3 subjects . 0 chapters" (slim has no chapters)
-    // After full bundle loads it would show chapter count
-    await expect(page.getByText(/Browse\s+3\s+subjects/)).toBeVisible({ timeout: 10000 });
+    await forEachLibraryViewport(page, async viewport => {
+      await page.goto('/library');
+      // The text is "Browse 3 subjects · 0 chapters" (slim has no chapters).
+      await expect(page.locator('p:visible').filter({ hasText: /Browse\s+3\s+subjects/ }), `${viewport}: subject count`).toBeVisible({ timeout: 10000 });
+    });
   });
 
   test('search filtering works - filters subjects by name', async ({ page }) => {
-    await page.goto('/library');
-    // Wait for initial render - use h3 headings in subject cards
-    await expect(page.locator('h3').filter({ hasText: 'Physics' })).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('h3').filter({ hasText: 'Chemistry' })).toBeVisible();
-    await expect(page.locator('h3').filter({ hasText: 'History' })).toBeVisible();
+    await forEachLibraryViewport(page, async viewport => {
+      await page.goto('/library');
+      await expect(page.locator('h3:visible').filter({ hasText: 'Physics' }), `${viewport}: Physics before search`).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('h3:visible').filter({ hasText: 'Chemistry' }), `${viewport}: Chemistry before search`).toBeVisible();
+      await expect(page.locator('h3:visible').filter({ hasText: 'History' }), `${viewport}: History before search`).toBeVisible();
 
-    // Type in search to filter
-    const searchInput = page.locator('[data-testid="library-search-input"]');
-    await searchInput.fill('Physics');
+      const searchInput = page.locator('[data-testid="library-search-input"]:visible');
+      await searchInput.fill('Physics');
 
-    // Physics should remain, others should be filtered out
-    await expect(page.locator('h3').filter({ hasText: 'Physics' })).toBeVisible();
-    // Wait for filter to take effect
-    await expect(page.locator('h3').filter({ hasText: 'Chemistry' })).not.toBeVisible({ timeout: 5000 });
-    await expect(page.locator('h3').filter({ hasText: 'History' })).not.toBeVisible();
+      await expect(page.locator('h3:visible').filter({ hasText: 'Physics' }), `${viewport}: Physics after search`).toBeVisible();
+      await expect(page.locator('h3:visible').filter({ hasText: 'Chemistry' }), `${viewport}: Chemistry filtered`).not.toBeVisible({ timeout: 5000 });
+      await expect(page.locator('h3:visible').filter({ hasText: 'History' }), `${viewport}: History filtered`).not.toBeVisible();
+    });
   });
 
   test('shows error state when API returns 500', async ({ page }) => {
@@ -207,15 +224,18 @@ test.describe('Library Page - Deployment Verification', () => {
       });
     });
 
-    await page.goto('/library');
-    // React-query retries 4 times with exponential backoff (1s, 2s, 4s, 8s)
-    // Total wait ~15s before error state shows
-    await expect(page.getByText('Failed to load library')).toBeVisible({ timeout: 30000 });
+    await forEachLibraryViewport(page, async viewport => {
+      await page.goto('/library');
+      // React-query retries 4 times with exponential backoff (1s, 2s, 4s, 8s).
+      await expect(page.getByText('Failed to load library'), `${viewport}: error state`).toBeVisible({ timeout: 30000 });
+    });
   });
 
   test('/library route alias works', async ({ page }) => {
-    const response = await page.goto('/library');
-    expect(response?.status()).toBeLessThan(400);
-    await expect(page.getByText('Educational Browser')).toBeVisible({ timeout: 10000 });
+    await forEachLibraryViewport(page, async viewport => {
+      const response = await page.goto('/library');
+      expect(response?.status(), `${viewport}: /library HTTP status`).toBeLessThan(400);
+      await expect(page.locator('h1:visible').filter({ hasText: 'Educational Browser' }), `${viewport}: /library heading`).toHaveCount(1);
+    });
   });
 });

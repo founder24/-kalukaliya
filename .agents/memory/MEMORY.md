@@ -87,3 +87,4 @@
 - [Staff content editor contract](staff-content-contract.md) — shared CRUD uses direct staff routes; admin-only jobs remain under admin routes.
 - [GitHub audit access](github-audit-access.md) — public PR/check data is available, but security alerts and branch protection require a working authenticated token
 - [Playwright route fixture matching](playwright-route-fixtures.md) — collection and nested REST URLs need separate route globs in stateful browser fixtures.
+- [AHSEC importer workflow runtime](syrabit-import-workflow-runtime.md) — local dry-runs need the PEP 668 install flag and the locked PyMuPDF dependency.
