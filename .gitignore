@@ -45,6 +45,7 @@ Thumbs.db
 coverage/
 htmlcov/
 .coverage
+apps/frontend/test-results/
 
 # Compressed files
 *.zip
