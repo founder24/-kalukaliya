@@ -18,7 +18,10 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "..", "public");
-const staticDir = path.join(publicDir, "static");
+const outputRoot = process.env.BUILD_STATIC_DATA_OUTPUT_DIR
+  ? path.resolve(process.env.BUILD_STATIC_DATA_OUTPUT_DIR)
+  : publicDir;
+const staticDir = path.join(outputRoot, "static");
 
 const GCS_BUCKET = (process.env.GCS_BUCKET || "").replace(/\/+$/, "");
 const backendUrl = (
@@ -160,7 +163,8 @@ async function main() {
     }`,
   );
 
-  // Ensure output directory exists.
+  // Ensure output directory exists. Release builds point this at dist/ so
+  // current backend snapshots never rewrite tracked public/ source files.
   await mkdir(staticDir, { recursive: true });
 
   const failures = [];
@@ -189,7 +193,7 @@ async function main() {
           transform: rewrite ? rewriteSitemapLocs : undefined,
           validate: (payload) => validatePayload(file, payload),
         });
-        await writeFile(path.join(publicDir, file), body, "utf-8");
+        await writeFile(path.join(outputRoot, file), body, "utf-8");
       } catch (err) {
         const message = `${file} — ${err.message}`;
         failures.push(message);
