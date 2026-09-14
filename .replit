@@ -34,6 +34,10 @@ args = "cd apps/backend && python3 -m pip install --user --requirement requireme
 outputType = "console"
 
 [[ports]]
+localPort = 4173
+externalPort = 3001
+
+[[ports]]
 localPort = 5000
 externalPort = 80
 
