@@ -686,7 +686,7 @@ export async function admitReferralInfluencer(
           UPDATE referral_influencer_slots
           SET user_id = ?,
               referral_code = ?,
-              status = 'active',
+            status = 'active',
               tier = 'basic',
               identity_verified = 1,
               kyc_verified = 1,

@@ -212,6 +212,42 @@ export const deleteAnonConversation = (id) =>
 export const saveOnboarding = (data) =>
   axios.post(`${API_BASE}/user/onboarding`, data, authConfig());
 
+export const getReferralExperience = () =>
+  axios.get(`${API_BASE}/referrals/me`, authConfig());
+
+export const submitReferralApplication = (data) =>
+  axios.post(`${API_BASE}/referrals/applications`, data, authConfig());
+
+export const activateReferralApplication = () =>
+  axios.post(`${API_BASE}/referrals/activate`, {}, authConfig());
+
+export const adminGetReferralApplications = (token, status) =>
+  axios.get(`${API_BASE}/admin/referrals/applications`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+    params: status ? { status } : {},
+  });
+
+export const adminReviewReferralApplication = (token, applicationId, data) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/applications/${encodeURIComponent(applicationId)}/decision`,
+    data,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminExpireReferralApplication = (token, applicationId, reason) =>
+  axios.post(
+    `${API_BASE}/admin/referrals/applications/${encodeURIComponent(applicationId)}/expire`,
+    { reason },
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
+export const adminGetReferralApplicationAudits = (token, applicationId) =>
+  axios.get(
+    `${API_BASE}/admin/referrals/applications/${encodeURIComponent(applicationId)}/audits`,
+    { headers: adminHeaders(token), withCredentials: true },
+  );
+
 export const adminLogin = (email, password) => {
   return axios.post(
     `${API_BASE}/admin/login`,

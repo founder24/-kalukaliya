@@ -24,6 +24,13 @@ import {
   safeReferralDestination,
   weeklyReferralMetrics,
 } from './referral-attribution';
+import {
+  activateReferralApplication,
+  expireReferralApplication,
+  referralExperience,
+  reviewReferralApplication,
+  submitReferralApplication,
+} from './referral-onboarding';
 
 const API_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../');
 const JWT_SECRET = 'referral-test-jwt-secret-at-least-32-characters';
@@ -50,6 +57,8 @@ function migrationStatements(): string[] {
 
 async function resetReferralState(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM referral_application_audits'),
+    env.DB.prepare('DELETE FROM referral_applications'),
     env.DB.prepare('DELETE FROM referral_claim_events'),
     env.DB.prepare('DELETE FROM referral_visit_rate_limits'),
     env.DB.prepare('DELETE FROM referral_gate_evidence'),
@@ -199,6 +208,23 @@ function qualityEvidence(claimId: string, maturityAt: number, suffix = 'default'
     measured_at_epoch_seconds: maturityAt,
     maturity_at_epoch_seconds: maturityAt,
     quality_score: 0.95,
+  };
+}
+
+function validApplication(idempotencyKey = crypto.randomUUID()) {
+  return {
+    institution: 'Syrabit Senior Secondary School',
+    className: '12',
+    streamName: 'Science',
+    ageEligible: true,
+    guardianConsentRequired: false,
+    guardianConsentConfirmed: false,
+    eligibilityAcknowledged: true,
+    conductAcknowledged: true,
+    privacyConsent: true,
+    termsVersion: REFERRAL_POLICY_VERSION,
+    privacyVersion: REFERRAL_POLICY_VERSION,
+    idempotencyKey,
   };
 }
 
@@ -1376,7 +1402,7 @@ describe('referral control route authorization', () => {
       }),
       env,
     );
-    expect(response.status).toBe(201);
+    expect(response.status).toBe(410);
 
     const spoofTargetId = await createUser('spoofed-origin-target');
     const spoofed = await adminReferralRouter.fetch(
@@ -1460,7 +1486,7 @@ describe('referral control route authorization', () => {
     expect(response.status).toBe(403);
   });
 
-  it('admits with explicit review capability and rejects a refresh-style anonymous call', async () => {
+  it('retires direct admission even with review capability and rejects an anonymous call', async () => {
     const targetId = await createUser('capability-target');
     const reviewerId = await createUser(
       'referral-reviewer',
@@ -1487,7 +1513,10 @@ describe('referral control route authorization', () => {
       }),
       env,
     );
-    expect(response.status).toBe(201);
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toMatchObject({
+      detail: expect.stringContaining('Direct admissions are retired'),
+    });
 
     const anonymous = await adminReferralRouter.fetch(
       new Request('https://api.syrabit.ai/admissions', { method: 'POST' }),
@@ -1509,5 +1538,307 @@ describe('referral control route authorization', () => {
       env,
     );
     expect(response.status).toBe(401);
+  });
+});
+
+describe('referral onboarding and activation', () => {
+  it('submits once for a stable idempotency key and rejects missing consent', async () => {
+    const userId = await createUser('onboarding-idempotent');
+    const body = validApplication('stable-application-request');
+    const first = await submitReferralApplication(env.DB, userId, body, TEST_TIME);
+    const retry = await submitReferralApplication(env.DB, userId, body, TEST_TIME + 1);
+    expect(first.idempotent).toBe(false);
+    expect(retry).toMatchObject({
+      idempotent: true,
+      application: { id: first.application.id, status: 'submitted' },
+    });
+    const rows = await env.DB.prepare(`
+      SELECT COUNT(*) AS count FROM referral_applications WHERE user_id = ?
+    `).bind(userId).first<{ count: number }>();
+    const audits = await env.DB.prepare(`
+      SELECT COUNT(*) AS count FROM referral_application_audits
+      WHERE application_id = ?
+    `).bind(first.application.id).first<{ count: number }>();
+    expect(rows?.count).toBe(1);
+    expect(audits?.count).toBe(1);
+
+    const invalidUser = await createUser('onboarding-invalid-consent');
+    await expect(submitReferralApplication(env.DB, invalidUser, {
+      ...validApplication('missing-privacy-consent'),
+      privacyConsent: false,
+    }, TEST_TIME)).rejects.toThrow('acknowledgements are required');
+  });
+
+  it('reserves an inactive slot and hides the code until explicit activation', async () => {
+    const userId = await createUser('onboarding-activation');
+    const application = await submitReferralApplication(
+      env.DB,
+      userId,
+      validApplication('activation-request'),
+      TEST_TIME,
+    );
+    const decision = await reviewReferralApplication(env.DB, application.application.id, {
+      decision: 'approve',
+      actorId: 'referral-audit-operator',
+      reason: 'Identity, KYC, and academic eligibility evidence were verified.',
+      identityVerified: true,
+      kycVerified: true,
+      now: TEST_TIME + 10,
+    });
+    expect(decision).toMatchObject({
+      status: 'activation_required',
+      activation_deadline_at: TEST_TIME + 10 + (7 * 24 * 60 * 60),
+    });
+    const reserved = await env.DB.prepare(`
+      SELECT status, referral_code FROM referral_influencer_slots WHERE user_id = ?
+    `).bind(userId).first<{ status: string; referral_code: string }>();
+    expect(reserved?.status).toBe('inactive');
+    expect(reserved?.referral_code).toHaveLength(32);
+
+    const before = await referralExperience(env.DB, userId);
+    expect(before.application).toMatchObject({ status: 'activation_required' });
+    expect(before.dashboard?.referral).toBeNull();
+    expect(JSON.stringify(before)).not.toContain(reserved!.referral_code);
+
+    const activated = await activateReferralApplication(env.DB, userId, TEST_TIME + 20);
+    expect(activated).toMatchObject({
+      status: 'active',
+      referral_code: reserved?.referral_code,
+    });
+    const after = await referralExperience(env.DB, userId);
+    expect(after.application).toMatchObject({ status: 'active' });
+    expect(after.dashboard?.referral).toEqual({
+      code: reserved?.referral_code,
+      link: `https://syrabit.ai/r/${reserved?.referral_code}`,
+    });
+  });
+
+  it('expires an unactivated reservation and promotes the oldest verified waitlist entry', async () => {
+    const reservedUser = await createUser('reserved-applicant');
+    const reservedApplication = await submitReferralApplication(
+      env.DB,
+      reservedUser,
+      validApplication('reserved-applicant-request'),
+      TEST_TIME,
+    );
+    await reviewReferralApplication(env.DB, reservedApplication.application.id, {
+      decision: 'approve',
+      actorId: 'referral-audit-operator',
+      reason: 'Verified first applicant evidence before reserving the place.',
+      identityVerified: true,
+      kycVerified: true,
+      now: TEST_TIME + 10,
+    });
+    await Promise.all(Array.from(
+      { length: 99 },
+      (_, index) => admitOne(`capacity-existing-${index}`),
+    ));
+
+    const oldestUser = await createUser('oldest-waitlisted');
+    const newestUser = await createUser('newest-waitlisted');
+    const oldest = await submitReferralApplication(
+      env.DB,
+      oldestUser,
+      validApplication('oldest-waitlist-request'),
+      TEST_TIME + 20,
+    );
+    const newest = await submitReferralApplication(
+      env.DB,
+      newestUser,
+      validApplication('newest-waitlist-request'),
+      TEST_TIME + 30,
+    );
+    for (const [application, now] of [[oldest, TEST_TIME + 40], [newest, TEST_TIME + 50]] as const) {
+      await expect(reviewReferralApplication(env.DB, application.application.id, {
+        decision: 'approve',
+        actorId: 'referral-audit-operator',
+        reason: 'Verified applicant evidence but all approved places are reserved.',
+        identityVerified: true,
+        kycVerified: true,
+        now,
+      })).resolves.toMatchObject({ status: 'waitlisted' });
+    }
+
+    const result = await expireReferralApplication(
+      env.DB,
+      reservedApplication.application.id,
+      'referral-audit-operator',
+      'Seven-day activation deadline passed without applicant acceptance.',
+      TEST_TIME + 10 + (7 * 24 * 60 * 60) + 1,
+    );
+    expect(result).toEqual({
+      status: 'expired',
+      promoted: oldest.application.id,
+    });
+    const states = await env.DB.prepare(`
+      SELECT user_id, status, influencer_slot FROM referral_applications
+      WHERE user_id IN (?, ?, ?) ORDER BY submitted_at
+    `).bind(reservedUser, oldestUser, newestUser)
+      .all<{ user_id: string; status: string; influencer_slot: number | null }>();
+    expect(states.results).toEqual([
+      { user_id: reservedUser, status: 'expired', influencer_slot: null },
+      expect.objectContaining({
+        user_id: oldestUser,
+        status: 'activation_required',
+        influencer_slot: expect.any(Number),
+      }),
+      { user_id: newestUser, status: 'waitlisted', influencer_slot: null },
+    ]);
+    const promotionAudit = await env.DB.prepare(`
+      SELECT action, from_status, to_status FROM referral_application_audits
+      WHERE application_id = ? AND action = 'waitlist_promoted'
+    `).bind(oldest.application.id)
+      .first<{ action: string; from_status: string; to_status: string }>();
+    expect(promotionAudit).toEqual({
+      action: 'waitlist_promoted',
+      from_status: 'waitlisted',
+      to_status: 'activation_required',
+    });
+  });
+
+  it('keeps application and slot state consistent when activation races expiry', async () => {
+    const userId = await createUser('activation-expiry-race');
+    const application = await submitReferralApplication(
+      env.DB,
+      userId,
+      validApplication('activation-expiry-race-request'),
+      TEST_TIME,
+    );
+    await reviewReferralApplication(env.DB, application.application.id, {
+      decision: 'approve',
+      actorId: 'referral-audit-operator',
+      reason: 'Verified evidence before exercising the activation expiry race.',
+      identityVerified: true,
+      kycVerified: true,
+      now: TEST_TIME + 10,
+    });
+    await Promise.allSettled([
+      activateReferralApplication(env.DB, userId, TEST_TIME + 20),
+      expireReferralApplication(
+        env.DB,
+        application.application.id,
+        'referral-audit-operator',
+        'Operator expired the reservation while activation was in flight.',
+        TEST_TIME + 20,
+        false,
+      ),
+    ]);
+    const state = await env.DB.prepare(`
+      SELECT a.status AS application_status, a.influencer_slot,
+             s.status AS slot_status, s.user_id AS slot_user_id
+      FROM referral_applications a
+      LEFT JOIN referral_influencer_slots s
+        ON s.slot_no = COALESCE(
+          a.influencer_slot,
+          (SELECT influencer_slot FROM referral_admission_audits
+           WHERE user_id = a.user_id ORDER BY admitted_at DESC LIMIT 1)
+        )
+      WHERE a.id = ?
+    `).bind(application.application.id).first<Record<string, string | number | null>>();
+    if (state?.application_status === 'active') {
+      expect(state).toMatchObject({
+        slot_status: 'active',
+        slot_user_id: userId,
+        influencer_slot: expect.any(Number),
+      });
+    } else {
+      expect(state).toMatchObject({
+        application_status: 'expired',
+        influencer_slot: null,
+        slot_status: 'available',
+        slot_user_id: null,
+      });
+    }
+  });
+
+  it('stops referral accrual on suspension and releases capacity on close', async () => {
+    const userId = await createUser('suspend-close-lifecycle');
+    const application = await submitReferralApplication(
+      env.DB,
+      userId,
+      validApplication('suspend-close-request'),
+      TEST_TIME,
+    );
+    await reviewReferralApplication(env.DB, application.application.id, {
+      decision: 'approve',
+      actorId: 'referral-audit-operator',
+      reason: 'Verified evidence before exercising suspension and closure.',
+      identityVerified: true,
+      kycVerified: true,
+      now: TEST_TIME + 10,
+    });
+    await activateReferralApplication(env.DB, userId, TEST_TIME + 20);
+    const suspended = await reviewReferralApplication(env.DB, application.application.id, {
+      decision: 'suspend',
+      actorId: 'referral-audit-operator',
+      reason: 'Suspended after a documented referral conduct review.',
+      now: TEST_TIME + 30,
+    });
+    expect(suspended).toMatchObject({ status: 'suspended' });
+    expect(suspended?.influencer_slot).toEqual(expect.any(Number));
+    const suspendedSlotNo = suspended?.influencer_slot as number;
+    const suspendedSlot = await env.DB.prepare(`
+      SELECT status FROM referral_influencer_slots WHERE user_id = ?
+    `).bind(userId).first<{ status: string }>();
+    expect(suspendedSlot?.status).toBe('suspended');
+    const qualificationWeek = await openTestWeek(TEST_TIME + 30);
+    await env.DB.batch([
+      env.DB.prepare(`
+        UPDATE referral_influencer_slots
+        SET tier = 'advanced', advanced_effective_at = ?, updated_at = ?
+        WHERE slot_no = ?
+      `).bind(TEST_TIME + 30, TEST_TIME + 30, suspendedSlotNo),
+      env.DB.prepare(`
+        UPDATE referral_advanced_positions
+        SET influencer_slot = ?, status = 'active', qualified_week_id = ?, qualified_at = ?,
+            reviewed_by = 'referral-audit-operator', reviewed_at = ?,
+            review_reason = 'Verified advanced-position test assignment.',
+            activates_at = ?, updated_at = ?
+        WHERE position_no = 1
+      `).bind(
+        suspendedSlotNo,
+        qualificationWeek.id,
+        TEST_TIME + 25,
+        TEST_TIME + 26,
+        TEST_TIME + 30,
+        TEST_TIME + 30,
+      ),
+    ]);
+
+    const closed = await reviewReferralApplication(env.DB, application.application.id, {
+      decision: 'close',
+      actorId: 'referral-audit-operator',
+      reason: 'Closed after the suspension review was completed.',
+      now: TEST_TIME + 40,
+    });
+    expect(closed).toEqual({
+      status: 'closed',
+      activation_deadline_at: null,
+      influencer_slot: null,
+    });
+    const released = await env.DB.prepare(`
+      SELECT status, user_id, referral_code
+      FROM referral_influencer_slots
+      WHERE slot_no = ?
+    `).bind(suspendedSlotNo)
+      .first<{ status: string; user_id: string | null; referral_code: string | null }>();
+    expect(released).toEqual({
+      status: 'available',
+      user_id: null,
+      referral_code: null,
+    });
+    const advancedPosition = await env.DB.prepare(`
+      SELECT influencer_slot, status, qualified_at, reviewed_by, activates_at
+      FROM referral_advanced_positions WHERE position_no = 1
+    `).first<Record<string, string | number | null>>();
+    expect(advancedPosition).toEqual({
+      influencer_slot: null,
+      status: 'released',
+      qualified_at: null,
+      reviewed_by: null,
+      activates_at: null,
+    });
+    const replacement = await admitOne('slot-reuse-after-advanced-close');
+    expect(replacement.slotNo).toBe(suspendedSlotNo);
   });
 });

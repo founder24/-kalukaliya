@@ -11,7 +11,6 @@ import {
 import {
   activateApprovedAdvancedPositions,
   advanceReferralLifecycle,
-  admitReferralInfluencer,
   matureReferralClaim,
   pauseReferralProgram,
   reconcileReferralAccount,
@@ -21,6 +20,15 @@ import {
   reviewAdvancedPosition,
   weeklyReferralMetrics,
 } from '../services/referral-attribution';
+import {
+  activateReferralApplication,
+  expireReferralApplication,
+  listReferralApplications,
+  referralApplicationAudits,
+  referralExperience,
+  reviewReferralApplication,
+  submitReferralApplication,
+} from '../services/referral-onboarding';
 import type { Env, JwtPayload } from '../types';
 
 export const referralRouter = new Hono<{ Bindings: Env }>();
@@ -231,49 +239,149 @@ referralRouter.post('/reconcile', async (c) => {
   }
 });
 
-adminReferralRouter.post('/admissions', async (c) => {
+referralRouter.get('/me', async (c) => {
+  const auth = await requireAccessUser(c);
+  if (auth instanceof Response) return auth;
+  try {
+    return c.json(await referralExperience(c.env.DB, auth.sub));
+  } catch {
+    return c.json({ detail: 'Referral experience unavailable' }, 503);
+  }
+});
+
+referralRouter.post('/applications', async (c) => {
+  const auth = await requireAccessUser(c);
+  if (auth instanceof Response) return auth;
+  if (!allowedMutationOrigin(c)) {
+    return c.json({ detail: 'Trusted Origin required' }, 403);
+  }
+  const body = await requestBody(c);
+  if (!body) return c.json({ detail: 'Application body required' }, 422);
+  try {
+    const result = await submitReferralApplication(c.env.DB, auth.sub, {
+      institution: String(body.institution ?? ''),
+      className: String(body.class_name ?? ''),
+      streamName: String(body.stream_name ?? ''),
+      ageEligible: body.age_eligible === true,
+      guardianConsentRequired: body.guardian_consent_required === true,
+      guardianConsentConfirmed: body.guardian_consent_confirmed === true,
+      eligibilityAcknowledged: body.eligibility_acknowledged === true,
+      conductAcknowledged: body.conduct_acknowledged === true,
+      privacyConsent: body.privacy_consent === true,
+      termsVersion: String(body.terms_version ?? ''),
+      privacyVersion: String(body.privacy_version ?? ''),
+      idempotencyKey: String(body.idempotency_key ?? ''),
+    });
+    return c.json({
+      status: result.application.status,
+      application_id: result.application.id,
+      idempotent: result.idempotent,
+    }, result.idempotent ? 200 : 201);
+  } catch (error) {
+    return c.json({
+      detail: error instanceof Error ? error.message : 'Invalid referral application',
+    }, 422);
+  }
+});
+
+referralRouter.post('/activate', async (c) => {
+  const auth = await requireAccessUser(c);
+  if (auth instanceof Response) return auth;
+  if (!allowedMutationOrigin(c)) {
+    return c.json({ detail: 'Trusted Origin required' }, 403);
+  }
+  try {
+    const result = await activateReferralApplication(c.env.DB, auth.sub);
+    if (!result) return c.json({ detail: 'Activation is not available' }, 409);
+    return c.json(result, result.status === 'active' ? 200 : 409);
+  } catch {
+    return c.json({ detail: 'Referral activation unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.get('/applications', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.reviewCapability);
+  if (auth instanceof Response) return auth;
+  try {
+    return c.json({
+      applications: await listReferralApplications(c.env.DB, c.req.query('status')),
+    });
+  } catch {
+    return c.json({ detail: 'Referral review queue unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.get('/applications/:applicationId/audits', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.reviewCapability);
+  if (auth instanceof Response) return auth;
+  try {
+    return c.json({
+      audits: await referralApplicationAudits(c.env.DB, c.req.param('applicationId')),
+    });
+  } catch {
+    return c.json({ detail: 'Referral audit history unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.post('/applications/:applicationId/decision', async (c) => {
   const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.reviewCapability);
   if (auth instanceof Response) return auth;
   const body = await requestBody(c);
+  const decision = body?.decision;
   if (
-    !body
-    || typeof body.user_id !== 'string'
-    || body.identity_verified !== true
-    || body.kyc_verified !== true
-    || body.eligibility_approved !== true
-    || body.has_authoritative_admission_priority !== true
-    || typeof body.reason !== 'string'
-    || body.reason.trim().length < 8
-    || body.reason.trim().length > 1_000
-    || !body.academic_snapshot
-    || typeof body.academic_snapshot !== 'object'
-    || Array.isArray(body.academic_snapshot)
-  ) {
+    !['review', 'approve', 'waitlist', 'reject', 'suspend', 'close'].includes(String(decision))
+    || typeof body?.reason !== 'string'
+  ) return c.json({ detail: 'Valid decision and reason are required' }, 422);
+  try {
+    const result = await reviewReferralApplication(
+      c.env.DB,
+      c.req.param('applicationId'),
+      {
+        decision: decision as 'review' | 'approve' | 'waitlist' | 'reject' | 'suspend' | 'close',
+        actorId: auth.actorId,
+        reason: body.reason,
+        identityVerified: body.identity_verified === true,
+        kycVerified: body.kyc_verified === true,
+      },
+    );
+    return result
+      ? c.json(result)
+      : c.json({ detail: 'Application not found' }, 404);
+  } catch (error) {
     return c.json({
-      detail: 'Approved identity, KYC, eligibility, admission priority, and academic snapshot are required',
+      detail: error instanceof Error ? error.message : 'Referral decision failed',
     }, 422);
   }
-  try {
-    const admission = await admitReferralInfluencer(c.env.DB, {
-      userId: body.user_id,
-      identityVerified: true,
-      kycVerified: true,
-      academicSnapshot: body.academic_snapshot as Record<string, unknown>,
-      reviewedBy: auth.actorId,
-      reviewReason: body.reason.trim(),
-      reviewedAt: Math.floor(Date.now() / 1000),
-    });
-    if (!admission.admitted) {
-      return c.json({ status: 'waitlist-or-already-admitted' }, 409);
-    }
-    return c.json({
-      status: 'admitted',
-      slot_no: admission.slotNo,
-      referral_code: admission.referralCode,
-    }, 201);
-  } catch {
-    return c.json({ detail: 'Referral admission unavailable' }, 503);
+});
+
+adminReferralRouter.post('/applications/:applicationId/expire', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.reviewCapability);
+  if (auth instanceof Response) return auth;
+  const body = await requestBody(c);
+  if (typeof body?.reason !== 'string') {
+    return c.json({ detail: 'Expiry reason is required' }, 422);
   }
+  try {
+    const result = await expireReferralApplication(
+      c.env.DB,
+      c.req.param('applicationId'),
+      auth.actorId,
+      body.reason,
+    );
+    return result
+      ? c.json(result)
+      : c.json({ detail: 'Application is not awaiting activation' }, 409);
+  } catch {
+    return c.json({ detail: 'Activation expiry unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.post('/admissions', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.reviewCapability);
+  if (auth instanceof Response) return auth;
+  return c.json({
+    detail: 'Direct admissions are retired. Review an applicant through /applications/:applicationId/decision.',
+  }, 410);
 });
 
 adminReferralRouter.post('/program/pause', async (c) => {
