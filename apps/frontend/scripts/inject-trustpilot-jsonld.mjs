@@ -21,8 +21,9 @@
  *           TRUSTPILOT_API_KEY + TRUSTPILOT_BUSINESS_UNIT_ID are set)
  *        c. The committed cache file
  *           scripts/.trustpilot-aggregate-cache.json
- *   2. On a fresh fetch, persists values back to the cache file so the
- *      next build can survive a live-source outage.
+ *   2. On a fresh fetch, persists values back to the cache file for local
+ *      builds. Cloudflare release builds keep the committed fallback cache
+ *      read-only so provenance checks see only source changes.
  *   3. Inserts (or updates) a <script type="application/ld+json"
  *      id="trustpilot-aggregaterating-static"> in the <head> of
  *      EVERY index.html under dist/ — so the SPA fallback shell AND
@@ -53,6 +54,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
 const cacheFile = path.resolve(__dirname, ".trustpilot-aggregate-cache.json");
+const IS_CLOUDFLARE_RELEASE = process.env.CLOUDFLARE_RELEASE_BUILD === "true";
 
 const SCRIPT_ID = "trustpilot-aggregaterating-static";
 const ORG_NAME = "Syrabit.ai";
@@ -305,11 +307,18 @@ async function main() {
   if (!agg) agg = await fetchFromTrustpilotDirect();
 
   if (agg) {
-    log(`fetched aggregate from ${agg.source}: ${agg.ratingValue}★ (${agg.ratingCount} reviews) — persisting to cache`);
-    try {
-      persistCache(agg);
-    } catch (e) {
-      log(`warning: failed to write cache file: ${e.message || e}`);
+    if (IS_CLOUDFLARE_RELEASE) {
+      log(
+        `fetched aggregate from ${agg.source}: ${agg.ratingValue}★ ` +
+        `(${agg.ratingCount} reviews) — release cache is read-only`,
+      );
+    } else {
+      log(`fetched aggregate from ${agg.source}: ${agg.ratingValue}★ (${agg.ratingCount} reviews) — persisting to cache`);
+      try {
+        persistCache(agg);
+      } catch (e) {
+        log(`warning: failed to write cache file: ${e.message || e}`);
+      }
     }
   } else {
     agg = loadCache();
