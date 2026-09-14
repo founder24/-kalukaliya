@@ -32,7 +32,11 @@ import {
 } from "./verify-hydration-policy.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const distDir = path.resolve(__dirname, "..", "dist");
+// The fixture test points this at an isolated dist tree; release validation
+// leaves it unset and always checks the built application.
+const distDir = path.resolve(
+  process.env.VERIFY_HYDRATION_DIST_DIR || path.join(__dirname, "..", "dist"),
+);
 const manifestPath = path.join(distDir, "prerender-manifest.json");
 
 function warn(msg) {

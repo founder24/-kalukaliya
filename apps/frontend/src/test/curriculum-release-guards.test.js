@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   hasNonEmptyLibraryBundle,
@@ -23,6 +25,88 @@ describe("release verifier syntax", () => {
       }),
     ).not.toThrow();
   });
+});
+
+describe("headless hydration release verification", () => {
+  it.skipIf(process.env.REQUIRE_HYDRATION_BROWSER !== "true")(
+    "fails with the static route and page error when a public shell crashes",
+    () => {
+      const fixtureDir = mkdtempSync(path.join(tmpdir(), "syrabit-hydration-"));
+      const verifierPath = path.resolve(
+        process.cwd(),
+        "scripts/verify-hydration.mjs",
+      );
+      const staticRoutes = ["home", "login", "terms"];
+
+      try {
+        for (const route of staticRoutes) {
+          mkdirSync(path.join(fixtureDir, route), { recursive: true });
+          writeFileSync(
+            path.join(fixtureDir, route, "index.html"),
+            [
+              "<!doctype html>",
+              "<html><body><div id=\"root\"></div>",
+              route === "home"
+                ? "<script>throw new Error('fixture static route crashed');</script>"
+                : "",
+              "</body></html>",
+            ].join(""),
+          );
+        }
+
+        mkdirSync(path.join(fixtureDir, "fixture-subject"), { recursive: true });
+        writeFileSync(
+          path.join(fixtureDir, "fixture-subject", "index.html"),
+          [
+            '<div id="root" data-hydrate="subject">subject fixture</div>',
+            "<script>console.error('Hydration failed: fixture warning');</script>",
+          ].join(""),
+        );
+        mkdirSync(path.join(fixtureDir, "fixture-subject", "fixture-chapter"), {
+          recursive: true,
+        });
+        writeFileSync(
+          path.join(
+            fixtureDir,
+            "fixture-subject",
+            "fixture-chapter",
+            "index.html",
+          ),
+          '<div id="root" data-hydrate="chapter">chapter fixture</div>',
+        );
+
+        let result;
+        try {
+          execFileSync(process.execPath, [verifierPath], {
+            cwd: process.cwd(),
+            env: {
+              ...process.env,
+              REQUIRE_HYDRATION_BROWSER: "true",
+              VERIFY_HYDRATION_DIST_DIR: fixtureDir,
+            },
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+        } catch (error) {
+          result = error;
+        }
+
+        expect(result?.status).toBe(1);
+        const output = `${result?.stdout || ""}\n${result?.stderr || ""}`;
+        expect(output).toContain("[static /home] (pageerror)");
+        expect(output).toContain("fixture static route crashed");
+        expect(output).toContain("[subject /fixture-subject] (error)");
+        expect(output).toContain("Hydration failed: fixture warning");
+        expect(output).toContain("loading subject route /fixture-subject");
+        expect(output).toContain(
+          "loading chapter route /fixture-subject/fixture-chapter",
+        );
+        expect(output).toContain("across 5 checked route(s)");
+      } finally {
+        rmSync(fixtureDir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("curriculum release strictness", () => {
