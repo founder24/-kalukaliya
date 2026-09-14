@@ -87,6 +87,16 @@ def test_import_approvals_show_safe_metadata_and_linked_progress(
             "timestamp": "2026-09-13T10:03:00+00:00",
             "error": "credential-like detail must not be exposed",
         },
+        {
+            "event": "import_terminal_summary",
+            "run_id": run_id,
+            "status": "failed",
+            "chapters": 4,
+            "completed": 3,
+            "failed": 1,
+            "timestamp": "2026-09-13T10:04:00+00:00",
+            "error": "terminal summaries must not copy this",
+        },
     )
 
     with (
@@ -120,11 +130,11 @@ def test_import_approvals_show_safe_metadata_and_linked_progress(
             "clean_preambles": False,
         },
         "progress": {
-            "status": "partial",
-            "chapters": 2,
-            "completed": 1,
+            "status": "failed",
+            "chapters": 4,
+            "completed": 3,
             "failed": 1,
-            "last_updated_at": "2026-09-13T10:03:00+00:00",
+            "last_updated_at": "2026-09-13T10:04:00+00:00",
         },
     }
     response_text = response.text
@@ -132,6 +142,7 @@ def test_import_approvals_show_safe_metadata_and_linked_progress(
     assert "should-not-leak" not in response_text
     assert "backup note contents" not in response_text
     assert "credential-like detail" not in response_text
+    assert "terminal summaries must not copy this" not in response_text
 
 
 def test_import_approvals_report_pending_run_without_progress(
@@ -168,4 +179,51 @@ def test_import_approvals_report_pending_run_without_progress(
         "completed": 0,
         "failed": 0,
         "last_updated_at": None,
+    }
+
+
+def test_import_approvals_report_running_run_without_terminal_summary(
+    client, admin_cookie, tmp_path
+):
+    import app.api.v1.admin_content as admin_content
+
+    approvals = tmp_path / "approvals.jsonl"
+    progress = tmp_path / "progress.jsonl"
+    _write_jsonl(
+        approvals,
+        {
+            "event": "production_write_approved",
+            "run_id": "run-running",
+            "operator": "operator",
+            "started_at": "2026-09-13T12:00:00+00:00",
+            "scope": {"subject": "biology"},
+        },
+    )
+    _write_jsonl(
+        progress,
+        {
+            "run_id": "run-running",
+            "chapter_id": "chapter-1",
+            "status": "done",
+            "timestamp": "2026-09-13T12:01:00+00:00",
+        },
+    )
+
+    with patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", approvals), patch.object(
+        admin_content,
+        "_AHSEC_D1_IMPORT_PROGRESS_FILE",
+        progress,
+    ):
+        response = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/approvals",
+            cookies=admin_cookie,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["approvals"][0]["progress"] == {
+        "status": "running",
+        "chapters": 1,
+        "completed": 1,
+        "failed": 0,
+        "last_updated_at": "2026-09-13T12:01:00+00:00",
     }

@@ -96,7 +96,9 @@ MIN_SOURCE_CHARS = 500
 MIN_NOTES_CHARS = 800
 MAX_PREAMBLE_DIFF_LINES = 8
 MAX_PREAMBLE_DIFF_LINE_CHARS = 240
+TERMINAL_SUMMARY_EVENT = "import_terminal_summary"
 ACTIVE_RUN_ID: str | None = None
+ACTIVE_RUN_COUNTS = {"completed": 0, "failed": 0}
 
 
 class ModelPreambleError(RuntimeError):
@@ -675,6 +677,33 @@ def record_progress(chapter_id: str, status: str, **details: Any) -> None:
     )
 
 
+def record_terminal_summary(
+    status: str,
+    *,
+    completed: int,
+    failed: int,
+) -> None:
+    """Append bounded run-level state without copying chapter data or errors."""
+    if not ACTIVE_RUN_ID:
+        return
+    if status not in {"completed", "failed"}:
+        raise ValueError(f"Unsupported terminal status: {status}")
+    completed = max(0, int(completed))
+    failed = max(0, int(failed))
+    append_jsonl(
+        PROGRESS_FILE,
+        {
+            "event": TERMINAL_SUMMARY_EVENT,
+            "run_id": ACTIVE_RUN_ID,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "status": status,
+            "chapters": completed + failed,
+            "completed": completed,
+            "failed": failed,
+        },
+    )
+
+
 def fetch_chapters(client: CloudflareClient) -> list[dict[str, Any]]:
     return client.query(
         """
@@ -1184,10 +1213,11 @@ def log_cleanup_preview(planned: list[dict[str, Any]]) -> None:
             log.info("  ... diff truncated in preview report")
 
 
-async def main() -> int:
-    global ACTIVE_RUN_ID
+async def _run_main() -> int:
+    global ACTIVE_RUN_ID, ACTIVE_RUN_COUNTS
     args = parse_args()
     ACTIVE_RUN_ID = None
+    ACTIVE_RUN_COUNTS = {"completed": 0, "failed": 0}
     if getattr(args, "archive_history", False):
         try:
             summary = archive_history(
@@ -1262,6 +1292,7 @@ async def main() -> int:
             planned,
             preview=preview,
         )
+        ACTIVE_RUN_COUNTS["completed"] = len(affected)
         if not args.skip_index:
             for chapter in affected:
                 await asyncio.to_thread(
@@ -1272,6 +1303,11 @@ async def main() -> int:
                     "existing-d1-preamble-cleanup",
                 )
         log.info("Preamble cleanup complete: changed=%d", len(affected))
+        record_terminal_summary(
+            "completed",
+            completed=len(affected),
+            failed=0,
+        )
         _clear_active_run(ACTIVE_RUN_ID)
         return 0
 
@@ -1399,16 +1435,38 @@ async def main() -> int:
                 chunks=chunk_count,
             )
             processed += 1
+            ACTIVE_RUN_COUNTS["completed"] = processed
             log.info("Updated %s (%d chars, %d chunks)", chapter_id, len(notes), chunk_count)
         except Exception as exc:
             failed += 1
+            ACTIVE_RUN_COUNTS["failed"] = failed
             record_progress(chapter_id, "error", error=str(exc))
             log.exception("Failed chapter %s: %s", chapter_id, exc)
         await asyncio.sleep(max(0.0, args.delay))
 
     log.info("Run complete: updated=%d failed=%d", processed, failed)
+    record_terminal_summary(
+        "failed" if failed else "completed",
+        completed=processed,
+        failed=failed,
+    )
     _clear_active_run(ACTIVE_RUN_ID)
     return 1 if failed else 0
+
+
+async def main() -> int:
+    """Run an import and close an approved run even on an unexpected failure."""
+    try:
+        return await _run_main()
+    except Exception:
+        if ACTIVE_RUN_ID:
+            record_terminal_summary(
+                "failed",
+                completed=ACTIVE_RUN_COUNTS["completed"],
+                failed=ACTIVE_RUN_COUNTS["failed"],
+            )
+            _clear_active_run(ACTIVE_RUN_ID)
+        raise
 
 
 if __name__ == "__main__":

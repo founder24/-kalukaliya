@@ -94,6 +94,113 @@ def test_progress_and_backup_records_share_approval_run_id(monkeypatch, tmp_path
     assert read_jsonl(backup_file)[0]["run_id"] == run_id
     assert json.loads((tmp_path / "active-run.json").read_text())["run_id"] == run_id
 
+
+@pytest.mark.parametrize(
+    ("status", "completed", "failed"),
+    [("completed", 3, 0), ("failed", 2, 1)],
+)
+def test_terminal_summary_is_run_scoped_and_safe(
+    monkeypatch, tmp_path, status, completed, failed
+):
+    progress_file = tmp_path / "progress.jsonl"
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "ACTIVE_RUN_ID", "run-terminal")
+
+    importer.record_terminal_summary(
+        status,
+        completed=completed,
+        failed=failed,
+    )
+
+    record = read_jsonl(progress_file)[0]
+    assert record == {
+        "event": "import_terminal_summary",
+        "run_id": "run-terminal",
+        "timestamp": record["timestamp"],
+        "status": status,
+        "chapters": completed + failed,
+        "completed": completed,
+        "failed": failed,
+    }
+    assert "CLOUDFLARE_API_TOKEN" not in json.dumps(record)
+    assert "notes_en" not in json.dumps(record)
+    assert "error" not in record
+
+
+def test_main_records_failed_terminal_summary_without_exception_payload(
+    monkeypatch, tmp_path
+):
+    progress_file = tmp_path / "progress.jsonl"
+    approval_file = tmp_path / "approvals.jsonl"
+    args = make_args()
+    monkeypatch.setattr(importer, "parse_args", lambda: args)
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "APPROVAL_FILE", approval_file)
+    monkeypatch.setattr(importer, "CloudflareClient", lambda: object())
+    monkeypatch.setattr(
+        importer,
+        "fetch_chapters",
+        lambda _client: [
+            {
+                "id": "chapter-1",
+                "class_name": "HS 1st Year",
+                "subject_slug": "chemistry",
+            }
+        ],
+    )
+
+    async def fail_extract_sources(_args):
+        raise RuntimeError("secret-token and backup note contents")
+
+    monkeypatch.setattr(importer, "extract_sources", fail_extract_sources)
+
+    with pytest.raises(RuntimeError, match="secret-token"):
+        asyncio.run(importer.main())
+
+    records = read_jsonl(progress_file)
+    assert records[-1] == {
+        "event": "import_terminal_summary",
+        "run_id": records[-1]["run_id"],
+        "timestamp": records[-1]["timestamp"],
+        "status": "failed",
+        "chapters": 0,
+        "completed": 0,
+        "failed": 0,
+    }
+    assert "secret-token" not in json.dumps(records[-1])
+    assert "backup note contents" not in json.dumps(records[-1])
+    assert not (tmp_path / "active-run.json").exists()
+
+
+def test_main_records_completed_terminal_summary(monkeypatch, tmp_path):
+    progress_file = tmp_path / "progress.jsonl"
+    approval_file = tmp_path / "approvals.jsonl"
+    args = make_args(limit=0)
+    monkeypatch.setattr(importer, "parse_args", lambda: args)
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "APPROVAL_FILE", approval_file)
+    monkeypatch.setattr(importer, "CloudflareClient", lambda: object())
+    monkeypatch.setattr(importer, "fetch_chapters", lambda _client: [])
+
+    async def no_sources(_args):
+        return {}
+
+    monkeypatch.setattr(importer, "extract_sources", no_sources)
+
+    assert asyncio.run(importer.main()) == 0
+
+    records = read_jsonl(progress_file)
+    assert records[-1]["event"] == "import_terminal_summary"
+    assert records[-1]["status"] == "completed"
+    assert records[-1]["chapters"] == 0
+    assert records[-1]["completed"] == 0
+    assert records[-1]["failed"] == 0
+    assert not (tmp_path / "active-run.json").exists()
+
+
 def approval_record(run_id, started_at):
     return {
         "event": "production_write_approved",

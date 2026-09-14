@@ -150,7 +150,10 @@ def _read_jsonl_records(path: _pathlib.Path) -> list[dict]:
 def _import_progress_summary(records: list[dict]) -> dict:
     """Summarise one import run without returning progress details or errors."""
     latest_by_chapter: dict[str, dict] = {}
+    terminal_summary: dict | None = None
     for record in records:
+        if record.get("event") == "import_terminal_summary":
+            terminal_summary = record
         chapter_id = str(record.get("chapter_id") or "").strip()
         if chapter_id:
             latest_by_chapter[chapter_id] = record
@@ -158,14 +161,25 @@ def _import_progress_summary(records: list[dict]) -> dict:
     statuses = [str(record.get("status") or "").lower() for record in latest_by_chapter.values()]
     done = sum(status == "done" for status in statuses)
     failed = sum(status not in ("", "done") for status in statuses)
-    if not statuses:
-        status = "approved"
-    elif failed and done:
-        status = "partial"
-    elif failed:
-        status = "failed"
+    if terminal_summary is not None:
+        status = str(terminal_summary.get("status") or "").lower()
+        if status not in {"completed", "failed"}:
+            status = "failed"
+
+        def safe_count(value: object, fallback: int) -> int:
+            if isinstance(value, bool):
+                return fallback
+            try:
+                return max(0, int(value))
+            except (TypeError, ValueError):
+                return fallback
+
+        done = safe_count(terminal_summary.get("completed"), done)
+        failed = safe_count(terminal_summary.get("failed"), failed)
+        chapters = safe_count(terminal_summary.get("chapters"), done + failed)
     else:
-        status = "completed"
+        status = "running" if statuses else "approved"
+        chapters = len(statuses)
 
     timestamps = [
         record.get("timestamp")
@@ -174,7 +188,7 @@ def _import_progress_summary(records: list[dict]) -> dict:
     ]
     return {
         "status": status,
-        "chapters": len(statuses),
+        "chapters": chapters,
         "completed": done,
         "failed": failed,
         "last_updated_at": max(timestamps) if timestamps else None,
