@@ -1,0 +1,509 @@
+Syrabit.ai — Ads Monetization Blueprint
+
+Your current ad strategy is built around two networks only:
+
+🥇 Adcash — video + banner + interstitial + in-page push
+
+🥈 Adsterra — native banner + Social Bar
+
+
+The objective is high monetization without destroying the educational UX.
+
+
+---
+
+1. Overall architecture
+
+Student enters Syrabit
+        │
+        ▼
+   Educational page
+        │
+ ┌──────┼─────────┐
+ ▼      ▼         ▼
+Notes Questions   PYQs
+ │       │         │
+ ▼       ▼         ▼
+Video   Video     Video
+Native  Native    Native
+Banner  Banner    Banner
+ │       │         │
+ └──────┼─────────┘
+        ▼
+   Social Bar
+        │
+        ▼
+Occasional transition
+    Interstitial
+        │
+        ▼
+Repeated study sessions
+        │
+        ▼
+More ad impressions
+        │
+        ▼
+Higher user LTV
+
+
+---
+
+2. Adcash — primary network
+
+Formats you planned
+
+Format	Purpose	Placement
+
+🎥 Video Slider	High-value video monetization	Within content/scroll
+🎥 Pre-roll	Highest-value video opportunity	Before selected content
+🖼️ Banner	Baseline display revenue	Natural content breaks
+⛶ Interstitial	Transition monetization	Page/chapter transitions
+🔔 In-page Push	Persistent monetization	Non-blocking page area
+
+
+Adcash officially supports these formats, including video slider/pre-roll, banners, interstitials and in-page push.
+
+
+---
+
+3. Adsterra — secondary network
+
+Primary formats
+
+Format	Purpose	Placement
+
+📰 Native Banner	Blends with educational content	Between content blocks
+🔵 Social Bar	Persistent mobile monetization	Site-wide
+
+
+The key idea is not to duplicate every format everywhere.
+
+Adsterra acts as your complementary native/social monetization layer.
+
+
+---
+
+4. Notes page
+
+Your Notes pages are long, so they receive the highest ad density.
+
+Recommended structure
+
+━━━━━━━━━━━━━━━━━━━━
+Chapter heading
+━━━━━━━━━━━━━━━━━━━━
+
+[ Educational content ]
+
+      🎥 VIDEO
+
+[ Educational content ]
+
+      📰 NATIVE
+
+[ Educational content ]
+
+      🖼️ BANNER
+
+[ Educational content ]
+
+      🎥 VIDEO
+
+[ Educational content ]
+
+      📰 NATIVE
+
+[ Educational content ]
+
+      🎥 VIDEO
+
+[ Educational content ]
+
+      🖼️ BANNER
+━━━━━━━━━━━━━━━━━━━━
+
+Target
+
+Up to ~3 video opportunities
+
+plus:
+
+1–2 native
+
+1–2 banners
+
+Social Bar
+
+occasional transition interstitial
+
+
+Not every opportunity necessarily becomes a monetized impression.
+
+
+---
+
+5. Questions page
+
+Questions are shorter, so reduce density.
+
+━━━━━━━━━━━━━━━━━━━━
+Question 1
+━━━━━━━━━━━━━━━━━━━━
+
+Answer / explanation
+
+      🎥 VIDEO
+
+Question 2
+━━━━━━━━━━━━━━━━━━━━
+
+      📰 NATIVE
+
+Question 3
+━━━━━━━━━━━━━━━━━━━━
+
+      🖼️ BANNER
+
+Target
+
+~1 video opportunity
+
+plus:
+
+1 native/banner
+
+Social Bar
+
+
+
+---
+
+6. PYQ page
+
+PYQs are image-heavy.
+
+The most important rule:
+
+> Never place intrusive ads directly over question-paper images.
+
+
+
+Example:
+
+━━━━━━━━━━━━━━━━━━━━
+2025 Question Paper
+━━━━━━━━━━━━━━━━━━━━
+
+        [ PAPER IMAGE ]
+
+        [ PAPER IMAGE ]
+
+      🎥 VIDEO
+
+        [ PAPER IMAGE ]
+
+      📰 NATIVE
+
+        [ PAPER IMAGE ]
+
+      🖼️ BANNER
+
+Target
+
+1–2 video opportunities
+
+plus:
+
+1 native/banner
+
+Social Bar
+
+
+Potentially another video opportunity on a longer PYQ page.
+
+
+---
+
+7. Interstitial strategy
+
+Don't trigger an interstitial every few minutes.
+
+Use it around natural transitions.
+
+For example:
+
+Chapter 1
+   ↓
+Questions
+   ↓
+[ INTERSTITIAL ]
+   ↓
+PYQs
+
+or:
+
+Subject A
+   ↓
+[ INTERSTITIAL ]
+   ↓
+Subject B
+
+The student should perceive it as a navigation transition, not an interruption during studying.
+
+
+---
+
+8. Social Bar
+
+Keep Social Bar persistent but visually unobtrusive.
+
+It can appear across:
+
+Notes
+Questions
+PYQs
+Subject pages
+Chapter pages
+
+This gives you an additional monetization layer without requiring another large content block.
+
+
+---
+
+9. Video opportunity model
+
+Your earlier concept was:
+
+Full subject journey
+
+If a student goes through:
+
+5 Notes pages
++
+5 Questions pages
++
+5 PYQ pages
+
+and you use:
+
+Notes:     3 video opportunities × 5 = 15
+Questions: 2 × 5 = 10
+PYQs:      3 × 5 = 15
+
+then:
+
+40 potential video opportunities
+
+But this is not 40 guaranteed video impressions.
+
+The distinction is crucial:
+
+> Opportunity ≠ impression ≠ filled impression ≠ monetized impression.
+
+
+
+Actual revenue depends on fill rate, viewability, user behavior, frequency caps, network demand and geography.
+
+
+---
+
+10. Student session strategy
+
+Your biggest advantage is the educational workflow:
+
+Search syllabus topic
+       ↓
+Read Notes
+       ↓
+Practice Questions
+       ↓
+Check PYQ
+       ↓
+Return to Notes
+       ↓
+Next chapter
+       ↓
+Revision later
+
+Therefore, monetization doesn't depend entirely on forcing ads into one page.
+
+It comes from repeated legitimate educational activity.
+
+
+---
+
+11. Target impression model
+
+For planning, we previously used:
+
+Strong-engagement scenario
+
+~40 actual monetized impressions/user/day
+
+But don't assume every student generates this.
+
+A more useful planning framework is:
+
+Engagement	Actual impressions/day
+
+Light	10–15
+Moderate	20–30
+Strong	30–40
+Very heavy	40+
+
+
+Your ₹2/user/day target requires approximately:
+
+₹50 blended eCPM × 40 impressions = ₹2/user/day
+
+So ₹2/user/day is an optimization target, not a guaranteed Assam traffic rate.
+
+
+---
+
+12. Blended eCPM model
+
+Don't add individual format eCPMs together.
+
+Instead calculate:
+
+Total ad revenue
+──────────────────── × 1,000
+Total monetized impressions
+
+For Assam-heavy mobile educational traffic, our planning bands were:
+
+Blended eCPM	Assessment
+
+₹20–25	Conservative
+₹30–40	Realistic planning range
+₹45–55	Strong
+₹55–70	Very strong
+₹70+	Excellent/upside
+
+
+I'd use ₹40 blended eCPM as the initial business-planning base case, then replace it with your actual measured number once Syrabit has sufficient traffic.
+
+
+---
+
+13. Revenue model
+
+At 40 monetized impressions/user/day:
+
+Blended eCPM	Revenue/user/day
+
+₹20	₹0.80
+₹25	₹1.00
+₹30	₹1.20
+₹40	₹1.60
+₹50	₹2.00
+₹60	₹2.40
+
+
+Therefore:
+
+₹2/day requires
+
+₹50 blended eCPM × 40 impressions / 1,000 = ₹2
+
+
+---
+
+14. Referral + ads together
+
+This is where your two systems connect.
+
+Campus Lead
+     │
+     ▼
+₹1 CAC
+     │
+     ▼
+Student acquired
+     │
+     ▼
+Syrabit Notes
+     │
+     ▼
+Questions
+     │
+     ▼
+PYQs
+     │
+     ▼
+Returns for revision
+     │
+     ▼
+Multiple active days
+     │
+     ▼
+Multiple ad impressions
+     │
+     ▼
+Ad revenue
+     │
+     ▼
+Student LTV
+
+Your fundamental equation becomes:
+
+LTV > CAC
+
+where:
+
+CAC ≈ ₹1/verified acquired visitor
+
+and LTV depends on:
+
+active days
+
+impressions/session
+
+sessions/day
+
+blended eCPM
+
+ad fill
+
+retention
+
+
+
+---
+
+15. The complete monetization stack
+
+SYRABIT.AI
+                      │
+          ┌───────────┴───────────┐
+          │                       │
+       AD CASH                 ADSTERRA
+          │                       │
+ ┌────────┼────────┐       ┌──────┴──────┐
+ │        │        │       │             │
+Video   Banner  Interstitial Native   Social Bar
+ │
+Pre-roll
+Slider
+In-page Push
+          │                       │
+          └───────────┬───────────┘
+                      ▼
+               Blended eCPM
+                      │
+                      ▼
+               Revenue / user
+                      │
+                      ▼
+              Monthly user LTV
+                      │
+                      ▼
+                Compare with
+                 ₹1 CAC
+
+The design principle
+
+High-value ads on long pages, lighter ads on short pages, interstitials only at natural transitions, and persistent native/social monetization without covering educational content.
+
+That gives you the best balance between ad revenue, student retention, and the ₹1 campus-acquisition model.
