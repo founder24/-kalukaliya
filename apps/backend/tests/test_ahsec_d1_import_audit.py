@@ -456,6 +456,146 @@ def test_index_failure_after_notes_write_is_a_distinct_repairable_state(
     assert "Vectorize unavailable" not in json.dumps(progress[-1])
 
 
+@pytest.mark.parametrize(
+    ("failure", "operation", "expected_events"),
+    [
+        (
+            "vector_delete",
+            "vector_delete",
+            ["write_notes", "write_rag_document", "embed", "query", "vector_delete"],
+        ),
+        (
+            "vector_upsert",
+            "vector_upsert",
+            [
+                "write_notes",
+                "write_rag_document",
+                "embed",
+                "query",
+                "vector_delete",
+                "vector_upsert",
+            ],
+        ),
+        (
+            "chunk_mapping",
+            "chunk_mapping_delete",
+            [
+                "write_notes",
+                "write_rag_document",
+                "embed",
+                "query",
+                "vector_delete",
+                "vector_upsert",
+                "chunk_mapping_delete",
+            ],
+        ),
+    ],
+)
+def test_index_replacement_failures_are_audited_and_repairable(
+    monkeypatch, tmp_path, failure, operation, expected_events
+):
+    progress_file = tmp_path / "progress.jsonl"
+    approval_file = tmp_path / "approvals.jsonl"
+    backup_file = tmp_path / "notes-backup.jsonl"
+    args = make_args(limit=1, delay=0, skip_index=False)
+    chapter = {
+        "id": f"chapter-{failure}",
+        "subject_id": "subject-1",
+        "class_name": "HS 1st Year",
+        "subject_name": "Chemistry",
+        "subject_slug": "chemistry",
+        "title": "Motion",
+        "chapter_number": 1,
+        "notes_en": "Existing notes",
+        "rag_text": "Existing notes",
+        "rag_sections_en": "[]",
+    }
+    source = {
+        "title": "Motion",
+        "effective_number": 1,
+        "body_text": "Official textbook content " * 30,
+        "source_pdf_url": "https://example.test/motion.pdf",
+    }
+    generated_notes = "## Motion\n\n" + ("Generated study notes. " * 60)
+
+    class FakeClient:
+        def __init__(self):
+            self.events = []
+
+        def generate(self, system_prompt, user_message, *, chapter_id=None):
+            return generated_notes
+
+        def embed(self, texts):
+            self.events.append("embed")
+            return [[0.1, 0.2] for _ in texts]
+
+        def query(self, sql, params=None):
+            self.events.append("query")
+            if "SELECT vector_id FROM chunks" in sql:
+                return [{"vector_id": "old-vector"}]
+            return []
+
+        def vector_delete(self, vector_ids):
+            self.events.append("vector_delete")
+            if failure == "vector_delete":
+                raise RuntimeError("delete unavailable")
+
+        def vector_upsert(self, vectors):
+            self.events.append("vector_upsert")
+            if failure == "vector_upsert":
+                raise RuntimeError("upsert unavailable")
+
+        def execute(self, sql, params=None):
+            if "UPDATE chapters" in sql:
+                self.events.append("write_notes")
+            elif "INSERT INTO rag_documents" in sql:
+                self.events.append("write_rag_document")
+            elif "DELETE FROM chunks" in sql:
+                self.events.append("chunk_mapping_delete")
+                if failure == "chunk_mapping":
+                    raise RuntimeError("chunk mapping unavailable")
+
+    client = FakeClient()
+    monkeypatch.setattr(importer, "parse_args", lambda: args)
+    monkeypatch.setattr(importer, "CloudflareClient", lambda: client)
+    monkeypatch.setattr(importer, "fetch_chapters", lambda _client: [chapter])
+
+    async def normal_sources(_args):
+        return {("11", "chemistry"): [source]}
+
+    monkeypatch.setattr(importer, "extract_sources", normal_sources)
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "APPROVAL_FILE", approval_file)
+    monkeypatch.setattr(importer, "BACKUP_FILE", backup_file)
+
+    assert asyncio.run(importer.main()) == 1
+    assert client.events == expected_events
+
+    records = read_jsonl(progress_file)
+    failed = next(
+        row for row in records if row.get("chapter_id") == chapter["id"]
+    )
+    assert failed["status"] == importer.INDEX_FAILED_STATUS
+    assert failed["operation"] == operation
+    assert failed["notes_written"] is True
+    assert failed["repairable"] is True
+    assert "unavailable" in failed["error"]
+    assert failed["index_attempt"] == 1
+    assert f"--repair-index {chapter['id']}" in failed["repair_command"]
+    assert records[-1]["event"] == importer.TERMINAL_SUMMARY_EVENT
+    assert records[-1]["status"] == "failed"
+    assert records[-1]["chapters"] == 1
+    assert records[-1]["completed"] == 0
+    assert records[-1]["failed"] == 1
+    assert not any(
+        row.get("chapter_id") == chapter["id"] and row["status"] == "done"
+        for row in records
+    )
+    assert chapter["id"] not in importer.load_done()
+    assert not (tmp_path / "active-run.json").exists()
+
+
 def test_index_repair_reuses_stored_notes_without_regeneration(
     monkeypatch, tmp_path
 ):

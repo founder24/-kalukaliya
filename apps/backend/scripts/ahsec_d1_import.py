@@ -107,6 +107,14 @@ ACTIVE_RUN_ID: str | None = None
 ACTIVE_RUN_COUNTS = {"completed": 0, "failed": 0}
 
 
+class IndexReplacementError(RuntimeError):
+    """Identify which non-atomic index replacement step failed."""
+
+    def __init__(self, operation: str, cause: Exception) -> None:
+        self.operation = operation
+        super().__init__(f"{operation} failed: {cause}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Replace AHSEC chapter notes in Cloudflare D1 from official PDFs"
@@ -442,6 +450,11 @@ def _record_index_failure(
     if source_pdf_url:
         details["source_pdf_url"] = source_pdf_url
     record_progress(chapter_id, INDEX_FAILED_STATUS, **details)
+
+
+def _index_failure_operation(error: Exception, fallback: str) -> str:
+    operation = getattr(error, "operation", None)
+    return str(operation or fallback)
 
 
 def _index_repair_attempt(chapter_id: str) -> int:
@@ -956,7 +969,10 @@ def replace_index(
         [chapter["id"]],
     )
     old_ids = [str(row["vector_id"]) for row in old if row.get("vector_id")]
-    client.vector_delete(old_ids)
+    try:
+        client.vector_delete(old_ids)
+    except Exception as exc:
+        raise IndexReplacementError("vector_delete", exc) from exc
 
     vectors: list[dict[str, Any]] = []
     rows: list[tuple[str, str, str]] = []
@@ -972,15 +988,21 @@ def replace_index(
         }
         vectors.append({"id": vector_id, "values": values, "metadata": metadata})
         rows.append((vector_id, content, json.dumps({**metadata, "sourceUrl": source_url})))
-    client.vector_upsert(vectors)
+    try:
+        client.vector_upsert(vectors)
+    except Exception as exc:
+        raise IndexReplacementError("vector_upsert", exc) from exc
 
-    client.execute(
-        """
-        DELETE FROM chunks
-        WHERE chapter_id = ? AND source_type = 'notes' AND medium = 'english'
-        """,
-        [chapter["id"]],
-    )
+    try:
+        client.execute(
+            """
+            DELETE FROM chunks
+            WHERE chapter_id = ? AND source_type = 'notes' AND medium = 'english'
+            """,
+            [chapter["id"]],
+        )
+    except Exception as exc:
+        raise IndexReplacementError("chunk_mapping_delete", exc) from exc
     if rows:
         placeholders = ",".join(["(?, ?, ?, ?, 'notes', 'english', 'text', ?, ?, ?, ?)"] * len(rows))
         params: list[Any] = []
@@ -998,19 +1020,25 @@ def replace_index(
                     now,
                 ]
             )
+        try:
+            client.execute(
+                f"""
+                INSERT INTO chunks
+                  (id, document_id, chapter_id, subject_id, source_type, medium,
+                   chunk_type, content, vector_id, metadata, created_at)
+                VALUES {placeholders}
+                """,
+                params,
+            )
+        except Exception as exc:
+            raise IndexReplacementError("chunk_mapping_insert", exc) from exc
+    try:
         client.execute(
-            f"""
-            INSERT INTO chunks
-              (id, document_id, chapter_id, subject_id, source_type, medium,
-               chunk_type, content, vector_id, metadata, created_at)
-            VALUES {placeholders}
-            """,
-            params,
+            "UPDATE chapters SET rag_indexed_at = ? WHERE id = ?",
+            [int(time.time()), chapter["id"]],
         )
-    client.execute(
-        "UPDATE chapters SET rag_indexed_at = ? WHERE id = ?",
-        [int(time.time()), chapter["id"]],
-    )
+    except Exception as exc:
+        raise IndexReplacementError("chunk_mapping_timestamp", exc) from exc
     return len(rows)
 
 
@@ -1085,7 +1113,7 @@ async def repair_indexes(
                 chapter_id,
                 exc,
                 attempt=attempt,
-                operation="index_repair",
+                operation=_index_failure_operation(exc, "index_repair"),
                 notes_written=bool(notes),
             )
             log.exception("Index repair failed for %s: %s", chapter_id, exc)
@@ -1567,7 +1595,7 @@ async def _run_main() -> int:
                         chapter_id,
                         exc,
                         attempt=_next_index_attempt(chapter_id),
-                        operation="cleanup",
+                        operation=_index_failure_operation(exc, "cleanup"),
                         source_pdf_url="existing-d1-preamble-cleanup",
                     )
                     log.exception(
@@ -1715,7 +1743,7 @@ async def _run_main() -> int:
                         chapter_id,
                         exc,
                         attempt=index_attempt,
-                        operation="import",
+                        operation=_index_failure_operation(exc, "import"),
                         source_pdf_url=str(source["source_pdf_url"]),
                     )
                     log.exception("Indexing failed after notes write for %s: %s", chapter_id, exc)
