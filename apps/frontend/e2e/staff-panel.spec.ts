@@ -30,6 +30,7 @@ const STAFF_USER = {
   email: 'staff@syrabit.com',
   name: 'Staff User',
   role: 'staff',
+  capabilities: ['referral:settle'],
   plan: 'pro',
   subscription_tier: 'pro',
 };
@@ -173,6 +174,12 @@ async function setupMocks(page: import('@playwright/test').Page) {
     { pattern: '**/api/v1/admin/conversations*', body: { data: [], total: 0 } },
     { pattern: '**/api/v1/admin/content/draft-served-subjects*', body: { subjects: [] } },
     { pattern: '**/api/v1/staff/analytics/command-center*', body: {} },
+    { pattern: '**/api/v1/admin/referrals/settlements*', body: { statements: [] } },
+    { pattern: '**/api/v1/admin/referrals/beneficiaries*', body: { beneficiaries: [] } },
+    {
+      pattern: '**/api/v1/admin/referrals/roi/dashboard*',
+      body: { inventory: [], controls: null, reports: [] },
+    },
   ];
 
   // SEO live health (called directly, not via admin helper)
@@ -549,6 +556,154 @@ test.describe('Staff panel — sidebar sections', () => {
     await clickSidebar(page, 'Conversations');
     await assertSectionAlive(page, 'Conversations');
     expect(consoleErrors, 'No uncaught console errors on Conversations').toHaveLength(0);
+  });
+
+  test('Referral ROI dashboard covers the protected healthy fixture and endpoint', async ({ page }) => {
+    const roiRequests: string[] = [];
+    await page.route('**/api/v1/admin/referrals/roi/dashboard*', (route) => {
+      roiRequests.push(new URL(route.request().url()).pathname);
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          inventory: [{
+            network: 'adsense',
+            status: 'enabled',
+            configured: true,
+            policy_notes: 'Only provider-finalized AdSense reports fund rewards.',
+            contributes_to_revenue: true,
+          }],
+          controls: {
+            evidence_id: 'roi-release-control',
+            reserve_healthy: true,
+            revenue_fresh: true,
+            invalid_traffic_healthy: true,
+            ad_account_healthy: true,
+            contribution_margin_healthy: true,
+            identity_resets_healthy: true,
+            fraud_healthy: true,
+            exposure_healthy: true,
+            warnings: [],
+            expires_at: Math.floor(Date.now() / 1000) + 3600,
+          },
+          reports: [{
+            id: 'roi-release-week',
+            week_key: '2026-W36',
+            data_quality: 'healthy',
+            pause_recommended: false,
+            referral_clicks: 12,
+            unique_browser_identities: 9,
+            authenticated_accounts: 6,
+            mature_verified_visitors: 4,
+            repeat_week_visitors: 2,
+            payable_statements: 3,
+            cash_paid_inr: 120,
+            actual_monetized_impressions: 432,
+            finalized_net_ad_revenue_paise: 22000,
+            true_program_cost_inr: 120,
+            contribution_margin_paise: 10000,
+            payback_ratio_milli: 1833,
+            warnings_json: '[]',
+          }],
+        }),
+      });
+    });
+
+    await gotoStaff(page);
+    await clickSidebar(page, 'Referral ROI');
+
+    await expect(page.getByRole('heading', { name: 'Ad-funded referral ROI' })).toBeVisible();
+    await expect(page.getByText('Production ad inventory')).toBeVisible();
+    await expect(page.getByText('adsense', { exact: true })).toBeVisible();
+    await expect(page.getByText('adsterra', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Safety controls')).toBeVisible();
+    await expect(page.getByText('Weekly unit economics')).toBeVisible();
+    for (const metric of ['Week', 'Quality', 'Clicks', 'Browsers', 'Accounts', 'Mature', 'Repeat', 'Payable', 'Paid', 'Impressions', 'Net ad revenue', 'Cost', 'Margin', 'Payback', 'Warnings']) {
+      await expect(page.getByRole('columnheader', { name: metric, exact: true })).toBeVisible();
+    }
+    await expect(page.getByTestId('referral-roi-pause-recommendation')).toHaveCount(0);
+    expect(roiRequests.length).toBeGreaterThan(0);
+    expect(roiRequests.every(path => path === '/api/v1/admin/referrals/roi/dashboard')).toBeTruthy();
+    expect(consoleErrors, 'No uncaught console errors on Referral ROI').toHaveLength(0);
+  });
+
+  test('Referral ROI denies provider data without referral:settle', async ({ page }) => {
+    const roiRequests: string[] = [];
+    await page.route('**/api/v1/users/me', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ...STAFF_USER, capabilities: [] }),
+      }),
+    );
+    await page.route('**/api/v1/admin/referrals/roi/dashboard*', (route) => {
+      roiRequests.push(new URL(route.request().url()).pathname);
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          inventory: [{
+            network: 'adsense',
+            status: 'enabled',
+            configured: true,
+            policy_notes: 'Provider-finalized only.',
+            contributes_to_revenue: true,
+          }],
+          controls: null,
+          reports: [],
+        }),
+      });
+    });
+
+    await gotoStaff(page);
+    await clickSidebar(page, 'Referral ROI');
+    await expect(page.getByTestId('referral-roi-forbidden')).toBeVisible();
+    await expect(page.getByText('Referral ROI is restricted.')).toBeVisible();
+    await expect(page.getByText('Production ad inventory')).toHaveCount(0);
+    expect(roiRequests).toHaveLength(0);
+    expect(consoleErrors, 'No uncaught console errors in the restricted ROI preview').toHaveLength(0);
+  });
+
+  test('Referral ROI shows a pause recommendation for missing, stale, and negative-margin evidence', async ({ page }) => {
+    const roiRequests: string[] = [];
+    await page.route('**/api/v1/admin/referrals/roi/dashboard*', (route) => {
+      roiRequests.push(new URL(route.request().url()).pathname);
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          inventory: [],
+          controls: null,
+          reports: [
+            {
+              id: 'stale-provider-revenue',
+              week_key: '2026-W36',
+              data_quality: 'blocked',
+              pause_recommended: true,
+              warnings_json: '["provider-revenue-stale"]',
+            },
+            {
+              id: 'negative-margin',
+              week_key: '2026-W35',
+              data_quality: 'blocked',
+              pause_recommended: true,
+              contribution_margin_paise: -100,
+              warnings_json: '["negative-contribution-margin"]',
+            },
+          ],
+        }),
+      });
+    });
+
+    await gotoStaff(page);
+    await clickSidebar(page, 'Referral ROI');
+    await expect(page.getByRole('heading', { name: 'Ad-funded referral ROI' })).toBeVisible();
+    await expect(page.getByTestId('referral-roi-pause-recommendation')).toContainText('roi-control-evidence-missing');
+    await expect(page.getByTestId('referral-roi-pause-recommendation')).toContainText('provider-revenue-stale');
+    await expect(page.getByTestId('referral-roi-pause-recommendation')).toContainText('negative-contribution-margin');
+    await expect(page.getByText('2026-W35')).toBeVisible();
+    expect(roiRequests.length).toBeGreaterThan(0);
+    expect(consoleErrors, 'No uncaught console errors for risky ROI states').toHaveLength(0);
   });
 
   // ──────────────────────────────────────────────────────────────────────────

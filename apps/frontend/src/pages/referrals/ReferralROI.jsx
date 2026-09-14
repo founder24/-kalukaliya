@@ -41,7 +41,9 @@ export default function ReferralROI({ adminToken }) {
     }
   }, [adminToken]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (allowed) load();
+  }, [allowed, load]);
 
   const calculate = async () => {
     if (!weekId.trim()) return;
@@ -60,6 +62,20 @@ export default function ReferralROI({ adminToken }) {
   }
 
   const controls = data?.controls;
+  const reports = data?.reports || [];
+  const controlExpired = Boolean(
+    controls?.expires_at != null
+      && Number(controls.expires_at) <= Math.floor(Date.now() / 1000),
+  );
+  const controlWarnings = controls
+    ? [
+      ...(Array.isArray(controls.warnings) ? controls.warnings : []),
+      ...(controlExpired ? ['roi-control-evidence-stale'] : []),
+    ]
+    : ['roi-control-evidence-missing'];
+  const pauseRecommended = !controls
+    || controlWarnings.length > 0
+    || reports.some(report => report.pause_recommended === true || warnings(report.warnings_json).length > 0);
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -75,6 +91,17 @@ export default function ReferralROI({ adminToken }) {
       </div>
 
       {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}
+      {pauseRecommended && (
+        <div
+          className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900"
+          data-testid="referral-roi-pause-recommendation"
+          role="alert"
+        >
+          <div className="flex items-center gap-2 font-bold"><ShieldAlert className="text-rose-600" size={18} />Pause recommendation</div>
+          <p className="mt-1">Keep referral accrual paused until the ROI evidence is healthy and current.</p>
+          <p className="mt-2 text-xs text-rose-700">Warnings: {[...controlWarnings, ...reports.flatMap(report => warnings(report.warnings_json))].join(', ')}</p>
+        </div>
+      )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between gap-3">
@@ -96,10 +123,10 @@ export default function ReferralROI({ adminToken }) {
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-2"><h3 className="font-bold text-slate-900">Safety controls</h3>{controls && !Object.entries(controls).some(([key, value]) => key.endsWith('_healthy') && value === false) ? <ShieldCheck className="text-emerald-600" size={18} /> : <ShieldAlert className="text-rose-600" size={18} />}</div>
+        <div className="flex items-center gap-2"><h3 className="font-bold text-slate-900">Safety controls</h3>{controls && !controlExpired && !Object.entries(controls).some(([key, value]) => key.endsWith('_healthy') && value === false) ? <ShieldCheck className="text-emerald-600" size={18} /> : <ShieldAlert className="text-rose-600" size={18} />}</div>
         <p className="mt-1 text-xs text-slate-500">A missing or expired control record fails closed and recommends pausing accrual.</p>
         {controls ? <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{Object.entries(controls).filter(([key]) => key.endsWith('_healthy')).map(([key, value]) => <div key={key} className={`rounded-lg px-3 py-2 text-xs font-semibold ${value ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{key.replaceAll('_', ' ')}: {value ? 'pass' : 'blocked'}</div>)}</div> : <p className="mt-4 text-sm font-semibold text-rose-700">No current control evidence.</p>}
-        {controls?.warnings?.length > 0 && <p className="mt-3 text-xs text-rose-700">Warnings: {controls.warnings.join(', ')}</p>}
+        {controlWarnings.length > 0 && <p className="mt-3 text-xs text-rose-700">Warnings: {controlWarnings.join(', ')}</p>}
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -107,7 +134,7 @@ export default function ReferralROI({ adminToken }) {
           <div><h3 className="font-bold text-slate-900">Weekly unit economics</h3><p className="mt-1 text-xs text-slate-500">Rewards are compared with finalized net contribution and true operating cost.</p></div>
           <div className="flex gap-2"><input value={weekId} onChange={event => setWeekId(event.target.value)} placeholder="Week ID to recalculate" className="h-9 rounded-lg border border-slate-200 px-3 text-xs outline-none focus:border-violet-500" /><button onClick={calculate} disabled={!weekId.trim()} className="h-9 rounded-lg bg-slate-900 px-3 text-xs font-bold text-white disabled:opacity-40">Calculate</button></div>
         </div>
-        <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1380px] text-left text-xs"><thead><tr className="border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-400"><th className="pb-2">Week</th><th className="pb-2">Quality</th><th className="pb-2">Clicks</th><th className="pb-2">Browsers</th><th className="pb-2">Accounts</th><th className="pb-2">Mature</th><th className="pb-2">Repeat</th><th className="pb-2">Payable</th><th className="pb-2">Paid</th><th className="pb-2">Impressions</th><th className="pb-2">Net ad revenue</th><th className="pb-2">Cost</th><th className="pb-2">Margin</th><th className="pb-2">Payback</th><th className="pb-2">Warnings</th></tr></thead><tbody>{(data?.reports || []).map(report => <tr key={report.id} className="border-b border-slate-50"><td className="py-3 font-semibold text-slate-800">{report.week_key || report.week_id}</td><td className={`py-3 font-bold ${report.data_quality === 'healthy' ? 'text-emerald-700' : 'text-rose-700'}`}>{report.data_quality}</td><td className="py-3">{report.referral_clicks}</td><td className="py-3">{report.unique_browser_identities}</td><td className="py-3">{report.authenticated_accounts}</td><td className="py-3">{report.mature_verified_visitors}</td><td className="py-3">{report.repeat_week_visitors}</td><td className="py-3">{report.payable_statements}</td><td className="py-3">₹{report.cash_paid_inr}</td><td className="py-3">{report.actual_monetized_impressions}</td><td className="py-3">{money(report.finalized_net_ad_revenue_paise)}</td><td className="py-3">₹{report.true_program_cost_inr}</td><td className={`py-3 ${Number(report.contribution_margin_paise) < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{money(report.contribution_margin_paise)}</td><td className="py-3">{report.payback_ratio_milli == null ? '—' : `${(Number(report.payback_ratio_milli) / 10).toFixed(1)}x`}</td><td className="py-3 max-w-[260px] text-rose-700">{warnings(report.warnings_json).join(', ') || '—'}</td></tr>)}</tbody></table>{!loading && !(data?.reports || []).length && <p className="py-8 text-center text-sm text-slate-500">No weekly ROI reports have been calculated yet.</p>}</div>
+        <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1380px] text-left text-xs"><thead><tr className="border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-400"><th className="pb-2">Week</th><th className="pb-2">Quality</th><th className="pb-2">Clicks</th><th className="pb-2">Browsers</th><th className="pb-2">Accounts</th><th className="pb-2">Mature</th><th className="pb-2">Repeat</th><th className="pb-2">Payable</th><th className="pb-2">Paid</th><th className="pb-2">Impressions</th><th className="pb-2">Net ad revenue</th><th className="pb-2">Cost</th><th className="pb-2">Margin</th><th className="pb-2">Payback</th><th className="pb-2">Warnings</th></tr></thead><tbody>{reports.map(report => <tr key={report.id} className="border-b border-slate-50"><td className="py-3 font-semibold text-slate-800">{report.week_key || report.week_id}</td><td className={`py-3 font-bold ${report.data_quality === 'healthy' ? 'text-emerald-700' : 'text-rose-700'}`}>{report.data_quality}</td><td className="py-3">{report.referral_clicks}</td><td className="py-3">{report.unique_browser_identities}</td><td className="py-3">{report.authenticated_accounts}</td><td className="py-3">{report.mature_verified_visitors}</td><td className="py-3">{report.repeat_week_visitors}</td><td className="py-3">{report.payable_statements}</td><td className="py-3">₹{report.cash_paid_inr}</td><td className="py-3">{report.actual_monetized_impressions}</td><td className="py-3">{money(report.finalized_net_ad_revenue_paise)}</td><td className="py-3">₹{report.true_program_cost_inr}</td><td className={`py-3 ${Number(report.contribution_margin_paise) < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{money(report.contribution_margin_paise)}</td><td className="py-3">{report.payback_ratio_milli == null ? '—' : `${(Number(report.payback_ratio_milli) / 10).toFixed(1)}x`}</td><td className="py-3 max-w-[260px] text-rose-700">{warnings(report.warnings_json).join(', ') || '—'}</td></tr>)}</tbody></table>{!loading && !reports.length && <p className="py-8 text-center text-sm text-slate-500">No weekly ROI reports have been calculated yet.</p>}</div>
       </section>
     </div>
   );

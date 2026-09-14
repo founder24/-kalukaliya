@@ -104,6 +104,12 @@ describe('release regressions', () => {
     expect(settlements.status).toBe(200);
     expect(await settlements.json()).toEqual({ statements: [] });
 
+    const roiDenied = await fetchWorker(request('/api/v1/admin/referrals/roi/dashboard', limited));
+    expect(roiDenied.status).toBe(403);
+    expect(await roiDenied.json()).toMatchObject({
+      capability: 'referral:settle',
+    });
+
     const roi = await fetchWorker(request('/api/v1/admin/referrals/roi/dashboard', settler));
     expect(roi.status).toBe(200);
     const roiBody = await roi.json() as {
