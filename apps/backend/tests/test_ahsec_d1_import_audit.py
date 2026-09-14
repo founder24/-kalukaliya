@@ -272,6 +272,111 @@ def test_normal_import_approves_and_generates_without_cleanup_preview(
     assert not (tmp_path / importer.CLEANUP_PREVIEW_FILENAME).exists()
 
 
+def test_normal_import_replaces_index_and_chunk_mappings_without_cleanup_preview(
+    monkeypatch, tmp_path
+):
+    progress_file = tmp_path / "progress.jsonl"
+    approval_file = tmp_path / "approvals.jsonl"
+    backup_file = tmp_path / "notes-backup.jsonl"
+    args = make_args(
+        limit=1,
+        delay=0,
+        skip_index=False,
+        clean_preambles=False,
+    )
+    chapter = {
+        "id": "chapter-indexed",
+        "subject_id": "subject-1",
+        "class_name": "HS 1st Year",
+        "subject_name": "Chemistry",
+        "subject_slug": "chemistry",
+        "title": "Motion",
+        "chapter_number": 1,
+        "notes_en": "Existing notes",
+        "rag_text": "Existing notes",
+        "rag_sections_en": "[]",
+    }
+    source = {
+        "title": "Motion",
+        "effective_number": 1,
+        "body_text": "Official textbook content " * 30,
+        "source_pdf_url": "https://example.test/motion.pdf",
+    }
+    generated_notes = "## Motion\n\n" + ("Generated study notes. " * 60)
+
+    class FakeClient:
+        def __init__(self):
+            self.generated = []
+            self.executed = []
+            self.queried = []
+            self.embedded = []
+            self.deleted_vectors = []
+            self.upserted_vectors = []
+
+        def generate(self, system_prompt, user_message, *, chapter_id=None):
+            self.generated.append((system_prompt, user_message, chapter_id))
+            return generated_notes
+
+        def embed(self, texts):
+            self.embedded.append(texts)
+            return [[0.1, 0.2] for _ in texts]
+
+        def query(self, sql, params=None):
+            self.queried.append((sql, params))
+            if "SELECT vector_id FROM chunks" in sql:
+                return [{"vector_id": "old-vector"}]
+            return []
+
+        def vector_delete(self, vector_ids):
+            self.deleted_vectors.append(vector_ids)
+
+        def vector_upsert(self, vectors):
+            self.upserted_vectors.append(vectors)
+
+        def execute(self, sql, params=None):
+            self.executed.append((sql, params))
+
+    client = FakeClient()
+    monkeypatch.setattr(importer, "parse_args", lambda: args)
+    monkeypatch.setattr(importer, "CloudflareClient", lambda: client)
+    monkeypatch.setattr(importer, "fetch_chapters", lambda _client: [chapter])
+
+    async def normal_sources(_args):
+        return {("11", "chemistry"): [source]}
+
+    monkeypatch.setattr(importer, "extract_sources", normal_sources)
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "APPROVAL_FILE", approval_file)
+    monkeypatch.setattr(importer, "BACKUP_FILE", backup_file)
+
+    assert asyncio.run(importer.main()) == 0
+
+    assert len(client.generated) == 1
+    assert client.generated[0][2] == "chapter-indexed"
+    assert len(client.embedded) == 1
+    assert client.embedded[0]
+    assert client.deleted_vectors == [["old-vector"]]
+    assert len(client.upserted_vectors) == 1
+    assert client.upserted_vectors[0][0]["id"] == "chapter-indexed_english_notes_0"
+    assert client.upserted_vectors[0][0]["metadata"]["chapterId"] == "chapter-indexed"
+    assert any("DELETE FROM chunks" in sql for sql, _params in client.executed)
+    assert any("INSERT INTO chunks" in sql for sql, _params in client.executed)
+    assert any("rag_indexed_at" in sql for sql, _params in client.executed)
+
+    approval = read_jsonl(approval_file)[0]
+    assert approval["scope"]["skip_index"] is False
+    assert approval["scope"]["clean_preambles"] is False
+    assert "cleanup_preview_fingerprint" not in approval["scope"]
+    assert "cleanup_preview_generated_at" not in approval["scope"]
+    progress = read_jsonl(progress_file)
+    done = next(row for row in progress if row["chapter_id"] == "chapter-indexed")
+    assert done["status"] == "done"
+    assert done["chunks"] == 1
+    assert progress[-1]["status"] == "completed"
+    assert not (tmp_path / importer.CLEANUP_PREVIEW_FILENAME).exists()
+
+
 def approval_record(run_id, started_at):
     return {
         "event": "production_write_approved",
