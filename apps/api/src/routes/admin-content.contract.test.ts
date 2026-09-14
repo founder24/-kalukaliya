@@ -116,6 +116,64 @@ function adminRequest(pathname: string, method = 'GET', body?: unknown): Request
 }
 
 describe('Worker-native admin publishing and seed dispatch', () => {
+  it('persists authenticated Cloudflare analytics health results for the admin surface', async () => {
+    const healthy = {
+      status: 'healthy',
+      checked_at: '2026-09-14T12:00:00.000Z',
+      error: null,
+      remediation: null,
+      needs_rotation: false,
+      hourly_buckets_returned: true,
+      hourly_bucket_count: 24,
+      unique_visitors_supported: true,
+    };
+    const unauthorized = await workerFetch(new Request(
+      'http://worker/api/v1/admin/cron/cloudflare-analytics-result',
+      { method: 'POST', body: JSON.stringify(healthy), headers: { 'Content-Type': 'application/json' } },
+    ));
+    expect(unauthorized.status).toBe(401);
+
+    const malformed = await workerFetch(new Request(
+      'http://worker/api/v1/admin/cron/cloudflare-analytics-result',
+      {
+        method: 'POST',
+        body: JSON.stringify({ ...healthy, hourly_bucket_count: '24' }),
+        headers: {
+          Authorization: `Bearer ${CRON_SECRET}`,
+          'Content-Type': 'application/json',
+        },
+      },
+    ));
+    expect(malformed.status).toBe(422);
+
+    const handoff = await workerFetch(new Request(
+      'http://worker/api/v1/admin/cron/cloudflare-analytics-result',
+      {
+        method: 'POST',
+        body: JSON.stringify(healthy),
+        headers: {
+          Authorization: `Bearer ${CRON_SECRET}`,
+          'Content-Type': 'application/json',
+        },
+      },
+    ));
+    expect(handoff.status).toBe(200);
+    await expect(handoff.json()).resolves.toEqual({
+      status: 'saved',
+      checked_at: healthy.checked_at,
+    });
+
+    const adminStatus = await workerFetch(adminRequest('/api/v1/admin/analytics/cf-status'));
+    expect(adminStatus.status).toBe(200);
+    await expect(adminStatus.json()).resolves.toMatchObject({
+      configured: true,
+      auth_ok: true,
+      status: 'healthy',
+      hourly_bucket_count: 24,
+      consecutive_failures: 0,
+    });
+  });
+
   it('removes model-introduction prose before the first notes heading', () => {
     expect(sanitizeGeneratedNotes(
       'Here are comprehensive study notes for the chapter "Motion in a Plane," designed to be clear and helpful for students.\n\n---\n\n## Motion in a Plane\n\nActual notes.',

@@ -560,6 +560,23 @@ export const cronAlertState = sqliteTable('cron_alert_state', {
   updatedAt: integer('updated_at').default(sql`(unixepoch())`),
 });
 
+// Latest result from the GitHub Cloudflare Analytics contract probe. The
+// workflow is the source of the probe; this singleton is the Worker-owned
+// handoff consumed by the admin health banner.
+export const cloudflareAnalyticsHealth = sqliteTable('cloudflare_analytics_health', {
+  id: text('id').primaryKey().default('singleton'),
+  status: text('status').notNull(),                                    // healthy | unhealthy
+  checkedAt: text('checked_at').notNull(),
+  error: text('error'),
+  remediation: text('remediation'),
+  needsRotation: integer('needs_rotation').notNull().default(0),
+  hourlyBucketsReturned: integer('hourly_buckets_returned').notNull().default(0),
+  hourlyBucketCount: integer('hourly_bucket_count'),
+  uniqueVisitorsSupported: integer('unique_visitors_supported'),
+  consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+  updatedAt: integer('updated_at').default(sql`(unixepoch())`),
+});
+
 // Dead letter queue (failed async jobs)
 export const deadLetters = sqliteTable('dead_letters', {
   id: text('id').primaryKey(),

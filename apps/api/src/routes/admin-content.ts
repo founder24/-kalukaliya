@@ -16,6 +16,7 @@ import { reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env } from '../types';
 import { runRagJob } from './staff';
+import type { CloudflareAnalyticsHealthResult } from '../types';
 
 export const adminContentRouter = new Hono<{ Bindings: Env }>();
 
@@ -1255,6 +1256,182 @@ function cronAuthorized(c: Context<{ Bindings: Env }>): boolean {
   const supplied = extractBearer(c.req.header('Authorization') ?? null);
   return Boolean(supplied && c.env.TRANSLATE_CRON_SECRET && supplied === c.env.TRANSLATE_CRON_SECRET);
 }
+
+function validateCloudflareAnalyticsHealthResult(
+  body: Record<string, unknown>,
+): CloudflareAnalyticsHealthResult | null {
+  const status = body.status;
+  const checkedAt = body.checked_at;
+  const error = body.error;
+  const remediation = body.remediation;
+  const needsRotation = body.needs_rotation;
+  const hourlyBucketsReturned = body.hourly_buckets_returned;
+  const hourlyBucketCount = body.hourly_bucket_count;
+  const uniqueVisitorsSupported = body.unique_visitors_supported;
+
+  if (status !== 'healthy' && status !== 'unhealthy') return null;
+  if (
+    typeof checkedAt !== 'string'
+    || checkedAt.length > 64
+    || Number.isNaN(Date.parse(checkedAt))
+  ) return null;
+  if (!(error === null || (typeof error === 'string' && error.length <= 500))) return null;
+  if (!(remediation === null || (typeof remediation === 'string' && remediation.length <= 500))) return null;
+  if (typeof needsRotation !== 'boolean' || typeof hourlyBucketsReturned !== 'boolean') return null;
+  if (!(uniqueVisitorsSupported === null || typeof uniqueVisitorsSupported === 'boolean')) return null;
+
+  const hasHourlyBucketCount = typeof hourlyBucketCount !== 'undefined';
+  if (status === 'healthy') {
+    if (
+      !hasHourlyBucketCount
+      || typeof hourlyBucketCount !== 'number'
+      || !Number.isInteger(hourlyBucketCount)
+      || hourlyBucketCount < 0
+      || hourlyBucketCount > 10_000
+    ) return null;
+    if (error !== null || remediation !== null || hourlyBucketsReturned !== true) return null;
+  } else {
+    if (hasHourlyBucketCount && hourlyBucketCount !== null) {
+      if (
+        typeof hourlyBucketCount !== 'number'
+        || !Number.isInteger(hourlyBucketCount)
+        || hourlyBucketCount < 0
+        || hourlyBucketCount > 10_000
+      ) return null;
+    }
+    if (typeof error !== 'string' || !error.trim() || typeof remediation !== 'string' || !remediation.trim()) return null;
+    if (hourlyBucketsReturned !== false) return null;
+  }
+
+  return {
+    status,
+    checked_at: checkedAt,
+    error: error as string | null,
+    remediation: remediation as string | null,
+    needs_rotation: needsRotation,
+    hourly_buckets_returned: hourlyBucketsReturned,
+    ...(typeof hourlyBucketCount === 'number' ? { hourly_bucket_count: hourlyBucketCount } : {}),
+    unique_visitors_supported: uniqueVisitorsSupported as boolean | null,
+  };
+}
+
+function cloudflareAnalyticsStatusResponse(row: {
+  status: string;
+  checked_at: string;
+  error: string | null;
+  remediation: string | null;
+  needs_rotation: number;
+  hourly_buckets_returned: number;
+  hourly_bucket_count: number | null;
+  unique_visitors_supported: number | null;
+  consecutive_failures: number;
+} | null) {
+  if (!row) {
+    return {
+      configured: false,
+      auth_ok: false,
+      needs_rotation: false,
+      last_error: null,
+      last_check_at: null,
+      blocked_for_seconds: 0,
+      consecutive_failures: 0,
+      rotation_hint: 'No Cloudflare analytics health result has been received yet.',
+      status: 'never_observed',
+    };
+  }
+  return {
+    configured: true,
+    auth_ok: row.status === 'healthy',
+    needs_rotation: row.needs_rotation === 1,
+    last_error: row.error,
+    last_check_at: row.checked_at,
+    blocked_for_seconds: 0,
+    consecutive_failures: row.consecutive_failures,
+    rotation_hint: row.remediation,
+    status: row.status,
+    checked_at: row.checked_at,
+    error: row.error,
+    remediation: row.remediation,
+    hourly_buckets_returned: row.hourly_buckets_returned === 1,
+    hourly_bucket_count: row.hourly_bucket_count,
+    unique_visitors_supported: row.unique_visitors_supported === null
+      ? null
+      : row.unique_visitors_supported === 1,
+  };
+}
+
+// The admin banner's native read surface. It is deliberately admin-session
+// protected; the GitHub workflow writes through the separate cron route below.
+adminContentRouter.get('/analytics/cf-status', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  const row = await c.env.DB.prepare(`
+    SELECT status, checked_at, error, remediation, needs_rotation,
+           hourly_buckets_returned, hourly_bucket_count,
+           unique_visitors_supported, consecutive_failures
+    FROM cloudflare_analytics_health
+    WHERE id = 'singleton'
+  `).first<{
+    status: string;
+    checked_at: string;
+    error: string | null;
+    remediation: string | null;
+    needs_rotation: number;
+    hourly_buckets_returned: number;
+    hourly_bucket_count: number | null;
+    unique_visitors_supported: number | null;
+    consecutive_failures: number;
+  }>();
+  return c.json(cloudflareAnalyticsStatusResponse(row ?? null));
+});
+
+// GitHub Actions posts the result after every probe, including failures. Do
+// not let a malformed or unauthenticated handoff alter the durable state.
+adminContentRouter.post('/cron/cloudflare-analytics-result', async c => {
+  if (!cronAuthorized(c)) return c.json({ detail: 'Valid TRANSLATE_CRON_SECRET required' }, 401);
+  const result = validateCloudflareAnalyticsHealthResult(await safeBody(c));
+  if (!result) {
+    return c.json({ detail: 'Malformed Cloudflare analytics health result' }, 422);
+  }
+
+  const timestamp = now();
+  await c.env.DB.prepare(`
+    INSERT INTO cloudflare_analytics_health (
+      id, status, checked_at, error, remediation, needs_rotation,
+      hourly_buckets_returned, hourly_bucket_count, unique_visitors_supported,
+      consecutive_failures, updated_at
+    ) VALUES (
+      'singleton', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      status = excluded.status,
+      checked_at = excluded.checked_at,
+      error = excluded.error,
+      remediation = excluded.remediation,
+      needs_rotation = excluded.needs_rotation,
+      hourly_buckets_returned = excluded.hourly_buckets_returned,
+      hourly_bucket_count = excluded.hourly_bucket_count,
+      unique_visitors_supported = excluded.unique_visitors_supported,
+      consecutive_failures = CASE
+        WHEN excluded.status = 'unhealthy' THEN cloudflare_analytics_health.consecutive_failures + 1
+        ELSE 0
+      END,
+      updated_at = excluded.updated_at
+  `).bind(
+    result.status,
+    result.checked_at,
+    result.error,
+    result.remediation,
+    result.needs_rotation ? 1 : 0,
+    result.hourly_buckets_returned ? 1 : 0,
+    result.hourly_bucket_count ?? null,
+    result.unique_visitors_supported === null ? null : (result.unique_visitors_supported ? 1 : 0),
+    result.status === 'unhealthy' ? 1 : 0,
+    timestamp,
+  ).run();
+
+  return c.json({ status: 'saved', checked_at: result.checked_at });
+});
+
 async function bulkMirrorRag(c: Context<{ Bindings: Env }>) {
   const limit = Math.max(1, Math.min(Number(c.req.query('limit') ?? 100), 200));
   const subjectId = c.req.query('subject_id');

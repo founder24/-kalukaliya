@@ -39,6 +39,17 @@ export interface Env {
   APP_ENV: string;
 }
 
+export type CloudflareAnalyticsHealthResult = {
+  status: 'healthy' | 'unhealthy';
+  checked_at: string;
+  error: string | null;
+  remediation: string | null;
+  needs_rotation: boolean;
+  hourly_buckets_returned: boolean;
+  hourly_bucket_count?: number;
+  unique_visitors_supported: boolean | null;
+};
+
 export interface JwtPayload {
   sub: string;       // user id
   role: string;      // student | educator | staff | admin
