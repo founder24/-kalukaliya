@@ -1,0 +1,226 @@
+name: AHSEC Cleanup Preview
+
+# Cleanup is intentionally manual. The preview job produces reviewable evidence
+# first; the apply job is separately gated by an explicit confirmation input and
+# the ahsec-production environment.
+on:
+  workflow_dispatch:
+    inputs:
+      class_level:
+        description: 'AHSEC class to clean (or all)'
+        required: true
+        type: choice
+        options:
+          - all
+          - '11'
+          - '12'
+        default: all
+      subject:
+        description: 'Optional D1 subject slug, for example physics'
+        required: false
+        type: string
+      limit:
+        description: 'Optional maximum number of chapters'
+        required: false
+        type: string
+      operator:
+        description: 'Operator identifier recorded in the production approval ledger'
+        required: false
+        type: string
+      confirm_production_write:
+        description: 'After reviewing the uploaded preview, explicitly allow the live cleanup'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ahsec-cleanup-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PREVIEW_ARTIFACT_NAME: ahsec-cleanup-preview-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  preview:
+    name: Generate and retain cleanup preview
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ahsec-cleanup-preview-${{ github.run_id }}-${{ github.run_attempt }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      INPUT_CLASS_LEVEL: ${{ inputs.class_level }}
+      INPUT_SUBJECT: ${{ inputs.subject }}
+      INPUT_LIMIT: ${{ inputs.limit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: apps/backend/requirements.txt
+
+      - name: Install importer dependencies
+        run: |
+          python3 -m pip install \
+            --user \
+            --break-system-packages \
+            --requirement apps/backend/requirements.txt \
+            --quiet
+
+      - name: Generate read-only cleanup preview
+        working-directory: apps/backend
+        env:
+          PREVIEW_DIR: ${{ runner.temp }}/ahsec-cleanup-preview
+        run: |
+          set -euo pipefail
+          mkdir -p "$PREVIEW_DIR"
+          PREVIEW_REPORT="$PREVIEW_DIR/preamble-cleanup-preview.json"
+
+          filter_args=()
+          case "$INPUT_CLASS_LEVEL" in
+            11|12)
+              filter_args+=(--class "$INPUT_CLASS_LEVEL")
+              ;;
+            all)
+              ;;
+            *)
+              echo "::error::Unsupported class level: $INPUT_CLASS_LEVEL"
+              exit 1
+              ;;
+          esac
+          if [[ -n "$INPUT_SUBJECT" ]]; then
+            filter_args+=(--subject "$INPUT_SUBJECT")
+          fi
+          if [[ -n "$INPUT_LIMIT" ]]; then
+            [[ "$INPUT_LIMIT" =~ ^[0-9]+$ ]] || {
+              echo "::error::limit must be a non-negative integer"
+              exit 1
+            }
+            filter_args+=(--limit "$INPUT_LIMIT")
+          fi
+
+          python3 -m scripts.ahsec_d1_import \
+            --clean-preambles \
+            --dry-run \
+            --delay 1 \
+            --cleanup-preview-report "$PREVIEW_REPORT" \
+            "${filter_args[@]}"
+
+          test -s "$PREVIEW_REPORT"
+          python3 - "$PREVIEW_REPORT" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+          if report.get("mode") != "preview":
+              raise SystemExit("cleanup preview must have mode=preview")
+          if not report.get("scope_fingerprint"):
+              raise SystemExit("cleanup preview is missing scope_fingerprint")
+          if not isinstance(report.get("changes"), list):
+              raise SystemExit("cleanup preview is missing changes")
+          print(
+              f"Generated preview: {report['changed']} change(s), "
+              f"fingerprint={report['scope_fingerprint']}"
+          )
+          PY
+          sha256sum "$PREVIEW_REPORT" > "$PREVIEW_REPORT.sha256"
+
+      - name: Upload retained cleanup preview for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PREVIEW_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}/ahsec-cleanup-preview/
+          if-no-files-found: error
+          retention-days: 90
+
+  apply:
+    name: Download reviewed preview and apply cleanup
+    needs: preview
+    if: ${{ inputs.confirm_production_write == true }}
+    runs-on: ubuntu-latest
+    environment: ahsec-production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      INPUT_CLASS_LEVEL: ${{ inputs.class_level }}
+      INPUT_SUBJECT: ${{ inputs.subject }}
+      INPUT_LIMIT: ${{ inputs.limit }}
+      OPERATOR: ${{ inputs.operator }}
+      PREVIEW_DIR: ${{ runner.temp }}/ahsec-cleanup-preview
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: apps/backend/requirements.txt
+
+      - name: Install importer dependencies
+        run: |
+          python3 -m pip install \
+            --user \
+            --break-system-packages \
+            --requirement apps/backend/requirements.txt \
+            --quiet
+
+      - name: Download the exact preview artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.preview.outputs.artifact_name }}
+          path: ${{ runner.temp }}/ahsec-cleanup-preview
+
+      - name: Verify downloaded preview bytes
+        working-directory: ${{ runner.temp }}/ahsec-cleanup-preview
+        run: |
+          set -euo pipefail
+          test -s preamble-cleanup-preview.json
+          test -s preamble-cleanup-preview.json.sha256
+          sha256sum --check preamble-cleanup-preview.json.sha256
+
+      - name: Apply cleanup with explicit production confirmation
+        working-directory: apps/backend
+        run: |
+          set -euo pipefail
+          operator="${OPERATOR:-$GITHUB_ACTOR}"
+          filter_args=()
+          case "$INPUT_CLASS_LEVEL" in
+            11|12)
+              filter_args+=(--class "$INPUT_CLASS_LEVEL")
+              ;;
+            all)
+              ;;
+            *)
+              echo "::error::Unsupported class level: $INPUT_CLASS_LEVEL"
+              exit 1
+              ;;
+          esac
+          if [[ -n "$INPUT_SUBJECT" ]]; then
+            filter_args+=(--subject "$INPUT_SUBJECT")
+          fi
+          if [[ -n "$INPUT_LIMIT" ]]; then
+            [[ "$INPUT_LIMIT" =~ ^[0-9]+$ ]] || {
+              echo "::error::limit must be a non-negative integer"
+              exit 1
+            }
+            filter_args+=(--limit "$INPUT_LIMIT")
+          fi
+
+          python3 -m scripts.ahsec_d1_import \
+            --clean-preambles \
+            --confirm-production-write \
+            --operator "$operator" \
+            --delay 1 \
+            --cleanup-preview-report "$PREVIEW_DIR/preamble-cleanup-preview.json" \
+            "${filter_args[@]}"
