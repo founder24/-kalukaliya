@@ -41,6 +41,7 @@
 - [Profile page crash defensive fixes](profile-page-crash-defense.md) — Root cause unknown (no prod trace); added null guard + error state + loadProfile callback; subscription_tier Literal widened
 - [Prerender $X replacement corruption](prerender-replace-corruption.md) — html.replace(pattern, string) with $' in data corrupts HTML; always use () => replacement in prerender scripts
 - [AHSEC Q&A pipeline](ahsec-qa-pipeline.md) — exercise extraction fix, Q&A format, meta-commentary cleanup, system prompt lesson, backfill script
+- [AHSEC cleanup preview gate](ahsec-cleanup-preview-gate.md) — production preamble cleanup requires fresh, scope-matched preview evidence
 - [AHSEC Q&A pipeline disabled](syrabit-qa-pipeline-disabled.md) — Q&A + published_topics cleared from all 548 chapters; ingestion now writes notes only; re-enable by un-commenting generate_qa_from_notes() call
 - [AHSEC prelim-page detection](ahsec-prelim-signals.md) — _PRELIM_SIGNALS gaps that let "Textbook Publication Details/Educational Philosophy/NCF" pages become chapter notes; 16 chapters cleared Aug 2026
 - [RAG field priority](rag-field-priority.md) — retrieval paths must read rag_sections→rag_text→notes_en→content_en; notes_en was missing, silently returning 0 context

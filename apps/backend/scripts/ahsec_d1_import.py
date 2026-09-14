@@ -414,7 +414,24 @@ def production_scope(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def record_production_approval(args: argparse.Namespace) -> tuple[str, str]:
+def cleanup_preview_scope(
+    args: argparse.Namespace, chapter_ids: list[str]
+) -> dict[str, Any]:
+    """Return the canonical filters and exact chapter set for cleanup."""
+    return {
+        **production_scope(args),
+        "chapter_ids": sorted({str(chapter_id) for chapter_id in chapter_ids}),
+    }
+
+
+def cleanup_preview_fingerprint(scope: dict[str, Any]) -> str:
+    encoded = json.dumps(scope, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def record_production_approval(
+    args: argparse.Namespace, extra_scope: dict[str, Any] | None = None
+) -> tuple[str, str]:
     """Record a confirmed production run before any live data is touched."""
     if args.dry_run or not args.confirm_production_write:
         raise RuntimeError(
@@ -427,6 +444,9 @@ def record_production_approval(args: argparse.Namespace) -> tuple[str, str]:
         raise RuntimeError(
             "An operator identifier is required for a production approval record"
         )
+    scope = production_scope(args)
+    if extra_scope:
+        scope.update(extra_scope)
     append_jsonl(
         APPROVAL_FILE,
         {
@@ -435,7 +455,7 @@ def record_production_approval(args: argparse.Namespace) -> tuple[str, str]:
             "operator": operator,
             "started_at": started_at,
             "approved_at": started_at,
-            "scope": production_scope(args),
+            "scope": scope,
         },
     )
     return run_id, started_at
@@ -773,9 +793,17 @@ def build_preamble_cleanup_plan(
 
 
 def apply_preamble_cleanup(
-    client: CloudflareClient, planned: list[dict[str, Any]]
+    client: CloudflareClient,
+    planned: list[dict[str, Any]],
+    *,
+    preview: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Apply a previously built cleanup plan to D1."""
+    """Apply a cleanup plan after the caller proves preview evidence."""
+    if preview is None:
+        raise RuntimeError(
+            "Cleanup writes require a matching preview artifact. "
+            "Run --clean-preambles --dry-run first."
+        )
     affected: list[dict[str, Any]] = []
     for chapter in planned:
         cleaned = str(chapter["notes_en"])
@@ -820,10 +848,22 @@ def apply_preamble_cleanup(
 
 
 def clean_existing_preambles(
-    client: CloudflareClient, chapters: list[dict[str, Any]]
+    client: CloudflareClient,
+    chapters: list[dict[str, Any]],
+    *,
+    emergency: bool = False,
 ) -> list[dict[str, Any]]:
-    """Compatibility wrapper that plans and applies cleanup in one call."""
-    return apply_preamble_cleanup(client, build_preamble_cleanup_plan(chapters))
+    """Compatibility wrapper for an explicitly authorized emergency cleanup."""
+    if not emergency:
+        raise RuntimeError(
+            "The compatibility cleanup helper is emergency-only. "
+            "Use the preview workflow or pass emergency=True explicitly."
+        )
+    return apply_preamble_cleanup(
+        client,
+        build_preamble_cleanup_plan(chapters),
+        preview={"emergency": True},
+    )
 
 
 def cleanup_preview_record(chapter: dict[str, Any]) -> dict[str, Any]:
@@ -837,17 +877,27 @@ def cleanup_preview_record(chapter: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def write_cleanup_preview_report(planned: list[dict[str, Any]]) -> Path:
+def write_cleanup_preview_report(
+    planned: list[dict[str, Any]],
+    scope: dict[str, Any] | None = None,
+) -> Path:
     """Persist a bounded, non-D1 preview report for operators and automation."""
-    report_path = STATE_DIR / "preamble-cleanup-preview.json"
+    report_path = STATE_DIR / CLEANUP_PREVIEW_FILENAME
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+    chapter_ids = sorted({str(chapter["id"]) for chapter in planned})
+    resolved_scope = scope or {
+        "chapter_ids": chapter_ids,
+    }
+    generated_at = datetime.now(timezone.utc)
     report_path.write_text(
         json.dumps(
             {
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_at": generated_at.isoformat(),
                 "mode": "preview",
                 "changed": len(planned),
-                "chapter_ids": [str(chapter["id"]) for chapter in planned],
+                "chapter_ids": chapter_ids,
+                "scope": resolved_scope,
+                "scope_fingerprint": cleanup_preview_fingerprint(resolved_scope),
                 "changes": [cleanup_preview_record(chapter) for chapter in planned],
             },
             ensure_ascii=False,
@@ -856,6 +906,62 @@ def write_cleanup_preview_report(planned: list[dict[str, Any]]) -> Path:
         encoding="utf-8",
     )
     return report_path
+
+
+def validate_cleanup_preview(
+    args: argparse.Namespace,
+    chapter_ids: list[str],
+    *,
+    report_path: Path | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Require a recent preview with the exact production cleanup scope."""
+    path = report_path or STATE_DIR / CLEANUP_PREVIEW_FILENAME
+    if not path.exists():
+        raise RuntimeError(
+            "Cleanup preview is required before a production cleanup. "
+            "Run --clean-preambles --dry-run with the same filters first."
+        )
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Cleanup preview cannot be read safely: {path}"
+        ) from exc
+    if report.get("mode") != "preview":
+        raise RuntimeError("Cleanup preview is invalid: expected mode=preview.")
+
+    generated_at_raw = report.get("generated_at")
+    try:
+        generated_at = datetime.fromisoformat(str(generated_at_raw))
+        if generated_at.tzinfo is None:
+            generated_at = generated_at.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "Cleanup preview is invalid: generated_at is missing or malformed."
+        ) from exc
+    current_time = now or datetime.now(timezone.utc)
+    age_seconds = (current_time - generated_at).total_seconds()
+    if age_seconds < 0 or age_seconds > CLEANUP_PREVIEW_MAX_AGE_SECONDS:
+        raise RuntimeError(
+            "Cleanup preview is stale or from the future. "
+            "Regenerate it with --clean-preambles --dry-run."
+        )
+
+    expected_scope = cleanup_preview_scope(args, chapter_ids)
+    expected_fingerprint = cleanup_preview_fingerprint(expected_scope)
+    report_scope = report.get("scope")
+    report_ids = report.get("chapter_ids")
+    if (
+        report_scope != expected_scope
+        or report_ids != expected_scope["chapter_ids"]
+        or report.get("scope_fingerprint") != expected_fingerprint
+    ):
+        raise RuntimeError(
+            "Cleanup preview does not match the current filters or chapter set. "
+            "Regenerate it with --clean-preambles --dry-run."
+        )
+    return report
 
 
 def log_cleanup_preview(planned: list[dict[str, Any]]) -> None:
@@ -897,14 +1003,6 @@ async def main() -> int:
             "Read-only dry-run: no Cloudflare D1 or Vectorize writes will be made. "
             "Use --confirm-production-write only for a deliberate production import."
         )
-    else:
-        ACTIVE_RUN_ID, started_at = record_production_approval(args)
-        log.info(
-            "Production write approved by %s (run_id=%s, started_at=%s)",
-            args.operator or getpass.getuser(),
-            ACTIVE_RUN_ID,
-            started_at,
-        )
     client = CloudflareClient()
     chapters = fetch_chapters(client)
     if args.class_level:
@@ -915,12 +1013,35 @@ async def main() -> int:
 
     if args.clean_preambles:
         planned = await asyncio.to_thread(build_preamble_cleanup_plan, chapters)
+        chapter_ids = [str(chapter["id"]) for chapter in planned]
+        preview_scope = cleanup_preview_scope(args, chapter_ids)
         if args.dry_run:
             log_cleanup_preview(planned)
-            report_path = write_cleanup_preview_report(planned)
+            report_path = write_cleanup_preview_report(planned, preview_scope)
             log.info("Cleanup preview report: %s", report_path)
             return 0
-        affected = await asyncio.to_thread(apply_preamble_cleanup, client, planned)
+        preview = validate_cleanup_preview(args, chapter_ids)
+        ACTIVE_RUN_ID, started_at = record_production_approval(
+            args,
+            {
+                "cleanup_preview_fingerprint": preview["scope_fingerprint"],
+                "cleanup_preview_generated_at": preview["generated_at"],
+            },
+        )
+        log.info(
+            "Production cleanup approved by %s (run_id=%s, started_at=%s, "
+            "preview_fingerprint=%s)",
+            args.operator or getpass.getuser(),
+            ACTIVE_RUN_ID,
+            started_at,
+            preview["scope_fingerprint"],
+        )
+        affected = await asyncio.to_thread(
+            apply_preamble_cleanup,
+            client,
+            planned,
+            preview=preview,
+        )
         if not args.skip_index:
             for chapter in affected:
                 await asyncio.to_thread(
@@ -932,6 +1053,15 @@ async def main() -> int:
                 )
         log.info("Preamble cleanup complete: changed=%d", len(affected))
         return 0
+
+    if not args.dry_run:
+        ACTIVE_RUN_ID, started_at = record_production_approval(args)
+        log.info(
+            "Production write approved by %s (run_id=%s, started_at=%s)",
+            args.operator or getpass.getuser(),
+            ACTIVE_RUN_ID,
+            started_at,
+        )
 
     sources = await extract_sources(args)
     done = set() if args.restart else load_done()
