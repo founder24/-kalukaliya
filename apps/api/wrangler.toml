@@ -109,3 +109,6 @@ crons = [
 #                        wrangler secret put R2_PUBLIC_URL --env production
 # TRANSLATE_CRON_SECRET — shared bearer secret for /api/v1/admin/cron/seed-*.
 #                          This is separate from admin browser sessions.
+# ADSENSE_REPORT_URL — aggregate-only internal endpoint returning
+#                      { reports: [{ ... } ] } for one requested referral week.
+# ADSENSE_REPORT_TOKEN — optional bearer token for the aggregate endpoint.

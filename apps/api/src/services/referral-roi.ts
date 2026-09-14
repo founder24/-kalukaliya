@@ -3,6 +3,8 @@ import { REFERRAL_POLICY } from '../contracts/referral-policy';
 const APPROVED_NETWORK = REFERRAL_POLICY.funding.approvedNetwork;
 const MAX_SOURCE_REFERENCE = 256;
 const MAX_EVIDENCE_HASH = /^[a-f0-9]{64}$/i;
+const MAX_RECONCILIATION_WEEKS = 12;
+const ADSENSE_SOURCE_REFERENCE = /^adsense:[A-Za-z0-9_-]{8,128}$/;
 
 type InventoryStatus = 'enabled' | 'disabled' | 'unconfigured';
 type RoiDataQuality = 'healthy' | 'warning' | 'blocked';
@@ -62,6 +64,15 @@ interface WeekRow {
   ends_at: number;
 }
 
+interface ReconciliationWeekRow extends WeekRow {
+  week_key: string;
+}
+
+export interface AdSenseReconciliationConfig {
+  ADSENSE_REPORT_URL?: string;
+  ADSENSE_REPORT_TOKEN?: string;
+}
+
 interface RoiCosts {
   reviewCostInr?: number;
   fraudCostInr?: number;
@@ -93,6 +104,149 @@ function boundedText(value: string, label: string): string {
     throw new Error(`${label} is required and must be at most ${MAX_SOURCE_REFERENCE} characters`);
   }
   return trimmed;
+}
+
+function providerRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function providerString(
+  record: Record<string, unknown>,
+  key: string,
+  label = key,
+): string {
+  if (typeof record[key] !== 'string') throw new Error(`${label} is required`);
+  return boundedText(record[key] as string, label);
+}
+
+function providerInteger(
+  record: Record<string, unknown>,
+  key: string,
+  label = key,
+): number {
+  const value = record[key];
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return value as number;
+}
+
+function providerBoolean(
+  record: Record<string, unknown>,
+  key: string,
+  label = key,
+): boolean {
+  if (typeof record[key] !== 'boolean') throw new Error(`${label} is required`);
+  return record[key] as boolean;
+}
+
+interface ProviderAggregate {
+  settlementPeriod: string;
+  currency: string;
+  grossRevenuePaise: number;
+  adjustmentsPaise: number;
+  providerFeesPaise: number;
+  monetizedImpressions: number;
+  finalizedThroughAt: number;
+  freshnessExpiresAt: number;
+  sourceReference: string;
+  evidenceHash: string;
+}
+
+function parseProviderAggregate(
+  payload: unknown,
+  week: ReconciliationWeekRow,
+  fetchedAt: number,
+): ProviderAggregate {
+  const envelope = providerRecord(payload, 'AdSense response');
+  if (!Array.isArray(envelope.reports) || envelope.reports.length !== 1) {
+    throw new Error('AdSense response must contain exactly one aggregate report');
+  }
+  const report = providerRecord(envelope.reports[0], 'AdSense aggregate report');
+  const network = report.network === undefined ? APPROVED_NETWORK : report.network;
+  if (network !== APPROVED_NETWORK) throw new Error('AdSense response network is not approved');
+  if (providerInteger(report, 'period_start', 'Period start') !== week.starts_at
+    || providerInteger(report, 'period_end', 'Period end') !== week.ends_at) {
+    throw new Error('AdSense report period does not match the referral week');
+  }
+  if (!providerBoolean(report, 'finalized', 'Finalization')) {
+    throw new Error('AdSense report is not finalized');
+  }
+  const currency = providerString(report, 'currency', 'Currency').toUpperCase();
+  if (currency !== 'INR') throw new Error('AdSense report currency must be INR');
+  const sourceReference = providerString(report, 'source_reference', 'Source reference');
+  if (!ADSENSE_SOURCE_REFERENCE.test(sourceReference)) {
+    throw new Error('AdSense source reference is invalid');
+  }
+  const evidenceHash = providerString(report, 'evidence_hash', 'Evidence hash').toLowerCase();
+  if (!MAX_EVIDENCE_HASH.test(evidenceHash)) throw new Error('AdSense evidence hash is invalid');
+  const finalizedThroughAt = providerInteger(
+    report,
+    'finalized_through_at',
+    'Finalized-through timestamp',
+  );
+  if (finalizedThroughAt > fetchedAt || finalizedThroughAt < week.ends_at) {
+    throw new Error('AdSense report does not finalize the full referral week');
+  }
+  const freshnessExpiresAt = providerInteger(
+    report,
+    'freshness_expires_at',
+    'Freshness expiry',
+  );
+  if (
+    freshnessExpiresAt <= fetchedAt
+    || freshnessExpiresAt - fetchedAt > REFERRAL_POLICY.funding.revenueEvidenceMaxAgeSeconds
+  ) {
+    throw new Error('AdSense freshness window is invalid');
+  }
+  return {
+    settlementPeriod: providerString(report, 'settlement_period', 'Settlement period'),
+    currency,
+    grossRevenuePaise: providerInteger(report, 'gross_revenue_paise', 'Gross revenue'),
+    adjustmentsPaise: providerInteger(report, 'adjustments_paise', 'Adjustments'),
+    providerFeesPaise: providerInteger(report, 'provider_fees_paise', 'Provider fees'),
+    monetizedImpressions: providerInteger(
+      report,
+      'monetized_impressions',
+      'Monetized impressions',
+    ),
+    finalizedThroughAt,
+    freshnessExpiresAt,
+    sourceReference,
+    evidenceHash,
+  };
+}
+
+async function fetchAdSenseAggregate(
+  baseUrl: string,
+  token: string | undefined,
+  week: ReconciliationWeekRow,
+  fetchedAt: number,
+): Promise<ProviderAggregate> {
+  const url = new URL(baseUrl);
+  url.searchParams.set('period_start', String(week.starts_at));
+  url.searchParams.set('period_end', String(week.ends_at));
+  url.searchParams.set('settlement_period', week.week_key);
+  const headers = new Headers({ Accept: 'application/json' });
+  if (token?.trim()) headers.set('Authorization', `Bearer ${token.trim()}`);
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+    redirect: 'error',
+  });
+  if (!response.ok) {
+    throw new Error(`AdSense provider returned HTTP ${response.status}`);
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error('AdSense provider returned invalid JSON');
+  }
+  return parseProviderAggregate(payload, week, fetchedAt);
 }
 
 export async function listAdNetworkInventory(db: D1Database): Promise<Array<Record<string, unknown>>> {
@@ -176,24 +330,15 @@ export async function ingestAdRevenueReport(
   if (!inventory || inventory.status !== 'enabled' || inventory.configured !== 1) {
     throw new Error('Provider network is not enabled and configured');
   }
-  const existing = await db.prepare(`
-    SELECT id, evidence_hash, net_revenue_paise
-    FROM ad_revenue_reports WHERE source_reference = ?
-  `).bind(sourceReference).first<{ id: string; evidence_hash: string; net_revenue_paise: number }>();
-  if (existing) {
-    if (existing.evidence_hash !== input.evidenceHash || existing.net_revenue_paise !== netRevenuePaise) {
-      throw new Error('Provider source reference was previously recorded with different evidence');
-    }
-    return { id: existing.id, idempotent: true, netRevenuePaise };
-  }
   const id = crypto.randomUUID();
-  await db.prepare(`
+  const inserted = await db.prepare(`
     INSERT INTO ad_revenue_reports
       (id, network, period_start, period_end, settlement_period, currency,
        gross_revenue_paise, adjustments_paise, provider_fees_paise, net_revenue_paise,
        monetized_impressions, finalized, finalized_through_at, fetched_at,
        freshness_expires_at, source_reference, evidence_hash, imported_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source_reference) DO NOTHING
   `).bind(
     id,
     input.network,
@@ -213,7 +358,124 @@ export async function ingestAdRevenueReport(
     input.evidenceHash.toLowerCase(),
     input.importedBy,
   ).run();
-  return { id, idempotent: false, netRevenuePaise };
+  if (inserted.meta.changes > 0) {
+    return { id, idempotent: false, netRevenuePaise };
+  }
+  const existing = await db.prepare(`
+    SELECT id, evidence_hash, net_revenue_paise, gross_revenue_paise,
+           adjustments_paise, provider_fees_paise, monetized_impressions
+    FROM ad_revenue_reports WHERE source_reference = ?
+  `).bind(sourceReference).first<{
+    id: string;
+    evidence_hash: string;
+    net_revenue_paise: number;
+    gross_revenue_paise: number;
+    adjustments_paise: number;
+    provider_fees_paise: number;
+    monetized_impressions: number;
+  }>();
+  if (!existing
+    || existing.evidence_hash !== input.evidenceHash
+    || existing.net_revenue_paise !== netRevenuePaise
+    || existing.gross_revenue_paise !== input.grossRevenuePaise
+    || existing.adjustments_paise !== adjustmentsPaise
+    || existing.provider_fees_paise !== providerFeesPaise
+    || existing.monetized_impressions !== input.monetizedImpressions) {
+    throw new Error('Provider source reference was previously recorded with different evidence');
+  }
+  return { id: existing.id, idempotent: true, netRevenuePaise };
+}
+
+export async function reconcileFinalizedAdSenseReports(
+  db: D1Database,
+  config: AdSenseReconciliationConfig,
+  now: number,
+): Promise<{
+  status: 'completed' | 'skipped';
+  weeks: number;
+  fetched: number;
+  imported: number;
+  idempotent: number;
+  calculated: number;
+  failures: string[];
+}> {
+  if (!config.ADSENSE_REPORT_URL?.trim()) {
+    return {
+      status: 'skipped',
+      weeks: 0,
+      fetched: 0,
+      imported: 0,
+      idempotent: 0,
+      calculated: 0,
+      failures: ['AdSense report endpoint is not configured'],
+    };
+  }
+  if (!Number.isSafeInteger(now)) throw new Error('Reconciliation time is invalid');
+  const weeks = await db.prepare(`
+    SELECT id, week_key, starts_at, ends_at
+    FROM referral_weeks
+    WHERE ends_at <= ? AND state IN ('closed', 'finalized')
+    ORDER BY ends_at ASC
+    LIMIT ?
+  `).bind(now, MAX_RECONCILIATION_WEEKS).all<ReconciliationWeekRow>();
+
+  let fetched = 0;
+  let imported = 0;
+  let idempotent = 0;
+  let calculated = 0;
+  const failures: string[] = [];
+  for (const week of weeks.results) {
+    let additionalWarnings: string[] = [];
+    try {
+      const aggregate = await fetchAdSenseAggregate(
+        config.ADSENSE_REPORT_URL,
+        config.ADSENSE_REPORT_TOKEN,
+        week,
+        now,
+      );
+      fetched += 1;
+      const result = await ingestAdRevenueReport(db, {
+        network: APPROVED_NETWORK,
+        periodStart: week.starts_at,
+        periodEnd: week.ends_at,
+        settlementPeriod: aggregate.settlementPeriod,
+        currency: aggregate.currency,
+        grossRevenuePaise: aggregate.grossRevenuePaise,
+        adjustmentsPaise: aggregate.adjustmentsPaise,
+        providerFeesPaise: aggregate.providerFeesPaise,
+        monetizedImpressions: aggregate.monetizedImpressions,
+        finalized: true,
+        finalizedThroughAt: aggregate.finalizedThroughAt,
+        fetchedAt: now,
+        freshnessExpiresAt: aggregate.freshnessExpiresAt,
+        sourceReference: aggregate.sourceReference,
+        evidenceHash: aggregate.evidenceHash,
+        importedBy: 'adsense-reconciliation',
+      });
+      if (result.idempotent) idempotent += 1;
+      else imported += 1;
+    } catch (error) {
+      additionalWarnings = ['adsense-reconciliation-failed'];
+      const message = error instanceof Error ? error.message : 'unknown provider error';
+      failures.push(`${week.week_key}: ${message}`.slice(0, 512));
+    }
+    await calculateWeeklyRoi(db, {
+      weekId: week.id,
+      actorId: 'adsense-reconciliation',
+      additionalWarnings,
+      calculatedAt: now,
+    });
+    calculated += 1;
+  }
+  return {
+    status: 'completed',
+    weeks: weeks.results.length,
+    fetched,
+    imported,
+    idempotent,
+    calculated,
+    failures,
+  };
 }
 
 export async function recordRoiControls(
@@ -303,6 +565,7 @@ export async function calculateWeeklyRoi(
     weekId: string;
     actorId: string;
     costs?: RoiCosts;
+    additionalWarnings?: string[];
     calculatedAt: number;
   },
 ): Promise<Record<string, unknown>> {
@@ -372,7 +635,11 @@ export async function calculateWeeklyRoi(
     + reversalCostInr
     + supportCostInr
     + operatingCostInr;
-  const warnings: string[] = [];
+  const warnings: string[] = (input.additionalWarnings ?? [])
+    .filter(item => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .slice(0, 16);
   if (!revenue) warnings.push('provider-revenue-missing');
   if (revenue && revenue.freshness_expires_at <= input.calculatedAt) warnings.push('provider-revenue-stale');
   if (!revenue || revenue.finalized !== 1) warnings.push('revenue-not-finalized');

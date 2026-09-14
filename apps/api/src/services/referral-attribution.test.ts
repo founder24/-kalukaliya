@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 
 import { REFERRAL_POLICY_VERSION } from '../contracts/referral-policy';
@@ -36,6 +36,7 @@ import {
   calculateWeeklyRoi,
   ingestAdRevenueReport,
   listAdNetworkInventory,
+  reconcileFinalizedAdSenseReports,
   recordRoiControls,
 } from './referral-roi';
 import {
@@ -2217,6 +2218,99 @@ describe('ad-funded referral ROI controls', () => {
       finalized_net_ad_revenue_paise: 22_000,
     });
     expect(report.referral_clicks).toBe(0);
+  });
+
+  it('reconciles a closed week idempotently and blocks changed provider evidence', async () => {
+    const { week } = await roiFixture();
+    await env.DB.prepare(`
+      UPDATE referral_weeks SET state = 'finalized', updated_at = ? WHERE id = ?
+    `).bind(week.endsAt, week.id).run();
+    await passRoiControls(week.endsAt + 100, week.endsAt + 3_600);
+    const providerResponse = {
+      reports: [{
+        network: 'adsense',
+        period_start: week.startsAt,
+        period_end: week.endsAt,
+        settlement_period: week.key,
+        currency: 'INR',
+        gross_revenue_paise: 25_000,
+        adjustments_paise: 2_000,
+        provider_fees_paise: 1_000,
+        monetized_impressions: 432,
+        finalized: true,
+        finalized_through_at: week.endsAt,
+        freshness_expires_at: week.endsAt + 3_600,
+        source_reference: `adsense:reconcile-${week.key}`,
+        evidence_hash: 'e'.repeat(64),
+      }],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.searchParams.get('period_start')).toBe(String(week.startsAt));
+      expect(url.searchParams.get('period_end')).toBe(String(week.endsAt));
+      expect(url.searchParams.has('browser_id')).toBe(false);
+      expect(url.searchParams.has('referral_identity')).toBe(false);
+      expect(new Headers(init?.headers).has('Cookie')).toBe(false);
+      return Response.json(providerResponse);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await expect(reconcileFinalizedAdSenseReports(env.DB, {
+        ADSENSE_REPORT_URL: 'https://adsense-reports.example.test/aggregate',
+        ADSENSE_REPORT_TOKEN: 'aggregate-token',
+      }, week.endsAt + 100)).resolves.toMatchObject({
+        status: 'completed',
+        weeks: 1,
+        fetched: 1,
+        imported: 1,
+        idempotent: 0,
+        calculated: 1,
+        failures: [],
+      });
+      await expect(reconcileFinalizedAdSenseReports(env.DB, {
+        ADSENSE_REPORT_URL: 'https://adsense-reports.example.test/aggregate',
+        ADSENSE_REPORT_TOKEN: 'aggregate-token',
+      }, week.endsAt + 100)).resolves.toMatchObject({
+        idempotent: 1,
+        imported: 0,
+        failures: [],
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const stored = await env.DB.prepare(`
+        SELECT source_reference, evidence_hash, gross_revenue_paise, net_revenue_paise
+        FROM ad_revenue_reports WHERE source_reference = ?
+      `).bind(`adsense:reconcile-${week.key}`).first<{
+        source_reference: string;
+        evidence_hash: string;
+        gross_revenue_paise: number;
+        net_revenue_paise: number;
+      }>();
+      expect(stored).toEqual({
+        source_reference: `adsense:reconcile-${week.key}`,
+        evidence_hash: 'e'.repeat(64),
+        gross_revenue_paise: 25_000,
+        net_revenue_paise: 22_000,
+      });
+
+      providerResponse.reports[0]!.evidence_hash = 'f'.repeat(64);
+      await expect(reconcileFinalizedAdSenseReports(env.DB, {
+        ADSENSE_REPORT_URL: 'https://adsense-reports.example.test/aggregate',
+      }, week.endsAt + 100)).resolves.toMatchObject({
+        weeks: 1,
+        fetched: 1,
+        imported: 0,
+        idempotent: 0,
+        calculated: 1,
+        failures: [`${week.key}: Provider source reference was previously recorded with different evidence`],
+      });
+      const roi = await env.DB.prepare(`
+        SELECT data_quality, warnings_json FROM referral_weekly_roi_reports WHERE week_id = ?
+      `).bind(week.id).first<{ data_quality: string; warnings_json: string }>();
+      expect(roi?.data_quality).toBe('blocked');
+      expect(JSON.parse(roi?.warnings_json ?? '[]')).toContain('adsense-reconciliation-failed');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('fails closed and pauses accrual when provider revenue or controls are stale', async () => {

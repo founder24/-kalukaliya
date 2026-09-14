@@ -20,6 +20,7 @@ import type { Env } from './types';
 import { resumePublishJobs, resumeSeedRuns } from './routes/admin-content';
 import { resumeRagReindexJobs } from './routes/staff';
 import { enforceReferralGateFreshness } from './services/referral-attribution';
+import { reconcileFinalizedAdSenseReports } from './services/referral-roi';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -134,6 +135,11 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
 
   // ── Daily: reset usage counters for free-user chat quotas ────────────────
   if (cronExpr === '0 0 * * *') {
+    await runTask(
+      'AdSense ROI reconciliation',
+      () => reconcileFinalizedAdSenseReports(env.DB, env, now),
+    );
+
     // Reset monthly counts for users whose last_reset_date was in a previous month
     await runTask('monthly usage reset', async () => {
       const startOfMonth = new Date();
