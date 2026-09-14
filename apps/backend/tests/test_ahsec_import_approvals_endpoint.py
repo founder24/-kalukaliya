@@ -225,6 +225,116 @@ def test_import_approvals_show_safe_metadata_and_linked_progress(
     assert "terminal summaries must not copy this" not in response_text
 
 
+def test_import_approvals_keep_overlapping_chapters_scoped_to_run(
+    client, admin_cookie, tmp_path
+):
+    import app.api.v1.admin_content as admin_content
+
+    approvals = tmp_path / "approvals.jsonl"
+    progress = tmp_path / "progress.jsonl"
+    _write_jsonl(
+        approvals,
+        {
+            "event": "production_write_approved",
+            "run_id": "run-first",
+            "operator": "first-operator",
+            "started_at": "2026-09-14T10:00:00+00:00",
+            "scope": {"class": "11", "subject": "chemistry"},
+        },
+        {
+            "event": "production_write_approved",
+            "run_id": "run-second",
+            "operator": "second-operator",
+            "started_at": "2026-09-14T10:01:00+00:00",
+            "scope": {"class": "12", "subject": "physics"},
+        },
+    )
+    _write_jsonl(
+        progress,
+        {
+            "run_id": "run-first",
+            "chapter_id": "shared-chapter-1",
+            "status": "done",
+            "timestamp": "2026-09-14T10:02:00+00:00",
+        },
+        {
+            "run_id": "run-second",
+            "chapter_id": "shared-chapter-1",
+            "status": "error",
+            "timestamp": "2026-09-14T10:03:00+00:00",
+        },
+        {
+            "run_id": "run-first",
+            "chapter_id": "shared-chapter-2",
+            "status": "error",
+            "timestamp": "2026-09-14T10:04:00+00:00",
+        },
+        {
+            "run_id": "run-second",
+            "chapter_id": "shared-chapter-2",
+            "status": "done",
+            "timestamp": "2026-09-14T10:05:00+00:00",
+        },
+        {
+            "event": "import_terminal_summary",
+            "run_id": "run-first",
+            "status": "failed",
+            "chapters": 2,
+            "completed": 1,
+            "failed": 1,
+            "timestamp": "2026-09-14T10:06:00+00:00",
+        },
+        {
+            "event": "import_terminal_summary",
+            "run_id": "run-second",
+            "status": "completed",
+            "chapters": 2,
+            "completed": 1,
+            "failed": 1,
+            "timestamp": "2026-09-14T10:07:00+00:00",
+        },
+    )
+
+    with (
+        patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", approvals),
+        patch.object(admin_content, "_AHSEC_D1_IMPORT_PROGRESS_FILE", progress),
+    ):
+        response = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/approvals",
+            cookies=admin_cookie,
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["approvals"] == [
+        {
+            "run_id": "run-second",
+            "operator": "second-operator",
+            "started_at": "2026-09-14T10:01:00+00:00",
+            "scope": {"class": "12", "subject": "physics"},
+            "progress": {
+                "status": "completed",
+                "chapters": 2,
+                "completed": 1,
+                "failed": 1,
+                "last_updated_at": "2026-09-14T10:07:00+00:00",
+            },
+        },
+        {
+            "run_id": "run-first",
+            "operator": "first-operator",
+            "started_at": "2026-09-14T10:00:00+00:00",
+            "scope": {"class": "11", "subject": "chemistry"},
+            "progress": {
+                "status": "failed",
+                "chapters": 2,
+                "completed": 1,
+                "failed": 1,
+                "last_updated_at": "2026-09-14T10:06:00+00:00",
+            },
+        },
+    ]
+
+
 def test_import_approvals_ignore_malformed_progress_lines(
     client, admin_cookie, tmp_path
 ):
