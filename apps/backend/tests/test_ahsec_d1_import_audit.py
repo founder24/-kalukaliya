@@ -92,6 +92,57 @@ def test_progress_and_backup_records_share_approval_run_id(monkeypatch, tmp_path
     assert read_jsonl(backup_file)[0]["run_id"] == run_id
 
 
+@pytest.mark.parametrize(
+    "preamble",
+    [
+        "Here are comprehensive study notes for the chapter Motion.",
+        "Below are detailed study notes for Motion.",
+        "Certainly! Here are the notes for this chapter.",
+        "As an AI language model, I will provide study notes.",
+        "I will provide complete study notes for the chapter.",
+        "These notes cover the key concepts from the chapter.",
+    ],
+)
+def test_generated_note_preamble_fixtures_are_rejected_with_bounded_diff(preamble):
+    raw = f"{preamble}\n\n## Motion\n\nBody content."
+
+    with pytest.raises(importer.ModelPreambleError) as exc_info:
+        importer.validate_generated_notes("chapter-42", raw)
+
+    message = str(exc_info.value)
+    assert "chapter-42" in message
+    assert "bounded_diff:" in message
+    assert len(message) < 1800
+
+
+def test_generated_note_validation_accepts_notes_without_preamble():
+    importer.validate_generated_notes(
+        "chapter-42",
+        "## Motion\n\nBody content starts directly with the chapter notes.",
+    )
+
+
+def test_client_rejects_preamble_before_cleaning_without_credentials(monkeypatch):
+    client = importer.CloudflareClient.__new__(importer.CloudflareClient)
+    client.api = "https://example.test"
+    responses = iter(
+        [
+            {
+                "result": {
+                    "response": (
+                        "Here are comprehensive study notes for the chapter Motion.\n\n"
+                        "## Motion\n\nBody content long enough for validation."
+                    )
+                }
+            }
+        ]
+    )
+    monkeypatch.setattr(client, "_post", lambda *_args, **_kwargs: next(responses))
+
+    with pytest.raises(importer.ModelPreambleError, match="chapter-42"):
+        client.generate("system", "prompt", chapter_id="chapter-42")
+
+
 def cleanup_chapter(
     notes=(
         "Here are comprehensive study notes for the chapter Motion.\n\n"

@@ -80,7 +80,13 @@ BACKUP_FILE = STATE_DIR / "notes-backup.jsonl"
 APPROVAL_FILE = STATE_DIR / "approvals.jsonl"
 MIN_SOURCE_CHARS = 500
 MIN_NOTES_CHARS = 800
+MAX_PREAMBLE_DIFF_LINES = 8
+MAX_PREAMBLE_DIFF_LINE_CHARS = 240
 ACTIVE_RUN_ID: str | None = None
+
+
+class ModelPreambleError(RuntimeError):
+    """Raised when Workers AI adds assistant-style introduction text."""
 
 
 def parse_args() -> argparse.Namespace:
@@ -167,7 +173,13 @@ class CloudflareClient:
     def execute(self, sql: str, params: list[Any] | None = None) -> None:
         self.query(sql, params)
 
-    def generate(self, system_prompt: str, user_message: str) -> str:
+    def generate(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        chapter_id: str | None = None,
+    ) -> str:
         payload = {
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -182,12 +194,17 @@ class CloudflareClient:
             try:
                 body = self._post(f"{self.api}/ai/run/{model}", payload, timeout=180)
                 result = body.get("result") or {}
-                text = str(result.get("response") or "").strip()
+                raw_text = str(result.get("response") or "").strip()
+                if chapter_id is not None:
+                    validate_generated_notes(chapter_id, raw_text)
+                text = raw_text
                 text = clean_notes(text)
                 if len(text) > len(best):
                     best = text
                 if len(text) >= MIN_NOTES_CHARS and text.startswith("##"):
                     return text
+            except ModelPreambleError:
+                raise
             except Exception as exc:
                 errors.append(f"{model}: {exc}")
         if len(best) >= MIN_NOTES_CHARS:
@@ -254,6 +271,82 @@ def clean_notes(text: str) -> str:
         )
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
+
+
+_MODEL_PREAMBLE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "notes_introduction",
+        re.compile(
+            r"^\s*(?:here|below|the following)\s+(?:are|is)\b"
+            r".{0,180}\b(?:study\s+)?notes?\b",
+            flags=re.I | re.S,
+        ),
+    ),
+    (
+        "assistant_acknowledgement",
+        re.compile(
+            r"^\s*(?:sure|certainly|of course|absolutely)[!,.]?\s+"
+            r"(?:here|below|i(?:'ll| will)\b)",
+            flags=re.I,
+        ),
+    ),
+    (
+        "ai_disclaimer",
+        re.compile(r"^\s*as an ai(?:\s+language)?\s+model\b", flags=re.I),
+    ),
+    (
+        "first_person_offer",
+        re.compile(
+            r"^\s*i\s+(?:will|'ll)\s+(?:provide|present|give|create)\b",
+            flags=re.I,
+        ),
+    ),
+    (
+        "notes_summary_introduction",
+        re.compile(
+            r"^\s*(?:these|the following)\s+(?:study\s+)?notes?\s+"
+            r"(?:provide|cover|include|summarize)\b",
+            flags=re.I,
+        ),
+    ),
+)
+
+
+def _bounded_diff_preview(before: str, after: str) -> tuple[str, bool]:
+    diff = list(
+        difflib.unified_diff(
+            before.splitlines(),
+            after.splitlines(),
+            fromfile="model-output",
+            tofile="normalized-output",
+            lineterm="",
+            n=1,
+        )
+    )
+    preview_lines = [
+        line[:MAX_PREAMBLE_DIFF_LINE_CHARS]
+        for line in diff[:MAX_PREAMBLE_DIFF_LINES]
+    ]
+    return "\n".join(preview_lines), len(diff) > MAX_PREAMBLE_DIFF_LINES
+
+
+def validate_generated_notes(chapter_id: str, raw_notes: str) -> None:
+    """Reject known model introductions before notes can reach D1."""
+    candidate = raw_notes.lstrip()[:1000]
+    for pattern_name, pattern in _MODEL_PREAMBLE_PATTERNS:
+        if not pattern.search(candidate):
+            continue
+        normalized = clean_notes(raw_notes)
+        preview, truncated = _bounded_diff_preview(raw_notes, normalized)
+        diff_summary = preview or "(normalizer produced no diff)"
+        if truncated:
+            diff_summary += "\n... diff truncated ..."
+        raise ModelPreambleError(
+            f"Generated notes rejected for chapter {chapter_id}: "
+            f"model preamble '{pattern_name}' detected; "
+            f"raw_chars={len(raw_notes)} normalized_chars={len(normalized)}; "
+            f"bounded_diff:\n{diff_summary}"
+        )
 
 
 def normalize(value: str) -> str:
@@ -907,6 +1000,7 @@ async def main() -> int:
                     client.generate,
                     _NOTES_SYSTEM_EN,
                     build_prompt(chapter, source),
+                    chapter_id=chapter_id,
                 )
                 sections = notes_to_rag_sections(notes)
                 if not sections:
