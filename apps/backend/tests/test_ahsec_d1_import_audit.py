@@ -475,6 +475,11 @@ def test_cleanup_apply_uses_plan_and_backs_up_original_note(monkeypatch, tmp_pat
     monkeypatch.setattr(importer, "BACKUP_FILE", backup_file)
     chapter = cleanup_chapter()
     planned = importer.build_preamble_cleanup_plan([chapter])
+    preview_path = importer.write_cleanup_preview_report(
+        planned,
+        report_path=tmp_path / "cleanup-preview.json",
+    )
+    preview = json.loads(preview_path.read_text())
 
     class FakeClient:
         def __init__(self):
@@ -487,7 +492,7 @@ def test_cleanup_apply_uses_plan_and_backs_up_original_note(monkeypatch, tmp_pat
     affected = importer.apply_preamble_cleanup(
         client,
         planned,
-        preview={"scope_fingerprint": "test-preview"},
+        preview=preview,
     )
 
     assert [row["id"] for row in affected] == ["chapter-1"]
@@ -512,7 +517,8 @@ def test_cleanup_apply_requires_preview_evidence(monkeypatch, tmp_path):
 
 def test_cleanup_preview_report_contains_ids_and_diff_summary(monkeypatch, tmp_path):
     monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
-    planned = importer.build_preamble_cleanup_plan([cleanup_chapter()])
+    chapter = cleanup_chapter()
+    planned = importer.build_preamble_cleanup_plan([chapter])
 
     report_path = importer.write_cleanup_preview_report(planned)
     report = json.loads(report_path.read_text())
@@ -521,6 +527,9 @@ def test_cleanup_preview_report_contains_ids_and_diff_summary(monkeypatch, tmp_p
     assert report["chapter_ids"] == ["chapter-1"]
     assert report["changes"][0]["removed_chars"] > 0
     assert "preview" in report["changes"][0]
+    assert report["changes"][0]["notes_en_digest"] == importer.cleanup_note_digest(
+        chapter["notes_en"]
+    )
     assert report["scope_fingerprint"]
 
 
@@ -553,6 +562,7 @@ def test_cleanup_preview_can_be_transferred_to_another_runner(
         apply_args,
         ["chapter-1"],
         report_path=importer.cleanup_preview_path(apply_args),
+        planned=planned,
     )
 
     assert validated["scope_fingerprint"] == original_report["scope_fingerprint"]
@@ -591,6 +601,7 @@ def test_cleanup_preview_must_match_filters_and_chapter_set(monkeypatch, tmp_pat
         args,
         ["chapter-1"],
         report_path=report_path,
+        planned=planned,
     )["scope_fingerprint"] == importer.cleanup_preview_fingerprint(scope)
 
     with pytest.raises(RuntimeError, match="does not match"):
@@ -598,12 +609,43 @@ def test_cleanup_preview_must_match_filters_and_chapter_set(monkeypatch, tmp_pat
             make_args(clean_preambles=True, subject="physics"),
             ["chapter-1"],
             report_path=report_path,
+            planned=planned,
         )
     with pytest.raises(RuntimeError, match="does not match"):
         importer.validate_cleanup_preview(
             args,
             ["chapter-2"],
             report_path=report_path,
+            planned=planned,
+        )
+
+
+def test_cleanup_preview_rejects_changed_note_content(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    args = make_args(clean_preambles=True)
+    original_planned = importer.build_preamble_cleanup_plan([cleanup_chapter()])
+    scope = importer.cleanup_preview_scope(args, ["chapter-1"])
+    report_path = importer.write_cleanup_preview_report(
+        original_planned,
+        scope,
+    )
+
+    changed_notes = cleanup_chapter()["notes_en"].replace(
+        "Body content long enough",
+        "Changed body content long enough",
+    )
+    changed_planned = importer.build_preamble_cleanup_plan(
+        [cleanup_chapter(notes=changed_notes)]
+    )
+
+    with pytest.raises(RuntimeError, match="note content"):
+        importer.validate_cleanup_preview(
+            args,
+            ["chapter-1"],
+            report_path=report_path,
+            planned=changed_planned,
         )
 
 

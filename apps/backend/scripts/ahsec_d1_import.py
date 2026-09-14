@@ -23,7 +23,7 @@ Run from apps/backend:
 Cleanup safety:
   * `--clean-preambles --dry-run` creates the preview artifact.
   * A production cleanup requires that artifact to be fresh and to match the
-    filters and chapter set being written.
+    filters, chapter set, and note content being written.
   * Normal imports do not require a cleanup preview. The low-level
     `clean_existing_preambles(..., emergency=True)` compatibility helper is
     reserved for an explicitly authorized emergency operation.
@@ -968,6 +968,57 @@ def build_preamble_cleanup_plan(
     return planned
 
 
+def cleanup_note_digest(notes: str | None) -> str:
+    """Return a stable digest for the note content reviewed by cleanup."""
+    return hashlib.sha256(str(notes or "").encode("utf-8")).hexdigest()
+
+
+def cleanup_plan_digests(planned: list[dict[str, Any]]) -> dict[str, str]:
+    """Return the original note digest for every planned chapter."""
+    return {
+        str(chapter["id"]): cleanup_note_digest(
+            str(
+                chapter.get(
+                    "_cleanup_original_notes",
+                    chapter.get("notes_en") or "",
+                )
+            )
+        )
+        for chapter in planned
+    }
+
+
+def validate_cleanup_preview_content(
+    preview: dict[str, Any],
+    planned: list[dict[str, Any]],
+) -> None:
+    """Ensure a preview describes the exact note content being cleaned."""
+    changes = preview.get("changes")
+    if not isinstance(changes, list):
+        raise RuntimeError(
+            "Cleanup preview is missing per-chapter note content evidence. "
+            "Regenerate it with --clean-preambles --dry-run."
+        )
+    preview_digests = {
+        str(change.get("chapter_id")): change.get("notes_en_digest")
+        for change in changes
+        if isinstance(change, dict) and change.get("chapter_id") is not None
+    }
+    expected_digests = cleanup_plan_digests(planned)
+    if (
+        set(preview_digests) != set(expected_digests)
+        or any(
+            preview_digests.get(chapter_id) != digest
+            for chapter_id, digest in expected_digests.items()
+        )
+    ):
+        raise RuntimeError(
+            "Cleanup preview does not match the current chapter note content. "
+            "The reviewed notes changed after preview generation; regenerate "
+            "it with --clean-preambles --dry-run."
+        )
+
+
 def apply_preamble_cleanup(
     client: CloudflareClient,
     planned: list[dict[str, Any]],
@@ -980,6 +1031,8 @@ def apply_preamble_cleanup(
             "Cleanup writes require a matching preview artifact. "
             "Run --clean-preambles --dry-run first."
         )
+    if not preview.get("emergency"):
+        validate_cleanup_preview_content(preview, planned)
     affected: list[dict[str, Any]] = []
     for chapter in planned:
         cleaned = str(chapter["notes_en"])
@@ -1049,6 +1102,9 @@ def cleanup_preview_record(chapter: dict[str, Any]) -> dict[str, Any]:
         "class_name": chapter.get("class_name"),
         "subject": chapter.get("subject_name"),
         "title": chapter.get("title"),
+        "notes_en_digest": cleanup_note_digest(
+            str(chapter.get("_cleanup_original_notes") or "")
+        ),
         **diff,
     }
 
@@ -1094,8 +1150,9 @@ def validate_cleanup_preview(
     *,
     report_path: Path | None = None,
     now: datetime | None = None,
+    planned: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Require a recent preview with the exact production cleanup scope."""
+    """Require a recent preview with the exact scope and note content."""
     path = Path(report_path or cleanup_preview_path(args)).expanduser()
     if not path.exists():
         raise RuntimeError(
@@ -1150,6 +1207,8 @@ def validate_cleanup_preview(
             "Cleanup preview does not match the current filters or chapter set. "
             "Regenerate it with --clean-preambles --dry-run."
         )
+    if planned is not None:
+        validate_cleanup_preview_content(report, planned)
     return report
 
 
@@ -1239,6 +1298,7 @@ async def _run_main() -> int:
             args,
             chapter_ids,
             report_path=cleanup_preview_path(args),
+            planned=planned,
         )
         ACTIVE_RUN_ID, started_at = record_production_approval(
             args,
