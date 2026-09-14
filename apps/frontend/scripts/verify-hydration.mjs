@@ -205,11 +205,12 @@ function serveDist(rootDir) {
 
 // --- Browser check ----------------------------------------------------------
 
-// Task #543: detect Playwright environment problems (missing npm package
-// OR missing browser binary) separately from application hydration failures.
-// Local builds retain the best-effort soft-skip, while release CI sets
-// REQUIRE_HYDRATION_BROWSER=true after provisioning Chromium and turns an
-// unavailable browser into a clear environment failure.
+// Detect Playwright environment problems (missing npm package, browser binary,
+// or native browser runtime) separately from application hydration failures.
+// Local builds retain the best-effort soft-skip. Release workflows run the
+// native-runtime preflight before this script and set
+// REQUIRE_HYDRATION_BROWSER=true so an unavailable browser is a clear
+// environment failure rather than an application failure.
 function isPlaywrightEnvProblem(err) {
   const msg = String(err?.message || err || "");
   return (
@@ -273,35 +274,9 @@ async function main() {
   let browser;
   const findings = [];
   try {
-    // Playwright's bundled chrome-headless-shell on Replit/NixOS sometimes
-    // can't find libgbm.so.1 on the default loader path. Inject the Nix
-    // mesa lib directory into LD_LIBRARY_PATH so it can resolve.
-    const env = { ...process.env };
-    try {
-      const mesaLibs = fs
-        .readdirSync("/nix/store")
-        .filter((n) => /^[a-z0-9]+-mesa-\d/.test(n))
-        .map((n) => `/nix/store/${n}/lib`)
-        .filter((p) => {
-          try {
-            return fs.existsSync(`${p}/libgbm.so.1`);
-          } catch {
-            return false;
-          }
-        });
-      if (mesaLibs.length > 0) {
-        env.LD_LIBRARY_PATH = [env.LD_LIBRARY_PATH, ...mesaLibs]
-          .filter(Boolean)
-          .join(":");
-      }
-    } catch {
-      // /nix/store not present (non-Replit env) — skip the patch.
-    }
-
     try {
       browser = await chromium.launch({
         args: ["--no-sandbox", "--disable-dev-shm-usage"],
-        env,
       });
     } catch (launchErr) {
       // Tear down the static server before handling the environment failure

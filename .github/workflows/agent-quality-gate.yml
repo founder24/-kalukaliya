@@ -156,6 +156,9 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: pnpm --filter @workspace/syrabit run playwright:install:chromium
 
+      - name: Verify Chromium runtime libraries
+        run: bash .github/scripts/verify-playwright-runtime.sh
+
       - name: Build frontend
         run: pnpm --filter @workspace/syrabit run build
 
