@@ -99,6 +99,10 @@ CLEANUP_PREVIEW_MAX_AGE_SECONDS = int(
 MIN_SOURCE_CHARS = 500
 MIN_NOTES_CHARS = 800
 TERMINAL_SUMMARY_EVENT = "import_terminal_summary"
+INDEX_FAILED_STATUS = "index_failed"
+INDEX_REPAIRED_STATUS = "index_repaired"
+MAX_INDEX_REPAIR_CHAPTERS = 10
+MAX_INDEX_REPAIR_ATTEMPTS = 3
 ACTIVE_RUN_ID: str | None = None
 ACTIVE_RUN_COUNTS = {"completed": 0, "failed": 0}
 
@@ -136,6 +140,18 @@ def parse_args() -> argparse.Namespace:
         "--skip-index",
         action="store_true",
         help="Update D1 notes but do not replace Vectorize/D1 chunk mappings",
+    )
+    parser.add_argument(
+        "--repair-index",
+        "--retry-index",
+        dest="repair_index",
+        action="append",
+        metavar="CHAPTER_ID",
+        help=(
+            "Rebuild Vectorize and D1 chunk mappings from the chapter's stored "
+            "notes after an index_failed result; may be repeated up to "
+            f"{MAX_INDEX_REPAIR_CHAPTERS} times"
+        ),
     )
     parser.add_argument(
         "--clean-preambles",
@@ -343,13 +359,18 @@ def chunk_text(text: str, max_words: int = 400, overlap: int = 50) -> list[str]:
     return chunks
 
 
-def load_done() -> set[str]:
-    done: set[str] = set()
-    progress_files = [PROGRESS_FILE]
+def _progress_files() -> list[Path]:
+    progress_files: list[Path] = []
     archive_dir = STATE_DIR / "archive"
     if archive_dir.exists():
         progress_files.extend(sorted(archive_dir.glob("*/progress.jsonl")))
-    for progress_file in progress_files:
+    progress_files.append(PROGRESS_FILE)
+    return progress_files
+
+
+def _latest_progress_by_chapter() -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for progress_file in _progress_files():
         if not progress_file.exists():
             continue
         for line in progress_file.read_text(encoding="utf-8").splitlines():
@@ -357,9 +378,81 @@ def load_done() -> set[str]:
                 row = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if row.get("status") == "done" and row.get("chapter_id"):
-                done.add(str(row["chapter_id"]))
+            chapter_id = str(row.get("chapter_id") or "").strip()
+            if chapter_id:
+                latest[chapter_id] = row
+    return latest
+
+
+def load_done() -> set[str]:
+    done: set[str] = set()
+    latest = _latest_progress_by_chapter()
+    for chapter_id, row in latest.items():
+        if row.get("status") in {"done", INDEX_REPAIRED_STATUS}:
+            done.add(chapter_id)
     return done
+
+
+def _repair_index_ids(args: argparse.Namespace) -> list[str]:
+    raw_ids = getattr(args, "repair_index", None) or []
+    chapter_ids = list(
+        dict.fromkeys(
+            str(value).strip() for value in raw_ids if str(value).strip()
+        )
+    )
+    if len(chapter_ids) > MAX_INDEX_REPAIR_CHAPTERS:
+        raise ValueError(
+            f"At most {MAX_INDEX_REPAIR_CHAPTERS} chapters may be repaired per run"
+        )
+    return chapter_ids
+
+
+def _next_index_attempt(chapter_id: str) -> int:
+    previous = _latest_progress_by_chapter().get(str(chapter_id))
+    if not previous or previous.get("status") != INDEX_FAILED_STATUS:
+        return 1
+    try:
+        return max(1, int(previous.get("index_attempt") or 1) + 1)
+    except (TypeError, ValueError):
+        return 2
+
+
+def _record_index_failure(
+    chapter_id: str,
+    error: Exception | str,
+    *,
+    attempt: int,
+    operation: str,
+    notes_written: bool = True,
+    source_pdf_url: str | None = None,
+) -> None:
+    details: dict[str, Any] = {
+        "phase": "index",
+        "operation": operation,
+        "notes_written": notes_written,
+        "index_attempt": attempt,
+        "error": str(error),
+        "repairable": True,
+        "repair_command": (
+            "python3 -m scripts.ahsec_d1_import "
+            "--confirm-production-write --repair-index "
+            f"{chapter_id}"
+        ),
+    }
+    if source_pdf_url:
+        details["source_pdf_url"] = source_pdf_url
+    record_progress(chapter_id, INDEX_FAILED_STATUS, **details)
+
+
+def _index_repair_attempt(chapter_id: str) -> int:
+    previous = _latest_progress_by_chapter().get(str(chapter_id))
+    if not previous or previous.get("status") != INDEX_FAILED_STATUS:
+        return 1
+    try:
+        attempt = int(previous.get("index_attempt") or 1)
+    except (TypeError, ValueError):
+        attempt = 1
+    return attempt + 1
 
 
 def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
@@ -544,7 +637,7 @@ def archive_history(before_days: int, dry_run: bool = False) -> dict[str, Any]:
 
 
 def production_scope(args: argparse.Namespace) -> dict[str, Any]:
-    return {
+    scope: dict[str, Any] = {
         "class": args.class_level,
         "subject": args.subject,
         "limit": args.limit,
@@ -552,6 +645,10 @@ def production_scope(args: argparse.Namespace) -> dict[str, Any]:
         "skip_index": args.skip_index,
         "clean_preambles": args.clean_preambles,
     }
+    repair_index = _repair_index_ids(args)
+    if repair_index:
+        scope["repair_index"] = repair_index
+    return scope
 
 
 def cleanup_preview_scope(
@@ -917,6 +1014,93 @@ def replace_index(
     return len(rows)
 
 
+async def repair_indexes(
+    client: CloudflareClient,
+    chapters: list[dict[str, Any]],
+    chapter_ids: list[str],
+) -> int:
+    """Retry indexing from stored notes without regenerating or rewriting notes."""
+    global ACTIVE_RUN_COUNTS
+
+    chapters_by_id = {str(chapter["id"]): chapter for chapter in chapters}
+    missing = [
+        chapter_id for chapter_id in chapter_ids if chapter_id not in chapters_by_id
+    ]
+    if missing:
+        raise RuntimeError(
+            "Requested index repair chapter(s) were not found in the selected "
+            f"AHSEC chapters: {', '.join(missing)}"
+        )
+
+    repaired = 0
+    failed = 0
+    for chapter_id in chapter_ids:
+        chapter = chapters_by_id[chapter_id]
+        attempt = _index_repair_attempt(chapter_id)
+        if attempt > MAX_INDEX_REPAIR_ATTEMPTS:
+            error = (
+                f"Index repair attempt limit reached ({MAX_INDEX_REPAIR_ATTEMPTS}); "
+                "inspect the Vectorize/D1 failure before retrying"
+            )
+            failed += 1
+            _record_index_failure(
+                chapter_id,
+                error,
+                attempt=attempt,
+                operation="index_repair",
+                notes_written=bool(str(chapter.get("notes_en") or "").strip()),
+            )
+            log.error("%s: %s", chapter_id, error)
+            continue
+
+        notes = str(chapter.get("notes_en") or "").strip()
+        try:
+            if not notes:
+                raise RuntimeError("Chapter has no stored English notes to index")
+            chunk_count = await asyncio.to_thread(
+                replace_index,
+                client,
+                chapter,
+                notes,
+                "index-repair",
+            )
+            record_progress(
+                chapter_id,
+                INDEX_REPAIRED_STATUS,
+                operation="index_repair",
+                index_attempt=attempt,
+                note_chars=len(notes),
+                chunks=chunk_count,
+            )
+            repaired += 1
+            log.info(
+                "Repaired index for %s (%d chars, %d chunks)",
+                chapter_id,
+                len(notes),
+                chunk_count,
+            )
+        except Exception as exc:
+            failed += 1
+            _record_index_failure(
+                chapter_id,
+                exc,
+                attempt=attempt,
+                operation="index_repair",
+                notes_written=bool(notes),
+            )
+            log.exception("Index repair failed for %s: %s", chapter_id, exc)
+
+    ACTIVE_RUN_COUNTS["completed"] = repaired
+    ACTIVE_RUN_COUNTS["failed"] = failed
+    record_terminal_summary(
+        "failed" if failed else "completed",
+        completed=repaired,
+        failed=failed,
+    )
+    _clear_active_run(ACTIVE_RUN_ID)
+    return 1 if failed else 0
+
+
 def build_preamble_cleanup_plan(
     chapters: list[dict[str, Any]], max_diff_lines: int = 20
 ) -> list[dict[str, Any]]:
@@ -1238,6 +1422,14 @@ async def _run_main() -> int:
     args = parse_args()
     ACTIVE_RUN_ID = None
     ACTIVE_RUN_COUNTS = {"completed": 0, "failed": 0}
+    try:
+        repair_index_ids = _repair_index_ids(args)
+    except ValueError as exc:
+        log.error("%s", exc)
+        return 2
+    if repair_index_ids and args.skip_index:
+        log.error("--repair-index cannot be combined with --skip-index")
+        return 2
     if getattr(args, "archive_history", False):
         try:
             summary = archive_history(
@@ -1281,6 +1473,23 @@ async def _run_main() -> int:
     if args.subject:
         chapters = [row for row in chapters if row["subject_slug"] == args.subject]
 
+    if repair_index_ids:
+        if args.dry_run:
+            log.info(
+                "Read-only index repair preview: would rebuild %d chapter index(es): %s",
+                len(repair_index_ids),
+                ", ".join(repair_index_ids),
+            )
+            return 0
+        ACTIVE_RUN_ID, started_at = record_production_approval(args)
+        log.info(
+            "Index repair approved by %s (run_id=%s, started_at=%s)",
+            args.operator or getpass.getuser(),
+            ACTIVE_RUN_ID,
+            started_at,
+        )
+        return await repair_indexes(client, chapters, repair_index_ids)
+
     if args.clean_preambles:
         planned = await asyncio.to_thread(build_preamble_cleanup_plan, chapters)
         chapter_ids = [str(chapter["id"]) for chapter in planned]
@@ -1321,24 +1530,66 @@ async def _run_main() -> int:
             planned,
             preview=preview,
         )
-        ACTIVE_RUN_COUNTS["completed"] = len(affected)
-        if not args.skip_index:
+        cleanup_failed = 0
+        cleanup_completed = 0
+        if args.skip_index:
             for chapter in affected:
-                await asyncio.to_thread(
-                    replace_index,
-                    client,
-                    chapter,
-                    str(chapter.get("notes_en") or ""),
-                    "existing-d1-preamble-cleanup",
+                record_progress(
+                    str(chapter["id"]),
+                    "done",
+                    operation="cleanup",
+                    note_chars=len(str(chapter.get("notes_en") or "")),
+                    chunks=0,
                 )
-        log.info("Preamble cleanup complete: changed=%d", len(affected))
+            cleanup_completed = len(affected)
+        else:
+            for chapter in affected:
+                chapter_id = str(chapter["id"])
+                try:
+                    chunk_count = await asyncio.to_thread(
+                        replace_index,
+                        client,
+                        chapter,
+                        str(chapter.get("notes_en") or ""),
+                        "existing-d1-preamble-cleanup",
+                    )
+                    record_progress(
+                        chapter_id,
+                        "done",
+                        operation="cleanup",
+                        note_chars=len(str(chapter.get("notes_en") or "")),
+                        chunks=chunk_count,
+                    )
+                    cleanup_completed += 1
+                except Exception as exc:
+                    cleanup_failed += 1
+                    _record_index_failure(
+                        chapter_id,
+                        exc,
+                        attempt=_next_index_attempt(chapter_id),
+                        operation="cleanup",
+                        source_pdf_url="existing-d1-preamble-cleanup",
+                    )
+                    log.exception(
+                        "Indexing failed after cleanup notes write for %s: %s",
+                        chapter_id,
+                        exc,
+                    )
+        ACTIVE_RUN_COUNTS["completed"] = cleanup_completed
+        ACTIVE_RUN_COUNTS["failed"] = cleanup_failed
+        log.info(
+            "Preamble cleanup complete: changed=%d indexed=%d failed=%d",
+            len(affected),
+            cleanup_completed,
+            cleanup_failed,
+        )
         record_terminal_summary(
-            "completed",
-            completed=len(affected),
-            failed=0,
+            "failed" if cleanup_failed else "completed",
+            completed=cleanup_completed,
+            failed=cleanup_failed,
         )
         _clear_active_run(ACTIVE_RUN_ID)
-        return 0
+        return 1 if cleanup_failed else 0
 
     if not args.dry_run:
         ACTIVE_RUN_ID, started_at = record_production_approval(args)
@@ -1448,13 +1699,28 @@ async def _run_main() -> int:
             )
             chunk_count = 0
             if not args.skip_index:
-                chunk_count = await asyncio.to_thread(
-                    replace_index,
-                    client,
-                    chapter,
-                    notes,
-                    str(source["source_pdf_url"]),
-                )
+                index_attempt = _next_index_attempt(chapter_id)
+                try:
+                    chunk_count = await asyncio.to_thread(
+                        replace_index,
+                        client,
+                        chapter,
+                        notes,
+                        str(source["source_pdf_url"]),
+                    )
+                except Exception as exc:
+                    failed += 1
+                    ACTIVE_RUN_COUNTS["failed"] = failed
+                    _record_index_failure(
+                        chapter_id,
+                        exc,
+                        attempt=index_attempt,
+                        operation="import",
+                        source_pdf_url=str(source["source_pdf_url"]),
+                    )
+                    log.exception("Indexing failed after notes write for %s: %s", chapter_id, exc)
+                    await asyncio.sleep(max(0.0, args.delay))
+                    continue
             record_progress(
                 chapter_id,
                 "done",

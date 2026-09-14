@@ -377,6 +377,249 @@ def test_normal_import_replaces_index_and_chunk_mappings_without_cleanup_preview
     assert not (tmp_path / importer.CLEANUP_PREVIEW_FILENAME).exists()
 
 
+def test_index_failure_after_notes_write_is_a_distinct_repairable_state(
+    monkeypatch, tmp_path
+):
+    progress_file = tmp_path / "progress.jsonl"
+    approval_file = tmp_path / "approvals.jsonl"
+    backup_file = tmp_path / "notes-backup.jsonl"
+    args = make_args(limit=1, delay=0, skip_index=False)
+    chapter = {
+        "id": "chapter-index-failed",
+        "subject_id": "subject-1",
+        "class_name": "HS 1st Year",
+        "subject_name": "Chemistry",
+        "subject_slug": "chemistry",
+        "title": "Motion",
+        "chapter_number": 1,
+        "notes_en": "Existing notes",
+        "rag_text": "Existing notes",
+        "rag_sections_en": "[]",
+    }
+    source = {
+        "title": "Motion",
+        "effective_number": 1,
+        "body_text": "Official textbook content " * 30,
+        "source_pdf_url": "https://example.test/motion.pdf",
+    }
+    generated_notes = "## Motion\n\n" + ("Generated study notes. " * 60)
+
+    class FakeClient:
+        def __init__(self):
+            self.generated = []
+            self.executed = []
+
+        def generate(self, system_prompt, user_message, *, chapter_id=None):
+            self.generated.append((system_prompt, user_message, chapter_id))
+            return generated_notes
+
+        def embed(self, texts):
+            raise RuntimeError("Vectorize unavailable in test")
+
+        def execute(self, sql, params=None):
+            self.executed.append((sql, params))
+
+    client = FakeClient()
+    monkeypatch.setattr(importer, "parse_args", lambda: args)
+    monkeypatch.setattr(importer, "CloudflareClient", lambda: client)
+    monkeypatch.setattr(importer, "fetch_chapters", lambda _client: [chapter])
+
+    async def normal_sources(_args):
+        return {("11", "chemistry"): [source]}
+
+    monkeypatch.setattr(importer, "extract_sources", normal_sources)
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "APPROVAL_FILE", approval_file)
+    monkeypatch.setattr(importer, "BACKUP_FILE", backup_file)
+
+    assert asyncio.run(importer.main()) == 1
+
+    assert len(client.generated) == 1
+    assert len(client.executed) == 2
+    progress = read_jsonl(progress_file)
+    failed = next(
+        row for row in progress if row["chapter_id"] == "chapter-index-failed"
+    )
+    assert failed["status"] == "index_failed"
+    assert failed["phase"] == "index"
+    assert failed["notes_written"] is True
+    assert failed["index_attempt"] == 1
+    assert "--repair-index chapter-index-failed" in failed["repair_command"]
+    assert not any(
+        row.get("chapter_id") == "chapter-index-failed" and row["status"] == "done"
+        for row in progress
+    )
+    assert progress[-1]["status"] == "failed"
+    assert progress[-1]["completed"] == 0
+    assert progress[-1]["failed"] == 1
+    assert "Vectorize unavailable" not in json.dumps(progress[-1])
+
+
+def test_index_repair_reuses_stored_notes_without_regeneration(
+    monkeypatch, tmp_path
+):
+    progress_file = tmp_path / "progress.jsonl"
+    approval_file = tmp_path / "approvals.jsonl"
+    backup_file = tmp_path / "notes-backup.jsonl"
+    args = make_args(
+        limit=None,
+        delay=0,
+        skip_index=False,
+        repair_index=["chapter-index-failed"],
+    )
+    chapter = {
+        "id": "chapter-index-failed",
+        "subject_id": "subject-1",
+        "class_name": "HS 1st Year",
+        "subject_name": "Chemistry",
+        "subject_slug": "chemistry",
+        "title": "Motion",
+        "chapter_number": 1,
+        "notes_en": "## Motion\n\n" + ("Stored notes. " * 60),
+        "rag_text": "Stored notes",
+        "rag_sections_en": "[]",
+    }
+
+    class FakeClient:
+        def __init__(self):
+            self.generated = []
+            self.executed = []
+            self.embedded = []
+            self.deleted_vectors = []
+            self.upserted_vectors = []
+
+        def generate(self, *args, **kwargs):
+            self.generated.append((args, kwargs))
+            raise AssertionError("index repair must not regenerate notes")
+
+        def embed(self, texts):
+            self.embedded.append(texts)
+            return [[0.1, 0.2] for _ in texts]
+
+        def query(self, sql, params=None):
+            if "SELECT vector_id FROM chunks" in sql:
+                return [{"vector_id": "old-vector"}]
+            return []
+
+        def vector_delete(self, vector_ids):
+            self.deleted_vectors.append(vector_ids)
+
+        def vector_upsert(self, vectors):
+            self.upserted_vectors.append(vectors)
+
+        def execute(self, sql, params=None):
+            self.executed.append((sql, params))
+
+    client = FakeClient()
+    monkeypatch.setattr(importer, "parse_args", lambda: args)
+    monkeypatch.setattr(importer, "CloudflareClient", lambda: client)
+    monkeypatch.setattr(importer, "fetch_chapters", lambda _client: [chapter])
+    monkeypatch.setattr(
+        importer,
+        "extract_sources",
+        lambda _args: (_ for _ in ()).throw(
+            AssertionError("index repair must not extract source PDFs")
+        ),
+    )
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "APPROVAL_FILE", approval_file)
+    monkeypatch.setattr(importer, "BACKUP_FILE", backup_file)
+    progress_file.write_text(
+        json.dumps(
+            {
+                "chapter_id": "chapter-index-failed",
+                "status": "index_failed",
+                "index_attempt": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert asyncio.run(importer.main()) == 0
+
+    assert not client.generated
+    assert client.embedded
+    assert client.deleted_vectors == [["old-vector"]]
+    progress = read_jsonl(progress_file)
+    repaired = [
+        row
+        for row in progress
+        if row.get("chapter_id") == "chapter-index-failed"
+    ][-1]
+    assert repaired["status"] == importer.INDEX_REPAIRED_STATUS
+    assert repaired["operation"] == "index_repair"
+    assert repaired["index_attempt"] == 2
+    assert progress[-1]["status"] == "completed"
+    approval = read_jsonl(approval_file)[0]
+    assert approval["scope"]["repair_index"] == ["chapter-index-failed"]
+    assert importer.load_done() == {"chapter-index-failed"}
+
+
+def test_latest_index_failure_overrides_an_earlier_done_record(monkeypatch, tmp_path):
+    progress_file = tmp_path / "progress.jsonl"
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    progress_file.write_text(
+        "\n".join(
+            [
+                json.dumps({"chapter_id": "chapter-1", "status": "done"}),
+                json.dumps(
+                    {
+                        "chapter_id": "chapter-1",
+                        "status": "index_failed",
+                        "index_attempt": 1,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert importer.load_done() == set()
+
+
+def test_index_repair_stops_after_bounded_attempts(monkeypatch, tmp_path):
+    progress_file = tmp_path / "progress.jsonl"
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "ACTIVE_RUN_ID", "run-repair-limit")
+    progress_file.write_text(
+        json.dumps(
+            {
+                "chapter_id": "chapter-1",
+                "status": importer.INDEX_FAILED_STATUS,
+                "index_attempt": importer.MAX_INDEX_REPAIR_ATTEMPTS,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class NoIndexClient:
+        def embed(self, _texts):
+            raise AssertionError("repair limit should prevent indexing")
+
+    chapter = {
+        "id": "chapter-1",
+        "notes_en": "## Motion\n\nStored notes",
+    }
+
+    assert (
+        asyncio.run(
+            importer.repair_indexes(NoIndexClient(), [chapter], ["chapter-1"])
+        )
+        == 1
+    )
+    records = read_jsonl(progress_file)
+    assert records[-2]["status"] == importer.INDEX_FAILED_STATUS
+    assert records[-2]["index_attempt"] == importer.MAX_INDEX_REPAIR_ATTEMPTS + 1
+    assert records[-1]["status"] == "failed"
+
+
 def approval_record(run_id, started_at):
     return {
         "event": "production_write_approved",
