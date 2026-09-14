@@ -11,6 +11,15 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+# Make direct execution (`python3 scripts/retranslate_assamese.py`) use the
+# same backend package root as module execution.
+BACKEND_DIR = str(Path(__file__).resolve().parents[1])
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
+
+from app.services.ai.note_quality import validate_generated_notes
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,6 +34,39 @@ log = logging.getLogger("retranslate_assamese")
 CONCURRENCY = int(sys.argv[sys.argv.index("--concurrency") + 1]) if "--concurrency" in sys.argv else 3
 LIMIT       = int(sys.argv[sys.argv.index("--limit") + 1])       if "--limit"       in sys.argv else 9999
 FORCE       = True   # always force — this script exists to fix bad translations
+
+
+TRANSLATE_SYSTEM = (
+    "You are a professional translator specialising in Assamese educational content. "
+    "Translate the following English text to Assamese. "
+    "Output ONLY the Assamese translation. "
+    "Preserve markdown headings, bold, bullet points and LaTeX math exactly."
+)
+CHUNK_WORDS = 400
+
+
+async def _translate_chunk(
+    text: str,
+    *,
+    chapter_id: str,
+    chunk_index: int,
+    total_chunks: int,
+    ai_client,
+) -> str:
+    """Generate and validate one Assamese chunk before callers append it."""
+    translated = await ai_client.generate(
+        TRANSLATE_SYSTEM,
+        text,
+        is_assamese=True,
+        max_tokens=2048,
+    )
+    if translated and translated.strip():
+        validate_generated_notes(
+            f"{chapter_id} translation chunk {chunk_index}/{total_chunks}",
+            translated,
+            record_type="Assamese translation chunk",
+        )
+    return translated
 
 
 async def main():
@@ -82,20 +124,6 @@ async def main():
     from app.services.ai.workers_ai_client import workers_ai_client
     from datetime import datetime as _dt, timezone as _tz
 
-    TRANSLATE_SYSTEM = (
-        "You are a professional translator specialising in Assamese educational content. "
-        "Translate the following English text to Assamese. "
-        "Output ONLY the Assamese translation. "
-        "Preserve markdown headings, bold, bullet points and LaTeX math exactly."
-    )
-    CHUNK_WORDS = 400
-
-    async def _translate_chunk(text: str) -> str:
-        """Generate an Assamese chunk through the authenticated Worker API."""
-        return await workers_ai_client.generate(
-            TRANSLATE_SYSTEM, text, is_assamese=True, max_tokens=2048
-        )
-
     sem = asyncio.Semaphore(CONCURRENCY)
     completed = failed = skipped = 0
     failed_ids: list[str] = []
@@ -115,7 +143,13 @@ async def main():
 
                 parts = []
                 for ci, chunk in enumerate(chunks, 1):
-                    translated = await _translate_chunk(chunk)
+                    translated = await _translate_chunk(
+                        chunk,
+                        chapter_id=chapter_id,
+                        chunk_index=ci,
+                        total_chunks=len(chunks),
+                        ai_client=workers_ai_client,
+                    )
                     if translated.strip():
                         parts.append(translated.strip())
                         log.info(f"  chunk {ci}/{len(chunks)} → {len(translated.split())} words")

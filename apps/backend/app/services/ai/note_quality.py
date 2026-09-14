@@ -51,6 +51,23 @@ _MODEL_PREAMBLE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             flags=re.I,
         ),
     ),
+    (
+        "translation_introduction",
+        re.compile(
+            r"^\s*(?:(?:here|below|the following)\s+(?:is|are)|"
+            r"(?:here|below)['’]s)\b"
+            r".{0,180}\b(?:assamese\s+)?(?:translation|translated|text)\b",
+            flags=re.I | re.S,
+        ),
+    ),
+    (
+        "translation_acknowledgement",
+        re.compile(
+            r"^\s*i\s+(?:have|['’]ve)\s+translated\b|"
+            r"^\s*translation\s*:",
+            flags=re.I,
+        ),
+    ),
 )
 
 

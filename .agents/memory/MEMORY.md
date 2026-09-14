@@ -90,3 +90,4 @@
 - [Playwright runtime preflight](playwright-runtime-preflight.md) — validate the separately downloaded headless shell directly; regular Chromium checks can miss loader failures.
 - [AHSEC importer workflow runtime](syrabit-import-workflow-runtime.md) — local dry-runs need the PEP 668 install flag and the locked PyMuPDF dependency.
 - [Referral settlement controls](referral-settlement-controls.md) — fund and settle only frozen mature-claim statements with private payout evidence and immutable pause cutoffs
+- [Assamese translation boundary](assamese-translation-boundary.md) — validate raw translation chunks before cleanup, accumulation, or bilingual chapter writes

@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.models.content import Chapter
+from app.services.ai.note_quality import ModelPreambleError, validate_generated_notes
 from app.services.ai.workers_ai_client import workers_ai_client
 
 logger = logging.getLogger(__name__)
@@ -91,13 +92,31 @@ class ChapterTranslator:
         text = re.sub(r'\n{3,}', '\n\n', text).strip()
         return text
 
-    async def _translate(self, system_prompt: str, text: str, retries: int = 3) -> str:
+    async def _translate(
+        self,
+        system_prompt: str,
+        text: str,
+        retries: int = 3,
+        *,
+        record_id: str = "translation",
+        record_type: str = "Assamese translation",
+    ) -> str:
         if not text or not text.strip():
             return text
         for attempt in range(retries):
             try:
                 result = await workers_ai_client.generate(system_prompt, text, is_assamese=True)
+                validate_generated_notes(
+                    record_id,
+                    result,
+                    normalizer=self._scrub_translation_artifacts,
+                    record_type=record_type,
+                )
                 return self._scrub_translation_artifacts(result)
+            except ModelPreambleError:
+                # A contract violation is deterministic. Retrying would only
+                # delay the rejection and could still expose bad content later.
+                raise
             except Exception as e:
                 if attempt == retries - 1:
                     raise
@@ -121,14 +140,31 @@ class ChapterTranslator:
             chunks.append("\n\n".join(cur))
         return chunks
 
-    async def translate_markdown(self, text: str) -> str:
+    async def translate_markdown(
+        self,
+        text: str,
+        *,
+        record_id: str = "translation",
+    ) -> str:
         words = text.split()
         if len(words) <= CHUNK_WORD_LIMIT:
-            return await self._translate(SYSTEM_PROMPT, text)
+            return await self._translate(
+                SYSTEM_PROMPT,
+                text,
+                record_id=f"{record_id} translation chunk 1/1",
+                record_type="Assamese translation chunk",
+            )
         chunks = self._chunk(text)
         translated = []
-        for chunk in chunks:
-            translated.append(await self._translate(SYSTEM_PROMPT, chunk))
+        for idx, chunk in enumerate(chunks, 1):
+            translated.append(
+                await self._translate(
+                    SYSTEM_PROMPT,
+                    chunk,
+                    record_id=f"{record_id} translation chunk {idx}/{len(chunks)}",
+                    record_type="Assamese translation chunk",
+                )
+            )
         return "\n\n".join(translated)
 
     async def translate_chapter(self, chapter: Chapter) -> bool:
@@ -137,8 +173,21 @@ class ChapterTranslator:
         Returns True on success, False on failure.
         """
         try:
-            title_as = await self._translate(TITLE_SYSTEM_PROMPT, chapter.title)
-            content_as = await self.translate_markdown(chapter.content_en or "")
+            chapter_id = str(
+                getattr(chapter, "id", None)
+                or getattr(chapter, "slug", None)
+                or "unknown-chapter"
+            )
+            title_as = await self._translate(
+                TITLE_SYSTEM_PROMPT,
+                chapter.title,
+                record_id=f"{chapter_id} title",
+                record_type="Assamese translation title",
+            )
+            content_as = await self.translate_markdown(
+                chapter.content_en or "",
+                record_id=chapter_id,
+            )
 
             await chapter.update({
                 "$set": {
