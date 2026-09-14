@@ -28,6 +28,7 @@ import { isStrictCurriculumBuild } from "./release-guards.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
+const distDir = path.join(repoRoot, "dist");
 
 const BUDGET_MS = (() => {
   const raw = process.env.BUILD_BUDGET_MS;
@@ -69,7 +70,7 @@ function runStep(name, command, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: "inherit",
-      env: process.env,
+      env: opts.env || process.env,
       cwd: opts.cwd || repoRoot,
     });
     const stepTimer = setTimeout(() => {
@@ -169,12 +170,6 @@ async function main() {
     node(path.join(__dirname, "verify-required-ads.mjs"), [], { budgetMs: 30_000 }),
   );
 
-  // 2.5. Static data generation — fetch content from backend for CDN.
-  await record(
-    "static-data",
-    node(path.join(__dirname, "generate-static-data.mjs"), [], { budgetMs: 60_000 }),
-  );
-
   // 3. Client + SSR builds in parallel. They write to dist/ and
   //    dist-ssr/ respectively, no shared output.
   const clientStart = Date.now();
@@ -202,6 +197,21 @@ async function main() {
     ),
   ]);
   summary.push({ label: "vite parallel", elapsed: Date.now() - clientStart });
+
+  // 3.5. Static data generation — fetch current content directly into dist/
+  //      after Vite has copied the public shell. This keeps release builds
+  //      reproducible: generated JSON/XML must never rewrite tracked source
+  //      files in public/.
+  await record(
+    "static-data",
+    node(path.join(__dirname, "generate-static-data.mjs"), [], {
+      budgetMs: 60_000,
+      env: {
+        ...process.env,
+        BUILD_STATIC_DATA_OUTPUT_DIR: distDir,
+      },
+    }),
+  );
 
   // 4. Prerender — orchestrator pre-warms the backend cache then
   //    spawns the four prerender scripts in parallel. Full curriculum
