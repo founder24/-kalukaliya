@@ -5,8 +5,11 @@ force=False and the chapter already has notes_en OR content_en set.
 """
 
 import pytest
+import jwt
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.config import settings
 from app.services.ai.note_quality import ModelPreambleError
 from app.services.content_generation import ContentGenerationService
 
@@ -221,3 +224,43 @@ async def test_generate_notes_rejects_model_preamble_with_chapter_identity():
     assert _CHAPTER_ID in message
     assert "Test Chapter" in message
     mock_generate.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_admin_generate_notes_returns_rejected_chapter_identity(client):
+    """The admin endpoint must surface model-preamble rejection for the chapter."""
+    chapter = _make_chapter()
+    rejection = ModelPreambleError(
+        f"Generated notes rejected for chapter {_CHAPTER_ID}: "
+        "model preamble 'assistant_acknowledgement' detected; title=Test Chapter"
+    )
+    expire = datetime.now(timezone.utc) + timedelta(hours=1)
+    token = jwt.encode(
+        {"sub": "test_admin_id", "type": "admin", "role": "admin", "exp": expire},
+        settings.JWT_SECRET,
+        algorithm="HS256",
+    )
+
+    with (
+        patch(
+            "app.api.v1.admin_content.Chapter.get",
+            new_callable=AsyncMock,
+            return_value=chapter,
+        ),
+        patch(
+            "app.api.v1.admin_content.content_generation_service.generate_notes",
+            new_callable=AsyncMock,
+            side_effect=rejection,
+        ) as mock_generate,
+    ):
+        response = await client.post(
+            f"/api/v1/admin/content/chapters/{_CHAPTER_ID}/generate-notes",
+            json={"force": True},
+            cookies={"syrabit_admin_session": token},
+        )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert _CHAPTER_ID in detail
+    assert "Test Chapter" in detail
+    mock_generate.assert_awaited_once_with(_CHAPTER_ID, force=True)
