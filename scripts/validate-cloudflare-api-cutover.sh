@@ -43,6 +43,23 @@ TMP_FILES=()
 cleanup() { rm -f "${TMP_FILES[@]}"; }
 trap cleanup EXIT
 
+# Cloudflare Access protects the public admin API host as well as the staff
+# Pages route. Keep these headers out of ordinary public checks, but attach
+# them to every admin request when the full authenticated contract is run.
+ACCESS_HEADERS=()
+if [[ -n "${CF_ACCESS_CLIENT_ID:-}" || -n "${CF_ACCESS_CLIENT_SECRET:-}" ]]; then
+  : "${CF_ACCESS_CLIENT_ID:?Set CF_ACCESS_CLIENT_ID for protected admin validation}"
+  : "${CF_ACCESS_CLIENT_SECRET:?Set CF_ACCESS_CLIENT_SECRET for protected admin validation}"
+  ACCESS_HEADERS=(
+    --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"
+    --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"
+  )
+fi
+if [[ -n "${ADMIN_SESSION_TOKEN:-}" ]]; then
+  : "${CF_ACCESS_CLIENT_ID:?Set CF_ACCESS_CLIENT_ID when ADMIN_SESSION_TOKEN is supplied}"
+  : "${CF_ACCESS_CLIENT_SECRET:?Set CF_ACCESS_CLIENT_SECRET when ADMIN_SESSION_TOKEN is supplied}"
+fi
+
 run_disposable_staff_auth_check() {
   local required_var cookie_jar login_body response headers status access_token refresh_token now
   local -a access_headers
@@ -310,6 +327,7 @@ edge_admin_get() {
   headers=$(mktemp)
   TMP_FILES+=("$output" "$headers")
   status=$(curl --silent --show-error --max-time 30 \
+    "${ACCESS_HEADERS[@]}" \
     --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
     -H "Cookie: syrabit_admin_session=${ADMIN_SESSION_TOKEN}" "${EDGE_BASE}/api/v1${path}")
   test "$status" = "200" || { cat "$output"; echo "Expected public-edge admin 200 for ${path}, got ${status}" >&2; exit 1; }
@@ -373,6 +391,7 @@ edge_admin_json_status() {
   TMP_FILES+=("$output" "$headers")
   status=$(curl --silent --show-error --max-time 30 \
     --request POST --header 'Content-Type: application/json' \
+    "${ACCESS_HEADERS[@]}" \
     --header "Cookie: syrabit_admin_session=${ADMIN_SESSION_TOKEN}" --data "$data" \
     --dump-header "$headers" --output "$output" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1${path}")
