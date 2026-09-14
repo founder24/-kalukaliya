@@ -8,19 +8,20 @@
 // broken SSR/CSR contract.
 //
 // This script closes that gap by:
-//   1. Picking one prerendered subject route and one prerendered chapter
-//      route from `dist/` (using the same data-hydrate marker scan as
-//      verify-all.mjs).
+//   1. Picking one representative public static route, one prerendered
+//      subject route, and one prerendered chapter route from `dist/`
+//      (using the same data-hydrate marker scan as verify-all.mjs).
 //   2. Serving `dist/` over a local static HTTP server.
 //   3. Loading each route in a real headless Chromium via Playwright.
-//   4. Failing the build if any console message or page error matches the
-//      well-known hydration mismatch signatures (React's plain-text
-//      warnings as well as minified production error codes #418/#423/#425).
+//   4. Failing the build if any console message matches the well-known
+//      hydration mismatch signatures (React's plain-text warnings as well as
+//      minified production error codes #418/#423/#425), or if a public static
+//      route raises an uncaught page error.
 //
-// Soft-fails (warns, exit 0) when there are no prerendered subject or
-// chapter routes to inspect — matches the soft-fail philosophy of
-// scripts/prerender-routes.mjs and scripts/verify-all.mjs so a
-// transient backend outage on the build host doesn't break deploys.
+// Soft-fails (warns, exit 0) when there are no routes to inspect — matches
+// the soft-fail philosophy of scripts/prerender-routes.mjs and
+// scripts/verify-all.mjs so a transient backend outage on the build host
+// doesn't break deploys.
 
 import fs from "fs";
 import http from "http";
@@ -39,21 +40,24 @@ function fail(msg) {
   process.exit(1);
 }
 
+let subjectsWritten = 0;
+let chaptersWritten = 0;
 if (!fs.existsSync(manifestPath)) {
-  warn("no prerender-manifest.json — prerender step likely soft-failed; skipping verification");
-  process.exit(0);
-}
-
-const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-const subjectsWritten = manifest?.counts?.subjects_written ?? 0;
-const chaptersWritten = manifest?.counts?.chapters_written ?? 0;
-if (subjectsWritten === 0 && chaptersWritten === 0) {
-  warn("manifest reports zero prerendered routes; nothing to verify");
-  process.exit(0);
+  warn("no prerender-manifest.json — prerender step likely soft-failed");
+} else {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  subjectsWritten = manifest?.counts?.subjects_written ?? 0;
+  chaptersWritten = manifest?.counts?.chapters_written ?? 0;
 }
 
 // Walk dist/ and bucket prerendered routes by data-hydrate kind so we can
 // pick one representative subject + chapter URL to load in the browser.
+const PUBLIC_STATIC_ROUTES = [
+  { kind: "static", route: "/home", file: "home/index.html" },
+  { kind: "static", route: "/login", file: "login/index.html" },
+  { kind: "static", route: "/terms", file: "terms/index.html" },
+];
+
 function* walk(dir, prefix = "") {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
@@ -90,8 +94,14 @@ else if (chaptersWritten > 0) {
   fail(`manifest claimed ${chaptersWritten} chapters written but none found on disk`);
 }
 
+for (const target of PUBLIC_STATIC_ROUTES) {
+  if (fs.existsSync(path.join(distDir, target.file))) {
+    targets.push(target);
+  }
+}
+
 if (targets.length === 0) {
-  warn("no prerendered subject or chapter routes found on disk; nothing to verify");
+  warn("no public static, subject, or chapter routes found on disk; nothing to verify");
   process.exit(0);
 }
 
@@ -321,31 +331,43 @@ async function main() {
 
       console.log(`[verify-hydration] loading ${target.kind} route ${target.route}`);
       await page.goto(url, { waitUntil: "load", timeout: 30000 });
-      // Wait for the bootstrap to mark hydration complete
-      // (window.__SYRABIT_HYDRATED__, set by src/index.jsx right after the
-      // hydrateRoot call). Fall back to a fixed window if the flag never
-      // appears so we still capture console warnings on routes that may
-      // have fallen back to client rendering.
-      try {
-        await page.waitForFunction(() => window.__SYRABIT_HYDRATED__ === true, {
-          timeout: 8000,
-        });
-      } catch {
+      if (target.kind === "static") {
+        // Static public routes are intentionally SPA shell stubs and use
+        // createRoot rather than the prerendered hydrateRoot path. Give the
+        // client mount and its effects a short settle window before checking
+        // for uncaught page errors.
         await page.waitForTimeout(2000);
+      } else {
+        // Wait for the bootstrap to mark hydration complete
+        // (window.__SYRABIT_HYDRATED__, set by src/index.jsx right after the
+        // hydrateRoot call). Fall back to a fixed window if the flag never
+        // appears so we still capture console warnings on routes that may
+        // have fallen back to client rendering.
+        try {
+          await page.waitForFunction(() => window.__SYRABIT_HYDRATED__ === true, {
+            timeout: 8000,
+          });
+        } catch {
+          await page.waitForTimeout(2000);
+        }
       }
       // Final settle so any deferred warnings React logs after commit
       // (e.g. "Hydration completed but contains mismatches") land in our
       // console buffer before we tear the page down.
       await page.waitForTimeout(750);
 
-      const offenders = messages.filter((m) => looksLikeHydrationProblem(m.text));
+      const offenders = messages.filter(
+        (m) =>
+          looksLikeHydrationProblem(m.text) ||
+          (target.kind === "static" && m.type === "pageerror"),
+      );
       for (const o of offenders) {
         findings.push({ route: target.route, kind: target.kind, ...o });
       }
 
       await context.close();
       console.log(
-        `[verify-hydration] ${target.route}: ${messages.length} console msgs, ${offenders.length} hydration issues`,
+        `[verify-hydration] ${target.route}: ${messages.length} console msgs, ${offenders.length} browser issues`,
       );
     }
   } finally {
@@ -354,15 +376,15 @@ async function main() {
   }
 
   if (findings.length > 0) {
-    console.error("[verify-hydration] hydration mismatches detected:");
+    console.error("[verify-hydration] browser/hydration issues detected:");
     for (const f of findings) {
       console.error(`  - [${f.kind} ${f.route}] (${f.type}) ${f.text}`);
     }
-    fail(`${findings.length} hydration warning(s) across ${targets.length} prerendered route(s)`);
+    fail(`${findings.length} browser issue(s) across ${targets.length} checked route(s)`);
   }
 
   console.log(
-    `[verify-hydration] OK — ${targets.length} prerendered route(s) hydrated cleanly in headless Chromium`,
+    `[verify-hydration] OK — ${targets.length} route(s) checked in headless Chromium`,
   );
 }
 

@@ -747,7 +747,7 @@ console.log(
     `${pages.length} html files, ${subjectsOnDisk} subject + ${chaptersOnDisk} chapter prerenders`,
 );
 
-// ── Run hydration headless-browser check in parallel (best-effort) ──
+// ── Run hydration/static-route headless-browser check in parallel (best-effort) ──
 async function runHydration() {
   if (process.env.SKIP_VERIFY_HYDRATION === "1") {
     if (process.env.REQUIRE_HYDRATION_BROWSER === "true") {
