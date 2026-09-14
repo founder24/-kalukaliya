@@ -27,6 +27,9 @@ import fs from "fs";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  browserIssuesForTarget,
+} from "./verify-hydration-policy.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -103,32 +106,6 @@ for (const target of PUBLIC_STATIC_ROUTES) {
 if (targets.length === 0) {
   warn("no public static, subject, or chapter routes found on disk; nothing to verify");
   process.exit(0);
-}
-
-// React hydration mismatch signatures. React 18/19 emits the plain-text
-// warnings in dev, and the production minified error codes in prod (which
-// is what we ship). Match all of them.
-const HYDRATION_PATTERNS = [
-  /Hydration failed/i,
-  /hydrating but the server rendered/i,
-  /did not match/i,
-  /Text content does not match/i,
-  /Text content did not match/i,
-  /Hydration completed but contains mismatches/i,
-  /There was an error while hydrating/i,
-  /server rendered HTML didn't match the client/i,
-  /Minified React error #418/i,
-  /Minified React error #421/i,
-  /Minified React error #422/i,
-  /Minified React error #423/i,
-  /Minified React error #425/i,
-  /reactjs\.org\/docs\/error-decoder\.html\?invariant=(?:418|421|422|423|425)/i,
-  /react\.dev\/errors\/(?:418|421|422|423|425)/i,
-];
-
-function looksLikeHydrationProblem(text) {
-  if (!text) return false;
-  return HYDRATION_PATTERNS.some((re) => re.test(text));
 }
 
 // --- Static server over dist/ -----------------------------------------------
@@ -331,11 +308,7 @@ async function main() {
       // console buffer before we tear the page down.
       await page.waitForTimeout(750);
 
-      const offenders = messages.filter(
-        (m) =>
-          looksLikeHydrationProblem(m.text) ||
-          (target.kind === "static" && m.type === "pageerror"),
-      );
+      const offenders = browserIssuesForTarget(target, messages);
       for (const o of offenders) {
         findings.push({ route: target.route, kind: target.kind, ...o });
       }

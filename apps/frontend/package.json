@@ -46,7 +46,7 @@
     "check:undefined": "eslint --no-warn-ignored \"src/**/*.{js,jsx,mjs}\"",
     "validate": "pnpm run typecheck && pnpm run check:undefined",
     "test": "vitest run",
-    "test:release-guards": "vitest run src/test/curriculum-release-guards.test.js",
+    "test:release-guards": "vitest run src/test/curriculum-release-guards.test.js src/test/verify-hydration-policy.test.js",
     "test:all": "bash scripts/test-all.sh",
     "test:e2e": "bash scripts/run-e2e.sh",
     "test:e2e:chat-ads": "bash scripts/run-chat-ads-e2e.sh"
