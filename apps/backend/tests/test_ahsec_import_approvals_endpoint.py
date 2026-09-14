@@ -1,3 +1,4 @@
+import argparse
 import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -36,6 +37,85 @@ def _write_jsonl(path, *records):
         + "\n",
         encoding="utf-8",
     )
+
+
+def test_importer_state_directory_is_read_by_approval_history_endpoint(
+    client, admin_cookie, monkeypatch, tmp_path
+):
+    import app.api.v1.admin_content as admin_content
+    from scripts import ahsec_d1_import as importer
+
+    state_dir = tmp_path / "import-state"
+    approval_file = state_dir / "approvals.jsonl"
+    progress_file = state_dir / "progress.jsonl"
+    backup_file = state_dir / "notes-backup.jsonl"
+    monkeypatch.setattr(importer, "STATE_DIR", state_dir)
+    monkeypatch.setattr(importer, "APPROVAL_FILE", approval_file)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "BACKUP_FILE", backup_file)
+    monkeypatch.setattr(importer, "ACTIVE_RUN_ID", None)
+
+    args = argparse.Namespace(
+        dry_run=False,
+        confirm_production_write=True,
+        operator="curriculum-reviewer",
+        class_level="11",
+        subject="chemistry",
+        limit=2,
+        restart=False,
+        skip_index=True,
+        clean_preambles=False,
+    )
+    run_id, started_at = importer.record_production_approval(args)
+    monkeypatch.setattr(importer, "ACTIVE_RUN_ID", run_id)
+    importer.record_progress("chapter-1", "done")
+    importer.backup_existing(
+        {
+            "id": "chapter-2",
+            "subject_id": "subject-1",
+            "notes_en": "backup note contents must remain private",
+        },
+        "https://example.test/book.pdf",
+    )
+    importer.record_progress(
+        "chapter-2",
+        "error",
+        error="failed chapter details must not be exposed",
+    )
+    importer.record_terminal_summary("failed", completed=1, failed=1)
+
+    with (
+        patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", approval_file),
+        patch.object(admin_content, "_AHSEC_D1_IMPORT_PROGRESS_FILE", progress_file),
+    ):
+        response = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/approvals",
+            cookies=admin_cookie,
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["file_exists"] is True
+    assert len(body["approvals"]) == 1
+    approval = body["approvals"][0]
+    assert approval["run_id"] == run_id
+    assert approval["operator"] == "curriculum-reviewer"
+    assert approval["started_at"] == started_at
+    assert approval["scope"] == {
+        "class": "11",
+        "subject": "chemistry",
+        "limit": 2,
+        "restart": False,
+        "skip_index": True,
+        "clean_preambles": False,
+    }
+    assert approval["progress"]["status"] == "failed"
+    assert approval["progress"]["chapters"] == 2
+    assert approval["progress"]["completed"] == 1
+    assert approval["progress"]["failed"] == 1
+    assert approval["progress"]["last_updated_at"]
+    assert "backup note contents must remain private" not in response.text
+    assert "failed chapter details must not be exposed" not in response.text
 
 
 def test_import_approvals_show_safe_metadata_and_linked_progress(
