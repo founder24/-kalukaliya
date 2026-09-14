@@ -19,6 +19,14 @@ Run from apps/backend:
   python3 -m scripts.ahsec_d1_import --clean-preambles --dry-run
   python3 -m scripts.ahsec_d1_import --limit 1
   python3 -m scripts.ahsec_d1_import --confirm-production-write --limit 1
+
+Cleanup safety:
+  * `--clean-preambles --dry-run` creates the preview artifact.
+  * A production cleanup requires that artifact to be fresh and to match the
+    filters and chapter set being written.
+  * Normal imports do not require a cleanup preview. The low-level
+    `clean_existing_preambles(..., emergency=True)` compatibility helper is
+    reserved for an explicitly authorized emergency operation.
 """
 
 from __future__ import annotations
@@ -27,6 +35,7 @@ import argparse
 import asyncio
 import difflib
 import getpass
+import hashlib
 import json
 import logging
 import os
@@ -78,6 +87,10 @@ STATE_DIR = Path(
 PROGRESS_FILE = STATE_DIR / "progress.jsonl"
 BACKUP_FILE = STATE_DIR / "notes-backup.jsonl"
 APPROVAL_FILE = STATE_DIR / "approvals.jsonl"
+CLEANUP_PREVIEW_FILENAME = "preamble-cleanup-preview.json"
+CLEANUP_PREVIEW_MAX_AGE_SECONDS = int(
+    os.getenv("AHSEC_CLEANUP_PREVIEW_MAX_AGE_SECONDS", "86400")
+)
 MIN_SOURCE_CHARS = 500
 MIN_NOTES_CHARS = 800
 MAX_PREAMBLE_DIFF_LINES = 8
