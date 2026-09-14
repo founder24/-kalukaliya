@@ -131,8 +131,18 @@ describe('scheduled Cloudflare audit contract', () => {
       'https://syrabit-api-prod.axomxplain.workers.dev',
     );
     expect(translationWorkflow).toContain('Authorization: Bearer');
+    expect(translationWorkflow).toContain('scripts/check-translate-cron-secret.sh');
+    expect(translationWorkflow).toContain('permissions:\n      contents: read');
     expect(translationWorkflow).not.toContain('CF-Access-Client-Id');
     expect(translationWorkflow).not.toContain('CF-Access-Client-Secret');
+
+    const translationProbe = fs.readFileSync(
+      path.join(repoRoot, 'scripts/check-translate-cron-secret.sh'),
+      'utf8',
+    );
+    expect(translationProbe).toContain('/api/v1/admin/cron/translate/probe');
+    expect(translationProbe).toContain('mutation_free');
+    expect(translationProbe).toContain('work_enqueued');
 
     const backendWorkflow = fs.readFileSync(
       path.join(repoRoot, '.github/workflows/ci-backend.yml'),

@@ -1369,6 +1369,19 @@ adminContentRouter.post('/rag/bulk-reindex', async c => {
 
 // Scheduled callers use a dedicated secret; they never inherit the browser
 // session cookie and the edge proxy no longer substitutes Cloud Run OIDC.
+adminContentRouter.post('/cron/translate/probe', async c => {
+  if (!cronAuthorized(c)) return c.json({ detail: 'Valid TRANSLATE_CRON_SECRET required' }, 401);
+  // Keep this probe deliberately side-effect free. It exists only to prove
+  // that the GitHub secret and Worker binding agree before the bulk route is
+  // allowed to enqueue a seed run.
+  return c.json({
+    authenticated: true,
+    mutation_free: true,
+    work_enqueued: false,
+    probe: 'translation-cron-authentication',
+  });
+});
+
 adminContentRouter.post('/cron/seed-notes', async c => {
   if (!cronAuthorized(c)) return c.json({ detail: 'Valid TRANSLATE_CRON_SECRET required' }, 401);
   return launchSeed(c, 'en');

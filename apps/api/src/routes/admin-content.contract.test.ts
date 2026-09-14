@@ -497,6 +497,36 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     await env.DB.prepare(`UPDATE seed_runs SET status = 'completed' WHERE id = 'manual-running'`).run();
   });
 
+  it('proves translation cron-secret alignment without creating a seed run', async () => {
+    const before = await env.DB.prepare('SELECT COUNT(*) AS count FROM seed_runs')
+      .first<{ count: number }>();
+
+    const unauthorized = await workerFetch(new Request('http://worker/api/v1/admin/cron/translate/probe', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer wrong-cron-secret', 'Content-Type': 'application/json' },
+      body: '{}',
+    }));
+    expect(unauthorized.status).toBe(401);
+
+    const authorized = await workerFetch(new Request('http://worker/api/v1/admin/cron/translate/probe', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${CRON_SECRET}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    }));
+    expect(authorized.status).toBe(200);
+    expect(authorized.headers.get('X-Syrabit-Route')).toBe('worker-native');
+    await expect(authorized.json()).resolves.toEqual({
+      authenticated: true,
+      mutation_free: true,
+      work_enqueued: false,
+      probe: 'translation-cron-authentication',
+    });
+
+    const after = await env.DB.prepare('SELECT COUNT(*) AS count FROM seed_runs')
+      .first<{ count: number }>();
+    expect(after?.count).toBe(before?.count);
+  });
+
   it('reclaims only an expired interrupted lease and completes durable chapter outcomes once', async () => {
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status, notes_en) VALUES ('interrupted-one','subject','Interrupted one','interrupted-one','draft','Notes persisted before the Worker stopped.')`),
