@@ -90,6 +90,32 @@ Each archive contains `approvals.jsonl`, `progress.jsonl`,
 that run. If the process is interrupted, the marker intentionally remains so
 an operator can inspect and recover the run before archiving again.
 
+## Transfer an AHSEC cleanup preview between runners
+
+Cleanup preview evidence can be transferred explicitly when preview and apply
+run on different machines or ephemeral CI runners. The preview JSON contains
+the generated-at timestamp, scope fingerprint, filters, and reviewed chapter
+IDs. Store it in the approved CI artifact location, then download that exact
+file before applying the cleanup:
+
+```bash
+# Preview runner
+cd apps/backend
+python3 -m scripts.ahsec_d1_import \
+  --clean-preambles --dry-run \
+  --cleanup-preview-report /approved/artifacts/ahsec-cleanup-preview.json
+
+# Apply runner, after the artifact has been reviewed and downloaded
+python3 -m scripts.ahsec_d1_import \
+  --clean-preambles --confirm-production-write \
+  --cleanup-preview-report /approved/artifacts/ahsec-cleanup-preview.json
+```
+
+The apply runner does not trust its local state directory or the transferred
+file's chapter list by itself. It fetches the current D1 chapter set, rebuilds
+the cleanup scope, and requires the report's filters, sorted chapter IDs,
+scope fingerprint, change records, and age to match before any write.
+
 ## Emergency Contacts / Escalation
 
 - **P1 (site down)**: Page on-call immediately via PagerDuty/Opsgenie

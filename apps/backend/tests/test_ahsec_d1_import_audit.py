@@ -419,6 +419,62 @@ def test_cleanup_preview_report_contains_ids_and_diff_summary(monkeypatch, tmp_p
     assert report["scope_fingerprint"]
 
 
+def test_cleanup_preview_can_be_transferred_to_another_runner(
+    monkeypatch, tmp_path
+):
+    preview_runner_state = tmp_path / "preview-runner"
+    apply_runner_state = tmp_path / "apply-runner"
+    transferred_report = tmp_path / "artifact-download" / "cleanup-preview.json"
+    args = make_args(clean_preambles=True)
+    planned = importer.build_preamble_cleanup_plan([cleanup_chapter()])
+    scope = importer.cleanup_preview_scope(args, ["chapter-1"])
+
+    monkeypatch.setattr(importer, "STATE_DIR", preview_runner_state)
+    report_path = importer.write_cleanup_preview_report(
+        planned,
+        scope,
+        report_path=tmp_path / "artifact-upload" / "cleanup-preview.json",
+    )
+    original_report = json.loads(report_path.read_text(encoding="utf-8"))
+    transferred_report.parent.mkdir(parents=True)
+    transferred_report.write_bytes(report_path.read_bytes())
+
+    monkeypatch.setattr(importer, "STATE_DIR", apply_runner_state)
+    apply_args = make_args(
+        clean_preambles=True,
+        cleanup_preview_report=transferred_report,
+    )
+    validated = importer.validate_cleanup_preview(
+        apply_args,
+        ["chapter-1"],
+        report_path=importer.cleanup_preview_path(apply_args),
+    )
+
+    assert validated["scope_fingerprint"] == original_report["scope_fingerprint"]
+    assert validated["generated_at"] == original_report["generated_at"]
+    assert not (apply_runner_state / importer.CLEANUP_PREVIEW_FILENAME).exists()
+
+
+def test_cleanup_preview_rejects_missing_reviewed_change(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    args = make_args(clean_preambles=True)
+    planned = importer.build_preamble_cleanup_plan([cleanup_chapter()])
+    scope = importer.cleanup_preview_scope(args, ["chapter-1"])
+    report_path = importer.write_cleanup_preview_report(planned, scope)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["changes"] = []
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="does not match"):
+        importer.validate_cleanup_preview(
+            args,
+            ["chapter-1"],
+            report_path=report_path,
+        )
+
+
 def test_cleanup_preview_must_match_filters_and_chapter_set(monkeypatch, tmp_path):
     monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
     args = make_args(clean_preambles=True)

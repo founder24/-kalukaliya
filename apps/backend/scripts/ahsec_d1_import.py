@@ -146,6 +146,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--cleanup-preview-report",
+        type=Path,
+        help=(
+            "Path to the cleanup preview JSON artifact. Preview mode writes to "
+            "this path and production cleanup reads the transferred artifact "
+            "from the same path; defaults to the local importer state directory."
+        ),
+    )
+    parser.add_argument(
         "--archive-history",
         action="store_true",
         help=(
@@ -558,6 +567,14 @@ def cleanup_preview_scope(
 def cleanup_preview_fingerprint(scope: dict[str, Any]) -> str:
     encoded = json.dumps(scope, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def cleanup_preview_path(args: argparse.Namespace) -> Path:
+    """Resolve the preview artifact path shared by preview and apply runners."""
+    configured_path = getattr(args, "cleanup_preview_report", None)
+    if configured_path:
+        return Path(configured_path).expanduser()
+    return STATE_DIR / CLEANUP_PREVIEW_FILENAME
 
 
 def record_production_approval(
@@ -1039,31 +1056,35 @@ def cleanup_preview_record(chapter: dict[str, Any]) -> dict[str, Any]:
 def write_cleanup_preview_report(
     planned: list[dict[str, Any]],
     scope: dict[str, Any] | None = None,
+    report_path: Path | None = None,
 ) -> Path:
     """Persist a bounded, non-D1 preview report for operators and automation."""
-    report_path = STATE_DIR / CLEANUP_PREVIEW_FILENAME
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    report_path = report_path or STATE_DIR / CLEANUP_PREVIEW_FILENAME
+    report_path = Path(report_path).expanduser()
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     chapter_ids = sorted({str(chapter["id"]) for chapter in planned})
     resolved_scope = scope or {
         "chapter_ids": chapter_ids,
     }
     generated_at = datetime.now(timezone.utc)
-    report_path.write_text(
-        json.dumps(
-            {
-                "generated_at": generated_at.isoformat(),
-                "mode": "preview",
-                "changed": len(planned),
-                "chapter_ids": chapter_ids,
-                "scope": resolved_scope,
-                "scope_fingerprint": cleanup_preview_fingerprint(resolved_scope),
-                "changes": [cleanup_preview_record(chapter) for chapter in planned],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    report = {
+        "generated_at": generated_at.isoformat(),
+        "mode": "preview",
+        "changed": len(planned),
+        "chapter_ids": chapter_ids,
+        "scope": resolved_scope,
+        "scope_fingerprint": cleanup_preview_fingerprint(resolved_scope),
+        "changes": [cleanup_preview_record(chapter) for chapter in planned],
+    }
+    temporary = report_path.with_name(f".{report_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, report_path)
+    finally:
+        temporary.unlink(missing_ok=True)
     return report_path
 
 
@@ -1075,7 +1096,7 @@ def validate_cleanup_preview(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Require a recent preview with the exact production cleanup scope."""
-    path = report_path or STATE_DIR / CLEANUP_PREVIEW_FILENAME
+    path = Path(report_path or cleanup_preview_path(args)).expanduser()
     if not path.exists():
         raise RuntimeError(
             "Cleanup preview is required before a production cleanup. "
@@ -1111,10 +1132,19 @@ def validate_cleanup_preview(
     expected_fingerprint = cleanup_preview_fingerprint(expected_scope)
     report_scope = report.get("scope")
     report_ids = report.get("chapter_ids")
+    changes = report.get("changes")
+    change_ids = [
+        str(change.get("chapter_id"))
+        for change in changes
+        if isinstance(change, dict) and change.get("chapter_id") is not None
+    ] if isinstance(changes, list) else None
     if (
         report_scope != expected_scope
         or report_ids != expected_scope["chapter_ids"]
         or report.get("scope_fingerprint") != expected_fingerprint
+        or report.get("changed") != len(expected_scope["chapter_ids"])
+        or not isinstance(changes, list)
+        or sorted(change_ids) != expected_scope["chapter_ids"]
     ):
         raise RuntimeError(
             "Cleanup preview does not match the current filters or chapter set. "
@@ -1198,10 +1228,18 @@ async def _run_main() -> int:
         preview_scope = cleanup_preview_scope(args, chapter_ids)
         if args.dry_run:
             log_cleanup_preview(planned)
-            report_path = write_cleanup_preview_report(planned, preview_scope)
+            report_path = write_cleanup_preview_report(
+                planned,
+                preview_scope,
+                cleanup_preview_path(args),
+            )
             log.info("Cleanup preview report: %s", report_path)
             return 0
-        preview = validate_cleanup_preview(args, chapter_ids)
+        preview = validate_cleanup_preview(
+            args,
+            chapter_ids,
+            report_path=cleanup_preview_path(args),
+        )
         ACTIVE_RUN_ID, started_at = record_production_approval(
             args,
             {
