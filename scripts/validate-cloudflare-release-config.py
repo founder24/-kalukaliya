@@ -74,7 +74,7 @@ def main() -> int:
     for marker in (
         "rehearse_chat_latency_failure:",
         "github.event_name == 'workflow_dispatch' && inputs.rehearse_chat_latency_failure",
-        "needs: [chat-performance, disposable-staff-auth]",
+        "needs: [chat-performance, live-chat-contract, disposable-staff-auth]",
         "CHAT_PERFORMANCE_RESULT: ${{ needs.chat-performance.result }}",
         "STAFF_ACCESS_RESULT: ${{ needs.disposable-staff-auth.result }}",
         'echo "| Chat first-token latency | ${CHAT_PERFORMANCE_RESULT} |"',
