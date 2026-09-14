@@ -90,6 +90,36 @@ describe('BreakGlassBanner', () => {
     expect(screen.getByTestId('break-glass-banner-stale')).toBeInTheDocument();
   });
 
+  it('ignores a response started with the previous admin token', async () => {
+    const previousTokenRequest = deferred();
+    const currentTokenRequest = deferred();
+    adminGetBreakGlassStatus
+      .mockReturnValueOnce(previousTokenRequest.promise)
+      .mockReturnValueOnce(currentTokenRequest.promise);
+
+    const { rerender } = render(<BreakGlassBanner adminToken="previous.jwt" />);
+    await waitFor(() => {
+      expect(adminGetBreakGlassStatus).toHaveBeenCalledWith('previous.jwt');
+    });
+
+    rerender(<BreakGlassBanner adminToken="current.jwt" />);
+    await waitFor(() => {
+      expect(adminGetBreakGlassStatus).toHaveBeenCalledWith('current.jwt');
+    });
+
+    await act(async () => {
+      previousTokenRequest.resolve({ data: { active: true } });
+    });
+
+    expect(screen.queryByTestId(BANNER)).toBeNull();
+
+    await act(async () => {
+      currentTokenRequest.resolve({ data: { active: false } });
+    });
+
+    expect(screen.queryByTestId(BANNER)).toBeNull();
+  });
+
   it('keeps the newer active response when an older manual response is inactive', async () => {
     vi.useFakeTimers();
     try {

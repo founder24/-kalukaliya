@@ -14,25 +14,37 @@ export default function BreakGlassBanner({ adminToken }) {
   const [stale, setStale] = useState(false);
   const pollRef = useRef(null);
   const requestSequenceRef = useRef(0);
+  const adminTokenRef = useRef(adminToken);
+  adminTokenRef.current = adminToken;
 
   const fetchStatus = useCallback(async () => {
     if (!adminToken) return;
+    const requestToken = adminToken;
     const requestSequence = ++requestSequenceRef.current;
     setLoading(true);
     try {
       const response = await adminGetBreakGlassStatus(adminToken);
-      if (requestSequence !== requestSequenceRef.current) return;
+      if (
+        requestSequence !== requestSequenceRef.current ||
+        requestToken !== adminTokenRef.current
+      ) return;
       setActive(Boolean(response?.data?.active));
       setHasSucceededOnce(true);
       setStale(false);
     } catch {
-      if (requestSequence !== requestSequenceRef.current) return;
+      if (
+        requestSequence !== requestSequenceRef.current ||
+        requestToken !== adminTokenRef.current
+      ) return;
       // Keep a last-known active warning visible through transient failures.
       // Before the first successful read, show an explicit unknown state rather
       // than silently implying that Cloudflare Access is enforcing its policy.
       setStale(true);
     } finally {
-      if (requestSequence === requestSequenceRef.current) {
+      if (
+        requestSequence === requestSequenceRef.current &&
+        requestToken === adminTokenRef.current
+      ) {
         setLoading(false);
       }
     }
