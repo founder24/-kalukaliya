@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 
 vi.mock('@/utils/api', () => ({
@@ -44,6 +44,31 @@ describe('BreakGlassBanner', () => {
     expect(screen.getByTestId('break-glass-banner-runbook')).toBeInTheDocument();
     // No stale badge on the happy path.
     expect(screen.queryByTestId('break-glass-banner-stale')).toBeNull();
+  });
+
+  it('keeps the active warning visible when a later status poll fails', async () => {
+    adminGetBreakGlassStatus
+      .mockResolvedValueOnce({ data: { active: true } })
+      .mockRejectedValueOnce(new Error('temporary network failure'));
+
+    render(<BreakGlassBanner adminToken="admin.jwt" />);
+
+    const banner = await screen.findByTestId(BANNER);
+    const recheck = screen.getByTestId('break-glass-banner-recheck');
+    await waitFor(() => expect(recheck).not.toBeDisabled());
+
+    fireEvent.click(recheck);
+
+    await waitFor(() => expect(adminGetBreakGlassStatus).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(recheck).not.toBeDisabled());
+
+    expect(banner).toHaveClass('bg-red-600');
+    expect(banner).toHaveTextContent(/Cloudflare Access is bypassed/i);
+    expect(screen.getByTestId('break-glass-banner-stale')).toHaveAttribute(
+      'title',
+      expect.stringContaining('last-known active state'),
+    );
+    expect(recheck).toBeInTheDocument();
   });
 
   it('shows an unavailable warning when the status fetch fails before any successful poll', async () => {
