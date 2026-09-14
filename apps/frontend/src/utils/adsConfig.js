@@ -420,14 +420,16 @@ export function getAdConfig(placement) {
   if (!p) return { enabled: false, height: 0 };
   if (DISABLED_NETWORKS.has(p.network)) return { enabled: false, height: 0 };
   const net = NETWORKS[p.network];
-  const enabled = !!(net && net.scriptUrl && p.slotId);
+  const slotId = typeof p.slotId === 'string' ? p.slotId.trim() : '';
+  const validSlotId = p.network !== 'adsense' || /^\d{5,20}$/.test(slotId);
+  const enabled = !!(net && net.scriptUrl && validSlotId && slotId);
   return {
     enabled,
     network: p.network,
     scriptUrl: net?.scriptUrl || '',
     publisherId: net?.publisherId || '',
     crossorigin: net?.crossorigin || '',
-    slotId: p.slotId,
+    slotId,
     height: p.height,
     label: p.label,
     adFormat: p.adFormat || 'auto',

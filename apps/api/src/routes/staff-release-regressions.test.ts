@@ -26,11 +26,11 @@ function request(pathname: string, jwt: string, method = 'GET', body?: unknown) 
 beforeAll(async () => {
   const proxy = await getPlatformProxy<Env>({ configPath: path.join(root, 'wrangler.toml'), remoteBindings: false, persist: false });
   dispose = proxy.dispose;
-  env = { ...proxy.env, JWT_SECRET: secret, ADMIN_JWT_SECRET: 'admin', RESET_TOKEN_SECRET: 'reset', EDGE_SHARED_SECRET: 'edge', RESEND_API_KEY: 'x', ALLOWED_ORIGINS: '*', APP_ENV: 'test',
+  env = { ...proxy.env, JWT_SECRET: secret, ADMIN_JWT_SECRET: 'admin', RESET_TOKEN_SECRET: 'reset', EDGE_SHARED_SECRET: 'edge', RESEND_API_KEY: 'x', ALLOWED_ORIGINS: '*', APP_ENV: 'test', REFERRAL_PROGRAM_RUNTIME_ENABLED: 'true',
     AI: { run: async (_m: string, input: { text?: string[] }) => ({ data: (input.text ?? []).map(() => ({ values: [1, 2] })) }) } as unknown as Ai };
   for (const statement of sql()) await env.DB.prepare(statement).run();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO users (id, role, capabilities) VALUES ('limited','staff','[]'),('editor','staff','["content:edit"]'),('legacy','staff',NULL),('admin','admin','[]')`),
+    env.DB.prepare(`INSERT INTO users (id, role, capabilities) VALUES ('limited','staff','[]'),('editor','staff','["content:edit"]'),('reviewer','staff','["referral:review"]'),('settler','staff','["referral:settle"]'),('legacy','staff',NULL),('admin','admin','[]')`),
     env.DB.prepare(`INSERT INTO boards (id,name,slug) VALUES ('b','B','b')`),
     env.DB.prepare(`INSERT INTO classes (id,board_id,name,slug) VALUES ('c','b','C','c')`),
     env.DB.prepare(`INSERT INTO streams (id,class_id,name,slug) VALUES ('s','c','S','s')`),
@@ -77,6 +77,51 @@ describe('release regressions', () => {
     ] as const) expect((await fetchWorker(request(path, limited, method, body))).status).not.toBe(403);
     expect((await fetchWorker(request('/api/v1/staff/content/subjects', legacy))).status).toBe(200);
     expect((await fetchWorker(request('/api/v1/staff/content/subjects', admin))).status).toBe(200);
+  });
+
+  it('enforces referral capabilities and preserves the Staff Panel response envelopes', async () => {
+    const reviewer = await token('reviewer');
+    const settler = await token('settler');
+    const limited = await token('limited');
+
+    const applicationsDenied = await fetchWorker(request('/api/v1/admin/referrals/applications', limited));
+    expect(applicationsDenied.status).toBe(403);
+    expect(await applicationsDenied.json()).toMatchObject({
+      capability: 'referral:review',
+    });
+
+    const applications = await fetchWorker(request('/api/v1/admin/referrals/applications', reviewer));
+    expect(applications.status).toBe(200);
+    expect(await applications.json()).toEqual({ applications: [] });
+
+    const settlementsDenied = await fetchWorker(request('/api/v1/admin/referrals/settlements', reviewer));
+    expect(settlementsDenied.status).toBe(403);
+    expect(await settlementsDenied.json()).toMatchObject({
+      capability: 'referral:settle',
+    });
+
+    const settlements = await fetchWorker(request('/api/v1/admin/referrals/settlements', settler));
+    expect(settlements.status).toBe(200);
+    expect(await settlements.json()).toEqual({ statements: [] });
+
+    const roi = await fetchWorker(request('/api/v1/admin/referrals/roi/dashboard', settler));
+    expect(roi.status).toBe(200);
+    const roiBody = await roi.json() as {
+      inventory: Array<{ network: string; status: string; configured: boolean }>;
+      controls: { evidence_id: string; warnings: string[] } | null;
+      reports: unknown[];
+    };
+    expect(Array.isArray(roiBody.inventory)).toBe(true);
+    expect(roiBody.inventory).toEqual(expect.arrayContaining([
+      expect.objectContaining({ network: 'adsense', status: 'enabled', configured: true }),
+      expect.objectContaining({ network: 'adsterra', status: 'disabled', configured: false }),
+      expect.objectContaining({ network: 'propellerads', status: 'disabled', configured: false }),
+    ]));
+    expect(roiBody.controls).toMatchObject({
+      evidence_id: 'missing',
+      warnings: [],
+    });
+    expect(roiBody.reports).toEqual([]);
   });
 
   it('fences an active RAG lease and recovers an expired running lease', async () => {

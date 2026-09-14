@@ -435,6 +435,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Load production AdSense slot configuration
+        run: node apps/frontend/scripts/load-pages-ads-env.mjs
+
       - name: Build frontend
         run: pnpm --filter @workspace/syrabit run build
         env:
