@@ -84,7 +84,10 @@ if [[ -n "$current_library_path" ]]; then
 else
   probe_output="$(timeout 20s "$headless_shell_path" --version 2>&1 || true)"
 fi
-if ! grep -qE '^[0-9]+\.[0-9]+\.' <<< "$probe_output"; then
+# Chrome for Testing prefixes the version with "Google Chrome for Testing",
+# while some Chromium builds print the version at the start of the line.
+# Validate the version token rather than assuming a particular prefix.
+if ! grep -qE '(^|[[:space:]])([0-9]+\.){2,3}[0-9]+([[:space:]]|$)' <<< "$probe_output"; then
   probe_missing="$(
     printf '%s\n' "$probe_output" |
       sed -nE 's/.*shared libraries: ([^:]+):.*/\1/p' |
