@@ -10,6 +10,11 @@ import { conversationsRouter } from './conversations';
 import { analyticsRouter, changelogRouter, configRouter, indexNowRouter } from './operations';
 import { seoRouter } from './seo';
 import { adminContentRouter } from './admin-content';
+import {
+  adminReferralRouter,
+  internalReferralRouter,
+  referralRouter,
+} from './referrals';
 import type { Env } from '../types';
 
 const api = new Hono<{ Bindings: Env }>();
@@ -33,7 +38,10 @@ api.route('/api/v1/admin',        staffRouter);
 api.route('/api/v1/users',        usersRouter);       // profile, memories, onboarding, credits, stats
 api.route('/api/v1/user',         usersRouter);       // alias — frontend uses /user/profile, /user/me
 api.route('/api/v1/internal',     internalRouter);    // internal Worker-to-Worker endpoints
+api.route('/api/v1/internal/referrals', internalReferralRouter);
 api.route('/api/v1/conversations', conversationsRouter); // saved history, rename/star/archive
+api.route('/api/v1/referrals', referralRouter);
+api.route('/api/v1/admin/referrals', adminReferralRouter);
 api.route('/api/v1/analytics', analyticsRouter);     // public browser beacons
 api.route('/api/analytics', analyticsRouter);        // legacy beacon path
 api.route('/api/v1/config', configRouter);           // public Trustpilot configuration

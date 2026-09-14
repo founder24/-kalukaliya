@@ -30,6 +30,7 @@ export interface Env {
   TRUSTPILOT_RATING_VALUE?: string;
   TRUSTPILOT_RATING_COUNT?: string;
   WEB_SEARCH_ENABLED?: string;
+  REFERRAL_PROGRAM_RUNTIME_ENABLED?: string;
 
   // R2 public URL base (e.g. https://assets.syrabit.ai) — required for file upload routes
   R2_PUBLIC_URL?: string;

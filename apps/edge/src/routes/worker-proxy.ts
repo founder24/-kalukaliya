@@ -56,6 +56,7 @@ export async function proxyToApiWorker(
 
     headers.set('X-Edge-Timestamp', timestamp);
     headers.set('X-Edge-Signature', signatureHex);
+    headers.set('X-Edge-Secret', env.EDGE_SHARED_SECRET);
   }
 
   // Keep the original Authorization header so the API Worker's auth endpoints
@@ -71,6 +72,8 @@ export async function proxyToApiWorker(
   headers.set('X-Real-IP', request.headers.get('CF-Connecting-IP') || 'unknown');
   headers.set('CF-Ray-ID', request.headers.get('CF-Ray') || '');
   headers.set('X-Forwarded-Proto', 'https');
+  const originalOrigin = headers.get('Origin');
+  if (originalOrigin) headers.set('X-Original-Origin', originalOrigin);
   headers.delete('Origin');
 
   // Forward the full original URL unchanged. The API Worker mounts routes at

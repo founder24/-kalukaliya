@@ -36,6 +36,8 @@ const MAX_OCR_MULTIPART_BYTES = MAX_OCR_IMAGE_BYTES + 64 * 1024;
 const MAX_OCR_PROMPT_LENGTH = 2_000;
 const TTS_RATE_LIMIT = 20;
 const OCR_RATE_LIMIT = 10;
+const REFERRAL_VISIT_RATE_LIMIT = 60;
+const REFERRAL_VISIT_RATE_WINDOW_MS = 60_000;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -55,6 +57,12 @@ export default {
       request.method === 'POST' &&
       Boolean(env.EDGE_SHARED_SECRET) &&
       request.headers.get('Authorization') === `Bearer ${env.EDGE_SHARED_SECRET}`
+    );
+    const isInternalReferral = (
+      url.pathname.startsWith('/api/v1/internal/referrals/')
+      && request.method === 'POST'
+      && Boolean(env.EDGE_SHARED_SECRET)
+      && request.headers.get('Authorization') === `Bearer ${env.EDGE_SHARED_SECRET}`
     );
     // This exact cron route carries TRANSLATE_CRON_SECRET rather than a user
     // JWT. The API Worker validates the secret; the edge
@@ -104,6 +112,7 @@ export default {
     if (
       url.pathname.startsWith('/api/')
       && !isInternalGeneration
+      && !isInternalReferral
       && !isCloudflareAnalyticsResultHandoff
     ) {
       const jwtResult = await verifyJWT(request, env.JWT_SECRET, env.JWT_PUBLIC_KEY);
@@ -244,6 +253,49 @@ export default {
         rlHeaders.set(name, value);
       }
       request = new Request(request, { headers: rlHeaders });
+    }
+
+    if (
+      request.method === 'GET'
+      && url.pathname.startsWith('/api/v1/referrals/visit/')
+    ) {
+      if (!env.RATE_LIMIT_DO) {
+        console.error('RATE_LIMIT_DO binding not available - failing referral visit closed');
+        const unavailable = jsonResponse(503, {
+          error: 'Rate limit service unavailable',
+          error_code: 'rate_limit_storage_unavailable',
+        });
+        unavailable.headers.set('X-Request-ID', requestId);
+        return finalize(unavailable);
+      }
+      try {
+        const networkIdentity = anonymousNetworkRateLimitIdentity(request);
+        const result = await checkRateLimit(
+          env.RATE_LIMIT_DO,
+          `referral-network:${networkIdentity}`,
+          'referral-visits',
+          REFERRAL_VISIT_RATE_LIMIT,
+          REFERRAL_VISIT_RATE_WINDOW_MS,
+        );
+        if (!result.allowed) {
+          const limited = jsonResponse(429, { error: 'Rate limit exceeded' });
+          limited.headers.set('X-Request-ID', requestId);
+          for (const [name, value] of Object.entries(
+            rateLimitHeaders(result, REFERRAL_VISIT_RATE_LIMIT),
+          )) {
+            limited.headers.set(name, value);
+          }
+          return finalize(limited);
+        }
+      } catch (error) {
+        console.error('Referral visit rate-limit storage unavailable:', error);
+        const unavailable = jsonResponse(503, {
+          error: 'Rate limit service unavailable',
+          error_code: 'rate_limit_storage_unavailable',
+        });
+        unavailable.headers.set('X-Request-ID', requestId);
+        return finalize(unavailable);
+      }
     }
 
     // ── 5. Routing ──
