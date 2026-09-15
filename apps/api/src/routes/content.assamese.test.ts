@@ -42,11 +42,11 @@ beforeAll(async () => {
       INSERT INTO chapters (
         id, subject_id, title, title_as, slug, slug_as,
         meta_description, meta_description_as, keywords, keywords_as,
-        status, notes_en, notes_as, published_topics
+        status, notes_en, notes_as, qa_en, qa_as, published_topics
       ) VALUES (
         'translated', 'subject', 'Motion', 'গতি', 'motion', 'gati',
         'English description', 'অসমীয়া বিৱৰণ', 'motion, physics', 'গতি, পদাৰ্থবিজ্ঞান',
-        'published', 'English notes', 'অসমীয়া টোকা',
+        'published', 'English notes', 'অসমীয়া টোকা', '[]', '[{"question":"প্ৰশ্নটো কি?"}]',
         '[{"title":"Velocity","title_as":"বেগ","slug":"velocity"},{"title":"Acceleration","title_as":"  ","slug":"acceleration"}]'
       )
     `),
@@ -54,11 +54,11 @@ beforeAll(async () => {
       INSERT INTO chapters (
         id, subject_id, title, title_as, slug, slug_as,
         meta_description, meta_description_as, keywords, keywords_as,
-        status, notes_en, notes_as, published_topics
+        status, notes_en, notes_as, qa_en, qa_as, published_topics
       ) VALUES (
         'fallback', 'subject', 'Force', '  ', 'force', '  ',
         'Force description', '  ', 'force, mechanics', '  ',
-        'published', 'Force notes', 'বলৰ টোকা',
+        'published', 'Force notes', 'বলৰ টোকা', '[{"question":"What is force?"}]', '[]',
         '[{"title":"Newton laws","title_as":"  ","slug":"newton-laws"}]'
       )
     `),
@@ -153,5 +153,48 @@ describe('Assamese public content metadata', () => {
       ],
       total: 2,
     });
+  });
+
+  it('refreshes legacy chapter-list cache entries with Assamese Q&A metadata', async () => {
+    const cacheKey = 'subject:subject:chapters';
+    await env.CONTENT_KV.delete(cacheKey);
+    await env.CONTENT_KV.put(cacheKey, JSON.stringify([{
+      id: 'legacy',
+      chapter_id: 'legacy',
+      title: 'Legacy chapter',
+      description: null,
+      description_as: null,
+      has_qa: false,
+    }]));
+
+    const refreshed = await get('/api/v1/content/chapters/subject');
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.headers.get('X-Cache')).toBe('MISS');
+
+    const refreshedPayload = await refreshed.json() as Array<{
+      id: string;
+      has_qa: boolean;
+      has_qa_as: boolean;
+    }>;
+    expect(refreshedPayload).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'translated',
+        has_qa: false,
+        has_qa_as: true,
+      }),
+      expect.objectContaining({
+        id: 'fallback',
+        has_qa: true,
+        has_qa_as: false,
+      }),
+    ]));
+    expect(refreshedPayload.some(chapter => chapter.id === 'legacy')).toBe(false);
+
+    // A current payload, including has_qa_as, remains a normal cache hit.
+    await env.CONTENT_KV.put(cacheKey, JSON.stringify(refreshedPayload));
+    const cached = await get('/api/v1/content/chapters/subject');
+    expect(cached.status).toBe(200);
+    expect(cached.headers.get('X-Cache')).toBe('HIT');
+    await expect(cached.json()).resolves.toEqual(refreshedPayload);
   });
 });
