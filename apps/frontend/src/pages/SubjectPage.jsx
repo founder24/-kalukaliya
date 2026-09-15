@@ -414,11 +414,12 @@ export default function SubjectPage() {
   const subjectSections = useMemo(() => {
     const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
     const notesChs = chapters.filter(ch => !ch.content_type || !QA_TYPES.has(ch.content_type));
-    const qaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type) || (
-      isAssamese
+    const qaChs = chapters.filter(ch => {
+      const hasQuestions = isAssamese
         ? (typeof ch.has_qa_as === 'boolean' ? ch.has_qa_as : ch.has_qa)
-        : ch.has_qa
-    ));
+        : ch.has_qa;
+      return hasQuestions && (QA_TYPES.has(ch.content_type) || ch.has_qa);
+    });
     // Subject-level PYQ papers — [{id, name, class_name, year, description, pages}]
     const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => ({
       id:          p.id || `pyq-${pi}`,

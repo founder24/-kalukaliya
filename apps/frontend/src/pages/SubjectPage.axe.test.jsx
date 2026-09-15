@@ -194,22 +194,37 @@ describe('SubjectPage — axe accessibility audit', () => {
       refetch: vi.fn(),
     });
     vi.mocked(useChapters).mockReturnValue({
-      data: [{
-        ...SAMPLE_CHAPTERS[0],
-        title: 'Motion',
-        title_as: 'গতি',
-        slug: 'motion',
-        slug_as: 'goti',
-        has_qa: false,
-        has_qa_as: true,
-      }],
+      data: [
+        {
+          ...SAMPLE_CHAPTERS[0],
+          title: 'Motion',
+          title_as: 'গতি',
+          slug: 'motion',
+          slug_as: 'goti',
+          content_type: 'qa',
+          has_qa: false,
+          has_qa_as: true,
+        },
+        {
+          ...SAMPLE_CHAPTERS[1],
+          title: 'English Questions',
+          title_as: 'ইংৰাজী প্ৰশ্ন',
+          slug: 'english-questions',
+          slug_as: 'english-questions-as',
+          content_type: 'qa',
+          has_qa: true,
+          has_qa_as: false,
+        },
+      ],
       isLoading: false,
     });
 
     render(<SubjectPage />);
+    expect(screen.getByRole('button', { name: /প্ৰশ্ন1/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /প্ৰশ্ন/ }));
 
     expect(screen.getAllByText('গতি').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('link', { name: /ইংৰাজী প্ৰশ্ন — Questions/ })).not.toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /Questions|প্ৰশ্ন|গতি/ }).some((link) =>
       link.getAttribute('href') === '/as/ahsec/class-11/english/goti?tab=qa'
     )).toBe(true);
