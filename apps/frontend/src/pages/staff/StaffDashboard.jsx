@@ -11,8 +11,11 @@ import AdminAnalytics from '@/components/admin/AdminAnalytics';
 import AdminUsers from '@/components/admin/AdminUsers';
 import AdminConversations from '@/components/admin/AdminConversations';
 import AdminModuleUnavailable from '@/components/admin/AdminModuleUnavailable';
+import AdminSeoManager from '@/components/admin/AdminSeoManager';
 import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
+import ReferralAdmissions from '@/pages/referrals/ReferralAdmissions';
 import ReferralROI from '@/pages/referrals/ReferralROI';
+import ReferralSettlements from '@/pages/referrals/ReferralSettlements';
 import { STAFF_PORTAL_SECTIONS } from '@/config/staffPortalSections.mjs';
 import StaffOperations from '@/components/staff/StaffOperations';
 import { canStaffCapability, isStaffOrAdmin } from '@/utils/staffAccess';
@@ -2921,7 +2924,7 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
     users:          'users',
     conversations:  'conversations',
     feedback:       'conversations',
-    seomanager:     'dashboard',   // no dedicated view — fall back to dashboard
+    seomanager:     'seomanager',
     monetization:   'dashboard',
   };
   const handleAdminNavigate = useCallback((section) => {
@@ -2938,9 +2941,6 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
   };
   const adminToken = getToken() || (adminCookieAccess ? 'cookie' : null);
   const unavailableView = {
-    seomanager: 'seomanager',
-    referrals: 'referrals',
-    referralsettlements: 'referralsettlements',
     notifications: 'notifications',
     ai: 'ai',
     security: 'security',
@@ -2993,6 +2993,21 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
           )}
           {view === 'conversations' && (
             <AdminConversations adminToken={adminToken} onNavigate={handleAdminNavigate} />
+          )}
+          {view === 'seomanager' && (
+            <div className="p-4 sm:p-6">
+              <AdminSeoManager adminToken={adminToken} onNavigate={handleAdminNavigate} />
+            </div>
+          )}
+          {view === 'referrals' && (
+            <div className="p-4 sm:p-6">
+              <ReferralAdmissions adminToken={adminToken} />
+            </div>
+          )}
+          {view === 'referralsettlements' && (
+            <div className="p-4 sm:p-6">
+              <ReferralSettlements adminToken={adminToken} />
+            </div>
           )}
           {view === 'referralroi' && (
             <div className="p-4 sm:p-6">

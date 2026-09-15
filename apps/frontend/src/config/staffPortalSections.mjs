@@ -22,7 +22,19 @@ export const STAFF_PORTAL_SECTIONS = Object.freeze([
       ],
     },
   },
-  { id: 'seomanager', label: 'SEO Manager', group: 'main', releaseCheck: { supported: false, requiredReads: [] } },
+  {
+    id: 'seomanager',
+    label: 'SEO Manager',
+    group: 'main',
+    releaseCheck: {
+      supported: true,
+      requiredReads: [
+        '/api/v1/seo/stats',
+        '/api/v1/seo/topics',
+        '/api/v1/seo/pages',
+      ],
+    },
+  },
   { id: 'users', label: 'Users', group: 'audience', releaseCheck: { supported: false, requiredReads: [] } },
   {
     id: 'referrals',

@@ -30,7 +30,7 @@ const STAFF_USER = {
   email: 'staff@syrabit.com',
   name: 'Staff User',
   role: 'staff',
-  capabilities: ['referral:settle'],
+  capabilities: ['referral:review', 'referral:settle'],
   plan: 'pro',
   subscription_tier: 'pro',
 };
@@ -180,6 +180,13 @@ async function setupMocks(page: import('@playwright/test').Page) {
       pattern: '**/api/v1/admin/referrals/roi/dashboard*',
       body: { inventory: [], controls: null, reports: [] },
     },
+    { pattern: '**/api/v1/admin/referrals/applications*', body: { applications: [] } },
+  ];
+
+  const staffSeoRoutes = [
+    { pattern: '**/api/v1/seo/stats*', body: { topics: 0, pages: 0, published: 0 } },
+    { pattern: '**/api/v1/seo/topics*', body: [] },
+    { pattern: '**/api/v1/seo/pages*', body: { pages: [] } },
   ];
 
   // SEO live health (called directly, not via admin helper)
@@ -191,6 +198,7 @@ async function setupMocks(page: import('@playwright/test').Page) {
     ...adminDashboardRoutes,
     ...adminAnalyticsRoutes,
     ...adminCrudRoutes,
+    ...staffSeoRoutes,
     ...seoRoutes,
   ]) {
     await page.route(pattern, (route) =>
@@ -689,6 +697,28 @@ test.describe('Staff panel — sidebar sections', () => {
     expect(roiRequests.length).toBeGreaterThan(0);
     expect(roiRequests.every(path => path === '/api/v1/admin/referrals/roi/dashboard')).toBeTruthy();
     expect(consoleErrors, 'No uncaught console errors on Referral ROI').toHaveLength(0);
+  });
+
+  test('SEO and referral staff workflows render their supported Worker-backed modules', async ({ page }) => {
+    staffMocks.enableStrictUnexpectedApiRequests();
+    await gotoStaff(page);
+
+    await clickSidebar(page, 'SEO Manager');
+    await expect(page.getByRole('heading', { name: 'SEO Content Manager', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /SEO Pages/ })).toBeVisible();
+    await expect(page.getByTestId('admin-module-unavailable-seomanager')).toHaveCount(0);
+
+    await clickSidebar(page, 'Referral Admissions');
+    await expect(page.getByTestId('referral-admissions')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Referral admissions', exact: true })).toBeVisible();
+    await expect(page.getByText('No applications in this view', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('admin-module-unavailable-referrals')).toHaveCount(0);
+
+    await clickSidebar(page, 'Referral Settlements');
+    await expect(page.getByTestId('referral-settlements')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Review verified claims. Release nothing automatically.', exact: true })).toBeVisible();
+    await expect(page.getByText('No statements calculated yet.', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('admin-module-unavailable-referralsettlements')).toHaveCount(0);
   });
 
   test('Referral ROI denies provider data without referral:settle', async ({ page }) => {
