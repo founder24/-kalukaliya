@@ -1,0 +1,796 @@
+Chapter 2: Motion in a Straight Line
+1. Kinematic Descriptors: Reference Frames, Point Object Model, Position, Path Length, and Displacement
+Kinematics describes the spatial and temporal characteristics of motion without inquiring into the underlying forces that generate or modify it. The study of rectilinear motion restricts this spatial translation to a single, continuous linear dimension (the x-axis).
+                             PHYSICAL MOTION
+                                    |
+        +---------------------------+---------------------------+
+        |                                                       |
+  POINT-PARTICLE MODEL                                FRAME OF REFERENCE
+  Dimensions of body << linear distance              Cartesian axes (x, y, z) +
+  traversed over interval of interest[span_2](start_span)[span_2](end_span).      master clock system (t)[span_3](start_span)[span_3](end_span).
+
+The Point-Particle Approximation
+In classical mechanics, real, extended bodies have finite geometry and can undergo simultaneous translation, rotation, and internal vibration. However, an extended object is mathematically approximated as a point particle whenever its spatial dimensions are negligible compared to the total distance traversed during the time interval under consideration.
+ * Valid Approximations: A multi-carriage railway train traveling hundreds of kilometers between distant stations; a monkey perched on the shoulder of a cyclist riding smoothly along a large circular velodrome; the Earth orbiting the Sun (R_{\text{Earth}} \ll \text{Orbital Radius}).
+ * Invalid Approximations: A spinning cricket ball that swerves in air and turns abruptly upon pitching (rotational spin and surface impact dynamics govern its behavior); a tumbling glass beaker slipping off a laboratory desk (rotational orientation and container size are comparable to the fall height).
+Coordinate Systems and Directional Conventions
+Position in one dimension is specified by choosing an arbitrary origin O along a reference line:
+ * Positions to the right of O are algebraically assigned a positive sign (+x).
+ * Positions to the left of O are algebraically assigned a negative sign (-x).
+ * The choice of origin and positive direction is arbitrary, but once established, it must be maintained consistently throughout all subsequent dynamical equations.
+           Negative Direction (-)        Origin (O)        Positive Direction (+)
+       <-----------------------------|----------------------------->
+      -x₂           -x₁              0             +x₁            +x₂
+
+Path Length (Distance) vs. Displacement
+A strict physical and mathematical distinction exists between scalar distance and vector displacement:
+| Characteristic | Path Length (Distance, s) | Displacement (\Delta x) |
+|---|---|---|
+| Definition | Total length of the actual trajectory traversed between instants t_1 and t_2. | Directed straight-line vector joining initial position x_1 to final position x_2. |
+| Mathematical Nature | Strictly scalar; s \ge 0. Monotonically non-decreasing over time (ds/dt \ge 0). | One-dimensional vector; carries magnitude and directional sign (\pm): \Delta x = x_2 - x_1. |
+| Path Dependence | Trajectory-dependent; accounts for all turns, stops, and reversals. | State function; depends solely on terminal boundary coordinates, independent of path. |
+| Fundamental Inequality | $s \ge | \Delta x |
+                       Curved Trajectory: Path Length s
+                     . - - - - - - - - - - - - - - .
+                    /                               \
+                   v                                 v
+           Initial Point P                         Final Point Q
+                  *--------------------------------->*
+                          Displacement Δx
+
+Analytical Case Studies & Dynamic Evaluations
+Conceptual Diagnostic: Physical Validity of the Point Object Approximation [Textbook Exercise 2.1]
+ * Step 1: System Isolation: Evaluate whether internal rotational degrees of freedom or finite object dimensions influence the primary translational trajectory.
+ * Step 2: Component Equations: Compare physical dimension L_{\text{body}} against total path length S_{\text{path}}:
+   
+ * Step 3: Analytical Execution:
+   * (a) Railway carriage moving without jerks between stations: Valid point object. Carriage length (\sim 20\text{ m}) is negligible compared to inter-city station distances (\sim 10^4\text{ to } 10^5\text{ m}).
+   * (b) Monkey sitting on a cyclist moving smoothly on a circular track: Valid point object. The combined dimensions of the monkey and cyclist are negligible compared to the circumference of the circular track.
+   * (c) Spinning cricket ball turning sharply upon pitching: Invalid as a point object. The rotational spin vector, angular momentum, and finite contact surface area dictate the trajectory; turning cannot be modeled by a point mass.
+   * (d) Tumbling beaker slipping off the edge of a table: Invalid as a point object. The beaker's height (\sim 0.1\text{ m}) is comparable to the fall height (\sim 1\text{ m}), and tumbling introduces rotational motion that alters how it lands.
+ * Step 4: Explicit Final Verification: Scenarios (a) and (b) can be modeled as point particles; scenarios (c) and (d) require extended rigid-body dynamics.
+Conceptual Diagnostic: Fundamental Distinction and Inequality of Path Length vs. Displacement [Textbook Exercise 2.9 & Summary Point 1]
+ * Step 1: System Isolation: Consider a particle undergoing arbitrary one-dimensional translation along the x-axis between initial coordinate x_1 at t_1 and final coordinate x_2 at t_2.
+ * Step 2: Mathematical Formulation:
+   
+ * Step 3: Analytical Execution:
+   * If the particle translates from x = 0 to x = +100\text{ m} and immediately returns to x = +40\text{ m}:
+     
+     
+     Here, s > |\Delta x|.
+   * Dividing both quantities by the elapsed time interval \Delta t = t_2 - t_1:
+     
+     
+     Because s \ge |\Delta x|, it follows that:
+     
+ * Step 4: Explicit Final Verification: Path length is strictly greater than or equal to the magnitude of displacement (s \ge |\Delta x|). Equality holds if and only if the particle moves along a strictly straight path without ever changing its direction of motion.
+Dynamic Evaluation: Distance-to-Displacement Ratio along a Quarter-Circle Trajectory [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation & Diagram: Let a body traverse the circumference of a circle of radius R from coordinate (R, 0) to coordinate (0, R).
+               y
+               |
+             B * (0, R)
+               | * .  Arc Path Length s
+               |     * .
+               |        *.
+               | Displacement\
+               |              *.
+             O +---------------* A (R, 0) ----> x
+
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Substituting \pi \approx 3.14159:
+   
+ * Step 4: Explicit Final Verification: The exact ratio of distance travelled to displacement magnitude is \mathbf{\frac{\pi}{2\sqrt{2}} \approx 1.11}.
+Analytical Case Study: Discrete Non-Monotonic Step Mechanics: 11 m and 13 m Pit Traps [PYQ 2025 Half-Yearly & Textbook Exercise 2.4]
+ * Step 1: System Isolation & Diagram: An agent walks along a narrow straight lane, taking a = 5\text{ steps} forward followed by b = 3\text{ steps} backward. Each step covers \Delta x_0 = 1\text{ m} and takes \Delta t_0 = 1\text{ s}. A boundary pit is located at distance L from the starting point.
+  x (m)
+   13 |                                           * (Falls into pit at t = 37 s)
+   11 |                             * (Pit 11m)  /
+      |                            / \          /
+    8 |               *           /   \        /
+      |              / \         /     \      /
+    5 |   *         /   \       /       *    /
+      |  / \       /     \     /         \  /
+    2 | /   \     /       *   /           \/
+    0 +------+---+---------+--+-----------+----+-----> t (s)
+      0      5   8        13  16         21   24   37
+
+ * Step 2: Component Equations:
+   * Net spatial progress per complete forward-backward cycle:
+     
+   * Time duration per cycle:
+     
+   * Critical Boundary Condition: The agent falls into the pit during the forward phase of a cycle as soon as x = L, terminating the motion before any subsequent backward steps occur. The distance to be covered by completed cycles must not exceed L - a.
+     
+ * Step 3: Analytical Execution:
+   * Case A: Pit at L = 11\text{ m} [PYQ 2025 Half-Yearly]:
+     
+     
+     Position after 3 cycles:
+     
+     
+     Remaining distance to pit:
+     
+     
+     Because the agent takes 5 steps forward in the next 5 seconds, they reach the pit directly:
+     
+   * Case B: Pit at L = 13\text{ m} [Textbook Exercise 2.4]:
+     
+     
+     Position after 4 cycles:
+     
+     
+     Remaining distance to pit:
+     
+     
+     The remaining 5 metres are covered in the next 5 forward steps:
+     
+ * Step 4: Explicit Final Verification: The agent falls into the pit at t = 29\text{ s} when the pit is at 11\text{ m}, and at t = 37\text{ s} when the pit is at 13\text{ m}.
+2. Velocity and Speed: Average vs. Instantaneous Dynamics and Calculus Formulation
+                         RATE OF CHANGE OF POSITION
+                                     |
+           +-------------------------+-------------------------+
+           |                                                   |
+     AVERAGE QUANTITIES                               INSTANTANEOUS QUANTITIES
+  Defined over finite intervals Δt                    Defined in the limit Δt -> 0[span_43](start_span)[span_43](end_span)
+  • Avg Speed = Path length / Δt[span_44](start_span)[span_44](end_span)                     • Inst Speed = |v(t)| = ds/dt[span_45](start_span)[span_45](end_span)
+  • Avg Velocity = Δx / Δt[span_46](start_span)[span_46](end_span)                           • Inst Velocity = dx/dt[span_47](start_span)[span_47](end_span)
+
+Mathematical Definitions
+Average Velocity (\bar{v})
+Average velocity is the net displacement \Delta x divided by the finite time interval \Delta t:
+
+
+On a position-time (x-t) plot, \bar{v} equals the geometric slope of the secant line passing through coordinates (t_1, x_1) and (t_2, x_2). Its algebraic sign reflects the direction of motion along the coordinate axis.
+Average Speed (v_{\text{avg}})
+Average speed is the total path length traversed divided by the total time elapsed:
+
+
+Because s \ge |\Delta x|, average speed is always greater than or equal to the magnitude of average velocity (v_{\text{avg}} \ge |\bar{v}|).
+Instantaneous Velocity (v) & Instantaneous Speed
+Instantaneous velocity is defined as the limiting value of average velocity as the time interval \Delta t becomes infinitesimally small:
+
+
+In calculus, \frac{dx}{dt} is the first derivative of position with respect to time.
+       Position x
+           |                                       Secant P₁P₂ (Slope = Avg Vel)
+           |                                     . /
+           |                                  .   /
+           |                              .      /
+           |                           P₂       /
+           |                         .*        /
+           |                       .  *       /   Tangent at P (Slope = Inst Vel)
+           |                    .    /       /  /
+           |                 P      /       / /
+           |               .*------/-------*
+           |             .        /       /
+           |          P₁         /       /
+           |         .*         /       /
+           |       .  /        /       /
+           +------+--+--------+-------+---------> Time t
+                  t₁ t        t₂
+
+Analytical Case Studies & Dynamic Evaluations
+Conceptual Diagnostic: Distinguishing Average Speed and Instantaneous Speed [PYQ 2026 Final & Textbook Exercise 2.11]
+ * Step 1: System Isolation: Consider a particle moving along the x-axis with variable velocity v(t) over a finite interval [t, t + \Delta t].
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * Over a finite interval \Delta t, a particle can reverse its direction, making the total path length \Delta s strictly greater than the net displacement |\Delta x|. Consequently, v_{\text{avg}} > |\bar{v}| in non-monotonic motion.
+   * Over an infinitesimal time interval dt \to 0, a physical particle with finite acceleration cannot abruptly reverse its velocity. The motion over an infinitesimal duration dt is strictly unidirectional along a linear path:
+     
+     
+     Dividing both sides by the scalar time differential dt:
+     
+ * Step 4: Explicit Final Verification: Average speed differs from average velocity because path length accounts for reversals over finite intervals. In contrast, instantaneous speed always strictly equals the absolute magnitude of instantaneous velocity because direction cannot reverse over an infinitesimal time step dt.
+Derivation: Geometric Tangent Limit Proof for Instantaneous Velocity [PYQ 2020 Final, PYQ 2022 Test, & Textbook Section 2.2]
+ * Step 1: System Isolation & Diagram: Let a continuous curve on an x-t coordinate plane represent the trajectory of a moving body. Isolate point P(t, x) on the curve.
+ * Step 2: Secant Slope Formulation: Define two boundary points P_1\left(t - \frac{\Delta t}{2}, x_1\right) and P_2\left(t + \frac{\Delta t}{2}, x_2\right) centered symmetrically around P. The slope of the chord (secant line) joining P_1 and P_2 is:
+   
+ * Step 3: Analytical Limiting Process:
+   Take the mathematical limit as \Delta t \to 0:
+   
+   
+   Geometrically, as \Delta t \to 0, points P_1 and P_2 slide along the curve toward P. The secant line P_1P_2 rotates into coincidence with the unique tangent line touching the curve at point P.
+ * Step 4: Explicit Final Verification: The instantaneous velocity of a particle at any time t is mathematically and geometrically equal to the slope of the tangent line drawn to its position-time (x-t) graph at that instant:
+   
+Derivation: Harmonic Mean Velocity for Round-Trip Journeys [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: A student travels from home to a friend's house across distance d at speed v_1 and returns along the identical route at speed v_2.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   Calculate average speed:
+   
+   
+   Calculate average velocity:
+   
+ * Step 4: Explicit Final Verification: The average speed for the round-trip journey is the harmonic mean of the speeds: \mathbf{v_{\text{avg}} = \frac{2v_1 v_2}{v_1 + v_2}}, while the average velocity is \bar{v} = 0.
+Analytical Case Study: Multi-Interval Commute and Average Speed vs. Velocity [Textbook Exercise 2.10]
+ * Step 1: System Isolation: A commuter walks from home to a market located at d = 2.5\text{ km} along a straight road at speed v_1 = 5.0\text{ km h}^{-1}. Finding the market closed, he immediately turns back and walks home at speed v_2 = 7.5\text{ km h}^{-1}.
+ * Step 2: Component Intervals:
+   * Outbound transit time:
+     
+   * Return transit time:
+     
+   * Total round-trip time:
+     
+ * Step 3: Analytical Execution Across Specified Intervals:
+   * Interval (i): 0 to 30\text{ min} (\Delta t = 0.5\text{ h}):
+     Position reaches market: x = 2.5\text{ km}; path length s = 2.5\text{ km}.
+     
+   * Interval (ii): 0 to 50\text{ min} (\Delta t = \frac{50}{60}\text{ h} = \frac{5}{6}\text{ h}):
+     The man returns home: net displacement \Delta x = 0; total path length s = 2.5 + 2.5 = 5.0\text{ km}.
+     
+   * Interval (iii): 0 to 40\text{ min} (\Delta t = \frac{40}{60}\text{ h} = \frac{2}{3}\text{ h}):
+     During the final 10\text{ min} (\frac{1}{6}\text{ h}), the man is walking home at 7.5\text{ km h}^{-1}:
+     
+     
+     Position at t = 40\text{ min}:
+     
+ * Step 4: Explicit Final Verification: Over finite intervals involving direction reversals, average speed exceeds the magnitude of average velocity.
+Dynamic Evaluation: Calculus Rate Analysis of Quadratic Polynomial Position [PYQ 2023 Final & Textbook Example 2.1]
+ * Step 1: System Isolation: A particle translates along the x-axis according to the polynomial:
+   
+   
+   where a = 8.5\text{ m}, b = 2.5\text{ m s}^{-2}, and t is measured in seconds.
+ * Step 2: Component Derivative Formulation:
+   
+ * Step 3: Analytical Execution:
+   * Instantaneous velocity at t = 0\text{ s}:
+     
+   * Instantaneous velocity at t = 2.0\text{ s}:
+     
+   * Average velocity between t_1 = 0\text{ s} and t_2 = 2.0\text{ s} [PYQ 2023 Final]:
+     
+   * Average velocity between t_1 = 2.0\text{ s} and t_2 = 4.0\text{ s} [Textbook Example 2.1]:
+     
+ * Step 4: Explicit Final Verification: Instantaneous velocity evaluates to \mathbf{0\text{ m s}^{-1}} at t=0 and \mathbf{10\text{ m s}^{-1}} at t=2\text{ s}; average velocity over 0 \to 2\text{ s} is \mathbf{5.0\text{ m s}^{-1}}, and over 2 \to 4\text{ s} is \mathbf{15.0\text{ m s}^{-1}}.
+Dynamic Evaluation: Velocity at Vanishing Acceleration in Cubic Position [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: The displacement of a particle moving along a straight track is parameterized by:
+   
+ * Step 2: Component Derivative Formulation:
+   
+ * Step 3: Analytical Execution:
+   Set acceleration to zero to find the critical instant:
+   
+   
+   Substitute t = 2.0\text{ s} into the velocity equation:
+   
+ * Step 4: Explicit Final Verification: The velocity of the particle when its acceleration vanishes is -9.0\text{ m s}^{-1} (directed along the negative coordinate axis).
+Dynamic Evaluation: Planar Kinematic Acceleration Components [PYQ 2023–24 Half-Yearly]
+ * Step 1: System Isolation: The coordinates of a moving body are given parametrically by x(t) = 5t - 2t^2 and y(t) = 10t.
+ * Step 2: Component Derivative Formulation:
+   * x-axis:
+     
+   * y-axis:
+     
+ * Step 3: Analytical Execution:
+   Evaluate acceleration components at t = 2.0\text{ s}:
+   
+   
+   Resultant acceleration vector:
+   
+ * Step 4: Explicit Final Verification: The acceleration at t = 2.0\text{ s} has magnitude 4.0\text{ m s}^{-2} and is directed entirely along the negative x-axis.
+3. Acceleration, Graphical Kinematics, and Physical Graph Validity
+                             ACCELERATION (a)
+                                     |
+           +-------------------------+-------------------------+
+           |                                                   |
+    AVERAGE ACCELERATION                              INSTANTANEOUS ACCELERATION
+    ā = Δv / Δt[span_88](start_span)[span_88](end_span)                               a = dv/dt = d²x/dt²[span_89](start_span)[span_89](end_span)
+    Slope of secant line on v-t plot[span_90](start_span)[span_90](end_span).         Slope of tangent line on v-t plot[span_91](start_span)[span_91](end_span).
+
+Acceleration represents the time rate of change of velocity. Because velocity is a vector, acceleration results from a change in speed, a change in direction, or both.
+  x-t Graph Curvature:
+     Positive a (Curves Up)       Negative a (Curves Down)          Zero a (Linear)
+        x                           x                           x
+        |      .--'                 |    .---.                  |       /
+        |    .'                     |   /     \                 |      /
+        |  .'                       |  /       \                |     /
+        0+----------> t             0+-----------> t            0+----------> t[span_94](start_span)[span_94](end_span)
+
+  v-t Graph Slopes:
+     +a, Positive Direction       -a, Positive Direction      -a, Reversing Direction
+        v                           v                           v
+        |      /                    | \                         | \
+        |     /                     |  \                        |  \
+        |    /                      |   \                       0+---\------> t
+        0+----------> t             0+-----\-----> t            |     \
+                                                                |      \[span_95](start_span)[span_95](end_span)
+
+Fundamental Theorems of Graphical Analysis
+Theorem 1: The Slope of a Velocity-Time (v-t) Graph Equals Acceleration
+By definition, instantaneous acceleration is the limit of average acceleration over an infinitesimal time step:
+
+
+On a Cartesian plot with v along the vertical axis and t along the horizontal axis, the quantity \frac{dv}{dt} corresponds to the geometric slope (\tan \phi) of the tangent line to the curve:
+
+ * At local peaks or troughs of a v-t curve, the tangent line is horizontal (\tan \phi = 0), so a = 0.
+       v
+       |           B (Peak: a = 0)
+       |         .---.
+       |        /     \              D (Peak: a = 0)
+       |       /       \           .---.
+       |      /         \         /     \
+       |     /           \       /       \
+       |  A *             \     /
+       | (Slope = a)       '---'
+       |                     C (Trough: a = 0)
+       +---------------------------------------------> t
+
+Theorem 2: The Area Under a Velocity-Time (v-t) Curve Equals Displacement
+The net spatial displacement over an interval [t_i, t_f] is given by the integral of velocity:
+
+
+On a v-t plot, the product v(t)\, dt corresponds to the area of an infinitesimal vertical strip of height v and width dt. Summing these strips across the full interval yields the area bounded between the curve and the time axis:
+
+       v
+       |                    Area = ∫ v dt = Displacement (Δx)
+       |             +-----------------------+
+       |             |///////////////////////|
+       |             |///////////////////////|
+       |           v |///////////////////////|
+       |             |///////////////////////|
+       |             +-----------------------+
+       0-------------+-----------------------+-------> t
+                     ti                      tf
+                              Δt = tf - ti[span_105](start_span)[span_105](end_span)
+
+ * Dimensional Check:
+   
+ * Displacement vs. Distance from v-t Areas:
+   * Displacement: Algebraic sum of areas (areas above the time axis are positive; areas below are negative):
+     
+   * Distance (Path Length): Sum of absolute areas:
+     
+Physical Validity of Kinematic Graphs
+In one-dimensional classical kinematics, physical observables must be single-valued, continuous functions of time. Discontinuities imply non-physical conditions:
+  (a) Dual Positions / Vertical Tangent    (b) Negative Speed
+        x                                       Speed
+        |     .---.                             |
+        |    /     \ (Two positions             |
+        |   |   *   | at one instant;           0+--------\--------------> t
+        |    \     /   Infinite slope           |          \______/ (Speed cannot
+        |     '---'    dx/dt = ∞)               |                   be negative)
+        0+-------------> t                      +------------------------>
+
+  (c) Decreasing Total Path Length        (d) Discontinuous Velocity
+        Path Length                             v
+        |                                       |       | (Vertical jump
+        |       .----.                          |   *---|  implies infinite
+        |      /      \ (Distance cannot        |       |  acceleration:
+        |     /        \ decrease over time)    |       *-- a = dv/dt = ∞)
+        0+---------------------> t              0+-----------------------> t[span_110](start_span)[span_110](end_span)
+
+ * Multi-Valued Coordinates: A single particle cannot occupy two distinct spatial coordinates simultaneously.
+ * Vertical Tangents (dx/dt = \infty): An infinite slope implies infinite velocity, violating relativistic and energy limits.
+ * Negative Speed or Path Length: Speed is the magnitude of velocity (|v| \ge 0), and path length cannot decrease over time (ds/dt \ge 0).
+ * Discontinuous Velocity Steps: An instantaneous velocity step produces an infinite derivative (a = \lim_{\Delta t \to 0} \frac{\Delta v}{\Delta t} = \infty), which would require an infinite physical force.
+Analytical Case Studies & Dynamic Evaluations
+Derivation: Analytical & Geometric Proof that Slope of v-t Graph Represents Acceleration [PYQ 2020 Final & PYQ 2022 Test]
+ * Step 1: System Isolation: Let an object translate with arbitrary velocity v(t) along the x-axis. Plot velocity v on the vertical axis against time t on the horizontal axis.
+ * Step 2: Differential Limit:
+   
+ * Step 3: Analytical Execution:
+   On the v-t curve, choose two points Q_1(t_1, v_1) and Q_2(t_2, v_2).
+   The slope of the secant chord is:
+   
+   
+   Taking the limit as t_2 \to t_1 (\Delta t \to 0), the secant line becomes the tangent to the curve at Q_1:
+   
+ * Step 4: Explicit Final Verification: The slope of the tangent to a velocity-time graph at any point equals the instantaneous acceleration of the body at that moment.
+Dynamic Evaluation: Calculating Distance and Displacement from Composite Multi-Quadrant v-t Graphs [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation & Diagram: A particle moves according to the piecewise velocity-time graph shown below:
+       v (m/s)
+         4 |       +-------+
+           |      /|       |\
+         2 |     / |       | \
+           |    /  |       |  \
+         0 +---+---+---+---+---+---+---+---+---> t (s)
+           |   1   2   3   4   5   6   7   8
+        -2 |                   |   |  /
+           |                   +---+ /
+        -4 |                   |/////|
+
+ * Step 2: Component Areas:
+   * Region 1 (Positive, t = 0 to 4\text{ s}): Trapezoid with bases b_1 = 4\text{ s}, b_2 = 2\text{ s} (from t=1 to 3\text{ s}), and height h_1 = +4\text{ m s}^{-1}:
+     
+   * Region 2 (Negative, t = 4 to 8\text{ s}): Triangle/rectangle spanning negative velocities with base b_3 = 4\text{ s} and minimum peak h_2 = -4\text{ m s}^{-1} (e.g., trapezoid of area A_2 = -8\text{ m}).
+ * Step 3: Analytical Execution:
+   * Displacement:
+     
+   * Path Length (Distance):
+     
+ * Step 4: Explicit Final Verification: For multi-quadrant v-t curves, displacement is the algebraic sum of areas (\mathbf{+4\text{ m}}), while distance is the absolute sum of areas (\mathbf{20\text{ m}}).
+Conceptual Diagnostic: Graphical Construction for Positive and Negative Velocities [PYQ 2023 Final]
+ * Step 1: Governing Relation: v = \frac{dx}{dt} = \text{Slope of } x-t \text{ graph}.
+ * Step 2: Geometric Conditions:
+   * Positive Velocity (v > 0): Slope \tan \theta > 0 \implies 0^\circ < \theta < 90^\circ (the curve rises with time).
+   * Negative Velocity (v < 0): Slope \tan \theta < 0 \implies 90^\circ < \theta < 180^\circ (the curve falls with time).
+      Positive Velocity (v > 0)                 Negative Velocity (v < 0)
+        x (m)                                     x (m)
+          |           /                             | \
+          |          /                              |  \
+          |         /  Slope = +v                   |   \  Slope = -v
+          |        /   (Rising)                     |    \ (Falling)
+          0+------+----------------> t (s)          0+----+----------------> t (s)
+
+Conceptual Diagnostic: Position-Time Curvature for Accelerated-to-Uniform Motion [PYQ 2025 Half-Yearly]
+ * Phase 1 (Uniform Acceleration, a = \text{constant} > 0):
+   
+   
+   The position-time graph is a parabola curving upward (\frac{d^2x}{dt^2} > 0).
+ * Phase 2 (Constant Velocity, a = 0):
+   
+   
+   The position-time graph transitions smoothly into an inclined straight line of constant slope.
+        x (m)
+          |                                  / Straight Line (v = const, a = 0)
+          |                                .'
+          |                             .-'
+          |                         _.-' Transition Point
+          |                     _.-'
+          |                 _.-' Parabolic Arc (a > 0)
+          |             _.-'
+          0+-----------+------------------------------------> t (s)
+
+Analytical Case Study: Comparative x-t Graph Analysis of School-to-Home Commutes [Textbook Exercise 2.2]
+Two students, A and B, walk home from school (origin O) to their respective homes P and Q along the x-axis:
+        x
+      Q |             / B
+      P |     / A    /
+        |    /      /
+        |   /      /
+        0--+------+-------------------------> t
+           0      t_start,B
+
+ * (a) Proximity to School: Home P corresponds to a smaller coordinate than Q (x_P < x_Q). A lives closer to the school than B.
+ * (b) Start Times: Curve A starts at t = 0; curve B starts at a later time t > 0. A starts from school earlier than B.
+ * (c) Walking Speeds: The slope \frac{dx}{dt} of curve B is steeper than that of curve A. B walks faster than A.
+ * (d) Arrival Times: Tracing horizontal lines from P and Q to their respective curves shows both reach their home coordinates at the same time coordinate t_{\text{home}}. A and B reach home at the same time.
+ * (e) Overtaking on the Road: Curve B intersects curve A at a single point, indicating B catches up to A once. B overtakes A on the road once.
+Analytical Case Study: Piecewise Linear x-t Graph Construction for Multi-Stage Commute [Textbook Exercise 2.3]
+A woman leaves home at 9:00 AM, walks at v_1 = 5\text{ km h}^{-1} to her office d = 2.5\text{ km} away, stays until 5:00 PM, and returns home by auto at v_2 = 25\text{ km h}^{-1}:
+ * Outbound transit time:
+   
+ * Stays at office from 9:30 AM to 5:00 PM (x = 2.5\text{ km}, horizontal segment).
+ * Return transit time:
+   
+    x (km)
+      2.5 |        +----------------------------------------+
+          |       /                                          \
+          |      /                                            \
+        0 +-----+--------------------------------------------+--+-----> Time
+         9:00  9:30 AM                                    5:00 5:06 PM
+
+Conceptual Diagnostic: Parabolic x-t Trajectory Physical Context [Textbook Exercise 2.13]
+ * Graph Description: A position-time graph that is zero for t < 0 and curves parabolically upward for t > 0 (x \propto t^2).
+ * Analysis: The graph does not indicate that the particle moves along a curved spatial trajectory; rectilinear motion is constrained to a straight line. The parabolic shape indicates that coordinate x depends quadratically on time (x = \frac{1}{2}at^2).
+ * Physical Context: A ball resting on a high ledge that is nudged off at t = 0, falling freely under constant downward gravitational acceleration (a = g).
+Analytical Case Study: Graph Interpretation of Simple Harmonic Oscillations [Textbook Exercise 2.16]
+For a particle undergoing simple harmonic motion according to x(t) = -A \sin(\omega t):
+
+        -A                 0                +A
+    <---|------------------|-----------------|---> x
+     Left Reversal       Origin        Right Reversal
+     a = +max, v = 0                   a = -max, v = 0
+
+ * Signs of Kinematic Variables across Intervals:
+   * At t = 0.3\text{ s} (x < 0 and moving toward origin): Position is negative (x < 0); velocity is positive (v > 0); restoring acceleration points toward origin, so acceleration is positive (a > 0).
+   * At t = 1.2\text{ s} (x > 0 and moving toward positive peak): Position is positive (x > 0); velocity is positive (v > 0); restoring acceleration points toward origin, so acceleration is negative (a < 0).
+   * At t = -1.2\text{ s}: Evaluated symmetrically via periodic phase analysis, yielding x < 0, v < 0, a > 0.
+Analytical Case Study: Segmented Analysis of x-t and v-t Variation Intervals [Textbook Exercises 2.17 & 2.18]
+ * Position Plot Interval Diagnostics [Textbook Exercise 2.17]:
+   * Average speed is the magnitude of the slope of the secant line: v_{\text{avg}} = \frac{\vert{}\Delta x\vert{}}{\Delta t}.
+   * The interval with the steepest slope has the greatest average speed (Interval 3).
+   * The interval with the shallowest slope has the least average speed (Interval 2).
+   * The sign of average velocity matches the sign of the displacement: positive for upward-sloping intervals, negative for downward-sloping intervals.
+ * Speed Plot Diagnostics [Textbook Exercise 2.18]:
+   * Acceleration magnitude corresponds to the steepness of the speed-time curve: \vert{}a\vert{} = \left\vert{}\frac{dv}{dt}\right\vert{}.
+   * Magnitude of acceleration is greatest in the interval with the steepest slope (Interval 2).
+   * Average speed is greatest in the interval with the highest average vertical value (Interval 3).
+   * At local extrema points A, B, C, D, the curve has horizontal tangents, so the instantaneous acceleration is a = 0.
+4. Uniformly Accelerated Motion: Kinematic Formulations and n^{\text{th}} Second Dynamics
+                    UNIFORMLY ACCELERATED MOTION (a = const.)
+                                       |
+          +----------------------------+----------------------------+
+          |                                                         |
+   GEOMETRIC DERIVATION                                     CALCULUS DERIVATION
+   Area & slope of v-t trapezoid[span_160](start_span)[span_160](end_span)                  Definite integration of a(t) & v(t)[span_161](start_span)[span_161](end_span)
+
+Derivations of the Kinematic Equations
+Equation 1: Velocity-Time Relation
+From the definition of constant acceleration:
+
+Calculus Proof [PYQ 2026 Final & Textbook Example 2.2]:
+
+
+Integrating both sides from t = 0 to t and from v_0 to v:
+
+Equation 2: Position-Time Relation
+Displacement corresponds to the area under the v-t curve between t = 0 and t:
+       v
+       |                    B
+       |                  .'|
+     v |               .'   |
+       |            .'      |
+       |         .'         |  Δv = v - v₀ = at
+       |      A'------------+ C
+    v₀ |      |/////////////|
+       |      |/////////////|  Rectangle Area = v₀ · t
+       |      |/////////////|
+       0------+-------------+------> t
+              0             t[span_167](start_span)[span_167](end_span)
+
+
+Substitute v - v_0 = at:
+
+Calculus Proof [PYQ 2025 Half-Yearly & Textbook Example 2.2]:
+
+
+Integrating from t = 0 (x = x_0) to t (x = x):
+
+Equation 3: Velocity-Displacement Relation
+For constant acceleration, the average velocity equals the arithmetic mean of initial and final velocities:
+
+
+Substitute t = \frac{v - v_0}{a} into the displacement equation x - x_0 = \bar{v} t:
+
+
+Rearranging terms gives:
+
+Calculus Proof [PYQ 2026 Final & Textbook Example 2.2]:
+Using the chain rule of differentiation:
+
+
+Integrating both sides over the motion:
+
+Derivations & Analytical Case Studies
+Derivation: Distance Traversed in the n^{\text{th}} Second of Uniformly Accelerated Motion [PYQ 2026 Final]
+ * Step 1: System Isolation: Let a particle accelerate uniformly from initial velocity u with constant acceleration a.
+ * Step 2: Component Formulations: The displacement during the n^{\text{th}} second is the difference between the displacement in n seconds and the displacement in (n - 1) seconds:
+   
+ * Step 3: Analytical Execution:
+   Using x(t) = ut + \frac{1}{2}at^2:
+   
+   
+   Subtracting x(n - 1) from x(n):
+   
+ * Step 4: Explicit Final Verification: The displacement traversed during the n^{\text{th}} second of motion is:
+   
+   
+   (Dimensional note: An implicit unit of time \Delta t = 1\text{ s} accompanies the factors, ensuring the equation is dimensionally consistent with length [L]).
+Conceptual Diagnostic: Truth-Value Analysis of Kinematic Statements [Textbook Exercise 2.7 & Points to Ponder]
+ * Statement (a): "A particle with zero speed at an instant may have non-zero acceleration."
+   * TRUE. When a ball is thrown vertically upward, its speed at the highest point is momentarily zero (v = 0), yet its acceleration remains non-zero and equals the acceleration due to gravity (a = -g = -9.8\text{ m s}^{-2}).
+ * Statement (b): "A particle with zero speed may have non-zero velocity."
+   * FALSE. Speed is the absolute magnitude of velocity (v_{\text{speed}} = \vert{}\vec{v}\vert{}). If speed is zero, the magnitude of velocity is identically zero, so velocity cannot be non-zero.
+ * Statement (c): "A particle with constant speed must have zero acceleration."
+   * FALSE in general; TRUE for 1D. In one dimension, constant speed implies constant velocity along the line, so a = 0. In two or three dimensions, an object in uniform circular motion moves at constant speed while undergoing centripetal acceleration.
+ * Statement (d): "A particle with positive acceleration must be speeding up."
+   * FALSE. Whether an object speeds up or slows down depends on the relative signs of velocity and acceleration. If velocity is negative (v < 0) and acceleration is positive (a > 0), the acceleration opposes the motion, causing the object to slow down.
+Analytical Case Study: Retardation and Braking Parameters on Straight Highways [Textbook Exercise 2.5]
+ * Step 1: System Isolation: A car travels along a straight highway at v_0 = 126\text{ km h}^{-1} and is brought to rest (v = 0) over a stopping distance of d = 200\text{ m}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   Calculate uniform retardation:
+   
+   
+   Calculate stopping time:
+   
+ * Step 4: Explicit Final Verification: The car undergoes a uniform retardation of 3.06\text{ m s}^{-2} and takes 11.4\text{ s} to come to a stop.
+5. Vertical Motion Under Gravity, Free-Fall Dynamics, and Galileo's Odd Numbers
+Free fall is rectilinear motion under constant downward gravitational acceleration (a = -g = -9.8\text{ m s}^{-2}), neglecting air resistance.
+                       v = 0 (Apex at Maximum Height H)
+                               *
+                             /   ^
+                 Ascent:   /       \   Descent:
+               Speed ↓   /           \   Speed ↑
+               v > 0   /               \   v < 0
+               a = -g |                 | a = -g
+                      |                 v
+                      *                 *
+           Launch Point (y = 0)      Impact Point (y = 0)
+           v = +v₀                   v = -v₀
+
+Governing Free-Fall Relations (Released from Rest, v_0 = 0 at y = 0)
+ *  *  * Derivations & Analytical Case Studies
+Derivation: Galileo's Law of Odd Numbers for Bodies Falling from Rest [Textbook Example 2.5]
+ * Step 1: System Isolation: Divide the total fall time of a body released from rest into consecutive, equal time intervals \tau.
+ * Step 2: Coordinate Equation: Setting v_0 = 0 and taking the downward direction as positive:
+   
+ * Step 3: Analytical Execution:
+   Evaluate the position at successive time marks t = 0, \tau, 2\tau, 3\tau, \dots, n\tau:
+   Define y_0 = \frac{1}{2}g\tau^2 as the distance fallen in the first interval.
+   * At t = 0: y_0 = 0
+   * At t = 1\tau: y_1 = \frac{1}{2}g\tau^2 = 1 y_0
+   * At t = 2\tau: y_2 = \frac{1}{2}g(2\tau)^2 = 4 y_0
+   * At t = 3\tau: y_3 = \frac{1}{2}g(3\tau)^2 = 9 y_0
+   * At t = 4\tau: y_4 = \frac{1}{2}g(4\tau)^2 = 16 y_0
+   * At t = 5\tau: y_5 = \frac{1}{2}g(5\tau)^2 = 25 y_0
+   Compute the distance traversed during each individual interval:
+   * 1st interval: \Delta y_1 = y_1 - 0 = 1y_0
+   * 2nd interval: \Delta y_2 = y_2 - y_1 = 4y_0 - 1y_0 = 3y_0
+   * 3rd interval: \Delta y_3 = y_3 - y_2 = 9y_0 - 4y_0 = 5y_0
+   * 4th interval: \Delta y_4 = y_4 - y_3 = 16y_0 - 9y_0 = 7y_0
+   * 5th interval: \Delta y_5 = y_5 - y_4 = 25y_0 - 16y_0 = 9y_0
+ * Step 4: Explicit Final Verification: The distances traversed during equal, successive time intervals by a body falling from rest stand in the ratio of consecutive odd numbers:
+   
+  t = 0  +--- y = 0
+         |    |
+  t = τ  +--- y = 1 y₀   (Interval Distance = 1 y₀)[span_220](start_span)[span_220](end_span)
+         |    |
+         |    |
+  t = 2τ +--- y = 4 y₀   (Interval Distance = 3 y₀)[span_221](start_span)[span_221](end_span)
+         |    |
+         |    |
+         |    |
+  t = 3τ +--- y = 9 y₀   (Interval Distance = 5 y₀)[span_222](start_span)[span_222](end_span)
+
+Derivation: The Quadratic Descent Theorem for Descent in the Last Second [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: A body falls freely from rest (v_0 = 0) under gravity (g = 9.8\text{ m s}^{-2}). It covers half of its total height during the final second of fall.
+ * Step 2: Component Equations:
+   Let the total time of descent be t, and the total height fallen be h:
+   
+   
+   The height fallen during the first (t - 1) seconds is:
+   
+   
+   The distance covered in the last second is:
+   
+ * Step 3: Analytical Execution:
+   Set \Delta h_{\text{last}} = \frac{h}{2}:
+   
+   
+   Solve using the quadratic formula:
+   
+   
+   Because the total fall time must exceed 1\text{ s} to have a "last second":
+   
+   
+   Calculate the total height:
+   
+ * Step 4: Explicit Final Verification: The total time of fall is 3.41\text{ s}, and the total height of fall is 57.1\text{ m}.
+Derivation: Fractional Tower Elevation at Intermediate Fall Times (t = T/3) [PYQ 2023–24 Half-Yearly]
+ * Step 1: System Isolation: A ball is released from rest (v_0 = 0) from the top of a tower of height h and reaches the ground in total time T.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   Downward distance fallen after time t = \frac{T}{3}:
+   
+   
+   Calculate the height above the ground:
+   
+ * Step 4: Explicit Final Verification: After T/3 seconds, the ball is at a height of \frac{8}{9}h above the ground.
+Analytical Case Study: Vertical Ballistic Projections from the Ground and Elevated Roofs [PYQ 2025 Half-Yearly, Textbook Example 2.3 & Exercise 2.6]
+ * Scenario A: Ball Launched Upward from Ground at v_0 = 29.4\text{ m s}^{-1} [Textbook Exercise 2.6]:
+   * (a) Direction of acceleration during upward motion: Directed vertically downward (a = -g = -9.8\text{ m s}^{-2}) throughout the flight.
+   * (b) Velocity and acceleration at the highest point: Instantaneous velocity is v = 0, while acceleration remains a = 9.8\text{ m s}^{-2} downward.
+   * (c) Sign conventions (x = 0, t = 0 at peak, downward direction positive):
+     * During upward flight: Position is positive (x > 0); velocity is negative (v < 0); acceleration is positive (a > 0).
+     * During downward flight: Position is positive (x > 0); velocity is positive (v > 0); acceleration is positive (a > 0).
+   * (d) Maximum height and total time of flight:
+     
+ * Scenario B: Ball Launched Upward from an Elevated Roof (h = 25.0\text{ m}, v_0 = 20.0\text{ m s}^{-1}) [Textbook Example 2.3]:
+   * Maximum height above the launch point:
+     
+     
+     Total height above ground = 25.0\text{ m} + 20.0\text{ m} = \mathbf{45.0\text{ m}}.
+   * Time to strike the ground (y = -25.0\text{ m} relative to roof origin):
+     
+Analytical Case Study: Periodic Damped Bouncing Dynamics [Textbook Exercise 2.8 & Exercise 2.15]
+ * Step 1: System Isolation & Diagram: A ball drops from rest from a height of h_0 = 90.0\text{ m} onto a hard floor, losing \frac{1}{10} of its speed upon each impact.
+  Speed (m/s)
+   42.0 |  \
+        |   \
+   37.8 |    \    /\
+        |     \  /  \
+        |      \/    \
+    0.0 +-------+-----+-----+----------------> t (s)
+        0      4.29  8.15 12.01
+
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * Initial Fall (0 \to t_1):
+     
+   * First Rebound (t_1 \to t_2):
+     Rebound speed: v_1' = 0.9 \times 42.0 = 37.8\text{ m s}^{-1}.
+     Time to ascend to the new peak:
+     
+     
+     Time at peak:
+     
+     
+     Descent back to the floor takes an equal duration (3.86\text{ s}), reaching the floor at:
+     
+     
+     Speed just before the second impact: 37.8\text{ m s}^{-1}.
+   * Second Rebound (t > 12\text{ s}):
+     
+ * Step 4: Explicit Final Verification: The speed decreases linearly to 42.0\text{ m s}^{-1} over 4.29\text{ s}, drops abruptly to 37.8\text{ m s}^{-1} upon impact, reaches zero at 8.15\text{ s}, and increases back to 37.8\text{ m s}^{-1} at 12.01\text{ s}.
+6. Applied Kinematics: Stopping Distances, Human Reaction Times, and Relative Velocity
+Stopping Distance of Vehicles
+When brakes apply a constant deceleration -a to a vehicle traveling with initial velocity v_0:
+
+ * Velocity-Squared Scaling: Stopping distance scales with the square of the initial speed (d_s \propto v_0^2). Doubling the initial speed quadruples the distance required to stop under the same braking force.
+Human Reaction Time & The Gravitational Drop Test
+Reaction time t_r is the time elapsed between detecting a sensory stimulus and initiating a physical response. It can be measured experimentally using a vertically dropped ruler:
+      Friend's hand releases ruler from rest (v₀ = 0)
+                     |
+                     v
+             [===|===|===|===] Ruler falls distance d
+                     ^
+                     |
+      Observer's hand catches ruler upon visual stimulus[span_239](start_span)[span_239](end_span)
+
+
+For a measured drop distance d = 21.0\text{ cm} = 0.21\text{ m} (g = 9.8\text{ m s}^{-2}):
+
+Relative Velocity in One Dimension
+For two objects A and B translating along a straight line with velocities v_A and v_B relative to a common reference frame:
+
+  Same Direction:                       Opposite Direction:
+  -----> v_A                            -----> v_A
+  ---------> v_B                        <----- v_B
+  v_AB = v_A - v_B                      v_AB = v_A - (-v_B) = v_A + v_B
+
+Analytical Case Studies: Applied Kinematics
+Dynamic Evaluation: High-Speed Ballistic Interception in Compound Moving Frames [Textbook Exercise 2.14]
+ * Step 1: System Isolation: A police vehicle P travels along a straight highway at v_P = 30\text{ km h}^{-1}. It fires a bullet with muzzle speed v_{BP} = 150\text{ m s}^{-1} (relative to the gun) at a target vehicle T fleeing in the same direction at v_T = 192\text{ km h}^{-1}.
+ * Step 2: Unit Conversion and Velocity Equations:
+   
+ * Step 3: Analytical Execution:
+   * Ground-frame speed of the fired bullet:
+     
+   * Impact speed relative to the fleeing vehicle:
+     
+ * Step 4: Explicit Final Verification: The bullet strikes the fleeing vehicle with an effective impact speed of 105\text{ m s}^{-1}.
+7. Master Consolidated Reference Tables
+Table A: Master PYQ Index
+| Exam / Year | Question Summary | Core Governing Concept | Final Analytical / Numerical Result |
+|---|---|---|---|
+| 2022 Test | Define instantaneous velocity and acceleration | Limiting differential rate | v = \lim_{\Delta t\to 0}\frac{\Delta x}{\Delta t} = \frac{dx}{dt}; a = \lim_{\Delta t\to 0}\frac{\Delta v}{\Delta t} = \frac{dv}{dt}. |
+| 2025 HY | Ratio of distance to displacement on quarter-circle | Arc length vs chord length | Ratio = \frac{\pi R / 2}{\sqrt{2} R} = \mathbf{\frac{\pi}{2\sqrt{2}} \approx 1.11}. |
+| 2025 HY | Time to fall in pit 11 m away (5 fwd, 3 back) | Non-monotonic step threshold | 3\text{ cycles} \times 8\text{ s} + 5\text{ s} = \mathbf{29\text{ s}}. |
+| 2025 HY | Average speed for round trip (v_1, v_2) | Harmonic mean of speeds | v_{\text{avg}} = \mathbf{\frac{2v_1 v_2}{v_1 + v_2}} (average velocity = 0). |
+| 2025 HY | x-t graph: uniform acceleration to constant velocity | Quadratic to linear slope | Upward-curving parabola transitioning into an inclined straight line. |
+| 2025 HY | Identify realistic v-t graph | Single-valued functions | Graph must be continuous, single-valued, and have no vertical slopes. |
+| 2025 HY | Velocity when a=0 for s = t^3 - 6t^2 + 3t + 4 | Second-derivative root | a = 6t - 12 = 0 \implies t = 2\text{ s}; v(2) = \mathbf{-9.0\text{ m s}^{-1}}. |
+| 2025 HY | Derive s = ut + \frac{1}{2}at^2 | Definite calculus integration | \int_0^s ds = \int_0^t (u + at)\, dt \implies \mathbf{s = ut + \frac{1}{2}at^2}. |
+| 2025 HY | Distance and displacement from v-t graph | Area under curve | Displacement = \mathbf{+4\text{ m}} (algebraic); Distance = \mathbf{20\text{ m}} (absolute). |
+| 2025 HY | Free fall: half distance covered in last second | Quadratic descent formulation | Total time t = 2 + \sqrt{2} \approx \mathbf{3.41\text{ s}}; Height h \approx \mathbf{57.1\text{ m}}. |
+| 2023–24 HY | Ball dropped from tower: position at t = T/3 | y \propto t^2 | Fallen = \frac{h}{9}; Height above ground = \mathbf{\frac{8}{9}h}. |
+| 2023–24 HY | Acceleration at t=2 s for x = 5t - 2t^2, y = 10t | Orthogonal second derivatives | a_x = -4\text{ m s}^{-2}, a_y = 0 \implies \vert{}\vec{a}\vert{} = \mathbf{4.0\text{ m s}^{-2}\text{ (along } -x\text{)}}. |
+| 2026 Final | Derive v = v_0 + at or v^2 = v_0^2 + 2ax | Calculus / chain rule | \int dv = a\int dt \implies \mathbf{v = v_0 + at}; v\, dv = a\, dx \implies \mathbf{v^2 = v_0^2 + 2ax}. |
+| 2026 Final | Displacement in n^{\text{th}} second | s_n = x(n) - x(n-1) | Derived: \mathbf{s_n = u + \frac{a}{2}(2n - 1)}. |
+| 2026 Final | Distinguish average vs. instantaneous speed | Finite vs infinitesimal \Delta t | v_{\text{avg}} = s/\Delta t; v_{\text{inst}} = \Vert{}v\Vert{} = ds/dt. |
+| 2020 Final | Why slope of v-t graph represents acceleration | Differential definition | \lim_{\Delta t\to 0}\frac{\Delta v}{\Delta t} = \frac{dv}{dt} = \text{Tangent Slope } \tan\phi = a. |
+| 2020 Final | Instantaneous velocity = slope of tangent to x-t | Limit of secant chord | Chord P_1P_2 \to \text{Tangent} as \Delta t \to 0 \implies \text{Slope} = \frac{dx}{dt} = v. |
+| 2023 Final | Average velocity for x = 8.5 + 2.5t^2 (0 \to 2 s) | \bar{v} = \Delta x / \Delta t | \bar{v} = \frac{18.5 - 8.5}{2.0} = \mathbf{5.0\text{ m s}^{-1}}. |
+| 2023 Final | Draw x-t graphs for +v and -v | Slope of x-t curve | +v \implies rising curve (\theta < 90^\circ); -v \implies falling curve (\theta > 90^\circ). |
+Table B: Textbook Exercises Index
+| Exercise # | Topic / Scenario | Analytical / Numerical Result (with Units) |
+|---|---|---|
+| 2.1 | Point object approximation validity | (a) Valid; (b) Valid; (c) Invalid; (d) Invalid. |
+| 2.2 | Comparative x-t graph analysis (A and B) | (a) A; (b) A; (c) B; (d) Same time; (e) B overtakes A once. |
+| 2.3 | x-t graph for woman walking to office | Walk: 0.5\text{ h} (9\text{:}30\text{ AM}); Office: 9\text{:}30\text{ AM}\text{--}5\text{:}00\text{ PM}; Auto: 6\text{ min} (5\text{:}06\text{ PM}). |
+| 2.4 | Drunkard walking in narrow lane (pit at 13 m) | 4\text{ full cycles } (32\text{ s}) + 5\text{ s} = \mathbf{37\text{ s}}. |
+| 2.5 | Highway car braking (126\text{ km/h} over 200\text{ m}) | Retardation a = \mathbf{3.06\text{ m s}^{-2}}; Stopping time t = \mathbf{11.4\text{ s}}. |
+| 2.6 | Ball thrown vertically upward at 29.4\text{ m/s} | (a) Downward; (b) v=0, a=9.8\text{ m s}^{-2}; (c) Up: x>0, v<0, a>0; (d) h=\mathbf{44.1\text{ m}}, t=\mathbf{6.0\text{ s}}. |
+| 2.7 | True/False statements on 1D motion | (a) True; (b) False; (c) False in general (True in 1D); (d) False. |
+| 2.8 | Ball dropped from 90 m, 10% speed loss per bounce | t_1 = 4.29\text{ s} (v=42\text{ m/s}); Rebound 37.8\text{ m/s}; Peak at 8.15\text{ s}; Floor at 12.01\text{ s}. |
+| 2.9 | Path length vs. displacement distinction | s \ge \vert{}\Delta x\vert{} and v_{\text{avg}} \ge \vert{}\bar{v}\vert{}; equality holds only for unidirectional 1D motion. |
+| 2.10 | Commuter walking to market (average speed and velocity) | (i) Both \mathbf{5.0\text{ km/h}}; (ii) \bar{v}=\mathbf{0}, v_{\text{avg}}=\mathbf{6.0\text{ km/h}}; (iii) \vert{}\bar{v}\vert{}=\mathbf{1.875\text{ km/h}}, v_{\text{avg}}=\mathbf{5.625\text{ km/h}}. |
+| 2.11 | Why instantaneous speed equals velocity magnitude | Direction cannot reverse over dt \to 0, so ds = \vert{}dx\vert{}. |
+| 2.12 | Physically impossible 1D motion graphs | All four are impossible: (a) multi-valued; (b) negative speed; (c) decreasing path; (d) infinite acceleration. |
+| 2.13 | Physical context for parabolic x-t curve | Ball released from rest falling freely under gravity (x = \frac{1}{2}gt^2). |
+| 2.14 | Police chase ballistic impact velocity | Effective impact speed on target car = \mathbf{105\text{ m s}^{-1}}. |
+| 2.15 | Physical situations for x-t, v-t, a-t plots | (a) Rebound from wall; (b) Bouncing ball under gravity; (c) Sudden impulse/impact. |
+| 2.16 | Signs of x, v, a in Simple Harmonic Motion | t=0.3\text{ s}: (-, +, +); t=1.2\text{ s}: (+, +, -); t=-1.2\text{ s}: (-, -, +). |
+| 2.17 | x-t curve segment speed and velocity signs | Max speed in interval 3; Min speed in interval 2; Sign matches secant slope. |
+| 2.18 | Speed-time curve acceleration and speed diagnostics | Max \vert{}a\vert{} in interval 2; Max speed in interval 3; a = 0 at peaks/troughs A, B, C, D. |
