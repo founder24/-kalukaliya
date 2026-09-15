@@ -337,7 +337,6 @@ const EDITOR_TABS = [
   { id: 'info',      label: 'Info' },
   { id: 'notes',     label: 'Notes' },
   { id: 'questions', label: 'Questions' },
-  { id: 'pyq',       label: 'PYQ Pages' },
 ];
 
 function FieldLabel({ children, chars, action }) {
@@ -1355,20 +1354,6 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
             </div>
           )}
 
-          {/* ── PYQ PAGES TAB ── */}
-          {tab === 'pyq' && (
-            <div className="space-y-4">
-              <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-2.5 text-xs text-amber-800">
-                <strong>PYQ page images</strong> — upload scanned question-paper pages (JPG, PNG, WEBP). Each upload is saved immediately; no "Save Chapter" needed.
-              </div>
-              <PyqPapersEditor
-                chapterId={chapterId}
-                papers={form?.pyq_papers || []}
-                onPapersChange={(papers) => setForm(f => ({ ...f, pyq_papers: papers }))}
-              />
-            </div>
-          )}
-
         </div>
 
         {/* Footer */}
@@ -1856,6 +1841,7 @@ function SubjectPYQsView({ subjectId }) {
   const [deletingId,   setDeletingId]   = useState(null);
   const [uploadingFor, setUploadingFor] = useState(null);
   const [removingPage, setRemovingPage] = useState(null);
+  const [ocrPageId, setOcrPageId] = useState(null);
   const [reindexingId, setReindexingId] = useState(null);
   const fileRef = useRef(null);
 
@@ -1956,6 +1942,22 @@ function SubjectPYQsView({ subjectId }) {
       toast.error(err?.response?.data?.detail || 'Reindex failed');
     } finally {
       setReindexingId(null);
+    }
+  };
+
+  const handleOcrPage = async (paperId, pageId) => {
+    setOcrPageId(pageId);
+    try {
+      const res = await api().post(
+        `/staff/content/subject/${subjectId}/pyq-papers/${paperId}/pages/${pageId}/ocr`,
+      );
+      setPapers(res.data.pyq_papers);
+      toast.success('Page text and figures extracted');
+    } catch (err) {
+      if (err?.response?.data?.pyq_papers) setPapers(err.response.data.pyq_papers);
+      toast.error(err?.response?.data?.detail || 'OCR failed — retry this page');
+    } finally {
+      setOcrPageId(null);
     }
   };
 
@@ -2145,6 +2147,47 @@ function SubjectPYQsView({ subjectId }) {
                         onChange={e => setEditForm(f => ({...f, description: e.target.value}))}
                       />
                     </div>
+                    {/* PYQ page images belong to the paper, not to a chapter
+                        Notes/Questions tab. Keep this control directly above
+                        the text used for PYQ retrieval. */}
+                    <div className="border-t border-amber-100 pt-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide">
+                            PYQ Page Images
+                          </div>
+                          <p className="text-[10px] text-gray-400 mt-0.5">
+                            Preserve diagrams, graphs, circuits, and figures alongside the searchable text.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleUploadPage(paper.id)}
+                          disabled={uploadingFor === paper.id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold transition-colors disabled:opacity-50"
+                        >
+                          {uploadingFor === paper.id ? <Spinner size={3} /> : <UploadIcon />}
+                          {uploadingFor === paper.id ? 'Uploading…' : 'Upload image page'}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                        <span className="font-semibold text-amber-700">{pages.length}</span>
+                        <span>page{pages.length === 1 ? '' : 's'} attached</span>
+                        {pages.some(page => page.ocr_status !== 'complete') && (
+                          <span className="text-gray-400">· OCR can be run per page below</span>
+                        )}
+                        {pages.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedId(paper.id)}
+                            className="text-amber-600 hover:text-amber-800 font-semibold"
+                          >
+                            View pages
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
                     {/* PYQ RAG text */}
                     <div className="border-t border-amber-100 pt-3 space-y-2">
                       <div className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide">
@@ -2222,6 +2265,26 @@ function SubjectPYQsView({ subjectId }) {
                             <span className="absolute top-0.5 left-0.5 text-[8px] font-bold text-white bg-black/40 px-1 py-0.5 rounded leading-none">
                               p{pi + 1}
                             </span>
+                            <button
+                              onClick={() => handleOcrPage(paper.id, pg.id)}
+                              disabled={ocrPageId === pg.id || pg.ocr_status === 'processing'}
+                              className="absolute bottom-0.5 left-0.5 bg-violet-600 text-white text-[8px] font-bold px-1 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity leading-none disabled:opacity-60"
+                            >
+                              {ocrPageId === pg.id || pg.ocr_status === 'processing'
+                                ? 'OCR…'
+                                : pg.ocr_status === 'complete' ? 'OCR again' : 'Extract OCR'}
+                            </button>
+                            {pg.ocr_status && pg.ocr_status !== 'pending' && (
+                              <span className={`absolute bottom-0.5 right-0.5 text-[8px] font-bold px-1 py-0.5 rounded leading-none ${
+                                pg.ocr_status === 'complete'
+                                  ? 'bg-emerald-500 text-white'
+                                  : pg.ocr_status === 'failed'
+                                    ? 'bg-red-500 text-white'
+                                    : 'bg-violet-500 text-white'
+                              }`}>
+                                {pg.ocr_status === 'complete' ? 'OCR ✓' : pg.ocr_status}
+                              </span>
+                            )}
                             <button
                               onClick={() => handleRemovePage(paper.id, pg.id)}
                               disabled={removingPage === pg.id}

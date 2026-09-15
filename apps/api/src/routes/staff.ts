@@ -551,6 +551,7 @@ async function ingestToVectorize(
   text: string,
   medium: 'english' | 'assamese',
   sourceType: 'notes' | 'important_questions' | 'pyq',
+  media: Array<Record<string, unknown>> = [],
 ): Promise<number> {
   const rawChunks = chunkText(text);
   if (rawChunks.length === 0) return 0;
@@ -581,6 +582,7 @@ async function ingestToVectorize(
           chapterId, subjectId, medium, sourceType,
           chunkType: 'text',
           content: chunk.slice(0, 512),
+          ...(media.length ? { media: JSON.stringify(media) } : {}),
         },
         content: chunk,
       };
@@ -610,7 +612,10 @@ async function ingestToVectorize(
           chunkType: 'text',
           content:  vr.content,
           vectorId: vr.id,
-          metadata: JSON.stringify({ chapterId, subjectId, medium, sourceType }),
+          metadata: JSON.stringify({
+            chapterId, subjectId, medium, sourceType,
+            ...(media.length ? { media } : {}),
+          }),
           createdAt: now,
         }).run(),
       ),
@@ -1294,7 +1299,12 @@ type PYQPaper = {
   class_name?: string | undefined; year?: number | null | undefined;
   description?: string | undefined; rag_text?: string | undefined; rag_text_as?: string | undefined;
   rag_updated_at?: string | null | undefined; rag_indexed_at?: string | null | undefined;
-  pages?: Array<{ id: string; url: string; uploaded_at?: string | undefined }> | undefined;
+  pages?: Array<{
+    id: string; url: string; uploaded_at?: string | undefined;
+    ocr_status?: 'pending' | 'processing' | 'complete' | 'failed';
+    ocr_text?: string; figures?: ChapterPYQFigure[]; ocr_error?: string;
+    ocr_updated_at?: string; ocr_model?: string;
+  }> | undefined;
   created_at?: string | undefined;
 };
 
@@ -1887,7 +1897,7 @@ staffRouter.post('/content/subject/:subjectId/pyq-papers/:paperId/pages', async 
     return c.json({ detail: `Upload failed: ${String(err)}` }, 502);
   }
 
-  const page = { id: pageId, url, uploaded_at: new Date().toISOString() };
+  const page = { id: pageId, url, uploaded_at: new Date().toISOString(), ocr_status: 'pending' as const };
   paper.pages = [...(paper.pages ?? []), page];
 
   try {
@@ -1900,6 +1910,58 @@ staffRouter.post('/content/subject/:subjectId/pyq-papers/:paperId/pages', async 
   }
   await auditLog(c.env, auth.sub ?? '', 'upload_subject_pyq_page', 'pyq_paper', paperId, { subject_id: subjectId, page_id: pageId });
   return c.json({ ok: true, page, pyq_papers: papers }, 201);
+});
+
+// POST /staff/content/subject/:subjectId/pyq-papers/:paperId/pages/:pageId/ocr
+staffRouter.post('/content/subject/:subjectId/pyq-papers/:paperId/pages/:pageId/ocr', async (c) => {
+  const auth = await guard(c); if (!auth) return c.res;
+  const denied = await capabilityDenied(c, auth, 'rag:reindex'); if (denied) return denied;
+  const { subjectId, paperId, pageId } = c.req.param();
+  const { row, papers } = await loadSubjectPapers(c.env, subjectId);
+  if (!row) return c.json({ detail: 'Subject not found' }, 404);
+  const paper = papers.find(item => item.id === paperId);
+  const page = paper?.pages?.find(item => item.id === pageId);
+  if (!paper) return c.json({ detail: 'Paper not found' }, 404);
+  if (!page) return c.json({ detail: 'Page not found' }, 404);
+
+  page.ocr_status = 'processing';
+  await saveSubjectPapers(c.env, subjectId, papers);
+  try {
+    const extracted = await extractPyqImage(
+      c.env,
+      ownedR2Key(c.env, page.url, `pyq/subjects/${subjectId}/${paperId}/`),
+    );
+    page.ocr_status = 'complete';
+    page.ocr_text = extracted.text;
+    page.figures = extracted.figures;
+    page.ocr_updated_at = new Date().toISOString();
+    page.ocr_model = PYQ_VISION_MODEL;
+    delete page.ocr_error;
+    await saveSubjectPapers(c.env, subjectId, papers);
+
+    const pageText = (paper.pages ?? []).filter(item => item.ocr_text?.trim()).map((item, index) => [
+      `## PYQ page ${index + 1}`,
+      `Original page image: ${item.url}`,
+      item.ocr_text,
+      ...(item.figures ?? []).map((figure, figureIndex) =>
+        `[Figure ${figureIndex + 1}] ${figure.description ?? figure.alt_text ?? 'Figure preserved in original page image.'}`),
+    ].join('\n')).join('\n\n');
+    const ragText = [paper.rag_text, pageText].filter(Boolean).join('\n\n').trim();
+    if (ragText) {
+      await deleteStaleVectors(c.env, paperId, 'pyq');
+      await ingestToVectorize(c.env, paperId, subjectId, ragText, 'english', 'pyq');
+      paper.rag_updated_at = new Date().toISOString();
+      paper.rag_indexed_at = paper.rag_updated_at;
+      await saveSubjectPapers(c.env, subjectId, papers);
+    }
+    return c.json({ ok: true, page, pyq_papers: papers });
+  } catch (error) {
+    page.ocr_status = 'failed';
+    page.ocr_error = error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300);
+    page.ocr_updated_at = new Date().toISOString();
+    await saveSubjectPapers(c.env, subjectId, papers);
+    return c.json({ ok: false, detail: page.ocr_error, page, pyq_papers: papers }, 502);
+  }
 });
 
 // DELETE /staff/content/subject/:subjectId/pyq-papers/:paperId/pages/:pageId
@@ -1995,15 +2057,11 @@ function parseVisionJson(raw: string): { text: string; figures: ChapterPYQFigure
   }
 }
 
-async function extractPyqPage(
+async function extractPyqImage(
   env: Env,
-  page: ChapterPYQPage,
+  key: string | null,
 ): Promise<{ text: string; figures: ChapterPYQFigure[] }> {
-  const key = ownedR2Key(env, page.url, `pyq/${page.id}/`);
-  // The URL is keyed by chapter, not page ID. Resolve the object from the URL
-  // at the route before calling this helper; this guard prevents accidental
-  // cross-prefix reads if the data is malformed.
-  if (!key) throw new Error('Stored page URL is not owned by this chapter');
+  if (!key) throw new Error('Stored page URL is not owned by this PYQ paper');
   const object = await env.R2_BUCKET.get(key);
   if (!object) throw new Error('Stored page image was not found');
   const bytes = await object.arrayBuffer();
@@ -2026,6 +2084,14 @@ async function extractPyqPage(
   const raw = String(record?.description ?? record?.response ?? record?.result?.description ?? record?.result?.response ?? '');
   if (!raw.trim()) throw new Error('Vision OCR returned no transcription');
   return parseVisionJson(raw);
+}
+
+async function extractPyqPage(
+  env: Env,
+  chapterId: string,
+  page: ChapterPYQPage,
+): Promise<{ text: string; figures: ChapterPYQFigure[] }> {
+  return extractPyqImage(env, ownedR2Key(env, page.url, `pyq/${chapterId}/papers/`));
 }
 
 /** Load pyq_papers JSON array from a chapter row. */
@@ -2130,7 +2196,12 @@ staffRouter.post('/content/chapter/:id/pyq-papers', async (c) => {
   const yearRaw = typeof formData['year'] === 'string' ? parseInt(formData['year'], 10) : undefined;
   const year = yearRaw && !isNaN(yearRaw) ? yearRaw : undefined;
 
-  const paper: ChapterPYQPage = { id: paperId, url, uploaded_at: new Date().toISOString() };
+  const paper: ChapterPYQPage = {
+    id: paperId,
+    url,
+    uploaded_at: new Date().toISOString(),
+    ocr_status: 'pending',
+  };
   if (title) paper.title = title;
   if (year)  paper.year  = year;
 
@@ -2148,6 +2219,59 @@ staffRouter.post('/content/chapter/:id/pyq-papers', async (c) => {
 
   await auditLog(c.env, auth.sub ?? '', 'add_pyq_paper', 'chapter', chapterId, { paperId });
   return c.json({ ok: true, paper, pyq_papers: papers }, 201);
+});
+
+// POST /staff/content/chapter/:id/pyq-papers/:paperId/ocr
+// Extracts exact page text plus figure descriptions, then rebuilds the
+// chapter-scoped PYQ vectors while retaining the original page image.
+staffRouter.post('/content/chapter/:id/pyq-papers/:paperId/ocr', async (c) => {
+  const auth = await guard(c); if (!auth) return c.res;
+  const denied = await capabilityDenied(c, auth, 'rag:reindex'); if (denied) return denied;
+  const { id: chapterId, paperId } = c.req.param();
+  const { ch, papers } = await loadChapterPapers(c.env, chapterId);
+  if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
+  const index = papers.findIndex(page => page.id === paperId);
+  if (index < 0) return c.json({ detail: 'PYQ page not found' }, 404);
+  const current = papers[index];
+  if (!current) return c.json({ detail: 'PYQ page not found' }, 404);
+
+  const processing: ChapterPYQPage = { ...current, ocr_status: 'processing' };
+  delete processing.ocr_error;
+  papers[index] = processing;
+  const db = createDb(c.env.DB);
+  await db.update(chapters).set({ pyqPapers: JSON.stringify(papers), updatedAt: nowTs() }).where(eq(chapters.id, chapterId));
+
+  try {
+    const extracted = await extractPyqPage(c.env, chapterId, processing);
+    papers[index] = {
+      ...processing,
+      ocr_status: 'complete',
+      ocr_text: extracted.text,
+      figures: extracted.figures,
+      ocr_updated_at: new Date().toISOString(),
+      ocr_model: PYQ_VISION_MODEL,
+    };
+    await db.update(chapters).set({ pyqPapers: JSON.stringify(papers), updatedAt: nowTs() }).where(eq(chapters.id, chapterId));
+
+    const indexed = await reindexChapterRag(c.env, chapterId, ['pyq']);
+    const pyqResult = indexed.pyq;
+    if (pyqResult?.error) throw new Error(`OCR saved but PYQ indexing failed: ${pyqResult.error}`);
+
+    await auditLog(c.env, auth.sub ?? '', 'ocr_pyq_page', 'chapter', chapterId, {
+      paperId, figures: extracted.figures.length, chunks: pyqResult?.chunks ?? 0,
+    });
+    return c.json({ ok: true, paper: papers[index], pyq_papers: papers, indexed: pyqResult });
+  } catch (error) {
+    const failed = {
+      ...processing,
+      ocr_status: 'failed' as const,
+      ocr_error: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300),
+      ocr_updated_at: new Date().toISOString(),
+    };
+    papers[index] = failed;
+    await db.update(chapters).set({ pyqPapers: JSON.stringify(papers), updatedAt: nowTs() }).where(eq(chapters.id, chapterId));
+    return c.json({ ok: false, detail: failed.ocr_error, paper: failed, pyq_papers: papers }, 502);
+  }
 });
 
 // DELETE /staff/content/chapter/:id/pyq-papers/:paperId
@@ -2207,7 +2331,24 @@ staffRouter.post('/content/subject/:subjectId/pyq-papers/:paperId/reindex', asyn
   const paper = papers.find(p => p.id === paperId);
   if (!paper) return c.json({ detail: 'Paper not found' }, 404);
 
-  const ragEn = (paper.rag_text    ?? '').trim();
+  const pageText = (paper.pages ?? [])
+    .filter(page => page.ocr_text?.trim())
+    .map((page, index) => [
+      `## PYQ page ${index + 1}`,
+      `Original page image: ${page.url}`,
+      page.ocr_text,
+      ...(page.figures ?? []).map((figure, figureIndex) =>
+        `[Figure ${figureIndex + 1}] ${figure.description ?? figure.alt_text ?? 'Figure preserved in original page image.'}`),
+    ].join('\n'))
+    .join('\n\n');
+  const media = (paper.pages ?? [])
+    .filter(page => page.ocr_text?.trim())
+    .map(page => ({
+      url: page.url,
+      pageId: page.id,
+      ...(page.figures ? { figures: page.figures } : {}),
+    }));
+  const ragEn = [paper.rag_text, pageText].filter(Boolean).join('\n\n').trim();
   const ragAs = (paper.rag_text_as ?? '').trim();
   let totalChunks = 0;
   const errors: string[] = [];
@@ -2215,7 +2356,7 @@ staffRouter.post('/content/subject/:subjectId/pyq-papers/:paperId/reindex', asyn
   catch (error) { return c.json({ ok: false, detail: `PYQ cleanup failed: ${String(error)}` }, 502); }
 
   if (ragEn) {
-    try { totalChunks += await ingestToVectorize(c.env, paperId, subjectId, ragEn, 'english', 'pyq'); }
+    try { totalChunks += await ingestToVectorize(c.env, paperId, subjectId, ragEn, 'english', 'pyq', media); }
     catch (err) { errors.push(`english: ${String(err)}`); }
   }
   if (ragAs) {

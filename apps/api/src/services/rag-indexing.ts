@@ -118,7 +118,7 @@ async function ingest(
     metadata: {
       chapterId, subjectId, medium, sourceType: sourceFor[scope],
       chunkType: 'text', content: entry.content.slice(0, 512),
-      ...(media.length ? { media } : {}),
+       ...(media.length ? { media: JSON.stringify(media) } : {}),
       ...hierarchyMetadata,
     },
   })));
@@ -168,8 +168,8 @@ export async function reindexChapterRag(env: Env, chapterId: string, requested: 
       : []),
   ].filter(Boolean).join('\n')).join('\n\n');
   text.pyq = [pyqText || null, null];
-  const pyqMedia: RagMedia[] = pyqPages.map(page => ({
-    url: page.url,
+  const pyqMedia: RagMedia[] = pyqPages.filter(page => typeof page.url === 'string').map(page => ({
+    url: page.url as string,
     ...(page.id ? { pageId: page.id } : {}),
     ...(Array.isArray(page.figures) ? { figures: page.figures as Array<Record<string, unknown>> } : {}),
   }));
