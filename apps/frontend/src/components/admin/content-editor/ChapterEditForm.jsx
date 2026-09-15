@@ -42,6 +42,7 @@ export default function ChapterEditForm({
   const [editorLang, setEditorLang] = useState('en');
   const [contentMode, setContentMode] = useState('reader'); // 'reader' | 'rag'
   const [translating, setTranslating] = useState(false);
+  const pageInputRef = useRef(null);
 
   const handleTranslateToAssamese = useCallback(async () => {
     if (!editTarget?.id) return;
@@ -91,6 +92,7 @@ export default function ChapterEditForm({
   }, [_contentField, setContentForm]);
 
   const imageUploadHandler = useCallback(async (image) => {
+    if (!editTarget?.id) throw new Error('Save the chapter before uploading image pages');
     const formData = new FormData();
     formData.append('file', image);
     const res = await axios.post(`${API}/staff/content/chapter/${editTarget.id}/pyq-papers`, formData, authHeaders(adminToken));
@@ -100,53 +102,60 @@ export default function ChapterEditForm({
   }, [adminToken, editTarget?.id]);
 
   const handleAddPages = useCallback(() => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.multiple = true;
-    input.onchange = async (e) => {
-      const files = Array.from(e.target.files || []);
-      if (!files.length) return;
-      if (files.some(f => f.size > 10 * 1024 * 1024)) {
-        toast.error('Each image must be under 10 MB');
-        return;
-      }
-      setImgUploading(true);
-      const tid = toast.loading(`Uploading ${files.length} page(s)…`);
-      try {
-        const urls = [];
-        const failures = [];
-        for (let i = 0; i < files.length; i++) {
-          toast.loading(`Page ${i + 1}/${files.length}…`, { id: tid });
-          try {
-            urls.push(await imageUploadHandler(files[i]));
-          } catch (error) {
-            // Keep successfully uploaded pages in the unsaved draft. Losing them
-            // after a later file fails is worse than requiring a retry.
-            failures.push(files[i].name);
-          }
+    if (!pageInputRef.current) return;
+    // Clearing first allows selecting the same page(s) again after a failed
+    // request. The persistent input also preserves the browser's multi-select
+    // behavior across repeated clicks.
+    pageInputRef.current.value = '';
+    pageInputRef.current.click();
+  }, []);
+
+  const handlePageFiles = useCallback(async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    if (files.some(f => f.size > 10 * 1024 * 1024)) {
+      toast.error('Each image must be under 10 MB');
+      e.target.value = '';
+      return;
+    }
+    setImgUploading(true);
+    const tid = toast.loading(`Uploading ${files.length} page(s)…`);
+    try {
+      const urls = [];
+      const failures = [];
+      for (let i = 0; i < files.length; i++) {
+        toast.loading(`Page ${i + 1}/${files.length}…`, { id: tid });
+        try {
+          urls.push(await imageUploadHandler(files[i]));
+        } catch (error) {
+          // Keep successfully uploaded pages in the unsaved draft. Losing them
+          // after a later file fails is worse than requiring a retry.
+          const detail = error.response?.data?.detail || error.message;
+          failures.push(`${files[i].name}${detail ? ` (${detail})` : ''}`);
         }
-        if (!urls.length) throw new Error('No pages uploaded');
-        const current = editorRef.current?.value ?? activeContent;
-        const previousPageCount = (current.match(/!\[Page\s+\d+\]\(/gi) || []).length;
-        const pagesMd = urls
-          .map((u, i) => `![Page ${previousPageCount + i + 1}](${u})`)
-          .join('\n\n');
-        const field = _contentField();
-        setContentForm(f => ({ ...f, [field]: current + (current.trim() ? '\n\n' : '') + pagesMd + '\n' }));
-        setEditorKey(k => k + 1);
-        if (failures.length) {
-          toast.error(`${urls.length} page(s) added; ${failures.length} failed. Retry: ${failures.join(', ')}`, { id: tid });
-        } else {
-          toast.success(`${urls.length} page(s) added`, { id: tid });
-        }
-      } catch {
-        toast.error('No pages were uploaded', { id: tid });
-      } finally {
-        setImgUploading(false);
       }
-    };
-    input.click();
+      if (!urls.length) {
+        throw new Error(failures.length ? failures.join('; ') : 'No pages uploaded');
+      }
+      const current = editorRef.current?.value ?? activeContent;
+      const previousPageCount = (current.match(/!\[Page\s+\d+\]\(/gi) || []).length;
+      const pagesMd = urls
+        .map((u, i) => `![Page ${previousPageCount + i + 1}](${u})`)
+        .join('\n\n');
+      const field = _contentField();
+      setContentForm(f => ({ ...f, [field]: current + (current.trim() ? '\n\n' : '') + pagesMd + '\n' }));
+      setEditorKey(k => k + 1);
+      if (failures.length) {
+        toast.error(`${urls.length} page(s) added; ${failures.length} failed. Retry: ${failures.join(', ')}`, { id: tid });
+      } else {
+        toast.success(`${urls.length} page(s) added`, { id: tid });
+      }
+    } catch (error) {
+      toast.error(error.message || 'No pages were uploaded', { id: tid });
+    } finally {
+      e.target.value = '';
+      setImgUploading(false);
+    }
   }, [imageUploadHandler, editorRef, activeContent, setContentForm, setEditorKey, _contentField]);
 
   const [showAuditLog, setShowAuditLog] = useState(false);
@@ -394,9 +403,19 @@ export default function ChapterEditForm({
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex items-center gap-1.5 mb-1.5 flex-shrink-0">
             <div className="flex items-center gap-1">
+              <input
+                ref={pageInputRef}
+                type="file"
+                accept=".jpg,.jpeg,.png,.webp,.gif,image/*"
+                multiple
+                className="hidden"
+                onChange={handlePageFiles}
+              />
               <button
+                type="button"
                 onClick={handleAddPages}
-                disabled={imgUploading}
+                disabled={imgUploading || !editTarget?.id}
+                title={editTarget?.id ? 'Select one or more image pages' : 'Save the chapter before uploading image pages'}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-all shadow-sm"
               >
                 {imgUploading ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />}
