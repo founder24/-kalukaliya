@@ -1395,7 +1395,7 @@ export default function ChapterPage() {
             )}
             <div
               id="chapter-content-top"
-              className="chapter-textbook rounded-2xl p-3 sm:p-4 scroll-mt-20 max-w-[720px] mx-auto text-[12px] leading-relaxed"
+              className="chapter-textbook rounded-2xl p-4 sm:p-6 scroll-mt-20 max-w-[720px] mx-auto text-[15px] sm:text-base leading-7"
             >
               {/* Notes mode — main markdown content */}
               {(isQuestionPaper || contentMode === 'notes') && (
