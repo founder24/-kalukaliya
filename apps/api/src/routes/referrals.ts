@@ -48,6 +48,8 @@ import {
   calculateWeeklyRoi,
   ingestAdRevenueReport,
   listAdNetworkInventory,
+  listRoiEvidenceDownloadAudits,
+  normalizeRoiAuditLimit,
   normalizeRoiReportLimit,
   recordRoiControls,
   recordRoiEvidenceDownloadAudit,
@@ -612,6 +614,21 @@ adminReferralRouter.get('/roi/dashboard/export', async (c) => {
     });
   } catch {
     return c.json({ detail: 'Referral ROI evidence export unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.get('/roi/dashboard/export-audits', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  try {
+    return c.json({
+      audits: await listRoiEvidenceDownloadAudits(
+        c.env.DB,
+        normalizeRoiAuditLimit(Number(c.req.query('limit') ?? 25)),
+      ),
+    });
+  } catch {
+    return c.json({ detail: 'Referral ROI evidence audit history unavailable' }, 503);
   }
 });
 

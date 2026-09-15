@@ -222,6 +222,50 @@ describe('release regressions', () => {
     expect(exportAudit?.created_at).toEqual(expect.any(Number));
   });
 
+  it('lists bounded ROI download audits without exposing raw audit details', async () => {
+    const limited = await token('limited');
+    const settler = await token('settler');
+    const capturedAt = Math.floor(Date.now() / 1000) + 10;
+    await env.DB.prepare(`
+      INSERT INTO content_audit_log
+        (id, user_id, action, target_type, target_id, diff, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      'roi-audit-listing-test',
+      'audit-operator',
+      'download_referral_roi_evidence',
+      'referral_roi',
+      'dashboard',
+      JSON.stringify({
+        report_limit: 7,
+        provider_secret: 'must-not-leak',
+        beneficiary_account: 'private-beneficiary-data',
+      }),
+      capturedAt,
+    ).run();
+
+    const denied = await fetchWorker(
+      request('/api/v1/admin/referrals/roi/dashboard/export-audits?limit=1', limited),
+    );
+    expect(denied.status).toBe(403);
+
+    const response = await fetchWorker(
+      request('/api/v1/admin/referrals/roi/dashboard/export-audits?limit=1', settler),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+      audits: [{
+        actor_id: 'audit-operator',
+        captured_at: capturedAt,
+        action: 'download_referral_roi_evidence',
+        report_limit: 7,
+      }],
+    });
+    expect(JSON.stringify(body)).not.toContain('must-not-leak');
+    expect(JSON.stringify(body)).not.toContain('private-beneficiary-data');
+  });
+
   it('fences an active RAG lease and recovers an expired running lease', async () => {
     const items = JSON.stringify([{ chapter_id: 'chapter', scopes: ['notes'], status: 'pending' }]);
     await env.DB.prepare(`INSERT INTO rag_reindex_jobs (id,status,requested_scopes,items,lease_token,lease_expires_at,created_at,updated_at) VALUES ('active','running','["notes"]',?,'owner',?,1,1)`).bind(items, Math.floor(Date.now() / 1000) + 600).run();
