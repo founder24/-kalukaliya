@@ -346,6 +346,16 @@ def _legacy_repair_progress_states() -> dict[str, tuple[dict, bool]]:
     return latest
 
 
+def _overlay_live_repair_progress_states(
+    states: dict[str, tuple[dict, bool]],
+) -> None:
+    """Apply appended live records so the last live decision wins."""
+    for record in _read_jsonl_records(_AHSEC_D1_IMPORT_PROGRESS_FILE):
+        chapter_id = str(record.get("chapter_id") or "").strip()
+        if chapter_id:
+            states[chapter_id] = (record, False)
+
+
 def _index_repair_queue(limit: int) -> dict:
     """Return latest unresolved index failures across live and archived ledgers."""
     indexed = _read_latest_progress_index(_AHSEC_D1_LATEST_PROGRESS_INDEX_FILE)
@@ -364,10 +374,7 @@ def _index_repair_queue(limit: int) -> dict:
         # The current ledger can change between importer index writes. Reading
         # only this bounded/live file preserves freshness without touching any
         # archived batches.
-        for record in _read_jsonl_records(_AHSEC_D1_IMPORT_PROGRESS_FILE):
-            chapter_id = str(record.get("chapter_id") or "").strip()
-            if chapter_id:
-                latest_by_chapter[chapter_id] = (record, False)
+        _overlay_live_repair_progress_states(latest_by_chapter)
 
     queue = []
     exhausted = 0

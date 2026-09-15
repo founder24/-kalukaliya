@@ -696,6 +696,148 @@ def test_index_repair_queue_uses_compact_index_after_archive_retention(
     assert second.json() == body
 
 
+def test_index_repair_queue_prefers_newest_appended_live_decision(
+    client, admin_cookie, tmp_path
+):
+    import app.api.v1.admin_content as admin_content
+
+    state_dir = tmp_path / "import-state"
+    archive_dir = state_dir / "archive"
+    archived_batch = archive_dir / "20260901T000000Z"
+    archived_batch.mkdir(parents=True)
+    approvals = state_dir / "approvals.jsonl"
+    progress = state_dir / "progress.jsonl"
+    latest_index = state_dir / "latest-progress.json"
+
+    _write_jsonl(
+        archived_batch / "progress.jsonl",
+        {
+            "run_id": "archived-run",
+            "chapter_id": "chapter-resolved",
+            "status": "index_failed",
+            "operation": "vector_upsert",
+            "index_attempt": 1,
+            "timestamp": "2026-09-01T10:00:00+00:00",
+        },
+        {
+            "run_id": "archived-run",
+            "chapter_id": "chapter-retried",
+            "status": "index_failed",
+            "operation": "vector_delete",
+            "index_attempt": 1,
+            "timestamp": "2026-09-01T10:01:00+00:00",
+        },
+    )
+    _write_jsonl(
+        progress,
+        {
+            "run_id": "resolution-run",
+            "chapter_id": "chapter-resolved",
+            "status": "done",
+            "timestamp": "2026-09-15T10:00:00+00:00",
+        },
+        {
+            "run_id": "retry-start-run",
+            "chapter_id": "chapter-retried",
+            "status": "done",
+            "operation": "chapter_write",
+            "index_attempt": 1,
+            "timestamp": "2026-09-15T10:01:00+00:00",
+        },
+        {
+            "run_id": "retry-current-run",
+            "chapter_id": "chapter-retried",
+            "status": "index_failed",
+            "operation": "chapter_index_lock",
+            "index_attempt": 2,
+            "timestamp": "2026-09-15T10:02:00+00:00",
+        },
+    )
+    latest_index.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "chapters": {
+                    "chapter-resolved": {
+                        "record": {
+                            "run_id": "archived-run",
+                            "chapter_id": "chapter-resolved",
+                            "status": "index_failed",
+                            "operation": "vector_upsert",
+                            "index_attempt": 1,
+                            "timestamp": "2026-09-01T10:00:00+00:00",
+                        },
+                        "archived": True,
+                    },
+                    "chapter-retried": {
+                        "record": {
+                            "run_id": "retry-start-run",
+                            "chapter_id": "chapter-retried",
+                            "status": "done",
+                            "operation": "chapter_write",
+                            "index_attempt": 1,
+                            "timestamp": "2026-09-15T10:01:00+00:00",
+                        },
+                        "archived": False,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with (
+        patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", approvals),
+        patch.object(admin_content, "_AHSEC_D1_IMPORT_PROGRESS_FILE", progress),
+        patch.object(
+            admin_content,
+            "_AHSEC_D1_LATEST_PROGRESS_INDEX_FILE",
+            latest_index,
+        ),
+        patch.object(
+            admin_content,
+            "_AHSEC_D1_ARCHIVE_DIR",
+            archive_dir,
+        ),
+        patch.object(
+            admin_content,
+            "_legacy_repair_progress_states",
+            side_effect=AssertionError("archive history must not be rescanned"),
+        ),
+    ):
+        first = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/index-repair-queue?limit=10",
+            cookies=admin_cookie,
+        )
+        second = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/index-repair-queue?limit=10",
+            cookies=admin_cookie,
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    body = first.json()
+    assert body["total"] == 1
+    assert body["exhausted"] == 0
+    assert body["chapters"] == [
+        {
+            "chapter_id": "chapter-retried",
+            "operation": "chapter_index_lock",
+            "attempts_used": 2,
+            "next_attempt": 3,
+            "attempt_limit": 3,
+            "repair_command": (
+                "python3 -m scripts.ahsec_d1_import "
+                "--confirm-production-write --repair-index chapter-retried"
+            ),
+            "run_id": "retry-current-run",
+            "failed_at": "2026-09-15T10:02:00+00:00",
+            "archived": False,
+        }
+    ]
+    assert second.json() == body
+
+
 @pytest.mark.parametrize(
     "latest_index_contents",
     [
