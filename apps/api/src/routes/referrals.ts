@@ -48,7 +48,9 @@ import {
   calculateWeeklyRoi,
   ingestAdRevenueReport,
   listAdNetworkInventory,
+  normalizeRoiReportLimit,
   recordRoiControls,
+  recordRoiEvidenceDownloadAudit,
   roiDashboard,
 } from '../services/referral-roi';
 import type { Env, JwtPayload } from '../types';
@@ -591,7 +593,15 @@ adminReferralRouter.get('/roi/dashboard/export', async (c) => {
   const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
   if (auth instanceof Response) return auth;
   try {
-    const dashboard = await roiDashboard(c.env.DB, Number(c.req.query('limit') ?? 12));
+    const reportLimit = normalizeRoiReportLimit(Number(c.req.query('limit') ?? 12));
+    const dashboard = await roiDashboard(c.env.DB, reportLimit);
+    c.executionCtx.waitUntil(
+      recordRoiEvidenceDownloadAudit(c.env.DB, {
+        actorId: auth.actorId,
+        reportLimit,
+        occurredAt: Math.floor(Date.now() / 1000),
+      }).catch(() => undefined),
+    );
     return new Response(JSON.stringify(dashboard, null, 2), {
       headers: {
         'Cache-Control': 'private, no-store, max-age=0',

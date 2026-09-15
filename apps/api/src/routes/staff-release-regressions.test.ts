@@ -10,8 +10,8 @@ import { resumeRagReindexJobs, runRagJob } from './staff';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../');
 let env: Env; let dispose: () => Promise<void>; let fetchWorker: (r: Request) => Promise<Response>;
-let env: Env; let dispose: () => Promise<void>; let fetchWorker: (r: Request) => Promise<Response>;
-let env: Env; let dispose: () => Promise<void>; let fetchWorker: (r: Request) => Promise<Response>;
+let fetchWorkerWithWaitUntil: (r: Request) => Promise<Response>;
+const waitUntilPromises: Promise<unknown>[] = [];
 const secret = 'staff-release-test-secret';
 async function token(sub: string, role = 'staff') {
   return new SignJWT({ role, type: 'access' }).setProtectedHeader({ alg: 'HS256' }).setSubject(sub)
@@ -40,7 +40,15 @@ beforeAll(async () => {
     env.DB.prepare(`INSERT INTO chapters (id,subject_id,title,slug,notes_en,qa_en,rag_text) VALUES ('chapter','subject','Chapter','chapter','note text','[{"content":"legacy QA"}]','must not be pyq')`),
   ]);
   const { default: worker } = await import('../index.js');
-  fetchWorker = request => (worker.fetch as (r: Request, e: Env, c: ExecutionContext) => Promise<Response>)(request, env, { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext);
+  const workerFetch = worker.fetch as (r: Request, e: Env, c: ExecutionContext) => Promise<Response>;
+  fetchWorker = request => workerFetch(request, env, {
+    waitUntil: () => {},
+    passThroughOnException: () => {},
+  } as unknown as ExecutionContext);
+  fetchWorkerWithWaitUntil = request => workerFetch(request, env, {
+    waitUntil: (promise: Promise<unknown>) => waitUntilPromises.push(Promise.resolve(promise)),
+    passThroughOnException: () => {},
+  } as unknown as ExecutionContext);
 });
 afterAll(async () => { await dispose(); });
 
@@ -70,7 +78,7 @@ describe('release regressions', () => {
   it('grants every staff account the unified control-center capabilities', async () => {
     const limited = await token('limited');
     const legacy = await token('legacy');
-    const limited = await token('limited'); const legacy = await token('legacy'); const admin = await token('admin', 'admin');
+    const admin = await token('admin', 'admin');
     for (const [path, method, body] of [
       ['/api/v1/staff/content/subjects', 'POST', { name: 'x' }],
       ['/api/v1/staff/content/kv-prewarm/subject', 'POST', {}],
@@ -140,11 +148,33 @@ describe('release regressions', () => {
       capability: 'referral:settle',
     });
 
-    const roiExport = await fetchWorker(request('/api/v1/admin/referrals/roi/dashboard/export', settler));
+    const roiExport = await fetchWorkerWithWaitUntil(request('/api/v1/admin/referrals/roi/dashboard/export', settler));
     expect(roiExport.status).toBe(200);
     expect(roiExport.headers.get('content-disposition')).toContain('attachment');
     expect(roiExport.headers.get('content-type')).toContain('application/json');
     expect(await roiExport.json()).toEqual(roiBody);
+    await Promise.all(waitUntilPromises.splice(0));
+    const exportAudit = await env.DB.prepare(`
+      SELECT user_id, action, target_type, target_id, diff, created_at
+      FROM content_audit_log
+      WHERE action = 'download_referral_roi_evidence' AND user_id = 'settler'
+      ORDER BY created_at DESC LIMIT 1
+    `).first<{
+      user_id: string;
+      action: string;
+      target_type: string;
+      target_id: string;
+      diff: string;
+      created_at: number;
+    }>();
+    expect(exportAudit).toMatchObject({
+      user_id: 'settler',
+      action: 'download_referral_roi_evidence',
+      target_type: 'referral_roi',
+      target_id: 'dashboard',
+    });
+    expect(JSON.parse(exportAudit?.diff ?? '{}')).toEqual({ report_limit: 12 });
+    expect(exportAudit?.created_at).toEqual(expect.any(Number));
   });
 
   it('fences an active RAG lease and recovers an expired running lease', async () => {
@@ -160,6 +190,7 @@ describe('release regressions', () => {
   });
 
   it('uses estimated vectors in destructive impact preview', async () => {
+    const legacy = await token('legacy');
     const response = await fetchWorker(request('/api/v1/staff/content/chapter/chapter', legacy, 'PATCH', { notes_en: 'audited edit' }));
     expect(response.status).toBe(200);
     const body = await response.json() as Record<string, unknown>;
@@ -189,6 +220,7 @@ describe('release regressions', () => {
   });
 
   it('rejects bulk translation without applying a shared translation', async () => {
+    const legacy = await token('legacy');
     const response = await fetchWorker(request('/api/v1/staff/content/chapter/chapter', legacy, 'PATCH', { notes_en: 'audited edit' }));
     expect(response.status).toBe(400);
   });
@@ -216,5 +248,39 @@ describe('release regressions', () => {
     expect(response.status).toBe(200);
     const audit = await env.DB.prepare(`SELECT user_id,action FROM content_audit_log WHERE target_id='chapter' AND action='update_chapter' AND user_id='legacy' ORDER BY created_at DESC LIMIT 1`).first<{ user_id: string; action: string }>();
     expect(audit).toMatchObject({ user_id: 'legacy', action: 'update_chapter' });
+  });
+
+  it('keeps the ROI download successful when its audit sink is unavailable', async () => {
+    const settler = await token('settler');
+    await env.DB.prepare('DROP TABLE content_audit_log').run();
+    try {
+      const response = await fetchWorkerWithWaitUntil(request('/api/v1/admin/referrals/roi/dashboard/export?limit=4', settler));
+      expect(response.status).toBe(200);
+      const body = await response.json() as { inventory: unknown[]; reports: unknown[] };
+      expect(Array.isArray(body.inventory)).toBe(true);
+      expect(Array.isArray(body.reports)).toBe(true);
+      await Promise.all(waitUntilPromises.splice(0));
+    } finally {
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS content_audit_log (
+          id TEXT PRIMARY KEY,
+          user_id TEXT,
+          action TEXT NOT NULL,
+          target_type TEXT,
+          target_id TEXT,
+          diff TEXT,
+          expires_at INTEGER,
+          created_at INTEGER DEFAULT (unixepoch())
+        )
+      `).run();
+      await env.DB.prepare(`
+        CREATE INDEX IF NOT EXISTS cal_target_idx
+        ON content_audit_log(target_type, target_id)
+      `).run();
+      await env.DB.prepare(`
+        CREATE INDEX IF NOT EXISTS cal_expires_idx
+        ON content_audit_log(expires_at)
+      `).run();
+    }
   });
 });

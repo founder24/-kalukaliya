@@ -883,11 +883,49 @@ export async function calculateWeeklyRoi(
   };
 }
 
+export function normalizeRoiReportLimit(limit: number): number {
+  if (!Number.isFinite(limit)) return 12;
+  return Math.min(52, Math.max(1, Math.trunc(limit)));
+}
+
+export async function recordRoiEvidenceDownloadAudit(
+  db: D1Database,
+  input: {
+    actorId: string;
+    reportLimit: number;
+    occurredAt: number;
+  },
+): Promise<void> {
+  const actorId = boundedText(input.actorId, 'ROI export actor');
+  if (
+    !Number.isSafeInteger(input.reportLimit)
+    || input.reportLimit < 1
+    || input.reportLimit > 52
+    || !Number.isSafeInteger(input.occurredAt)
+  ) {
+    throw new Error('Invalid ROI export audit metadata');
+  }
+  await db.prepare(`
+    INSERT INTO content_audit_log
+      (id, user_id, action, target_type, target_id, diff, expires_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    crypto.randomUUID(),
+    actorId,
+    'download_referral_roi_evidence',
+    'referral_roi',
+    'dashboard',
+    JSON.stringify({ report_limit: input.reportLimit }),
+    input.occurredAt + 86400 * 180,
+    input.occurredAt,
+  ).run();
+}
+
 export async function roiDashboard(
   db: D1Database,
   limit = 12,
 ): Promise<Record<string, unknown>> {
-  const safeLimit = Math.min(52, Math.max(1, Math.trunc(limit)));
+  const safeLimit = normalizeRoiReportLimit(limit);
   const [inventory, controls, reports, reconciliation] = await Promise.all([
     listAdNetworkInventory(db),
     db.prepare(`SELECT * FROM referral_roi_controls WHERE id = 'singleton'`).first<ControlRow>(),
