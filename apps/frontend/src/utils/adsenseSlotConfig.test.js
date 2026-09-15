@@ -13,7 +13,7 @@ function validEnvironment() {
 
 describe('AdSense placement configuration', () => {
   it('declares one environment key for every manual placement', () => {
-    expect(Object.keys(ADSENSE_PLACEMENT_ENV_KEYS)).toHaveLength(20);
+    expect(Object.keys(ADSENSE_PLACEMENT_ENV_KEYS)).toHaveLength(21);
     expect(new Set(ADSENSE_SLOT_ENV_KEYS).size).toBe(ADSENSE_SLOT_ENV_KEYS.length);
   });
 

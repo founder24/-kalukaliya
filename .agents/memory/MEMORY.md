@@ -98,3 +98,4 @@
 - [AHSEC index concurrency](ahsec-index-concurrency.md) — lock the full chapter write/index sequence and refresh repair notes after lock acquisition
 - [Vite optimized dependency stability](vite-optimized-dependency-stability.md) — pre-optimize lazy staff/admin UI dependencies to prevent stale browser chunks during dev reloads
 - [Workers AI RAG indexing contract](workers-ai-rag-indexing-contract.md) — normalize bge-m3 array responses and keep Vectorize deletes within the 100-ID request limit
+- [Chapter PYQ page order](pyq-page-order.md) — chapter image records are ordered one-page entries; normalize legacy grouped data only at the viewer boundary

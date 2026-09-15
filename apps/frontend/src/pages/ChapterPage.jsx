@@ -294,6 +294,7 @@ export default function ChapterPage() {
   const skipFirstFetchRef = useRef(!!initialChapterData);
   const [pyqData, setPyqData] = useState(null);
   const [pyqImages, setPyqImages] = useState([]);
+  const [pyqImagesLoaded, setPyqImagesLoaded] = useState(false);
   // P0 #1 of the AI-visibility plan — FAQPage JSON-LD entries built from
   // the chapter's published MCQs. Fed into chapterSchema() via
   // pageData.data.faq_entries so the existing JSON-LD pipeline emits a
@@ -588,6 +589,7 @@ export default function ChapterPage() {
   useEffect(() => {
     setPyqData(null);
     setPyqImages([]);
+    setPyqImagesLoaded(false);
     if (!data?.chapter_id) return;
     let cancelled = false;
     // Text PYQs (important questions)
@@ -598,8 +600,16 @@ export default function ChapterPage() {
     // Image-based question papers uploaded via admin panel → R2
     apiClient()
       .get(`/content/chapters/${data.chapter_id}/pyq-images`)
-      .then(r => { if (!cancelled) setPyqImages(r.data?.papers || []); })
-      .catch(() => { if (!cancelled) setPyqImages([]); });
+      .then(r => {
+        if (cancelled) return;
+        setPyqImages(Array.isArray(r.data?.papers) ? r.data.papers : []);
+        setPyqImagesLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPyqImages([]);
+        setPyqImagesLoaded(true);
+      });
     return () => { cancelled = true; };
   }, [data?.chapter_id, contentLang]);
 
@@ -636,10 +646,13 @@ export default function ChapterPage() {
     // silently fall back to Notes so the user never sees a blank content area.
     // We use setContentMode directly (not switchTab) so the URL param is NOT
     // rewritten — it stays stale until the user manually switches tabs.
-    if (validTab === 'pyq' && !data?.pyq_pdf_url && !pyqImages.length) validTab = 'notes';
+    // Wait for the image endpoint before deciding whether a shared PYQ tab
+    // should fall back to Notes; otherwise the initial empty state can win
+    // the race and hide pages that are still loading.
+    if (validTab === 'pyq' && pyqImagesLoaded && !data?.pyq_pdf_url && !pyqImages.length) validTab = 'notes';
     setContentMode(validTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.chapter_id]);
+  }, [data?.chapter_id, pyqImagesLoaded, pyqImages.length]);
 
   // Sync the active tab into the URL (?tab=notes|qa|pyq) without adding a
   // new history entry so that shared / bookmarked URLs open on the same tab

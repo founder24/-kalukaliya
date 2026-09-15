@@ -239,6 +239,14 @@ const PLACEMENTS = {
     label: 'Advertisement',
     adFormat: 'auto',
   },
+  'chapter.pyq.betweenImages': {
+    network: 'adsense',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['chapter.pyq.betweenImages']] || '',
+    height: 0,
+    label: 'Advertisement',
+    adFormat: 'fluid',
+    adLayout: 'in-article',
+  },
   'chapter.pyq.inContent': {
     network: 'adsense',
     slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['chapter.pyq.inContent']] || '',

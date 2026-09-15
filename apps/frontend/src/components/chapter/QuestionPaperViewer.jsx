@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { X, ZoomIn, ZoomOut, Maximize2, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import AdSlot from '@/components/ads/AdSlot';
 
 /**
  * QuestionPaperViewer
@@ -11,6 +12,27 @@ import { X, ZoomIn, ZoomOut, Maximize2, Download, ChevronLeft, ChevronRight } fr
  *   papers   — array of { id, exam_year, filename, page_count, file_urls: string[] }
  *   lang     — 'en' | 'as'
  */
+export function normalizeQuestionPaperPages(papers = []) {
+  const pages = [];
+  papers.forEach((paper, paperIndex) => {
+    if (Array.isArray(paper?.file_urls)) {
+      paper.file_urls.filter(Boolean).forEach((url, pageIndex) => {
+        pages.push({
+          ...paper,
+          id: `${paper.id || paperIndex}-page-${pageIndex + 1}`,
+          url,
+          page_index: pageIndex,
+        });
+      });
+      return;
+    }
+    if (paper?.url) {
+      pages.push({ ...paper, id: paper.id || `page-${paperIndex + 1}` });
+    }
+  });
+  return pages;
+}
+
 export default function QuestionPaperViewer({ papers = [], lang = 'en' }) {
   const [lightbox, setLightbox] = useState(null); // { urls: [], idx: 0 }
   const [zoom, setZoom] = useState(100);
@@ -23,7 +45,9 @@ export default function QuestionPaperViewer({ papers = [], lang = 'en' }) {
   const prevPage = useCallback(() => setLightbox(l => l ? { ...l, idx: Math.max(0, l.idx - 1) } : l), []);
   const nextPage = useCallback(() => setLightbox(l => l ? { ...l, idx: Math.min(l.urls.length - 1, l.idx + 1) } : l), []);
 
-  if (!papers.length) {
+  const pages = normalizeQuestionPaperPages(papers);
+
+  if (!pages.length) {
     return (
       <div className="py-12 text-center space-y-2" data-testid="pyq-images-empty">
         <p className="text-sm text-muted-foreground">
@@ -33,64 +57,52 @@ export default function QuestionPaperViewer({ papers = [], lang = 'en' }) {
     );
   }
 
-  // Group by year, newest first
-  const byYear = {};
-  for (const p of papers) {
-    const yr = p.exam_year || 'Unknown';
-    (byYear[yr] = byYear[yr] || []).push(p);
-  }
-  const years = Object.keys(byYear).sort((a, b) => b - a);
+  // Raw chapter uploads have one {id, url, uploaded_at} entry per page.
+  // Render the normalized list directly: sorting/grouping here would break
+  // the upload order that represents the scanned paper's page order.
+  const pageUrls = pages.map(page => page.url);
 
   return (
     <>
       <div className="space-y-8" data-testid="pyq-images-viewer">
-        {years.map(yr => (
-          <div key={yr}>
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-100 text-violet-700 tracking-wide">
-                {yr === 'Unknown'
-                  ? (lang === 'as' ? 'বছৰ অজ্ঞাত' : 'Year unknown')
-                  : (lang === 'as' ? `${yr} চন` : `${yr} Exam`)}
-              </span>
-              <div className="flex-1 h-px bg-violet-100" />
-            </div>
-
-            {byYear[yr].map(paper => {
-              const urls = paper.file_urls || [];
-              return (
-                <div key={paper.id} className="space-y-2 mb-4">
-                  {urls.map((url, pageIdx) => (
-                    <div
-                      key={pageIdx}
-                      className="relative group cursor-zoom-in rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-gray-50"
-                      onClick={() => openLightbox(urls, pageIdx)}
-                    >
-                      <img
-                        src={url}
-                        alt={lang === 'as'
-                          ? `প্ৰশ্নকাকত ${yr} — পৃষ্ঠা ${pageIdx + 1}`
-                          : `Question Paper ${yr} — Page ${pageIdx + 1}`}
-                        className="w-full h-auto block"
-                        loading={pageIdx === 0 ? 'eager' : 'lazy'}
-                        decoding="async"
-                      />
-                      {/* page badge */}
-                      {urls.length > 1 && (
-                        <span className="absolute top-2 right-2 text-[10px] font-mono bg-black/50 text-white px-1.5 py-0.5 rounded-full pointer-events-none">
-                          {pageIdx + 1}/{urls.length}
-                        </span>
-                      )}
-                      {/* hover overlay */}
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 flex items-center justify-center transition-all pointer-events-none">
-                        <ZoomIn size={24} className="text-white opacity-0 group-hover:opacity-80 transition-opacity drop-shadow" />
-                      </div>
-                    </div>
-                  ))}
+        {pages.map((paper, pageIndex) => {
+          const year = paper.exam_year || paper.year || null;
+          const previousYear = pages[pageIndex - 1]?.exam_year || pages[pageIndex - 1]?.year || null;
+          const showYear = year && year !== previousYear;
+          return (
+            <div key={paper.id} className="mb-4">
+              {showYear && (
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-100 text-violet-700 tracking-wide">
+                    {lang === 'as' ? `${year} চন` : `${year} Exam`}
+                  </span>
+                  <div className="flex-1 h-px bg-violet-100" />
                 </div>
-              );
-            })}
-          </div>
-        ))}
+              )}
+              <div
+                className="relative group cursor-zoom-in rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-gray-50"
+                onClick={() => openLightbox(pageUrls, pageIndex)}
+              >
+                <img
+                  src={paper.url}
+                  alt={lang === 'as'
+                    ? `প্ৰশ্নকাকত ${year || ''} — পৃষ্ঠা ${pageIndex + 1}`
+                    : `Question Paper ${year || ''} — Page ${pageIndex + 1}`}
+                  className="w-full h-auto block"
+                  loading={pageIndex === 0 ? 'eager' : 'lazy'}
+                  decoding="async"
+                />
+                <span className="absolute top-2 right-2 text-[10px] font-mono bg-black/50 text-white px-1.5 py-0.5 rounded-full pointer-events-none">
+                  {pageIndex + 1}/{pages.length}
+                </span>
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 flex items-center justify-center transition-all pointer-events-none">
+                  <ZoomIn size={24} className="text-white opacity-0 group-hover:opacity-80 transition-opacity drop-shadow" />
+                </div>
+              </div>
+              {pageIndex < pages.length - 1 && <AdSlot placement="chapter.pyq.betweenImages" />}
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Lightbox ── */}

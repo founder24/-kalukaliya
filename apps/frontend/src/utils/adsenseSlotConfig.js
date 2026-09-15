@@ -27,6 +27,7 @@ export const ADSENSE_PLACEMENT_ENV_KEYS = Object.freeze({
   'chapter.qa.end': 'VITE_ADS_ADSENSE_CHAPTER_QA_END_SLOT',
   'chapter.sidebar': 'VITE_ADS_ADSENSE_CHAPTER_SIDEBAR_SLOT',
   'chapter.pyq.top': 'VITE_ADS_ADSENSE_CHAPTER_PYQ_TOP_SLOT',
+  'chapter.pyq.betweenImages': 'VITE_ADS_ADSENSE_CHAPTER_PYQ_BETWEEN_IMAGES_SLOT',
   'chapter.pyq.inContent': 'VITE_ADS_ADSENSE_CHAPTER_PYQ_INCONTENT_SLOT',
 });
 

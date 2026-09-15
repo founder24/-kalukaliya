@@ -14,6 +14,7 @@ import StaffOperations from '@/components/staff/StaffOperations';
 import { canStaffCapability, isStaffOrAdmin } from '@/utils/staffAccess';
 import { buildStaffChapterPatchPayload, normalizeStaffChapterCreateStatus } from '@/utils/staffChapterPayload';
 import { formatPastedContent } from '@/utils/formatPastedContent';
+import { uploadPyqFilesInOrder } from '@/utils/staffPyqUpload';
 
 const api = () => {
   const token = getToken();
@@ -606,17 +607,31 @@ function QaCard({ section, index, total, onChange, onDelete, onMove }) {
 
 function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
   const [uploading, setUploading] = useState(false);
+  const [uploadQueue, setUploadQueue] = useState([]);
   const [deletingId, setDeletingId] = useState(null);
   const fileRef = useRef(null);
 
-  const handlePickFile = () => {
-    if (!fileRef.current) return;
-    fileRef.current.value = '';
-    fileRef.current.onchange = async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      setUploading(true);
-      try {
+  const updateQueueItem = (id, patch) => {
+    setUploadQueue(queue => queue.map(item => item.id === id ? { ...item, ...patch } : item));
+  };
+
+  const handleFiles = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length || uploading) return;
+
+    const queue = files.map((file, index) => ({
+      id: `${file.name}-${file.size}-${file.lastModified}-${index}`,
+      file,
+      status: 'queued',
+      error: '',
+    }));
+    setUploadQueue(queue);
+    setUploading(true);
+
+    const { uploadedCount } = await uploadPyqFilesInOrder({
+      items: queue,
+      uploadFile: async (file) => {
         const fd = new FormData();
         fd.append('file', file);
         const res = await api().post(
@@ -624,16 +639,20 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
           fd,
           { headers: { 'Content-Type': 'multipart/form-data' } },
         );
-        onPapersChange(res.data.pyq_papers);
-        toast.success('Page added');
-      } catch (err) {
-        toast.error(err?.response?.data?.detail || 'Upload failed');
-      } finally {
-        setUploading(false);
-        if (fileRef.current) fileRef.current.value = '';
-      }
-    };
-    fileRef.current.click();
+        return res.data;
+      },
+      onPageUploaded: (latestPapers) => onPapersChange(latestPapers),
+      onStatus: (item, status, error = '') => updateQueueItem(item.id, { status, error }),
+    });
+
+    setUploading(false);
+    if (uploadedCount === queue.length) {
+      toast.success(`${uploadedCount} page${uploadedCount === 1 ? '' : 's'} added in order`);
+    } else if (uploadedCount > 0) {
+      toast.warning(`${uploadedCount} of ${queue.length} pages uploaded; retry the failed pages`);
+    } else {
+      toast.error('No pages were uploaded');
+    }
   };
 
   const handleDelete = async (paperId) => {
@@ -654,7 +673,14 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
 
   return (
     <div className="space-y-3">
-      <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.webp" className="hidden" />
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".jpg,.jpeg,.png,.webp,.gif"
+        multiple
+        onChange={handleFiles}
+        className="hidden"
+      />
 
       {/* Seamless page strip — no gaps, portrait A4 ratio */}
       {papers.length > 0 && (
@@ -702,7 +728,7 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
 
       {/* Upload zone — portrait A4 ratio when empty, compact strip when pages exist */}
       <button
-        onClick={handlePickFile}
+        onClick={() => fileRef.current?.click()}
         disabled={uploading}
         className="w-full border-2 border-dashed border-amber-200 rounded-xl text-amber-500 hover:border-amber-400 hover:bg-amber-50/50 transition-colors disabled:opacity-50 flex flex-col items-center justify-center gap-2"
         style={papers.length === 0 ? { aspectRatio: '210/297', maxHeight: '70vh' } : { padding: '14px' }}
@@ -715,18 +741,46 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
         ) : papers.length === 0 ? (
           <>
             <UploadIcon />
-            <span className="text-sm font-medium">Add first page</span>
-            <span className="text-xs text-amber-400">Portrait A4 · JPG, PNG, WEBP</span>
+            <span className="text-sm font-medium">Select page images</span>
+            <span className="text-xs text-amber-400">Select multiple files in page order · JPG, PNG, WEBP, GIF</span>
           </>
         ) : (
           <span className="flex items-center gap-2 text-sm font-medium">
             <UploadIcon />
-            Add page {papers.length + 1}
+            Add more pages
           </span>
         )}
       </button>
+      {uploadQueue.length > 0 && (
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-1.5" aria-live="polite">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Upload queue</span>
+            {!uploading && (
+              <button
+                type="button"
+                onClick={() => setUploadQueue([])}
+                className="text-[11px] text-gray-400 hover:text-gray-700"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          {uploadQueue.map((item, index) => (
+            <div key={item.id} className="flex items-center gap-2 text-xs">
+              <span className="w-5 text-center text-gray-400 tabular-nums">{index + 1}</span>
+              <span className="min-w-0 flex-1 truncate text-gray-700">{item.file.name}</span>
+              {item.status === 'queued' && <span className="text-gray-400">Waiting</span>}
+              {item.status === 'uploading' && <span className="text-amber-600">Uploading…</span>}
+              {item.status === 'uploaded' && <span className="text-emerald-600">Uploaded</span>}
+              {item.status === 'failed' && (
+                <span className="max-w-[45%] truncate text-red-600" title={item.error}>{item.error}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <p className="text-[11px] text-gray-400 text-center">
-        Upload in page order · max 20 MB per page
+        Pages upload one at a time in the order you select them · max 20 MB per page
       </p>
     </div>
   );
