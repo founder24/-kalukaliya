@@ -130,7 +130,7 @@ export default function ReferralROI({ adminToken }) {
            <button onClick={exportEvidence} disabled={loading || exporting} data-testid="button-download-referral-roi" className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 disabled:opacity-60">
              <Download size={14} /> {exporting ? 'Preparing…' : 'Download evidence'}
            </button>
-           <button onClick={load} disabled={loading || exporting} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60">
+           <button onClick={load} disabled={loading || exporting} data-testid="button-refresh-referral-roi" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60">
              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh evidence
            </button>
          </div>
@@ -214,7 +214,7 @@ export default function ReferralROI({ adminToken }) {
         )}
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="referral-roi-inventory">
         <div className="flex items-center justify-between gap-3">
           <div><h3 className="font-bold text-slate-900">Production ad inventory</h3><p className="mt-1 text-xs text-slate-500">Disabled and unconfigured networks contribute zero revenue.</p></div>
           <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-bold text-violet-700">Authoritative config</span>
@@ -240,7 +240,7 @@ export default function ReferralROI({ adminToken }) {
         {controlWarnings.length > 0 && <p className="mt-3 text-xs text-rose-700">Warnings: {controlWarnings.join(', ')}</p>}
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="referral-roi-unit-economics">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div><h3 className="font-bold text-slate-900">Weekly unit economics</h3><p className="mt-1 text-xs text-slate-500">Rewards are compared with finalized net contribution and true operating cost.</p></div>
           <div className="flex gap-2"><input value={weekId} onChange={event => setWeekId(event.target.value)} placeholder="Week ID to recalculate" className="h-9 rounded-lg border border-slate-200 px-3 text-xs outline-none focus:border-violet-500" /><button onClick={calculate} disabled={!weekId.trim()} className="h-9 rounded-lg bg-slate-900 px-3 text-xs font-bold text-white disabled:opacity-40">Calculate</button></div>

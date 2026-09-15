@@ -706,6 +706,91 @@ test.describe('Staff panel — sidebar sections', () => {
     expect(consoleErrors, 'No uncaught console errors for risky ROI states').toHaveLength(0);
   });
 
+  test('Referral ROI clears stale warnings after refreshing with healthy evidence', async ({ page }) => {
+    let roiRequestCount = 0;
+    await page.route('**/api/v1/admin/referrals/roi/dashboard*', (route) => {
+      roiRequestCount += 1;
+      const blocked = roiRequestCount <= 2;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(blocked
+          ? {
+              inventory: [],
+              controls: null,
+              reports: [{
+                id: 'blocked-roi-week',
+                week_key: '2026-W36',
+                data_quality: 'blocked',
+                pause_recommended: true,
+                warnings_json: '["provider-revenue-stale","negative-contribution-margin"]',
+                contribution_margin_paise: -100,
+              }],
+            }
+          : {
+              inventory: [{
+                network: 'adsense',
+                status: 'enabled',
+                configured: true,
+                policy_notes: 'Only provider-finalized AdSense reports fund rewards.',
+                contributes_to_revenue: true,
+              }],
+              controls: {
+                evidence_id: 'roi-fresh-control',
+                reserve_healthy: true,
+                revenue_fresh: true,
+                invalid_traffic_healthy: true,
+                ad_account_healthy: true,
+                contribution_margin_healthy: true,
+                identity_resets_healthy: true,
+                fraud_healthy: true,
+                exposure_healthy: true,
+                warnings: [],
+                expires_at: Math.floor(Date.now() / 1000) + 3600,
+              },
+              reports: [{
+                id: 'healthy-roi-week',
+                week_key: '2026-W37',
+                data_quality: 'healthy',
+                pause_recommended: false,
+                referral_clicks: 24,
+                unique_browser_identities: 18,
+                authenticated_accounts: 11,
+                mature_verified_visitors: 8,
+                repeat_week_visitors: 5,
+                payable_statements: 6,
+                cash_paid_inr: 180,
+                actual_monetized_impressions: 864,
+                finalized_net_ad_revenue_paise: 39000,
+                true_program_cost_inr: 180,
+                contribution_margin_paise: 21000,
+                payback_ratio_milli: 2167,
+                warnings_json: '[]',
+              }],
+            }),
+      });
+    });
+
+    await gotoStaff(page);
+    await clickSidebar(page, 'Referral ROI');
+    const pauseRecommendation = page.getByTestId('referral-roi-pause-recommendation');
+    await expect(pauseRecommendation).toContainText('roi-control-evidence-missing');
+    await expect(pauseRecommendation).toContainText('provider-revenue-stale');
+    await expect(pauseRecommendation).toContainText('negative-contribution-margin');
+
+    await page.getByTestId('button-refresh-referral-roi').click();
+
+    await expect(pauseRecommendation).toHaveCount(0);
+    await expect(page.getByText('roi-control-evidence-missing')).toHaveCount(0);
+    await expect(page.getByText('provider-revenue-stale')).toHaveCount(0);
+    await expect(page.getByText('negative-contribution-margin')).toHaveCount(0);
+    await expect(page.getByTestId('referral-roi-inventory')).toContainText('adsense');
+    await expect(page.getByTestId('referral-roi-unit-economics')).toContainText('2026-W37');
+    await expect(page.getByTestId('referral-roi-unit-economics')).toContainText('₹210.00');
+    expect(roiRequestCount).toBe(3);
+    expect(consoleErrors, 'No uncaught console errors after healthy ROI refresh').toHaveLength(0);
+  });
+
   // ──────────────────────────────────────────────────────────────────────────
   // Interactive controls test — exercises state-setter props (setSeoLive,
   // setR2Health) that were missing from ctx before the widget prop-scoping fix.
