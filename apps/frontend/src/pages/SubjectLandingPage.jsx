@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import {
   BookOpen, ChevronRight, ChevronDown, ExternalLink, Home, Sparkles,
@@ -18,10 +18,16 @@ import { siblingsAsRelated } from '@/utils/siblingChapter';
 
 export default function SubjectLandingPage() {
   const { board, classSlug, subjectSlug } = useParams();
+  const location = useLocation();
   const [searchQuery, setSearchQuery] = useState('');
   const { contentLang } = useContentLang();
+  // The URL is authoritative for public SEO pages. This prevents a saved
+  // Assamese preference from making the English canonical route ambiguous,
+  // while ensuring every /as/... navigation stays Assamese.
+  const pageLanguage = location.pathname.startsWith('/as/') ? 'as' : contentLang;
+  const isAssamese = pageLanguage === 'as';
 
-  const { data: subject = null, isLoading: subjectLoading, error: subjectError } = useResolveSubject(board, classSlug, subjectSlug, contentLang);
+  const { data: subject = null, isLoading: subjectLoading, error: subjectError } = useResolveSubject(board, classSlug, subjectSlug, pageLanguage);
   const subjectId = subject?.id || subject?._id;
   const { data: chapters = [], isLoading: chaptersLoading } = useChapters(subjectId);
   const loading = subjectLoading || (!!subjectId && chaptersLoading);
@@ -37,7 +43,11 @@ export default function SubjectLandingPage() {
     // filter. Keep chapters visible while content is being generated so numbers
     // and names do not shift between visits.
     const notesChs = chapters;
-    const qaChs = chapters.filter(ch => ch.has_qa);
+    const qaChs = chapters.filter(ch => (
+      isAssamese
+        ? (typeof ch.has_qa_as === 'boolean' ? ch.has_qa_as : ch.has_qa)
+        : ch.has_qa
+    ));
     // Subject-level PYQ papers — read from subject.pyq_papers (not chapters)
     const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => ({
       id:          p.id || `pyq-${pi}`,
@@ -52,11 +62,11 @@ export default function SubjectLandingPage() {
       })),
     }));
     return [
-      { key: 'notes',          label: 'Chapters',  icon: BookOpen,   chapters: notesChs, pyqGroups: null,   accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
-      { key: 'qa',             label: 'Questions', icon: HelpCircle, chapters: qaChs,    pyqGroups: null,   accent: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' },
-      { key: 'question_paper', label: 'PYQs',      icon: FileText,   chapters: [],       pyqGroups,         accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.25)' },
+      { key: 'notes',          label: isAssamese ? 'অধ্যায়সমূহ' : 'Chapters', icon: BookOpen, chapters: notesChs, pyqGroups: null, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
+      { key: 'qa',             label: isAssamese ? 'প্ৰশ্ন' : 'Questions', icon: HelpCircle, chapters: qaChs, pyqGroups: null, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
+      { key: 'question_paper', label: isAssamese ? 'পিৱাইকিউ' : 'PYQs', icon: FileText, chapters: [], pyqGroups, accent: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
     ];
-  }, [chapters, subject?.pyq_papers]);
+  }, [chapters, subject?.pyq_papers, isAssamese]);
 
   const activeSectionChapters = useMemo(() => {
     const sec = SECTIONS.find(s => s.key === activeSection);
@@ -73,8 +83,12 @@ export default function SubjectLandingPage() {
     );
   }, [activeSectionChapters, searchQuery]);
 
-  const basePath = `/${board}/${classSlug}/${subjectSlug}`;
-  const chapterBasePath = `/${board}/${classSlug}${subject?.stream_slug ? `/${subject.stream_slug}` : ''}/${subjectSlug}`;
+  const basePath = isAssamese
+    ? `/as/${board}/${classSlug}/${subjectSlug}`
+    : `/${board}/${classSlug}/${subjectSlug}`;
+  const chapterBasePath = isAssamese
+    ? basePath
+    : `/${board}/${classSlug}${subject?.stream_slug ? `/${subject.stream_slug}` : ''}/${subjectSlug}`;
 
   // Pull SEO related-topics for the first chapter to seed the
   // ContinueLearning rail, then backfill with sibling chapters until ≥4 links.
@@ -160,10 +174,10 @@ export default function SubjectLandingPage() {
     return out.slice(0, 6);
   }, [seoRelated, chapters, seedChapterId, basePath]);
 
-  const subjectName = contentLang === 'as'
+  const subjectName = isAssamese
     ? (subject?.name_as || subject?.name || subjectSlug)
     : (subject?.name || subjectSlug);
-  const subjectDescription = contentLang === 'as'
+  const subjectDescription = isAssamese
     ? (subject?.description_as || subject?.description || '')
     : (subject?.description || '');
   const boardName = subject?.board_name || board;
@@ -527,16 +541,16 @@ export default function SubjectLandingPage() {
             </div>
           ) : (
             filteredChapters.flatMap((ch, i) => {
-              const chapterTitle = contentLang === 'as' ? (ch.title_as || ch.title) : ch.title;
-              const chapterDescription = contentLang === 'as'
+              const chapterTitle = isAssamese ? (ch.title_as || ch.title) : ch.title;
+              const chapterDescription = isAssamese
                 ? (ch.description_as || ch.description)
                 : ch.description;
-              const chapterTopics = contentLang === 'as'
+              const chapterTopics = isAssamese
                 ? (ch.syllabus_topics_as?.length ? ch.syllabus_topics_as : ch.syllabus_topics)
                 : ch.syllabus_topics;
-              const chapterSlug = contentLang === 'as' ? (ch.slug_as || ch.slug) : ch.slug;
+              const chapterSlug = isAssamese ? (ch.slug_as || ch.slug) : ch.slug;
               const chPath = chapterSlug
-                ? `${contentLang === 'as' ? `/as/${board}/${classSlug}/${subjectSlug}` : chapterBasePath}/${chapterSlug}`
+                ? `${chapterBasePath}/${chapterSlug}${activeSection === 'qa' ? '?tab=qa' : ''}`
                 : `${basePath}`;
 
               const card = (
@@ -623,7 +637,7 @@ export default function SubjectLandingPage() {
             subjectName={subjectName}
             subjectPath={basePath}
             chatHref={`/chat?subject=${subject.id || subject._id || ''}`}
-            contentLang={contentLang}
+            contentLang={pageLanguage}
           />
         )}
 

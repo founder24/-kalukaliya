@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 const mockContentLanguage = vi.hoisted(() => ({ value: 'en' }));
@@ -101,5 +101,47 @@ describe('SubjectCard share destination', () => {
         : '/ahsec/hs-1st-year/physics/units-and-measurement',
     );
     expect(chapterLink).toHaveStyle({ opacity: '0.5' });
+  });
+
+  it('uses the Assamese subject destination and preserves the Questions tab', () => {
+    mockContentLanguage.value = 'as';
+    const subject = {
+      id: 'physics-id',
+      name: 'Physics',
+      name_as: 'পদাৰ্থবিজ্ঞান',
+      boardSlug: 'ahsec',
+      classSlug: 'hs-1st-year',
+      slug: 'physics',
+    };
+
+    render(
+      <SubjectCard
+        sub={subject}
+        chapters={[{
+          id: 'qa-chapter',
+          title: 'Motion questions',
+          title_as: 'গতিৰ প্ৰশ্ন',
+          slug: 'motion-questions',
+          slug_as: 'gotir-prashna',
+          content_type: 'notes',
+          has_qa: false,
+          has_qa_as: true,
+        }]}
+        isSaved={false}
+        onToggleSave={vi.fn()}
+        onAskAI={vi.fn()}
+        index={0}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /প্ৰশ্ন\s*1/ }));
+    expect(screen.getByRole('link', { name: 'গতিৰ প্ৰশ্ন' })).toHaveAttribute(
+      'href',
+      '/as/ahsec/hs-1st-year/physics/gotir-prashna?tab=qa',
+    );
+    expect(screen.getByRole('link', { name: /View পদাৰ্থবিজ্ঞান/ })).toHaveAttribute(
+      'href',
+      '/as/ahsec/hs-1st-year/physics',
+    );
   });
 });

@@ -14,6 +14,7 @@ const row: PublicChapterListRow = {
   notesEn: 'Generated chapter notes',
   notesAs: 'উৎপাদিত অধ্যায়ৰ টোকা',
   qaEn: '[{"question":"What is motion?"}]',
+  qaAs: '[]',
   publishedTopics: '[{"title":" Speed ","title_as":" দ্ৰুতি "},{"title":"Velocity"}]',
   pyqPdfUrl: null,
   pyqPapers: '[{"year":2025}]',
@@ -35,6 +36,7 @@ describe('serializePublicChapterList', () => {
       notes_generated: true,
       has_assamese: true,
       has_qa: true,
+      has_qa_as: false,
       has_pyq: true,
       syllabus_topics: ['Speed', 'Velocity'],
       syllabus_topics_as: ['দ্ৰুতি', 'Velocity'],
@@ -48,6 +50,7 @@ describe('serializePublicChapterList', () => {
       ...row,
       status: null,
       qaEn: 'not-json',
+      qaAs: 'not-json',
       publishedTopics: '{}',
       pyqPapers: 'null',
       pyqPdfUrl: null,
@@ -59,6 +62,16 @@ describe('serializePublicChapterList', () => {
       syllabus_topics_as: [],
       topic_count: 0,
     });
+  });
+
+  it('tracks Assamese-only Q&A independently from English Q&A', () => {
+    const [assameseOnly, englishOnly] = serializePublicChapterList([
+      { ...row, id: 'assamese-only', qaEn: '[]', qaAs: '[{"question":"প্ৰশ্ন"}]' },
+      { ...row, id: 'english-only', qaEn: '[{"question":"Question"}]', qaAs: '[]' },
+    ]);
+
+    expect(assameseOnly).toMatchObject({ has_qa: false, has_qa_as: true });
+    expect(englishOnly).toMatchObject({ has_qa: true, has_qa_as: false });
   });
 
   it('only advertises notes when meaningful content exists', () => {

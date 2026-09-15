@@ -13,6 +13,7 @@ import React from 'react';
 
 expect.extend(toHaveNoViolations);
 const { mockApiGet } = vi.hoisted(() => ({ mockApiGet: vi.fn() }));
+const { mockContentLang } = vi.hoisted(() => ({ mockContentLang: { value: 'en' } }));
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ subjectId: 'english-class-11' }),
@@ -63,6 +64,10 @@ vi.mock('@/hooks/useContent', () => ({
   useChapters: vi.fn(),
 }));
 
+vi.mock('@/context/LanguageContext', () => ({
+  useContentLang: () => ({ contentLang: mockContentLang.value, switchLang: vi.fn() }),
+}));
+
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
@@ -93,6 +98,7 @@ const SAMPLE_CHAPTERS = [
 
 beforeEach(() => {
   vi.useRealTimers();
+  mockContentLang.value = 'en';
   mockApiGet.mockReset();
   vi.mocked(useSubject).mockReturnValue({
     data:     undefined,
@@ -174,5 +180,38 @@ describe('SubjectPage — axe accessibility audit', () => {
     await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/cms/post/english-class-11'));
     expect(await screen.findByText('Worker-native study notes.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Published chapter' })).toHaveAttribute('id', 'published-chapter');
+  });
+
+  it('uses Assamese chapter metadata and preserves the Questions tab in legacy links', async () => {
+    mockContentLang.value = 'as';
+    vi.mocked(useSubject).mockReturnValue({
+      data: {
+        ...SAMPLE_SUBJECT,
+        name_as: 'পদাৰ্থবিজ্ঞান',
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    vi.mocked(useChapters).mockReturnValue({
+      data: [{
+        ...SAMPLE_CHAPTERS[0],
+        title: 'Motion',
+        title_as: 'গতি',
+        slug: 'motion',
+        slug_as: 'goti',
+        has_qa: false,
+        has_qa_as: true,
+      }],
+      isLoading: false,
+    });
+
+    render(<SubjectPage />);
+    fireEvent.click(screen.getByRole('button', { name: /প্ৰশ্ন/ }));
+
+    expect(screen.getAllByText('গতি').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link', { name: /Questions|প্ৰশ্ন|গতি/ }).some((link) =>
+      link.getAttribute('href') === '/as/ahsec/class-11/english/goti?tab=qa'
+    )).toBe(true);
   });
 });

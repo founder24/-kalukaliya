@@ -14,6 +14,7 @@ export type PublicChapterListRow = {
   notesEn: string | null;
   notesAs: string | null;
   qaEn: string | null;
+  qaAs: string | null;
   publishedTopics: string | null;
   pyqPdfUrl: string | null;
   pyqPapers: string | null;
@@ -33,6 +34,7 @@ export type PublicChapterListItem = {
   notes_generated: boolean;
   has_assamese: boolean;
   has_qa: boolean;
+  has_qa_as: boolean;
   has_pyq: boolean;
   syllabus_topics: string[];
   syllabus_topics_as: string[];
@@ -85,6 +87,7 @@ export function serializePublicChapterList(
        notes_generated: Boolean(chapter.notesEn && chapter.notesEn.trim().length > 10),
        has_assamese: Boolean(chapter.notesAs && chapter.notesAs.trim().length > 10),
       has_qa: parseArray<unknown>(chapter.qaEn).length > 0,
+      has_qa_as: parseArray<unknown>(chapter.qaAs).length > 0,
       has_pyq: Boolean(chapter.pyqPdfUrl) || parseArray<unknown>(chapter.pyqPapers).length > 0,
       syllabus_topics: syllabusTopics,
       syllabus_topics_as: syllabusTopicsAs,

@@ -227,7 +227,8 @@ contentRouter.get('/subjects/:id', async (c) => {
 // ── Chapters list ──────────────────────────────────────────────────────────────
 // GET /api/v1/content/chapters/:subjectId
 // → [{ id, chapter_id, title, title_as, slug, chapter_number,
-//      notes_generated, has_assamese, has_qa, has_pyq, syllabus_topics }]
+//      notes_generated, has_assamese, has_qa, has_qa_as, has_pyq,
+//      syllabus_topics }]
 //
 // Cloud Run returns ALL chapters for a (published) subject sorted by
 // chapter_number. Security: we validate the subject is published first so
@@ -258,7 +259,10 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
       // Older KV entries predate chapter description metadata. Ignore those
       // entries once so the current serializer can refresh them in place.
       const hasChapterMetadata = Array.isArray(parsed) && parsed.every((item) =>
-        item && typeof item === 'object' && 'description' in item && 'description_as' in item
+        item && typeof item === 'object'
+          && 'description' in item
+          && 'description_as' in item
+          && 'has_qa_as' in item
       );
       if (hasChapterMetadata) {
         c.header('Cache-Control', 'public, max-age=60, s-maxage=300');
@@ -283,6 +287,7 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     notesEn: chapters.notesEn,
     notesAs: chapters.notesAs,
     qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
     publishedTopics: chapters.publishedTopics,
     pyqPdfUrl: chapters.pyqPdfUrl,
     pyqPapers: chapters.pyqPapers,
@@ -565,7 +570,8 @@ contentRouter.get('/library-bundle', async (c) => {
   type ChapterRow = { id: string; subjectId: string; title: string; titleAs: string | null; slug: string; slugAs: string | null;
     metaDescription: string | null; metaDescriptionAs: string | null;
     chapterNumber: number | null; status: string | null; contentType: string | null;
-    notesEn: string | null; notesAs: string | null; qaEn: string | null; publishedTopics: string | null; };
+    notesEn: string | null; notesAs: string | null;
+    qaEn: string | null; qaAs: string | null; publishedTopics: string | null; };
 
   let allChapters: ChapterRow[] = [];
   if (!slim) {
@@ -575,7 +581,7 @@ contentRouter.get('/library-bundle', async (c) => {
       metaDescription: chapters.metaDescription, metaDescriptionAs: chapters.metaDescriptionAs,
       chapterNumber: chapters.chapterNumber, status: chapters.status, contentType: chapters.contentType,
       notesEn: chapters.notesEn, notesAs: chapters.notesAs,
-      qaEn: chapters.qaEn, publishedTopics: chapters.publishedTopics,
+      qaEn: chapters.qaEn, qaAs: chapters.qaAs, publishedTopics: chapters.publishedTopics,
     }).from(chapters).where(inArray(chapters.status, ['published', 'active']));
   }
 
@@ -604,6 +610,7 @@ contentRouter.get('/library-bundle', async (c) => {
       notes_generated: !!(ch.notesEn && ch.notesEn.length > 10),
       has_assamese: !!(ch.notesAs && ch.notesAs.length > 10),
       has_qa: ch.qaEn !== '[]' && ch.qaEn != null,
+      has_qa_as: (safeParse<unknown[]>(ch.qaAs) ?? []).length > 0,
       topic_count: topicsArr.length,
       pyq_papers: [],
     };

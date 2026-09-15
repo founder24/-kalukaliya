@@ -266,6 +266,17 @@ function LegacyTopicRedirect() {
   return <Navigate to={`/${board}/${classSlug}/${subjectSlug}/${chapterSlug}`} replace />;
 }
 
+// Keep the language-prefixed route family in one place so route-order
+// regressions are easy to detect. These paths must stay ahead of the generic
+// board/class wildcard family below.
+export const ASSAMESE_SEO_ROUTE_PATHS = Object.freeze({
+  subject: '/as/:board/:classSlug/:subjectSlug',
+  chapterWithStream: '/as/:board/:classSlug/:streamSlug/:subjectSlug/:chapterSlug',
+  chapter: '/as/:board/:classSlug/:subjectSlug/:chapterSlug',
+  topicWithStream: '/as/:board/:classSlug/:streamSlug/:subjectSlug/:chapterSlug/topic/:topicSlug',
+  topic: '/as/:board/:classSlug/:subjectSlug/:chapterSlug/topic/:topicSlug',
+});
+
 // ── Routes (extracted so SSR can render them inside a StaticRouter) ───────
 export function AppRoutes() {
   return (
@@ -318,6 +329,15 @@ export function AppRoutes() {
       {/* ── PYQ HTML Replica pages ── */}
       <Route path="/pyq/:slug" element={<PYQReplicaPage />} />
 
+      {/* ── Assamese SEO routes ──
+          Keep these before the generic wildcard families. Otherwise
+          `/as/...` is interpreted as a board named "as". */}
+      <Route path={ASSAMESE_SEO_ROUTE_PATHS.subject} element={<SubjectLandingPage />} />
+      <Route path={ASSAMESE_SEO_ROUTE_PATHS.chapterWithStream} element={<ChapterPage />} />
+      <Route path={ASSAMESE_SEO_ROUTE_PATHS.chapter} element={<ChapterPage />} />
+      <Route path={ASSAMESE_SEO_ROUTE_PATHS.topicWithStream} element={<ChapterPage />} />
+      <Route path={ASSAMESE_SEO_ROUTE_PATHS.topic} element={<ChapterPage />} />
+
       {/* ── SEO routes: /{board}/{class}/{subject} and /{board}/{class}/{subject}/{chapter} ── */}
       <Route path="/:board/:classSlug/:streamSlug/:subjectSlug/:chapterSlug" element={<ChapterPage />} />
       <Route path="/:board/:classSlug/:subjectSlug/:chapterSlug" element={<ChapterPage />} />
@@ -330,16 +350,6 @@ export function AppRoutes() {
       <Route path="/:board/:classSlug/:streamSlug/:subjectSlug/:chapterSlug/topic/:topicSlug" element={<ChapterPage />} />
       <Route path="/:board/:classSlug/:subjectSlug/:chapterSlug/topic/:topicSlug" element={<ChapterPage />} />
 
-      {/* Task #295 — Assamese-language chapter routes. The /as/* prefix
-          is the path-based hreflang="as-IN" target (replaces ?lang=as).
-          ChapterPage detects the prefix, forces contentLang='as' for
-          the duration of the page, and fetches via the dedicated
-          /content/chapter-by-slug-as resolver which matches against
-          chapters.slug_as (with English-slug fallback). */}
-      <Route path="/as/:board/:classSlug/:streamSlug/:subjectSlug/:chapterSlug" element={<ChapterPage />} />
-      <Route path="/as/:board/:classSlug/:subjectSlug/:chapterSlug" element={<ChapterPage />} />
-      <Route path="/as/:board/:classSlug/:streamSlug/:subjectSlug/:chapterSlug/topic/:topicSlug" element={<ChapterPage />} />
-      <Route path="/as/:board/:classSlug/:subjectSlug/:chapterSlug/topic/:topicSlug" element={<ChapterPage />} />
       <Route path="/:board/:classSlug/:subjectSlug/:chapterSlug/:pageType" element={<LegacyTopicRedirect />} />
       <Route path="/:board/:classSlug/:subjectSlug" element={<SubjectLandingPage />} />
 

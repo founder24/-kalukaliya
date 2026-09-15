@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useParams, Link, useSearchParams, useLocation } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 import TopicAnswerCard from '@/components/chapter/TopicAnswerCard';
@@ -259,6 +259,10 @@ function readChapterPreload(board, classSlug, subjectSlug, chapterSlug) {
 
 export default function ChapterPage() {
   const params = useParams();
+  // Router location is available during SSR as well as in the browser.
+  // Do not rely on window here or direct /as links would fetch English
+  // chapter data in the server-rendered response.
+  const routerLocation = useLocation();
   const board = params.board;
   const classSlug = params.classSlug;
   const hasStreamInUrl = !!(params.streamSlug && params.chapterSlug);
@@ -320,8 +324,9 @@ export default function ChapterPage() {
   const [contentMode, setContentMode] = useState(
     ['notes', 'qa', 'pyq'].includes(_initTab) ? _initTab : 'notes',
   );
-  const isAssamesePath = typeof window !== 'undefined'
-    && (window.location.pathname || '').startsWith('/as/');
+  const isAssamesePath = (routerLocation?.pathname || (
+    typeof window !== 'undefined' ? window.location.pathname : ''
+  )).startsWith('/as/');
   const [activeId, setActiveId] = useState('');
   const [relatedChapterTopics, setRelatedChapterTopics] = useState([]);
   // Task #914 Step 3 — published topics with `definition_status=ok`

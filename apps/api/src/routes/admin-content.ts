@@ -197,6 +197,7 @@ async function prewarmSubject(env: Env, subjectId: string): Promise<void> {
     notesEn: chapters.notesEn,
     notesAs: chapters.notesAs,
     qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
     publishedTopics: chapters.publishedTopics,
     pyqPdfUrl: chapters.pyqPdfUrl,
     pyqPapers: chapters.pyqPapers,

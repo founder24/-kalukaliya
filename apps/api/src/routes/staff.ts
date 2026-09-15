@@ -525,7 +525,7 @@ async function kvPrewarm(env: Env, subjectId: string): Promise<void> {
       id: chapters.id, title: chapters.title, titleAs: chapters.titleAs, slug: chapters.slug, slugAs: chapters.slugAs,
       metaDescription: chapters.metaDescription, metaDescriptionAs: chapters.metaDescriptionAs,
       chapterNumber: chapters.chapterNumber, status: chapters.status,
-      notesEn: chapters.notesEn, notesAs: chapters.notesAs, qaEn: chapters.qaEn,
+      notesEn: chapters.notesEn, notesAs: chapters.notesAs, qaEn: chapters.qaEn, qaAs: chapters.qaAs,
       publishedTopics: chapters.publishedTopics, pyqPdfUrl: chapters.pyqPdfUrl, pyqPapers: chapters.pyqPapers,
     }).from(chapters).where(publicChapterListWhere(subjectId)).orderBy(chapters.chapterNumber);
 

@@ -190,7 +190,7 @@ const useSeoTopics = (board, classSlug, subjectSlug) =>
     enabled: !!board && !!classSlug && !!subjectSlug,
   });
 
-export function prefetchSubjectData(queryClient, board, classSlug, subjectSlug) {
+export function prefetchSubjectData(queryClient, board, classSlug, subjectSlug, contentLang = 'en') {
   const staleTime = 10 * 60 * 1000;
   queryClient.prefetchQuery({
     queryKey: ['seo-topics', board, classSlug, subjectSlug],
@@ -198,8 +198,8 @@ export function prefetchSubjectData(queryClient, board, classSlug, subjectSlug) 
     staleTime,
   });
   queryClient.fetchQuery({
-    queryKey: ['resolve-subject', board, classSlug, subjectSlug],
-    queryFn: () => fetchResolveSubject(board, classSlug, subjectSlug),
+    queryKey: ['resolve-subject', board, classSlug, subjectSlug, contentLang],
+    queryFn: () => fetchResolveSubject(board, classSlug, subjectSlug, contentLang),
     staleTime,
   }).then((subjectData) => {
     const subjectId = subjectData?.id || subjectData?._id;

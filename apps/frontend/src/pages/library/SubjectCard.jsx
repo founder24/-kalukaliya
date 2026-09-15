@@ -19,12 +19,13 @@ const THUMB_GRADIENTS = {
   science:   ['#7c3aed', '#4f46e5'],
 };
 
-export function getSubjectLandingPath(sub = {}) {
+export function getSubjectLandingPath(sub = {}, contentLang = 'en') {
   const boardSlug = sub.boardSlug || sub.board_slug;
   const classSlug = sub.classSlug || sub.class_slug;
   const subjectSlug = sub.slug || sub.subject_slug;
+  const prefix = contentLang === 'as' ? '/as' : '';
   return boardSlug && classSlug && subjectSlug
-    ? `/${boardSlug}/${classSlug}/${subjectSlug}`
+    ? `${prefix}/${boardSlug}/${classSlug}/${subjectSlug}`
     : `/subject/${sub.id}`;
 }
 
@@ -43,8 +44,8 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
   const hasDocument = useMemo(() => sub.has_document === true, [sub.has_document]);
 
   const subjectLandingPath = useMemo(
-    () => getSubjectLandingPath(sub),
-    [sub],
+    () => getSubjectLandingPath(sub, contentLang),
+    [sub, contentLang],
   );
 
   const displayUrl = useMemo(() => {
@@ -67,10 +68,19 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
   }, [sub, chapters.length, subjectLandingPath, share, displaySubjectName, displaySubjectDescription]);
 
   const handlePrefetch = useCallback(() => {
-    if (sub.boardSlug && sub.classSlug && sub.slug) {
-      prefetchSubjectData(queryClient, sub.boardSlug, sub.classSlug, sub.slug);
+    const boardSlug = sub.boardSlug || sub.board_slug;
+    const classSlug = sub.classSlug || sub.class_slug;
+    const subjectSlug = sub.slug || sub.subject_slug;
+    if (boardSlug && classSlug && subjectSlug) {
+      prefetchSubjectData(
+        queryClient,
+        boardSlug,
+        classSlug,
+        subjectSlug,
+        contentLang,
+      );
     }
-  }, [queryClient, sub.boardSlug, sub.classSlug, sub.slug]);
+  }, [queryClient, sub, contentLang]);
 
   const SECTIONS = useMemo(() => {
     const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
@@ -87,7 +97,11 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     // hide it from the Q section whenever the subject also has properly-named Q&A
     // chapters, so the Questions tab doesn't mirror the Notes tab with "Full Book" ×N.
     const _GENERIC_TITLE = /^full\s+book$/i;
-    const _allQaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type) || ch.has_qa);
+    const _allQaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type) || (
+      isAs
+        ? (typeof ch.has_qa_as === 'boolean' ? ch.has_qa_as : ch.has_qa)
+        : ch.has_qa
+    ));
     const _hasNamedQa = _allQaChs.some(ch => !_GENERIC_TITLE.test((ch.title || '').trim()));
     const qaChs = _hasNamedQa
       ? _allQaChs.filter(ch => !_GENERIC_TITLE.test((ch.title || '').trim()))
@@ -410,16 +424,20 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                 // In Assamese mode, prefer the Assamese URL slug so students land on
                 // a readable /as/… address instead of the English slug fallback.
                 const asSlug = isAs ? (ch.slug_as || effectiveSlug) : effectiveSlug;
-                const hasValidLink = !!(sub.boardSlug && sub.classSlug && sub.slug && effectiveSlug);
+                const boardSlug = sub.boardSlug || sub.board_slug;
+                const classSlug = sub.classSlug || sub.class_slug;
+                const subjectSlug = sub.slug || sub.subject_slug;
+                const hasValidLink = !!(boardSlug && classSlug && subjectSlug && effectiveSlug);
                 const hasContent = ch.notes_generated !== false;
                 const chapterTitle = isAs ? (ch.title_as || ch.title) : ch.title;
                 const chapterDescription = isAs
                   ? (ch.description_as || ch.description)
                   : ch.description;
                 const chPath = hasValidLink
-                  ? (isAs
-                    ? `/as/${sub.boardSlug}/${sub.classSlug}/${sub.slug}/${asSlug}`
-                    : `/${sub.boardSlug}/${sub.classSlug}/${sub.slug}/${effectiveSlug}`)
+                  ? `${isAs
+                    ? `/as/${boardSlug}/${classSlug}/${subjectSlug}/${asSlug}`
+                    : `/${boardSlug}/${classSlug}/${subjectSlug}/${effectiveSlug}`
+                  }${section.key === 'qa' ? '?tab=qa' : ''}`
                   : subjectLandingPath;
                 return (
                   <div

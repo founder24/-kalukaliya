@@ -7,13 +7,18 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { axe, toHaveNoViolations } from 'jest-axe';
-import { render, act } from '@testing-library/react';
+import { render, act, fireEvent, screen } from '@testing-library/react';
 import React from 'react';
 
 expect.extend(toHaveNoViolations);
+const { mockPathname, mockParams } = vi.hoisted(() => ({
+  mockPathname: { value: '/ahsec/class-11/english' },
+  mockParams: { value: { board: 'ahsec', classSlug: 'class-11', subjectSlug: 'english' } },
+}));
 
 vi.mock('react-router-dom', () => ({
-  useParams: () => ({ board: 'ahsec', classSlug: 'class-11', subjectSlug: 'english' }),
+  useParams: () => mockParams.value,
+  useLocation: () => ({ pathname: mockPathname.value }),
   Link:      ({ children, to }) => <a href={to}>{children}</a>,
 }));
 
@@ -84,6 +89,8 @@ const SAMPLE_CHAPTERS = [
 
 beforeEach(() => {
   vi.useRealTimers();
+  mockPathname.value = '/ahsec/class-11/english';
+  mockParams.value = { board: 'ahsec', classSlug: 'class-11', subjectSlug: 'english' };
   vi.mocked(useResolveSubject).mockReturnValue({ data: null, isLoading: true, error: null });
   vi.mocked(useChapters).mockReturnValue({ data: [], isLoading: true });
   if (typeof window !== 'undefined') {
@@ -118,5 +125,44 @@ describe('SubjectLandingPage — axe accessibility audit', () => {
     });
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it('forces Assamese metadata and preserves the Questions tab on canonical links', async () => {
+    mockPathname.value = '/as/ahsec/class-11/physics';
+    mockParams.value = { board: 'ahsec', classSlug: 'class-11', subjectSlug: 'physics' };
+    vi.mocked(useResolveSubject).mockReturnValue({
+      data: {
+        ...SAMPLE_SUBJECT,
+        name: 'Physics',
+        name_as: 'পদাৰ্থবিজ্ঞান',
+        description_as: 'পদাৰ্থবিজ্ঞানৰ অধ্যয়ন',
+        stream_slug: 'science',
+      },
+      isLoading: false,
+      error: null,
+    });
+    vi.mocked(useChapters).mockReturnValue({
+      data: [{
+        ...SAMPLE_CHAPTERS[0],
+        title: 'Motion',
+        title_as: 'গতি',
+        slug: 'motion',
+        slug_as: 'goti',
+        has_qa: false,
+        has_qa_as: true,
+      }],
+      isLoading: false,
+    });
+
+    await act(async () => {
+      render(<SubjectLandingPage />);
+    });
+    fireEvent.click(screen.getByRole('button', { name: /প্ৰশ্ন/ }));
+
+    expect(screen.getAllByText('পদাৰ্থবিজ্ঞান').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link').find((link) =>
+      link.getAttribute('href') === '/as/ahsec/class-11/physics/goti?tab=qa'
+    )).toBeTruthy();
+    expect(useResolveSubject).toHaveBeenLastCalledWith('ahsec', 'class-11', 'physics', 'as');
   });
 });

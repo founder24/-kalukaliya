@@ -18,6 +18,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { getChunks, getChapterTopicSummary, apiClient } from '@/utils/api';
 import { useShare } from '@/hooks/useShare';
 import { useSubject, useChapters } from '@/hooks/useContent';
+import { useContentLang } from '@/context/LanguageContext';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { toast } from 'sonner';
 
@@ -223,11 +224,12 @@ export function BlogView({ subject, subjectId }) {
   );
 }
 
-function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null }) {
+function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null, contentLang = 'en' }) {
   const [topicSummaries, setTopicSummaries] = useState({});
   const [loadingTopics, setLoadingTopics] = useState({});
   const [chunks, setChunks] = useState({});
   const [loadingChapter, setLoadingChapter] = useState(null);
+  const isAssamese = contentLang === 'as';
 
   const loadChapterData = useCallback(async (chapterId) => {
     if (topicSummaries[chapterId] || loadingTopics[chapterId]) return;
@@ -268,8 +270,16 @@ function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null }) {
   return (
     <Accordion type="multiple" className="space-y-2 max-w-4xl mx-auto">
       {chapters.map(chapter => {
-        const chapterSeoPath = subject?.board_slug && subject?.class_slug && subject?.slug && chapter.slug
-          ? `/${subject.board_slug}/${subject.class_slug}/${subject.slug}/${chapter.slug}`
+        const chapterSlug = isAssamese ? (chapter.slug_as || chapter.slug) : chapter.slug;
+        const chapterTitle = isAssamese ? (chapter.title_as || chapter.title) : chapter.title;
+        const chapterDescription = isAssamese
+          ? (chapter.description_as || chapter.description)
+          : chapter.description;
+        const chapterSeoPath = subject?.board_slug && subject?.class_slug && subject?.slug && chapterSlug
+          ? `${isAssamese
+            ? `/as/${subject.board_slug}/${subject.class_slug}/${subject.slug}`
+            : `/${subject.board_slug}/${subject.class_slug}${subject.stream_slug ? `/${subject.stream_slug}` : ''}/${subject.slug}`
+          }/${chapterSlug}${sectionKey === 'qa' ? '?tab=qa' : ''}`
           : null;
         return (
           <AccordionItem key={chapter.id} value={chapter.id} className="chapter-textbook rounded-xl border-0 px-4">
@@ -279,7 +289,7 @@ function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null }) {
                   {chapter.chapter_number}
                 </span>
                 <div className="text-left min-w-0">
-                  <span className="text-sm font-medium block" style={{ color: '#1a1a1a', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>{chapter.title}</span>
+                  <span className="text-sm font-medium block" style={{ color: '#1a1a1a', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>{chapterTitle}</span>
                   {chapter.topics?.length > 0 && (
                     <span className="text-[11px]" style={{ color: '#888' }}>{chapter.topics.length} topics</span>
                   )}
@@ -290,16 +300,16 @@ function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null }) {
               <article
                 itemScope
                 itemType="https://schema.org/LearningResource"
-                aria-label={`${chapter.title} — ${subject.name} study material`}
+                aria-label={`${chapterTitle} — ${subject.name} study material`}
               >
-                <meta itemProp="name" content={chapter.title} />
+                <meta itemProp="name" content={chapterTitle} />
                 <meta itemProp="educationalLevel" content={subject.class_name || ''} />
                 <meta itemProp="learningResourceType" content="Study Notes" />
                 <meta itemProp="inLanguage" content="en-IN" />
-                {chapter.description && <meta itemProp="description" content={chapter.description} />}
+                {chapterDescription && <meta itemProp="description" content={chapterDescription} />}
 
-                {chapter.description && (
-                  <p className="text-xs mb-3 px-1 leading-relaxed" style={{ color: '#666' }}>{chapter.description}</p>
+                {chapterDescription && (
+                  <p className="text-xs mb-3 px-1 leading-relaxed" style={{ color: '#666' }}>{chapterDescription}</p>
                 )}
 
                 {chapter.topics?.length > 0 && (
@@ -335,7 +345,7 @@ function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null }) {
                     <div className="flex items-center gap-2">
                       <FileText size={14} className="text-primary flex-shrink-0" />
                       <span className="text-sm font-medium group-hover/ch:text-primary transition-colors" style={{ color: '#1a1a1a' }}>
-                        {chapter.title} — Full Notes
+                        {chapterTitle} — {sectionKey === 'qa' ? 'Questions' : 'Full Notes'}
                       </span>
                       <ChevronRight size={14} className="ml-auto group-hover/ch:text-primary flex-shrink-0 transition-colors" style={{ color: '#aaa' }} />
                     </div>
@@ -370,10 +380,10 @@ function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null }) {
                       chatContext: {
                         chapterId: chapter.id,
                         subjectId,
-                        sourceTitle: chapter.title || '',
+                         sourceTitle: chapterTitle || '',
                         sourceSubtitle: subject?.name || '',
                         contentMode: sectionKey || 'notes',
-                        chapterTitle: chapter.title || '',
+                         chapterTitle: chapterTitle || '',
                         subjectName: subject?.name || '',
                       },
                     }}
@@ -394,6 +404,8 @@ function LegacyAccordion({ subject, subjectId, chapters, sectionKey = null }) {
 
 export default function SubjectPage() {
   const { subjectId }          = useParams();
+  const { contentLang }        = useContentLang();
+  const isAssamese             = contentLang === 'as';
 
   const { data: subject, isLoading: subjectLoading, isError: subjectError, refetch: refetchSubject } = useSubject(subjectId);
   const { data: chapters = [], isLoading: chaptersLoading } = useChapters(subjectId);
@@ -402,7 +414,11 @@ export default function SubjectPage() {
   const subjectSections = useMemo(() => {
     const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
     const notesChs = chapters.filter(ch => !ch.content_type || !QA_TYPES.has(ch.content_type));
-    const qaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type));
+    const qaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type) || (
+      isAssamese
+        ? (typeof ch.has_qa_as === 'boolean' ? ch.has_qa_as : ch.has_qa)
+        : ch.has_qa
+    ));
     // Subject-level PYQ papers — [{id, name, class_name, year, description, pages}]
     const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => ({
       id:          p.id || `pyq-${pi}`,
@@ -417,12 +433,12 @@ export default function SubjectPage() {
       })),
     }));
     return [
-      { key: 'notes',           label: 'Notes',      chapters: notesChs, pyqGroups: null,  accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
-      { key: 'qa',              label: 'Questions',  chapters: qaChs,    pyqGroups: null,  accent: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' },
-      { key: 'question_paper',  label: 'PYQs',       chapters: [],       pyqGroups,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.25)' },
-      { key: 'blog',            label: 'Blog View',  chapters: [],       pyqGroups: null,  accent: '#0284c7', bg: 'rgba(2,132,199,0.08)',   border: 'rgba(2,132,199,0.25)' },
+      { key: 'notes',           label: isAssamese ? 'টোকা' : 'Notes', chapters: notesChs, pyqGroups: null, accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
+      { key: 'qa',              label: isAssamese ? 'প্ৰশ্ন' : 'Questions', chapters: qaChs, pyqGroups: null, accent: '#2563eb', bg: 'rgba(37,99,235,0.08)', border: 'rgba(37,99,235,0.25)' },
+      { key: 'question_paper',  label: isAssamese ? 'পিৱাইকিউ' : 'PYQs', chapters: [], pyqGroups, accent: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
+      { key: 'blog',            label: isAssamese ? 'ব্লগ' : 'Blog View', chapters: [], pyqGroups: null, accent: '#0284c7', bg: 'rgba(2,132,199,0.08)', border: 'rgba(2,132,199,0.25)' },
     ];
-  }, [chapters, subject?.pyq_papers]);
+  }, [chapters, subject?.pyq_papers, isAssamese]);
 
   const [activeSection, setActiveSection] = useState('notes');
   const [expandedPyqId, setExpandedPyqId] = useState(null);
@@ -743,7 +759,7 @@ export default function SubjectPage() {
           })()
         ) : (
           /* Chapters accordion — filtered by active section */
-          <LegacyAccordion subject={subject} subjectId={subjectId} chapters={filteredChapters} sectionKey={activeSectionKey} />
+          <LegacyAccordion subject={subject} subjectId={subjectId} chapters={filteredChapters} sectionKey={activeSectionKey} contentLang={contentLang} />
         )}
 
         {/* Full Syllabus — always visible, all chapters, Notes/Q&A deep links (SEO/GEO crawlable) */}
@@ -757,10 +773,17 @@ export default function SubjectPage() {
               {[...chapters]
                 .sort((a, b) => (a.order_index ?? a.order ?? a.chapter_number ?? 0) - (b.order_index ?? b.order ?? b.chapter_number ?? 0))
                 .map((ch, i) => {
-                  const chBase = subject.board_slug && subject.class_slug && subject.slug && ch.slug
-                    ? `/${subject.board_slug}/${subject.class_slug}${subject.stream_slug ? `/${subject.stream_slug}` : ''}/${subject.slug}/${ch.slug}`
+                  const chapterSlug = isAssamese ? (ch.slug_as || ch.slug) : ch.slug;
+                  const chapterTitle = isAssamese ? (ch.title_as || ch.title) : ch.title;
+                  const chBase = subject.board_slug && subject.class_slug && subject.slug && chapterSlug
+                    ? `${isAssamese
+                      ? `/as/${subject.board_slug}/${subject.class_slug}/${subject.slug}`
+                      : `/${subject.board_slug}/${subject.class_slug}${subject.stream_slug ? `/${subject.stream_slug}` : ''}/${subject.slug}`
+                    }/${chapterSlug}`
                     : null;
-                  const hasQA = ch.has_qa || ch.content_type === 'qa';
+                  const hasQA = (isAssamese
+                    ? (typeof ch.has_qa_as === 'boolean' ? ch.has_qa_as : ch.has_qa)
+                    : ch.has_qa) || ch.content_type === 'qa';
                   return (
                     <div
                       key={ch.id || i}
@@ -770,7 +793,7 @@ export default function SubjectPage() {
                       <span className="w-6 text-center text-[11px] font-bold shrink-0" style={{ color: 'hsl(var(--muted-foreground) / 0.5)' }}>
                         {ch.chapter_number ?? i + 1}
                       </span>
-                      <span className="flex-1 font-medium truncate text-foreground">{ch.title}</span>
+                      <span className="flex-1 font-medium truncate text-foreground">{chapterTitle}</span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {chBase && (
                           <Link
