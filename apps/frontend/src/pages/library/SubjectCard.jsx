@@ -442,7 +442,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                 return (
                   <div
                     key={ch.id || i}
-                    className="flex items-center gap-2 px-3 py-2.5 sm:py-2 text-xs transition-all"
+                    className="group flex items-center gap-2 rounded-md px-3 py-2.5 text-xs transition-colors hover:bg-violet-50/60 sm:py-2"
                     style={{ borderBottom: i < visChapters.length - 1 ? '1px solid rgba(139,92,246,0.05)' : 'none' }}
                   >
                     <span
@@ -453,13 +453,20 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                     </span>
                     <Link
                       to={chPath}
-                      className="truncate transition-colors flex-1 font-medium"
+                      className={`flex-1 truncate font-medium transition-colors ${
+                        hasValidLink && hasContent
+                          ? 'text-slate-700 group-hover:text-violet-700'
+                          : 'text-slate-400'
+                      }`}
                       title={`${chapterTitle} — ${displaySubjectName}${chapterDescription ? ` — ${chapterDescription}` : ''}`}
-                      style={{ color: section.accent, opacity: (hasValidLink && hasContent) ? 1 : 0.5 }}
+                      style={{ opacity: (hasValidLink && hasContent) ? 1 : 0.5 }}
                     >
                       {chapterTitle}
                     </Link>
-                    <ExternalLink size={10} className="shrink-0" style={{ color: 'hsl(var(--muted-foreground) / 0.2)' }} />
+                    <ExternalLink
+                      size={10}
+                      className="shrink-0 text-slate-300 transition-colors group-hover:text-violet-400"
+                    />
                   </div>
                 );
               })}
