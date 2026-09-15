@@ -316,6 +316,22 @@ describe('release regressions', () => {
     expect(JSON.stringify(body)).not.toContain('must-not-leak');
     expect(JSON.stringify(body)).not.toContain('private-beneficiary-data');
 
+    // created_at has second-level precision. A later insert in this same
+    // second must stay outside the snapshot captured by the cursor.
+    await env.DB.prepare(`
+      INSERT INTO content_audit_log
+        (id, user_id, action, target_type, target_id, diff, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      'roi-audit-listing-000',
+      'audit-operator-newer',
+      'download_referral_roi_evidence',
+      'referral_roi',
+      'dashboard',
+      JSON.stringify({ report_limit: 10 }),
+      capturedAt,
+    ).run();
+
     await env.DB.prepare(`
       DELETE FROM content_audit_log WHERE id = ?
     `).bind('roi-audit-listing-002').run();
@@ -350,6 +366,16 @@ describe('release regressions', () => {
     ]);
     expect(JSON.stringify(nextBody)).not.toContain('must-not-leak');
     expect(JSON.stringify(nextBody)).not.toContain('private-beneficiary-data');
+
+    const replayedPage = await fetchWorker(
+      request(
+        `/api/v1/admin/referrals/roi/dashboard/export-audits?limit=2&cursor=${encodeURIComponent(body.next_cursor ?? '')}`,
+        settler,
+      ),
+    );
+    expect(replayedPage.status).toBe(200);
+    expect(await replayedPage.json()).toEqual(nextBody);
+    expect(JSON.stringify(nextBody)).not.toContain('audit-operator-newer');
   });
 
   it('fences an active RAG lease and recovers an expired running lease', async () => {

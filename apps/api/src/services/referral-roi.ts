@@ -944,10 +944,15 @@ type RoiEvidenceDownloadAuditRow = {
 type RoiEvidenceDownloadAuditCursor = {
   createdAt: number;
   id: string;
+  snapshotRowId: number | null;
 };
 
 function encodeRoiEvidenceDownloadAuditCursor(cursor: RoiEvidenceDownloadAuditCursor): string {
-  return btoa(JSON.stringify({ c: cursor.createdAt, i: cursor.id }))
+  return btoa(JSON.stringify({
+    c: cursor.createdAt,
+    i: cursor.id,
+    s: cursor.snapshotRowId,
+  }))
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/g, '');
@@ -958,16 +963,24 @@ function decodeRoiEvidenceDownloadAuditCursor(value: string | undefined): RoiEvi
   try {
     const padded = value.replace(/-/g, '+').replace(/_/g, '/')
       .padEnd(Math.ceil(value.length / 4) * 4, '=');
-    const parsed = JSON.parse(atob(padded)) as { c?: unknown; i?: unknown };
+    const parsed = JSON.parse(atob(padded)) as { c?: unknown; i?: unknown; s?: unknown };
     if (
       !Number.isSafeInteger(parsed.c)
       || typeof parsed.i !== 'string'
       || !parsed.i
       || parsed.i.length > 200
+      || (parsed.s !== undefined
+        && (!Number.isSafeInteger(parsed.s) || (parsed.s as number) < 0))
     ) {
       throw new Error('Invalid ROI audit cursor');
     }
-    return { createdAt: parsed.c as number, id: parsed.i };
+    return {
+      createdAt: parsed.c as number,
+      id: parsed.i,
+      // Cursors issued before the snapshot field remain readable, but only
+      // newly issued cursors can fence same-second inserts.
+      snapshotRowId: parsed.s === undefined ? null : parsed.s as number,
+    };
   } catch {
     throw new Error('Invalid ROI audit cursor');
   }
@@ -1038,22 +1051,35 @@ export async function listRoiEvidenceDownloadAuditPage(
 }> {
   const safeLimit = normalizeRoiAuditLimit(input.limit ?? 25);
   const cursor = decodeRoiEvidenceDownloadAuditCursor(input.cursor);
+  const snapshotRowId = cursor?.snapshotRowId ?? (!cursor
+    ? ((await db.prepare(`
+      SELECT COALESCE(MAX(rowid), 0) AS snapshot_row_id
+      FROM content_audit_log
+      WHERE action = 'download_referral_roi_evidence'
+        AND target_type = 'referral_roi'
+        AND target_id = 'dashboard'
+    `).first<{ snapshot_row_id: number }>())?.snapshot_row_id ?? 0)
+    : null);
+  const snapshotClause = snapshotRowId === null ? '' : 'AND rowid <= ?';
   const cursorClause = cursor
     ? 'AND (created_at < ? OR (created_at = ? AND id < ?))'
     : '';
-  const bindings = cursor
-    ? [cursor.createdAt, cursor.createdAt, cursor.id, safeLimit + 1]
-    : [safeLimit + 1];
+  const bindings = [
+    ...(snapshotRowId === null ? [] : [snapshotRowId]),
+    ...(cursor ? [cursor.createdAt, cursor.createdAt, cursor.id] : []),
+    safeLimit + 1,
+  ];
   const rows = await db.prepare(`
-    SELECT id, user_id, action, diff, created_at
+    SELECT rowid AS row_id, id, user_id, action, diff, created_at
     FROM content_audit_log
     WHERE action = 'download_referral_roi_evidence'
       AND target_type = 'referral_roi'
       AND target_id = 'dashboard'
+      ${snapshotClause}
       ${cursorClause}
     ORDER BY created_at DESC, id DESC
     LIMIT ?
-  `).bind(...bindings).all<RoiEvidenceDownloadAuditRow>();
+  `).bind(...bindings).all<RoiEvidenceDownloadAuditRow & { row_id: number }>();
   const pageRows = rows.results.slice(0, safeLimit);
   const lastRow = pageRows.at(-1);
   return {
@@ -1065,6 +1091,7 @@ export async function listRoiEvidenceDownloadAuditPage(
       ? encodeRoiEvidenceDownloadAuditCursor({
         createdAt: lastRow.created_at,
         id: lastRow.id,
+        snapshotRowId,
       })
       : null,
   };
