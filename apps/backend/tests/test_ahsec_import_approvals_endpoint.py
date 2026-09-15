@@ -694,3 +694,136 @@ def test_index_repair_queue_uses_compact_index_after_archive_retention(
     assert body["chapters"][0]["archived"] is False
     assert body["chapters"][1]["archived"] is True
     assert second.json() == body
+
+
+@pytest.mark.parametrize(
+    "latest_index_contents",
+    [
+        "{malformed latest-state index\n",
+        json.dumps(
+            {
+                "version": 1,
+                "chapters": {
+                    "chapter-eligible": {
+                        "record": {
+                            "chapter_id": "chapter-eligible",
+                            "status": "index_failed",
+                        },
+                        "archived": True,
+                    },
+                    "chapter-partial": {"record": {"chapter_id": "chapter-partial"}},
+                },
+            }
+        )
+        + "\n",
+    ],
+    ids=["invalid-json", "partial-chapter-entry"],
+)
+def test_index_repair_queue_rebuilds_corrupt_compact_index(
+    client, admin_cookie, tmp_path, latest_index_contents
+):
+    import app.api.v1.admin_content as admin_content
+
+    state_dir = tmp_path / "import-state"
+    archive_dir = state_dir / "archive" / "20260914T000000Z"
+    archive_dir.mkdir(parents=True)
+    approvals = state_dir / "approvals.jsonl"
+    progress = state_dir / "progress.jsonl"
+    latest_index = state_dir / "latest-progress.json"
+
+    _write_jsonl(
+        archive_dir / "progress.jsonl",
+        "truncated historical line",
+        {
+            "run_id": "old-run",
+            "chapter_id": "chapter-resolved",
+            "status": "index_failed",
+            "operation": "vector_delete",
+            "index_attempt": 1,
+            "timestamp": "2026-09-14T10:00:00+00:00",
+        },
+        {
+            "run_id": "eligible-run",
+            "chapter_id": "chapter-eligible",
+            "status": "index_failed",
+            "operation": "vector_upsert",
+            "index_attempt": 1,
+            "timestamp": "2026-09-14T10:01:00+00:00",
+            "private_error": "must not be exposed",
+        },
+    )
+    _write_jsonl(
+        progress,
+        "incomplete live record",
+        {
+            "run_id": "current-run",
+            "chapter_id": "chapter-resolved",
+            "status": "done",
+            "timestamp": "2026-09-15T10:00:00+00:00",
+        },
+    )
+    latest_index.write_text(latest_index_contents, encoding="utf-8")
+
+    with (
+        patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", approvals),
+        patch.object(admin_content, "_AHSEC_D1_IMPORT_PROGRESS_FILE", progress),
+        patch.object(
+            admin_content,
+            "_AHSEC_D1_LATEST_PROGRESS_INDEX_FILE",
+            latest_index,
+        ),
+        patch.object(
+            admin_content,
+            "_AHSEC_D1_ARCHIVE_DIR",
+            state_dir / "archive",
+        ),
+        patch.object(
+            admin_content,
+            "_legacy_repair_progress_states",
+            wraps=admin_content._legacy_repair_progress_states,
+        ) as rebuild,
+    ):
+        first = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/index-repair-queue?limit=10",
+            cookies=admin_cookie,
+        )
+        second = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/index-repair-queue?limit=10",
+            cookies=admin_cookie,
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    body = first.json()
+    assert body["total"] == 1
+    assert body["exhausted"] == 0
+    assert [item["chapter_id"] for item in body["chapters"]] == [
+        "chapter-eligible"
+    ]
+    assert body["chapters"][0]["archived"] is True
+    assert "private_error" not in first.text
+    assert rebuild.call_count == 1
+    assert second.json() == body
+    assert json.loads(latest_index.read_text(encoding="utf-8"))["chapters"] == {
+        "chapter-resolved": {
+            "record": {
+                "run_id": "current-run",
+                "chapter_id": "chapter-resolved",
+                "status": "done",
+                "timestamp": "2026-09-15T10:00:00+00:00",
+            },
+            "archived": False,
+        },
+        "chapter-eligible": {
+            "record": {
+                "run_id": "eligible-run",
+                "chapter_id": "chapter-eligible",
+                "status": "index_failed",
+                "operation": "vector_upsert",
+                "index_attempt": 1,
+                "timestamp": "2026-09-14T10:01:00+00:00",
+                "private_error": "must not be exposed",
+            },
+            "archived": True,
+        },
+    }

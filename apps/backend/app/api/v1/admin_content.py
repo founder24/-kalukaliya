@@ -279,14 +279,19 @@ def _read_latest_progress_index(
 
     states: dict[str, tuple[dict, bool]] = {}
     for chapter_id, state in chapters.items():
-        if not isinstance(state, dict):
-            continue
+        normalized_chapter_id = str(chapter_id).strip()
+        if not normalized_chapter_id or not isinstance(state, dict):
+            return None
         record = state.get("record")
-        if isinstance(record, dict) and str(chapter_id).strip():
-            states[str(chapter_id).strip()] = (
-                record,
-                bool(state.get("archived", False)),
-            )
+        if (
+            not isinstance(record, dict)
+            or str(record.get("chapter_id") or "").strip() != normalized_chapter_id
+            or not isinstance(record.get("status"), str)
+            or not record["status"].strip()
+            or not isinstance(state.get("archived"), bool)
+        ):
+            return None
+        states[normalized_chapter_id] = (record, state["archived"])
     return states
 
 
