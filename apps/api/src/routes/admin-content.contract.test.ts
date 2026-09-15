@@ -180,6 +180,90 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     )).toBe('## Motion in a Plane\n\nActual notes.');
   });
 
+  it('reindexes formatted notes before returning and invalidates the subject cache', async () => {
+    const subjectId = 'format-subject';
+    const formatted = `## Formatted chapter\n\n${'Formatted topic content. '.repeat(55)}`.trim();
+    const source = `## Original chapter\n\n${'Original topic content. '.repeat(45)}`;
+    const originalAi = env.AI;
+    const originalVectorize = env.VECTORIZE;
+    const upserted: Array<{ id: string; values: number[]; metadata: Record<string, unknown> }> = [];
+    const deleted: string[] = [];
+
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO subjects (id, stream_id, name, slug, is_published) VALUES (?, 'stream', 'Formatted Subject', ?, 1)`)
+        .bind(subjectId, subjectId),
+      env.DB.prepare(`
+        INSERT INTO chapters
+          (id, subject_id, title, slug, status, notes_en, rag_text, rag_sections_en, rag_updated_at, rag_indexed_at)
+        VALUES ('format-chapter', ?, 'Formatted Chapter', 'formatted-chapter', 'draft', ?, ?, '[]', 1, 1)
+      `).bind(subjectId, source, source),
+      env.DB.prepare(`
+        INSERT INTO chunks
+          (id, chapter_id, subject_id, source_type, medium, chunk_type, content, vector_id, metadata)
+        VALUES ('format-old-chunk', 'format-chapter', ?, 'notes', 'english', 'text', ?, 'format-chapter_english_notes_0', '{}')
+      `).bind(subjectId, source),
+    ]);
+    await env.CONTENT_KV.put(`subject:${subjectId}:chapters`, 'stale');
+    env.AI = {
+      run: async (model: string, input: { text?: string[] }) => (
+        model === '@cf/baai/bge-m3'
+          ? { data: (input.text ?? []).map(() => ({ values: [0.01, 0.02] })) }
+          : { response: formatted }
+      ),
+    } as unknown as Ai;
+    env.VECTORIZE = {
+      upsert: async (entries: typeof upserted) => {
+        upserted.push(...entries);
+        return { count: entries.length };
+      },
+      deleteByIds: async (ids: string[]) => {
+        deleted.push(...ids);
+        return { count: ids.length };
+      },
+    } as unknown as VectorizeIndex;
+
+    try {
+      const response = await workerFetch(adminRequest(`/api/v1/admin/content/subject/${subjectId}/format-notes`, 'POST'));
+      expect(response.status).toBe(200);
+      await expect(response.clone().json()).resolves.toMatchObject({
+        chapters_formatted: 1,
+        total_with_content: 1,
+        skipped: [],
+        reindex_queued: [],
+        reindex_failed: [],
+      });
+
+      const chapter = await env.DB.prepare(`
+        SELECT notes_en, rag_text, rag_sections_en, rag_updated_at, rag_indexed_at
+        FROM chapters WHERE id = 'format-chapter'
+      `).first<{
+        notes_en: string; rag_text: string; rag_sections_en: string;
+        rag_updated_at: number; rag_indexed_at: number;
+      }>();
+      expect(chapter?.notes_en).toBe(formatted);
+      expect(chapter?.rag_text).toBe(formatted);
+      expect(chapter?.rag_sections_en).toBe('[]');
+      expect(chapter?.rag_indexed_at).toBeGreaterThanOrEqual(chapter?.rag_updated_at ?? Number.MAX_SAFE_INTEGER);
+
+      const mappings = await env.DB.prepare(`
+        SELECT content, vector_id FROM chunks
+        WHERE chapter_id = 'format-chapter' AND source_type = 'notes'
+      `).all<{ content: string; vector_id: string }>();
+      expect(mappings.results.length).toBeGreaterThan(0);
+      expect(mappings.results.every(row => row.content.includes('Formatted topic content.'))).toBe(true);
+      expect(mappings.results.every(row => !row.content.includes('Original topic content.'))).toBe(true);
+      expect(new Set(mappings.results.map(row => row.vector_id))).toEqual(new Set(upserted.map(row => row.id)));
+      expect(deleted).toContain('format-chapter_english_notes_0');
+      await expect(env.CONTENT_KV.get(`subject:${subjectId}:chapters`)).resolves.toBeNull();
+    } finally {
+      env.AI = originalAi;
+      env.VECTORIZE = originalVectorize;
+      await env.DB.prepare('DELETE FROM chunks WHERE chapter_id = ?').bind('format-chapter').run();
+      await env.DB.prepare('DELETE FROM chapters WHERE id = ?').bind('format-chapter').run();
+      await env.DB.prepare('DELETE FROM subjects WHERE id = ?').bind(subjectId).run();
+    }
+  });
+
   it('supports the existing admin login, verify, and logout cookie lifecycle', async () => {
     const login = await workerFetch(new Request('http://worker/api/v1/admin/login', {
       method: 'POST',

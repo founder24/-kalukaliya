@@ -67,6 +67,18 @@ function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   try { return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; }
 }
 
+async function queueNoteReindex(env: Env, chapterId: string): Promise<string> {
+  const jobId = crypto.randomUUID();
+  const items = JSON.stringify([{ chapter_id: chapterId, scopes: ['notes'], status: 'pending' }]);
+  const timestamp = now();
+  await env.DB.prepare(`
+    INSERT INTO rag_reindex_jobs
+      (id, actor_id, status, requested_scopes, items, created_at, updated_at)
+    VALUES (?, NULL, 'pending', '["notes"]', ?, ?, ?)
+  `).bind(jobId, items, timestamp, timestamp).run();
+  return jobId;
+}
+
 function cookieValue(cookie: string, key: string): string | null {
   const prefix = `${key}=`;
   return cookie.split(';').map(part => part.trim()).find(part => part.startsWith(prefix))
@@ -1027,6 +1039,8 @@ adminContentRouter.post('/content/subject/:subjectId/format-notes', async c => {
   }
 
   let formatted = 0;
+  const reindexQueued: Array<{ chapter_id: string; title: string; job_id: string; error: string }> = [];
+  const reindexFailed: Array<{ chapter_id: string; title: string; error: string }> = [];
   const skipped: Array<{ chapter_id: string; title: string; error: string }> = [];
   for (const chapter of withContent) {
     const source = chapter.notes!.trim();
@@ -1044,12 +1058,41 @@ adminContentRouter.post('/content/subject/:subjectId/format-notes', async c => {
       }
       await db.update(chapters).set({
         notesEn: content,
+        // reindexChapterRag intentionally prefers the canonical RAG fields
+        // over notes_en. Keep those fields in lockstep so a queued retry
+        // cannot restore chunks from the pre-format source.
+        ragText: content,
+        ragSectionsEn: '[]',
         wordCountEn: outputWords,
         ragUpdatedAt: now(),
         ragIndexedAt: null,
         updatedAt: now(),
       }).where(eq(chapters.id, chapter.id)).run();
       formatted += 1;
+
+      try {
+        const results = await reindexChapterRag(c.env, chapter.id, ['notes']);
+        const failure = results.notes?.error;
+        if (failure) throw new Error(failure);
+      } catch (error) {
+        const reindexError = error instanceof Error ? error.message : String(error);
+        try {
+          const jobId = await queueNoteReindex(c.env, chapter.id);
+          c.executionCtx.waitUntil(runRagJob(c.env, jobId));
+          reindexQueued.push({
+            chapter_id: chapter.id,
+            title: chapter.title,
+            job_id: jobId,
+            error: reindexError,
+          });
+        } catch (queueError) {
+          reindexFailed.push({
+            chapter_id: chapter.id,
+            title: chapter.title,
+            error: `RAG reindex failed: ${reindexError}; retry queue failed: ${queueError instanceof Error ? queueError.message : String(queueError)}`,
+          });
+        }
+      }
     } catch (error) {
       skipped.push({
         chapter_id: chapter.id,
@@ -1063,6 +1106,8 @@ adminContentRouter.post('/content/subject/:subjectId/format-notes', async c => {
     chapters_formatted: formatted,
     total_with_content: withContent.length,
     skipped,
+    reindex_queued: reindexQueued,
+    reindex_failed: reindexFailed,
     message: `Formatted ${formatted} of ${withContent.length} chapters`,
   });
 });

@@ -22,3 +22,13 @@ succeeded but retrieval silently returned 0 chunks — LLM answered without any 
 **How to apply:** When adding a new retrieval path or refactoring, grep for `content_en` to find
 any hard-coded field reads and expand them using the priority chain above.
 `bulk_seed_rag_en.py:_get_chapter_text()` is the canonical reference implementation.
+
+Content rewrite flows must also update or clear every higher-priority RAG field they supersede
+before queueing a reindex; otherwise a successful repair can faithfully embed stale structured
+or plain-text content instead of the newly written notes.
+
+**Why:** Reindexing reads the stored priority chain, not the field that happened to trigger the
+rewrite. Updating only `notes_en` leaves old `rag_sections_en` or `rag_text` eligible for repair.
+
+**How to apply:** For complete note rewrites, persist the new source in `rag_text_en` and clear
+stale structured sections, then replace the note vectors and D1 mappings.
