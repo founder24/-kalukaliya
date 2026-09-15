@@ -10,6 +10,10 @@ import AdminDashboard from '@/components/admin/AdminDashboard';
 import AdminAnalytics from '@/components/admin/AdminAnalytics';
 import AdminUsers from '@/components/admin/AdminUsers';
 import AdminConversations from '@/components/admin/AdminConversations';
+import AdminModuleUnavailable from '@/components/admin/AdminModuleUnavailable';
+import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
+import ReferralROI from '@/pages/referrals/ReferralROI';
+import { STAFF_PORTAL_SECTIONS } from '@/config/staffPortalSections.mjs';
 import StaffOperations from '@/components/staff/StaffOperations';
 import { canStaffCapability, isStaffOrAdmin } from '@/utils/staffAccess';
 import { buildStaffChapterPatchPayload, normalizeStaffChapterCreateStatus } from '@/utils/staffChapterPayload';
@@ -209,8 +213,48 @@ function Dot({ filled, label }) {
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
-function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
+const SIDEBAR_VIEW_BY_SECTION = {
+  dashboard: 'dashboard',
+  contenthub: 'contenthub',
+  seomanager: 'seomanager',
+  users: 'users',
+  referrals: 'referrals',
+  referralsettlements: 'referralsettlements',
+  referralroi: 'referralroi',
+  conversations: 'conversations',
+  notifications: 'notifications',
+  ai: 'ai',
+  analytics: 'analytics',
+  security: 'security',
+  logs: 'logs',
+  health: 'health',
+  ops: 'ops',
+  settings: 'settings',
+};
+
+function Sidebar({ user, onLogout, view, onViewChange, onChangePassword, mobile = false }) {
   const hasStaffAccess = isStaffOrAdmin(user);
+  const activeSection = view === 'subjects' || view === 'chapters'
+    ? 'contenthub'
+    : view;
+  const icons = {
+    dashboard: <DashboardIcon />,
+    contenthub: <GridIcon />,
+    seomanager: <GridIcon />,
+    users: <UsersIcon />,
+    referrals: <GridIcon />,
+    referralsettlements: <DatabaseIcon />,
+    referralroi: <AnalyticsIcon />,
+    conversations: <ConversationsIcon />,
+    notifications: <GridIcon />,
+    ai: <GridIcon />,
+    analytics: <AnalyticsIcon />,
+    security: <GridIcon />,
+    logs: <GridIcon />,
+    health: <GridIcon />,
+    ops: <DatabaseIcon />,
+    settings: <GridIcon />,
+  };
   return (
     <aside className="flex flex-col h-full bg-white border-r border-gray-100">
       <div className="flex items-center gap-3 px-5 py-5 border-b border-gray-100">
@@ -221,15 +265,23 @@ function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {hasStaffAccess && <>
-          <SidebarLink active={view === 'dashboard'} icon={<DashboardIcon />} label="Dashboard" onClick={() => onViewChange('dashboard')} />
-          <SidebarLink active={view === 'analytics'} icon={<AnalyticsIcon />} label="Command center" onClick={() => onViewChange('analytics')} />
-          <SidebarLink active={view === 'users'} icon={<UsersIcon />} label="Users" onClick={() => onViewChange('users')} />
-          <SidebarLink active={view === 'conversations'} icon={<ConversationsIcon />} label="Conversations" onClick={() => onViewChange('conversations')} />
-          <div className="my-2 border-t border-gray-100" />
-        </>}
-        <SidebarLink active={view === 'subjects' || view === 'chapters'} icon={<GridIcon />} label="Subjects" onClick={() => onViewChange('subjects')} />
-        <SidebarLink active={view === 'operations'} icon={<DatabaseIcon />} label="RAG & lifecycle" onClick={() => onViewChange('operations')} />
+        {hasStaffAccess && STAFF_PORTAL_SECTIONS.map((section) => (
+          <SidebarLink
+            key={section.id}
+            active={activeSection === SIDEBAR_VIEW_BY_SECTION[section.id]}
+            icon={icons[section.id] || <GridIcon />}
+            label={section.label}
+            testId={mobile ? undefined : `admin-nav-${section.id}`}
+            onClick={() => onViewChange(section.id)}
+          />
+        ))}
+        <div className="my-2 border-t border-gray-100" />
+        <SidebarLink
+          active={view === 'operations'}
+          icon={<DatabaseIcon />}
+          label="RAG & lifecycle"
+          onClick={() => onViewChange('operations')}
+        />
       </nav>
       <div className="px-4 py-4 border-t border-gray-100">
         <div className="flex items-center gap-3 mb-3">
@@ -253,9 +305,13 @@ function Sidebar({ user, onLogout, view, onViewChange, onChangePassword }) {
   );
 }
 
-function SidebarLink({ active, icon, label, onClick }) {
+function SidebarLink({ active, icon, label, testId, onClick }) {
   return (
-    <button onClick={onClick} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${active ? 'bg-violet-50 text-violet-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
+    <button
+      onClick={onClick}
+      data-testid={testId}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${active ? 'bg-violet-50 text-violet-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}
+    >
       <span className={active ? 'text-violet-600' : 'text-gray-400'}>{icon}</span>
       {label}
     </button>
@@ -2653,7 +2709,7 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
   const mobileMenuButtonRef = useRef(null);
   const [changePwOpen, setChangePwOpen] = useState(false);
   const [view,         setView]         = useState(
-    commandSections.includes(initialSection) ? 'analytics' : 'subjects',
+    commandSections.includes(initialSection) ? 'analytics' : 'contenthub',
   );
 
   const [boards,   setBoards]   = useState([]);
@@ -2811,11 +2867,12 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
   }, []);
 
   const handleViewChange = (v) => {
-    if (['dashboard', 'analytics', 'users', 'conversations'].includes(v) && !hasStaffAccess) {
-      toast.error('Dashboard, analytics, users, and conversations are available to staff and administrators.');
+    if (!hasStaffAccess) {
+      toast.error('Staff portal sections are available to staff and administrators.');
       return;
     }
-    setView(v);
+    const nextView = v === 'contenthub' ? 'contenthub' : v;
+    setView(nextView);
     // Command-center states are shareable (`/staff?section=rag&days=30`).
     // Content editing itself remains the established Subjects/Chapters workflow.
     if (v === 'analytics') {
@@ -2824,11 +2881,11 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
         if (!next.get('section')) next.set('section', 'overview');
         return next;
       });
-    } else if (v === 'subjects') {
+    } else if (v === 'contenthub' || v === 'subjects') {
       setSearchParams({});
     }
     setSidebarOpen(false);
-    if (v === 'subjects') setSelectedSubject(null);
+    if (v === 'contenthub' || v === 'subjects') setSelectedSubject(null);
   };
 
   // Map admin quick-link section IDs to staff panel view names
@@ -2854,6 +2911,18 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
     window.location.href = adminCookieAccess && !user ? '/admin/login' : '/login';
   };
   const adminToken = getToken() || (adminCookieAccess ? 'cookie' : null);
+  const unavailableView = {
+    seomanager: 'seomanager',
+    referrals: 'referrals',
+    referralsettlements: 'referralsettlements',
+    notifications: 'notifications',
+    ai: 'ai',
+    security: 'security',
+    logs: 'logs',
+    health: 'health',
+    ops: 'ops',
+    settings: 'settings',
+  };
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
@@ -2869,11 +2938,12 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
 
       {/* Mobile drawer */}
       <div id="staff-mobile-drawer" role="dialog" aria-modal="true" aria-label="Staff navigation" className={`fixed inset-y-0 left-0 z-50 w-72 lg:hidden transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <Sidebar user={effectiveUser} onLogout={handleLogout} view={view} onViewChange={handleViewChange} onChangePassword={() => { setSidebarOpen(false); setChangePwOpen(true); }} />
+          <Sidebar user={effectiveUser} onLogout={handleLogout} view={view} onViewChange={handleViewChange} onChangePassword={() => { setSidebarOpen(false); setChangePwOpen(true); }} mobile />
       </div>
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <BreakGlassBanner adminToken={adminToken} />
         <header className="lg:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100 flex-shrink-0 shadow-sm">
           <button ref={mobileMenuButtonRef} onClick={() => setSidebarOpen(true)} className="p-2 rounded-xl text-gray-500 hover:bg-gray-100 transition-colors" aria-label="Open menu" aria-expanded={sidebarOpen} aria-controls="staff-mobile-drawer"><HamburgerIcon /></button>
           <div className="flex items-center gap-2">
@@ -2898,6 +2968,14 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
           {view === 'conversations' && (
             <AdminConversations adminToken={adminToken} onNavigate={handleAdminNavigate} />
           )}
+          {view === 'referralroi' && (
+            <div className="p-4 sm:p-6">
+              <ReferralROI adminToken={adminToken} />
+            </div>
+          )}
+          {unavailableView[view] && (
+            <AdminModuleUnavailable moduleId={unavailableView[view]} />
+          )}
           {view === 'operations' && (
             <StaffOperations
               user={effectiveUser}
@@ -2908,7 +2986,7 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
               onOpenChapter={handleOpenRepairChapter}
             />
           )}
-          {view === 'subjects' && (
+          {(view === 'contenthub' || view === 'subjects') && (
             <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} error={contentError} onRetry={loadContent} onSelectSubject={selectSubject} onSubjectCreated={handleSubjectCreated} />
           )}
           {view === 'chapters' && selectedSubject && (
