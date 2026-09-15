@@ -978,7 +978,7 @@ test.describe('Staff panel — sidebar sections', () => {
     expect(consoleErrors, 'No uncaught console errors during bilingual chapter editing').toHaveLength(0);
   });
 
-  test('uploads selected image pages in order and appends consecutive markdown pages', async ({ page }) => {
+  test('uploads selected image pages in order and persists consecutive markdown pages after reopening', async ({ page }) => {
     const fixture = await setupContentEditorFixture(page);
     staffMocks.enableStrictUnexpectedApiRequests();
 
@@ -1003,6 +1003,26 @@ test.describe('Staff panel — sidebar sections', () => {
     expect(fixture.pyqUploadFilenames).toEqual(['page-1.png', 'page-2.png']);
     expect(fixture.hasRequest('POST', '/api/v1/staff/content/chapter/chapter-1/pyq-papers')).toBeTruthy();
     expect(fixture.hasRequest('POST', '/api/v1/admin/content/upload-image')).toBeFalsy();
+
+    const expectedNotes = [
+      '## Existing English\n\n• first point',
+      '![Page 1](/r2/page-1.png)',
+      '![Page 2](/r2/page-2.png)',
+    ].join('\n\n');
+    const saveRequest = page.waitForRequest(request =>
+      request.method() === 'PATCH' &&
+      request.url().includes('/staff/content/chapter/chapter-1'),
+    );
+    await page.getByRole('button', { name: 'Save Chapter', exact: true }).click();
+    expect((await saveRequest).postDataJSON()).toMatchObject({
+      notes_en: expectedNotes,
+    });
+
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await page.getByRole('button', { name: /^Notes RAG/ }).click();
+    await expect(page.getByPlaceholder(/Study notes in English/)).toHaveValue(expectedNotes);
   });
 
   test('reports partial image-page failures while keeping successful pages', async ({ page }) => {
