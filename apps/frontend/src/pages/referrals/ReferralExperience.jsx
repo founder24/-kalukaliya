@@ -74,6 +74,8 @@ export default function ReferralExperience() {
 
   const policy = experience?.policy || {};
   const program = experience?.program || {};
+  const rewards = experience?.rewards || {};
+  const rewardsPolicy = rewards.policy || {};
   const application = experience?.application;
   const dashboard = experience?.dashboard;
   const isPaused = program.state === 'paused';
@@ -82,6 +84,8 @@ export default function ReferralExperience() {
   const currentWeek = dashboard?.current_week;
   const rewardCap = currentWeek?.reward_cap_inr;
   const qualificationPercent = qualification?.target ? (Number(qualification.mature_verified || 0) / Number(qualification.target)) * 100 : 0;
+  const monthlyBaseCredits = rewardsPolicy.monthly_base_credits ?? 30;
+  const monthlyBonusCredits = rewardsPolicy.signup_bonus_credits ?? 99;
 
   const change = (name, value) => setForm((current) => ({ ...current, [name]: value }));
   const submit = async (event) => {
@@ -123,7 +127,7 @@ export default function ReferralExperience() {
           <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full border border-violet-300/20" /><div className="absolute right-8 top-8 h-28 w-28 rounded-full border border-violet-300/20" />
           <p className="mb-3 text-[11px] font-bold uppercase tracking-[.22em] text-violet-200">Syrabit referral program</p>
           <div className="relative max-w-2xl"><h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Help a classmate study. Earn when their visit is verified.</h1><p className="mt-3 max-w-xl text-sm leading-6 text-violet-100/80">A transparent program for eligible students. No pressure to share, no public identity, and no promise until the server verifies a visit.</p></div>
-          <div className="relative mt-6 flex flex-wrap gap-2 text-xs font-semibold text-violet-100"><span className="rounded-full bg-white/10 px-3 py-2">Policy {policy.version || 'current'}</span><span className="rounded-full bg-white/10 px-3 py-2">Server-verified earnings</span><span className="rounded-full bg-white/10 px-3 py-2">Program pauses are visible</span></div>
+          <div className="relative mt-6 flex flex-wrap gap-2 text-xs font-semibold text-violet-100"><span className="rounded-full bg-white/10 px-3 py-2">Policy {policy.version || 'current'}</span><span className="rounded-full bg-white/10 px-3 py-2">Server-verified earnings</span><span className="rounded-full bg-white/10 px-3 py-2">Program pauses are visible</span><span className="rounded-full bg-white/10 px-3 py-2">{monthlyBaseCredits} monthly base + up to {monthlyBonusCredits} bonus credits</span></div>
         </header>
 
         {isPaused && <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><Clock3 className="mt-0.5 shrink-0" size={18} /><div><b>Referrals are paused{program.pause_effective_at ? ` since ${date(program.pause_effective_at)}` : ''}.</b><p className="mt-1 text-amber-800">Your progress is preserved and new earnings stop during the pause. We will show a new activation date here when the program resumes.</p></div></div>}

@@ -41,6 +41,15 @@ export const REFERRAL_POLICY = {
     genericStaffAccessIsInsufficient: true,
     retiredPythonBackendAllowed: false,
   },
+  accessRewards: {
+    promoterMatureVerifiedThreshold: 100,
+    adFreeDurationSeconds: 30 * 24 * 60 * 60,
+    monthlyBaseCredits: 30,
+    signupBonusCredits: 99,
+    globalMonthlyCreditCap: 9_900,
+    perPromoterMonthlyCreditCap: 99,
+    requireOnboarding: true,
+  },
 } as const;
 
 export type ReferralTier = 'basic' | 'advanced';

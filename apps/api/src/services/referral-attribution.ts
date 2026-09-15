@@ -4,6 +4,10 @@ import {
   REFERRAL_POLICY_VERSION,
   type ReferralEvidenceGate,
 } from '../contracts/referral-policy';
+import {
+  issuePromoterAdFreeReward,
+  issueReferralSignupReward,
+} from './referral-rewards';
 
 export const REFERRAL_IDENTITY_COOKIE = 'syrabit_referral_identity';
 export const REFERRAL_EVENT_RETENTION_SECONDS = 180 * 24 * 60 * 60;
@@ -868,9 +872,11 @@ export async function reconcileReferralAccount(
     return 'duplicate-account';
   }
   if (!updated) {
-    return claim.identity_confidence === 'account'
-      ? 'already-reconciled'
-      : 'duplicate-account';
+    if (claim.identity_confidence === 'account') {
+      await issueReferralSignupReward(db, accountId, occurredAt).catch(() => {});
+      return 'already-reconciled';
+    }
+    return 'duplicate-account';
   }
 
   await recordBoundedEvent(db, {
@@ -882,6 +888,7 @@ export async function reconcileReferralAccount(
     identityConfidence: 'account',
     occurredAt,
   });
+  await issueReferralSignupReward(db, accountId, occurredAt).catch(() => {});
   return 'reconciled';
 }
 
@@ -1351,12 +1358,13 @@ export async function matureReferralClaim(
   await rebalanceProvisionalAdvancedPositions(db, maturedAt);
 
   const claim = await db.prepare(`
-    SELECT week_id, credited_influencer_slot
+    SELECT week_id, credited_influencer_slot, account_id
     FROM referral_weekly_claims
     WHERE id = ? AND maturity_token = ?
   `).bind(claimId, maturityToken).first<{
     week_id: string;
     credited_influencer_slot: number;
+    account_id: string | null;
   }>();
   if (!claim) {
     return {
@@ -1367,13 +1375,29 @@ export async function matureReferralClaim(
     };
   }
   const progress = await db.prepare(`
-    SELECT mature_verified_count, provisional_qualified_at
+    SELECT mature_verified_count, reward_eligible_count, provisional_qualified_at
     FROM referral_weekly_progress
     WHERE week_id = ? AND influencer_slot = ?
   `).bind(claim.week_id, claim.credited_influencer_slot).first<{
     mature_verified_count: number;
+    reward_eligible_count: number;
     provisional_qualified_at: number | null;
   }>();
+  const promoter = await db.prepare(`
+    SELECT user_id
+    FROM referral_influencer_slots
+    WHERE slot_no = ?
+  `).bind(claim.credited_influencer_slot).first<{ user_id: string }>();
+  if (
+    promoter?.user_id
+    && (progress?.mature_verified_count ?? 0) >= REFERRAL_POLICY.accessRewards.promoterMatureVerifiedThreshold
+    && (progress?.reward_eligible_count ?? 0) >= REFERRAL_POLICY.accessRewards.promoterMatureVerifiedThreshold
+  ) {
+    await issuePromoterAdFreeReward(db, promoter.user_id, maturedAt).catch(() => {});
+  }
+  if (claim.account_id) {
+    await issueReferralSignupReward(db, claim.account_id, maturedAt).catch(() => {});
+  }
   const position = await db.prepare(`
     SELECT position_no
     FROM referral_advanced_positions

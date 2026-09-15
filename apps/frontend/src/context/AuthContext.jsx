@@ -6,6 +6,7 @@ import {
   hydrateAdsOptOutFromServer,
   setAdsAuthChecked,
   setAdsPlan,
+  setAdsReferralEntitlement,
 } from '@/utils/adsConfig';
 import {
   getToken,
@@ -30,6 +31,9 @@ export const AuthProvider = ({ children }) => {
 
   const fetchMe = useCallback(async () => {
     let resolvedUserId = null;
+    // Do not let a previous account's referral reward suppress ads while the
+    // next account is being resolved.
+    setAdsReferralEntitlement(null);
     try {
       const token = getToken();
       const headers = token
@@ -70,9 +74,18 @@ export const AuthProvider = ({ children }) => {
         // Set the plan before publishing the user so ad-bearing route
         // effects cannot run once with anonymous consent during hydration.
         setAdsPlan(userData.plan);
+        setAdsReferralEntitlement(
+          userData.referral_ad_free_entitlement
+            ?? userData.referralAdFreeEntitlement
+            ?? userData.referral_ad_free
+            ?? userData.referralAdFree
+            ?? false,
+          userData.referral_ad_free_until ?? userData.referralAdFreeUntil,
+        );
         setUser(userData);
       } else {
         setAdsPlan(null);
+        setAdsReferralEntitlement(null);
         setUser(null);
       }
       justAuthenticated.current = false;
@@ -80,6 +93,7 @@ export const AuthProvider = ({ children }) => {
     } catch {
       if (!justAuthenticated.current) {
         setAdsPlan(null);
+        setAdsReferralEntitlement(null);
         setUser(null);
       }
       return false;
@@ -140,6 +154,14 @@ export const AuthProvider = ({ children }) => {
       const userData = profileRes.data;
       hydrateAdsOptOutFromServer(userData?.ads_opt_out);
       setAdsPlan(userData?.plan);
+      setAdsReferralEntitlement(
+        userData?.referral_ad_free_entitlement
+          ?? userData?.referralAdFreeEntitlement
+          ?? userData?.referral_ad_free
+          ?? userData?.referralAdFree
+          ?? false,
+        userData?.referral_ad_free_until ?? userData?.referralAdFreeUntil,
+      );
       setUser(userData);
       try { Analytics.login(userData.id, userData.email); } catch {}
       return userData;
@@ -170,6 +192,14 @@ export const AuthProvider = ({ children }) => {
       const userData = profileRes.data;
       hydrateAdsOptOutFromServer(userData?.ads_opt_out);
       setAdsPlan(userData?.plan);
+      setAdsReferralEntitlement(
+        userData?.referral_ad_free_entitlement
+          ?? userData?.referralAdFreeEntitlement
+          ?? userData?.referral_ad_free
+          ?? userData?.referralAdFree
+          ?? false,
+        userData?.referral_ad_free_until ?? userData?.referralAdFreeUntil,
+      );
       setUser(userData);
       try { Analytics.signup(userData.email, userData.plan); } catch {}
       return userData;
@@ -200,6 +230,7 @@ export const AuthProvider = ({ children }) => {
     justAuthenticated.current = false;
     localStorage.removeItem('syrabit:onboarding');
     setAdsPlan(null);
+    setAdsReferralEntitlement(null);
     setUser(null);
     try { Analytics.logout(); } catch {}
   };

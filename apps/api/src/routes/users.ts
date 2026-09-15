@@ -36,6 +36,7 @@ import {
   isBrowserAnonId,
 } from '../services/anonymous';
 import { getAnonQuotaUsage } from './chat';
+import { getReferralRewardStatus } from '../services/referral-rewards';
 import type { Env } from '../types';
 
 export const usersRouter = new Hono<{ Bindings: Env }>();
@@ -119,6 +120,30 @@ function buildProfileResponse(user: typeof users.$inferSelect): Record<string, u
   };
 }
 
+async function addReferralRewardFields(
+  db: D1Database,
+  response: Record<string, unknown>,
+  userId: string,
+): Promise<Record<string, unknown>> {
+  const rewards = await getReferralRewardStatus(db, userId);
+  return {
+    ...response,
+    referral_ad_free_entitlement: rewards.adFree.active,
+    referral_ad_free_until: rewards.adFree.expiresAt
+      ? new Date(rewards.adFree.expiresAt * 1000).toISOString()
+      : null,
+    monthly_message_allowance: {
+      period: rewards.monthly.period,
+      base_limit: rewards.monthly.baseLimit,
+      base_used: rewards.monthly.baseUsed,
+      base_remaining: rewards.monthly.baseRemaining,
+      bonus_granted: rewards.monthly.bonusGranted,
+      bonus_used: rewards.monthly.bonusUsed,
+      bonus_remaining: rewards.monthly.bonusRemaining,
+    },
+  };
+}
+
 // ── GET /me ────────────────────────────────────────────────────────────────────
 // ── GET /profile ───────────────────────────────────────────────────────────────
 
@@ -132,7 +157,11 @@ async function getProfile(
   const user = await db.select().from(users).where(eq(users.id, id)).get();
   if (!user || user.deletedAt) return c.json({ detail: 'User not found' }, 404) as Response;
 
-  return c.json(buildProfileResponse(user)) as Response;
+  return c.json(await addReferralRewardFields(
+    c.env.DB,
+    buildProfileResponse(user),
+    id,
+  )) as Response;
 }
 
 usersRouter.get('/me',      getProfile);
@@ -355,6 +384,7 @@ usersRouter.get('/credits', async (c) => {
   let anonymousId: string | null = null;
   let authenticated = false;
   let authenticatedUserId: string | null = null;
+  let rewardStatus: Awaited<ReturnType<typeof getReferralRewardStatus>> | null = null;
 
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
@@ -371,6 +401,7 @@ usersRouter.get('/credits', async (c) => {
         authenticated = true;
         authenticatedUserId = payload.sub;
         tier = user.subscriptionTier ?? 'free';
+        rewardStatus = await getReferralRewardStatus(c.env.DB, payload.sub);
       }
     }
   }
@@ -423,6 +454,21 @@ usersRouter.get('/credits', async (c) => {
       as: languageQuota(),
     },
     tier,
+    ...(rewardStatus ? {
+      monthly_message_allowance: {
+        period: rewardStatus.monthly.period,
+        base_limit: rewardStatus.monthly.baseLimit,
+        base_used: rewardStatus.monthly.baseUsed,
+        base_remaining: rewardStatus.monthly.baseRemaining,
+        bonus_granted: rewardStatus.monthly.bonusGranted,
+        bonus_used: rewardStatus.monthly.bonusUsed,
+        bonus_remaining: rewardStatus.monthly.bonusRemaining,
+      },
+      referral_ad_free_entitlement: rewardStatus.adFree.active,
+      referral_ad_free_until: rewardStatus.adFree.expiresAt
+        ? new Date(rewardStatus.adFree.expiresAt * 1000).toISOString()
+        : null,
+    } : {}),
     ...(anonymousId ? { anon_id: anonymousId } : {}),
   });
 });

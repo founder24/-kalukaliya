@@ -9,6 +9,10 @@ export default function AiCredits({ stats }) {
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Usage</p>
       </div>
       <div className="p-4">
+        <div className="mb-4 rounded-xl border border-violet-200 bg-violet-50/70 px-3 py-2.5 text-xs leading-5 text-violet-900" data-testid="ai-credit-grant-disclosure">
+          <b>Monthly grants:</b> 30 base credits, plus up to 99 referral bonus credits when the server verifies the reward.
+          Bonus grants may pause while the referral program is paused or verification is pending.
+        </div>
         <div className="grid grid-cols-2 gap-3">
           {[
             { icon: Database, label: 'Total Tokens', value: stats.total_tokens > 1000 ? `${(stats.total_tokens/1000).toFixed(0)}K` : stats.total_tokens, color: 'text-blue-600', bg: 'rgba(59,130,246,0.10)' },

@@ -45,6 +45,13 @@ import {
   currentQuotaMinutePeriod,
   trustedEdgeRateLimitUsage,
 } from '../services/anonymous';
+import {
+  completeClaimMonthlyReservation,
+  releaseClaimMonthlyReservation,
+  releaseMonthlyReservation,
+  reserveMonthlyChatQuota,
+  type MonthlyReservationKind,
+} from '../services/referral-rewards';
 import type { Env } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -538,6 +545,9 @@ interface ChatRequestClaim {
   period?: string;
   is_anon?: number;
   quota_reserved?: number;
+  monthly_period?: string | null;
+  monthly_base_reserved?: number;
+  monthly_bonus_reserved?: number;
   session_id: string | null;
   response_content: string | null;
   response_metadata: string | null;
@@ -548,7 +558,8 @@ async function getChatRequestClaim(
   requestId: string,
 ): Promise<ChatRequestClaim | null> {
   return d1.prepare(
-    `SELECT user_id, status, session_id, response_content, response_metadata
+    `SELECT user_id, status, session_id, response_content, response_metadata,
+            monthly_period, monthly_base_reserved, monthly_bonus_reserved
      FROM chat_request_claims
      WHERE request_id = ? AND expires_at > ?`,
   ).bind(requestId, Math.floor(Date.now() / 1000)).first<ChatRequestClaim>();
@@ -573,19 +584,26 @@ async function insertChatRequestClaim(
   userId: string,
   isAnon: boolean,
   quotaReserved: boolean,
+  monthlyPeriod: string | null = null,
+  monthlyKind: MonthlyReservationKind = null,
   period = currentQuotaMinutePeriod(),
 ): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
   const result = await d1.prepare(`
     INSERT OR IGNORE INTO chat_request_claims
-      (request_id, user_id, period, is_anon, quota_reserved, status, created_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?)
+      (request_id, user_id, period, is_anon, quota_reserved,
+       monthly_period, monthly_base_reserved, monthly_bonus_reserved,
+       status, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)
   `).bind(
     requestId,
     userId,
     period,
     isAnon ? 1 : 0,
     quotaReserved ? 1 : 0,
+    monthlyPeriod,
+    monthlyKind === 'base' ? 1 : 0,
+    monthlyKind === 'bonus' ? 1 : 0,
     now,
     now + 24 * 3600,
   ).run();
@@ -647,6 +665,7 @@ async function releaseClaimQuotaReservation(
           AND period = (
             SELECT period FROM chat_request_claims
             WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+             AND quota_reserved = 1
           )
       `).bind(now, userId, requestId, userId)
     : d1.prepare(`
@@ -656,8 +675,10 @@ async function releaseClaimQuotaReservation(
           AND period = (
             SELECT period FROM chat_request_claims
             WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+              AND quota_reserved = 1
           )
       `).bind(now, userId, requestId, userId);
+  await releaseClaimMonthlyReservation(d1, requestId, userId);
   await d1.batch([
     quotaStatement,
     d1.prepare(
@@ -1704,6 +1725,7 @@ chatRouter.post('/cancel', async (c) => {
               AND quota_reserved = 1
           )
       `).bind(now, userId, claim.period, requestId, userId);
+  await releaseClaimMonthlyReservation(c.env.DB, requestId, userId);
   const results = await c.env.DB.batch([
     quotaStatement,
     c.env.DB.prepare(
@@ -1815,6 +1837,11 @@ chatRouter.post('/stream', async (c) => {
   let quotaLimit: number;
   let quotaAllowed: boolean;
   let ownsQuotaReservation = false;
+  let monthlyAllowed = true;
+  let monthlyPeriod: string | null = null;
+  let monthlyKind: MonthlyReservationKind = null;
+  let ownsMonthlyReservation = false;
+  let monthlyQuotaExceeded = false;
 
   const quotaStart = Date.now();
   const reservationPeriod = currentQuotaMinutePeriod();
@@ -1870,19 +1897,45 @@ chatRouter.post('/stream', async (c) => {
       ownsQuotaReservation = quotaAllowed && userRole !== 'admin' && userRole !== 'staff';
     }
 
-    if (quotaAllowed && clientRequestId) {
+    if (quotaAllowed && !isAnon) {
+      const monthly = await reserveMonthlyChatQuota(
+        c.env.DB,
+        userId,
+        userTier,
+        userRole,
+      );
+      monthlyAllowed = monthly.allowed;
+      monthlyPeriod = monthly.period;
+      monthlyKind = monthly.kind;
+      ownsMonthlyReservation = monthly.allowed && monthly.kind !== null;
+      if (!monthlyAllowed) {
+        monthlyQuotaExceeded = true;
+        if (ownsQuotaReservation) {
+          await releaseQuotaReservation(c.env.DB, userId, false, reservationPeriod);
+          ownsQuotaReservation = false;
+        }
+      }
+    }
+
+    if (quotaAllowed && monthlyAllowed && clientRequestId) {
       const inserted = await insertChatRequestClaim(
         c.env.DB,
         clientRequestId,
         userId,
         isAnon,
         ownsQuotaReservation,
+        monthlyPeriod,
+        monthlyKind,
         reservationPeriod,
       );
       if (!inserted) {
         if (ownsQuotaReservation) {
           await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod);
           ownsQuotaReservation = false;
+        }
+        if (ownsMonthlyReservation && monthlyPeriod && monthlyKind) {
+          await releaseMonthlyReservation(c.env.DB, userId, monthlyPeriod, monthlyKind);
+          ownsMonthlyReservation = false;
         }
         const racedClaim = await getChatRequestClaim(c.env.DB, clientRequestId);
         if (!racedClaim || racedClaim.user_id !== userId) {
@@ -1909,12 +1962,26 @@ chatRouter.post('/stream', async (c) => {
     }
   } catch (err) {
     console.error('[chat] quota storage unavailable:', err);
-    if (ownsQuotaReservation) {
-      await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
-        .catch(releaseErr => console.error('[chat] quota compensation failed:', releaseErr));
-      await deleteChatRequestClaim(c.env.DB, clientRequestId, userId)
-        .catch(deleteErr => console.error('[chat] claim compensation failed:', deleteErr));
+    if (clientRequestId && (ownsQuotaReservation || ownsMonthlyReservation)) {
+      await releaseClaimQuotaReservation(c.env.DB, clientRequestId, userId, isAnon)
+        .catch(releaseErr => console.error('[chat] claim compensation failed:', releaseErr));
       ownsQuotaReservation = false;
+      ownsMonthlyReservation = false;
+    } else {
+      if (ownsQuotaReservation) {
+        await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
+          .catch(releaseErr => console.error('[chat] quota compensation failed:', releaseErr));
+        ownsQuotaReservation = false;
+      }
+      if (ownsMonthlyReservation && monthlyPeriod && monthlyKind) {
+        await releaseMonthlyReservation(c.env.DB, userId, monthlyPeriod, monthlyKind)
+          .catch(releaseErr => console.error('[chat] monthly quota compensation failed:', releaseErr));
+        ownsMonthlyReservation = false;
+      }
+      if (clientRequestId) {
+        await deleteChatRequestClaim(c.env.DB, clientRequestId, userId)
+          .catch(deleteErr => console.error('[chat] claim compensation failed:', deleteErr));
+      }
     }
     c.header('X-Failure-Stage', 'quota');
     return c.json({
@@ -1925,13 +1992,17 @@ chatRouter.post('/stream', async (c) => {
     }, 503);
   }
 
-  if (!quotaAllowed) {
+  if (!quotaAllowed || !monthlyAllowed) {
     c.header('X-Failure-Stage', 'quota');
     return c.json(
       {
-        detail: 'Rate limit reached. Please wait a minute before sending another message.',
-        error_code: 'chat_rpm_limit',
-        quota: { used: quotaCount, limit: quotaLimit },
+        detail: monthlyQuotaExceeded
+          ? 'Monthly chat allowance reached. Referral bonus messages are separate from the 6/minute rate limit.'
+          : 'Rate limit reached. Please wait a minute before sending another message.',
+        error_code: monthlyQuotaExceeded ? 'chat_monthly_limit' : 'chat_rpm_limit',
+        quota: monthlyQuotaExceeded
+          ? { period: monthlyPeriod, allowance: 'monthly' }
+          : { used: quotaCount, limit: quotaLimit },
         request_id: serverRequestId,
         failure_stage: 'quota',
       },
@@ -1942,9 +2013,19 @@ chatRouter.post('/stream', async (c) => {
 
   // Helper to release a reserved quota slot on failure paths.
   const releaseQuota = async (): Promise<void> => {
-    if (ownsQuotaReservation) {
-      await releaseClaimQuotaReservation(c.env.DB, clientRequestId, userId, isAnon);
+    if (ownsQuotaReservation || ownsMonthlyReservation) {
+      if (clientRequestId) {
+        await releaseClaimQuotaReservation(c.env.DB, clientRequestId, userId, isAnon);
+      } else {
+        if (ownsQuotaReservation) {
+          await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod);
+        }
+        if (ownsMonthlyReservation && monthlyPeriod && monthlyKind) {
+          await releaseMonthlyReservation(c.env.DB, userId, monthlyPeriod, monthlyKind);
+        }
+      }
       ownsQuotaReservation = false;
+      ownsMonthlyReservation = false;
     }
   };
 
@@ -2557,6 +2638,10 @@ chatRouter.post('/stream', async (c) => {
       // reserveAnonQuota before streaming — do not increment again here.
       try {
         if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
+        if (clientRequestId && ownsMonthlyReservation) {
+          await completeClaimMonthlyReservation(c.env.DB, clientRequestId, userId);
+          ownsMonthlyReservation = false;
+        }
         await persistCompletedChat(c.env.DB, {
           userId,
           sessionId:         effectiveSessionId,

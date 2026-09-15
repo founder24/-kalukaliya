@@ -362,6 +362,72 @@ export function setAdsAuthChecked(checked) {
  */
 const AD_FREE_PLANS = new Set(['starter', 'pro', 'premium']);
 let _adFreePlan = false;
+// Referral rewards can grant ad-free access independently of a subscription.
+// Keep this in memory only: the server is authoritative and a fresh auth
+// response must replace it (or clear it) on logout/account switches.
+let _referralAdFree = false;
+let _referralAdFreeExpiresAt = null;
+let _referralAdFreeTimer = null;
+
+function entitlementExpiryMs(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric < 1e12 ? numeric * 1000 : numeric;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function referralAdFreeActive() {
+  return _referralAdFree
+    && (_referralAdFreeExpiresAt === null || Date.now() < _referralAdFreeExpiresAt);
+}
+
+/**
+ * Mirror the server's referral ad-free entitlement. This deliberately does
+ * not persist to storage: expiry and revocation must take effect on the next
+ * consent evaluation, and another account must never inherit this state.
+ *
+ * Accepted server shapes are `{ active, expires_at, revoked }` and the
+ * convenient top-level `{ referral_ad_free, referral_ad_free_until }` values
+ * used by older profile responses.
+ */
+export function setAdsReferralEntitlement(entitlement, expiresAt) {
+  const source = entitlement && typeof entitlement === 'object' ? entitlement : {};
+  const activeValue = typeof entitlement === 'boolean'
+    ? entitlement
+    : source.active ?? source.enabled ?? source.granted ?? source.ad_free
+      ?? (source.status === 'active') ?? entitlement;
+  const revoked = source.revoked === true || source.status === 'revoked' || source.status === 'expired';
+  const expiry = entitlementExpiryMs(
+    expiresAt ?? source.expires_at ?? source.expiresAt ?? source.until ?? source.ad_free_until,
+  );
+  const nextActive = activeValue === true && !revoked && (expiry === null || Date.now() < expiry);
+  const changed = nextActive !== referralAdFreeActive() || expiry !== _referralAdFreeExpiresAt;
+  if (_referralAdFreeTimer !== null) {
+    clearTimeout(_referralAdFreeTimer);
+    _referralAdFreeTimer = null;
+  }
+  _referralAdFree = nextActive;
+  _referralAdFreeExpiresAt = expiry;
+  if (nextActive && expiry !== null && typeof window !== 'undefined') {
+    _referralAdFreeTimer = setTimeout(() => {
+      _referralAdFree = false;
+      _referralAdFreeTimer = null;
+      window.dispatchEvent(new CustomEvent('syrabit:ads-consent-changed', {
+        detail: { reason: 'referral-entitlement-expired', adFree: false, expiresAt: expiry },
+      }));
+    }, Math.max(0, expiry - Date.now()));
+  }
+  if (changed && typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new CustomEvent('syrabit:ads-consent-changed', {
+        detail: { reason: 'referral-entitlement', adFree: nextActive, expiresAt: expiry },
+      }));
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 export function setAdsPlan(plan) {
   const normalizedPlan = typeof plan === 'string' ? plan.trim().toLowerCase() : '';
@@ -470,6 +536,9 @@ export function getAdConfig(placement) {
  */
 export function adsConsentGranted() {
   if (typeof window === 'undefined') return false;
+  // Re-check time on every call so an entitlement cannot outlive its server
+  // supplied expiry merely because no React event occurred at that moment.
+  if (referralAdFreeActive()) return false;
   if (_adFreePlan) return false;
   if (getAdsOptOut()) return false;
   // Fail closed until the initial auth probe has settled.

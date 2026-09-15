@@ -73,6 +73,10 @@ function migrationStatements(): string[] {
 
 async function resetReferralState(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM referral_monthly_credit_grants'),
+    env.DB.prepare('DELETE FROM referral_access_entitlements'),
+    env.DB.prepare('DELETE FROM referral_reward_claims'),
+    env.DB.prepare('DELETE FROM referral_monthly_credit_usage'),
     env.DB.prepare('DELETE FROM referral_application_audits'),
     env.DB.prepare('DELETE FROM referral_applications'),
     env.DB.prepare('DELETE FROM referral_claim_events'),

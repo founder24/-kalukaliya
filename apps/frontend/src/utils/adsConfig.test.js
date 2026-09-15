@@ -32,4 +32,26 @@ describe('adsConfig account gating', () => {
     expect(adsConfig.getAdsOptOut()).toBe(false);
     expect(adsConfig.adsConsentGranted()).toBe(true);
   });
+
+  it('suppresses ads for an active referral entitlement and clears on revocation', async () => {
+    const adsConfig = await import('./adsConfig');
+    adsConfig.setAdsAuthChecked(true);
+
+    adsConfig.setAdsReferralEntitlement({
+      active: true,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    expect(adsConfig.adsConsentGranted()).toBe(false);
+
+    adsConfig.setAdsReferralEntitlement({ active: false, revoked: true });
+    expect(adsConfig.adsConsentGranted()).toBe(true);
+  });
+
+  it('does not suppress ads after a referral entitlement expires', async () => {
+    const adsConfig = await import('./adsConfig');
+    adsConfig.setAdsAuthChecked(true);
+
+    adsConfig.setAdsReferralEntitlement({ active: true, expires_at: Date.now() - 1 });
+    expect(adsConfig.adsConsentGranted()).toBe(true);
+  });
 });

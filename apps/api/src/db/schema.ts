@@ -885,6 +885,85 @@ export const referralWeeklyEnvelopes = sqliteTable('referral_weekly_envelopes', 
   updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
 });
 
+export const referralRewardClaims = sqliteTable('referral_reward_claims', {
+  id: text('id').primaryKey(),
+  rewardType: text('reward_type').notNull(),
+  promoterUserId: text('promoter_user_id').references(() => users.id),
+  promoterSlot: integer('promoter_slot').references(() => referralInfluencerSlots.slotNo),
+  weekId: text('week_id').references(() => referralWeeks.id),
+  referredAccountId: text('referred_account_id').references(() => users.id),
+  period: text('period'),
+  status: text('status').notNull(),
+  units: integer('units').notNull().default(0),
+  startsAt: integer('starts_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  policyVersion: text('policy_version').notNull(),
+  evidenceJson: text('evidence_json').notNull().default('{}'),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+  revokedAt: integer('revoked_at'),
+}, (t) => [
+  uniqueIndex('referral_reward_claim_idempotency_idx').on(t.idempotencyKey),
+  uniqueIndex('referral_reward_signup_account_idx')
+    .on(t.referredAccountId)
+    .where(sql`${t.rewardType} = 'signup_bonus' AND ${t.referredAccountId} IS NOT NULL`),
+  uniqueIndex('referral_reward_adfree_week_idx')
+    .on(t.promoterUserId, t.weekId)
+    .where(sql`${t.rewardType} = 'ad_free' AND ${t.promoterUserId} IS NOT NULL AND ${t.weekId} IS NOT NULL`),
+  index('referral_reward_claim_status_idx').on(t.status, t.rewardType, t.expiresAt),
+]);
+
+export const referralAccessEntitlements = sqliteTable('referral_access_entitlements', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  rewardClaimId: text('reward_claim_id').notNull().references(() => referralRewardClaims.id),
+  status: text('status').notNull(),
+  startsAt: integer('starts_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  policyVersion: text('policy_version').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+  revokedAt: integer('revoked_at'),
+}, (t) => [
+  uniqueIndex('referral_access_entitlement_claim_idx').on(t.rewardClaimId),
+  uniqueIndex('referral_access_active_user_idx').on(t.userId)
+    .where(sql`${t.status} = 'active'`),
+  index('referral_access_expiry_idx').on(t.status, t.expiresAt),
+]);
+
+export const referralMonthlyCreditGrants = sqliteTable('referral_monthly_credit_grants', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  rewardClaimId: text('reward_claim_id').notNull().references(() => referralRewardClaims.id),
+  period: text('period').notNull(),
+  units: integer('units').notNull(),
+  status: text('status').notNull(),
+  policyVersion: text('policy_version').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+  revokedAt: integer('revoked_at'),
+}, (t) => [
+  uniqueIndex('referral_monthly_grant_claim_idx').on(t.rewardClaimId),
+  index('referral_monthly_grants_user_period_idx').on(t.userId, t.period, t.status),
+]);
+
+export const referralMonthlyCreditUsage = sqliteTable('referral_monthly_credit_usage', {
+  userId: text('user_id').notNull().references(() => users.id),
+  period: text('period').notNull(),
+  baseLimit: integer('base_limit').notNull(),
+  baseReserved: integer('base_reserved').notNull().default(0),
+  baseConsumed: integer('base_consumed').notNull().default(0),
+  bonusGranted: integer('bonus_granted').notNull().default(0),
+  bonusReserved: integer('bonus_reserved').notNull().default(0),
+  bonusConsumed: integer('bonus_consumed').notNull().default(0),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('referral_monthly_usage_pk').on(t.userId, t.period),
+  index('referral_monthly_usage_period_idx').on(t.period, t.updatedAt),
+]);
+
 export const referralAccrualIntervals = sqliteTable('referral_accrual_intervals', {
   id: text('id').primaryKey(),
   weekId: text('week_id').notNull().references(() => referralWeeks.id),

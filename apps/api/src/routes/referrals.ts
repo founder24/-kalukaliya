@@ -57,6 +57,7 @@ import {
   recordRoiEvidenceDownloadAudit,
   roiDashboard,
 } from '../services/referral-roi';
+import { getReferralRewardStatus } from '../services/referral-rewards';
 import type { Env, JwtPayload } from '../types';
 
 export const referralRouter = new Hono<{ Bindings: Env }>();
@@ -271,7 +272,21 @@ referralRouter.get('/me', async (c) => {
   const auth = await requireAccessUser(c);
   if (auth instanceof Response) return auth;
   try {
-    return c.json(await referralExperience(c.env.DB, auth.sub));
+    const [experience, rewards] = await Promise.all([
+      referralExperience(c.env.DB, auth.sub),
+      getReferralRewardStatus(c.env.DB, auth.sub),
+    ]);
+    return c.json({
+      ...experience,
+      rewards: {
+        ...rewards,
+        policy: {
+          monthly_base_credits: REFERRAL_POLICY.accessRewards.monthlyBaseCredits,
+          signup_bonus_credits: REFERRAL_POLICY.accessRewards.signupBonusCredits,
+          ad_free_duration_days: 30,
+        },
+      },
+    });
   } catch {
     return c.json({ detail: 'Referral experience unavailable' }, 503);
   }
