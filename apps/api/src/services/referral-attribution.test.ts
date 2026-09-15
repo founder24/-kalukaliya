@@ -38,6 +38,7 @@ import {
   listAdNetworkInventory,
   reconcileFinalizedAdSenseReports,
   recordRoiControls,
+  roiDashboard,
 } from './referral-roi';
 import {
   activateReferralApplication,
@@ -84,6 +85,7 @@ async function resetReferralState(): Promise<void> {
     env.DB.prepare('DELETE FROM referral_settlement_audits'),
     env.DB.prepare('DELETE FROM referral_payment_receipts'),
     env.DB.prepare('DELETE FROM referral_weekly_roi_reports'),
+    env.DB.prepare('DELETE FROM adsense_reconciliation_status'),
     env.DB.prepare(`UPDATE referral_roi_controls SET
       reserve_healthy = 0, revenue_fresh = 0, invalid_traffic_healthy = 0,
       ad_account_healthy = 0, contribution_margin_healthy = 0,
@@ -2308,9 +2310,42 @@ describe('ad-funded referral ROI controls', () => {
       `).bind(week.id).first<{ data_quality: string; warnings_json: string }>();
       expect(roi?.data_quality).toBe('blocked');
       expect(JSON.parse(roi?.warnings_json ?? '[]')).toContain('adsense-reconciliation-failed');
+      await expect(roiDashboard(env.DB)).resolves.toMatchObject({
+        reconciliation: {
+          status: 'completed',
+          started_at: week.endsAt + 100,
+          completed_at: week.endsAt + 100,
+          weeks: 1,
+          fetched: 1,
+          imported: 0,
+          idempotent: 0,
+          calculated: 1,
+          failures: [`${week.key}: Provider source reference was previously recorded with different evidence`],
+        },
+      });
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('records a skipped automatic run when the provider endpoint is missing', async () => {
+    await expect(reconcileFinalizedAdSenseReports(env.DB, {}, TEST_TIME)).resolves.toEqual({
+      status: 'skipped',
+      weeks: 0,
+      fetched: 0,
+      imported: 0,
+      idempotent: 0,
+      calculated: 0,
+      failures: ['AdSense report endpoint is not configured'],
+    });
+    await expect(roiDashboard(env.DB)).resolves.toMatchObject({
+      reconciliation: {
+        status: 'skipped',
+        started_at: TEST_TIME,
+        completed_at: TEST_TIME,
+        failures: ['AdSense report endpoint is not configured'],
+      },
+    });
   });
 
   it('fails closed and pauses accrual when provider revenue or controls are stale', async () => {

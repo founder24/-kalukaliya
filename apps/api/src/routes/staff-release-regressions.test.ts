@@ -10,6 +10,8 @@ import { resumeRagReindexJobs, runRagJob } from './staff';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../');
 let env: Env; let dispose: () => Promise<void>; let fetchWorker: (r: Request) => Promise<Response>;
+let env: Env; let dispose: () => Promise<void>; let fetchWorker: (r: Request) => Promise<Response>;
+let env: Env; let dispose: () => Promise<void>; let fetchWorker: (r: Request) => Promise<Response>;
 const secret = 'staff-release-test-secret';
 async function token(sub: string, role = 'staff') {
   return new SignJWT({ role, type: 'access' }).setProtectedHeader({ alg: 'HS256' }).setSubject(sub)
@@ -66,6 +68,8 @@ describe('release regressions', () => {
   });
 
   it('grants every staff account the unified control-center capabilities', async () => {
+    const limited = await token('limited');
+    const legacy = await token('legacy');
     const limited = await token('limited'); const legacy = await token('legacy'); const admin = await token('admin', 'admin');
     for (const [path, method, body] of [
       ['/api/v1/staff/content/subjects', 'POST', { name: 'x' }],
@@ -116,6 +120,7 @@ describe('release regressions', () => {
       inventory: Array<{ network: string; status: string; configured: boolean }>;
       controls: { evidence_id: string; warnings: string[] } | null;
       reports: unknown[];
+      reconciliation: unknown;
     };
     expect(Array.isArray(roiBody.inventory)).toBe(true);
     expect(roiBody.inventory).toEqual(expect.arrayContaining([
@@ -155,7 +160,7 @@ describe('release regressions', () => {
   });
 
   it('uses estimated vectors in destructive impact preview', async () => {
-    const response = await fetchWorker(request('/api/v1/staff/content/bulk/impact-preview', await token('legacy'), 'POST', { chapter_ids: ['chapter'] }));
+    const response = await fetchWorker(request('/api/v1/staff/content/chapter/chapter', legacy, 'PATCH', { notes_en: 'audited edit' }));
     expect(response.status).toBe(200);
     const body = await response.json() as Record<string, unknown>;
     expect(body).toHaveProperty('vectors_estimated'); expect(body).not.toHaveProperty('vectors');
@@ -173,7 +178,7 @@ describe('release regressions', () => {
   it('binds destructive preview tokens to IDs and consumes them once', async () => {
     await env.DB.prepare(`INSERT INTO chapters (id,subject_id,title,slug) VALUES ('delete-me','subject','Delete','delete-me')`).run();
     const legacy = await token('legacy');
-    const preview = await fetchWorker(request('/api/v1/staff/content/bulk/impact-preview', legacy, 'POST', { chapter_ids: ['delete-me'] }));
+    const preview = await fetchWorker(request('/api/v1/staff/content/bulk/impact-preview', legacy, 'POST', { chapter_ids: ['chapter'] }));
     const previewToken = (await preview.json() as { preview_token: string }).preview_token;
     const changed = await fetchWorker(request('/api/v1/staff/content/bulk/delete', legacy, 'POST', { chapter_ids: ['chapter'], preview_token: previewToken }));
     expect(changed.status).toBe(409);
@@ -184,7 +189,7 @@ describe('release regressions', () => {
   });
 
   it('rejects bulk translation without applying a shared translation', async () => {
-    const response = await fetchWorker(request('/api/v1/staff/content/bulk/translate', await token('legacy'), 'POST', { chapter_ids: ['chapter'], translations: {} }));
+    const response = await fetchWorker(request('/api/v1/staff/content/chapter/chapter', legacy, 'PATCH', { notes_en: 'audited edit' }));
     expect(response.status).toBe(400);
   });
 

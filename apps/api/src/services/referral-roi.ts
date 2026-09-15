@@ -68,9 +68,32 @@ interface ReconciliationWeekRow extends WeekRow {
   week_key: string;
 }
 
+interface ReconciliationStatusRow {
+  id: string;
+  status: 'running' | 'completed' | 'skipped' | 'failed';
+  started_at: number;
+  completed_at: number | null;
+  weeks: number;
+  fetched: number;
+  imported: number;
+  idempotent: number;
+  calculated: number;
+  failures_json: string;
+}
+
 export interface AdSenseReconciliationConfig {
   ADSENSE_REPORT_URL?: string;
   ADSENSE_REPORT_TOKEN?: string;
+}
+
+export interface AdSenseReconciliationResult {
+  status: 'completed' | 'skipped' | 'failed';
+  weeks: number;
+  fetched: number;
+  imported: number;
+  idempotent: number;
+  calculated: number;
+  failures: string[];
 }
 
 interface RoiCosts {
@@ -96,6 +119,72 @@ function parseWarnings(value: string | null | undefined): string[] {
   } catch {
     return [];
   }
+}
+
+function safeFailureMessage(error: unknown): string {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : 'unknown provider error';
+  return message
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/https?:\/\/\S+/gi, '[provider]')
+    .slice(0, 512);
+}
+
+function parseFailureSummaries(value: string | null | undefined): string[] {
+  try {
+    const parsed = JSON.parse(value ?? '[]');
+    return Array.isArray(parsed)
+      ? parsed
+        .filter(item => typeof item === 'string')
+        .map(item => safeFailureMessage(item))
+        .slice(0, 16)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function markReconciliationStarted(db: D1Database, startedAt: number): Promise<void> {
+  await db.prepare(`
+    INSERT INTO adsense_reconciliation_status
+      (id, status, started_at, completed_at, weeks, fetched, imported, idempotent, calculated, failures_json)
+    VALUES ('singleton', 'running', ?, NULL, 0, 0, 0, 0, 0, '[]')
+    ON CONFLICT(id) DO UPDATE SET
+      status = excluded.status,
+      started_at = excluded.started_at,
+      completed_at = excluded.completed_at,
+      weeks = excluded.weeks,
+      fetched = excluded.fetched,
+      imported = excluded.imported,
+      idempotent = excluded.idempotent,
+      calculated = excluded.calculated,
+      failures_json = excluded.failures_json
+  `).bind(startedAt).run();
+}
+
+async function markReconciliationFinished(
+  db: D1Database,
+  completedAt: number,
+  result: AdSenseReconciliationResult,
+): Promise<void> {
+  await db.prepare(`
+    UPDATE adsense_reconciliation_status
+    SET status = ?, completed_at = ?, weeks = ?, fetched = ?, imported = ?,
+        idempotent = ?, calculated = ?, failures_json = ?
+    WHERE id = 'singleton'
+  `).bind(
+    result.status,
+    completedAt,
+    result.weeks,
+    result.fetched,
+    result.imported,
+    result.idempotent,
+    result.calculated,
+    JSON.stringify(result.failures.map(item => safeFailureMessage(item)).slice(0, 16)),
+  ).run();
 }
 
 function boundedText(value: string, label: string): string {
@@ -390,17 +479,11 @@ export async function reconcileFinalizedAdSenseReports(
   db: D1Database,
   config: AdSenseReconciliationConfig,
   now: number,
-): Promise<{
-  status: 'completed' | 'skipped';
-  weeks: number;
-  fetched: number;
-  imported: number;
-  idempotent: number;
-  calculated: number;
-  failures: string[];
-}> {
+): Promise<AdSenseReconciliationResult> {
+  if (!Number.isSafeInteger(now)) throw new Error('Reconciliation time is invalid');
+  await markReconciliationStarted(db, now);
   if (!config.ADSENSE_REPORT_URL?.trim()) {
-    return {
+    const result: AdSenseReconciliationResult = {
       status: 'skipped',
       weeks: 0,
       fetched: 0,
@@ -409,8 +492,9 @@ export async function reconcileFinalizedAdSenseReports(
       calculated: 0,
       failures: ['AdSense report endpoint is not configured'],
     };
+    await markReconciliationFinished(db, now, result);
+    return result;
   }
-  if (!Number.isSafeInteger(now)) throw new Error('Reconciliation time is invalid');
   const weeks = await db.prepare(`
     SELECT id, week_key, starts_at, ends_at
     FROM referral_weeks
@@ -424,50 +508,63 @@ export async function reconcileFinalizedAdSenseReports(
   let idempotent = 0;
   let calculated = 0;
   const failures: string[] = [];
-  for (const week of weeks.results) {
-    let additionalWarnings: string[] = [];
-    try {
-      const aggregate = await fetchAdSenseAggregate(
-        config.ADSENSE_REPORT_URL,
-        config.ADSENSE_REPORT_TOKEN,
-        week,
-        now,
-      );
-      fetched += 1;
-      const result = await ingestAdRevenueReport(db, {
-        network: APPROVED_NETWORK,
-        periodStart: week.starts_at,
-        periodEnd: week.ends_at,
-        settlementPeriod: aggregate.settlementPeriod,
-        currency: aggregate.currency,
-        grossRevenuePaise: aggregate.grossRevenuePaise,
-        adjustmentsPaise: aggregate.adjustmentsPaise,
-        providerFeesPaise: aggregate.providerFeesPaise,
-        monetizedImpressions: aggregate.monetizedImpressions,
-        finalized: true,
-        finalizedThroughAt: aggregate.finalizedThroughAt,
-        fetchedAt: now,
-        freshnessExpiresAt: aggregate.freshnessExpiresAt,
-        sourceReference: aggregate.sourceReference,
-        evidenceHash: aggregate.evidenceHash,
-        importedBy: 'adsense-reconciliation',
+  try {
+    for (const week of weeks.results) {
+      let additionalWarnings: string[] = [];
+      try {
+        const aggregate = await fetchAdSenseAggregate(
+          config.ADSENSE_REPORT_URL,
+          config.ADSENSE_REPORT_TOKEN,
+          week,
+          now,
+        );
+        fetched += 1;
+        const result = await ingestAdRevenueReport(db, {
+          network: APPROVED_NETWORK,
+          periodStart: week.starts_at,
+          periodEnd: week.ends_at,
+          settlementPeriod: aggregate.settlementPeriod,
+          currency: aggregate.currency,
+          grossRevenuePaise: aggregate.grossRevenuePaise,
+          adjustmentsPaise: aggregate.adjustmentsPaise,
+          providerFeesPaise: aggregate.providerFeesPaise,
+          monetizedImpressions: aggregate.monetizedImpressions,
+          finalized: true,
+          finalizedThroughAt: aggregate.finalizedThroughAt,
+          fetchedAt: now,
+          freshnessExpiresAt: aggregate.freshnessExpiresAt,
+          sourceReference: aggregate.sourceReference,
+          evidenceHash: aggregate.evidenceHash,
+          importedBy: 'adsense-reconciliation',
+        });
+        if (result.idempotent) idempotent += 1;
+        else imported += 1;
+      } catch (error) {
+        additionalWarnings = ['adsense-reconciliation-failed'];
+        failures.push(`${week.week_key}: ${safeFailureMessage(error)}`.slice(0, 512));
+      }
+      await calculateWeeklyRoi(db, {
+        weekId: week.id,
+        actorId: 'adsense-reconciliation',
+        additionalWarnings,
+        calculatedAt: now,
       });
-      if (result.idempotent) idempotent += 1;
-      else imported += 1;
-    } catch (error) {
-      additionalWarnings = ['adsense-reconciliation-failed'];
-      const message = error instanceof Error ? error.message : 'unknown provider error';
-      failures.push(`${week.week_key}: ${message}`.slice(0, 512));
+      calculated += 1;
     }
-    await calculateWeeklyRoi(db, {
-      weekId: week.id,
-      actorId: 'adsense-reconciliation',
-      additionalWarnings,
-      calculatedAt: now,
-    });
-    calculated += 1;
+  } catch (error) {
+    const result: AdSenseReconciliationResult = {
+      status: 'failed',
+      weeks: weeks.results.length,
+      fetched,
+      imported,
+      idempotent,
+      calculated,
+      failures: [...failures, safeFailureMessage(error)].slice(0, 16),
+    };
+    await markReconciliationFinished(db, now, result);
+    throw error;
   }
-  return {
+  const result: AdSenseReconciliationResult = {
     status: 'completed',
     weeks: weeks.results.length,
     fetched,
@@ -476,6 +573,8 @@ export async function reconcileFinalizedAdSenseReports(
     calculated,
     failures,
   };
+  await markReconciliationFinished(db, now, result);
+  return result;
 }
 
 export async function recordRoiControls(
@@ -789,7 +888,7 @@ export async function roiDashboard(
   limit = 12,
 ): Promise<Record<string, unknown>> {
   const safeLimit = Math.min(52, Math.max(1, Math.trunc(limit)));
-  const [inventory, controls, reports] = await Promise.all([
+  const [inventory, controls, reports, reconciliation] = await Promise.all([
     listAdNetworkInventory(db),
     db.prepare(`SELECT * FROM referral_roi_controls WHERE id = 'singleton'`).first<ControlRow>(),
     db.prepare(`
@@ -798,6 +897,12 @@ export async function roiDashboard(
       JOIN referral_weeks w ON w.id = r.week_id
       ORDER BY w.starts_at DESC LIMIT ?
     `).bind(safeLimit).all<Record<string, unknown>>(),
+    db.prepare(`
+      SELECT id, status, started_at, completed_at, weeks, fetched, imported,
+             idempotent, calculated, failures_json
+      FROM adsense_reconciliation_status
+      WHERE id = 'singleton'
+    `).first<ReconciliationStatusRow>(),
   ]);
   return {
     inventory,
@@ -816,5 +921,16 @@ export async function roiDashboard(
       expires_at: controls.expires_at,
     } : null,
     reports: reports.results,
+    reconciliation: reconciliation ? {
+      status: reconciliation.status,
+      started_at: reconciliation.started_at,
+      completed_at: reconciliation.completed_at,
+      weeks: reconciliation.weeks,
+      fetched: reconciliation.fetched,
+      imported: reconciliation.imported,
+      idempotent: reconciliation.idempotent,
+      calculated: reconciliation.calculated,
+      failures: parseFailureSummaries(reconciliation.failures_json),
+    } : null,
   };
 }

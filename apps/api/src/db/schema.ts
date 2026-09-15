@@ -536,6 +536,19 @@ export const referralRoiControls = sqliteTable('referral_roi_controls', {
   expiresAt: integer('expires_at').notNull(),
 });
 
+export const adsenseReconciliationStatus = sqliteTable('adsense_reconciliation_status', {
+  id: text('id').primaryKey(),
+  status: text('status').notNull(),
+  startedAt: integer('started_at').notNull(),
+  completedAt: integer('completed_at'),
+  weeks: integer('weeks').notNull().default(0),
+  fetched: integer('fetched').notNull().default(0),
+  imported: integer('imported').notNull().default(0),
+  idempotent: integer('idempotent').notNull().default(0),
+  calculated: integer('calculated').notNull().default(0),
+  failuresJson: text('failures_json').notNull().default('[]'),
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // RECURRING REFERRAL ATTRIBUTION
 // ─────────────────────────────────────────────────────────────────────────────
