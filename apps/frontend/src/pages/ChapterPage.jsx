@@ -132,7 +132,9 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
   const sortedMarks = Object.keys(markWise).sort((a, b) => Number(a) - Number(b));
   const flatPyqs = pyqData.pyqs || [];
 
-  const hasMW = sortedMarks.length > 0 && sortedMarks.some(m => (markWise[m] || []).length > 0);
+  // Unmarked PYQs should render as one numbered list, not as an
+  // "unknown-Mark Questions" bucket.
+  const hasMW = sortedMarks.some(m => m !== 'unknown' && (markWise[m] || []).length > 0);
 
   return (
     <div className="chapter-textbook rounded-2xl p-3 sm:p-4 mt-4">
@@ -180,6 +182,11 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
                         return (
                           <li key={i} className="text-sm leading-relaxed text-gray-700 pl-1">
                             {qText}
+                            {typeof q === 'object' && q && (q.year || q.source) && (
+                              <span className="ml-2 text-xs text-gray-400">
+                                {[q.year, q.source].filter(Boolean).join(' · ')}
+                              </span>
+                            )}
                           </li>
                         );
                       })}
@@ -198,6 +205,11 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
             return (
               <li key={i} className="text-sm leading-relaxed text-gray-700 pl-1">
                 {qText}
+                {typeof q === 'object' && q && (q.year || q.source) && (
+                  <span className="ml-2 text-xs text-gray-400">
+                    {[q.year, q.source].filter(Boolean).join(' · ')}
+                  </span>
+                )}
                 {marks && (
                   <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
                     {marks}M
@@ -210,6 +222,14 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
       ) : null}
     </div>
   );
+}
+
+function formatQuestionMeta(question) {
+  if (!question || typeof question !== 'object') return '';
+  const year = question.year ? String(question.year).trim() : '';
+  const source = question.source ? String(question.source).trim() : '';
+  if (source && year && source.includes(year)) return source;
+  return [year, source].filter(Boolean).join(' · ');
 }
 
 // Look up the chapter payload baked into the prerendered HTML by
@@ -572,7 +592,7 @@ export default function ChapterPage() {
     let cancelled = false;
     // Text PYQs (important questions)
     apiClient()
-      .get(`/content/chapters/${data.chapter_id}/topic-pyqs?limit=50`)
+      .get(`/content/chapters/${data.chapter_id}/topic-pyqs?limit=50&lang=${contentLang === 'as' ? 'as' : 'en'}`)
       .then(r => { if (!cancelled) setPyqData(r.data); })
       .catch(() => { if (!cancelled) setPyqData(null); });
     // Image-based question papers uploaded via admin panel → R2
@@ -581,7 +601,7 @@ export default function ChapterPage() {
       .then(r => { if (!cancelled) setPyqImages(r.data?.papers || []); })
       .catch(() => { if (!cancelled) setPyqImages([]); });
     return () => { cancelled = true; };
-  }, [data?.chapter_id]);
+  }, [data?.chapter_id, contentLang]);
 
   // P0 #1 of the AI-visibility plan — fetch FAQPage source data so the
   // existing chapterSchema() builder can emit a schema.org FAQPage node.
@@ -1100,6 +1120,9 @@ export default function ChapterPage() {
   const boardName = data.board_name || board;
   const className = data.class_name || classSlug;
   const streamName = data.stream_name || '';
+  const answerTopics = publishedTopics.filter(
+    topic => topic && typeof topic === 'object' && topic.definition && (topic.topic_slug || topic.slug),
+  );
 
   // Task #333: Bing-keyword-aware title + description.
   // Pull the top Bing terms once so the same ranked list seeds title,
@@ -1394,9 +1417,9 @@ export default function ChapterPage() {
               {/* Q&A mode — source citation / topic definition cards */}
               {!isQuestionPaper && contentMode === 'qa' && (
                 <div data-testid="topic-answer-cards">
-                  {publishedTopics.length > 0 ? (
+                  {answerTopics.length > 0 || pyqData?.total > 0 ? (
                     <>
-                      {publishedTopics.flatMap((t, i) => {
+                      {answerTopics.flatMap((t, i) => {
                         const tSlug = t.topic_slug || t.slug || '';
                         const card = (
                           <TopicAnswerCard
@@ -1413,6 +1436,7 @@ export default function ChapterPage() {
                         }
                         return [card];
                       })}
+                      <ImportantQuestions chapterTitle={chapterTitle} pyqData={pyqData} />
                       <AdSlot placement="chapter.qa.end" />
                     </>
                   ) : (
