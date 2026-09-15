@@ -1,0 +1,688 @@
+CLASS 11 PHYSICS
+
+UNIFIED CHAPTER-WISE PYQ QUESTION BANK
+
+English + Assamese
+
+Syllabus: Chapters 1–7 only
+
+---
+
+CHAPTER 1 — UNITS AND MEASUREMENTS
+
+অধ্যায় ১ — একক আৰু জোখ-মাখ
+
+1.
+
+What is a unit?
+একক বুলিলে কি বুজা?
+(2022 Test)
+
+2.
+
+What is the SI unit of pressure?
+চাপৰ SI একক কি?
+(2022 Test)
+
+3.
+
+How many significant figures are there in 0.310 × 10³?
+0.310 × 10³ সংখ্যাটোত কিমানটা significant figure আছে?
+(2025 Half-Yearly)
+
+4.
+
+Find the dimensions of the constants a and b if F = at + bt².
+F = at + bt² সমীকৰণত a আৰু b ধ্ৰুৱকৰ মাত্ৰা নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+5.
+
+Write the dimensions of density, coefficient of elasticity, work and angular acceleration.
+ঘনত্ব, স্থিতিস্থাপকতাৰ গুণাংক, কাৰ্য আৰু কৌণিক ত্বৰণৰ মাত্ৰা লিখা।
+(2022 Test)
+
+6.
+
+Which pair of physical quantities has the same dimensions?
+কোনটো ভৌতিক ৰাশিৰ যোৰৰ মাত্ৰা একে?
+(2023–24 Half-Yearly)
+
+7.
+
+Check dimensionally whether P = F·V is correct.
+P = F·V সমীকৰণটো মাত্ৰাগতভাৱে শুদ্ধ হয় নে পৰীক্ষা কৰা।
+(2026 Final)
+
+8.
+
+Calculate the percentage error in x if x = a²b³/(c√d), when the percentage errors in a, b, c and d are 2%, 1%, 3% and 4%.
+x = a²b³/(c√d) হলে a, b, c আৰু d-ৰ শতাংশ ভুল ক্ৰমে 2%, 1%, 3% আৰু 4%। x-ৰ শতাংশ ভুল নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+9.
+
+Find the dimensions of the spring constant.
+স্প্ৰিং ধ্ৰুৱকৰ মাত্ৰা নিৰ্ণয় কৰা।
+(2026 Final)
+
+10.
+
+Differentiate between dimensions and dimensional formula.
+মাত্ৰা আৰু মাত্ৰাগত সূত্ৰৰ মাজৰ পাৰ্থক্য লিখা।
+(2020 Final)
+
+11.
+
+Define one newton in terms of fundamental SI units.
+মৌলিক SI এককৰ সহায়ত 1 নিউটন সংজ্ঞায়িত কৰা।
+(2023 Final)
+
+12.
+
+Find the relative error in a quantity expressed as a combination of powers of measured quantities.
+জোখ লোৱা ৰাশিসমূহৰ ঘাতযুক্ত সমন্বয়ৰ পৰা পোৱা ৰাশিৰ আপেক্ষিক ভুল নিৰ্ণয় কৰা।
+(2020 Final)
+
+---
+
+CHAPTER 2 — MOTION IN A STRAIGHT LINE
+
+অধ্যায় ২ — সৰল ৰেখাত গতি
+
+1.
+
+Define instantaneous velocity and instantaneous acceleration.
+ক্ষণিক বেগ আৰু ক্ষণিক ত্বৰণৰ সংজ্ঞা দিয়া।
+(2022 Test)
+
+2.
+
+A body travels along a quarter-circle path. Find the ratio of distance travelled to displacement.
+এটা বস্তু চতুৰ্থাংশ বৃত্তীয় পথ অতিক্ৰম কৰে। অতিক্ৰম কৰা দূৰত্ব আৰু স্থানান্তৰৰ অনুপাত নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+3.
+
+A person moves five steps forward and three steps backward repeatedly, with each step taking one second. Determine when the person reaches a pit 11 m from the starting point.
+এজন ব্যক্তিয়ে 5 খোজ আগলৈ আৰু 3 খোজ পিছলৈ এনেদৰে পুনৰাবৃত্তি কৰে। প্ৰতিটো খোজত 1 ছেকেণ্ড লাগে। আৰম্ভণিৰ পৰা 11 m দূৰত থকা গাঁতটোত তেওঁ কেতিয়া পৰিব?
+(2025 Half-Yearly)
+
+4.
+
+A student travels from home to a friend's house at speed v₁ and returns at speed v₂. Find the average speed.
+এজন ছাত্ৰই ঘৰ পৰা বন্ধুৰ ঘৰলৈ v₁ বেগেৰে যায় আৰু v₂ বেগেৰে ঘূৰি আহে। গড় বেগ নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+5.
+
+Identify the appropriate position-time graph for a body that accelerates uniformly and then moves with constant velocity.
+এটা বস্তু প্ৰথমে সমত্বৰণে গতি কৰি পিছত সুষম বেগেৰে গতি কৰিলে তাৰ position-time graph চিনাক্ত কৰা।
+(2025 Half-Yearly)
+
+6.
+
+Identify the realistic velocity-time graph for a moving body.
+গতি কৰা বস্তুৰ বাবে বাস্তৱসন্মত velocity-time graph চিনাক্ত কৰা।
+(2025 Half-Yearly)
+
+7.
+
+For s = t³ − 6t² + 3t + 4, find the velocity when acceleration is zero.
+s = t³ − 6t² + 3t + 4 হলে ত্বৰণ শূন্য হোৱা মুহূৰ্তত বেগ নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+8.
+
+Derive s = ut + ½at².
+s = ut + ½at² সমীকৰণটো প্ৰতিপাদন কৰা।
+(2025 Half-Yearly)
+
+9.
+
+From a given velocity-time graph, calculate distance and displacement during the specified interval.
+দিয়া velocity-time graph-ৰ পৰা নিৰ্দিষ্ট সময়ৰ ভিতৰত দূৰত্ব আৰু স্থানান্তৰ নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+10.
+
+A body falls freely from rest. If it covers half of its total distance during the last second, find the total time and height of fall.
+এটা বস্তু স্থিৰ অৱস্থাৰ পৰা মুক্তভাৱে পৰে। শেষৰ এক ছেকেণ্ডত মুঠ দূৰত্বৰ আধা অতিক্ৰম কৰিলে মুঠ সময় আৰু উচ্চতা নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+11.
+
+A ball is released from the top of a tower of height h and reaches the ground in T seconds. Find its position after T/3 seconds.
+h উচ্চতাৰ টাৱাৰৰ পৰা এটা বল এৰি দিয়া হয় আৰু T ছেকেণ্ডত মাটিত পৰে। T/3 ছেকেণ্ড পিছত ইয়াৰ অৱস্থান নিৰ্ণয় কৰা।
+(2023–24 Half-Yearly)
+
+12.
+
+For x = 5t − 2t² and y = 10t, find the acceleration at t = 2 s.
+x = 5t − 2t² আৰু y = 10t হলে t = 2 s সময়ত ত্বৰণ নিৰ্ণয় কৰা।
+(2023–24 Half-Yearly)
+
+13.
+
+Derive any one of v = v₀ + at and v² = v₀² + 2ax.
+v = v₀ + at অথবা v² = v₀² + 2ax — যিকোনো এটা সমীকৰণ প্ৰতিপাদন কৰা।
+(2026 Final)
+
+14.
+
+Derive the relation involving the distance covered during the nth second of uniformly accelerated motion.
+সমত্বৰিত গতিত n-তম ছেকেণ্ডত অতিক্ৰম কৰা দূৰত্বৰ সমীকৰণ প্ৰতিপাদন কৰা।
+(2026 Final)
+
+15.
+
+Distinguish between average speed and instantaneous speed.
+গড় বেগ আৰু ক্ষণিক বেগৰ পাৰ্থক্য লিখা।
+(2026 Final)
+
+16.
+
+From a velocity-time graph, explain why the slope represents acceleration.
+velocity-time graph-ৰ ঢালক কিয় ত্বৰণ বুলি কোৱা হয় ব্যাখ্যা কৰা।
+(2020 Final)
+
+17.
+
+Show that instantaneous velocity is equal to the slope of the tangent to the displacement-time graph.
+প্ৰমাণ কৰা যে ক্ষণিক বেগ displacement-time graph-ৰ স্পৰ্শকৰ ঢালৰ সমান।
+(2020 Final)
+
+18.
+
+For x = 8.5 + 2.5t², calculate the average velocity between t = 0 and t = 2 s.
+x = 8.5 + 2.5t² হলে t = 0 ৰ পৰা t = 2 s লৈ গড় বেগ নিৰ্ণয় কৰা।
+(2023 Final)
+
+19.
+
+Draw position-time graphs for positive and negative velocity.
+ধনাত্মক আৰু ঋণাত্মক বেগৰ বাবে position-time graph আঁকা।
+(2023 Final)
+
+---
+
+CHAPTER 3 — MOTION IN A PLANE
+
+অধ্যায় ৩ — সমতলত গতি
+
+1.
+
+Find the resultant of two vectors A and B for different values of the angle between them.
+A আৰু B ভেক্টৰৰ মাজৰ বিভিন্ন কোণৰ বাবে resultant নিৰ্ণয় কৰা।
+(2022 Test)
+
+2.
+
+If |A + B| = |A − B|, find the angle between A and B.
+|A + B| = |A − B| হলে A আৰু B-ৰ মাজৰ কোণ নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+3.
+
+Show vectorially that (A + B) + C = A + (B + C).
+ভেক্টৰ চিত্ৰৰ সহায়ত (A + B) + C = A + (B + C) দেখুওৱা।
+(2026 Final)
+
+4.
+
+A force has magnitude 20 N and one rectangular component is 12 N. Find the other component.
+20 N মানৰ বলৰ এটা আয়তক্ষেত্ৰীয় উপাংশ 12 N হলে আনটো উপাংশ নিৰ্ণয় কৰা।
+(2023–24 Half-Yearly)
+
+5.
+
+Find the resultant of two vectors A and B making an angle θ.
+θ কোণ কৰা A আৰু B দুটা ভেক্টৰৰ resultant নিৰ্ণয় কৰা।
+(2026 Final)
+
+6.
+
+Obtain the conditions for maximum and minimum resultant of two vectors.
+দুটা ভেক্টৰৰ resultant-ৰ সৰ্বাধিক আৰু সৰ্বনিম্ন মানৰ চৰ্ত নিৰ্ণয় কৰা।
+(2026 Final)
+
+7.
+
+A body moves 6 m north, 8 m east and 10 m vertically upward. Find its resultant displacement.
+এটা বস্তু 6 m উত্তৰ, 8 m পূব আৰু 10 m উৰ্ধ্বমুখী গতি কৰে। resultant displacement নিৰ্ণয় কৰা।
+(2026 Final)
+
+8.
+
+A projectile has range 200 m and time of flight 5 s. Find its horizontal component of velocity.
+এটা projectile-ৰ range 200 m আৰু time of flight 5 s। অনুভূমিক বেগৰ উপাংশ নিৰ্ণয় কৰা।
+(2023–24 Half-Yearly)
+
+9.
+
+For the projectile equation y = 16x − x²/4, determine the horizontal range.
+projectile-ৰ সমীকৰণ y = 16x − x²/4 হলে horizontal range নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+10.
+
+Show that a body projected horizontally from the top of a tower follows a parabolic path.
+এটা টাৱাৰৰ ওপৰৰ পৰা অনুভূমিকভাৱে প্ৰক্ষেপ কৰা বস্তুই পৰাবলিক পথ অনুসৰণ কৰে বুলি প্ৰমাণ কৰা।
+(2025 Half-Yearly)
+
+11.
+
+A projectile is projected at 60° with kinetic energy K. Find its kinetic energy at the highest point.
+K গতিশক্তিৰে এটা projectile 60° কোণত প্ৰক্ষেপ কৰা হয়। সৰ্বোচ্চ বিন্দুত ইয়াৰ গতিশক্তি নিৰ্ণয় কৰা।
+(2026 Final)
+
+12.
+
+A particle moves with uniform speed in a circle. Find the change in momentum when it moves to the diametrically opposite point.
+এটা কণা সুষম বেগেৰে বৃত্তত গতি কৰে। ব্যাসৰ বিপৰীত বিন্দুলৈ গ'লে momentum-ৰ পৰিৱৰ্তন নিৰ্ণয় কৰা।
+(2023–24 Half-Yearly)
+
+13.
+
+If i and j are unit vectors along x and y axes, find the magnitude and direction of i + j.
+i আৰু j ক্ৰমে x আৰু y অক্ষৰ একক ভেক্টৰ হলে i + j-ৰ মান আৰু দিশ নিৰ্ণয় কৰা।
+(2020 Final)
+
+14.
+
+A cricket ball is projected at 28 m/s at 30° above the horizontal. Find maximum height, time of flight and horizontal range.
+এটা cricket ball 28 m/s বেগেৰে অনুভূমিকৰ সৈতে 30° কোণত প্ৰক্ষেপ কৰা হয়। সৰ্বোচ্চ উচ্চতা, উৰণৰ সময় আৰু range নিৰ্ণয় কৰা।
+(2020 Final)
+
+15.
+
+Draw a vector representing 3A for a given vector A.
+দিয়া A ভেক্টৰৰ বাবে 3A ভেক্টৰটো আঁকা।
+(2023 Final)
+
+16.
+
+Prove the law of cosines for vector addition.
+ভেক্টৰ যোগৰ cosine law প্ৰতিপাদন কৰা।
+(2023 Final)
+
+---
+
+CHAPTER 4 — LAWS OF MOTION
+
+অধ্যায় ৪ — গতিৰ নিয়ম
+
+1.
+
+Two masses are acted upon by the same force. If the acceleration of the 4 kg mass is 2 m/s², find the acceleration of the 5 kg mass.
+4 kg আৰু 5 kg ভৰৰ দুটা বস্তুত একে বল প্ৰয়োগ কৰা হৈছে। 4 kg বস্তুটোৰ ত্বৰণ 2 m/s² হলে 5 kg বস্তুটোৰ ত্বৰণ নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+2.
+
+A 5 kg mass changes velocity from 0 to 60 m/s in 1 s. Find the force acting on it.
+5 kg ভৰৰ বস্তু এটাৰ বেগ 0 ৰ পৰা 60 m/s লৈ 1 s-ত সলনি হয়। তাৰ ওপৰত কিমান বল ক্ৰিয়া কৰে?
+(2025 Half-Yearly)
+
+3.
+
+A 10 N force produces an acceleration of 1 m/s². Find the mass.
+10 N বলে 1 m/s² ত্বৰণ সৃষ্টি কৰিলে বস্তুটোৰ ভৰ নিৰ্ণয় কৰা।
+(2026 Final)
+
+4.
+
+Two masses of 5 kg and 10 kg are connected through a pulley. Find their acceleration.
+5 kg আৰু 10 kg ভৰৰ দুটা বস্তু pulley-ৰ সৈতে সংযুক্ত। সিহঁতৰ ত্বৰণ নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+5.
+
+A 2 kg block is acted upon by a 2.8 N force. If μs = 0.4, find the frictional force.
+2 kg ভৰৰ block এটাত 2.8 N বল প্ৰয়োগ কৰা হৈছে। μs = 0.4 হলে frictional force নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+6.
+
+Find the coefficient of friction when the angle of friction is 30°.
+friction angle 30° হলে coefficient of friction নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+7.
+
+Define coefficient of friction and angle of friction and derive their relation.
+friction coefficient আৰু friction angle সংজ্ঞায়িত কৰি সিহঁতৰ মাজৰ সম্পৰ্ক প্ৰতিপাদন কৰা।
+(2026 Final)
+
+8.
+
+Derive the acceleration of a body sliding down a rough inclined plane.
+এটা ৰুক্ষ inclined plane-ৰ তললৈ গতি কৰা বস্তুৰ ত্বৰণৰ সমীকৰণ প্ৰতিপাদন কৰা।
+(2025 Half-Yearly)
+
+9.
+
+A lift of mass 1000 kg accelerates upward at 1 m/s². Find the tension in the supporting string.
+1000 kg ভৰৰ lift এটা 1 m/s² ত্বৰণেৰে ওপৰলৈ গৈ আছে। supporting string-ৰ tension নিৰ্ণয় কৰা।
+(2026 Final)
+
+10.
+
+When milk is churned, why does cream separate?
+গাখীৰ churn কৰিলে cream কিয় পৃথক হয়?
+(2026 Final)
+
+11.
+
+In vertical circular motion, determine the point at which the string breaks when the speed is increased.
+vertical circular motion-ত বেগ বৃদ্ধি কৰিলে কোনটো বিন্দুত string ছিঙিব পাৰে নিৰ্ণয় কৰা।
+(2026 Final)
+
+12.
+
+Define impulse and prove that impulse equals change in momentum.
+impulse সংজ্ঞায়িত কৰি impulse = momentum-ৰ পৰিৱৰ্তন বুলি প্ৰমাণ কৰা।
+(2025 Half-Yearly)
+
+13.
+
+State and prove the law of conservation of linear momentum.
+linear momentum সংৰক্ষণৰ নিয়মটো লিখি প্ৰমাণ কৰা।
+(2025 Half-Yearly)
+
+14.
+
+State Newton's third law and use it to establish conservation of momentum.
+Newton-ৰ তৃতীয় নিয়ম লিখি তাৰ সহায়ত momentum সংৰক্ষণৰ নীতি প্ৰতিপাদন কৰা।
+(2020 Final)
+
+15.
+
+Define friction and state the laws of friction.
+friction সংজ্ঞায়িত কৰি friction-ৰ নিয়মসমূহ লিখা।
+(2020 Final)
+
+16.
+
+For a body on an inclined plane that is just about to slide, show that tan θ = μ.
+এটা inclined plane-ত বস্তুটো ঠিক পিছলিবলৈ আৰম্ভ কৰা অৱস্থাত tan θ = μ বুলি প্ৰমাণ কৰা।
+(2023 Final)
+
+17.
+
+A 4 kg mass just begins to slide on a plane inclined at 15°. Find the coefficient of static friction.
+4 kg ভৰৰ বস্তু এটা 15° inclined plane-ত ঠিক পিছলিবলৈ আৰম্ভ কৰে। static friction coefficient নিৰ্ণয় কৰা।
+(2023 Final)
+
+18.
+
+Discuss the motion of a car on a level road and obtain the maximum safe speed.
+সমতল পথত গাড়ীৰ গতি আলোচনা কৰি সৰ্বাধিক নিৰাপদ বেগৰ সমীকৰণ নিৰ্ণয় কৰা।
+(2023 Final)
+
+---
+
+CHAPTER 5 — WORK, ENERGY AND POWER
+
+অধ্যায় ৫ — কাৰ্য, শক্তি আৰু ক্ষমতা
+
+1.
+
+A man pushes a wall but it does not move. How much work is done?
+এজন মানুহে এখন দেৱাল ঠেলিছে কিন্তু দেৱালখন লৰচৰ নকৰে। কিমান কাৰ্য সম্পন্ন হয়?
+(2025 Half-Yearly)
+
+2.
+
+What physical quantity is represented by F·ds?
+F·ds-এ কোনটো ভৌতিক ৰাশি সূচায়?
+(2026 Final)
+
+3.
+
+If linear momentum increases by 50%, by what percentage does kinetic energy increase?
+linear momentum 50% বৃদ্ধি পালে kinetic energy কিমান শতাংশ বৃদ্ধি পাব?
+(2025 Half-Yearly)
+
+4.
+
+A 1 g object falling through 1 km reaches the ground at 50 m/s. Find the change in kinetic energy.
+1 g ভৰৰ বস্তু এটা 1 km উচ্চতাৰ পৰা পৰি 50 m/s বেগেৰে মাটিত আহে। kinetic energy-ৰ পৰিৱৰ্তন নিৰ্ণয় কৰা।
+(2026 Final)
+
+5.
+
+Find the decrease in potential energy when a 20 kg body falls through 50 cm.
+20 kg ভৰৰ বস্তু এটা 50 cm তললৈ পৰিলে potential energy-ৰ হ্ৰাস নিৰ্ণয় কৰা।
+(2026 Final)
+
+6.
+
+A spring stores 100 J when stretched by 2 cm. Find the increase in stored energy when it is stretched by another 2 cm.
+2 cm টানিলে এটা spring-ত 100 J শক্তি সঞ্চিত হয়। আৰু 2 cm টানিলে শক্তি কিমান বৃদ্ধি পাব?
+(2026 Final)
+
+7.
+
+Define conservative force and derive the potential energy of a spring.
+conservative force সংজ্ঞায়িত কৰি spring-ৰ potential energy-ৰ সমীকৰণ প্ৰতিপাদন কৰা।
+(2025 Half-Yearly)
+
+8.
+
+Express power as the product of force and velocity.
+force আৰু velocity-ৰ গুণফলৰ ৰূপত power প্ৰকাশ কৰা।
+(2026 Final)
+
+9.
+
+State and prove the work-energy theorem.
+work-energy theorem লিখি প্ৰমাণ কৰা।
+(2026 Final)
+
+10.
+
+Define elastic and inelastic collision.
+elastic আৰু inelastic collision সংজ্ঞায়িত কৰা।
+(2025 Half-Yearly)
+
+11.
+
+For maximum transfer of kinetic energy in a one-dimensional elastic collision, what relation should hold between the masses?
+এটা one-dimensional elastic collision-ত kinetic energy-ৰ সৰ্বাধিক transfer-ৰ বাবে দুটা ভৰৰ মাজত কি সম্পৰ্ক থাকিব লাগে?
+(2026 Final)
+
+12.
+
+Show that work done on a body is equal to the change in its kinetic energy.
+এটা বস্তুৰ ওপৰত কৰা net work kinetic energy-ৰ পৰিৱৰ্তনৰ সমান বুলি প্ৰমাণ কৰা।
+(2020 Final)
+
+13.
+
+What is the SI unit of the scalar product of force and velocity?
+force আৰু velocity-ৰ scalar product-ৰ SI একক কি?
+(2023 Final)
+
+14.
+
+Discuss one-dimensional elastic and inelastic collisions and obtain the relevant energy relations.
+one-dimensional elastic আৰু inelastic collision আলোচনা কৰি প্ৰাসংগিক শক্তিৰ সম্পৰ্ক নিৰ্ণয় কৰা।
+(2023 Final)
+
+CHAPTER 6 — SYSTEM OF PARTICLES AND ROTATIONAL MOTION
+
+অধ্যায় ৬ — কণাৰ তন্ত্ৰ আৰু ঘূৰ্ণন গতি
+
+1.
+
+Define a rigid body and centre of mass.
+rigid body আৰু centre of mass সংজ্ঞায়িত কৰা।
+(2025 Half-Yearly)
+
+2.
+
+Two identical particles move towards each other with velocities 2v and v. Find the velocity of their centre of mass.
+একে ভৰৰ দুটা কণা ক্ৰমে 2v আৰু v বেগেৰে পৰস্পৰৰ ফালে গতি কৰে। centre of mass-ৰ বেগ নিৰ্ণয় কৰা।
+(2026 Final)
+
+3.
+
+Find the scalar and vector products of two given vectors.
+দিয়া দুটা ভেক্টৰৰ scalar product আৰু vector product নিৰ্ণয় কৰা।
+(2026 Final)
+
+4.
+
+A force acts on a body with its line of action not passing through the centre of gravity. What types of acceleration can result?
+এটা বস্তুৰ ওপৰত প্ৰয়োগ কৰা বলৰ line of action centre of gravity-ৰ মাজেৰে নোযোৱাত কি ধৰণৰ ত্বৰণ সৃষ্টি হ'ব পাৰে?
+(2026 Final)
+
+5.
+
+A couple acts on a two-particle system. Describe the resulting motion.
+দুটা কণাৰ তন্ত্ৰৰ ওপৰত couple ক্ৰিয়া কৰিলে resulting motion কেনেকুৱা হ'ব?
+(2026 Final)
+
+6.
+
+Find the dimensions of angular momentum.
+angular momentum-ৰ মাত্ৰা নিৰ্ণয় কৰা।
+(2026 Final)
+
+7.
+
+Define torque and derive its relation with moment of inertia and angular acceleration.
+torque সংজ্ঞায়িত কৰি moment of inertia আৰু angular acceleration-ৰ সৈতে ইয়াৰ সম্পৰ্ক প্ৰতিপাদন কৰা।
+(2026 Final)
+
+8.
+
+Derive rotational kinetic energy and hence define moment of inertia. Explain its physical significance.
+rotational kinetic energy-ৰ সমীকৰণ প্ৰতিপাদন কৰি moment of inertia সংজ্ঞায়িত কৰা আৰু ইয়াৰ ভৌতিক তাৎপৰ্য ব্যাখ্যা কৰা।
+(2025 Half-Yearly)
+
+9.
+
+Define moment of inertia and state its physical significance.
+moment of inertia সংজ্ঞায়িত কৰি ইয়াৰ ভৌতিক তাৎপৰ্য লিখা।
+(2020 Final)
+
+10.
+
+Show that the rate of change of angular momentum is equal to torque. State conservation of angular momentum.
+angular momentum-ৰ পৰিৱৰ্তনৰ হাৰ torque-ৰ সমান বুলি প্ৰমাণ কৰা। angular momentum সংৰক্ষণৰ নিয়ম লিখা।
+(2020 Final)
+
+11.
+
+A force acts on a body at a distance r from the origin making angle θ with the axis. Find the moment of force and its dimensional formula.
+এটা বল origin-ৰ পৰা r দূৰত থকা বস্তু এটাত axis-ৰ সৈতে θ কোণ কৰি ক্ৰিয়া কৰে। moment of force আৰু ইয়াৰ dimensional formula নিৰ্ণয় কৰা।
+(2023 Final)
+
+12.
+
+Define moment of inertia and give its unit. Relate rotational kinetic energy to angular velocity.
+moment of inertia সংজ্ঞায়িত কৰি ইয়াৰ একক লিখা আৰু rotational kinetic energy-ৰ সৈতে angular velocity-ৰ সম্পৰ্ক স্থাপন কৰা।
+(2023 Final)
+
+CHAPTER 7 — GRAVITATION
+
+অধ্যায় ৭ — মহাকৰ্ষণ
+
+1.
+
+Two equal-area portions of a planet's elliptical orbit are swept out in different intervals. Compare the corresponding times.
+এটা গ্ৰহৰ elliptical orbit-ৰ সমান ক্ষেত্ৰফলৰ দুটা অংশ গ্ৰহটোৱে অতিক্ৰম কৰে। দুয়োটা ক্ষেত্ৰৰ বাবে প্ৰয়োজনীয় সময়ৰ সম্পৰ্ক নিৰ্ণয় কৰা।
+(2025 Half-Yearly)
+
+2.
+
+State Kepler's laws of planetary motion.
+গ্ৰহীয় গতিৰ Kepler-ৰ নিয়মসমূহ লিখা।
+(2026 Final)
+
+3.
+
+State Kepler's law and define orbital velocity. Derive the expression for orbital velocity.
+Kepler-ৰ নিয়ম লিখা, orbital velocity সংজ্ঞায়িত কৰা আৰু orbital velocity-ৰ সমীকৰণ প্ৰতিপাদন কৰা।
+(2025 Half-Yearly)
+
+4.
+
+A satellite has a period of 5 hours. If its orbital radius becomes four times, find the new period.
+এটা satellite-ৰ time period 5 ঘণ্টা। orbital radius 4 গুণ কৰিলে নতুন time period নিৰ্ণয় কৰা।
+(2026 Final)
+
+5.
+
+Derive the expression for orbital velocity of an artificial satellite.
+artificial satellite-ৰ orbital velocity-ৰ সমীকৰণ প্ৰতিপাদন কৰা।
+(2026 Final)
+
+6.
+
+State Kepler's laws of planetary motion.
+গ্ৰহীয় গতিৰ Kepler-ৰ নিয়মসমূহ লিখা।
+(2020 Final)
+
+7.
+
+Find the total mechanical energy of an orbiting satellite from its kinetic and potential energies.
+এটা কক্ষপথত ঘূৰি থকা satellite-ৰ kinetic আৰু potential energy-ৰ পৰা মুঠ mechanical energy নিৰ্ণয় কৰা।
+(2023 Final)
+
+8.
+
+Explain how acceleration due to gravity changes with altitude and depth.
+উচ্চতা আৰু গভীৰতাৰ সৈতে acceleration due to gravity কেনেকৈ সলনি হয় ব্যাখ্যা কৰা।
+(2023 Final)
+
+9.
+
+Write a short note on weightlessness.
+weightlessness সম্পৰ্কে এটি চমু টোকা লিখা।
+(2023 Final)
+
+10.
+
+Explain the relation between the orbital motion of a satellite and its total energy.
+satellite-ৰ orbital motion আৰু ইয়াৰ total energy-ৰ মাজৰ সম্পৰ্ক ব্যাখ্যা কৰা।
+(2023 Final)
+
+EXCLUDED FROM THE MASTER BANK
+
+The following types were deliberately removed because they are outside your exact 7-chapter/62-subtopic syllabus:
+
+- Thermodynamics
+- Kinetic theory
+- Heat transfer
+- SHM
+- Waves
+- Properties of bulk matter
+- Fluids / viscosity / Bernoulli
+- Surface tension
+- Elasticity
+- Thermal expansion
+- Carnot cycle
+- Radiation
+- Relative Velocity (your textbook's 2.5, but not in your syllabus)
+- Spring-cut time-period/SHM questions
+- Screw gauge/spherometer questions where they are not part of your specified Ch.1 subtopics
+- Other Class XI questions belonging to Chapters 8–14
+
+---
+
+MASTER CHAPTER DISTRIBUTION
+
+Chapter 1 — Units and Measurements: 12 questions
+Chapter 2 — Motion in a Straight Line: 19 questions
+Chapter 3 — Motion in a Plane: 16 questions
+Chapter 4 — Laws of Motion: 18 questions
+Chapter 5 — Work, Energy and Power: 14 questions
+Chapter 6 — System of Particles and Rotational Motion: 12 questions
+Chapter 7 — Gravitation: 10 questions
+
+Total consolidated question prompts: 101
+
+Sources represented include the Assam/AHSEC Class 11 Physics papers for 2020, 2022, 2023, 2023–24, 2025 and 2026, with duplicate versions of the same paper consolidated. The AssamBoard repository explicitly lists the 2026 Physics papers and the 2025 Half-Yearly Physics papers, and the 2023 AHSEC paper is independently archived as a 15-page paper.
