@@ -18,6 +18,9 @@ type RagMedia = {
 };
 const sourceFor: Record<RagScope, SourceType> = { notes: 'notes', qa: 'important_questions', pyq: 'pyq' };
 const now = () => Math.floor(Date.now() / 1000);
+// Each mapping row currently uses ten bound values. Keep each multi-row
+// statement below D1's 100-parameter remote query limit.
+const CHUNK_MAPPING_BATCH_SIZE = 9;
 
 function parse(value: string | null): Array<Record<string, string>> {
   try { return value ? JSON.parse(value) as Array<Record<string, string>> : []; } catch { return []; }
@@ -124,7 +127,7 @@ async function ingest(
   })));
   try {
     const db = createDb(env.DB);
-    await Promise.all(entries.map(entry => db.insert(chunks).values({
+    const rows = entries.map(entry => ({
       id: crypto.randomUUID(), chapterId, subjectId, sourceType: sourceFor[scope],
       medium, chunkType: 'text', content: entry.content, vectorId: entry.id,
       metadata: JSON.stringify({
@@ -133,7 +136,10 @@ async function ingest(
         ...hierarchyMetadata,
       }),
       createdAt: now(),
-    }).run()));
+    }));
+    for (let offset = 0; offset < rows.length; offset += CHUNK_MAPPING_BATCH_SIZE) {
+      await db.insert(chunks).values(rows.slice(offset, offset + CHUNK_MAPPING_BATCH_SIZE)).run();
+    }
   } catch (error) {
     await env.VECTORIZE.deleteByIds(entries.map(entry => entry.id)).catch(() => undefined);
     throw error;

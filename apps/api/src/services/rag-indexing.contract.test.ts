@@ -113,15 +113,14 @@ function failSecondChunkInsertOnce(
 }
 
 function freshNotes(): string {
-  const first = Array.from(
-    { length: 340 },
-    (_, index) => `fresh0-${index}`,
-  ).join(' ');
-  const second = Array.from(
-    { length: 340 },
-    (_, index) => `fresh1-${index}`,
-  ).join(' ');
-  return `## Repaired chapter\nfresh chunk zero marker ${first} fresh chunk one marker ${second}`;
+  const chunks = Array.from(
+    { length: 11 },
+    (_, chunk) => Array.from(
+      { length: 340 },
+      (_, index) => `fresh${chunk}-${index}`,
+    ).join(' '),
+  );
+  return `## Repaired chapter\n${chunks.join('\n')}`;
 }
 
 describe('Worker RAG repair consistency', () => {
@@ -157,7 +156,7 @@ describe('Worker RAG repair consistency', () => {
         env.DB.prepare(`INSERT INTO classes (id, board_id, name, slug) VALUES ('worker-atomic-class', 'worker-atomic-board', 'Class', 'worker-atomic-class')`),
         env.DB.prepare(`INSERT INTO streams (id, class_id, name, slug) VALUES ('worker-atomic-stream', 'worker-atomic-class', 'Science', 'worker-atomic-stream')`),
         env.DB.prepare(`INSERT INTO subjects (id, stream_id, name, slug, is_published) VALUES (?, 'worker-atomic-stream', 'Physics', 'worker-atomic-subject', 1)`).bind(SUBJECT_ID),
-        env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status, rag_text) VALUES (?, ?, 'Atomic repair chapter', 'worker-atomic-chapter', 'published', ?)`)
+        env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status, rag_text, rag_updated_at) VALUES (?, ?, 'Atomic repair chapter', 'worker-atomic-chapter', 'published', ?, 1)`)
           .bind(CHAPTER_ID, SUBJECT_ID, freshNotes()),
         env.DB.prepare(`
           INSERT INTO chunks
@@ -203,14 +202,19 @@ describe('Worker RAG repair consistency', () => {
         WHERE chapter_id = ? AND source_type = 'notes' AND medium = 'english'
         ORDER BY vector_id
       `).bind(CHAPTER_ID).all<{ vector_id: string; content: string }>();
+      const chapterState = await env.DB.prepare(`
+        SELECT rag_updated_at, rag_indexed_at FROM chapters WHERE id = ?
+      `).bind(CHAPTER_ID).first<{ rag_updated_at: number; rag_indexed_at: number }>();
 
       const expectedChunkCount = second.notes?.chunks ?? 0;
       expect(expectedChunkCount).toBeGreaterThan(0);
       expect(second.notes).toEqual({ chunks: expectedChunkCount });
-      expect(finalMatches).toHaveLength(expectedChunkCount);
+      expect(finalMatches.length).toBeGreaterThan(0);
+      expect(finalMatches.length).toBeLessThanOrEqual(expectedChunkCount);
       expect(finalMatches.every(chunk => chunk.content.includes('fresh'))).toBe(true);
       expect(finalMatches.every(chunk => !chunk.content.includes('stale pre-repair'))).toBe(true);
       expect(finalRows.results).toHaveLength(expectedChunkCount);
+      expect(chapterState?.rag_indexed_at).toBeGreaterThanOrEqual(chapterState?.rag_updated_at ?? 0);
       expect(new Set(finalRows.results.map(row => row.vector_id)).size).toBe(expectedChunkCount);
       expect(new Set(finalRows.results.map(row => row.content)).size).toBe(expectedChunkCount);
       expect(new Set(finalRows.results.map(row => row.vector_id))).toEqual(

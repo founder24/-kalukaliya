@@ -106,6 +106,11 @@ INDEX_FAILED_STATUS = "index_failed"
 INDEX_REPAIRED_STATUS = "index_repaired"
 MAX_INDEX_REPAIR_CHAPTERS = 10
 MAX_INDEX_REPAIR_ATTEMPTS = 3
+# Cloudflare's remote D1 query API accepts at most 100 bound parameters. Keep
+# multi-row mapping statements below that ceiling with room for schema growth.
+D1_BIND_PARAMETER_LIMIT = 100
+CHUNK_MAPPING_BIND_PARAMETERS = 8
+CHUNK_MAPPING_BATCH_SIZE = 10
 INDEX_LOCK_TIMEOUT_SECONDS = float(
     os.getenv("AHSEC_INDEX_LOCK_TIMEOUT_SECONDS", "30")
 )
@@ -362,10 +367,11 @@ class CloudflareClient:
     def vector_delete(self, ids: list[str]) -> None:
         if not ids:
             return
-        self._post(
-            f"{self.api}/vectorize/v2/indexes/{VECTOR_INDEX}/delete_by_ids",
-            {"ids": ids},
-        )
+        for offset in range(0, len(ids), 100):
+            self._post(
+                f"{self.api}/vectorize/v2/indexes/{VECTOR_INDEX}/delete_by_ids",
+                {"ids": ids[offset : offset + 100]},
+            )
 
 
 def clean_notes(text: str) -> str:
@@ -1161,34 +1167,46 @@ def _replace_index_unlocked(
     except Exception as exc:
         raise IndexReplacementError("chunk_mapping_delete", exc) from exc
     if rows:
-        placeholders = ",".join(["(?, ?, ?, ?, 'notes', 'english', 'text', ?, ?, ?, ?)"] * len(rows))
-        params: list[Any] = []
         now = int(time.time())
-        for vector_id, content, metadata in rows:
-            params.extend(
-                [
-                    str(uuid.uuid4()),
-                    f"ahsec-notes-en:{chapter['id']}",
-                    chapter["id"],
-                    chapter["subject_id"],
-                    content,
-                    vector_id,
-                    metadata,
-                    now,
-                ]
+        for offset in range(0, len(rows), CHUNK_MAPPING_BATCH_SIZE):
+            batch = rows[offset : offset + CHUNK_MAPPING_BATCH_SIZE]
+            placeholders = ",".join(
+                ["(?, ?, ?, ?, 'notes', 'english', 'text', ?, ?, ?, ?)"]
+                * len(batch)
             )
-        try:
-            client.execute(
-                f"""
-                INSERT INTO chunks
-                  (id, document_id, chapter_id, subject_id, source_type, medium,
-                   chunk_type, content, vector_id, metadata, created_at)
-                VALUES {placeholders}
-                """,
-                params,
-            )
-        except Exception as exc:
-            raise IndexReplacementError("chunk_mapping_insert", exc) from exc
+            params: list[Any] = []
+            for vector_id, content, metadata in batch:
+                params.extend(
+                    [
+                        str(uuid.uuid4()),
+                        f"ahsec-notes-en:{chapter['id']}",
+                        chapter["id"],
+                        chapter["subject_id"],
+                        content,
+                        vector_id,
+                        metadata,
+                        now,
+                    ]
+                )
+            if len(params) >= D1_BIND_PARAMETER_LIMIT:
+                raise IndexReplacementError(
+                    "chunk_mapping_insert",
+                    RuntimeError(
+                        "chunk mapping batch reached the remote D1 bind limit"
+                    ),
+                )
+            try:
+                client.execute(
+                    f"""
+                    INSERT INTO chunks
+                      (id, document_id, chapter_id, subject_id, source_type, medium,
+                       chunk_type, content, vector_id, metadata, created_at)
+                    VALUES {placeholders}
+                    """,
+                    params,
+                )
+            except Exception as exc:
+                raise IndexReplacementError("chunk_mapping_insert", exc) from exc
     try:
         client.execute(
             "UPDATE chapters SET rag_indexed_at = ? WHERE id = ?",

@@ -181,7 +181,7 @@ class VectorizeClient:
         Delete vectors by ID from the Cloudflare Vectorize index.
 
         Args:
-            vector_ids: list of vector IDs to delete (max 1000 per request).
+            vector_ids: list of vector IDs to delete (batched at 100 per request).
 
         Returns:
             {count: int, mutationId: str}
@@ -190,29 +190,35 @@ class VectorizeClient:
         if not vector_ids:
             return {"count": 0}
 
-        resp = await self._http.post(
-            f"{self._base}/delete-by-ids",
-            headers=self._headers,
-            json={"ids": vector_ids},
-        )
-        resp.raise_for_status()
-        body = resp.json()
+        total_count = 0
+        mutation_ids: list[str] = []
+        for i in range(0, len(vector_ids), _BATCH_SIZE):
+            batch = vector_ids[i : i + _BATCH_SIZE]
+            resp = await self._http.post(
+                f"{self._base}/delete_by_ids",
+                headers=self._headers,
+                json={"ids": batch},
+            )
+            resp.raise_for_status()
+            body = resp.json()
 
-        if not body.get("success"):
-            errors = body.get("errors", [])
-            raise RuntimeError(f"Vectorize delete failed: {errors}")
+            if not body.get("success"):
+                errors = body.get("errors", [])
+                raise RuntimeError(f"Vectorize delete failed: {errors}")
 
-        result = body.get("result", {})
-        logger.info(
-            f"Vectorize delete: {result.get('count', len(vector_ids))} vectors deleted"
-        )
-        return result
+            result = body.get("result", {})
+            total_count += result.get("count", len(batch))
+            if mid := result.get("mutationId"):
+                mutation_ids.append(mid)
+
+        logger.info(f"Vectorize delete: {total_count} vectors deleted")
+        return {"count": total_count, "mutationIds": mutation_ids}
 
     async def get_by_ids(self, vector_ids: list[str]) -> list[dict]:
         """
         Fetch vectors by their IDs from Cloudflare Vectorize.
 
-        Uses the POST /get-by-ids endpoint.  Returns a list of vector objects
+        Uses the POST /get_by_ids endpoint.  Returns a list of vector objects
         (each with an "id" field) for IDs that exist in the index.  IDs that
         do not exist are simply absent from the response — callers can diff the
         requested list against the returned list to find missing vectors.
@@ -227,23 +233,28 @@ class VectorizeClient:
         if not vector_ids:
             return []
 
-        resp = await self._http.post(
-            f"{self._base}/get-by-ids",
-            headers=self._headers,
-            json={"ids": vector_ids},
-        )
-        resp.raise_for_status()
-        body = resp.json()
+        vectors: list[dict] = []
+        for i in range(0, len(vector_ids), _BATCH_SIZE):
+            batch = vector_ids[i : i + _BATCH_SIZE]
+            resp = await self._http.post(
+                f"{self._base}/get_by_ids",
+                headers=self._headers,
+                json={"ids": batch},
+            )
+            resp.raise_for_status()
+            body = resp.json()
 
-        if not body.get("success"):
-            errors = body.get("errors", [])
-            raise RuntimeError(f"Vectorize get-by-ids failed: {errors}")
+            if not body.get("success"):
+                errors = body.get("errors", [])
+                raise RuntimeError(f"Vectorize get_by_ids failed: {errors}")
 
-        result = body.get("result", [])
-        # API may return a list directly or {"vectors": [...]}
-        if isinstance(result, list):
-            return result
-        return result.get("vectors", [])
+            result = body.get("result", [])
+            # API may return a list directly or {"vectors": [...]}
+            if isinstance(result, list):
+                vectors.extend(result)
+            else:
+                vectors.extend(result.get("vectors", []))
+        return vectors
 
     async def get_index_info(self) -> dict:
         """Return metadata about the Vectorize index (dimensions, metric, count)."""
