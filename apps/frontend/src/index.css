@@ -714,16 +714,13 @@
     margin: 2.75rem 0 1rem;
     color: #172554;
     border-top: 3px double #b8c7db;
-    border-bottom: 3px double #b8c7db;
-    padding: 0.7rem 0 0.65rem;
+    padding: 0.9rem 0 0;
   }
   .chapter-textbook h3 {
     font-size: 1.12rem;
     font-weight: 700;
     margin: 1.9rem 0 0.65rem;
     color: #1f2937;
-    border-bottom: 1px solid #e5e7eb;
-    padding-bottom: 0.35rem;
   }
   .chapter-textbook h4,
   .chapter-textbook h5,
@@ -732,8 +729,6 @@
     font-weight: 700;
     margin: 1.35rem 0 0.5rem;
     color: #374151;
-    border-bottom: 1px dashed #e5e7eb;
-    padding-bottom: 0.25rem;
   }
   .chapter-textbook p {
     margin: 0 0 1.15rem;
