@@ -4,6 +4,7 @@ const cronWorkers = vi.hoisted(() => ({
   resumeSeedRuns: vi.fn(async () => undefined),
   resumePublishJobs: vi.fn(async () => undefined),
   resumeRagReindexJobs: vi.fn(async () => undefined),
+  reconcileFinalizedAdSenseReports: vi.fn(async () => undefined),
 }));
 
 vi.mock('./routes/admin-content', async importOriginal => ({
@@ -15,6 +16,11 @@ vi.mock('./routes/admin-content', async importOriginal => ({
 vi.mock('./routes/staff', async importOriginal => ({
   ...(await importOriginal<typeof import('./routes/staff')>()),
   resumeRagReindexJobs: cronWorkers.resumeRagReindexJobs,
+}));
+
+vi.mock('./services/referral-roi', async importOriginal => ({
+  ...(await importOriginal<typeof import('./services/referral-roi')>()),
+  reconcileFinalizedAdSenseReports: cronWorkers.reconcileFinalizedAdSenseReports,
 }));
 
 import { handleScheduled } from './index';
@@ -47,6 +53,7 @@ describe('scheduled D1 operational persistence', () => {
     cronWorkers.resumeSeedRuns.mockReset().mockResolvedValue(undefined);
     cronWorkers.resumePublishJobs.mockReset().mockResolvedValue(undefined);
     cronWorkers.resumeRagReindexJobs.mockReset().mockResolvedValue(undefined);
+    cronWorkers.reconcileFinalizedAdSenseReports.mockReset().mockResolvedValue(undefined);
   });
 
   it('records a successful invocation and clears the durable failure state', async () => {
@@ -102,6 +109,28 @@ describe('scheduled D1 operational persistence', () => {
     expect(completion?.bindings[1]).toBe('failed');
     expect(completion?.bindings[2]).toBe(1);
     expect(completion?.bindings[3]).toContain('RAG reindex resume: RAG lease query unavailable');
+    const state = writes.find(write => write.query.includes('INSERT INTO cron_alert_state'));
+    expect(state?.bindings.slice(0, 2)).toEqual([1, 1]);
+  });
+
+  it('records a useful AdSense reconciliation failure in the scheduled run', async () => {
+    cronWorkers.reconcileFinalizedAdSenseReports.mockRejectedValueOnce(
+      new Error('2026-09-14: AdSense response must contain exactly one aggregate report'),
+    );
+    const writes: Write[] = [];
+
+    await handleScheduled(
+      { cron: '0 0 * * *', scheduledTime: 1_735_689_600_000 } as ScheduledController,
+      cronEnv(writes),
+    );
+
+    expect(cronWorkers.reconcileFinalizedAdSenseReports).toHaveBeenCalledTimes(1);
+    const completion = writes.find(write => write.query.includes('UPDATE cron_runs'));
+    expect(completion?.bindings[1]).toBe('failed');
+    expect(completion?.bindings[2]).toBe(1);
+    expect(completion?.bindings[3]).toContain(
+      'AdSense ROI reconciliation: 2026-09-14: AdSense response must contain exactly one aggregate report',
+    );
     const state = writes.find(write => write.query.includes('INSERT INTO cron_alert_state'));
     expect(state?.bindings.slice(0, 2)).toEqual([1, 1]);
   });
