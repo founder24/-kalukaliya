@@ -526,7 +526,7 @@ test.describe('Staff panel — sidebar sections', () => {
   async function gotoStaff(p: import('@playwright/test').Page) {
     await p.goto('/staff');
     // <aside> is only rendered when StaffGuard is satisfied (user.role===staff)
-    await p.waitForSelector('aside', { timeout: 20_000 });
+    await p.waitForSelector('aside:visible', { timeout: 20_000 });
   }
 
   /** Click a sidebar nav button by its visible label. */
@@ -1180,5 +1180,47 @@ test.describe('Staff panel — sidebar sections', () => {
       consoleErrors,
       'No uncaught console errors while cycling through every section',
     ).toHaveLength(0);
+  });
+
+  test('every catalogued section stays reachable through the mobile drawer', async ({ page }) => {
+    staffMocks.enableStrictUnexpectedApiRequests();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoStaff(page);
+
+    const menuButton = page.getByRole('button', { name: 'Open menu' });
+    const drawer = page.getByRole('dialog', { name: 'Staff navigation' });
+    const main = page.locator('main');
+
+    await expect(menuButton).toBeVisible();
+    await expect(menuButton).toHaveAttribute('aria-expanded', 'false');
+
+    for (const { id, label } of ALL_SECTIONS) {
+      await menuButton.click();
+      await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+      await expect(drawer).toBeVisible();
+
+      const sectionButton = drawer.getByRole('button', { name: label, exact: true });
+      await expect(sectionButton, `"${label}" must remain reachable in the mobile drawer`).toBeVisible();
+      await sectionButton.click();
+
+      await expect(menuButton, `"${label}" must close the mobile drawer after selection`)
+        .toHaveAttribute('aria-expanded', 'false');
+      await expect(drawer).toHaveClass(/-translate-x-full/);
+      await expect(
+        sectionButton,
+        `"${label}" must remain the active section after the drawer closes`,
+      ).toHaveClass(/bg-violet-50/);
+      await expect(
+        main.locator(':scope > *').first(),
+        `"${label}" must render content after mobile navigation`,
+      ).toBeVisible();
+      await expect(
+        main.locator('text=/Something went wrong|failed to load|could not be loaded/i'),
+        `"${label}" must not show an error boundary message`,
+      ).toHaveCount(0);
+      expect(id, `Mobile navigation should use the catalogued section "${label}"`).toBeTruthy();
+    }
+
+    expect(consoleErrors, 'No uncaught console errors while cycling mobile sections').toHaveLength(0);
   });
 });
