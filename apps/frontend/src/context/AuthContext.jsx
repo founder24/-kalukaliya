@@ -5,6 +5,7 @@ import { Analytics } from '@/utils/analytics';
 import {
   hydrateAdsOptOutFromServer,
   setAdsAuthChecked,
+  setAdsPlan,
 } from '@/utils/adsConfig';
 import {
   getToken,
@@ -64,16 +65,21 @@ export const AuthProvider = ({ children }) => {
       }
       const userData = res.data;
       if (userData && userData.id) {
-        setUser(userData);
         resolvedUserId = userData.id;
         hydrateAdsOptOutFromServer(userData.ads_opt_out);
+        // Set the plan before publishing the user so ad-bearing route
+        // effects cannot run once with anonymous consent during hydration.
+        setAdsPlan(userData.plan);
+        setUser(userData);
       } else {
+        setAdsPlan(null);
         setUser(null);
       }
       justAuthenticated.current = false;
       return !!resolvedUserId;
     } catch {
       if (!justAuthenticated.current) {
+        setAdsPlan(null);
         setUser(null);
       }
       return false;
@@ -109,6 +115,7 @@ export const AuthProvider = ({ children }) => {
 
   // Mirror the signed-in user's plan into the ads module
   useEffect(() => {
+    setAdsPlan(user?.plan);
   }, [user?.plan]);
 
 
@@ -131,8 +138,9 @@ export const AuthProvider = ({ children }) => {
         withCredentials: true,
       });
       const userData = profileRes.data;
-      setUser(userData);
       hydrateAdsOptOutFromServer(userData?.ads_opt_out);
+      setAdsPlan(userData?.plan);
+      setUser(userData);
       try { Analytics.login(userData.id, userData.email); } catch {}
       return userData;
     } catch (err) {
@@ -160,8 +168,9 @@ export const AuthProvider = ({ children }) => {
         withCredentials: true,
       });
       const userData = profileRes.data;
-      setUser(userData);
       hydrateAdsOptOutFromServer(userData?.ads_opt_out);
+      setAdsPlan(userData?.plan);
+      setUser(userData);
       try { Analytics.signup(userData.email, userData.plan); } catch {}
       return userData;
     } catch (err) {
@@ -190,6 +199,7 @@ export const AuthProvider = ({ children }) => {
     setToken(null);
     justAuthenticated.current = false;
     localStorage.removeItem('syrabit:onboarding');
+    setAdsPlan(null);
     setUser(null);
     try { Analytics.logout(); } catch {}
   };

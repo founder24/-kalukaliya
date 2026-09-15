@@ -360,6 +360,28 @@ export function setAdsAuthChecked(checked) {
  * subscribers without a server round-trip. Pass `null` / `undefined`
  * for anonymous visitors and on logout.
  */
+const AD_FREE_PLANS = new Set(['starter', 'pro', 'premium']);
+let _adFreePlan = false;
+
+export function setAdsPlan(plan) {
+  const normalizedPlan = typeof plan === 'string' ? plan.trim().toLowerCase() : '';
+  const next = AD_FREE_PLANS.has(normalizedPlan);
+  if (next === _adFreePlan) return;
+
+  _adFreePlan = next;
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('syrabit:ads-consent-changed', {
+          detail: { reason: 'plan', adFree: _adFreePlan },
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 // One-time banner that explains the new cross-device sync behaviour to
 // users who already had a local "opt out of ads" choice set before the
 // account-synced version of the toggle shipped. Bump the version
@@ -448,6 +470,7 @@ export function getAdConfig(placement) {
  */
 export function adsConsentGranted() {
   if (typeof window === 'undefined') return false;
+  if (_adFreePlan) return false;
   if (getAdsOptOut()) return false;
   // Fail closed until the initial auth probe has settled.
   if (!_authChecked) return false;
