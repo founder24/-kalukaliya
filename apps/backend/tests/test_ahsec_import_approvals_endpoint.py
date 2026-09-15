@@ -827,3 +827,72 @@ def test_index_repair_queue_rebuilds_corrupt_compact_index(
             "archived": True,
         },
     }
+
+
+def test_index_repair_queue_reports_failed_compact_index_rebuild(
+    client, admin_cookie, tmp_path
+):
+    import app.api.v1.admin_content as admin_content
+
+    state_dir = tmp_path / "import-state"
+    archive_dir = state_dir / "archive" / "20260914T000000Z"
+    archive_dir.mkdir(parents=True)
+    approvals = state_dir / "approvals.jsonl"
+    progress = state_dir / "progress.jsonl"
+    latest_index = state_dir / "latest-progress.json"
+    _write_jsonl(
+        archive_dir / "progress.jsonl",
+        {
+            "run_id": "eligible-run",
+            "chapter_id": "chapter-eligible",
+            "status": "index_failed",
+            "operation": "vector_upsert",
+            "index_attempt": 1,
+            "timestamp": "2026-09-14T10:01:00+00:00",
+            "private_error": "must not be exposed",
+        },
+    )
+    progress.write_text("", encoding="utf-8")
+    latest_index.write_text("{malformed latest-state index\n", encoding="utf-8")
+
+    with (
+        patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", approvals),
+        patch.object(admin_content, "_AHSEC_D1_IMPORT_PROGRESS_FILE", progress),
+        patch.object(admin_content, "_AHSEC_D1_LATEST_PROGRESS_INDEX_FILE", latest_index),
+        patch.object(
+            admin_content,
+            "_AHSEC_D1_ARCHIVE_DIR",
+            state_dir / "archive",
+        ),
+        patch.object(
+            admin_content,
+            "_write_latest_progress_index",
+            return_value=False,
+        ) as write_index,
+    ):
+        response = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/index-repair-queue?limit=10",
+            cookies=admin_cookie,
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["index_rebuild"] == {"status": "failed"}
+    assert body["chapters"] == [
+        {
+            "chapter_id": "chapter-eligible",
+            "operation": "vector_upsert",
+            "attempts_used": 1,
+            "next_attempt": 2,
+            "attempt_limit": 3,
+            "repair_command": (
+                "python3 -m scripts.ahsec_d1_import "
+                "--confirm-production-write --repair-index chapter-eligible"
+            ),
+            "run_id": "eligible-run",
+            "failed_at": "2026-09-14T10:01:00+00:00",
+            "archived": True,
+        }
+    ]
+    assert "private_error" not in response.text
+    assert write_index.call_count == 1

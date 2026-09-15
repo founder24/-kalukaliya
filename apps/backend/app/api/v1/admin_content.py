@@ -298,7 +298,7 @@ def _read_latest_progress_index(
 def _write_latest_progress_index(
     path: _pathlib.Path,
     states: dict[str, tuple[dict, bool]],
-) -> None:
+) -> bool:
     """Persist a legacy scan so later queue polls avoid archive traversal."""
     payload = {
         "version": 1,
@@ -315,15 +315,16 @@ def _write_latest_progress_index(
             encoding="utf-8",
         )
         _os.replace(temporary, path)
-    except OSError as exc:
+    except OSError:
         logger.warning(
-            "admin_index_repair_queue: failed to persist latest-state index: %s",
-            exc,
+            "admin_index_repair_queue: failed to persist latest-state index",
         )
         try:
             temporary.unlink(missing_ok=True)
         except OSError:
             pass
+        return False
+    return True
 
 
 def _legacy_repair_progress_states() -> dict[str, tuple[dict, bool]]:
@@ -348,14 +349,16 @@ def _legacy_repair_progress_states() -> dict[str, tuple[dict, bool]]:
 def _index_repair_queue(limit: int) -> dict:
     """Return latest unresolved index failures across live and archived ledgers."""
     indexed = _read_latest_progress_index(_AHSEC_D1_LATEST_PROGRESS_INDEX_FILE)
+    rebuild_failed = False
     if indexed is None:
         # Older state directories have no index. Preserve their behavior while
         # migrating them after this one compatibility scan.
         latest_by_chapter = _legacy_repair_progress_states()
-        _write_latest_progress_index(
+        rebuild_succeeded = _write_latest_progress_index(
             _AHSEC_D1_LATEST_PROGRESS_INDEX_FILE,
             latest_by_chapter,
         )
+        rebuild_failed = not rebuild_succeeded
     else:
         latest_by_chapter = indexed
         # The current ledger can change between importer index writes. Reading
@@ -413,7 +416,7 @@ def _index_repair_queue(limit: int) -> dict:
         reverse=True,
     )
     bounded = queue[:limit]
-    return {
+    response = {
         "chapters": bounded,
         "total": len(queue),
         "limit": limit,
@@ -421,6 +424,12 @@ def _index_repair_queue(limit: int) -> dict:
         "exhausted": exhausted,
         "attempt_limit": _AHSEC_INDEX_REPAIR_ATTEMPT_LIMIT,
     }
+    if rebuild_failed:
+        # Keep the failure signal bounded and free of filesystem or ledger
+        # details. The queue remains useful for this request, while operators
+        # can distinguish repeated archive scans from a healthy compact index.
+        response["index_rebuild"] = {"status": "failed"}
+    return response
 
 
 @router.get("/content/ahsec-d1-import/approvals")
