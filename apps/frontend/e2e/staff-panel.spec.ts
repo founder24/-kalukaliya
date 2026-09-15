@@ -1145,6 +1145,82 @@ test.describe('Staff panel — sidebar sections', () => {
     ]);
   });
 
+  test('removes the final page record and its English markdown after saving and reopening', async ({ page }) => {
+    const fixture = await setupContentEditorFixture(page);
+    staffMocks.enableStrictUnexpectedApiRequests();
+    page.once('dialog', dialog => dialog.accept());
+
+    await gotoStaff(page);
+    await page.locator('main select').nth(0).selectOption('board-1');
+    await page.locator('main select').nth(1).selectOption('class-1');
+    await page.locator('main select').nth(2).selectOption('stream-1');
+    await page.getByRole('button', { name: /Physics/ }).click();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await page.getByRole('button', { name: /^Notes RAG/ }).click();
+
+    const content = page.getByPlaceholder(/Study notes in English/);
+    await page.getByTestId('chapter-page-upload-input').setInputFiles({
+      name: 'page-1.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('page one'),
+    });
+    const notesWithPage = [
+      '## Existing English\n\n• first point',
+      '![Page 1](/r2/page-1.png)',
+    ].join('\n\n');
+    await expect(content).toHaveValue(notesWithPage);
+    await expect(page.getByAltText('Page 1')).toHaveCount(1);
+    expect(fixture.chapterPages().map(page => page.url)).toEqual(['/r2/page-1.png']);
+
+    const firstSaveRequest = page.waitForRequest(request =>
+      request.method() === 'PATCH' &&
+      request.url().endsWith('/staff/content/chapter/chapter-1'),
+    );
+    await page.getByRole('button', { name: 'Save Chapter', exact: true }).click();
+    expect((await firstSaveRequest).postDataJSON()).toMatchObject({
+      notes_en: notesWithPage,
+      pyq_papers: [expect.objectContaining({ id: 'paper-1', url: '/r2/page-1.png' })],
+    });
+
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await page.getByRole('button', { name: /^Notes RAG/ }).click();
+    await expect(content).toHaveValue(notesWithPage);
+    await expect(page.getByAltText('Page 1')).toHaveCount(1);
+
+    const deleteRequest = page.waitForRequest(request =>
+      request.method() === 'DELETE' &&
+      request.url().endsWith('/staff/content/chapter/chapter-1/pyq-papers/paper-1'),
+    );
+    await page.getByRole('button', { name: 'Remove', exact: true }).click();
+    await deleteRequest;
+
+    const notesWithoutPage = '## Existing English\n\n• first point';
+    await expect(content).toHaveValue(notesWithoutPage);
+    await expect(page.getByAltText('Page 1')).toHaveCount(0);
+    expect(fixture.chapterPages()).toEqual([]);
+
+    const secondSaveRequest = page.waitForRequest(request =>
+      request.method() === 'PATCH' &&
+      request.url().endsWith('/staff/content/chapter/chapter-1'),
+    );
+    await page.getByRole('button', { name: 'Save Chapter', exact: true }).click();
+    expect((await secondSaveRequest).postDataJSON()).toMatchObject({
+      notes_en: notesWithoutPage,
+      pyq_papers: [],
+    });
+
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await page.getByRole('button', { name: /^Notes RAG/ }).click();
+    await expect(content).toHaveValue(notesWithoutPage);
+    await expect(page.getByAltText('Page 1')).toHaveCount(0);
+    expect(fixture.chapterPages()).toEqual([]);
+  });
+
   test('reports partial image-page failures while keeping successful pages', async ({ page }) => {
     const fixture = await setupContentEditorFixture(page);
     fixture.failPyqUpload('bad-page.png');

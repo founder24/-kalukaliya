@@ -963,7 +963,7 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
         if (!match) return line;
         pageNumber += 1;
         return `![Page ${pageNumber}](${match[1]})`;
-      }).join('\n').replace(/\n{3,}/g, '\n\n');
+      }).join('\n').replace(/\n{3,}/g, '\n\n').trimEnd();
       return { ...current, notes_en: renumbered };
     });
   };
