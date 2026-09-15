@@ -491,3 +491,97 @@ def test_import_approvals_report_running_run_without_terminal_summary(
         "failed": 0,
         "last_updated_at": "2026-09-13T12:01:00+00:00",
     }
+
+
+def test_index_repair_queue_uses_latest_archived_state_and_attempt_limit(
+    client, admin_cookie, tmp_path
+):
+    import app.api.v1.admin_content as admin_content
+
+    state_dir = tmp_path / "import-state"
+    archive_dir = state_dir / "archive" / "20260901T000000Z"
+    archive_dir.mkdir(parents=True)
+    approvals = state_dir / "approvals.jsonl"
+    progress = state_dir / "progress.jsonl"
+    _write_jsonl(
+        archive_dir / "progress.jsonl",
+        {
+            "run_id": "archived-run",
+            "chapter_id": "chapter-archived",
+            "status": "index_failed",
+            "operation": "vector_upsert",
+            "index_attempt": 1,
+            "timestamp": "2026-09-01T10:00:00+00:00",
+            "error": "CLOUDFLARE_API_TOKEN must never be returned",
+            "repair_command": "private command should be rebuilt",
+        },
+        {
+            "run_id": "resolved-old-run",
+            "chapter_id": "chapter-resolved",
+            "status": "index_failed",
+            "operation": "vector_delete",
+            "index_attempt": 1,
+            "timestamp": "2026-09-01T10:01:00+00:00",
+        },
+        {
+            "run_id": "exhausted-run",
+            "chapter_id": "chapter-exhausted",
+            "status": "index_failed",
+            "operation": "chunk_mapping_insert",
+            "index_attempt": 3,
+            "timestamp": "2026-09-01T10:02:00+00:00",
+        },
+    )
+    _write_jsonl(
+        progress,
+        {
+            "run_id": "resolved-new-run",
+            "chapter_id": "chapter-resolved",
+            "status": "done",
+            "timestamp": "2026-09-02T10:00:00+00:00",
+        },
+        {
+            "run_id": "current-run",
+            "chapter_id": "chapter-current",
+            "status": "index_failed",
+            "operation": "chapter_index_lock",
+            "index_attempt": 2,
+            "timestamp": "2026-09-02T10:01:00+00:00",
+        },
+    )
+
+    with (
+        patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", approvals),
+        patch.object(admin_content, "_AHSEC_D1_IMPORT_PROGRESS_FILE", progress),
+        patch.object(admin_content, "_AHSEC_D1_ARCHIVE_DIR", state_dir / "archive"),
+    ):
+        response = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/index-repair-queue?limit=1",
+            cookies=admin_cookie,
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 2
+    assert body["limit"] == 1
+    assert body["has_more"] is True
+    assert body["exhausted"] == 1
+    assert body["attempt_limit"] == 3
+    assert body["chapters"] == [
+        {
+            "chapter_id": "chapter-current",
+            "operation": "chapter_index_lock",
+            "attempts_used": 2,
+            "next_attempt": 3,
+            "attempt_limit": 3,
+            "repair_command": (
+                "python3 -m scripts.ahsec_d1_import "
+                "--confirm-production-write --repair-index chapter-current"
+            ),
+            "run_id": "current-run",
+            "failed_at": "2026-09-02T10:01:00+00:00",
+            "archived": False,
+        }
+    ]
+    assert "CLOUDFLARE_API_TOKEN" not in response.text
+    assert "private command should be rebuilt" not in response.text
