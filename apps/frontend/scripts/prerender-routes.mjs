@@ -51,7 +51,8 @@ import {
 import { injectPrerenderPath } from "./_prerender-marker.mjs";
 import { createJsonRequestPool } from "./_prerender-request-pool.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const distDir = path.resolve(__dirname, "..", "dist");
 const distSsrDir = path.resolve(__dirname, "..", "dist-ssr");
 const srcHtml = path.join(distDir, "index.html");
@@ -357,7 +358,10 @@ function inlineMainCssOnce(html, distDir) {
   return out;
 }
 
-function injectShell(htmlTemplate, { ssrHtml, hydrateKind, inlineScripts, pageChunkPreload }) {
+export function injectShell(
+  htmlTemplate,
+  { ssrHtml, hydrateKind, inlineScripts, pageChunkPreload },
+) {
   const startMarker =
     `<noscript><style>#__shell{display:none!important}</style></noscript>`;
   const startIdx = htmlTemplate.indexOf(startMarker);
@@ -1259,23 +1263,25 @@ async function main() {
   }
 }
 
-main()
-  .then(() => {
-    // Force-exit so the orchestrator does not SIGTERM us after the
-    // 5-min budget. Even after main() resolves, Node keeps the event
-    // loop alive due to keep-alive HTTP sockets to the backend (see
-    // Cloudflare Pages build log 2026-04-19: "[prerender-routes] done
-    // in 37s" followed 4 minutes later by "exceeded 300000ms — sending
-    // SIGTERM"). All useful work has already been written to disk by
-    // the time we get here, so a clean exit is safe.
-    process.exit(0);
-  })
-  .catch((err) => {
-    // Development/offline builds keep the historical SPA fallback. Release
-    // builds propagate the failure so an empty curriculum cannot deploy.
-    console.error(
-      `[prerender-routes] ${STRICT_CURRICULUM_BUILD ? "fatal release failure" : "non-fatal failure"}:`,
-      err?.stack || err,
-    );
-    process.exit(STRICT_CURRICULUM_BUILD ? 1 : 0);
-  });
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main()
+    .then(() => {
+      // Force-exit so the orchestrator does not SIGTERM us after the
+      // 5-min budget. Even after main() resolves, Node keeps the event
+      // loop alive due to keep-alive HTTP sockets to the backend (see
+      // Cloudflare Pages build log 2026-04-19: "[prerender-routes] done
+      // in 37s" followed 4 minutes later by "exceeded 300000ms — sending
+      // SIGTERM"). All useful work has already been written to disk by
+      // the time we get here, so a clean exit is safe.
+      process.exit(0);
+    })
+    .catch((err) => {
+      // Development/offline builds keep the historical SPA fallback. Release
+      // builds propagate the failure so an empty curriculum cannot deploy.
+      console.error(
+        `[prerender-routes] ${STRICT_CURRICULUM_BUILD ? "fatal release failure" : "non-fatal failure"}:`,
+        err?.stack || err,
+      );
+      process.exit(STRICT_CURRICULUM_BUILD ? 1 : 0);
+    });
+}
