@@ -257,6 +257,18 @@ describe('release regressions', () => {
       capturedAt - 1,
     ).run();
 
+    const queryPlan = await env.DB.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id, user_id, action, diff, created_at
+      FROM content_audit_log
+      WHERE action = 'download_referral_roi_evidence'
+        AND target_type = 'referral_roi'
+        AND target_id = 'dashboard'
+      ORDER BY created_at DESC, id DESC
+      LIMIT 2
+    `).all<{ detail: string }>();
+    expect(queryPlan.results.some(row => row.detail.includes('cal_roi_download_history_idx'))).toBe(true);
+
     const denied = await fetchWorker(
       request('/api/v1/admin/referrals/roi/dashboard/export-audits?limit=1', limited),
     );
@@ -407,6 +419,10 @@ describe('release regressions', () => {
       await env.DB.prepare(`
         CREATE INDEX IF NOT EXISTS cal_expires_idx
         ON content_audit_log(expires_at)
+      `).run();
+      await env.DB.prepare(`
+        CREATE INDEX IF NOT EXISTS cal_roi_download_history_idx
+        ON content_audit_log(action, target_type, target_id, created_at, id)
       `).run();
     }
   });

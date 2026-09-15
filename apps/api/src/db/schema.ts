@@ -462,6 +462,13 @@ export const contentAuditLog = sqliteTable('content_audit_log', {
 }, (t) => [
   index('cal_target_idx').on(t.targetType, t.targetId),
   index('cal_expires_idx').on(t.expiresAt),
+  index('cal_roi_download_history_idx').on(
+    t.action,
+    t.targetType,
+    t.targetId,
+    t.createdAt,
+    t.id,
+  ),
 ]);
 
 // Browser analytics is retained as a deliberately small, privacy-preserving
