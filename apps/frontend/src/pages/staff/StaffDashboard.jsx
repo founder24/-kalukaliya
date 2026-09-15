@@ -660,7 +660,7 @@ function QaCard({ section, index, total, onChange, onDelete, onMove }) {
 
 // ── Multi-image PYQ pages editor ─────────────────────────────────────────────
 
-function PyqPapersEditor({ chapterId, papers, onPapersChange, onPageUploaded }) {
+function PyqPapersEditor({ chapterId, papers, onPapersChange, onPageUploaded, onPageDeleted }) {
   const [uploading, setUploading] = useState(false);
   const [uploadQueue, setUploadQueue] = useState([]);
   const [deletingId, setDeletingId] = useState(null);
@@ -723,6 +723,7 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange, onPageUploaded }) 
         `/staff/content/chapter/${chapterId}/pyq-papers/${paperId}`,
       );
       onPapersChange(res.data.pyq_papers);
+      onPageDeleted?.(res.data.pyq_papers, papers.find(paper => paper.id === paperId));
       toast.success('Page removed');
     } catch {
       toast.error('Remove failed');
@@ -938,6 +939,30 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
         ...current,
         notes_en: notes.trim() ? `${notes.trimEnd()}\n\n${markdown}` : markdown,
       };
+    });
+  };
+
+  const handlePageDeleted = (_latestPapers, removedPage) => {
+    const removedUrl = removedPage?.url;
+    setForm(current => {
+      const notes = current?.notes_en || '';
+      let removed = false;
+      let pageNumber = 0;
+      const remaining = notes.split('\n').filter(line => {
+        const match = line.trim().match(/^!\[Page \d+\]\((.*)\)$/);
+        if (!removed && match?.[1] === removedUrl) {
+          removed = true;
+          return false;
+        }
+        return true;
+      });
+      const renumbered = remaining.map(line => {
+        const match = line.trim().match(/^!\[Page \d+\]\((.*)\)$/);
+        if (!match) return line;
+        pageNumber += 1;
+        return `![Page ${pageNumber}](${match[1]})`;
+      }).join('\n').replace(/\n{3,}/g, '\n\n');
+      return { ...current, notes_en: renumbered };
     });
   };
 
@@ -1247,6 +1272,7 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                     papers={form?.pyq_papers || []}
                     onPapersChange={pyqPapers => setForm(current => ({ ...current, pyq_papers: pyqPapers }))}
                     onPageUploaded={handlePageUploaded}
+                    onPageDeleted={handlePageDeleted}
                   />
                   <div>
                     <FieldLabel

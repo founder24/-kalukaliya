@@ -367,7 +367,7 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
     record(route);
     const path = pathOf(route);
     const reindexMatch = path.match(/\/chapter\/([^/]+)\/reindex$/);
-    const chapterId = reindexMatch ? reindexMatch[1] : path.split('/').pop();
+    const chapterId = reindexMatch?.[1] || path.match(/\/chapter\/([^/]+)/)?.[1] || path.split('/').pop();
     const chapter = chapters.find(item => item.id === chapterId);
     if (route.request().method() === 'GET') return json(route, chapter || {}, chapter ? 200 : 404);
     if (route.request().method() === 'POST' && reindexMatch) {
@@ -402,6 +402,13 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
       const pyqPapers = [...(current?.pyq_papers || []), paper];
       chapters = chapters.map(item => item.id === chapterId ? { ...item, pyq_papers: pyqPapers } : item);
       return json(route, { ok: true, paper, pyq_papers: pyqPapers }, 201);
+    }
+    if (route.request().method() === 'DELETE' && path.includes('/pyq-papers/')) {
+      const paperId = path.split('/').pop();
+      const current = chapters.find(item => item.id === chapterId);
+      const pyqPapers = (current?.pyq_papers || []).filter(paper => paper.id !== paperId);
+      chapters = chapters.map(item => item.id === chapterId ? { ...item, pyq_papers: pyqPapers } : item);
+      return json(route, { ok: true, pyq_papers: pyqPapers });
     }
     if (route.request().method() === 'PATCH') {
       chapters = chapters.map(item => item.id === chapterId ? { ...item, ...bodyOf(route), version: (item.version || 0) + 1 } : item);
@@ -454,6 +461,9 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
     },
     hasRequest(method: string, path: string) {
       return requests.some(request => request.method === method && request.path === path);
+    },
+    chapterPages() {
+      return chapters.find(chapter => chapter.id === 'chapter-1')?.pyq_papers || [];
     },
   };
 }
@@ -1023,6 +1033,79 @@ test.describe('Staff panel — sidebar sections', () => {
     await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
     await page.getByRole('button', { name: /^Notes RAG/ }).click();
     await expect(page.getByPlaceholder(/Study notes in English/)).toHaveValue(expectedNotes);
+  });
+
+  test('keeps page records and English markdown ordered after removing and adding a page', async ({ page }) => {
+    const fixture = await setupContentEditorFixture(page);
+    staffMocks.enableStrictUnexpectedApiRequests();
+    page.once('dialog', dialog => dialog.accept());
+
+    await gotoStaff(page);
+    await page.locator('main select').nth(0).selectOption('board-1');
+    await page.locator('main select').nth(1).selectOption('class-1');
+    await page.locator('main select').nth(2).selectOption('stream-1');
+    await page.getByRole('button', { name: /Physics/ }).click();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await page.getByRole('button', { name: /^Notes RAG/ }).click();
+
+    const content = page.getByPlaceholder(/Study notes in English/);
+    await page.getByTestId('chapter-page-upload-input').setInputFiles([
+      { name: 'page-1.png', mimeType: 'image/png', buffer: Buffer.from('page one') },
+      { name: 'page-2.png', mimeType: 'image/png', buffer: Buffer.from('page two') },
+    ]);
+    await expect(content).toHaveValue(/!\[Page 2\]\(\/r2\/page-2\.png\)/);
+
+    const deleteRequest = page.waitForRequest(request =>
+      request.method() === 'DELETE' &&
+      request.url().endsWith('/staff/content/chapter/chapter-1/pyq-papers/paper-1'),
+    );
+    await page.getByRole('button', { name: 'Remove', exact: true }).nth(0).click();
+    await deleteRequest;
+    await expect(content).toHaveValue([
+      '## Existing English\n\n• first point',
+      '![Page 1](/r2/page-2.png)',
+    ].join('\n\n'));
+    expect(fixture.chapterPages().map(page => page.url)).toEqual(['/r2/page-2.png']);
+
+    await page.getByTestId('chapter-page-upload-input').setInputFiles({
+      name: 'page-3.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('page three'),
+    });
+    const expectedNotes = [
+      '## Existing English\n\n• first point',
+      '![Page 1](/r2/page-2.png)',
+      '![Page 2](/r2/page-3.png)',
+    ].join('\n\n');
+    await expect(content).toHaveValue(expectedNotes);
+    expect(fixture.chapterPages().map(page => page.url)).toEqual([
+      '/r2/page-2.png',
+      '/r2/page-3.png',
+    ]);
+
+    const saveRequest = page.waitForRequest(request =>
+      request.method() === 'PATCH' &&
+      request.url().endsWith('/staff/content/chapter/chapter-1'),
+    );
+    await page.getByRole('button', { name: 'Save Chapter', exact: true }).click();
+    expect((await saveRequest).postDataJSON()).toMatchObject({
+      notes_en: expectedNotes,
+      pyq_papers: [
+        expect.objectContaining({ id: 'paper-2', url: '/r2/page-2.png' }),
+        expect.objectContaining({ id: 'paper-3', url: '/r2/page-3.png' }),
+      ],
+    });
+
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await page.getByRole('button', { name: /^Notes RAG/ }).click();
+    await expect(page.getByPlaceholder(/Study notes in English/)).toHaveValue(expectedNotes);
+    expect(fixture.chapterPages().map(page => page.url)).toEqual([
+      '/r2/page-2.png',
+      '/r2/page-3.png',
+    ]);
   });
 
   test('reports partial image-page failures while keeping successful pages', async ({ page }) => {
