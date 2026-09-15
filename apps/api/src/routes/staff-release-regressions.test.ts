@@ -316,6 +316,10 @@ describe('release regressions', () => {
     expect(JSON.stringify(body)).not.toContain('must-not-leak');
     expect(JSON.stringify(body)).not.toContain('private-beneficiary-data');
 
+    await env.DB.prepare(`
+      DELETE FROM content_audit_log WHERE id = ?
+    `).bind('roi-audit-listing-002').run();
+
     const nextPage = await fetchWorker(
       request(
         `/api/v1/admin/referrals/roi/dashboard/export-audits?limit=2&cursor=${encodeURIComponent(body.next_cursor ?? '')}`,
