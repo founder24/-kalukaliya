@@ -582,7 +582,7 @@ contentRouter.get('/library-bundle', async (c) => {
       chapterNumber: chapters.chapterNumber, status: chapters.status, contentType: chapters.contentType,
       notesEn: chapters.notesEn, notesAs: chapters.notesAs,
       qaEn: chapters.qaEn, qaAs: chapters.qaAs, publishedTopics: chapters.publishedTopics,
-    }).from(chapters).where(inArray(chapters.status, ['published', 'active']));
+    }).from(chapters).where(eq(chapters.status, 'published'));
   }
 
   // Build chapter maps: subjectId → chapter list

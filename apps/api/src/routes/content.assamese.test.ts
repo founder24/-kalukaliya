@@ -62,6 +62,13 @@ beforeAll(async () => {
         '[{"title":"Newton laws","title_as":"  ","slug":"newton-laws"}]'
       )
     `),
+    env.DB.prepare(`
+      INSERT INTO chapters (
+        id, subject_id, title, slug, status
+      ) VALUES
+        ('draft-chapter', 'subject', 'Draft chapter', 'draft-chapter', 'draft'),
+        ('archived-chapter', 'subject', 'Archived chapter', 'archived-chapter', 'archived')
+    `),
   ]);
 });
 
@@ -192,6 +199,23 @@ describe('Assamese public content metadata', () => {
         has_qa_as: false,
       }),
     ]));
+  });
+
+  it('only returns published chapters in the board boot bundle', async () => {
+    const response = await get('/api/v1/content/library-bundle?boot=board');
+    expect(response.status).toBe(200);
+
+    const payload = await response.json() as {
+      chapters: Array<{ chapter_id: string; status: string }>;
+    };
+
+    expect(payload.chapters.map(chapter => chapter.chapter_id)).toEqual([
+      'translated',
+      'fallback',
+    ]);
+    expect(payload.chapters.every(chapter => chapter.status === 'published')).toBe(true);
+    expect(payload.chapters.some(chapter => chapter.chapter_id === 'draft-chapter')).toBe(false);
+    expect(payload.chapters.some(chapter => chapter.chapter_id === 'archived-chapter')).toBe(false);
   });
 
   it('localizes the topics-published query and preserves English fallbacks', async () => {
