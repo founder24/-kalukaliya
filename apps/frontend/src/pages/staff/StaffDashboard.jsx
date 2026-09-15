@@ -695,7 +695,6 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange, onPageUploaded, on
         const res = await api().post(
           `/staff/content/chapter/${chapterId}/pyq-papers`,
           fd,
-          { headers: { 'Content-Type': 'multipart/form-data' } },
         );
         return res.data;
       },

@@ -283,6 +283,7 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
     version: 0,
   }];
   const pyqUploadFilenames: string[] = [];
+  const pyqUploadContentTypes: string[] = [];
   let failedPyqFilename: string | null = null;
 
   const json = (route: import('@playwright/test').Route, body: unknown, status = 200) =>
@@ -397,6 +398,7 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
       const postData = route.request().postData() || '';
       const filename = postData.match(/filename="([^"]+)"/)?.[1] || 'unknown-image';
       pyqUploadFilenames.push(filename);
+      pyqUploadContentTypes.push(route.request().headers()['content-type'] || '');
       if (filename === failedPyqFilename) {
         return json(route, { detail: `Fixture rejected ${filename}` }, 502);
       }
@@ -464,6 +466,7 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
   return {
     requests,
     pyqUploadFilenames,
+    pyqUploadContentTypes,
     failPyqUpload(filename: string) {
       failedPyqFilename = filename;
     },
@@ -1041,6 +1044,10 @@ test.describe('Staff panel — sidebar sections', () => {
     await expect(content).toHaveValue(/!\[Page 1\]\(\/r2\/page-1\.png\)/);
     await expect(content).toHaveValue(/!\[Page 2\]\(\/r2\/page-2\.png\)/);
     expect(fixture.pyqUploadFilenames).toEqual(['page-1.png', 'page-2.png']);
+    expect(fixture.pyqUploadContentTypes).toEqual([
+      expect.stringMatching(/^multipart\/form-data; boundary=/),
+      expect.stringMatching(/^multipart\/form-data; boundary=/),
+    ]);
     expect(fixture.hasRequest('POST', '/api/v1/staff/content/chapter/chapter-1/pyq-papers')).toBeTruthy();
     expect(fixture.hasRequest('POST', '/api/v1/admin/content/upload-image')).toBeFalsy();
 
