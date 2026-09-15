@@ -160,7 +160,12 @@ export default function SubjectLandingPage() {
     return out.slice(0, 6);
   }, [seoRelated, chapters, seedChapterId, basePath]);
 
-  const subjectName = subject?.name || subjectSlug;
+  const subjectName = contentLang === 'as'
+    ? (subject?.name_as || subject?.name || subjectSlug)
+    : (subject?.name || subjectSlug);
+  const subjectDescription = contentLang === 'as'
+    ? (subject?.description_as || subject?.description || '')
+    : (subject?.description || '');
   const boardName = subject?.board_name || board;
   const className = subject?.class_name || classSlug;
   const streamName = subject?.stream_name || '';
@@ -255,7 +260,7 @@ export default function SubjectLandingPage() {
     <div className="min-h-screen bg-background text-foreground">
       <PageMeta
         title={`${subjectName} — ${boardName} ${className} Notes & Study Material`}
-        description={subject.description || `Complete ${subjectName} study material for ${boardName} ${className} students. Notes, MCQs, important questions, and AI-powered tutoring.`}
+        description={subjectDescription || `Complete ${subjectName} study material for ${boardName} ${className} students. Notes, MCQs, important questions, and AI-powered tutoring.`}
         url={`https://syrabit.ai${basePath}`}
         pageType="subject"
         pageData={{
@@ -299,9 +304,9 @@ export default function SubjectLandingPage() {
               <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground leading-tight">
                 {subjectName}
               </h1>
-              {subject.description && (
+              {subjectDescription && (
                 <p className="text-muted-foreground mt-1.5 text-sm leading-relaxed max-w-2xl line-clamp-2 sm:line-clamp-none">
-                  {subject.description}
+                  {subjectDescription}
                 </p>
               )}
               <div className="flex items-center gap-3 mt-2.5 text-xs sm:text-sm text-muted-foreground">
