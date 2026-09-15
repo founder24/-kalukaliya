@@ -255,7 +255,20 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
     status: 'published',
     content_type: 'notes',
     content: '',
-    notes_en: '',
+    notes_en: '## Existing English\n\n• first point',
+    notes_as: '## বিদ্যমান\n\n• প্ৰথম বিষয়',
+    qa_text_en: '## Q1\n\n**Answer:** Existing answer',
+    qa_text_as: '## প্ৰশ্ন ১\n\n**উত্তৰ:** বৰ্তমানৰ উত্তৰ',
+    rag_sections_en: [],
+    rag_sections_as: [],
+    qa_rag_sections_en: [],
+    qa_rag_sections_as: [],
+    notes_rag_stale: true,
+    qa_rag_stale: true,
+    notes_rag_updated_at: '2026-09-15T09:00:00.000Z',
+    qa_rag_updated_at: '2026-09-15T09:00:00.000Z',
+    notes_rag_indexed_at: null,
+    qa_rag_indexed_at: null,
     notes_generated: false,
     chapter_number: 1,
     version: 0,
@@ -322,7 +335,7 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
     const path = pathOf(route);
     if (route.request().method() === 'GET') {
       const subjectId = path.split('/').pop();
-      return json(route, { chapters: chapters.filter(chapter => chapter.subject_id === subjectId) });
+      return json(route, chapters.filter(chapter => chapter.subject_id === subjectId));
     }
     if (route.request().method() === 'POST') {
       const input = bodyOf(route);
@@ -350,9 +363,25 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
   await page.route('**/api/v1/staff/content/chapter/**', route => {
     record(route);
     const path = pathOf(route);
-    const chapterId = path.split('/').pop();
+    const reindexMatch = path.match(/\/chapter\/([^/]+)\/reindex$/);
+    const chapterId = reindexMatch ? reindexMatch[1] : path.split('/').pop();
     const chapter = chapters.find(item => item.id === chapterId);
     if (route.request().method() === 'GET') return json(route, chapter || {}, chapter ? 200 : 404);
+    if (route.request().method() === 'POST' && reindexMatch) {
+      const scope = new URL(route.request().url()).searchParams.get('scope');
+      chapters = chapters.map(item => {
+        if (item.id !== chapterId) return item;
+        const indexed = {
+          ...item,
+          notes_rag_stale: scope === 'notes' || scope === 'all' ? false : item.notes_rag_stale,
+          qa_rag_stale: scope === 'qa' || scope === 'all' ? false : item.qa_rag_stale,
+          notes_rag_indexed_at: scope === 'notes' || scope === 'all' ? '2026-09-15T09:01:00.000Z' : item.notes_rag_indexed_at,
+          qa_rag_indexed_at: scope === 'qa' || scope === 'all' ? '2026-09-15T09:01:00.000Z' : item.qa_rag_indexed_at,
+        };
+        return indexed;
+      });
+      return json(route, { ok: true, chapter: chapters.find(item => item.id === chapterId) });
+    }
     if (route.request().method() === 'PATCH') {
       chapters = chapters.map(item => item.id === chapterId ? { ...item, ...bodyOf(route), version: (item.version || 0) + 1 } : item);
       return json(route, chapters.find(item => item.id === chapterId) || {});
@@ -857,83 +886,71 @@ test.describe('Staff panel — sidebar sections', () => {
     expect(consoleErrors, 'No uncaught console errors during interactive controls test').toHaveLength(0);
   });
 
-  test('authenticated Content Editor completes isolated subject and chapter CRUD', async ({ page }) => {
+  test('authenticated staff can edit bilingual notes, format each field, save, and reindex', async ({ page }) => {
     const fixture = await setupContentEditorFixture(page);
     staffMocks.enableStrictUnexpectedApiRequests();
 
     await gotoStaff(page);
-    await clickSidebar(page, 'Content Editor');
-    await expect(page.getByTestId('content-hub-panel-editor')).toBeVisible();
-    await expect(page.getByText('All-in-One Content Manager')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Subjects', exact: true })).toBeVisible();
+    const filters = page.locator('main select');
+    await filters.nth(0).selectOption('board-1');
+    await filters.nth(1).selectOption('class-1');
+    await filters.nth(2).selectOption('stream-1');
+    await page.getByRole('button', { name: /Physics/ }).click();
+    await expect(page.getByRole('heading', { name: 'Chapters', exact: true })).toBeVisible();
+    await expect(page.getByText('Motion', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await expect(page.getByText(/Cloudflare Access is bypassed/i)).toHaveCount(0);
+    const editor = page.locator('div.fixed.inset-0');
+    await editor.getByRole('button', { name: /^Notes/ }).click();
 
-    // Navigate the seeded hierarchy and prove the chapter list is populated.
-    await page.getByRole('button', { name: /AHSEC/ }).click();
-    await page.getByRole('button', { name: /Class 12/ }).click();
-    await page.getByRole('button', { name: /Science/ }).click();
-    await expect(page.getByTestId('subject-card-subject-1')).toContainText('Physics');
+    const notesEnglish = editor.getByPlaceholder(/Study notes in English/);
+    const notesAssamese = editor.getByPlaceholder(/অসমীয়া ভাষাত টোকা/);
+    await notesEnglish.fill('## English heading\r\n\r\n• English bullet');
+    await notesAssamese.fill('## অসমীয়া শিৰোনাম\r\n\r\n• অসমীয়া বিন্দু');
 
-    // Subject create, status, edit, and delete all use the isolated fixture.
-    await page.getByTestId('add-subject').click();
-    await page.getByPlaceholder('Subject name...').fill('Chemistry');
-    await page.getByRole('button', { name: 'Create', exact: true }).click();
-    await expect(page.getByTestId('subject-card-subject-2')).toContainText('Chemistry');
+    await editor.getByTestId('format-pasted-english-notes').click();
+    await expect(notesEnglish).toHaveValue('## English heading\n\n- English bullet');
+    await expect(notesAssamese).toHaveValue('## অসমীয়া শিৰোনাম\r\n\r\n• অসমীয়া বিন্দু');
 
-    await page.getByTestId('subject-status-toggle-subject-2-trigger').click();
-    await page.getByTestId('subject-status-toggle-subject-2-option-draft').click();
-    await expect(page.getByTestId('subject-status-toggle-subject-2-trigger')).toContainText('Draft');
+    await editor.getByTestId('format-pasted-assamese-notes').click();
+    await expect(notesEnglish).toHaveValue('## English heading\n\n- English bullet');
+    await expect(notesAssamese).toHaveValue('## অসমীয়া শিৰোনাম\n\n- অসমীয়া বিন্দু');
 
-    const chemistryCard = page.getByTestId('subject-card-subject-2');
-    await page.getByTestId('edit-subject-subject-2').click();
-    await chemistryCard.locator('input:not([type="checkbox"])').first().fill('Chemistry Updated');
-    const subjectPatch = page.waitForRequest(request =>
-      request.method() === 'PATCH' && request.url().includes('/staff/content/subjects/subject-2'),
+    const saveRequest = page.waitForRequest(request =>
+      request.method() === 'PATCH' &&
+      request.url().includes('/staff/content/chapter/chapter-1'),
     );
-    await chemistryCard.getByRole('button', { name: 'Save', exact: true }).click();
-    expect((await subjectPatch).postDataJSON()).toMatchObject({ name: 'Chemistry Updated' });
-    await expect(page.getByTestId('subject-card-subject-2')).toContainText('Chemistry Updated');
+    await editor.getByRole('button', { name: 'Save Chapter', exact: true }).click();
+    expect((await saveRequest).postDataJSON()).toMatchObject({
+      notes_en: '## English heading\n\n- English bullet',
+      notes_as: '## অসমীয়া শিৰোনাম\n\n- অসমীয়া বিন্দু',
+    });
 
-    await page.getByTestId('delete-subject-subject-2').click();
-    await page.getByRole('button', { name: 'Delete', exact: true }).click();
-    await expect(page.getByTestId('subject-card-subject-2')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await editor.getByRole('button', { name: /^Notes/ }).click();
+    await editor.getByRole('button', { name: /^RAG/ }).click();
+    await expect(page.getByText('RAG updated but not reindexed.')).toBeVisible();
+    await expect(editor.getByText(/latest notes until you reindex/)).toBeVisible();
 
-    // Select the seeded subject, create a chapter, and confirm it appears
-    // after the editor refreshes its list.
-    await page.getByTestId('subject-card-subject-1').click();
-    await expect(page.getByText('Chapters (1)')).toBeVisible();
-    await page.getByTestId('create-chapter').click();
-    await page.getByPlaceholder('Chapter title').fill('Work and Energy');
-    await page.getByRole('button', { name: 'Create', exact: true }).click();
-    await expect(page.getByText('Work and Energy')).toBeVisible();
+    const reindexRequest = page.waitForRequest(request =>
+      request.method() === 'POST' &&
+      request.url().includes('/staff/content/chapter/chapter-1/reindex?scope=notes'),
+    );
+    await page.getByRole('button', { name: 'Reindex now', exact: true }).click();
+    await reindexRequest;
+    await expect(page.getByText('Reindex', { exact: true })).toBeVisible();
 
-    // Edit and status changes update the visible card after successful requests.
-    await page.getByTestId('edit-chapter-chapter-1').click();
-    await expect(page.getByText('Edit Chapter')).toBeVisible();
-    await page.getByPlaceholder('Chapter title').fill('Work and Energy — Updated');
-    await page.getByRole('button', { name: 'Update', exact: true }).click();
-    await expect(page.getByText('Work and Energy — Updated')).toBeVisible();
+    await editor.getByRole('button', { name: /^Questions/ }).click();
+    await editor.getByRole('button', { name: /^RAG/ }).click();
+    await expect(editor.getByText(/latest Q&A until you reindex/)).toBeVisible();
+    await expect(page.getByText('RAG updated but not reindexed.')).toBeVisible();
 
-    await page.getByTestId('chapter-status-toggle-chapter-1-trigger').click();
-    await page.getByTestId('chapter-status-toggle-chapter-1-option-draft').click();
-    await expect(page.getByTestId('chapter-status-toggle-chapter-1-trigger')).toContainText('Draft');
-
-    // Generated notes are fetched back into the chapter card instead of only
-    // showing a successful toast.
-    await page.getByTestId('generate-notes-chapter-1').click();
-    await expect(page.getByText('Notes', { exact: true })).toBeVisible();
-
-    await page.getByTestId('delete-chapter-chapter-1').click();
-    await page.getByRole('button', { name: 'Delete', exact: true }).click();
-    await expect(page.getByText('Work and Energy — Updated')).toHaveCount(0);
-
-    expect(fixture.hasRequest('GET', '/api/v1/staff/content/chapters/subject-1')).toBeTruthy();
-    expect(fixture.hasRequest('POST', '/api/v1/staff/content/subjects')).toBeTruthy();
-    expect(fixture.hasRequest('PATCH', '/api/v1/staff/content/subjects/subject-2')).toBeTruthy();
-    expect(fixture.hasRequest('DELETE', '/api/v1/staff/content/subjects/subject-2')).toBeTruthy();
-    expect(fixture.hasRequest('POST', '/api/v1/staff/content/chapters')).toBeTruthy();
     expect(fixture.hasRequest('PATCH', '/api/v1/staff/content/chapter/chapter-1')).toBeTruthy();
-    expect(fixture.hasRequest('DELETE', '/api/v1/staff/content/chapter/chapter-1')).toBeTruthy();
-    expect(fixture.hasRequest('POST', '/api/v1/admin/content/chapters/chapter-1/generate-notes')).toBeTruthy();
-    expect(consoleErrors, 'No uncaught console errors during content CRUD').toHaveLength(0);
+    expect(fixture.hasRequest('POST', '/api/v1/staff/content/chapter/chapter-1/reindex')).toBeTruthy();
+    expect(consoleErrors, 'No uncaught console errors during bilingual chapter editing').toHaveLength(0);
   });
 
   // ──────────────────────────────────────────────────────────────────────────

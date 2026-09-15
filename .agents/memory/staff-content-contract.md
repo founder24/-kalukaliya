@@ -15,3 +15,14 @@ failure and keep one contract for staff and admin roles.
 **How to apply:** When adding or repairing editor actions, use the staff route
 family for shared CRUD and preserve list aliases such as `content`,
 `content_as`, and `notes_generated` when an older editor consumes the result.
+
+The post-cutover browser surface starts content editing from the staff
+dashboard's Subjects view; chapter-list requests return a bare array, not the
+legacy content-hub envelope.
+
+**Why:** Browser fixtures that retained the removed AdminContentHub hierarchy
+crashed the current Chapters view before editor coverage could run.
+
+**How to apply:** Staff browser checks should select the Subjects filters,
+open the chapter card, and model `/staff/content/chapters/{subject_id}` as an
+array response.
