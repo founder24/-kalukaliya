@@ -1,0 +1,849 @@
+Chapter 3: Motion in a Plane
+1. Vector and Scalar Foundations, Invariance, and Algebraic Rules
+Physical quantities in two or three dimensions are classified based on their transformation properties under spatial coordinate rotations and their adherence to vector addition laws.
+                        PHYSICAL QUANTITIES
+                                 |
+        +------------------------+------------------------+
+        |                                                 |
+     SCALARS                                           VECTORS
+  Specified entirely by a single                  Possess magnitude AND direction;
+  numerical magnitude with unit;                   MUST obey Triangle / Parallelogram
+  invariant under axis rotation[span_1](start_span)[span_1](end_span).          laws of vector addition[span_2](start_span)[span_2](end_span).
+
+Classification Criteria and Definitive Properties
+ * Scalar Quantities: Completely described by a numerical magnitude and algebraic sign. They obey the rules of ordinary algebra. Examples include volume, mass, speed, density, number of moles, angular frequency, temperature, pressure, time, work, power, gravitational potential, coefficient of friction, and electric charge.
+   * Electric Current: Possesses magnitude and a directional sense along a conductor, yet is classified as a scalar because currents add algebraically at circuit nodes (I_{\text{net}} = I_1 + I_2) according to charge conservation, rather than by vector addition laws.
+   * Hydrostatic Pressure: Classed as a scalar because the compressive contact force exerted by a static fluid acts perpendicularly against any bounding surface regardless of the surface's spatial orientation.
+   * Coordinate Invariance: A scalar quantity has the same value for observers using different orientations of reference axes. A scalar is not required to be conserved in a physical process (for instance, kinetic energy in an inelastic collision is not conserved), nor is it forbidden from taking negative values (such as negative work, electric potential, or temperature in degrees Celsius).
+ * Vector Quantities: Possess both a magnitude and a spatial direction, and fundamentally satisfy the triangle or parallelogram law of addition. Examples include displacement, velocity, acceleration, force, impulse, linear momentum, angular momentum, electric field, and angular velocity.
+   * Magnitude Character: The magnitude (or absolute value) of a vector is intrinsically a positive scalar quantity or zero (|\vec{A}| = A \ge 0).
+Validity of Algebraic Operations
+                   VECTOR & SCALAR OPERATIONS
+                               |
+       +-----------------------+-----------------------+
+       |                                               |
+  PERMISSIBLE OPERATIONS                     MEANINGLESS OPERATIONS
+  • Multiplying vector by scalar[span_12](start_span)[span_12](end_span)    • Adding scalar to vector[span_13](start_span)[span_13](end_span)
+  • Multiplying any two scalars[span_14](start_span)[span_14](end_span)     • Adding scalars of different units[span_15](start_span)[span_15](end_span)
+  • Adding vectors of same dimension[span_16](start_span)[span_16](end_span)• Adding vector to bare scalar component[span_17](start_span)[span_17](end_span)
+
+ * Adding Any Two Scalars: Valid if and only if both scalars represent physical quantities sharing identical physical dimensions and units (e.g., adding two masses is valid; adding mass to temperature is physically undefined).
+ * Adding a Scalar to a Vector: Fundamentally meaningless under all circumstances, even if their dimensional formulas coincide. A pure directional entity cannot be combined with a non-directional scalar.
+ * Multiplying a Vector by a Real Scalar (\lambda): Always meaningful. The operation yields a new vector \vec{B} = \lambda \vec{A} whose magnitude is |\lambda| |\vec{A}|. If \lambda > 0, the spatial direction is preserved; if \lambda < 0, the direction is inverted by 180^\circ. The scalar multiplier may carry physical dimensions (e.g., multiplying an acceleration vector \vec{a} by scalar mass m produces the dynamic force vector \vec{F} = m\vec{a}).
+ * Adding Any Two Vectors: Meaningful if and only if the vectors represent the same physical quantity with identical units (e.g., adding two displacement vectors or two force vectors). Velocity vectors cannot be added to force vectors.
+ * Adding a Component to a Vector: Meaningful only if the component is scaled by its directional unit vector to form an actual component vector (\vec{A} + A_x \hat{i}). Adding a scalar component magnitude A_x directly to the vector \vec{A} is invalid.
+Geometric Triangle Inequalities
+For any two non-zero vectors \vec{a} and \vec{b} forming the sides of a vector triangle with resultant \vec{a} + \vec{b}:
+                     B *
+                      / \
+                     /   \
+                 b  /     \  |a + b|
+                   /       \
+                  /         \
+                 *----------->*
+                 O     a       A
+
+ * Upper Bound on Addition:
+   
+   
+   Condition for Equality: Applies if and only if \vec{a} and \vec{b} are collinear and act in the same direction (parallel, \theta = 0^\circ).
+ * Lower Bound on Addition:
+   
+   
+   Condition for Equality: Applies if and only if \vec{a} and \vec{b} are collinear and directed oppositely (antiparallel, \theta = 180^\circ).
+ * Upper Bound on Subtraction:
+   
+   
+   Condition for Equality: Applies if and only if \vec{a} and \vec{b} are antiparallel (\theta = 180^\circ), such that -\vec{b} aligns parallel to \vec{a}.
+ * Lower Bound on Subtraction:
+   
+   
+   Condition for Equality: Applies if and only if \vec{a} and \vec{b} are parallel (\theta = 0^\circ).
+Equilibrium of Vector Systems and Polygon Closure
+For a closed system of four coplanar or non-coplanar vectors satisfying:
+
+                 b
+            *--------->*
+           ^            \
+        a /              \ c
+         /                v
+        *<-----------------*
+                 d
+
+ * Non-Zero Magnitudes: The individual vectors are not required to be null vectors (\vec{0}); they must merely form a closed polygon when connected head-to-tail.
+ * Pairwise Resultant Equivalence:
+   
+ * Magnitude Constraint: The magnitude of any single vector cannot exceed the scalar sum of the magnitudes of the remaining vectors:
+   
+ * Coplanar Confinement: The resultant of two vectors \vec{b} + \vec{c} = -(\vec{a} + \vec{d}) must lie in the plane defined by \vec{a} and \vec{d} (if non-collinear), or along their common line of action (if collinear).
+ * Three Non-Coplanar Vectors: Three vectors that do not lie in the same spatial plane can never sum to yield a null vector. The resultant of any two vectors lies entirely in their mutual plane, leaving the third non-coplanar vector with an uncancelled component perpendicular to that plane.
+Analytical Case Studies & Dynamic Evaluations
+Conceptual Diagnostic: Classification of Physical Quantities as Scalars or Vectors [Textbook Exercises 3.1, 3.2, 3.3]
+ * Step 1: System Isolation: Inspect the directional properties and addition laws of given mechanical and thermodynamic quantities.
+ * Step 2: Component Equations: A physical quantity is a vector if and only if it possesses direction and transforms according to the triangle/parallelogram addition law.
+ * Step 3: Analytical Execution:
+   * Textbook Exercise 3.1:
+     * Scalars: Volume, Mass, Speed, Density, Number of moles, Angular frequency.
+     * Vectors: Acceleration, Velocity, Displacement, Angular velocity.
+   * Textbook Exercise 3.2 (Identify two scalars): From the list {Force, Angular momentum, Work, Current, Linear momentum, Electric field, Average velocity, Magnetic moment, Relative velocity}, Work and Current are scalar quantities.
+   * Textbook Exercise 3.3 (Identify the only vector): From the list {Temperature, Pressure, Impulse, Time, Power, Total path length, Energy, Gravitational potential, Coefficient of friction, Charge}, Impulse (\vec{J} = \Delta \vec{p}) is the only vector quantity.
+ * Step 4: Explicit Final Verification: Scalars are specified by magnitude alone; vectors require both magnitude and direction obeying vector algebra.
+Conceptual Diagnostic: Invariant and Physical Properties of Scalar Quantities [Textbook Exercise 3.21]
+ * Step 1: System Isolation: Examine the fundamental invariance and conservation definitions of scalar fields.
+ * Step 2: Component Statements Evaluation:
+   * (a) "A scalar is conserved in a process": False. Kinetic energy is a scalar, but it is not conserved in inelastic collisions.
+   * (b) "A scalar can never take negative values": False. Electrostatic potential, work, and temperature in Celsius can be negative.
+   * (c) "A scalar must be dimensionless": False. Mass, speed, and energy are dimensional scalars.
+   * (d) "A scalar does not vary from one point to another in space": False. Gravitational potential and temperature vary across spatial coordinates.
+   * (e) "A scalar has the same value for observers with different orientations of axes": True. Scalars are coordinate invariants under orthogonal reference frame rotations.
+ * Step 3: Explicit Final Verification: Only statement (e) is universally true for all scalar quantities.
+Conceptual Diagnostic: Physical Meaningfulness of Algebraic Operations [Textbook Exercise 3.4]
+ * Step 1: System Isolation: Apply the rules of scalar algebra and vector spaces to algebraic combinations of physical quantities.
+ * Step 2: Operation-by-Operation Analysis:
+   * (a) Adding any two scalars: Meaningful only if they have the same physical dimensions (e.g., mass cannot be added to time).
+   * (b) Adding a scalar to a vector of the same dimensions: Not meaningful. Scalars and vectors cannot be combined under addition.
+   * (c) Multiplying any vector by any scalar: Meaningful. It scales the magnitude and adjusts units (e.g., m\vec{a} = \vec{F}).
+   * (d) Multiplying any two scalars: Meaningful. It produces a derived scalar quantity (e.g., \text{density} \times \text{volume} = \text{mass}).
+   * (e) Adding any two vectors: Meaningful only if they represent the same physical quantity with identical dimensions.
+   * (f) Adding a component of a vector to the same vector: Meaningful only if the component is directed along its unit vector (adding a scalar component magnitude directly to a vector is undefined).
+ * Step 3: Explicit Final Verification: Operations (c) and (d) are always meaningful; operations (a), (e), and (f) are conditionally meaningful; operation (b) is never meaningful.
+Derivation: Vector Triangle Inequalities and Boundary Equality Conditions [Textbook Exercise 3.6]
+ * Step 1: System Isolation & Diagram: Let vectors \vec{a} and \vec{b} form two sides of triangle OAB, with the third side representing the resultant \vec{R} = \vec{a} + \vec{b}.
+                     B *
+                      / \
+                     /   \
+                 b  /     \  R = a + b
+                   /       \
+                  /         \
+                 *----------->*
+                 O     a       A
+
+ * Step 2: Component Equations: In Euclidean geometry, the length of any side of a triangle is strictly less than the sum of the lengths of the other two sides, and strictly greater than their difference:
+   
+ * Step 3: Analytical Execution:
+   From the Law of Cosines:
+   
+   
+   Since -1 \le \cos\theta \le 1:
+   * For \cos\theta = 1 (\theta = 0^\circ, parallel vectors):
+     
+     
+     Equality in (a) holds when \vec{a} and \vec{b} are parallel (\theta = 0^\circ).
+   * For \cos\theta = -1 (\theta = 180^\circ, antiparallel vectors):
+     
+     
+     Equality in (b) holds when \vec{a} and \vec{b} are antiparallel (\theta = 180^\circ).
+   * Replacing \vec{b} with -\vec{b}:
+     
+     
+     Equality for |\vec{a} - \vec{b}| \le |\vec{a}| + |\vec{b}| holds when \cos\theta = -1 (\theta = 180^\circ); equality for |\vec{a} - \vec{b}| \ge ||\vec{a}| - |\vec{b}|| holds when \cos\theta = 1 (\theta = 0^\circ).
+ * Step 4: Explicit Final Verification: All four geometric inequalities are verified, with equality holding exclusively for collinear alignments (\theta = 0^\circ or 180^\circ).
+Conceptual Diagnostic: Equilibrium and Coplanarity of Vector Polygons [Textbook Exercises 3.5 & 3.7]
+ * Step 1: System Isolation: Consider four non-zero vectors satisfying \vec{a} + \vec{b} + \vec{c} + \vec{d} = \vec{0}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * (a) "\vec{a}, \vec{b}, \vec{c}, \vec{d} must each be a null vector": Incorrect. A set of non-zero vectors forming a closed quadrilateral sum to zero.
+   * (b) "The magnitude of (\vec{a} + \vec{c}) equals the magnitude of (\vec{b} + \vec{d})": Correct.
+     
+   * (c) "The magnitude of \vec{a} can never be greater than the sum of the magnitudes of \vec{b}, \vec{c}, and \vec{d}": Correct.
+     
+   * (d) "\vec{b} + \vec{c} must lie in the plane of \vec{a} and \vec{d} if \vec{a} and \vec{d} are not collinear": Correct. Because \vec{b} + \vec{c} = -(\vec{a} + \vec{d}), the resultant vector must be collinear with -(\vec{a} + \vec{d}) and therefore lie within the plane defined by \vec{a} and \vec{d}.
+ * Step 4: Explicit Final Verification: Statements (b), (c), and (d) are physically and mathematically valid; statement (a) is invalid.
+Analytical Case Study: Scalar Multiple Vector Construction (3\vec{A}) [PYQ 2023 Final]
+ * Step 1: System Isolation: Given a base vector \vec{A} of magnitude A pointing in an arbitrary spatial direction.
+ * Step 2: Component Equations:
+   
+ * Step 3: Graphical Execution:
+           Vector A:        *-------->
+           
+           Vector 3A:       *------------------------>[span_88](start_span)[span_88](end_span)
+
+ * Step 4: Explicit Final Verification: The vector 3\vec{A} is oriented in the exact same direction as \vec{A} and has a magnitude strictly three times larger (|3\vec{A}| = 3|\vec{A}|).
+2. Vector Addition Laws, Analytical Trigonometry, and Relative Planar Motion
+                        VECTOR ADDITION METHODS
+                                   |
+         +-------------------------+-------------------------+
+         |                                                   |
+   GRAPHICAL LAWS                                     ANALYTICAL FORMULATION
+   • Head-to-Tail Triangle Law[span_90](start_span)[span_90](end_span)              • Law of Cosines (Magnitude)[span_91](start_span)[span_91](end_span)
+   • Parallelogram Law[span_92](start_span)[span_92](end_span)                      • Law of Sines (Direction)[span_93](start_span)[span_93](end_span)
+
+Triangle and Parallelogram Laws of Vector Addition
+ * Triangle Law (Head-to-Tail Method): If two vectors \vec{A} and \vec{B} are represented in magnitude and direction by two consecutive sides of a triangle taken in order, their resultant \vec{R} = \vec{A} + \vec{B} is represented by the third side directed from the tail of the first to the head of the second.
+ * Commutative Law:
+   
+ * Associative Law:
+   
+     Commutative Proof (Parallelogram):       Associative Proof (Polygon):
+                Q             S                                  C
+                 *----------->*                              *------->*
+                ^            ^                              ^        /
+             B /            / B                          B /        /
+              /            /                              /        /
+             *----------->*                              *        / R
+            O      A      P                            A |       /
+                                                         |      v
+        OS = OP + PS = A + B                             *----->*
+        OS = OQ + QS = B + A                                A + B[span_97](start_span)[span_97](end_span)
+
+Derivation: Analytical Law of Cosines and Law of Sines
+Let two vectors \vec{A} and \vec{B} originate from a common origin O, subtending an angle \theta between their directions. Construct parallelogram OQSP where \vec{OP} = \vec{A} and \vec{OQ} = \vec{B}. Extend line OP and drop a perpendicular from vertex S meeting the extension at N. Drop another perpendicular from P to the diagonal OS at M.
+                 Q                   S
+                  *-----------------*
+                 /|                /|
+                / |               / |
+             B /  |            R /  | B·sin θ
+              /   |             /   |
+             /    |            /    |
+            *-----+-----------*-----+ N
+            O     |     A     P  B·cos θ
+                   \         /
+                    \   M   /
+                     \  *  /
+                      \/ \/[span_102](start_span)[span_102](end_span)
+
+From right-angled triangle \Delta OSN:
+
+Direction of the Resultant Vector (\alpha)
+Let \alpha be the angle that the resultant \vec{R} makes with vector \vec{A}:
+
+Derivation of the Law of Sines
+From right triangle \Delta OSN, SN = R \sin \alpha.
+From right triangle \Delta PSN, SN = B \sin \theta.
+Equating the expressions for SN:
+
+
+Similarly, using perpendicular PM drawn to diagonal OS:
+
+
+Combining the ratios produces the Law of Sines:
+
+Analytical Case Studies & Dynamic Evaluations
+Derivation: Associative Law of Vector Addition via Closed Polygon Geometry [PYQ 2026 Final]
+ * Step 1: System Isolation & Diagram: Let three vectors \vec{A}, \vec{B}, \vec{C} be represented by line segments \vec{OP}, \vec{PQ}, \vec{QS} respectively.
+                         Q               S
+                          *------------->*
+                         ^ \            ^
+                      B /   \ (B + C)  /
+                       /     \        /
+                      /       v      /
+                     *--------*     / R
+                    O    A    P    /
+                     \            /
+                      \          /
+                       *--------*
+                         (A + B)[span_121](start_span)[span_121](end_span)
+
+ * Step 2: Head-to-Tail Polygon Construction:
+   * In \Delta OPQ, by the triangle law:
+     
+   * In \Delta OQS, the resultant closing vector \vec{OS} is:
+     
+ * Step 3: Alternative Path Grouping:
+   * In \Delta PQS, the vector sum of \vec{B} and \vec{C} is:
+     
+   * In \Delta OPS, the closing vector \vec{OS} is:
+     
+ * Step 4: Explicit Final Verification: Equating (1) and (2) establishes associativity:
+   
+Dynamic Evaluation: Resultant Extrema and Critical Angle Dependencies [PYQ 2022 Test & PYQ 2026 Final]
+ * Step 1: System Isolation: Let vectors \vec{A} and \vec{B} have an included angle \theta \in [0^\circ, 180^\circ].
+ * Step 2: Component Equation:
+   
+ * Step 3: Analytical Execution across Critical Angles:
+   * Parallel Vectors (\theta = 0^\circ):
+     
+     
+     Direction: \tan \alpha = \frac{B \sin 0^\circ}{A + B \cos 0^\circ} = 0 \implies \alpha = 0^\circ (collinear with \vec{A}).
+   * Antiparallel Vectors (\theta = 180^\circ):
+     
+     
+     Direction: Directed along the vector with the larger magnitude.
+   * Orthogonal Vectors (\theta = 90^\circ):
+     
+     
+     Direction: \tan \alpha = \frac{B \sin 90^\circ}{A + B \cos 90^\circ} = \frac{B}{A} \implies \alpha = \tan^{-1}\left(\frac{B}{A}\right).
+ * Step 4: Explicit Final Verification: Resultant magnitude is maximized at \theta = 0^\circ (R_{\text{max}} = A + B) and minimized at \theta = 180^\circ (R_{\text{min}} = |A - B|).
+Derivation: Orthogonal Vector Condition for Equivalent Sum and Difference Magnitudes [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: Given two non-zero vectors \vec{A} and \vec{B} satisfying:
+   
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   Equating the squared magnitudes:
+   
+   
+   Since the vectors are non-zero (A \ne 0 and B \ne 0):
+   
+ * Step 4: Explicit Final Verification: The angle between \vec{A} and \vec{B} is 90^\circ; the two vectors must be mutually perpendicular.
+Dynamic Evaluation: Relative Vector Velocity in Rain-Wind Systems [Textbook Example 3.1]
+ * Step 1: System Isolation & Diagram: Rain falls vertically downward at \vec{v}_r = -35\hat{j}\text{ m s}^{-1}. Wind blows horizontally from East to West at \vec{v}_w = -12\hat{i}\text{ m s}^{-1}.
+                          Rain Vr (35 m/s, Down)
+                                  |
+                                  |
+                                  v
+  Wind Vw (12 m/s, W) <-----------+
+                       \          |
+                        \         | θ
+                       R \        |
+                          \       |
+                           v      v
+                    Umbrella Orientation[span_137](start_span)[span_137](end_span)
+
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The resultant velocity of the rain is 37\text{ m s}^{-1}. To stay dry, a person must hold an umbrella in the vertical plane tilted at an angle of 19^\circ with the vertical towards the East.
+Dynamic Evaluation: Vector Navigation and Drift Across Water Currents [Textbook Example 3.3]
+ * Step 1: System Isolation & Diagram: A motorboat heads North with speed v_b = 25\text{ km h}^{-1}. The water current flows at v_c = 10\text{ km h}^{-1} in a direction 60^\circ East of South.
+                     N
+                     ^
+                     |   . R (Resultant)
+                     | .'
+                  vb |/ φ
+          W <--------+--------> E
+                     |\
+                     | \ 60°
+                     |  v vc
+                     v
+                     S[span_146](start_span)[span_146](end_span)
+
+ * Step 2: Included Angle Determination:
+   The velocity vector \vec{v}_b points North (0^\circ azimuth).
+   The current vector \vec{v}_c points 60^\circ East of South (180^\circ - 60^\circ = 120^\circ from North).
+   The included angle between the vectors is \theta = 120^\circ.
+ * Step 3: Analytical Execution:
+   Apply the Law of Cosines:
+   
+   
+   Since \cos 120^\circ = -0.5:
+   
+   
+   Apply the Law of Sines to find the drift angle \phi East of North:
+   
+ * Step 4: Explicit Final Verification: The boat moves with a net speed of 21.8\text{ km h}^{-1} directed at 23.4^\circ East of North.
+3. Resolution of Vectors, Unit Vector Spaces, and 3D Component Mechanics
+                        VECTOR RESOLUTION
+                                |
+        +-----------------------+-----------------------+
+        |                                               |
+  PLANAR 2D SPACE                                THREE-DIMENSIONAL SPACE
+  A = Ax·î + Ay·ĵ[span_157](start_span)[span_157](end_span)                      A = Ax·î + Ay·ĵ + Az·k̂[span_158](start_span)[span_158](end_span)
+  Ax = A·cos θ, Ay = A·sin θ[span_159](start_span)[span_159](end_span)           Ax = A·cos α, Ay = A·cos β, Az = A·cos γ[span_160](start_span)[span_160](end_span)
+  A = √(Ax² + Ay²)[span_161](start_span)[span_161](end_span)                     A = √(Ax² + Ay² + Az²)[span_162](start_span)[span_162](end_span)
+
+Orthogonal Bases and Direction Cosines
+In three-dimensional Cartesian space, mutually perpendicular unit vectors \hat{i}, \hat{j}, \hat{k} are defined along the positive x, y, z axes respectively:
+
+
+Any vector \vec{A} can be resolved into unique rectangular components:
+
+If \vec{A} makes angles \alpha, \beta, \gamma with the x, y, z axes respectively, its direction cosines are given by:
+
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Orthogonal Rectangular Component Determination [PYQ 2023–24 Half-Yearly]
+ * Step 1: System Isolation: A force vector \vec{F} in a plane has magnitude F = 20\text{ N} and a known rectangular component F_x = 12\text{ N}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The other rectangular component of the force has a magnitude of 16\text{ N}.
+Dynamic Evaluation: Three-Dimensional Spatial Vector Displacement [PYQ 2026 Final]
+ * Step 1: System Isolation & Diagram: Let a body undergo three successive orthogonal translations: 6\text{ m} North (+y), 8\text{ m} East (+x), and 10\text{ m} vertically upward (+z).
+                     z (Upward)
+                     ^
+                     |      . P(8, 6, 10)
+                  10 |    .'|
+                     |  .'  |
+                     |.'    |
+                     0------+-----> x (East)
+                    /      8
+                 6 /
+                  v y (North)[span_170](start_span)[span_170](end_span)
+
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Direction with respect to the vertical z-axis:
+   
+ * Step 4: Explicit Final Verification: The resultant displacement magnitude is 10\sqrt{2}\text{ m} \approx 14.1\text{ m}, inclined at 45^\circ to the vertical.
+Analytical Case Study: Unit Vector Combinations and Vector Projections [PYQ 2020 Final & Textbook Exercise 3.19]
+ * Step 1: System Isolation: Analyze the unit basis vectors \hat{i} and \hat{j} along the x and y axes, and determine the projection of vector \vec{A} = 2\hat{i} + 3\hat{j} onto the directions of (\hat{i} + \hat{j}) and (\hat{i} - \hat{j}).
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * Magnitude and Direction of \hat{i} + \hat{j} [PYQ 2020 Final]:
+     
+   * Magnitude and Direction of \hat{i} - \hat{j}:
+     
+   * Components of \vec{A} = 2\hat{i} + 3\hat{j} along \vec{u}_1 and \vec{u}_2 [Textbook Exercise 3.19]:
+     Normalize \vec{u}_1 and \vec{u}_2 into unit vectors:
+     
+     
+     The scalar component of \vec{A} along \hat{n}_1 is the dot product:
+     
+     
+     The scalar component of \vec{A} along \hat{n}_2 is:
+     
+ * Step 4: Explicit Final Verification: The magnitudes of both (\hat{i} \pm \hat{j}) are \sqrt{2} at angles \pm 45^\circ; the components of \vec{A} along these directions are \frac{5}{\sqrt{2}} and -\frac{1}{\sqrt{2}} respectively.
+4. Planar Kinematics: Parametric Trajectories, Calculus, and Geometric Paths
+                       PLANAR KINEMATICS
+                               |
+        +----------------------+----------------------+
+        |                                             |
+  PARAMETRIC POSITION                           VECTOR VELOCITY & ACCELERATION
+  r(t) = x(t)·î + y(t)·ĵ[span_174](start_span)[span_174](end_span)              v(t) = dr/dt = vx·î + vy·ĵ[span_175](start_span)[span_175](end_span)
+  Displacement: Δr = r(t₂) - r(t₁)[span_176](start_span)[span_176](end_span)    a(t) = dv/dt = ax·î + ay·ĵ[span_177](start_span)[span_177](end_span)
+
+Position, Velocity, and Acceleration Vectors in a Plane
+ * Position Vector: Connects the reference origin O to particle position P(x, y) at time t:
+   
+ * Instantaneous Velocity Vector: Directed tangentially along the instantaneous path of the particle:
+   
+ * Instantaneous Acceleration Vector:
+   
+   
+   In two or three dimensions, the velocity vector \vec{v} and acceleration vector \vec{a} can subtend any angle between 0^\circ and 180^\circ.
+                 y
+                 |               v (Tangent to trajectory)
+                 |             .---*----->
+                 |           .'    |
+                 |          /      | a (Acceleration)
+                 |         /       v
+                 |        * P(r)
+                 |       /
+                 |   r  /
+                 |     /
+                 0----+------------------> x[span_185](start_span)[span_185](end_span)
+
+Superposition and Independence of Orthogonal Axes
+Planar motion under constant acceleration decomposes into two independent, simultaneous one-dimensional motions along the perpendicular x and y axes:
+
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Differential Calculus of Time-Varying Trajectories [Textbook Example 3.4 & Exercise 3.17]
+ * Step 1: System Isolation: A particle moves in the x-y plane according to the position vector:
+   
+ * Step 2: Component Derivative Formulation:
+   
+ * Step 3: Analytical Execution:
+   * Velocity function:
+     
+   * Acceleration function:
+     
+   * Velocity at t = 2.0\text{ s} [Textbook Exercise 3.17]:
+     
+ * Step 4: Explicit Final Verification: The acceleration is constant at 4.0\text{ m s}^{-2} in the -y direction; at t = 2.0\text{ s}, the speed is 8.54\text{ m s}^{-1} inclined at -69.4^\circ.
+Dynamic Evaluation: Planar Kinematics Under Constant Orthogonal Accelerations [Textbook Example 3.5 & Exercise 3.18]
+ * Step 1: System Isolation: A particle departs the origin at t = 0 with initial velocity \vec{v}_0 = 10.0\hat{j}\text{ m s}^{-1} and undergoes constant acceleration \vec{a} = 8.0\hat{i} + 2.0\hat{j}\text{ m s}^{-2}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * Time when x(t) = 16.0\text{ m} [Textbook Exercise 3.18]:
+     
+   * y-coordinate at t = 2.0\text{ s}:
+     
+   * Velocity components at t = 2.0\text{ s}:
+     
+ * Step 4: Explicit Final Verification: At x = 16\text{ m}, the time is t = 2.0\text{ s}, the y-coordinate is 24.0\text{ m}, and the speed is 21.3\text{ m s}^{-1}.
+Conceptual Diagnostic: Validity of Kinematic Equations for Arbitrary Space Motion [Textbook Exercise 3.20]
+ * Step 1: System Isolation: Examine motion in three dimensions under an arbitrary, non-constant acceleration \vec{a}(t).
+ * Step 2: Component Equations Evaluation:
+   * (a) \vec{v}_{\text{avg}} = \frac{1}{2}[\vec{v}(t_1) + \vec{v}(t_2)]: False in general. Valid only when acceleration is strictly constant.
+   * (b) \vec{v}_{\text{avg}} = \frac{\vec{r}(t_2) - \vec{r}(t_1)}{t_2 - t_1}: True under all circumstances. This is the fundamental definition of average velocity.
+   * (c) \vec{v}(t) = \vec{v}(0) + \vec{a}t: False in general. Applicable only if acceleration is constant over time.
+   * (d) \vec{r}(t) = \vec{r}(0) + \vec{v}(0)t + \frac{1}{2}\vec{a}t^2: False in general. Requires integration of non-constant \vec{a}(t) when acceleration varies.
+   * (e) \vec{a}_{\text{avg}} = \frac{\vec{v}(t_2) - \vec{v}(t_1)}{t_2 - t_1}: True under all circumstances. This is the fundamental definition of average acceleration.
+ * Step 3: Explicit Final Verification: Only relations (b) and (e) are true for arbitrary physical motion in space.
+Analytical Case Study: Comparative Path Length vs. Displacement on an Ice Rink [Textbook Exercise 3.8]
+ * Step 1: System Isolation & Diagram: Three girls (A, B, C) skate across a circular ice rink of radius R = 200\text{ m}, starting at perimeter point P and ending at diametrically opposite point Q along distinct paths.
+                     Q (Final Point)
+                        *
+                       /|\
+                      / | \
+                     /  |  \
+                  A /   | B \ C
+                   (    |    )
+                    \   |   /
+                     \  |  /
+                        *
+                     P (Start Point)[span_217](start_span)[span_217](end_span)
+
+ * Step 2: Component Equations:
+   Displacement is the straight-line vector from P to Q:
+   
+ * Step 3: Analytical Execution:
+   The magnitude of the displacement vector is the length of the diameter for all three skaters:
+   
+   
+   Skater B moves along the straight line segment joining P to Q. Skaters A and C follow curved paths whose path lengths strictly exceed the diameter.
+ * Step 4: Explicit Final Verification: The displacement magnitude is 400\text{ m} for each girl; this equals the actual path length only for girl B.
+Analytical Case Study: Closed-Loop Multi-Stage Circular Park Navigation [Textbook Exercise 3.9]
+ * Step 1: System Isolation & Diagram: A cyclist starts at the center O of a circular park of radius R = 1\text{ km}, rides along radius OP, follows the circumference arc from P to Q, and returns to the center along radius QO. The round trip takes \Delta t = 10\text{ min} = \frac{10}{60}\text{ h} = \frac{1}{6}\text{ h}.
+                   Q (Arc Boundary)
+                    * - - - - - * P
+                     \         /
+                      \       /
+                    1 km\   / 1 km
+                         \ /
+                          * O (Centre)[span_226](start_span)[span_226](end_span)
+
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * Net Displacement: \Delta \vec{r} = \mathbf{0}
+   * Average Velocity:
+     
+   * Total Path Length (assuming arc PQ is a quadrant, subtending 90^\circ = \frac{\pi}{2}\text{ rad}):
+     
+   * Average Speed:
+     
+ * Step 4: Explicit Final Verification: The net displacement is 0, the average velocity is 0, and the average speed is 21.4\text{ km h}^{-1}.
+Analytical Case Study: Hexagonal Closed-Track Navigation and Displacements [Textbook Exercise 3.10]
+ * Step 1: System Isolation & Diagram: A motorist on an open field turns 60^\circ left after every 500\text{ m} traveled, tracing the perimeter of a regular hexagon of side length a = 500\text{ m} = 0.5\text{ km}.
+                    C *-------* D (3rd Turn)
+                     /         \
+                    /           \
+         (2nd Turn) B*           * E
+                     \         /
+                      \       /
+                       *-----*
+                       A     F
+                    (Start)
+
+ * Step 2: Component Displacements:
+   * At the Third Turn (Point D):
+     * Total Path Length: s_3 = 3 \times 500\text{ m} = \mathbf{1500\text{ m} = 1.5\text{ km}}
+     * Displacement Vector: Connects initial vertex A to opposite vertex D, spanning the main diameter of the regular hexagon:
+       
+     * Comparison: \frac{|\Delta \vec{r}_3|}{s_3} = \frac{1000}{1500} = \mathbf{\frac{2}{3}}
+   * At the Sixth Turn (Return to Start Vertex A):
+     * Total Path Length: s_6 = 6 \times 500\text{ m} = \mathbf{3000\text{ m} = 3.0\text{ km}}
+     * Displacement Vector: The motorist has completed a full closed loop:
+       
+     * Comparison: Ratio is 0
+   * At the Eighth Turn (Vertex C on the Second Circuit):
+     * Total Path Length: s_8 = 8 \times 500\text{ m} = \mathbf{4000\text{ m} = 4.0\text{ km}}
+     * Displacement Vector: Vector from start A to vertex C. In \Delta ABC, with |\vec{AB}| = a, |\vec{BC}| = a, the exterior turn is 60^\circ, so the interior angle is \angle ABC = 120^\circ:
+       
+       
+       Direction: Tilted at 30^\circ to the initial direction of motion.
+     * Comparison: \frac{|\Delta \vec{r}_8|}{s_8} = \frac{866}{4000} \approx \mathbf{0.216}
+ * Step 3: Explicit Final Verification: Displacements are 1.0\text{ km} (3rd turn), 0 (6th turn), and 0.866\text{ km} (8th turn).
+Analytical Case Study: Real-World Circuitous Transit and Speed-Velocity Disparity [Textbook Exercise 3.11]
+ * Step 1: System Isolation: A passenger travels from a railway station to a hotel located along a straight road at distance d = 10\text{ km}. A cab takes a circuitous route of path length s = 23\text{ km} in time \Delta t = 28\text{ min} = \frac{28}{60}\text{ h} = \frac{7}{15}\text{ h}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * Average Speed:
+     
+   * Magnitude of Average Velocity:
+     
+ * Step 4: Explicit Final Verification: Average speed is 49.3\text{ km h}^{-1} and the magnitude of average velocity is 21.4\text{ km h}^{-1}; the two quantities are not equal because the cab follows a curved path.
+Dynamic Evaluation: Kinematic Triangulation of High-Altitude Aircraft Speed [Textbook Exercise 3.22]
+ * Step 1: System Isolation & Diagram: An aircraft cruises horizontally at a constant altitude h = 3400\text{ m} above ground. Two observation sightings taken \Delta t = 10.0\text{ s} apart subtend a total angle of 2\theta_0 = 30.0^\circ at a ground station O.
+                     A             B (Aircraft Path)
+                     *<--- d ---->*
+                      \     |    /
+                       \    |h  /
+                        \   |  /
+                         \  | / θ₀ = 15°
+                          \ |/
+                           * O (Observation Station)[span_253](start_span)[span_253](end_span)
+
+ * Step 2: Trigonometric Formulation:
+   The ground station, the midpoint of the flight path, and either observation point form a right triangle with half-angle \theta_0 = 15.0^\circ:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Compute the aircraft speed:
+   
+   
+   Converting to \text{km h}^{-1}:
+   
+ * Step 4: Explicit Final Verification: The cruise speed of the aircraft is 182\text{ m s}^{-1} \approx 656\text{ km h}^{-1}.
+5. Projectile Motion: Parabolic Trajectories, Flight Parameters, and Energetics
+A projectile is any body in free flight subject solely to uniform downward gravitational acceleration (\vec{a} = -g\hat{j}), assuming air resistance is negligible.
+                  y
+                  |                Apex (vy = 0, vx = v₀·cos θ₀)
+                  |                       *
+                  |                  . '     ' .
+                  |             . '               ' .
+                  |         . '                       ' .
+              v₀  |       *'                             '*
+                  |      /                                 \
+                  |  θ₀ /                                   \
+                  0----+-------------------------------------*---> x
+                      Origin (y = 0)                   Range R[span_258](start_span)[span_258](end_span)
+
+Orthogonal Kinematic Breakdown
+ * Horizontal Axis (x): Zero horizontal acceleration (a_x = 0):
+   
+ * Vertical Axis (y): Constant downward acceleration (a_y = -g):
+   
+Derivation: Parabolic Trajectory Equation
+Solve for time t from the horizontal position equation:
+
+
+Substitute t into the vertical position equation:
+
+
+This matches the standard form of a parabola, y = Ax - Bx^2 (where A = \tan \theta_0 and B = \frac{g}{2v_0^2 \cos^2 \theta_0} are constants). Thus, the path of a projectile in a uniform gravitational field is a parabola.
+Derivations: Fundamental Projectile Metrics
+Time of Maximum Height (t_m) and Total Flight Time (T_f)
+At the peak of the trajectory, the vertical velocity component vanishes (v_y = 0):
+
+
+Setting the vertical displacement to zero (y = 0) for landing on flat ground:
+
+Maximum Vertical Height (h_m)
+Substitute t_m = \frac{v_0 \sin \theta_0}{g} into the vertical position equation:
+
+Horizontal Range (R) and Complementary Elevation Ranges
+The horizontal range R is the distance traversed during the total flight time T_f:
+
+ * Condition for Maximum Range: The range is maximized when \sin 2\theta_0 = 1 \implies 2\theta_0 = 90^\circ \implies \mathbf{\theta_0 = 45^\circ}:
+   
+Analytical Case Studies & Dynamic Evaluations
+Derivation: Parabolic Trajectory Equation and Horizontal Launch from a Tower [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation & Diagram: A projectile is launched horizontally with velocity \vec{v}_0 = u\hat{i} from the top of a tower of height h. Set the coordinate origin at the launch point.
+                    Launch (0, 0) ---> u
+                     +----------------*
+                     |                 \
+                     |                  \
+                   h |                   \ Parabolic Path
+                     |                    \
+                     |                     v
+             ========+======================* Impact
+
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   Substitute t = \frac{x}{u} into the vertical displacement equation:
+   
+   
+   This matches the form y = -kx^2 (where k = \frac{g}{2u^2} is a positive constant).
+ * Step 4: Explicit Final Verification: The relation between y and x is quadratic, confirming that an object launched horizontally from a tower follows a parabolic path.
+Derivation: Galileo's Complementary Elevation Range Theorem [Textbook Example 3.6]
+ * Step 1: System Isolation: Consider two launch angles with equal angular deviations above and below 45^\circ: \theta_1 = 45^\circ + \alpha and \theta_2 = 45^\circ - \alpha (for 0 < \alpha \le 45^\circ).
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   For \theta_1 = 45^\circ + \alpha:
+   
+   
+   For \theta_2 = 45^\circ - \alpha:
+   
+   
+   Because \sin 2\theta_1 = \sin 2\theta_2 = \cos 2\alpha:
+   
+ * Step 4: Explicit Final Verification: For angles of elevation that exceed or fall short of 45^\circ by equal amounts, the horizontal ranges are identical.
+Dynamic Evaluation: Horizontal Projection from a Cliff Edge [Textbook Example 3.7]
+ * Step 1: System Isolation: A hiker throws a stone horizontally at v_0 = 15.0\text{ m s}^{-1} from the edge of a cliff of height h = 490\text{ m} (g = 9.8\text{ m s}^{-2}).
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * Time to reach the ground (y = -490\text{ m}):
+     
+   * Velocity components at ground impact:
+     
+   * Impact speed:
+     
+ * Step 4: Explicit Final Verification: The stone reaches the ground in 10\text{ s} and strikes with a speed of 99\text{ m s}^{-1}.
+Dynamic Evaluation: Parameter Extraction from Empirical Trajectory Equations [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: The path of a projectile is described by the trajectory equation:
+   
+ * Step 2: Boundary Condition: The horizontal range R corresponds to the non-zero horizontal position where the projectile returns to ground level (y = 0).
+ * Step 3: Analytical Execution:
+   
+   
+   The roots are x = 0 (launch point) and:
+   
+ * Step 4: Explicit Final Verification: The horizontal range of the projectile is 64\text{ m}.
+Dynamic Evaluation: Horizontal Velocity Component from Range and Flight Time [PYQ 2023–24 Half-Yearly]
+ * Step 1: System Isolation: A projectile has a horizontal range R = 200\text{ m} and a time of flight T_f = 5.0\text{ s}.
+ * Step 2: Component Equations: Because horizontal acceleration is zero (a_x = 0), the horizontal velocity component remains constant throughout the flight:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The horizontal velocity component is 40\text{ m s}^{-1}.
+Derivation: Kinetic Energy Transformation at Projectile Apex [PYQ 2026 Final]
+ * Step 1: System Isolation: A projectile of mass m is launched at angle \theta_0 = 60^\circ with initial kinetic energy K.
+ * Step 2: Velocity Components:
+   
+   
+   At the highest point (apex), the vertical velocity vanishes (v_y = 0), so the particle retains only its horizontal velocity component:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The kinetic energy of the projectile at its highest point is \frac{K}{4} (or 25\% of its initial launch kinetic energy).
+Dynamic Evaluation: Comprehensive Ballistic Parameter Calculation [PYQ 2020 Final & Textbook Example 3.8]
+ * Step 1: System Isolation: A cricket ball is launched with initial speed v_0 = 28.0\text{ m s}^{-1} at an elevation angle \theta_0 = 30.0^\circ (g = 9.8\text{ m s}^{-2}).
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * Maximum Height Attained [PYQ 2020 Final]:
+     
+   * Total Time of Flight [PYQ 2020 Final]:
+     
+   * Horizontal Range [PYQ 2020 Final]:
+     
+ * Step 4: Explicit Final Verification: Maximum height is 10.0\text{ m}, time of flight is 2.9\text{ s}, and horizontal range is 69\text{ m}.
+Dynamic Evaluation: Trajectory Confinement and Ceiling Clearance Limits [Textbook Exercise 3.12]
+ * Step 1: System Isolation: A sports arena has a flat ceiling of height H_c = 25.0\text{ m}. A ball is launched with initial speed v_0 = 40.0\text{ m s}^{-1}. Find the maximum horizontal range achievable without the ball striking the ceiling.
+ * Step 2: Constraint Formulation:
+   The maximum height of the projectile cannot exceed the ceiling height:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Compute the corresponding horizontal factor:
+   
+   
+   Calculate the horizontal range under this ceiling constraint:
+   
+ * Step 4: Explicit Final Verification: The maximum horizontal distance the ball can travel without hitting the ceiling is 150.5\text{ m}.
+Dynamic Evaluation: Scaling Relation Between Maximum Range and Vertical Elevation [Textbook Exercise 3.13]
+ * Step 1: System Isolation: An athlete throws a ball to a maximum horizontal range R_{\text{max}} = 100\text{ m}. Find the maximum vertical height the same athlete can achieve with the same launch speed.
+ * Step 2: Component Equations:
+   
+   
+   For a purely vertical throw (\theta = 90^\circ):
+   
+ * Step 3: Analytical Execution:
+   Substitute v_0^2 = g R_{\text{max}} into the vertical height relation:
+   
+ * Step 4: Explicit Final Verification: The athlete can throw the ball to a maximum vertical height of 50\text{ m} (exactly half the maximum horizontal range).
+6. Uniform Circular Motion: Centripetal Kinematics and Dynamics
+                     UNIFORM CIRCULAR MOTION (Speed v = const.)
+                                       |
+          +----------------------------+----------------------------+
+          |                                                         |
+   ANGULAR VARIABLES                                        CENTRIPETAL ACCELERATION
+   • ω = dθ/dt[span_320](start_span)[span_320](end_span)                                    • ac = v² / R (Directed Inward)[span_321](start_span)[span_321](end_span)
+   • v = ω·R[span_322](start_span)[span_322](end_span)                                      • ac = ω²·R = 4π²·ν²·R[span_323](start_span)[span_323](end_span)
+   • T = 1/ν = 2π/ω[span_324](start_span)[span_324](end_span)                               • Vector changes continuously[span_325](start_span)[span_325](end_span)
+
+Uniform circular motion describes motion along a circular path of radius R at constant scalar speed v. While the speed is constant, the velocity vector \vec{v} continuously changes direction, producing an instantaneous centripetal acceleration directed toward the center of the circle.
+                            v' (Tangent at P')
+                            ^
+                           /
+                        P'*
+                         / \
+                     r' /   \ Δr
+                       / Δθ  \
+                      *-------* P
+                      C   r   |
+                              v (Tangent at P)[span_328](start_span)[span_328](end_span)
+
+Derivation: Centripetal Acceleration Magnitude and Inward Direction
+Let a particle move along a circular path of radius R centered at C. Over a time interval \Delta t, the particle moves from point P (position \vec{r}, velocity \vec{v}) to point P' (position \vec{r}', velocity \vec{v}').
+Because velocity vectors are perpendicular to their position vectors (\vec{v} \perp \vec{r} and \vec{v}' \perp \vec{r}'), the angle between \vec{v} and \vec{v}' equals the angular displacement \Delta \theta subtended by the position vectors.
+Form the velocity vector triangle with sides \vec{v}, \vec{v}', and \Delta \vec{v} = \vec{v}' - \vec{v}. The position triangle \Delta CPP' and the velocity triangle are similar isosceles triangles:
+
+
+Divide by the time interval \Delta t and take the limit as \Delta t \to 0:
+
+
+As \Delta t \to 0, the chord length |\Delta \vec{r}| approaches the arc length \Delta s, and \lim_{\Delta t \to 0} \frac{|\Delta \vec{r}|}{\Delta t} = v:
+
+Direction Analysis
+As \Delta t \to 0, \Delta \vec{r} becomes perpendicular to \vec{r}. The velocity change vector \Delta \vec{v} becomes perpendicular to \vec{v} and points along the angle bisector toward the center C. This inward radial acceleration is termed centripetal acceleration.
+Angular Variables and Parameter Relations
+ * Angular Speed (\omega): The rate of change of angular displacement:
+   
+ * Linear-Angular Speed Relation: Since arc length is \Delta s = R \Delta \theta, dividing by \Delta t gives:
+   
+ * Period (T) and Frequency (\nu):
+   
+ * Equivalent Formulations of Centripetal Acceleration:
+   
+ * Vector Characteristic: Even though the magnitude a_c is constant, the vector \vec{a}_c(t) is not a constant vector because its spatial direction rotates continuously through 360^\circ.
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Linear Momentum Inversion Across a Diametric Inversion [PYQ 2023–24 Half-Yearly]
+ * Step 1: System Isolation & Diagram: A particle of mass m travels with uniform speed v along a circle of radius R. Consider two diametrically opposite positions P and Q.
+                     P *------> v  (Initial p_i = m·v·î)
+                      / \
+                     |   |
+                      \ /
+              -v <-----* Q         (Final p_f = -m·v·î)
+
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The magnitude of the change in linear momentum when moving between diametrically opposite points is 2mv.
+Dynamic Evaluation: Centripetal Acceleration of a Horizontally Whirled Stone [Textbook Exercise 3.14 & Example 3.9]
+ * Step 1: System Isolation: A stone tied to a string of length R = 80.0\text{ cm} = 0.80\text{ m} is whirled in a horizontal circle, completing 14\text{ revolutions} in 25.0\text{ s}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The centripetal acceleration is 9.91\text{ m s}^{-2}, directed radially inward along the string toward the center of rotation.
+Dynamic Evaluation: Centripetal Load and Gravitational Multiples in Aircraft Loops [Textbook Exercise 3.15]
+ * Step 1: System Isolation: An aircraft executes a horizontal circular loop of radius R = 1.00\text{ km} = 1000\text{ m} at a steady speed v = 900\text{ km h}^{-1} (g = 9.8\text{ m s}^{-2}).
+ * Step 2: Unit Conversion and Formulation:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Ratio to gravitational acceleration:
+   
+ * Step 4: Explicit Final Verification: The aircraft experiences a centripetal acceleration of 62.5\text{ m s}^{-2}, which is 6.38 times the acceleration due to gravity (6.38\text{ g}).
+Conceptual Diagnostic: Invariance and Diagnostic Truth-Values of Circular Motion [Textbook Exercise 3.16 & Points to Ponder]
+ * Statement (a): "The net acceleration of a particle in circular motion is always along the radius of the circle towards the centre."
+   * FALSE in general; TRUE only for uniform circular motion. In non-uniform circular motion, the net acceleration \vec{a} = \vec{a}_c + \vec{a}_t has both an inward radial component (a_c = \frac{v^2}{R}) and a tangential component (a_t = \frac{dv}{dt}), causing the net acceleration vector to deviate from the radial line.
+ * Statement (b): "The velocity vector of a particle at a point is always along the tangent to the path of the particle at that point."
+   * TRUE. The velocity vector is collinear with the displacement limit d\vec{r}, which defines the tangent to the curve at every point.
+ * Statement (c): "The acceleration vector of a particle in uniform circular motion averaged over one complete cycle is a null vector."
+   * TRUE. For every instantaneous inward acceleration vector \vec{a}_c(t), there exists an equal and opposite acceleration vector \vec{a}_c\left(t + \frac{T}{2}\right) = -\vec{a}_c(t) half a period later. Integrating over a complete cycle yields:
+     
+7. Master Consolidated Reference Tables
+Table A: Master PYQ Index
+| Exam / Year | Question Summary | Core Governing Concept | Final Analytical / Numerical Result |
+|---|---|---|---|
+| 2022 Test | Resultant of two vectors A and B for different angles | R = \sqrt{A^2 + B^2 + 2AB\cos\theta} | \theta = 0^\circ \implies A+B; \theta = 180^\circ \implies \Vert{}A-B\Vert{}; \theta = 90^\circ \implies \sqrt{A^2+B^2}. |
+| 2025 HY | If \Vert{}A + B\Vert{} = \Vert{}A - B\Vert{}, find angle between them | Orthogonal vector cancellations | 4AB\cos\theta = 0 \implies \mathbf{\theta = 90^\circ\text{ (}\pi/2\text{ rad)}}. |
+| 2026 Final | Show vectorially that (A + B) + C = A + (B + C) | Polygon closure geometry | Proved using triangle law across polygon OPQS. |
+| 2023–24 HY | Force is 20 N and one rectangular component is 12 N | F^2 = F_x^2 + F_y^2 | F_y = \sqrt{20^2 - 12^2} = \mathbf{16\text{ N}}. |
+| 2026 Final | Resultant of vectors A and B making angle \theta | Parallelogram analytical proof | R = \sqrt{A^2 + B^2 + 2AB\cos\theta}; \tan\alpha = \frac{B\sin\theta}{A+B\cos\theta}. |
+| 2026 Final | Conditions for maximum and minimum resultant | Derivative extrema on \cos\theta | R_{\text{max}} = A+B at \theta=0^\circ; R_{\text{min}} = \Vert{}A-B\Vert{} at \theta=180^\circ. |
+| 2026 Final | Displacement for 6 m N, 8 m E, 10 m upward | r = \sqrt{x^2 + y^2 + z^2} | r = \sqrt{8^2 + 6^2 + 10^2} = \mathbf{10\sqrt{2}\text{ m} \approx 14.14\text{ m}} at 45^\circ to vertical. |
+| 2023–24 HY | Horizontal velocity for R = 200\text{ m} and T_f = 5\text{ s} | R = v_x \times T_f | v_x = \frac{200\text{ m}}{5\text{ s}} = \mathbf{40\text{ m s}^{-1}}. |
+| 2025 HY | Range from projectile equation y = 16x - x^2/4 | Ground boundary condition (y = 0) | x(16 - x/4) = 0 \implies \mathbf{R = 64\text{ m}}. |
+| 2025 HY | Body horizontally projected from tower is parabolic | Independence of axes (x = ut, y \propto t^2) | y = -\left(\frac{g}{2u^2}\right)x^2 \implies Trajectory is a parabola. |
+| 2026 Final | KE at highest point for launch at 60^\circ | v_{\text{apex}} = v_0 \cos 60^\circ | K_{\text{apex}} = \frac{1}{2}m(v_0/2)^2 = \mathbf{\frac{K}{4}}. |
+| 2023–24 HY | Change in momentum across diametric circle points | Vector subtraction: \vec{p}_f - \vec{p}_i | \Delta \vec{p} = (-mv\hat{i}) - (mv\hat{i}) \implies \vert{}\Delta \vec{p}\vert{} = \mathbf{2mv}. |
+| 2020 Final | Magnitude and direction of \hat{i} + \hat{j} | Modulus and inverse tangent | \vert{}\hat{i} + \hat{j}\vert{} = \mathbf{\sqrt{2}}, direction \mathbf{\theta = 45^\circ\text{ with }+x\text{-axis}}. |
+| 2020 Final | Flight metrics for v_0 = 28\text{ m/s} at 30^\circ | Ballistic metric formulas | h_m = \mathbf{10.0\text{ m}}, T_f = \mathbf{2.86\text{ s}}, R = \mathbf{69.28\text{ m}}. |
+| 2023 Final | Draw vector representing 3\vec{A} | Scalar scaling of vectors | Parallel vector with identical direction, length tripled. |
+| 2023 Final | Prove the Law of Cosines for vector addition | Geometric right triangle projection | R^2 = (A + B\cos\theta)^2 + (B\sin\theta)^2 \implies \mathbf{R = \sqrt{A^2+B^2+2AB\cos\theta}}. |
+Table B: Textbook Exercises Index
+| Exercise # | Topic / Scenario | Analytical / Numerical Result (with Units) |
+|---|---|---|
+| 3.1 | Scalar vs. Vector classification | Scalars: Vol, Mass, Speed, Density, Moles, Ang. freq; Vectors: Accel, Vel, Disp, Ang. vel. |
+| 3.2 | Pick two scalars from list | Work and Current. |
+| 3.3 | Pick only vector from list | Impulse. |
+| 3.4 | Algebraic operations validity | (a) Same dimensions only; (b) Never; (c) Valid; (d) Valid; (e) Same quantity only; (f) Only if vector. |
+| 3.5 | True/False vector statements | (a) True; (b) True (scalar components); (c) False; (d) True; (e) True. |
+| 3.6 | Triangle inequalities and equality conditions | Valid geometrically; equality holds for collinear configurations (\theta = 0^\circ or 180^\circ). |
+| 3.7 | Properties of closed 4-vector polygon | (a) False; (b) True; (c) True; (d) True. |
+| 3.8 | Three girls skating across circular ice rink | Displacement magnitude = \mathbf{400\text{ m}} for all; equals path length for girl B only. |
+| 3.9 | Cyclist round trip in circular park | (a) Displacement = \mathbf{0}; (b) Velocity = \mathbf{0}; (c) Speed = \mathbf{21.43\text{ km h}^{-1}}. |
+| 3.10 | Motorist on hexagonal track | 3rd: Disp = \mathbf{1.0\text{ km}}, Path = 1.5\text{ km}; 6th: Disp = \mathbf{0}; 8th: Disp = \mathbf{0.866\text{ km}}. |
+| 3.11 | Taxi trip (10 km straight vs 23 km circuitous) | Speed = \mathbf{49.3\text{ km h}^{-1}}; Velocity magnitude = \mathbf{21.4\text{ km h}^{-1}} (unequal). |
+| 3.12 | Clearance under 25 m ceiling (v_0 = 40\text{ m/s}) | Maximum horizontal range R_{\text{max}} = \mathbf{150.5\text{ m}}. |
+| 3.13 | Maximum range 100 m vs. vertical throw | Maximum vertical throw height H_{\text{vert}} = \frac{R_{\text{max}}}{2} = \mathbf{50.0\text{ m}}. |
+| 3.14 | Whirled stone (80\text{ cm}, 14 rev in 25 s) | a_c = \mathbf{9.91\text{ m s}^{-2}}, directed radially inward toward the center. |
+| 3.15 | Aircraft loop (R = 1\text{ km}, 900\text{ km/h}) | a_c = \mathbf{62.5\text{ m s}^{-2}} \approx \mathbf{6.38\text{ g}}. |
+| 3.16 | True/False circular motion statements | (a) False (true only if speed is uniform); (b) True; (c) True. |
+| 3.17 | Particle trajectory calculus | \vec{v}(t) = 3.0\hat{i}-4.0t\hat{j}, \vec{a} = -4.0\hat{j}; at t=2\text{ s}: v \approx \mathbf{8.54\text{ m s}^{-1}} at -69.4^\circ. |
+| 3.18 | 2D motion under constant acceleration | At x = 16\text{ m}: t = \mathbf{2.0\text{ s}}, y = \mathbf{24.0\text{ m}}, speed v \approx \mathbf{21.3\text{ m s}^{-1}}. |
+| 3.19 | Unit vectors and projections of \vec{A} = 2\hat{i} + 3\hat{j} | Magnitudes \mathbf{\sqrt{2}} at \mathbf{\pm 45^\circ}; Components are \mathbf{\frac{5}{\sqrt{2}} \approx 3.54} and \mathbf{-\frac{1}{\sqrt{2}} \approx -0.71}. |
+| 3.20 | Arbitrary space motion relations | (a) False; (b) True; (c) False; (d) False; (e) True. |
+| 3.21 | Invariant properties of scalar quantities | (a) False; (b) False; (c) False; (d) False; (e) True. |
+| 3.22 | Aircraft cruise speed from ground angle sweep | Speed v = \mathbf{182.2\text{ m s}^{-1} \approx 656\text{ km h}^{-1}}. |
