@@ -155,18 +155,31 @@ export async function reindexChapterRag(env: Env, chapterId: string, requested: 
     qa: [qa(chapter.qaEn), qa(chapter.qaAs)],
     pyq: [null, null],
   };
-  const pyqPages = parse(chapter.pyqPapers).filter(page => page.ocr_text?.trim());
-  const pyqText = pyqPages.map((page, index) => [
-    `## PYQ page ${index + 1}`,
-    `Original page image: ${page.url}`,
-    page.ocr_text,
-    ...(Array.isArray(page.figures)
-      ? (page.figures as unknown[]).map((figure, figureIndex) => {
-        const item = figure as Record<string, unknown>;
-        return `[Figure ${figureIndex + 1}] ${String(item.description ?? item.alt_text ?? 'Figure preserved in original page image.')}${item.labels ? ` Labels: ${JSON.stringify(item.labels)}` : ''}`;
-      })
-      : []),
-  ].filter(Boolean).join('\n')).join('\n\n');
+  const pyqRecords = parse(chapter.pyqPapers);
+  const pyqPages = pyqRecords.filter(page => page.ocr_text?.trim());
+  const pyqTextRecords = pyqRecords.filter(page => page.is_text && page.text_content?.trim());
+  const pyqText = [
+    ...pyqTextRecords.map((page, index) => [
+      `## Pasted PYQ text ${index + 1}`,
+      ...(Array.isArray(page.mark_groups)
+        ? (page.mark_groups as unknown[]).map(group => {
+          const item = group as Record<string, unknown>;
+          return [`### ${String(item.label ?? 'Unmarked')}`, String(item.text ?? '')].filter(Boolean).join('\n');
+        })
+        : [page.text_content]),
+    ].filter(Boolean).join('\n')),
+    ...pyqPages.map((page, index) => [
+      `## PYQ page ${index + 1}`,
+      `Original page image: ${page.url}`,
+      page.ocr_text,
+      ...(Array.isArray(page.figures)
+        ? (page.figures as unknown[]).map((figure, figureIndex) => {
+          const item = figure as Record<string, unknown>;
+          return `[Figure ${figureIndex + 1}] ${String(item.description ?? item.alt_text ?? 'Figure preserved in original page image.')}${item.labels ? ` Labels: ${JSON.stringify(item.labels)}` : ''}`;
+        })
+        : []),
+    ].filter(Boolean).join('\n')),
+  ].filter(Boolean).join('\n\n');
   text.pyq = [pyqText || null, null];
   const pyqMedia: RagMedia[] = pyqPages.filter(page => typeof page.url === 'string').map(page => ({
     url: page.url as string,

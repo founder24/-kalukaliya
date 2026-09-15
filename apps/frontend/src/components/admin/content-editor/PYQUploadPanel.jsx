@@ -336,20 +336,18 @@ export default function PYQUploadPanel({
     }
     setSubmittingText(true);
     try {
-      await axios.post(`${API}/admin/pyq/upload-text`, {
+      const response = await axios.post(`${API}/staff/content/chapter/${chapterId}/pyq-text`, {
         text: textContent.trim(),
         exam_year: examYear,
-        paper_type: 'major',
-        subject_id: subjectId || '',
-        board_id: boardId || '',
-        class_id: classId || '',
-        stream_id: streamId || '',
-        chapter_id: chapterId || '',
       }, authHeaders(adminToken));
       toast.success('Text PYQ uploaded & processed');
       setTextContent('');
       setShowTextInput(false);
-      await loadPyqs();
+      if (response.data?.pyq_papers) {
+        setPyqs(response.data.pyq_papers.map(normalizePage));
+      } else {
+        await loadPyqs();
+      }
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Text upload failed');
     } finally {

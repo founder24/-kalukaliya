@@ -67,6 +67,7 @@ const CHAT_REQUESTS_PER_MINUTE = CHAT_RPM_LIMIT;
 // curriculum content. Chapter-scoped turns bypass semantic retrieval below, so
 // these caps primarily protect the no-context and follow-up paths.
 const CONTEXT_CHAR_CAP       = 8_000;
+const PYQ_CONTEXT_CHAR_CAP   = 24_000;
 const HISTORY_MSG_CAP        = 6;
 const HISTORY_CHARS_PER_MSG  = 350;
 const MEMORY_ITEM_CAP        = 6;
@@ -357,9 +358,25 @@ export async function fetchAuthoritativeIntentContext(
       || Boolean(row.pyq_pdf_url || (tryJson<unknown[]>(row.pyq_papers, []).length)))
     .map((row) => {
       const papers = tryJson<unknown[]>(row.pyq_papers, []);
+      const pastedText = intent === 'pyq'
+        ? papers.map((rawPaper, paperIndex) => {
+          const paper = rawPaper as Record<string, unknown>;
+          if (typeof paper.text_content !== 'string' || !paper.text_content.trim()) return '';
+          const groups = Array.isArray(paper.mark_groups)
+            ? paper.mark_groups.map(rawGroup => {
+              const group = rawGroup as Record<string, unknown>;
+              return `### ${String(group.label ?? 'Unmarked')}\n${String(group.text ?? '')}`;
+            }).filter(Boolean).join('\n\n')
+            : paper.text_content.trim();
+          return `## Pasted PYQ ${paperIndex + 1}\n${groups || paper.text_content.trim()}`;
+        }).filter(Boolean).join('\n\n')
+        : '';
       const evidence = intent === 'syllabus'
         ? `Authoritative syllabus chapter: ${row.title}`
-        : `Authoritative PYQ record for ${row.title}. PDF available: ${row.pyq_pdf_url ? 'yes' : 'no'}. Stored paper pages: ${papers.length}.`;
+        : [
+          `Authoritative PYQ record for ${row.title}. PDF available: ${row.pyq_pdf_url ? 'yes' : 'no'}. Stored paper pages: ${papers.length}.`,
+          pastedText,
+        ].filter(Boolean).join('\n\n');
       return {
         chapterId: row.id,
         chapterTitle: row.title,
@@ -1184,7 +1201,8 @@ export async function fetchMatchedChunkContext(
   }));
 
   const result: ContextChunk[] = [];
-  let remaining = CONTEXT_CHAR_CAP;
+  const hasPyq = candidates.some(candidate => candidate?.sourceType?.includes('pyq'));
+  let remaining = hasPyq ? PYQ_CONTEXT_CHAR_CAP : CONTEXT_CHAR_CAP;
   for (const candidate of candidates) {
     if (!candidate || remaining <= 0) continue;
     const content = candidate.content.slice(0, remaining);

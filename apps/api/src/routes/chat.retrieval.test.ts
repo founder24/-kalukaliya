@@ -127,6 +127,46 @@ describe('chapter-scoped chat retrieval', () => {
     expect(bind).toHaveBeenCalledWith('page-chapter', 'class-11-physics', 30);
   });
 
+  it('keeps pasted PYQ mark groups in authoritative chat context', async () => {
+    const rawText = '1. Define force. [1]\n2. Explain momentum. (2 marks)\n৩. গতিৰ সমীকৰণ লিখা। ৫ নম্বৰ';
+    const d1 = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          all: vi.fn(async () => ({
+            results: [{
+              id: 'chapter-1',
+              title: 'Motion',
+              subject_id: 'physics',
+              pyq_pdf_url: null,
+              pyq_papers: JSON.stringify([{
+                is_text: true,
+                text_content: rawText,
+                mark_groups: [
+                  { label: '1 marks', text: '1. Define force. [1]' },
+                  { label: '2 marks', text: '2. Explain momentum. (2 marks)' },
+                  { label: '5 marks', text: '৩. গতিৰ সমীকৰণ লিখা। ৫ নম্বৰ' },
+                ],
+              }]),
+            }],
+          })),
+        })),
+      })),
+    };
+
+    const [context] = await fetchAuthoritativeIntentContext(
+      d1 as unknown as D1Database,
+      'pyq',
+      'physics',
+      'chapter-1',
+      'en',
+    );
+
+    expect(context?.content).toContain('### 1 marks');
+    expect(context?.content).toContain('2. Explain momentum');
+    expect(context?.content).toContain('### 5 marks');
+    expect(context?.content).toContain('গতিৰ সমীকৰণ');
+  });
+
   it('selects only the required language fields for direct English chapter RAG', async () => {
     let query = '';
     const first = vi.fn(async () => ({

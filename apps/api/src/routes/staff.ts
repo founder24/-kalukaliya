@@ -447,6 +447,54 @@ function makeSlug(name: string): string {
 }
 
 function nowTs(): number { return Math.floor(Date.now() / 1000); }
+
+const ASSAMESE_DIGITS = '০১২৩৪৫৬৭৮৯';
+
+function normalizeIndicDigits(value: string): string {
+  return value.replace(/[০-৯]/g, digit => String(ASSAMESE_DIGITS.indexOf(digit)));
+}
+
+/**
+ * Preserve the pasted paper exactly while also producing ordered mark groups
+ * for retrieval. A line inherits the most recently declared mark value until
+ * another mark marker is encountered.
+ */
+export function groupPyqTextByMarks(text: string): Array<{
+  marks: number | null;
+  label: string;
+  text: string;
+}> {
+  const groups: Array<{ marks: number | null; label: string; lines: string[] }> = [];
+  let current: { marks: number | null; label: string; lines: string[] } | null = null;
+  const markPattern = /(?:\[\s*([0-9০-৯]+)\s*\]|\(\s*([0-9০-৯]+)\s*(?:marks?|মাৰ্ক|নম্বৰ)?\s*\)|(?:^|[\s:–—-])([0-9০-৯]+)\s*(?:marks?|মাৰ্ক|নম্বৰ)(?![A-Za-z]))/iu;
+
+  for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
+    const match = line.match(markPattern);
+    if (match) {
+      const rawMarks = match[1] ?? match[2] ?? match[3];
+      const marks = rawMarks ? Number(normalizeIndicDigits(rawMarks)) : null;
+      const label = marks === null || !Number.isFinite(marks) ? 'Unmarked' : `${marks} marks`;
+      current = { marks: Number.isFinite(marks) ? marks : null, label, lines: [] };
+      groups.push(current);
+    }
+    if (!current) {
+      current = { marks: null, label: 'Unmarked', lines: [] };
+      groups.push(current);
+    }
+    current.lines.push(line);
+  }
+
+  return groups
+    .map(group => ({ marks: group.marks, label: group.label, text: group.lines.join('\n').trim() }))
+    .filter(group => group.text.length > 0);
+}
+
+function pyqQuestionCount(text: string): number {
+  return text.split(/\r?\n/).filter(line =>
+    /^\s*(?:\d+|[০-৯]+|[A-Za-z])[\s.)-]+/.test(line),
+  ).length;
+}
+
 async function previewSignature(secret: string, payload: string): Promise<string> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const bytes = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload)));
@@ -1249,6 +1297,59 @@ staffRouter.patch('/content/chapter/:chapterId', async (c) => {
   await kvPrewarm(c.env, ch.subjectId);
 
   return c.json({ ok: true });
+});
+
+// POST /staff/content/chapter/:id/pyq-text
+// Store pasted PYQ text in the same Worker-native chapter record used by
+// page uploads. The raw text remains intact; mark groups are retrieval
+// metadata, not a replacement for the source.
+staffRouter.post('/content/chapter/:id/pyq-text', async (c) => {
+  const auth = await guard(c); if (!auth) return c.res;
+  const denied = await capabilityDenied(c, auth, 'content:edit'); if (denied) return denied;
+  const chapterId = c.req.param('id');
+  const body = await safeBody(c);
+  const text = typeof body.text === 'string' ? body.text.replace(/\r\n?/g, '\n').trim() : '';
+  if (!text) return c.json({ detail: 'text is required' }, 422);
+  if (text.length > 500_000) return c.json({ detail: 'text is too large (max 500,000 characters)' }, 413);
+
+  const db = createDb(c.env.DB);
+  const chapter = await db.select({
+    id: chapters.id, subjectId: chapters.subjectId, pyqPapers: chapters.pyqPapers,
+  }).from(chapters).where(eq(chapters.id, chapterId)).get();
+  if (!chapter) return c.json({ detail: 'Chapter not found' }, 404);
+
+  const markGroups = groupPyqTextByMarks(text);
+  const paper = {
+    id: crypto.randomUUID(),
+    filename: 'text_pyq',
+    file_url: '',
+    is_image: false,
+    is_pdf: false,
+    is_text: true,
+    processing_status: 'done',
+    exam_year: typeof body.exam_year === 'number' ? body.exam_year : null,
+    year: typeof body.exam_year === 'number' ? body.exam_year : null,
+    question_count: pyqQuestionCount(text),
+    text_content: text,
+    mark_groups: markGroups,
+    uploaded_at: new Date().toISOString(),
+  };
+  const papers = [...(safeParse<Array<Record<string, unknown>>>(chapter.pyqPapers) ?? []), paper];
+  await db.update(chapters).set({
+    pyqPapers: JSON.stringify(papers),
+    updatedAt: nowTs(),
+    ragUpdatedAt: nowTs(),
+  }).where(eq(chapters.id, chapterId));
+
+  const indexed = await reindexChapterRag(c.env, chapterId, ['pyq']);
+  const result = indexed.pyq;
+  await auditLog(c.env, auth.sub ?? '', 'add_pyq_text', 'chapter', chapterId, {
+    paperId: paper.id, questionCount: paper.question_count, markGroups: markGroups.length,
+  });
+  if (result?.error) {
+    return c.json({ ok: false, detail: result.error, paper, pyq_papers: papers, indexed: result }, 502);
+  }
+  return c.json({ ok: true, paper, pyq_papers: papers, indexed: result }, 201);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
