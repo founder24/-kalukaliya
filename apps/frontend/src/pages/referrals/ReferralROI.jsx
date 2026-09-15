@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { canStaffCapability } from '@/utils/staffAccess';
 import { useAuth } from '@/context/AuthContext';
-import { RefreshCw, ShieldCheck, ShieldAlert, LockKeyhole } from 'lucide-react';
+import { Download, RefreshCw, ShieldCheck, ShieldAlert, LockKeyhole } from 'lucide-react';
 import { toast } from 'sonner';
-import { adminCalculateReferralRoi, adminGetReferralRoiDashboard } from '@/utils/api';
+import {
+  adminCalculateReferralRoi,
+  adminExportReferralRoi,
+  adminGetReferralRoiDashboard,
+} from '@/utils/api';
 
 const unwrap = response => response?.data ?? response ?? {};
 const money = paise => paise == null ? '—' : `₹${(Number(paise) / 100).toFixed(2)}`;
@@ -27,6 +31,7 @@ export default function ReferralROI({ adminToken }) {
   const [data, setData] = useState(null);
   const [weekId, setWeekId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -54,6 +59,29 @@ export default function ReferralROI({ adminToken }) {
       await load();
     } catch (requestError) {
       toast.error(requestError?.response?.data?.detail || 'ROI calculation failed.');
+    }
+  };
+
+  const exportEvidence = async () => {
+    setExporting(true);
+    try {
+      const response = await adminExportReferralRoi(adminToken);
+      const blob = response.data instanceof Blob
+        ? response.data
+        : new Blob([JSON.stringify(response.data)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'referral-roi-evidence.json';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success('ROI evidence downloaded.');
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || 'ROI evidence download failed.');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -85,9 +113,14 @@ export default function ReferralROI({ adminToken }) {
             Provider-finalized AdSense revenue only. Client ad-impression beacons never authorize rewards.
           </p>
         </div>
-        <button onClick={load} disabled={loading} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh evidence
-        </button>
+         <div className="flex flex-wrap gap-2">
+           <button onClick={exportEvidence} disabled={loading || exporting} data-testid="button-download-referral-roi" className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 disabled:opacity-60">
+             <Download size={14} /> {exporting ? 'Preparing…' : 'Download evidence'}
+           </button>
+           <button onClick={load} disabled={loading || exporting} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60">
+             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh evidence
+           </button>
+         </div>
       </div>
 
       {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}

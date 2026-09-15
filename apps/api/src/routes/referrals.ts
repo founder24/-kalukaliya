@@ -587,6 +587,24 @@ adminReferralRouter.get('/roi/dashboard', async (c) => {
   }
 });
 
+adminReferralRouter.get('/roi/dashboard/export', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  try {
+    const dashboard = await roiDashboard(c.env.DB, Number(c.req.query('limit') ?? 12));
+    return new Response(JSON.stringify(dashboard, null, 2), {
+      headers: {
+        'Cache-Control': 'private, no-store, max-age=0',
+        'Content-Disposition': 'attachment; filename="referral-roi-evidence.json"',
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  } catch {
+    return c.json({ detail: 'Referral ROI evidence export unavailable' }, 503);
+  }
+});
+
 adminReferralRouter.get('/roi/inventory', async (c) => {
   const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
   if (auth instanceof Response) return auth;

@@ -128,6 +128,18 @@ describe('release regressions', () => {
       warnings: [],
     });
     expect(roiBody.reports).toEqual([]);
+
+    const exportDenied = await fetchWorker(request('/api/v1/admin/referrals/roi/dashboard/export', limited));
+    expect(exportDenied.status).toBe(403);
+    expect(await exportDenied.json()).toMatchObject({
+      capability: 'referral:settle',
+    });
+
+    const roiExport = await fetchWorker(request('/api/v1/admin/referrals/roi/dashboard/export', settler));
+    expect(roiExport.status).toBe(200);
+    expect(roiExport.headers.get('content-disposition')).toContain('attachment');
+    expect(roiExport.headers.get('content-type')).toContain('application/json');
+    expect(await roiExport.json()).toEqual(roiBody);
   });
 
   it('fences an active RAG lease and recovers an expired running lease', async () => {

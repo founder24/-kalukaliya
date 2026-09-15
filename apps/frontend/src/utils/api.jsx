@@ -265,6 +265,14 @@ export const adminGetReferralRoiDashboard = (token, limit = 12) =>
     params: { limit },
   });
 
+export const adminExportReferralRoi = (token, limit = 12) =>
+  axios.get(`${API_BASE}/admin/referrals/roi/dashboard/export`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+    params: { limit },
+    responseType: 'blob',
+  });
+
 export const adminCalculateReferralRoi = (token, weekId, data = {}) =>
   axios.post(
     `${API_BASE}/admin/referrals/roi/weeks/${encodeURIComponent(weekId)}/calculate`,
