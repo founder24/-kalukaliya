@@ -93,6 +93,7 @@ STATE_DIR = Path(
 PROGRESS_FILE = STATE_DIR / "progress.jsonl"
 BACKUP_FILE = STATE_DIR / "notes-backup.jsonl"
 APPROVAL_FILE = STATE_DIR / "approvals.jsonl"
+LATEST_PROGRESS_INDEX_FILENAME = "latest-progress.json"
 ARCHIVE_RETENTION_DAYS = int(os.getenv("AHSEC_D1_ARCHIVE_RETENTION_DAYS", "90"))
 CLEANUP_PREVIEW_FILENAME = "preamble-cleanup-preview.json"
 CLEANUP_PREVIEW_MAX_AGE_SECONDS = int(
@@ -429,20 +430,101 @@ def _progress_files() -> list[Path]:
     return progress_files
 
 
-def _latest_progress_by_chapter() -> dict[str, dict[str, Any]]:
-    latest: dict[str, dict[str, Any]] = {}
+def _latest_progress_index_path() -> Path:
+    return STATE_DIR / LATEST_PROGRESS_INDEX_FILENAME
+
+
+def _read_latest_progress_index() -> dict[str, dict[str, Any]] | None:
+    """Read the compact latest-state index, or None when it needs rebuilding."""
+    path = _latest_progress_index_path()
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        return None
+    chapters = payload.get("chapters")
+    if not isinstance(chapters, dict):
+        return None
+
+    states: dict[str, dict[str, Any]] = {}
+    for chapter_id, state in chapters.items():
+        if not isinstance(state, dict):
+            continue
+        record = state.get("record")
+        if isinstance(record, dict) and str(chapter_id).strip():
+            states[str(chapter_id).strip()] = {
+                "record": record,
+                "archived": bool(state.get("archived", False)),
+            }
+    return states
+
+
+def _write_latest_progress_index(states: dict[str, dict[str, Any]]) -> None:
+    """Atomically persist one latest progress record per chapter."""
+    path = _latest_progress_index_path()
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {"version": 1, "chapters": states}
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _scan_progress_states() -> dict[str, dict[str, Any]]:
+    """Build the compact index from legacy ledgers during one migration scan."""
+    states: dict[str, dict[str, Any]] = {}
     for progress_file in _progress_files():
         if not progress_file.exists():
             continue
         for line in progress_file.read_text(encoding="utf-8").splitlines():
             try:
                 row = json.loads(line)
-            except json.JSONDecodeError:
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(row, dict):
                 continue
             chapter_id = str(row.get("chapter_id") or "").strip()
             if chapter_id:
-                latest[chapter_id] = row
-    return latest
+                states[chapter_id] = {
+                    "record": row,
+                    "archived": progress_file != PROGRESS_FILE,
+                }
+    return states
+
+
+def _latest_progress_states() -> dict[str, dict[str, Any]]:
+    """Return latest chapter state without rescanning archived ledgers."""
+    states = _read_latest_progress_index()
+    if states is None:
+        states = _scan_progress_states()
+        _write_latest_progress_index(states)
+
+    # The live ledger may receive a record between index writes. Overlaying it
+    # keeps the index crash-tolerant while avoiding all archive scans on polls.
+    if PROGRESS_FILE.exists():
+        for line in PROGRESS_FILE.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(row, dict):
+                continue
+            chapter_id = str(row.get("chapter_id") or "").strip()
+            if chapter_id:
+                states[chapter_id] = {"record": row, "archived": False}
+    return states
+
+
+def _latest_progress_by_chapter() -> dict[str, dict[str, Any]]:
+    return {
+        chapter_id: state["record"]
+        for chapter_id, state in _latest_progress_states().items()
+    }
 
 
 def load_done() -> set[str]:
@@ -700,6 +782,10 @@ def archive_history(before_days: int, dry_run: bool = False) -> dict[str, Any]:
         temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         temporary.write_text("".join(lines), encoding="utf-8")
         os.replace(temporary, path)
+    # Archive rotation changes whether the latest record is live or archived.
+    # Rebuild once during the maintenance command so queue polls remain
+    # independent of the number of historical archive batches.
+    _write_latest_progress_index(_scan_progress_states())
     summary["archive_dir"] = str(batch_dir)
     return summary
 
@@ -788,6 +874,11 @@ def record_progress(chapter_id: str, status: str, **details: Any) -> None:
         PROGRESS_FILE,
         payload,
     )
+    states = _read_latest_progress_index()
+    if states is None:
+        states = _scan_progress_states()
+    states[str(chapter_id).strip()] = {"record": payload, "archived": False}
+    _write_latest_progress_index(states)
 
 
 def record_terminal_summary(

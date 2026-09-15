@@ -585,3 +585,112 @@ def test_index_repair_queue_uses_latest_archived_state_and_attempt_limit(
     ]
     assert "CLOUDFLARE_API_TOKEN" not in response.text
     assert "private command should be rebuilt" not in response.text
+
+
+def test_index_repair_queue_uses_compact_index_after_archive_retention(
+    client, admin_cookie, tmp_path
+):
+    import app.api.v1.admin_content as admin_content
+
+    state_dir = tmp_path / "import-state"
+    archive_dir = state_dir / "archive"
+    for batch_number in range(20):
+        batch = archive_dir / f"202601{batch_number + 1:02d}T000000Z"
+        batch.mkdir(parents=True)
+        (batch / "progress.jsonl").write_text(
+            "malformed historical record\n", encoding="utf-8"
+        )
+
+    approvals = state_dir / "approvals.jsonl"
+    progress = state_dir / "progress.jsonl"
+    progress.write_text(
+        "malformed live record\n"
+        + json.dumps(
+            {
+                "chapter_id": "chapter-resolved",
+                "status": "done",
+                "timestamp": "2026-09-15T10:04:00+00:00",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    latest_index = state_dir / "latest-progress.json"
+    latest_index.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "chapters": {
+                    "chapter-archived": {
+                        "record": {
+                            "chapter_id": "chapter-archived",
+                            "status": "index_failed",
+                            "operation": "vector_upsert",
+                            "index_attempt": 1,
+                            "run_id": "archived-run",
+                            "timestamp": "2026-01-01T10:00:00+00:00",
+                        },
+                        "archived": True,
+                    },
+                    "chapter-current": {
+                        "record": {
+                            "chapter_id": "chapter-current",
+                            "status": "index_failed",
+                            "operation": "chunk_mapping_insert",
+                            "index_attempt": 2,
+                            "run_id": "current-run",
+                            "timestamp": "2026-09-15T10:03:00+00:00",
+                        },
+                        "archived": False,
+                    },
+                    "chapter-resolved": {
+                        "record": {
+                            "chapter_id": "chapter-resolved",
+                            "status": "index_failed",
+                            "index_attempt": 1,
+                            "run_id": "old-run",
+                            "timestamp": "2026-01-01T10:01:00+00:00",
+                        },
+                        "archived": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with (
+        patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", approvals),
+        patch.object(admin_content, "_AHSEC_D1_IMPORT_PROGRESS_FILE", progress),
+        patch.object(
+            admin_content,
+            "_AHSEC_D1_LATEST_PROGRESS_INDEX_FILE",
+            latest_index,
+        ),
+        patch.object(
+            admin_content,
+            "_legacy_repair_progress_states",
+            side_effect=AssertionError("archive history must not be rescanned"),
+        ),
+    ):
+        first = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/index-repair-queue?limit=10",
+            cookies=admin_cookie,
+        )
+        second = client.get(
+            "/api/v1/admin/content/ahsec-d1-import/index-repair-queue?limit=10",
+            cookies=admin_cookie,
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    body = first.json()
+    assert body["total"] == 2
+    assert body["exhausted"] == 0
+    assert [item["chapter_id"] for item in body["chapters"]] == [
+        "chapter-current",
+        "chapter-archived",
+    ]
+    assert body["chapters"][0]["archived"] is False
+    assert body["chapters"][1]["archived"] is True
+    assert second.json() == body

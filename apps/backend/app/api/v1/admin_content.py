@@ -38,6 +38,7 @@ _AHSEC_D1_STATE_DIR = _pathlib.Path(
 )
 _AHSEC_D1_APPROVAL_FILE = _AHSEC_D1_STATE_DIR / "approvals.jsonl"
 _AHSEC_D1_IMPORT_PROGRESS_FILE = _AHSEC_D1_STATE_DIR / "progress.jsonl"
+_AHSEC_D1_LATEST_PROGRESS_INDEX_FILE = _AHSEC_D1_STATE_DIR / "latest-progress.json"
 _AHSEC_D1_ARCHIVE_DIR = _AHSEC_D1_STATE_DIR / "archive"
 _AHSEC_INDEX_FAILED_STATUS = "index_failed"
 _AHSEC_INDEX_REPAIR_ATTEMPT_LIMIT = 3
@@ -259,25 +260,110 @@ def _safe_repair_command(chapter_id: str) -> str:
     )
 
 
-def _index_repair_queue(limit: int) -> dict:
-    """Return latest unresolved index failures across live and archived ledgers."""
-    progress_files = []
-    if _AHSEC_D1_ARCHIVE_DIR.exists():
-        progress_files.extend(sorted(_AHSEC_D1_ARCHIVE_DIR.glob("*/progress.jsonl")))
-    progress_files.append(_AHSEC_D1_IMPORT_PROGRESS_FILE)
+def _read_latest_progress_index(
+    path: _pathlib.Path,
+) -> dict[str, tuple[dict, bool]] | None:
+    """Read the importer-maintained one-record-per-chapter state index."""
+    if not path.exists():
+        return None
+    try:
+        payload = _json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        logger.warning("admin_index_repair_queue: invalid latest-state index")
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        return None
+    chapters = payload.get("chapters")
+    if not isinstance(chapters, dict):
+        return None
 
-    latest_by_chapter: dict[str, tuple[dict, _pathlib.Path]] = {}
-    for progress_file in progress_files:
+    states: dict[str, tuple[dict, bool]] = {}
+    for chapter_id, state in chapters.items():
+        if not isinstance(state, dict):
+            continue
+        record = state.get("record")
+        if isinstance(record, dict) and str(chapter_id).strip():
+            states[str(chapter_id).strip()] = (
+                record,
+                bool(state.get("archived", False)),
+            )
+    return states
+
+
+def _write_latest_progress_index(
+    path: _pathlib.Path,
+    states: dict[str, tuple[dict, bool]],
+) -> None:
+    """Persist a legacy scan so later queue polls avoid archive traversal."""
+    payload = {
+        "version": 1,
+        "chapters": {
+            chapter_id: {"record": record, "archived": archived}
+            for chapter_id, (record, archived) in states.items()
+        },
+    }
+    temporary = path.with_name(f".{path.name}.{_uuid.uuid4().hex}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(
+            _json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        _os.replace(temporary, path)
+    except OSError as exc:
+        logger.warning(
+            "admin_index_repair_queue: failed to persist latest-state index: %s",
+            exc,
+        )
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _legacy_repair_progress_states() -> dict[str, tuple[dict, bool]]:
+    """Read pre-index ledgers for one backward-compatible migration pass."""
+    progress_files: list[tuple[_pathlib.Path, bool]] = []
+    if _AHSEC_D1_ARCHIVE_DIR.exists():
+        progress_files.extend(
+            (path, True)
+            for path in sorted(_AHSEC_D1_ARCHIVE_DIR.glob("*/progress.jsonl"))
+        )
+    progress_files.append((_AHSEC_D1_IMPORT_PROGRESS_FILE, False))
+
+    latest: dict[str, tuple[dict, bool]] = {}
+    for progress_file, archived in progress_files:
         for record in _read_jsonl_records(progress_file):
             chapter_id = str(record.get("chapter_id") or "").strip()
             if chapter_id:
-                # Archive batches are chronological and the live ledger is
-                # traversed last, matching the importer's latest-state rules.
-                latest_by_chapter[chapter_id] = (record, progress_file)
+                latest[chapter_id] = (record, archived)
+    return latest
+
+
+def _index_repair_queue(limit: int) -> dict:
+    """Return latest unresolved index failures across live and archived ledgers."""
+    indexed = _read_latest_progress_index(_AHSEC_D1_LATEST_PROGRESS_INDEX_FILE)
+    if indexed is None:
+        # Older state directories have no index. Preserve their behavior while
+        # migrating them after this one compatibility scan.
+        latest_by_chapter = _legacy_repair_progress_states()
+        _write_latest_progress_index(
+            _AHSEC_D1_LATEST_PROGRESS_INDEX_FILE,
+            latest_by_chapter,
+        )
+    else:
+        latest_by_chapter = indexed
+        # The current ledger can change between importer index writes. Reading
+        # only this bounded/live file preserves freshness without touching any
+        # archived batches.
+        for record in _read_jsonl_records(_AHSEC_D1_IMPORT_PROGRESS_FILE):
+            chapter_id = str(record.get("chapter_id") or "").strip()
+            if chapter_id:
+                latest_by_chapter[chapter_id] = (record, False)
 
     queue = []
     exhausted = 0
-    for chapter_id, (record, progress_file) in latest_by_chapter.items():
+    for chapter_id, (record, archived) in latest_by_chapter.items():
         if str(record.get("status") or "").lower() != _AHSEC_INDEX_FAILED_STATUS:
             continue
         raw_attempt = record.get("index_attempt")
@@ -296,7 +382,6 @@ def _index_repair_queue(limit: int) -> dict:
             if re.fullmatch(r"[a-z0-9][a-z0-9_.:-]{0,63}", raw_operation)
             else "index"
         )
-        archived = progress_file != _AHSEC_D1_IMPORT_PROGRESS_FILE
         queue.append(
             {
                 "chapter_id": chapter_id,

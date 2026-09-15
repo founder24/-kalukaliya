@@ -1510,3 +1510,19 @@ def test_archive_history_keeps_active_run_and_correlated_ledgers(
     assert "not-json" in live_approval_text
     assert active_run in (tmp_path / "active-run.json").read_text(encoding="utf-8")
     assert "chapter-old" in importer.load_done()
+    latest_index = json.loads(
+        (tmp_path / importer.LATEST_PROGRESS_INDEX_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert latest_index["version"] == 1
+    assert latest_index["chapters"]["chapter-old"] == {
+        "record": {
+            "run_id": old_run,
+            "chapter_id": "chapter-old",
+            "status": "done",
+            "timestamp": old_started,
+        },
+        "archived": True,
+    }
+    assert latest_index["chapters"]["chapter-active"]["archived"] is False
