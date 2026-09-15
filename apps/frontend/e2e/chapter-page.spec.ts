@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+  ASSAMESE_PAGE_ONE_URL,
+  ASSAMESE_PAGE_TWO_URL,
+  assameseChapter,
   fixtureChapter,
   PAGE_ONE_URL,
   PAGE_TWO_URL,
@@ -39,24 +42,6 @@ const assameseChapters = [
     notes_generated: true,
   },
 ];
-
-const assameseChapter = {
-  chapter_id: 'as-chapter-goti',
-  chapter_title: 'গতি',
-  title: 'Motion',
-  topic_title: 'Motion',
-  subject_name: 'পদাৰ্থবিজ্ঞান',
-  subject_id: 'as-subject-physics',
-  board_name: 'AHSEC',
-  class_name: 'HS 1st Year',
-  slug: 'motion',
-  slug_as: 'goti',
-  content_type: 'notes',
-  content: '# Motion\n\nAssamese route fixture notes.',
-  content_en: '# Motion\n\nEnglish route fixture notes.',
-  notes_en: '# Motion\n\nEnglish route fixture notes.',
-  published_topics: [],
-};
 
 async function installFixture(page: Page, { pageTwoAvailable = false } = {}) {
   await page.route('**/api/v1/**', route => route.fulfill({
@@ -151,6 +136,16 @@ async function installAssameseFixture(page: Page, requests: {
       body: JSON.stringify(assameseChapter),
     });
   });
+  await page.route(ASSAMESE_PAGE_ONE_URL, route => route.fulfill({
+    status: 200,
+    contentType: 'image/png',
+    body: ONE_BY_ONE_PNG,
+  }));
+  await page.route(ASSAMESE_PAGE_TWO_URL, route => route.fulfill({
+    status: 200,
+    contentType: 'image/png',
+    body: ONE_BY_ONE_PNG,
+  }));
 }
 
 test('public English chapter notes show a fallback when a saved page image is unavailable', async ({ page }) => {
@@ -202,9 +197,22 @@ test('direct Assamese subject and chapter routes keep localized resolution and Q
   await expect(page).toHaveURL(new RegExp(`${ASSAMESE_CHAPTER_ROUTE}\\?tab=qa$`));
 
   await page.goto(ASSAMESE_CHAPTER_ROUTE);
-  await expect(page.getByRole('heading', { name: 'গতি', exact: true })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('heading', { name: 'গতি', exact: true })).toBeVisible();
   await expect.poll(() => requests.chapter.find((url) => url.includes('chapter-by-slug-as/'))).toBeTruthy();
 
   await page.getByRole('button', { name: 'প্ৰশ্নোত্তৰ', exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`${ASSAMESE_CHAPTER_ROUTE}\\?tab=qa$`));
+});
+
+test('localized Assamese chapter notes preserve both saved page images through hydration', async ({ page }) => {
+  const requests = { subject: [] as string[], chapter: [] as string[] };
+  await installAssameseFixture(page, requests);
+  await page.goto(`${ASSAMESE_CHAPTER_ROUTE}?tab=notes`);
+
+  const content = page.locator('#chapter-content-top');
+  await expect(page.getByRole('banner').getByRole('heading', { name: 'গতি', exact: true })).toBeVisible();
+  await expect(content.locator('img[alt="পৃষ্ঠা ১"]')).toHaveAttribute('src', ASSAMESE_PAGE_ONE_URL);
+  await expect(content.locator('img[alt="পৃষ্ঠা ২"]')).toHaveAttribute('src', ASSAMESE_PAGE_TWO_URL);
+  await expect(content.locator('img[alt="পৃষ্ঠা ১"]')).toHaveJSProperty('naturalWidth', 1);
+  await expect(content.locator('img[alt="পৃষ্ঠা ২"]')).toHaveJSProperty('naturalWidth', 1);
 });
