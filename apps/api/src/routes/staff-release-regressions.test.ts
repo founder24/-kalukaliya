@@ -226,36 +226,44 @@ describe('release regressions', () => {
     const limited = await token('limited');
     const settler = await token('settler');
     const capturedAt = Math.floor(Date.now() / 1000) + 10;
-    await env.DB.prepare(`
-      INSERT INTO content_audit_log
-        (id, user_id, action, target_type, target_id, diff, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      'roi-audit-listing-test',
-      'audit-operator',
-      'download_referral_roi_evidence',
-      'referral_roi',
-      'dashboard',
-      JSON.stringify({
-        report_limit: 7,
-        provider_secret: 'must-not-leak',
-        beneficiary_account: 'private-beneficiary-data',
-      }),
-      capturedAt,
-    ).run();
-    await env.DB.prepare(`
-      INSERT INTO content_audit_log
-        (id, user_id, action, target_type, target_id, diff, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      'roi-audit-listing-older',
-      'audit-operator-older',
-      'download_referral_roi_evidence',
-      'referral_roi',
-      'dashboard',
-      JSON.stringify({ report_limit: 8 }),
-      capturedAt - 1,
-    ).run();
+    for (const audit of [
+      {
+        id: 'roi-audit-listing-001',
+        actor: 'audit-operator-001',
+        reportLimit: 7,
+        diff: {
+          report_limit: 7,
+          provider_secret: 'must-not-leak',
+          beneficiary_account: 'private-beneficiary-data',
+        },
+      },
+      {
+        id: 'roi-audit-listing-002',
+        actor: 'audit-operator-002',
+        reportLimit: 8,
+        diff: { report_limit: 8 },
+      },
+      {
+        id: 'roi-audit-listing-003',
+        actor: 'audit-operator-003',
+        reportLimit: 9,
+        diff: { report_limit: 9 },
+      },
+    ]) {
+      await env.DB.prepare(`
+        INSERT INTO content_audit_log
+          (id, user_id, action, target_type, target_id, diff, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        audit.id,
+        audit.actor,
+        'download_referral_roi_evidence',
+        'referral_roi',
+        'dashboard',
+        JSON.stringify(audit.diff),
+        capturedAt,
+      ).run();
+    }
 
     const queryPlan = await env.DB.prepare(`
       EXPLAIN QUERY PLAN
@@ -280,40 +288,64 @@ describe('release regressions', () => {
     expect(invalidCursor.status).toBe(422);
 
     const response = await fetchWorker(
-      request('/api/v1/admin/referrals/roi/dashboard/export-audits?limit=1', settler),
+      request('/api/v1/admin/referrals/roi/dashboard/export-audits?limit=2', settler),
     );
     expect(response.status).toBe(200);
     const body = await response.json() as {
       audits: Array<Record<string, unknown>>;
       next_cursor: string | null;
     };
-    expect(body).toEqual({
-      audits: [{
-        actor_id: 'audit-operator',
+    expect(body.audits).toEqual([
+      {
+        actor_id: 'audit-operator-003',
         captured_at: capturedAt,
         action: 'download_referral_roi_evidence',
-        report_limit: 7,
-      }],
-      next_cursor: expect.any(String),
-    });
+        report_limit: 9,
+      },
+      {
+        actor_id: 'audit-operator-002',
+        captured_at: capturedAt,
+        action: 'download_referral_roi_evidence',
+        report_limit: 8,
+      },
+    ]);
+    expect(body.next_cursor).toEqual(expect.any(String));
+    for (const audit of body.audits) {
+      expect(Object.keys(audit).sort()).toEqual(['action', 'actor_id', 'captured_at', 'report_limit']);
+    }
     expect(JSON.stringify(body)).not.toContain('must-not-leak');
     expect(JSON.stringify(body)).not.toContain('private-beneficiary-data');
 
     const nextPage = await fetchWorker(
       request(
-        `/api/v1/admin/referrals/roi/dashboard/export-audits?limit=1&cursor=${encodeURIComponent(body.next_cursor ?? '')}`,
+        `/api/v1/admin/referrals/roi/dashboard/export-audits?limit=2&cursor=${encodeURIComponent(body.next_cursor ?? '')}`,
         settler,
       ),
     );
     expect(nextPage.status).toBe(200);
-    expect(await nextPage.json()).toMatchObject({
-      audits: [{
-        actor_id: 'audit-operator-older',
-        captured_at: capturedAt - 1,
-        action: 'download_referral_roi_evidence',
-        report_limit: 8,
-      }],
+    const nextBody = await nextPage.json() as {
+      audits: Array<Record<string, unknown>>;
+      next_cursor: string | null;
+    };
+    const firstNextAudit = nextBody.audits[0];
+    expect(firstNextAudit).toEqual({
+      actor_id: 'audit-operator-001',
+      captured_at: capturedAt,
+      action: 'download_referral_roi_evidence',
+      report_limit: 7,
     });
+    expect(Object.keys(firstNextAudit ?? {}).sort()).toEqual(['action', 'actor_id', 'captured_at', 'report_limit']);
+    expect(
+      [...body.audits, ...nextBody.audits]
+        .map(audit => audit.actor_id)
+        .filter(actor => typeof actor === 'string' && actor.startsWith('audit-operator-')),
+    ).toEqual([
+      'audit-operator-003',
+      'audit-operator-002',
+      'audit-operator-001',
+    ]);
+    expect(JSON.stringify(nextBody)).not.toContain('must-not-leak');
+    expect(JSON.stringify(nextBody)).not.toContain('private-beneficiary-data');
   });
 
   it('fences an active RAG lease and recovers an expired running lease', async () => {
