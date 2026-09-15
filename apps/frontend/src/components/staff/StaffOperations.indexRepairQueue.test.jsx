@@ -1,6 +1,6 @@
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
@@ -23,6 +23,10 @@ vi.mock('sonner', () => ({
 import StaffOperations from './StaffOperations';
 
 describe('StaffOperations index repair queue', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     get.mockImplementation((path) => {
       if (path.startsWith('/staff/content/chapters/')) return Promise.resolve({ data: [] });
@@ -73,5 +77,25 @@ describe('StaffOperations index repair queue', () => {
     expect(screen.getByText('archived run')).toBeTruthy();
     expect(screen.getByText(/--repair-index chapter-queue-1/)).toBeTruthy();
     expect(get).toHaveBeenCalledWith('/admin/content/ahsec-d1-import/index-repair-queue?limit=25');
+  });
+
+  it('requires confirmation before opening an available chapter', async () => {
+    const onOpenChapter = vi.fn();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(
+      <StaffOperations
+        user={{ role: 'admin' }}
+        subjects={[{ id: 'subject-1', name: 'Chemistry' }]}
+        onOpenChapter={onOpenChapter}
+      />,
+    );
+
+    const button = await screen.findByTestId('button-open-repair-chapter-chapter-queue-1');
+    fireEvent.click(button);
+    expect(onOpenChapter).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(button);
+    expect(onOpenChapter).toHaveBeenCalledWith('chapter-queue-1');
   });
 });

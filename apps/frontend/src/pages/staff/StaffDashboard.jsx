@@ -2608,6 +2608,20 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
     });
   }, []);
 
+  const handleOpenRepairChapter = useCallback(async (chapterId) => {
+    if (!chapterId) return;
+    try {
+      await api().get(`/staff/content/chapter/${encodeURIComponent(chapterId)}`);
+      setEditingChapterId(chapterId);
+    } catch (error) {
+      if (error?.response?.status === 404) {
+        toast.error('This chapter is no longer available. The repair queue entry was kept.');
+      } else {
+        toast.error(error?.response?.data?.detail || 'Chapter could not be opened.');
+      }
+    }
+  }, []);
+
   const handleViewChange = (v) => {
     if (['dashboard', 'analytics', 'users', 'conversations'].includes(v) && !hasStaffAccess) {
       toast.error('Dashboard, analytics, users, and conversations are available to staff and administrators.');
@@ -2703,6 +2717,7 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
               chapters={chapters}
               selectedSubject={selectedSubject}
               onRefresh={() => selectedSubject && selectSubject(selectedSubject)}
+              onOpenChapter={handleOpenRepairChapter}
             />
           )}
           {view === 'subjects' && (

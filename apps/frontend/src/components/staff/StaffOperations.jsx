@@ -106,7 +106,7 @@ function ImportApprovalRow({ approval }) {
   );
 }
 
-export default function StaffOperations({ user, subjects = [], chapters = [], selectedSubject, onRefresh }) {
+export default function StaffOperations({ user, subjects = [], chapters = [], selectedSubject, onRefresh, onOpenChapter }) {
   const [jobList, setJobList] = useState(null);
   const [jobError, setJobError] = useState(null);
   const [importApprovals, setImportApprovals] = useState(null);
@@ -294,6 +294,20 @@ export default function StaffOperations({ user, subjects = [], chapters = [], se
                 <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Repair command</div>
                 <code className="mt-1 block break-all text-[11px] text-slate-700">{item.repair_command}</code>
               </div>
+              {item.chapter_id && onOpenChapter && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('Open this chapter in the Staff editor? This will not run a repair.')) {
+                      onOpenChapter(item.chapter_id);
+                    }
+                  }}
+                  className="mt-3 inline-flex items-center rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50"
+                  data-testid={`button-open-repair-chapter-${item.chapter_id}`}
+                >
+                  Open chapter
+                </button>
+              )}
             </article>
           ))}
         </div>
