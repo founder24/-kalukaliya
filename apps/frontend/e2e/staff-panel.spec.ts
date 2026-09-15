@@ -285,6 +285,7 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
   const pyqUploadFilenames: string[] = [];
   const pyqUploadContentTypes: string[] = [];
   let failedPyqFilename: string | null = null;
+  let failNextPyqDelete = false;
 
   const json = (route: import('@playwright/test').Route, body: unknown, status = 200) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -415,6 +416,10 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
     }
     if (route.request().method() === 'DELETE' && path.includes('/pyq-papers/')) {
       const paperId = path.split('/').pop();
+      if (failNextPyqDelete) {
+        failNextPyqDelete = false;
+        return json(route, { detail: 'Fixture rejected page removal' }, 503);
+      }
       const current = chapters.find(item => item.id === chapterId);
       const pyqPapers = (current?.pyq_papers || []).filter(paper => paper.id !== paperId);
       chapters = chapters.map(item => item.id === chapterId ? { ...item, pyq_papers: pyqPapers } : item);
@@ -469,6 +474,9 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
     pyqUploadContentTypes,
     failPyqUpload(filename: string) {
       failedPyqFilename = filename;
+    },
+    failNextPageDelete() {
+      failNextPyqDelete = true;
     },
     hasRequest(method: string, path: string) {
       return requests.some(request => request.method === method && request.path === path);
@@ -1143,6 +1151,80 @@ test.describe('Staff panel — sidebar sections', () => {
       '/r2/page-2.png',
       '/r2/page-3.png',
     ]);
+  });
+
+  test('preserves page records and English markdown when removal fails before succeeding on retry', async ({ page }) => {
+    const fixture = await setupContentEditorFixture(page);
+    fixture.failNextPageDelete();
+    staffMocks.enableStrictUnexpectedApiRequests();
+    page.on('dialog', dialog => dialog.accept());
+
+    await gotoStaff(page);
+    await page.locator('main select').nth(0).selectOption('board-1');
+    await page.locator('main select').nth(1).selectOption('class-1');
+    await page.locator('main select').nth(2).selectOption('stream-1');
+    await page.getByRole('button', { name: /Physics/ }).click();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await page.getByRole('button', { name: /^Notes RAG/ }).click();
+
+    const content = page.getByPlaceholder(/Study notes in English/);
+    await page.getByTestId('chapter-page-upload-input').setInputFiles([
+      { name: 'page-1.png', mimeType: 'image/png', buffer: Buffer.from('page one') },
+      { name: 'page-2.png', mimeType: 'image/png', buffer: Buffer.from('page two') },
+    ]);
+    const notesWithPages = [
+      '## Existing English\n\n• first point',
+      '![Page 1](/r2/page-1.png)',
+      '![Page 2](/r2/page-2.png)',
+    ].join('\n\n');
+    await expect(content).toHaveValue(notesWithPages);
+    await expect(page.getByAltText('Page 1')).toHaveCount(1);
+    await expect(page.getByAltText('Page 2')).toHaveCount(1);
+    expect(fixture.chapterPages().map(page => page.url)).toEqual([
+      '/r2/page-1.png',
+      '/r2/page-2.png',
+    ]);
+
+    const failedDeleteRequest = page.waitForRequest(request =>
+      request.method() === 'DELETE' &&
+      request.url().endsWith('/staff/content/chapter/chapter-1/pyq-papers/paper-1'),
+    );
+    await page.getByRole('button', { name: 'Remove', exact: true }).nth(0).click();
+    await failedDeleteRequest;
+    await expect(page.getByText('Remove failed', { exact: true })).toBeVisible();
+    await expect(content).toHaveValue(notesWithPages);
+    await expect(page.getByAltText('Page 1')).toHaveCount(1);
+    await expect(page.getByAltText('Page 2')).toHaveCount(1);
+    expect(fixture.chapterPages().map(page => page.url)).toEqual([
+      '/r2/page-1.png',
+      '/r2/page-2.png',
+    ]);
+
+    const successfulDeleteRequest = page.waitForRequest(request =>
+      request.method() === 'DELETE' &&
+      request.url().endsWith('/staff/content/chapter/chapter-1/pyq-papers/paper-1'),
+    );
+    await page.getByRole('button', { name: 'Remove', exact: true }).nth(0).click();
+    await successfulDeleteRequest;
+    const notesAfterRetry = [
+      '## Existing English\n\n• first point',
+      '![Page 1](/r2/page-2.png)',
+    ].join('\n\n');
+    await expect(content).toHaveValue(notesAfterRetry);
+    await expect(page.getByAltText('Page 1')).toHaveCount(1);
+    await expect(page.getByAltText('Page 2')).toHaveCount(0);
+    expect(fixture.chapterPages().map(page => page.url)).toEqual(['/r2/page-2.png']);
+
+    const saveRequest = page.waitForRequest(request =>
+      request.method() === 'PATCH' &&
+      request.url().endsWith('/staff/content/chapter/chapter-1'),
+    );
+    await page.getByRole('button', { name: 'Save Chapter', exact: true }).click();
+    expect((await saveRequest).postDataJSON()).toMatchObject({
+      notes_en: notesAfterRetry,
+      pyq_papers: [expect.objectContaining({ id: 'paper-2', url: '/r2/page-2.png' })],
+    });
   });
 
   test('removes the final page record and its English markdown after saving and reopening', async ({ page }) => {
