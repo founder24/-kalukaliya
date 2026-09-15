@@ -28,6 +28,49 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Admin Content"], dependencies=[Depends(require_admin_session), Depends(csrf_guard)])
 
+# Shared contract for bulk chapter formatting. Keep this focused on document
+# structure: the reader CSS owns the visual treatment, while this prompt makes
+# future chapters produce the same semantic hierarchy and comfortable rhythm.
+CHAPTER_MARKDOWN_FORMATTER_SYSTEM_PROMPT = """
+You are the final Markdown formatting editor for a student-facing educational chapter.
+Return the COMPLETE reformatted source and nothing else: no explanation, no summary, no
+code fences, and no introductory sentence.
+
+NON-NEGOTIABLE CONTENT RULES
+- Preserve every fact, definition, example, derivation, equation, number, unit, table value,
+  question, answer, limitation, and conclusion from the source.
+- Do not add knowledge, solve a new problem, paraphrase away detail, shorten the chapter,
+  or change the order of the source material.
+- Preserve formulas and symbols exactly whenever possible. Never invent a missing formula
+  or numerical result.
+- Preserve HTML comments, invisible ad markers, image links, and other source markers exactly.
+- Clean only unambiguous OCR noise or duplicated whitespace; do not silently repair uncertain text.
+
+STRUCTURE RULES
+- Use one # heading for the chapter title only when a title is present in the source.
+- Use ## for major topics and keep each topic heading with all of its notes until the next
+  ## topic begins.
+- Use ### for subtopics and #### for deeper subtopics, keeping each heading directly with
+  the notes that explain it.
+- Put exactly one blank line between paragraphs, headings, lists, tables, and callouts.
+- Keep related sentences in the same paragraph; do not turn every sentence into a separate
+  paragraph. Use short paragraphs of roughly 2–5 related sentences where the source allows.
+- Use numbered lists for procedures, derivations, and ordered steps. Use bullet lists for
+  properties, examples, comparisons, and unordered points.
+- Keep equations or important relationships on their own line when the source presents them
+  that way. Do not wrap formulas in unsupported LaTeX delimiters.
+- Use Markdown tables only for information that is already tabular or clearly comparative.
+- Use a blockquote only when the source explicitly identifies a definition, key idea, exam
+  note, warning, or takeaway; do not create new callouts or claims.
+- Do not add decorative horizontal rules between a heading and its notes or between every
+  paragraph. Topic separation is handled by the reading interface.
+- Do not use emojis or color/style instructions.
+
+QUALITY CHECK
+Before returning, verify that the output is complete, starts directly with the chapter
+content, retains all source sections, and contains no commentary about the formatting task.
+""".strip()
+
 # ── Progress log paths (module-level so tests can redirect via patch.object) ──
 import pathlib as _pathlib
 _AHSEC_SCRIPTS_DIR   = _pathlib.Path(__file__).parent.parent.parent.parent / "scripts"
@@ -3373,20 +3416,36 @@ async def format_subject_notes(
     except Exception:
         sid = subject_id
     chapters = await Chapter.find({"subject_id": sid}).to_list(length=500)
-    with_content = [ch for ch in chapters if ch.content_en and len(ch.content_en.strip()) > 50]
+    with_content = [
+        ch for ch in chapters
+        if ((ch.notes_en or ch.content_en) and len((ch.notes_en or ch.content_en).strip()) > 50)
+    ]
     if not with_content:
         return {"chapters_formatted": 0, "total_with_content": 0, "message": "No chapters with content"}
     from app.services.ai.router import generate_response
-    system_prompt = (
-        "You are a markdown formatter for educational content. "
-        "Add proper markdown headings (##, ###), bullet points, and consistent spacing. "
-        "Do NOT add new information. Return ONLY the reformatted markdown."
-    )
     formatted = 0
     for ch in with_content:
         try:
-            result = await generate_response(system_prompt, ch.content_en[:3000], model="sarvam-30b")
-            ch.content_en = result.strip()
+            source = (ch.notes_en or ch.content_en or "").strip()
+            result = await generate_response(
+                CHAPTER_MARKDOWN_FORMATTER_SYSTEM_PROMPT,
+                f"Chapter title: {ch.title}\n\nSOURCE MARKDOWN:\n\n{source}",
+                model="sarvam-30b",
+            )
+            reformatted = result.strip()
+            source_words = len(source.split())
+            output_words = len(reformatted.split())
+            # A formatter must not silently turn a full chapter into a summary.
+            if output_words < max(40, int(source_words * 0.6)):
+                raise ValueError(
+                    f"formatter output was too short ({output_words}/{source_words} words)"
+                )
+            if ch.notes_en:
+                ch.notes_en = reformatted
+                ch.notes_generated = True
+            else:
+                ch.content_en = reformatted
+            ch.word_count = output_words
             ch.updated_at = datetime.now(timezone.utc)
             await ch.save()
             formatted += 1

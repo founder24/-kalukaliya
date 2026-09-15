@@ -12,6 +12,7 @@ import { createDb } from '../db/client';
 import { boards, classes, chapters, publishJobs, seedRuns, streams, subjects, users } from '../db/schema';
 import { extractBearer, isSessionValid, sessionIssuedAt, signAdminToken, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import { generate } from '../services/ai';
+import { CHAPTER_MARKDOWN_FORMATTER_SYSTEM_PROMPT } from '../services/content-formatting';
 import { reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env } from '../types';
@@ -53,6 +54,13 @@ export function sanitizeGeneratedNotes(text: string): string {
     '',
   );
   return cleaned.trim();
+}
+
+function cleanFormattedChapter(text: string): string {
+  return text.trim()
+    .replace(/^```(?:markdown)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
 }
 
 function parseJson<T>(raw: string | null | undefined, fallback: T): T {
@@ -1006,11 +1014,57 @@ adminContentRouter.post('/content/extract-pdf-text', async c => {
 });
 adminContentRouter.post('/content/subject/:subjectId/format-notes', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
-  const result = await c.env.DB.prepare(`
-    UPDATE chapters SET notes_en = TRIM(notes_en), notes_as = TRIM(notes_as), updated_at = ?
-    WHERE subject_id = ?
-  `).bind(now(), c.req.param('subjectId')).run();
-  return c.json({ chapters_formatted: result.meta.changes ?? 0, message: 'Notes formatting complete' });
+  const subjectId = c.req.param('subjectId');
+  const db = createDb(c.env.DB);
+  const rows = await db.select({
+    id: chapters.id,
+    title: chapters.title,
+    notes: chapters.notesEn,
+  }).from(chapters).where(eq(chapters.subjectId, subjectId));
+  const withContent = rows.filter(row => Boolean(row.notes?.trim()) && row.notes!.trim().length > 50);
+  if (!withContent.length) {
+    return c.json({ chapters_formatted: 0, total_with_content: 0, message: 'No chapters with content' });
+  }
+
+  let formatted = 0;
+  const skipped: Array<{ chapter_id: string; title: string; error: string }> = [];
+  for (const chapter of withContent) {
+    const source = chapter.notes!.trim();
+    try {
+      const result = await generate(c.env.AI, {
+        systemPrompt: CHAPTER_MARKDOWN_FORMATTER_SYSTEM_PROMPT,
+        userMessage: `Chapter title: ${chapter.title}\n\nSOURCE MARKDOWN:\n\n${source}`,
+        maxTokens: Math.min(9000, Math.max(2400, Math.ceil(source.split(/\s+/).length * 1.5))),
+      });
+      const content = cleanFormattedChapter(result.text);
+      const sourceWords = source.split(/\s+/).filter(Boolean).length;
+      const outputWords = content.split(/\s+/).filter(Boolean).length;
+      if (outputWords < Math.max(40, Math.floor(sourceWords * 0.6))) {
+        throw new Error(`formatter output was too short (${outputWords}/${sourceWords} words)`);
+      }
+      await db.update(chapters).set({
+        notesEn: content,
+        wordCountEn: outputWords,
+        ragUpdatedAt: now(),
+        ragIndexedAt: null,
+        updatedAt: now(),
+      }).where(eq(chapters.id, chapter.id)).run();
+      formatted += 1;
+    } catch (error) {
+      skipped.push({
+        chapter_id: chapter.id,
+        title: chapter.title,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  await c.env.CONTENT_KV.delete(`subject:${subjectId}:chapters`).catch(() => undefined);
+  return c.json({
+    chapters_formatted: formatted,
+    total_with_content: withContent.length,
+    skipped,
+    message: `Formatted ${formatted} of ${withContent.length} chapters`,
+  });
 });
 adminContentRouter.get('/content/version-history/:chapterId', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;

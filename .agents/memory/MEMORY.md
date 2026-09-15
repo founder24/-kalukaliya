@@ -2,6 +2,7 @@
 - [Wrangler remote D1 writes](wrangler-remote-d1-writes.md) — remote D1 file execution rejects raw transaction-control SQL; verify and invalidate caches after writes
 - [Production RAG maintenance](production-rag-maintenance.md) — out-of-band chapter writes must refresh Vectorize, D1 chunk mappings, timestamps, and subject KV
 - [Syrabit content architecture](syrabit-content-arch.md) — Chapter model, 3-section model (Notes/Q&A/Question Paper), content_type field, translation pipeline
+- [Chapter formatting contract](chapter-formatting-contract.md) — preserve source content while grouping topics, tightening same-subtopic notes, and using restrained study emphasis
 - [Syrabit chat+auth pipeline bugs](syrabit-pipeline-bugs.md) — Fixed bugs: analytics 404s, conversation_id/session_id mismatch, logout null-token crash
 - [CF↔GCP audit](cf-gcp-audit.md) — Token perms, duplicate SM secrets, BACKEND_URL binding conflict, CF KV cache fix, bot rendering fix
 - [Syrabit chat latency fix](syrabit-chat-latency.md) — gemini-2.5-flash thinking phase (7-8s TTFB) fixed; model switch + thinkingBudget guard
