@@ -55,6 +55,10 @@ beforeAll(async () => {
       )
     `),
     env.DB.prepare(`
+      INSERT INTO chapter_slug_redirects (id, subject_id, chapter_id, locale, slug)
+      VALUES ('translated-old-slug', 'subject', 'translated', 'en', 'motion-in-a-plane')
+    `),
+    env.DB.prepare(`
       INSERT INTO chapters (
         id, subject_id, title, title_as, slug, slug_as,
         meta_description, meta_description_as, keywords, keywords_as,
@@ -143,6 +147,17 @@ describe('Assamese public content metadata', () => {
         { title: 'Velocity', title_as: 'বেগ', slug: 'velocity' },
         { title: 'Acceleration', title_as: '  ', slug: 'acceleration' },
       ],
+    });
+  });
+
+  it('resolves a renamed chapter through its old slug and exposes the canonical slug', async () => {
+    const response = await get('/api/v1/content/chapter-by-slug/ahsec/class-12/physics/motion-in-a-plane');
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      chapter_id: 'translated',
+      chapter_slug: 'motion',
+      canonical_slug: 'motion',
+      slug_redirect: { from: 'motion-in-a-plane', to: 'motion' },
     });
   });
 

@@ -180,6 +180,18 @@ export const chapters = sqliteTable('chapters', {
   index('chapters_status_idx').on(t.status),
 ]);
 
+export const chapterSlugRedirects = sqliteTable('chapter_slug_redirects', {
+  id: text('id').primaryKey(),
+  subjectId: text('subject_id').notNull(),
+  chapterId: text('chapter_id').notNull(),
+  locale: text('locale').notNull().default('en'),                     // en | as
+  slug: text('slug').notNull(),
+  createdAt: integer('created_at').default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('chapter_slug_redirects_subject_locale_slug_idx').on(t.subjectId, t.locale, t.slug),
+  index('chapter_slug_redirects_chapter_idx').on(t.chapterId),
+]);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTH TOKENS
 // ─────────────────────────────────────────────────────────────────────────────

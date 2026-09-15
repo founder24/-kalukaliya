@@ -17,6 +17,7 @@ import React from 'react';
 // ─── router mock (must be defined before component import) ──────────────────
 
 const mockSetSearchParams = vi.fn();
+const mockNavigate = vi.fn();
 let mockSearchParams = new URLSearchParams();
 
 vi.mock('react-router-dom', () => ({
@@ -26,7 +27,8 @@ vi.mock('react-router-dom', () => ({
     subjectSlug: 'english',
     chapterSlug: 'prose',
   }),
-  useLocation: () => ({ pathname: '/ahsec/class-11/english/prose' }),
+  useLocation: () => ({ pathname: '/ahsec/class-11/english/prose', search: '', hash: '' }),
+  useNavigate: () => mockNavigate,
   useSearchParams: () => [mockSearchParams, mockSetSearchParams],
   Link: ({ children, to }) => <a href={to}>{children}</a>,
 }));

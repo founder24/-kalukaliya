@@ -29,7 +29,7 @@
 import { Hono, type Context } from 'hono';
 import { eq, and } from 'drizzle-orm';
 import { createDb } from '../db/client';
-import { boards, classes, streams, subjects, chapters, chunks, contentAuditLog, users } from '../db/schema';
+import { boards, classes, streams, subjects, chapters, chapterSlugRedirects, chunks, contentAuditLog, users } from '../db/schema';
 import { extractBearer, hashPassword, isSessionValid, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import { purgeChapterRag, purgeRagScope, reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
@@ -444,6 +444,28 @@ function makeSlug(name: string): string {
     .replace(/[^\w\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+async function chapterSlugTaken(
+  env: Env,
+  subjectId: string,
+  slug: string,
+  locale: 'en' | 'as',
+  excludeChapterId?: string,
+): Promise<boolean> {
+  const column = locale === 'as' ? 'slug_as' : 'slug';
+  const current = await env.DB.prepare(
+    `SELECT id FROM chapters WHERE subject_id = ? AND ${column} = ?${excludeChapterId ? ' AND id != ?' : ''} LIMIT 1`,
+  ).bind(...(excludeChapterId ? [subjectId, slug, excludeChapterId] : [subjectId, slug])).first<{ id: string }>();
+  if (current) return true;
+
+  const redirect = await env.DB.prepare(
+    `SELECT chapter_id FROM chapter_slug_redirects
+     WHERE subject_id = ? AND locale = ? AND slug = ?${excludeChapterId ? ' AND chapter_id != ?' : ''} LIMIT 1`,
+  ).bind(...(excludeChapterId
+    ? [subjectId, locale, slug, excludeChapterId]
+    : [subjectId, locale, slug])).first<{ chapter_id: string }>();
+  return Boolean(redirect);
 }
 
 function nowTs(): number { return Math.floor(Date.now() / 1000); }
@@ -1057,11 +1079,19 @@ staffRouter.post('/content/chapters', async (c) => {
   }
 
   const slug = makeSlug(String(body['slug'] ?? title));
+  if (!slug) return c.json({ detail: 'slug cannot be empty' }, 422);
+  if (await chapterSlugTaken(c.env, subjectId, slug, 'en')) {
+    return c.json({ detail: `Chapter slug '${slug}' is already in use for this subject` }, 409);
+  }
+  const slugAs = typeof body.slug_as === 'string' ? body.slug_as.trim() || null : null;
+  if (slugAs && await chapterSlugTaken(c.env, subjectId, slugAs, 'as')) {
+    return c.json({ detail: `Assamese chapter slug '${slugAs}' is already in use for this subject` }, 409);
+  }
   const id   = crypto.randomUUID();
 
   await db.insert(chapters).values({
     id, title, titleAs: typeof body.title_as === 'string' ? body.title_as.trim() || null : null,
-    subjectId, slug, slugAs: typeof body.slug_as === 'string' ? body.slug_as.trim() || null : null,
+    subjectId, slug, slugAs,
     metaDescription: typeof body.meta_description === 'string' ? body.meta_description.trim() || null : null,
     metaDescriptionAs: typeof body.meta_description_as === 'string' ? body.meta_description_as.trim() || null : null,
     keywords: typeof body.keywords === 'string' ? body.keywords.trim() || null : null,
@@ -1190,6 +1220,7 @@ staffRouter.patch('/content/chapter/:chapterId', async (c) => {
 
   const ch = await db.select({
     id: chapters.id, subjectId: chapters.subjectId,
+    slug: chapters.slug, slugAs: chapters.slugAs,
     ragUpdatedAt: chapters.ragUpdatedAt, ragIndexedAt: chapters.ragIndexedAt,
     notesEn: chapters.notesEn,
   }).from(chapters).where(eq(chapters.id, chapterId)).get();
@@ -1217,8 +1248,21 @@ staffRouter.patch('/content/chapter/:chapterId', async (c) => {
   if ('title' in body && body['title'] !== undefined)          updates.title         = String(body['title']).trim();
   if ('title_as' in body && body['title_as'] !== undefined)    updates.titleAs       = String(body['title_as'] ?? '').trim() || null;
   if ('slug' in body && !makeSlug(String(body.slug ?? ''))) return c.json({ detail: 'slug cannot be empty' }, 422);
-  if ('slug' in body  && body['slug'] !== undefined)           updates.slug          = makeSlug(String(body['slug']));
+  if ('slug' in body  && body['slug'] !== undefined) {
+    const nextSlug = makeSlug(String(body['slug']));
+    if (nextSlug !== ch.slug && await chapterSlugTaken(c.env, ch.subjectId, nextSlug, 'en', chapterId)) {
+      return c.json({ detail: `Chapter slug '${nextSlug}' is already in use for this subject` }, 409);
+    }
+    updates.slug = nextSlug;
+  }
   if ('slug_as' in body && body['slug_as'] !== undefined)      updates.slugAs        = String(body['slug_as'] ?? '').trim() || null;
+  if ('slug_as' in body && body['slug_as'] !== undefined) {
+    const nextSlugAs = String(body['slug_as'] ?? '').trim() || null;
+    if (nextSlugAs && nextSlugAs !== (ch.slugAs ?? '') && await chapterSlugTaken(c.env, ch.subjectId, nextSlugAs, 'as', chapterId)) {
+      return c.json({ detail: `Assamese chapter slug '${nextSlugAs}' is already in use for this subject` }, 409);
+    }
+    updates.slugAs = nextSlugAs;
+  }
   if ('meta_description' in body && body['meta_description'] !== undefined) updates.metaDescription = String(body['meta_description'] ?? '').trim() || null;
   if ('meta_description_as' in body && body['meta_description_as'] !== undefined) updates.metaDescriptionAs = String(body['meta_description_as'] ?? '').trim() || null;
   if ('keywords' in body && body['keywords'] !== undefined) updates.keywords = String(body['keywords'] ?? '').trim() || null;
@@ -1286,6 +1330,26 @@ staffRouter.patch('/content/chapter/:chapterId', async (c) => {
 
   try {
     await db.update(chapters).set(updates).where(eq(chapters.id, chapterId));
+    if (updates.slug && updates.slug !== ch.slug) {
+      await db.insert(chapterSlugRedirects).values({
+        id: crypto.randomUUID(),
+        subjectId: ch.subjectId,
+        chapterId,
+        locale: 'en',
+        slug: ch.slug,
+        createdAt: now,
+      });
+    }
+    if (updates.slugAs !== undefined && updates.slugAs !== ch.slugAs && ch.slugAs?.trim()) {
+      await db.insert(chapterSlugRedirects).values({
+        id: crypto.randomUUID(),
+        subjectId: ch.subjectId,
+        chapterId,
+        locale: 'as',
+        slug: ch.slugAs.trim(),
+        createdAt: now,
+      });
+    }
   } catch (error) {
     console.error(`[staff] Failed to update chapter ${chapterId}:`, error);
     return c.json({ detail: 'Failed to save chapter' }, 500);

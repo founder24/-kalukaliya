@@ -19,7 +19,9 @@ vi.mock('react-router-dom', () => ({
     subjectSlug: 'english',
     chapterSlug: 'prose',
   }),
+  useLocation:     () => ({ pathname: '/ahsec/class-11/english/prose', search: '', hash: '' }),
   useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  useNavigate:     () => vi.fn(),
   Link:            ({ children, to }) => <a href={to}>{children}</a>,
 }));
 

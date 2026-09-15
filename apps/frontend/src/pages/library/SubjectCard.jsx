@@ -420,7 +420,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           return (
             <div key={section.key}>
               {visChapters.map((ch, i) => {
-                const effectiveSlug = ch.slug || (ch.title ? ch.title.toLowerCase().replace(/[^\p{L}\p{N}\p{M}]+/gu, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '') : '');
+                // Public chapter URLs are server-owned. Never derive a slug
+                // from the displayed title: after a rename that can recreate
+                // an old URL or collide with a sibling chapter.
+                const effectiveSlug = ch.slug || ch.chapter_slug || '';
                 // In Assamese mode, prefer the Assamese URL slug so students land on
                 // a readable /as/… address instead of the English slug fallback.
                 const asSlug = isAs ? (ch.slug_as || effectiveSlug) : effectiveSlug;

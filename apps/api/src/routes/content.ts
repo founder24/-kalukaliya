@@ -24,7 +24,7 @@
 import { Hono, type Context } from 'hono';
 import { eq, and, ne, inArray } from 'drizzle-orm';
 import { createDb } from '../db/client';
-import { boards, classes, streams, subjects, chapters } from '../db/schema';
+import { boards, classes, streams, subjects, chapters, chapterSlugRedirects } from '../db/schema';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env } from '../types';
 
@@ -401,11 +401,29 @@ async function resolveChapterBySlug(
     .where(and(eq(chapters.subjectId, subjectRow.id), ne(chapters.status, 'archived')))
     .orderBy(chapters.chapterNumber);
 
-  // Match chapter by slug or slug_as
-  const chapterRow = chapterRows.find(ch => {
+  // Match the current canonical slug first. A renamed chapter can retain its
+  // old public URL through a locale-specific redirect record.
+  let chapterRow = chapterRows.find(ch => {
     if (useSlugAs) return ch.slugAs === chapterSlug || ch.slug === chapterSlug;
     return ch.slug === chapterSlug;
   });
+  let redirectedFromSlug: string | null = null;
+  if (!chapterRow) {
+    const redirect = await db.select({
+      chapterId: chapterSlugRedirects.chapterId,
+      slug: chapterSlugRedirects.slug,
+    }).from(chapterSlugRedirects)
+      .where(and(
+        eq(chapterSlugRedirects.subjectId, subjectRow.id),
+        eq(chapterSlugRedirects.locale, useSlugAs ? 'as' : 'en'),
+        eq(chapterSlugRedirects.slug, chapterSlug),
+      ))
+      .get();
+    if (redirect) {
+      chapterRow = chapterRows.find(ch => ch.id === redirect.chapterId);
+      if (chapterRow) redirectedFromSlug = redirect.slug;
+    }
+  }
   if (!chapterRow) {
     return c.json({ detail: `Chapter '${chapterSlug}' not found` }, 404);
   }
@@ -442,6 +460,9 @@ async function resolveChapterBySlug(
   const displayKeywords = useSlugAs
     ? (chapterRow.keywordsAs?.trim() || chapterRow.keywords)
     : chapterRow.keywords;
+  const canonicalSlug = useSlugAs
+    ? (chapterRow.slugAs?.trim() || chapterRow.slug)
+    : chapterRow.slug;
   const displayTopics = useSlugAs
     ? topicsArr.map(topic => {
       if (!topic || typeof topic !== 'object') return topic;
@@ -458,6 +479,10 @@ async function resolveChapterBySlug(
     chapter_title:  displayTitle,
     chapter_slug:   chapterRow.slug,
     slug_as:        chapterRow.slugAs ?? null,
+    canonical_slug: canonicalSlug,
+    slug_redirect: redirectedFromSlug
+      ? { from: redirectedFromSlug, to: canonicalSlug }
+      : null,
     // A topic is a subsection of a chapter, never the chapter's display title.
     // Dedicated topic deep links resolve their own heading on the client.
     topic_title:    displayTitle,

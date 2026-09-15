@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
-import { useParams, Link, useSearchParams, useLocation } from 'react-router-dom';
+import { useParams, Link, useSearchParams, useLocation, useNavigate } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 import TopicAnswerCard from '@/components/chapter/TopicAnswerCard';
@@ -263,6 +263,7 @@ export default function ChapterPage() {
   // Do not rely on window here or direct /as links would fetch English
   // chapter data in the server-rendered response.
   const routerLocation = useLocation();
+  const navigate = useNavigate();
   const board = params.board;
   const classSlug = params.classSlug;
   const hasStreamInUrl = !!(params.streamSlug && params.chapterSlug);
@@ -554,6 +555,20 @@ export default function ChapterPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [board, classSlug, streamSlug, subjectSlug, chapterSlug, hasStreamInUrl, isAssamesePath]);
+
+  // A legacy chapter URL is allowed to resolve for existing links, but the
+  // browser should settle on the renamed chapter's canonical URL. The API
+  // returns the current slug and the redirect pair without requiring a second
+  // content request.
+  useEffect(() => {
+    if (!data?.slug_redirect || !data.canonical_slug || data.canonical_slug === chapterSlug) return;
+    const nextPath = isAssamesePath
+      ? `/as/${board}/${classSlug}/${subjectSlug}/${data.canonical_slug}`
+      : (streamSlug
+        ? `/${board}/${classSlug}/${streamSlug}/${subjectSlug}/${data.canonical_slug}`
+        : `/${board}/${classSlug}/${subjectSlug}/${data.canonical_slug}`);
+    navigate(`${nextPath}${routerLocation.search}${routerLocation.hash}`, { replace: true });
+  }, [data?.slug_redirect, data?.canonical_slug, chapterSlug, isAssamesePath, board, classSlug, streamSlug, subjectSlug, routerLocation.search, routerLocation.hash, navigate]);
 
   useEffect(() => {
     if (!data) return;
@@ -965,12 +980,14 @@ export default function ChapterPage() {
   const _chapterStreamSlug = streamSlug || data?.stream_slug || '';
   // For Assamese URLs, prefer slug_as from the resolved data (falls back to
   // the English slug so the URL remains valid before slug_as is written).
-  const _asChapterSlug = data?.slug_as || chapterSlug;
+  const _canonicalChapterSlug = isAssamesePath
+    ? (data?.canonical_slug || data?.slug_as || data?.chapter_slug || chapterSlug)
+    : (data?.canonical_slug || data?.chapter_slug || chapterSlug);
   const _chapterPath = isAssamesePath
-    ? `${asBasePath}/${_asChapterSlug}`
+    ? `${asBasePath}/${_canonicalChapterSlug}`
     : (_chapterStreamSlug
-      ? `/${board}/${classSlug}/${_chapterStreamSlug}/${subjectSlug}/${chapterSlug}`
-      : `${basePath}/${chapterSlug}`);
+      ? `/${board}/${classSlug}/${_chapterStreamSlug}/${subjectSlug}/${_canonicalChapterSlug}`
+      : `${basePath}/${_canonicalChapterSlug}`);
   const chapterUrl = `https://syrabit.ai${_chapterPath}`;
   const canonical = topicSlugParam
     ? `${chapterUrl}#topic-${topicSlugParam}`
@@ -985,7 +1002,9 @@ export default function ChapterPage() {
   const handleShare = useCallback(() => {
     // In Assamese mode share the /as/… URL with the Assamese slug so the link
     // the student copies lands on the correct Assamese-canonical page.
-    const _shareSlug = isAssamesePath ? (data?.slug_as || chapterSlug) : chapterSlug;
+    const _shareSlug = isAssamesePath
+      ? (data?.canonical_slug || data?.slug_as || chapterSlug)
+      : (data?.canonical_slug || data?.chapter_slug || chapterSlug);
     const _shareBase = isAssamesePath ? `/as/${board}/${classSlug}/${subjectSlug}` : basePath;
     const _sharePath = `${_shareBase}/${_shareSlug}`;
     Analytics.chapterShare(data?.title || chapterSlug, _sharePath);

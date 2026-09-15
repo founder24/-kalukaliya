@@ -421,6 +421,7 @@ describe('Staff chapter edit round-trip through D1', () => {
       headers: authHeaders(token),
       body: JSON.stringify({
         title_as: 'পৰীক্ষামূলক অধ্যায়',
+        slug: 'renamed-round-trip-test-chapter',
         slug_as: 'পৰীক্ষামূলক-অধ্যায়',
         meta_description: 'English chapter summary.',
         meta_description_as: 'অসমীয়া অধ্যায়ৰ সাৰাংশ।',
@@ -460,12 +461,14 @@ describe('Staff chapter edit round-trip through D1', () => {
       keywords_as: string;
       rag_sections_en: Array<{ title: string; content: string }>;
       qa_en: Array<{ question: string; answer: string }>;
+      slug: string;
     };
 
     // notes_en must reflect the written value, not '' or null.
     expect(body.notes_en).toBe(
       'These are the English notes for the round-trip test chapter.',
     );
+    expect(body.slug).toBe('renamed-round-trip-test-chapter');
     expect(body.title_as).toBe('পৰীক্ষামূলক অধ্যায়');
     expect(body.slug_as).toBe('পৰীক্ষামূলক-অধ্যায়');
     expect(body.meta_description).toBe('English chapter summary.');
@@ -483,6 +486,32 @@ describe('Staff chapter edit round-trip through D1', () => {
     expect(Array.isArray(body.qa_en)).toBe(true);
     expect(body.qa_en).toHaveLength(1);
     expect(body.qa_en[0]?.question).toBe('What is this chapter about?');
+  });
+
+  it('keeps the previous English slug as a public redirect after a rename', async () => {
+    const redirect = await sharedEnv.DB.prepare(`
+      SELECT chapter_id, locale, slug
+      FROM chapter_slug_redirects
+      WHERE chapter_id = ? AND locale = 'en'
+    `).bind(chapterId).first<{ chapter_id: string; locale: string; slug: string }>();
+    expect(redirect).toMatchObject({
+      chapter_id: chapterId,
+      locale: 'en',
+      slug: 'round-trip-test-chapter',
+    });
+
+    const oldUrl = await workerFetch(new Request(
+      'http://worker/api/v1/content/chapter-by-slug/test-board/class-12/physics/round-trip-test-chapter',
+    ));
+    expect(oldUrl.status).toBe(200);
+    expect(await oldUrl.json()).toMatchObject({
+      chapter_id: chapterId,
+      canonical_slug: 'renamed-round-trip-test-chapter',
+      slug_redirect: {
+        from: 'round-trip-test-chapter',
+        to: 'renamed-round-trip-test-chapter',
+      },
+    });
   });
 
   // ── Step 4: PATCH with empty values explicitly clears content ───────────────
