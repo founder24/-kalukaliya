@@ -17,6 +17,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { spawn } from "child_process";
 import {
   isStrictCurriculumBuild,
+  validateChapterPreload,
   validateLibrarySnapshot,
   validatePrerenderManifest,
 } from "./release-guards.mjs";
@@ -288,9 +289,14 @@ for (const page of pages) {
       const seedIdx = page.body.indexOf(`window.${seedKey}`);
       const moduleIdx = page.body.indexOf('<script type="module"');
       if (seedIdx === -1) {
-        fail(`${route}: missing inlined window.${seedKey} payload`);
+        if (kind === "subject") {
+          fail(`${route}: missing inlined window.${seedKey} payload`);
+        }
       } else if (moduleIdx === -1 || seedIdx > moduleIdx) {
         fail(`${route}: window.${seedKey} must be inlined BEFORE main module script`);
+      }
+      if (kind === "chapter") {
+        failures.push(...validateChapterPreload(route, page.body).failures);
       }
       if (/<div id="__shell"/.test(page.body)) {
         fail(`${route}: legacy #__shell overlay still present`);

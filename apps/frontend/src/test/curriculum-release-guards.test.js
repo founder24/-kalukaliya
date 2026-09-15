@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   hasNonEmptyLibraryBundle,
   isStrictCurriculumBuild,
+  validateChapterPreload,
   validateLibrarySnapshot,
   validatePrerenderManifest,
 } from "../../scripts/release-guards.mjs";
@@ -277,5 +278,62 @@ describe("library and browser snapshot guards", () => {
     );
     expect(hasNonEmptyLibraryBundle({ subjects: [] })).toBe(false);
     expect(hasNonEmptyLibraryBundle(null)).toBe(false);
+  });
+});
+
+describe("chapter preload snapshot guards", () => {
+  const validPreload = {
+    board: "ahsec",
+    classSlug: "class-12",
+    subjectSlug: "physics",
+    chapterSlug: "motion",
+    data: {
+      chapter_id: "chapter-motion",
+      title: "Motion",
+    },
+  };
+
+  const routeDocument = (payload) =>
+    `<div id="root" data-hydrate="chapter">rendered chapter</div>` +
+    `<script>window.__CHAPTER_PRELOAD__=${payload};</script>`;
+
+  it("accepts a valid chapter preload from a route document", () => {
+    const result = validateChapterPreload(
+      "ahsec/class-12/physics/motion/index.html",
+      routeDocument(JSON.stringify(validPreload)),
+    );
+
+    expect(result.failures).toEqual([]);
+    expect(result.preload).toEqual(validPreload);
+  });
+
+  it("fails malformed preload JSON with an actionable route", () => {
+    const result = validateChapterPreload(
+      "ahsec/class-12/physics/motion/index.html",
+      routeDocument('{"board":"ahsec",'),
+    );
+
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toContain(
+      "ahsec/class-12/physics/motion/index.html: window.__CHAPTER_PRELOAD__ is not valid JSON",
+    );
+  });
+
+  it("fails when required route or chapter data fields are missing", () => {
+    const result = validateChapterPreload(
+      "ahsec/class-12/physics/motion/index.html",
+      routeDocument(
+        JSON.stringify({
+          ...validPreload,
+          subjectSlug: "",
+          data: {},
+        }),
+      ),
+    );
+
+    expect(result.failures).toEqual([
+      "ahsec/class-12/physics/motion/index.html: window.__CHAPTER_PRELOAD__.subjectSlug must be a non-empty route string",
+      "ahsec/class-12/physics/motion/index.html: window.__CHAPTER_PRELOAD__.data.chapter_id must be a non-empty chapter ID",
+    ]);
   });
 });

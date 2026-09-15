@@ -51,6 +51,74 @@ export function validateLibrarySnapshot(rel, body, { strict = false } = {}) {
   return { failures, warnings };
 }
 
+export function validateChapterPreload(rel, body) {
+  const failures = [];
+  const marker = "window.__CHAPTER_PRELOAD__=";
+  const markerStart = body.indexOf(marker);
+
+  if (markerStart === -1) {
+    failures.push(`${rel}: missing inlined window.__CHAPTER_PRELOAD__ payload`);
+    return { preload: null, failures };
+  }
+
+  const payloadStart = markerStart + marker.length;
+  const payloadEnd = body.indexOf(";</script>", payloadStart);
+  if (payloadEnd === -1) {
+    failures.push(
+      `${rel}: window.__CHAPTER_PRELOAD__ script is missing its closing </script> boundary`,
+    );
+    return { preload: null, failures };
+  }
+
+  let preload;
+  try {
+    preload = JSON.parse(body.slice(payloadStart, payloadEnd));
+  } catch (err) {
+    failures.push(
+      `${rel}: window.__CHAPTER_PRELOAD__ is not valid JSON (${err.message})`,
+    );
+    return { preload: null, failures };
+  }
+
+  if (
+    preload === null ||
+    typeof preload !== "object" ||
+    Array.isArray(preload)
+  ) {
+    failures.push(
+      `${rel}: window.__CHAPTER_PRELOAD__ must be an object with route fields and data`,
+    );
+    return { preload: null, failures };
+  }
+
+  for (const field of ["board", "classSlug", "subjectSlug", "chapterSlug"]) {
+    if (typeof preload[field] !== "string" || !preload[field].trim()) {
+      failures.push(
+        `${rel}: window.__CHAPTER_PRELOAD__.${field} must be a non-empty route string`,
+      );
+    }
+  }
+
+  if (
+    preload.data === null ||
+    typeof preload.data !== "object" ||
+    Array.isArray(preload.data)
+  ) {
+    failures.push(
+      `${rel}: window.__CHAPTER_PRELOAD__.data must be a chapter data object`,
+    );
+  } else if (
+    typeof preload.data.chapter_id !== "string" ||
+    !preload.data.chapter_id.trim()
+  ) {
+    failures.push(
+      `${rel}: window.__CHAPTER_PRELOAD__.data.chapter_id must be a non-empty chapter ID`,
+    );
+  }
+
+  return { preload, failures };
+}
+
 export function validatePrerenderManifest(
   manifest,
   { strict = false } = {},
