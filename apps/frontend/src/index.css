@@ -713,15 +713,17 @@
     font-size: clamp(1.25rem, 1.1rem + 0.35vw, 1.5rem);
     font-weight: 750;
     margin: 2.75rem 0 1rem;
-    color: #172554;
+    color: #1f2937;
     border-top: 3px double #9fb3cf;
     padding: 0.9rem 0 0;
   }
   .chapter-textbook h3 {
     font-size: 1.12rem;
     font-weight: 700;
-    margin: 1.9rem 0 0.65rem;
-    color: #0f4c5c;
+    margin: 2.15rem 0 0.55rem;
+    padding-top: 0.7rem;
+    border-top: 1px solid #e5e7eb;
+    color: #334155;
   }
   .chapter-textbook h4,
   .chapter-textbook h5,
@@ -732,26 +734,26 @@
     color: #374151;
   }
   .chapter-textbook p {
-    margin: 0 0 1.15rem;
+    margin: 0 0 0.72rem;
     color: #283548;
-    line-height: 1.85;
+    line-height: 1.78;
   }
-  .chapter-textbook strong { font-weight: 700; color: #172554; }
+  .chapter-textbook strong { font-weight: 700; color: #334155; }
   .chapter-textbook p strong,
-  .chapter-textbook li strong { color: #1d4ed8; }
+  .chapter-textbook li strong { color: #334155; }
   .chapter-textbook em { font-style: italic; color: #475569; }
-  .chapter-textbook ul { list-style: disc; padding-left: 1.6rem; margin: 0.4rem 0 1.35rem; color: #283548; }
-  .chapter-textbook ol { list-style: decimal; padding-left: 1.6rem; margin: 0.4rem 0 1.35rem; color: #283548; }
-  .chapter-textbook li { margin: 0.45rem 0; padding-left: 0.15rem; }
+  .chapter-textbook ul { list-style: disc; padding-left: 1.6rem; margin: 0.35rem 0 0.95rem; color: #283548; }
+  .chapter-textbook ol { list-style: decimal; padding-left: 1.6rem; margin: 0.35rem 0 0.95rem; color: #283548; }
+  .chapter-textbook li { margin: 0.3rem 0; padding-left: 0.15rem; }
   .chapter-textbook li > ul, .chapter-textbook li > ol { margin: 0.35rem 0 0.55rem; }
-  .chapter-textbook blockquote { border-left: 4px solid #2c7a7b; padding: 0.85rem 1.1rem; margin: 1.5rem 0; color: #334155; font-style: normal; background: #f0fdfa; border-radius: 0 10px 10px 0; box-shadow: inset 0 0 0 1px rgba(45, 139, 140, 0.08); }
+  .chapter-textbook blockquote { border-left: 3px solid #cbd5e1; padding: 0.75rem 1rem; margin: 1.2rem 0; color: #475569; font-style: normal; background: #f8fafc; border-radius: 0 8px 8px 0; }
   .chapter-textbook blockquote p { margin-bottom: 0.55rem; }
   .chapter-textbook blockquote p:last-child { margin-bottom: 0; }
   .chapter-textbook code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.83em; background: #f3f4f6; padding: 0.1em 0.4em; border-radius: 4px; color: #7c3aed; }
   .chapter-textbook pre { background: #1e1e2e; color: #cdd6f4; border-radius: 10px; padding: 1rem 1.2rem; margin: 0.8rem 0; overflow-x: auto; }
   .chapter-textbook pre code { background: none; padding: 0; color: inherit; font-size: 0.85em; }
   .chapter-textbook table { display: block; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border-collapse: collapse; margin: 1.5rem 0 1.8rem; font-size: 0.88rem; line-height: 1.55; }
-  .chapter-textbook th { background: #eaf2ff; color: #172554; font-weight: 700; padding: 0.7rem 0.8rem; text-align: left; border: 1px solid #cbd9ec; white-space: nowrap; }
+  .chapter-textbook th { background: #f1f5f9; color: #334155; font-weight: 700; padding: 0.7rem 0.8rem; text-align: left; border: 1px solid #dbe3ec; white-space: nowrap; }
   .chapter-textbook td { padding: 0.65rem 0.8rem; border: 1px solid #e5e7eb; color: #374151; vertical-align: top; min-width: 8rem; }
   .chapter-textbook tr:nth-child(even) td { background: #fbfaf7; }
   .chapter-textbook hr { border: none; border-top: 1px solid #dbe3f0; margin: 2rem 0; }
