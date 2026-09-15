@@ -48,7 +48,11 @@ import {
   calculateWeeklyRoi,
   ingestAdRevenueReport,
   listAdNetworkInventory,
+  listRoiEvidenceDownloadAuditPage,
+  normalizeRoiAuditLimit,
+  normalizeRoiReportLimit,
   recordRoiControls,
+  recordRoiEvidenceDownloadAudit,
   roiDashboard,
 } from '../services/referral-roi';
 import type { Env, JwtPayload } from '../types';
@@ -584,6 +588,50 @@ adminReferralRouter.get('/roi/dashboard', async (c) => {
     return c.json(await roiDashboard(c.env.DB, Number(c.req.query('limit') ?? 12)));
   } catch {
     return c.json({ detail: 'Referral ROI dashboard unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.get('/roi/dashboard/export', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  try {
+    const reportLimit = normalizeRoiReportLimit(Number(c.req.query('limit') ?? 12));
+    const dashboard = await roiDashboard(c.env.DB, reportLimit);
+    c.executionCtx.waitUntil(
+      recordRoiEvidenceDownloadAudit(c.env.DB, {
+        actorId: auth.actorId,
+        reportLimit,
+        occurredAt: Math.floor(Date.now() / 1000),
+      }).catch(() => undefined),
+    );
+    return new Response(JSON.stringify(dashboard, null, 2), {
+      headers: {
+        'Cache-Control': 'private, no-store, max-age=0',
+        'Content-Disposition': 'attachment; filename="referral-roi-evidence.json"',
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  } catch {
+    return c.json({ detail: 'Referral ROI evidence export unavailable' }, 503);
+  }
+});
+
+adminReferralRouter.get('/roi/dashboard/export-audits', async (c) => {
+  const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
+  if (auth instanceof Response) return auth;
+  try {
+    const cursor = c.req.query('cursor')?.trim();
+    const page = await listRoiEvidenceDownloadAuditPage(c.env.DB, {
+      limit: normalizeRoiAuditLimit(Number(c.req.query('limit') ?? 25)),
+      ...(cursor ? { cursor } : {}),
+    });
+    return c.json({ audits: page.audits, next_cursor: page.nextCursor });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Invalid ROI audit cursor') {
+      return c.json({ detail: 'Invalid ROI audit cursor' }, 422);
+    }
+    return c.json({ detail: 'Referral ROI evidence audit history unavailable' }, 503);
   }
 });
 

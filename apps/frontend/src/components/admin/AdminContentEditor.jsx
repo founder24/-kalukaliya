@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import axios from 'axios';
 import { isDegreeBoard } from '@/utils/courseTypes';
 import { API, authHeaders, autoSlug } from '@/utils/adminHelpers';
+import { buildStaffChapterPatchPayload } from '@/utils/staffChapterPayload';
 
 import ContentViewerPopup from './content-editor/ContentViewerPopup';
 import InlineCreator from './content-editor/InlineCreator';
@@ -267,7 +268,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     try {
       const slug = contentForm.slug || autoSlug(contentForm.title);
       const topics = (contentForm.topics || []).filter(Boolean);
-      const createPayload = { subject_id: selSubject, title: contentForm.title, slug, description: contentForm.description, content: contentForm.notes_en || contentForm.content, notes_en: contentForm.notes_en, notes_as: contentForm.notes_as, content_as: contentForm.content_as, rag_text_en: contentForm.rag_text_en, rag_text_as: contentForm.rag_text_as, qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as, qa_rag_text_en: contentForm.qa_rag_text_en, qa_rag_text_as: contentForm.qa_rag_text_as, pyq_pdf_url: contentForm.pyq_pdf_url, content_type: contentForm.content_type, chapter_number: contentForm.order, status: 'published', topics };
+      const createPayload = { subject_id: selSubject, title: contentForm.title, slug, description: contentForm.description, content: contentForm.notes_en || contentForm.content, notes_en: contentForm.notes_en, notes_as: contentForm.notes_as, content_as: contentForm.content_as, rag_text_en: contentForm.rag_text_en, rag_text_as: contentForm.rag_text_as, qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as, qa_rag_text_en: contentForm.qa_rag_text_en, qa_rag_text_as: contentForm.qa_rag_text_as, content_type: contentForm.content_type, chapter_number: contentForm.order, status: 'draft', topics };
       await axios.post(`${API}/staff/content/chapters`, createPayload, authHeaders(adminToken));
       toast.success('Chapter created successfully'); setEditView(null); setContentForm({ title: '', slug: '', description: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '' }); setChapterStats(null); refreshChapters(selSubject);
     } catch { toast.error('Failed to create chapter'); }
@@ -282,12 +283,11 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       const topics = (contentForm.topics || []).filter(Boolean);
       // Send every editable reader/RAG/QA field, including empty strings.  Empty
       // values are intentional clears, not accidental omissions from a card view.
-      const updatePayload = { title: contentForm.title, slug, description: contentForm.description, content_type: contentForm.content_type, chapter_number: contentForm.order, topics,
+      const updatePayload = buildStaffChapterPatchPayload({ title: contentForm.title, slug, description: contentForm.description, content_type: contentForm.content_type, chapter_number: contentForm.order, topics,
         notes_en: contentForm.notes_en, notes_as: contentForm.notes_as, content: contentForm.content,
         content_as: contentForm.content_as, rag_text_en: contentForm.rag_text_en, rag_text_as: contentForm.rag_text_as,
         qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as,
-        qa_rag_text_en: contentForm.qa_rag_text_en, qa_rag_text_as: contentForm.qa_rag_text_as,
-        pyq_pdf_url: contentForm.pyq_pdf_url };
+        qa_rag_text_en: contentForm.qa_rag_text_en, qa_rag_text_as: contentForm.qa_rag_text_as });
       if (!force) updatePayload.version = contentForm.version ?? 0;
       const res = await axios.patch(`${API}/staff/content/chapter/${editTarget.id}`, updatePayload, authHeaders(adminToken));
       const newVersion = res.data?.version ?? (contentForm.version + 1);

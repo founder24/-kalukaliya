@@ -19,7 +19,7 @@ import {
 } from '@/config/staffPortalSections.mjs';
 import BreakGlassBanner from '@/components/admin/BreakGlassBanner';
 
-const AdminDashboard       = lazy(() => import('@/components/admin/AdminDashboard'));
+const StaffDashboardOverview = lazy(() => import('@/components/admin/StaffDashboardOverview'));
 const AdminRoadmap         = lazy(() => import('@/components/admin/AdminRoadmap'));
 const AdminContentHub      = lazy(() => import('@/components/admin/AdminContentHub'));
 const AdminAnalytics       = lazy(() => import('@/components/admin/AdminAnalytics'));
@@ -67,7 +67,7 @@ const GROUP_LABELS = {
 const GROUPS = ['main', 'audience', 'operations', 'system'];
 
 export const SECTION_COMPONENTS = {
-  dashboard:     AdminModuleUnavailable,
+  dashboard:     StaffDashboardOverview,
   contenthub:    AdminContentHub,
   seomanager:    AdminModuleUnavailable,
   users:         AdminModuleUnavailable,
@@ -328,7 +328,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
     );
   }
 
-  const ActiveComponent = SECTION_COMPONENTS[activeSection] || AdminDashboard;
+  const ActiveComponent = SECTION_COMPONENTS[activeSection] || StaffDashboardOverview;
   const activeLabel = SECTIONS.find((s) => s.id === activeSection)?.label
     || (activeSection === 'roadmap' ? 'Roadmap' : 'Staff');
 

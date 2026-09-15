@@ -21,6 +21,11 @@
  * See ADS.md for the full list of env vars per network.
  */
 
+import {
+  ADSENSE_PLACEMENT_ENV_KEYS,
+  ADSENSE_SLOT_ID_PATTERN,
+} from './adsenseSlotConfig';
+
 const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 
 // ── Per-network defaults ─────────────────────────────────────────────────────
@@ -76,10 +81,7 @@ const NETWORKS = {
 const PLACEMENTS = {
   'chat.afterAssistant': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_CHAT_AFTER_ASSISTANT_SLOT
-      || env.VITE_ADS_ADSENSE_LEARN_INCONTENT_SLOT
-      || env.VITE_ADS_ADSENSE_PYQ_INCONTENT_SLOT
-      || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['chat.afterAssistant']] || '',
     height: 120,
     label: 'Sponsored learning content',
     adFormat: 'fluid',
@@ -88,14 +90,14 @@ const PLACEMENTS = {
   // ── PYQ pages ─────────────────────────────────────────────────────────────
   'pyq.topOfContent': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_PYQ_TOP_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['pyq.topOfContent']] || '',
     height: 250,
     label: 'Advertisement',
     adFormat: 'auto',
   },
   'pyq.inContent': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_PYQ_INCONTENT_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['pyq.inContent']] || '',
     height: 0,
     label: 'Advertisement',
     adFormat: 'fluid',
@@ -106,7 +108,7 @@ const PLACEMENTS = {
   // Max 3 injections per paper — students spend 15-30 min here, highest RPM.
   'pyq.betweenImages': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_PYQ_BETWEEN_IMAGES_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['pyq.betweenImages']] || '',
     height: 0,
     label: 'Advertisement',
     adFormat: 'fluid',
@@ -114,7 +116,7 @@ const PLACEMENTS = {
   },
   'pyq.endOfContent': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_PYQ_END_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['pyq.endOfContent']] || '',
     height: 250,
     label: 'Advertisement',
     adFormat: 'auto',
@@ -123,14 +125,14 @@ const PLACEMENTS = {
   // ── Notes / Learn pages ────────────────────────────────────────────────────
   'learn.topOfContent': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_TOP_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['learn.topOfContent']] || '',
     height: 250,
     label: 'Advertisement',
     adFormat: 'auto',
   },
   'learn.inContent': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_INCONTENT_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['learn.inContent']] || '',
     height: 0,
     label: 'Advertisement',
     adFormat: 'fluid',
@@ -138,7 +140,7 @@ const PLACEMENTS = {
   },
   'learn.afterPyqs': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_AFTER_PYQS_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['learn.afterPyqs']] || '',
     height: 0,
     label: 'Advertisement',
     adFormat: 'fluid',
@@ -146,7 +148,7 @@ const PLACEMENTS = {
   },
   'learn.afterFlashcards': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_AFTER_FLASHCARDS_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['learn.afterFlashcards']] || '',
     height: 0,
     label: 'Advertisement',
     adFormat: 'fluid',
@@ -154,7 +156,7 @@ const PLACEMENTS = {
   },
   'learn.endOfContent': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_END_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['learn.endOfContent']] || '',
     height: 250,
     label: 'Advertisement',
     adFormat: 'auto',
@@ -163,7 +165,7 @@ const PLACEMENTS = {
   // in LearnPage so mobile/tablet viewports never reserve the 600px column.
   'learn.sidebar': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_SIDEBAR_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['learn.sidebar']] || '',
     height: 600,
     label: 'Advertisement',
     adFormat: 'auto',
@@ -172,7 +174,7 @@ const PLACEMENTS = {
   // Blueprint "reward zone" — appears after a full Q+A pair as a natural break.
   'learn.afterQuestion': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_LEARN_AFTER_QUESTION_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['learn.afterQuestion']] || '',
     height: 0,
     label: 'Advertisement',
     adFormat: 'fluid',
@@ -183,14 +185,14 @@ const PLACEMENTS = {
   // Notes tab — three slots: top display, in-article fluid, end display.
   'chapter.notes.top': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_CHAPTER_NOTES_TOP_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['chapter.notes.top']] || '',
     height: 250,
     label: 'Advertisement',
     adFormat: 'auto',
   },
   'chapter.notes.inContent': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_CHAPTER_NOTES_INCONTENT_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['chapter.notes.inContent']] || '',
     height: 0,
     label: 'Advertisement',
     adFormat: 'fluid',
@@ -198,7 +200,7 @@ const PLACEMENTS = {
   },
   'chapter.notes.end': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_CHAPTER_NOTES_END_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['chapter.notes.end']] || '',
     height: 250,
     label: 'Advertisement',
     adFormat: 'auto',
@@ -206,7 +208,7 @@ const PLACEMENTS = {
   // Q&A tab — in-article fluid inserted after every 3rd topic card, plus end display.
   'chapter.qa.inContent': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_CHAPTER_QA_INCONTENT_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['chapter.qa.inContent']] || '',
     height: 0,
     label: 'Advertisement',
     adFormat: 'fluid',
@@ -214,7 +216,7 @@ const PLACEMENTS = {
   },
   'chapter.qa.end': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_CHAPTER_QA_END_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['chapter.qa.end']] || '',
     height: 250,
     label: 'Advertisement',
     adFormat: 'auto',
@@ -224,7 +226,7 @@ const PLACEMENTS = {
   // desktop ad density matches LearnPage.
   'chapter.sidebar': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_CHAPTER_SIDEBAR_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['chapter.sidebar']] || '',
     height: 600,
     label: 'Advertisement',
     adFormat: 'auto',
@@ -232,14 +234,14 @@ const PLACEMENTS = {
   // Question Paper tab — top display and post-viewer fluid.
   'chapter.pyq.top': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_CHAPTER_PYQ_TOP_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['chapter.pyq.top']] || '',
     height: 250,
     label: 'Advertisement',
     adFormat: 'auto',
   },
   'chapter.pyq.inContent': {
     network: 'adsense',
-    slotId: env.VITE_ADS_ADSENSE_CHAPTER_PYQ_INCONTENT_SLOT || '',
+    slotId: env[ADSENSE_PLACEMENT_ENV_KEYS['chapter.pyq.inContent']] || '',
     height: 0,
     label: 'Advertisement',
     adFormat: 'fluid',
@@ -358,6 +360,28 @@ export function setAdsAuthChecked(checked) {
  * subscribers without a server round-trip. Pass `null` / `undefined`
  * for anonymous visitors and on logout.
  */
+const AD_FREE_PLANS = new Set(['starter', 'pro', 'premium']);
+let _adFreePlan = false;
+
+export function setAdsPlan(plan) {
+  const normalizedPlan = typeof plan === 'string' ? plan.trim().toLowerCase() : '';
+  const next = AD_FREE_PLANS.has(normalizedPlan);
+  if (next === _adFreePlan) return;
+
+  _adFreePlan = next;
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('syrabit:ads-consent-changed', {
+          detail: { reason: 'plan', adFree: _adFreePlan },
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 // One-time banner that explains the new cross-device sync behaviour to
 // users who already had a local "opt out of ads" choice set before the
 // account-synced version of the toggle shipped. Bump the version
@@ -420,14 +444,16 @@ export function getAdConfig(placement) {
   if (!p) return { enabled: false, height: 0 };
   if (DISABLED_NETWORKS.has(p.network)) return { enabled: false, height: 0 };
   const net = NETWORKS[p.network];
-  const enabled = !!(net && net.scriptUrl && p.slotId);
+  const slotId = typeof p.slotId === 'string' ? p.slotId.trim() : '';
+  const validSlotId = p.network !== 'adsense' || ADSENSE_SLOT_ID_PATTERN.test(slotId);
+  const enabled = !!(net && net.scriptUrl && validSlotId && slotId);
   return {
     enabled,
     network: p.network,
     scriptUrl: net?.scriptUrl || '',
     publisherId: net?.publisherId || '',
     crossorigin: net?.crossorigin || '',
-    slotId: p.slotId,
+    slotId,
     height: p.height,
     label: p.label,
     adFormat: p.adFormat || 'auto',
@@ -444,6 +470,7 @@ export function getAdConfig(placement) {
  */
 export function adsConsentGranted() {
   if (typeof window === 'undefined') return false;
+  if (_adFreePlan) return false;
   if (getAdsOptOut()) return false;
   // Fail closed until the initial auth probe has settled.
   if (!_authChecked) return false;

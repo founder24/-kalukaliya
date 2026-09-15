@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 
 import { REFERRAL_POLICY_VERSION } from '../contracts/referral-policy';
@@ -36,7 +36,9 @@ import {
   calculateWeeklyRoi,
   ingestAdRevenueReport,
   listAdNetworkInventory,
+  reconcileFinalizedAdSenseReports,
   recordRoiControls,
+  roiDashboard,
 } from './referral-roi';
 import {
   activateReferralApplication,
@@ -83,6 +85,7 @@ async function resetReferralState(): Promise<void> {
     env.DB.prepare('DELETE FROM referral_settlement_audits'),
     env.DB.prepare('DELETE FROM referral_payment_receipts'),
     env.DB.prepare('DELETE FROM referral_weekly_roi_reports'),
+    env.DB.prepare('DELETE FROM adsense_reconciliation_status'),
     env.DB.prepare(`UPDATE referral_roi_controls SET
       reserve_healthy = 0, revenue_fresh = 0, invalid_traffic_healthy = 0,
       ad_account_healthy = 0, contribution_margin_healthy = 0,
@@ -2166,6 +2169,150 @@ describe('ad-funded referral ROI controls', () => {
     });
   }
 
+  function validProviderAggregate(
+    week: ReturnType<typeof referralWeekBounds>,
+  ): Record<string, unknown> {
+    return {
+      network: 'adsense',
+      period_start: week.startsAt,
+      period_end: week.endsAt,
+      settlement_period: week.key,
+      currency: 'INR',
+      gross_revenue_paise: 25_000,
+      adjustments_paise: 2_000,
+      provider_fees_paise: 1_000,
+      monetized_impressions: 432,
+      finalized: true,
+      finalized_through_at: week.endsAt,
+      freshness_expires_at: week.endsAt + 3_600,
+      source_reference: `adsense:aggregate-${week.key}`,
+      evidence_hash: 'e'.repeat(64),
+    };
+  }
+
+  type ProviderResponseFactory = (
+    week: ReturnType<typeof referralWeekBounds>,
+  ) => Response;
+  type MalformedProviderCase = {
+    name: string;
+    response: ProviderResponseFactory;
+    failure: string;
+  };
+
+  const malformedProviderCases: MalformedProviderCase[] = [
+    {
+      name: 'an empty report envelope',
+      response: () => Response.json({ reports: [] }),
+      failure: 'AdSense response must contain exactly one aggregate report',
+    },
+    {
+      name: 'multiple aggregate reports',
+      response: week => Response.json({
+        reports: [validProviderAggregate(week), validProviderAggregate(week)],
+      }),
+      failure: 'AdSense response must contain exactly one aggregate report',
+    },
+    {
+      name: 'an invalid period timestamp',
+      response: week => {
+        const report = validProviderAggregate(week);
+        report.period_start = 'not-a-timestamp';
+        return Response.json({ reports: [report] });
+      },
+      failure: 'Period start must be a non-negative integer',
+    },
+    {
+      name: 'an incomplete finalization timestamp',
+      response: week => {
+        const report = validProviderAggregate(week);
+        report.finalized_through_at = week.endsAt - 1;
+        return Response.json({ reports: [report] });
+      },
+      failure: 'AdSense report does not finalize the full referral week',
+    },
+    {
+      name: 'a non-INR currency',
+      response: week => {
+        const report = validProviderAggregate(week);
+        report.currency = 'USD';
+        return Response.json({ reports: [report] });
+      },
+      failure: 'AdSense report currency must be INR',
+    },
+    {
+      name: 'an explicitly incomplete report',
+      response: week => {
+        const report = validProviderAggregate(week);
+        report.finalized = false;
+        return Response.json({ reports: [report] });
+      },
+      failure: 'AdSense report is not finalized',
+    },
+    {
+      name: 'a stale freshness window',
+      response: week => {
+        const report = validProviderAggregate(week);
+        report.freshness_expires_at = week.endsAt + 100;
+        return Response.json({ reports: [report] });
+      },
+      failure: 'AdSense freshness window is invalid',
+    },
+    {
+      name: 'an HTTP provider error',
+      response: () => new Response('provider unavailable', { status: 502 }),
+      failure: 'AdSense provider returned HTTP 502',
+    },
+  ];
+
+  it.each(malformedProviderCases)('blocks the weekly ROI report for $name and records the provider failure', async ({
+    response,
+    failure,
+  }) => {
+    const { week } = await roiFixture();
+    await env.DB.prepare(`
+      UPDATE referral_weeks SET state = 'finalized', updated_at = ? WHERE id = ?
+    `).bind(week.endsAt, week.id).run();
+    await passRoiControls(week.endsAt + 100, week.endsAt + 3_600);
+    const fetchMock = vi.fn(async () => response(week));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await expect(reconcileFinalizedAdSenseReports(env.DB, {
+        ADSENSE_REPORT_URL: 'https://adsense-reports.example.test/aggregate',
+      }, week.endsAt + 100)).resolves.toMatchObject({
+        status: 'completed',
+        weeks: 1,
+        fetched: 0,
+        imported: 0,
+        idempotent: 0,
+        calculated: 1,
+        failures: [`${week.key}: ${failure}`],
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      const roi = await env.DB.prepare(`
+        SELECT data_quality, warnings_json
+        FROM referral_weekly_roi_reports
+        WHERE week_id = ?
+      `).bind(week.id).first<{ data_quality: string; warnings_json: string }>();
+      expect(roi?.data_quality).toBe('blocked');
+      expect(JSON.parse(roi?.warnings_json ?? '[]')).toContain('adsense-reconciliation-failed');
+
+      await expect(roiDashboard(env.DB)).resolves.toMatchObject({
+        reconciliation: {
+          status: 'completed',
+          weeks: 1,
+          fetched: 0,
+          imported: 0,
+          idempotent: 0,
+          calculated: 1,
+          failures: [`${week.key}: ${failure}`],
+        },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('keeps blueprint-only and disabled networks out of authoritative inventory and revenue', async () => {
     const inventory = await listAdNetworkInventory(env.DB);
     expect(inventory.find(item => item.network === 'adsense')).toMatchObject({
@@ -2217,6 +2364,132 @@ describe('ad-funded referral ROI controls', () => {
       finalized_net_ad_revenue_paise: 22_000,
     });
     expect(report.referral_clicks).toBe(0);
+  });
+
+  it('reconciles a closed week idempotently and blocks changed provider evidence', async () => {
+    const { week } = await roiFixture();
+    await env.DB.prepare(`
+      UPDATE referral_weeks SET state = 'finalized', updated_at = ? WHERE id = ?
+    `).bind(week.endsAt, week.id).run();
+    await passRoiControls(week.endsAt + 100, week.endsAt + 3_600);
+    const providerResponse = {
+      reports: [{
+        network: 'adsense',
+        period_start: week.startsAt,
+        period_end: week.endsAt,
+        settlement_period: week.key,
+        currency: 'INR',
+        gross_revenue_paise: 25_000,
+        adjustments_paise: 2_000,
+        provider_fees_paise: 1_000,
+        monetized_impressions: 432,
+        finalized: true,
+        finalized_through_at: week.endsAt,
+        freshness_expires_at: week.endsAt + 3_600,
+        source_reference: `adsense:reconcile-${week.key}`,
+        evidence_hash: 'e'.repeat(64),
+      }],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.searchParams.get('period_start')).toBe(String(week.startsAt));
+      expect(url.searchParams.get('period_end')).toBe(String(week.endsAt));
+      expect(url.searchParams.has('browser_id')).toBe(false);
+      expect(url.searchParams.has('referral_identity')).toBe(false);
+      expect(new Headers(init?.headers).has('Cookie')).toBe(false);
+      return Response.json(providerResponse);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await expect(reconcileFinalizedAdSenseReports(env.DB, {
+        ADSENSE_REPORT_URL: 'https://adsense-reports.example.test/aggregate',
+        ADSENSE_REPORT_TOKEN: 'aggregate-token',
+      }, week.endsAt + 100)).resolves.toMatchObject({
+        status: 'completed',
+        weeks: 1,
+        fetched: 1,
+        imported: 1,
+        idempotent: 0,
+        calculated: 1,
+        failures: [],
+      });
+      await expect(reconcileFinalizedAdSenseReports(env.DB, {
+        ADSENSE_REPORT_URL: 'https://adsense-reports.example.test/aggregate',
+        ADSENSE_REPORT_TOKEN: 'aggregate-token',
+      }, week.endsAt + 100)).resolves.toMatchObject({
+        idempotent: 1,
+        imported: 0,
+        failures: [],
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const stored = await env.DB.prepare(`
+        SELECT source_reference, evidence_hash, gross_revenue_paise, net_revenue_paise
+        FROM ad_revenue_reports WHERE source_reference = ?
+      `).bind(`adsense:reconcile-${week.key}`).first<{
+        source_reference: string;
+        evidence_hash: string;
+        gross_revenue_paise: number;
+        net_revenue_paise: number;
+      }>();
+      expect(stored).toEqual({
+        source_reference: `adsense:reconcile-${week.key}`,
+        evidence_hash: 'e'.repeat(64),
+        gross_revenue_paise: 25_000,
+        net_revenue_paise: 22_000,
+      });
+
+      providerResponse.reports[0]!.evidence_hash = 'f'.repeat(64);
+      await expect(reconcileFinalizedAdSenseReports(env.DB, {
+        ADSENSE_REPORT_URL: 'https://adsense-reports.example.test/aggregate',
+      }, week.endsAt + 100)).resolves.toMatchObject({
+        weeks: 1,
+        fetched: 1,
+        imported: 0,
+        idempotent: 0,
+        calculated: 1,
+        failures: [`${week.key}: Provider source reference was previously recorded with different evidence`],
+      });
+      const roi = await env.DB.prepare(`
+        SELECT data_quality, warnings_json FROM referral_weekly_roi_reports WHERE week_id = ?
+      `).bind(week.id).first<{ data_quality: string; warnings_json: string }>();
+      expect(roi?.data_quality).toBe('blocked');
+      expect(JSON.parse(roi?.warnings_json ?? '[]')).toContain('adsense-reconciliation-failed');
+      await expect(roiDashboard(env.DB)).resolves.toMatchObject({
+        reconciliation: {
+          status: 'completed',
+          started_at: week.endsAt + 100,
+          completed_at: week.endsAt + 100,
+          weeks: 1,
+          fetched: 1,
+          imported: 0,
+          idempotent: 0,
+          calculated: 1,
+          failures: [`${week.key}: Provider source reference was previously recorded with different evidence`],
+        },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('records a skipped automatic run when the provider endpoint is missing', async () => {
+    await expect(reconcileFinalizedAdSenseReports(env.DB, {}, TEST_TIME)).resolves.toEqual({
+      status: 'skipped',
+      weeks: 0,
+      fetched: 0,
+      imported: 0,
+      idempotent: 0,
+      calculated: 0,
+      failures: ['AdSense report endpoint is not configured'],
+    });
+    await expect(roiDashboard(env.DB)).resolves.toMatchObject({
+      reconciliation: {
+        status: 'skipped',
+        started_at: TEST_TIME,
+        completed_at: TEST_TIME,
+        failures: ['AdSense report endpoint is not configured'],
+      },
+    });
   });
 
   it('fails closed and pauses accrual when provider revenue or controls are stale', async () => {

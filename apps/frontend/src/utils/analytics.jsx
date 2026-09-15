@@ -80,16 +80,20 @@ const mirrorAdImpression = (properties) => {
   if (typeof window === 'undefined') return;
   if (!properties || !properties.placement || !properties.network) return;
   try {
-    // ``enabled`` used to be in this payload but it was always true
-    // at the AdSlot call site (the IntersectionObserver only fires
-    // after a cfg.enabled gate) and the backend never read it back.
-    // Dropped in the admin-panel audit; backend ignores the extra
-    // key from older bundles, so this is a one-sided rollout.
+  // ``enabled`` used to be in this payload but it was always true
+  // at the AdSlot call site (the IntersectionObserver only fires
+  // after a cfg.enabled gate) and the backend never read it back.
+  // The stable placement plus numeric slot ID are the diagnostics needed
+  // to reconcile viewability with the provider's finalized ad-unit report.
     const payload = JSON.stringify({
       event: 'ad_slot_viewed',
       analytics_consent: 'granted',
       placement: properties.placement,
       network: properties.network,
+      // This is the numeric AdSense ad-unit ID (`data-ad-slot`). Keeping it
+      // beside the stable placement name lets provider reports reconcile
+      // viewability without changing referral authorization.
+      slot_id: properties.slotId || null,
     });
     const url = `${API_BASE}/analytics/ad-impression`;
     const blob = new Blob([payload], { type: 'application/json' });
@@ -336,8 +340,8 @@ export const Analytics = {
   // Gated by ad consent in the caller so opt-out users emit nothing.
   // ``enabled`` was dropped — see mirrorAdImpression() comment for
   // rationale (always true at call site + never read by backend).
-  adSlotViewed: ({ placement, network } = {}) => {
-    track('ad_slot_viewed', { placement, network });
+  adSlotViewed: ({ placement, network, slotId } = {}) => {
+    track('ad_slot_viewed', { placement, network, slot_id: slotId || null });
   },
 
   adminLogin: (email) => {

@@ -3,7 +3,10 @@ export const STAFF_PORTAL_SECTIONS = Object.freeze([
     id: 'dashboard',
     label: 'Dashboard',
     group: 'main',
-    releaseCheck: { supported: false, requiredReads: [] },
+    releaseCheck: {
+      supported: true,
+      requiredReads: ['/api/v1/staff/analytics/command-center'],
+    },
   },
   {
     id: 'contenthub',

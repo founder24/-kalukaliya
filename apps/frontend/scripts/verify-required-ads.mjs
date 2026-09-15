@@ -22,6 +22,7 @@ const REQUIRED = {
   "pages/PYQReplicaPage.jsx": [
     "pyq.topOfContent",
     "pyq.inContent",
+    "pyq.betweenImages",
     "pyq.endOfContent",
   ],
   "pages/LearnPage.jsx": [
@@ -29,6 +30,7 @@ const REQUIRED = {
     "learn.inContent",
     "learn.afterPyqs",
     "learn.afterFlashcards",
+    "learn.afterQuestion",
     "learn.endOfContent",
     "learn.sidebar",
   ],
@@ -39,6 +41,7 @@ const REQUIRED = {
     "chapter.notes.end",
     "chapter.qa.inContent",
     "chapter.qa.end",
+    "chapter.sidebar",
     "chapter.pyq.top",
     "chapter.pyq.inContent",
   ],
