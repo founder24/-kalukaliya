@@ -1153,6 +1153,59 @@ test.describe('Staff panel — sidebar sections', () => {
     ]);
   });
 
+  test('removes a page by URL after its image caption is customized', async ({ page }) => {
+    const fixture = await setupContentEditorFixture(page);
+    staffMocks.enableStrictUnexpectedApiRequests();
+    page.once('dialog', dialog => dialog.accept());
+
+    await gotoStaff(page);
+    await page.locator('main select').nth(0).selectOption('board-1');
+    await page.locator('main select').nth(1).selectOption('class-1');
+    await page.locator('main select').nth(2).selectOption('stream-1');
+    await page.getByRole('button', { name: /Physics/ }).click();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await page.getByRole('button', { name: /^Notes RAG/ }).click();
+
+    const content = page.getByPlaceholder(/Study notes in English/);
+    await page.getByTestId('chapter-page-upload-input').setInputFiles([
+      { name: 'page-1.png', mimeType: 'image/png', buffer: Buffer.from('page one') },
+      { name: 'page-2.png', mimeType: 'image/png', buffer: Buffer.from('page two') },
+      { name: 'page-3.png', mimeType: 'image/png', buffer: Buffer.from('page three') },
+    ]);
+    await expect(content).toHaveValue(/!\[Page 3\]\(\/r2\/page-3\.png\)/);
+
+    const editedNotes = [
+      '## Existing English\n\n• first point',
+      '![Scanned introduction](/r2/page-1.png)',
+      '> Keep this note beside the page links',
+      '![Page 2](/r2/page-2.png)',
+      '[Keep this Markdown link](https://example.com)',
+      '![Page 3](/r2/page-3.png)',
+    ].join('\n\n');
+    await content.fill(editedNotes);
+
+    const deleteRequest = page.waitForRequest(request =>
+      request.method() === 'DELETE' &&
+      request.url().endsWith('/staff/content/chapter/chapter-1/pyq-papers/paper-1'),
+    );
+    await page.getByRole('button', { name: 'Remove', exact: true }).nth(0).click();
+    await deleteRequest;
+
+    const expectedNotes = [
+      '## Existing English\n\n• first point',
+      '> Keep this note beside the page links',
+      '![Page 1](/r2/page-2.png)',
+      '[Keep this Markdown link](https://example.com)',
+      '![Page 2](/r2/page-3.png)',
+    ].join('\n\n');
+    await expect(content).toHaveValue(expectedNotes);
+    expect(fixture.chapterPages().map(page => page.url)).toEqual([
+      '/r2/page-2.png',
+      '/r2/page-3.png',
+    ]);
+  });
+
   test('preserves page records and English markdown when removal fails before succeeding on retry', async ({ page }) => {
     const fixture = await setupContentEditorFixture(page);
     fixture.failNextPageDelete();

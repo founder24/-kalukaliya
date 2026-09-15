@@ -79,6 +79,17 @@ function Spinner({ size = 5 }) {
   );
 }
 
+function parseStandaloneMarkdownImage(line) {
+  const match = line.match(/^(\s*)!\[([^\]]*)\]\((.*)\)(\s*)$/);
+  if (!match) return null;
+
+  const destination = match[3].trim().match(/^<?([^>\s]+)>?/);
+  return {
+    alt: match[2],
+    url: destination?.[1] || '',
+  };
+}
+
 // ── Field indicator dots ─────────────────────────────────────────────────────
 
 // ── Topic chip list editor ────────────────────────────────────────────────────
@@ -946,23 +957,32 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
 
   const handlePageDeleted = (_latestPapers, removedPage) => {
     const removedUrl = removedPage?.url;
+    const pageUrls = new Set(
+      (_latestPapers || [])
+        .map(page => page?.url)
+        .filter(Boolean),
+    );
+    if (removedUrl) pageUrls.add(removedUrl);
+
     setForm(current => {
       const notes = current?.notes_en || '';
       let removed = false;
       let pageNumber = 0;
       const remaining = notes.split('\n').filter(line => {
-        const match = line.trim().match(/^!\[Page \d+\]\((.*)\)$/);
-        if (!removed && match?.[1] === removedUrl) {
+        const image = parseStandaloneMarkdownImage(line);
+        if (!removed && image?.url === removedUrl) {
           removed = true;
           return false;
         }
         return true;
       });
       const renumbered = remaining.map(line => {
-        const match = line.trim().match(/^!\[Page \d+\]\((.*)\)$/);
-        if (!match) return line;
+        const image = parseStandaloneMarkdownImage(line);
+        if (!image || !pageUrls.has(image.url) || !/^Page \d+$/.test(image.alt.trim())) {
+          return line;
+        }
         pageNumber += 1;
-        return `![Page ${pageNumber}](${match[1]})`;
+        return line.replace(/!\[[^\]]*\]/, `![Page ${pageNumber}]`);
       }).join('\n').replace(/\n{3,}/g, '\n\n').trimEnd();
       return { ...current, notes_en: renumbered };
     });
