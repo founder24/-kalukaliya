@@ -29,6 +29,78 @@ def read_jsonl(path):
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
+class SearchableIndexClient:
+    """Small credential-free stand-in for Vectorize plus the D1 chunk map."""
+
+    def __init__(self, *, fail_upsert=False):
+        self.fail_upsert = fail_upsert
+        self.vectors = {
+            "old-vector": {
+                "metadata": {
+                    "chapterId": "chapter-search-repair",
+                    "subjectId": "subject-1",
+                    "medium": "english",
+                    "sourceType": "notes",
+                },
+            }
+        }
+        self.chunks = {"old-vector": "stale pre-failure note text"}
+        self.embedded = []
+
+    def embed(self, texts):
+        self.embedded.append(texts)
+        return [[0.1, 0.2] for _ in texts]
+
+    def query(self, sql, params=None):
+        if "SELECT vector_id FROM chunks" in sql:
+            return [
+                {"vector_id": vector_id}
+                for vector_id, vector in self.vectors.items()
+                if vector["metadata"]["chapterId"] == params[0]
+            ]
+        return []
+
+    def vector_delete(self, vector_ids):
+        for vector_id in vector_ids:
+            self.vectors.pop(vector_id, None)
+
+    def vector_upsert(self, vectors):
+        if self.fail_upsert:
+            raise RuntimeError("search index unavailable")
+        for vector in vectors:
+            self.vectors[vector["id"]] = vector
+
+    def execute(self, sql, params=None):
+        if "DELETE FROM chunks" in sql:
+            chapter_id = params[0]
+            self.chunks = {
+                vector_id: content
+                for vector_id, content in self.chunks.items()
+                if self.vectors.get(vector_id, {}).get("metadata", {}).get("chapterId")
+                != chapter_id
+            }
+        elif "INSERT INTO chunks" in sql:
+            for offset in range(0, len(params), 8):
+                self.chunks[params[offset + 5]] = params[offset + 4]
+
+    def search(self, query, *, chapter_id):
+        """Mirror retrieval's vector filter followed by D1 chunk hydration."""
+        query_terms = set(query.lower().split())
+        results = []
+        for vector_id, vector in self.vectors.items():
+            metadata = vector["metadata"]
+            if (
+                metadata.get("chapterId") != chapter_id
+                or metadata.get("medium") != "english"
+                or metadata.get("sourceType") != "notes"
+            ):
+                continue
+            content = self.chunks.get(vector_id)
+            if content and query_terms & set(content.lower().split()):
+                results.append(content)
+        return results
+
+
 def test_production_approval_records_scope_without_credentials(monkeypatch, tmp_path):
     approval_file = tmp_path / "approvals.jsonl"
     monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
@@ -696,6 +768,63 @@ def test_index_repair_reuses_stored_notes_without_regeneration(
     approval = read_jsonl(approval_file)[0]
     assert approval["scope"]["repair_index"] == ["chapter-index-failed"]
     assert importer.load_done() == {"chapter-index-failed"}
+
+
+@pytest.mark.parametrize("fail_upsert", [False, True])
+def test_index_repair_search_returns_fresh_notes_or_remains_unresolved(
+    monkeypatch, tmp_path, fail_upsert
+):
+    progress_file = tmp_path / "progress.jsonl"
+    chapter_id = "chapter-search-repair"
+    repaired_text = (
+        "## Motion\n\n"
+        "fresh repair marker explains the corrected acceleration experiment. "
+        * 30
+    )
+    normalized_repaired_text = " ".join(repaired_text.split())
+    chapter = {
+        "id": chapter_id,
+        "subject_id": "subject-1",
+        "class_name": "HS 1st Year",
+        "subject_name": "Chemistry",
+        "subject_slug": "chemistry",
+        "title": "Motion",
+        "notes_en": repaired_text,
+    }
+    client = SearchableIndexClient(fail_upsert=fail_upsert)
+
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "ACTIVE_RUN_ID", "run-search-repair")
+    progress_file.write_text(
+        json.dumps(
+            {
+                "chapter_id": chapter_id,
+                "status": importer.INDEX_FAILED_STATUS,
+                "index_attempt": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = asyncio.run(importer.repair_indexes(client, [chapter], [chapter_id]))
+    latest = [
+        row for row in read_jsonl(progress_file) if row.get("chapter_id") == chapter_id
+    ][-1]
+
+    if fail_upsert:
+        assert result == 1
+        assert latest["status"] == importer.INDEX_FAILED_STATUS
+        assert client.search("fresh repair marker", chapter_id=chapter_id) == []
+        assert client.search("stale pre-failure", chapter_id=chapter_id) == []
+    else:
+        assert result == 0
+        assert latest["status"] == importer.INDEX_REPAIRED_STATUS
+        assert client.search("fresh repair marker", chapter_id=chapter_id) == [
+            normalized_repaired_text
+        ]
+        assert client.search("stale pre-failure", chapter_id=chapter_id) == []
 
 
 def test_latest_index_failure_overrides_an_earlier_done_record(monkeypatch, tmp_path):
