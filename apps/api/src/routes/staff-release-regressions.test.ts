@@ -278,14 +278,29 @@ describe('release regressions', () => {
     expect(queryPlan.results.some(row => row.detail.includes('cal_roi_download_history_idx'))).toBe(true);
 
     const denied = await fetchWorker(
-      request('/api/v1/admin/referrals/roi/dashboard/export-audits?limit=1', limited),
+      request('/api/v1/admin/referrals/roi/dashboard/export-audits?limit=1&cursor=invalid', limited),
     );
     expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({
+      detail: 'Explicit referral:settle capability required',
+      capability: 'referral:settle',
+    });
 
-    const invalidCursor = await fetchWorker(
-      request('/api/v1/admin/referrals/roi/dashboard/export-audits?cursor=invalid', settler),
-    );
-    expect(invalidCursor.status).toBe(422);
+    const malformedCursors = [
+      'invalid',
+      btoa(JSON.stringify({ c: 'not-a-timestamp', i: 'audit-id' })),
+      btoa(JSON.stringify({ c: capturedAt, i: '' })),
+    ];
+    for (const cursor of malformedCursors) {
+      const invalidCursor = await fetchWorker(
+        request(
+          `/api/v1/admin/referrals/roi/dashboard/export-audits?cursor=${encodeURIComponent(cursor)}`,
+          settler,
+        ),
+      );
+      expect(invalidCursor.status).toBe(422);
+      expect(await invalidCursor.json()).toEqual({ detail: 'Invalid ROI audit cursor' });
+    }
 
     const response = await fetchWorker(
       request('/api/v1/admin/referrals/roi/dashboard/export-audits?limit=2', settler),

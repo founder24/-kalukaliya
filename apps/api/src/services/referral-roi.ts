@@ -947,6 +947,19 @@ type RoiEvidenceDownloadAuditCursor = {
   snapshotRowId: number | null;
 };
 
+export const INVALID_ROI_AUDIT_CURSOR_DETAIL = 'Invalid ROI audit cursor';
+
+class InvalidRoiAuditCursorError extends Error {
+  constructor() {
+    super(INVALID_ROI_AUDIT_CURSOR_DETAIL);
+    this.name = 'InvalidRoiAuditCursorError';
+  }
+}
+
+export function isInvalidRoiAuditCursorError(error: unknown): boolean {
+  return error instanceof InvalidRoiAuditCursorError;
+}
+
 function encodeRoiEvidenceDownloadAuditCursor(cursor: RoiEvidenceDownloadAuditCursor): string {
   return btoa(JSON.stringify({
     c: cursor.createdAt,
@@ -972,7 +985,7 @@ function decodeRoiEvidenceDownloadAuditCursor(value: string | undefined): RoiEvi
       || (parsed.s !== undefined
         && (!Number.isSafeInteger(parsed.s) || (parsed.s as number) < 0))
     ) {
-      throw new Error('Invalid ROI audit cursor');
+      throw new InvalidRoiAuditCursorError();
     }
     return {
       createdAt: parsed.c as number,
@@ -982,7 +995,7 @@ function decodeRoiEvidenceDownloadAuditCursor(value: string | undefined): RoiEvi
       snapshotRowId: parsed.s === undefined ? null : parsed.s as number,
     };
   } catch {
-    throw new Error('Invalid ROI audit cursor');
+    throw new InvalidRoiAuditCursorError();
   }
 }
 
