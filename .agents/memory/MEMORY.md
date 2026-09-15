@@ -97,3 +97,4 @@
 - [Production AdSense verification](production-ads-verification.md) — a live Google loader is not enough; verify compiled slot IDs, DOM metadata, fills, and stale hashed assets separately
 - [AHSEC index concurrency](ahsec-index-concurrency.md) — lock the full chapter write/index sequence and refresh repair notes after lock acquisition
 - [Vite optimized dependency stability](vite-optimized-dependency-stability.md) — pre-optimize lazy staff/admin UI dependencies to prevent stale browser chunks during dev reloads
+- [Workers AI RAG indexing contract](workers-ai-rag-indexing-contract.md) — normalize bge-m3 array responses and keep Vectorize deletes within the 100-ID request limit

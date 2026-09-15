@@ -43,7 +43,8 @@ export async function purgeRagScope(env: Env, chapterId: string, scope: RagScope
   // Deterministic legacy IDs must be swept to prevent stale tails after older deployments.
   for (const medium of ['english', 'assamese']) for (let index = 0; index < 500; index++) ids.push(`${chapterId}_${medium}_${sourceType}_${index}`);
   const unique = [...new Set(ids)];
-  for (let offset = 0; offset < unique.length; offset += 1000) await env.VECTORIZE.deleteByIds(unique.slice(offset, offset + 1000));
+  // Vectorize accepts at most 100 IDs per delete request.
+  for (let offset = 0; offset < unique.length; offset += 100) await env.VECTORIZE.deleteByIds(unique.slice(offset, offset + 100));
   await db.delete(chunks).where(and(eq(chunks.chapterId, chapterId), eq(chunks.sourceType, sourceType)));
 }
 
@@ -84,9 +85,18 @@ async function ingest(env: Env, chapterId: string, subjectId: string, text: stri
     ...(hierarchy?.boardId && { boardId: hierarchy.boardId }),
     ...(hierarchy?.boardName && { boardName: hierarchy.boardName }),
   };
-  const response = await (env.AI as unknown as { run(model: string, input: { text: string[] }): Promise<{ data: Array<{ values: number[] }> }> })
+  const response = await (env.AI as unknown as {
+    run(model: string, input: { text: string[] }): Promise<{ data: Array<{ values?: number[] } | number[]> }>
+  })
     .run('@cf/baai/bge-m3', { text: content });
-  const entries = content.map((item, index) => ({ content: item, values: response.data[index]?.values, id: `${chapterId}_${medium}_${sourceFor[scope]}_${index}` }))
+  // Workers AI has returned both `{ values }` objects and bare numeric arrays
+  // for bge-m3 over time; accept either shape so indexing does not silently
+  // discard every embedding when the binding uses the current array format.
+  const entries = content.map((item, index) => {
+    const raw = response.data[index];
+    const values = Array.isArray(raw) ? raw : raw && Array.isArray(raw.values) ? raw.values : undefined;
+    return { content: item, values, id: `${chapterId}_${medium}_${sourceFor[scope]}_${index}` };
+  })
     .filter((entry): entry is { content: string; values: number[]; id: string } => Boolean(entry.values?.length));
   if (!entries.length) throw new Error('Embedding provider returned no vectors');
   await env.VECTORIZE.upsert(entries.map(entry => ({ id: entry.id, values: entry.values, metadata: { chapterId, subjectId, medium, sourceType: sourceFor[scope], chunkType: 'text', content: entry.content.slice(0, 512), ...hierarchyMetadata } })));
