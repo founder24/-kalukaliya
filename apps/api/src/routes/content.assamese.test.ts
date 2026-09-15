@@ -38,6 +38,10 @@ beforeAll(async () => {
     env.DB.prepare(`INSERT INTO classes (id, board_id, name, slug) VALUES ('class', 'board', 'Class 12', 'class-12')`),
     env.DB.prepare(`INSERT INTO streams (id, class_id, name, slug) VALUES ('stream', 'class', 'Science', 'science')`),
     env.DB.prepare(`INSERT INTO subjects (id, stream_id, name, slug, is_published) VALUES ('subject', 'stream', 'Physics', 'physics', 1)`),
+    env.DB.prepare(`INSERT INTO boards (id, name, slug) VALUES ('other-board', 'CBSE', 'cbse')`),
+    env.DB.prepare(`INSERT INTO classes (id, board_id, name, slug) VALUES ('other-class', 'other-board', 'Class 10', 'class-10')`),
+    env.DB.prepare(`INSERT INTO streams (id, class_id, name, slug) VALUES ('other-stream', 'other-class', 'General', 'general')`),
+    env.DB.prepare(`INSERT INTO subjects (id, stream_id, name, slug, is_published) VALUES ('other-subject', 'other-stream', 'Mathematics', 'mathematics', 1)`),
     env.DB.prepare(`
       INSERT INTO chapters (
         id, subject_id, title, title_as, slug, slug_as,
@@ -60,6 +64,13 @@ beforeAll(async () => {
         'Force description', '  ', 'force, mechanics', '  ',
         'published', 'Force notes', 'বলৰ টোকা', '[{"question":"What is force?"}]', '[]',
         '[{"title":"Newton laws","title_as":"  ","slug":"newton-laws"}]'
+      )
+    `),
+    env.DB.prepare(`
+      INSERT INTO chapters (
+        id, subject_id, title, slug, status, notes_en
+      ) VALUES (
+        'other-board-chapter', 'other-subject', 'Real Numbers', 'real-numbers', 'published', 'Other board notes'
       )
     `),
     env.DB.prepare(`
@@ -216,6 +227,39 @@ describe('Assamese public content metadata', () => {
     expect(payload.chapters.every(chapter => chapter.status === 'published')).toBe(true);
     expect(payload.chapters.some(chapter => chapter.chapter_id === 'draft-chapter')).toBe(false);
     expect(payload.chapters.some(chapter => chapter.chapter_id === 'archived-chapter')).toBe(false);
+  });
+
+  it('keeps chapters from other boards out of the board boot bundle', async () => {
+    const response = await get('/api/v1/content/library-bundle?boot=board');
+    expect(response.status).toBe(200);
+
+    const payload = await response.json() as {
+      chapters: Array<{ chapter_id: string; subject_id: string }>;
+      boards: Array<{
+        id: string;
+        classes: Array<{
+          streams: Array<{
+            subjects: Array<{
+              id: string;
+              chapters?: Array<{ chapter_id: string; subject_id: string }>;
+            }>;
+          }>;
+        }>;
+      }>;
+    };
+
+    expect(payload.chapters).toEqual([
+      expect.objectContaining({ chapter_id: 'translated', subject_id: 'subject' }),
+      expect.objectContaining({ chapter_id: 'fallback', subject_id: 'subject' }),
+    ]);
+    expect(payload.chapters.some(chapter => chapter.chapter_id === 'other-board-chapter')).toBe(false);
+
+    const otherBoardSubject = payload.boards
+      .find(board => board.id === 'other-board')
+      ?.classes.flatMap(cls => cls.streams)
+      .flatMap(stream => stream.subjects)
+      .find(subject => subject.id === 'other-subject');
+    expect(otherBoardSubject?.chapters).toEqual([]);
   });
 
   it('localizes the topics-published query and preserves English fallbacks', async () => {
