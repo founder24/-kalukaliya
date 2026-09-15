@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import threading
 from datetime import timedelta
 from datetime import datetime, timedelta, timezone
 
@@ -32,14 +33,26 @@ def read_jsonl(path):
 class SearchableIndexClient:
     """Small credential-free stand-in for Vectorize plus the D1 chunk map."""
 
-    def __init__(self, *, fail_upsert=False, fail_chunk_insert_after=None):
+    def __init__(
+        self,
+        *,
+        fail_upsert=False,
+        fail_chunk_insert_after=None,
+        chapter_id="chapter-search-repair",
+        block_vector_delete_for=None,
+    ):
         self.fail_upsert = fail_upsert
         self.fail_chunk_insert_after = fail_chunk_insert_after
+        self.chapter_id = chapter_id
+        self.block_vector_delete_for = block_vector_delete_for
+        self.vector_delete_started = threading.Event()
+        self.release_vector_delete = threading.Event()
+        self.vector_delete_block_consumed = False
         self.partial_failure_consumed = False
         self.vectors = {
-            "old-vector": {
+            f"old-vector-{chapter_id}": {
                 "metadata": {
-                    "chapterId": "chapter-search-repair",
+                    "chapterId": chapter_id,
                     "subjectId": "subject-1",
                     "medium": "english",
                     "sourceType": "notes",
@@ -49,8 +62,8 @@ class SearchableIndexClient:
         self.chunk_rows = [
             {
                 "id": "old-chunk",
-                "chapter_id": "chapter-search-repair",
-                "vector_id": "old-vector",
+                "chapter_id": chapter_id,
+                "vector_id": f"old-vector-{chapter_id}",
                 "content": "stale pre-failure note text",
             }
         ]
@@ -70,6 +83,15 @@ class SearchableIndexClient:
         return []
 
     def vector_delete(self, vector_ids):
+        if (
+            self.block_vector_delete_for
+            and self.block_vector_delete_for in vector_ids
+            and not self.vector_delete_block_consumed
+        ):
+            self.vector_delete_block_consumed = True
+            self.vector_delete_started.set()
+            if not self.release_vector_delete.wait(timeout=5):
+                raise RuntimeError("test vector delete release timed out")
         for vector_id in vector_ids:
             self.vectors.pop(vector_id, None)
 
@@ -924,6 +946,83 @@ def test_partial_chunk_mapping_write_is_repairable_without_duplicates(
         f"{chapter_id}_english_notes_{index}"
         for index in range(len(expected_chunks))
     }
+
+
+async def test_overlapping_normal_index_and_repair_fail_closed_per_chapter(
+    monkeypatch, tmp_path
+):
+    progress_file = tmp_path / "progress.jsonl"
+    chapter_id = "chapter-overlapping-index"
+    unrelated_id = "chapter-unrelated-index"
+    chapter = {
+        "id": chapter_id,
+        "subject_id": "subject-1",
+        "notes_en": "## Motion\n\nStored repair notes. " * 20,
+    }
+    unrelated_chapter = {
+        "id": unrelated_id,
+        "subject_id": "subject-1",
+    }
+    client = SearchableIndexClient(
+        chapter_id=chapter_id,
+        block_vector_delete_for=f"old-vector-{chapter_id}",
+    )
+
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "INDEX_LOCK_TIMEOUT_SECONDS", 0.05)
+    progress_file.write_text(
+        json.dumps(
+            {
+                "chapter_id": chapter_id,
+                "status": importer.INDEX_FAILED_STATUS,
+                "index_attempt": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    normal_task = asyncio.create_task(
+        asyncio.to_thread(
+            importer.replace_index,
+            client,
+            chapter,
+            "## Motion\n\nFresh normal import notes. " * 20,
+            "normal-import",
+        )
+    )
+    assert await asyncio.to_thread(client.vector_delete_started.wait, 2)
+
+    unrelated_count = await asyncio.wait_for(
+        asyncio.to_thread(
+            importer.replace_index,
+            client,
+            unrelated_chapter,
+            "## Other\n\nUnrelated chapter notes.",
+            "normal-import",
+        ),
+        timeout=2,
+    )
+    repair_result = await asyncio.wait_for(
+        importer.repair_indexes(client, [chapter], [chapter_id]),
+        timeout=2,
+    )
+
+    assert unrelated_count == 1
+    assert repair_result == 1
+    failed = [
+        row
+        for row in read_jsonl(progress_file)
+        if row.get("chapter_id") == chapter_id
+    ][-1]
+    assert failed["status"] == importer.INDEX_FAILED_STATUS
+    assert failed["operation"] == "chapter_index_lock"
+    assert failed["retryable"] is True
+    assert "already being indexed" in failed["error"]
+
+    client.release_vector_delete.set()
+    assert await asyncio.wait_for(normal_task, timeout=2) == 1
 
 
 def test_latest_index_failure_overrides_an_earlier_done_record(monkeypatch, tmp_path):

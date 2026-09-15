@@ -94,3 +94,4 @@
 - [Live staff Access boundary](staff-live-access-boundary.md) — production staff verification needs both application auth and Cloudflare Access credentials
 - [Cloudflare release provenance](cloudflare-release-provenance.md) — release builds must keep generated curriculum, review cache, and browser output out of tracked source
 - [Production AdSense verification](production-ads-verification.md) — a live Google loader is not enough; verify compiled slot IDs, DOM metadata, fills, and stale hashed assets separately
+- [AHSEC index concurrency](ahsec-index-concurrency.md) — lock the full chapter write/index sequence and refresh repair notes after lock acquisition

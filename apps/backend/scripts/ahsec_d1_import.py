@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import difflib
+import fcntl
 import getpass
 import hashlib
 import json
@@ -44,6 +45,7 @@ import time
 import unicodedata
 import uuid
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -103,6 +105,10 @@ INDEX_FAILED_STATUS = "index_failed"
 INDEX_REPAIRED_STATUS = "index_repaired"
 MAX_INDEX_REPAIR_CHAPTERS = 10
 MAX_INDEX_REPAIR_ATTEMPTS = 3
+INDEX_LOCK_TIMEOUT_SECONDS = float(
+    os.getenv("AHSEC_INDEX_LOCK_TIMEOUT_SECONDS", "30")
+)
+INDEX_LOCK_POLL_SECONDS = 0.05
 ACTIVE_RUN_ID: str | None = None
 ACTIVE_RUN_COUNTS = {"completed": 0, "failed": 0}
 
@@ -113,6 +119,53 @@ class IndexReplacementError(RuntimeError):
     def __init__(self, operation: str, cause: Exception) -> None:
         self.operation = operation
         super().__init__(f"{operation} failed: {cause}")
+
+
+class ChapterIndexLockError(IndexReplacementError):
+    """A chapter index is busy and the caller should retry the operation."""
+
+    retryable = True
+
+
+class ChapterContentWriteError(RuntimeError):
+    """The notes/backup portion failed before index replacement began."""
+
+
+@contextmanager
+def chapter_index_lock(chapter_id: str):
+    """Serialize replacement of one chapter without blocking unrelated chapters."""
+    lock_dir = STATE_DIR / "index-locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_name = hashlib.sha256(str(chapter_id).encode("utf-8")).hexdigest()
+    lock_path = lock_dir / f"{lock_name}.lock"
+    timeout = max(0.0, INDEX_LOCK_TIMEOUT_SECONDS)
+    deadline = time.monotonic() + timeout
+
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ChapterIndexLockError(
+                        "chapter_index_lock",
+                        RuntimeError(
+                            f"chapter {chapter_id} is already being indexed; "
+                            f"retry after {timeout:g}s",
+                        ),
+                    )
+                time.sleep(
+                    min(
+                        INDEX_LOCK_POLL_SECONDS,
+                        max(0.0, deadline - time.monotonic()),
+                    )
+                )
+
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def parse_args() -> argparse.Namespace:
@@ -449,6 +502,8 @@ def _record_index_failure(
     }
     if source_pdf_url:
         details["source_pdf_url"] = source_pdf_url
+    if getattr(error, "retryable", False):
+        details["retryable"] = True
     record_progress(chapter_id, INDEX_FAILED_STATUS, **details)
 
 
@@ -958,6 +1013,17 @@ def replace_index(
     notes: str,
     source_url: str,
 ) -> int:
+    """Replace one chapter's index while holding its bounded chapter lock."""
+    with chapter_index_lock(str(chapter["id"])):
+        return _replace_index_unlocked(client, chapter, notes, source_url)
+
+
+def _replace_index_unlocked(
+    client: CloudflareClient,
+    chapter: dict[str, Any],
+    notes: str,
+    source_url: str,
+) -> int:
     text_chunks = chunk_text(notes)
     embeddings = client.embed(text_chunks)
 
@@ -1042,6 +1108,55 @@ def replace_index(
     return len(rows)
 
 
+def replace_notes_and_index(
+    client: CloudflareClient,
+    chapter: dict[str, Any],
+    notes: str,
+    sections: list[dict[str, str]],
+    source_url: str,
+    *,
+    index: bool,
+) -> int:
+    """Write one chapter and, when enabled, replace its index atomically."""
+    with chapter_index_lock(str(chapter["id"])):
+        try:
+            backup_existing(chapter, source_url)
+            write_notes(client, chapter, notes, sections, source_url)
+        except Exception as exc:
+            raise ChapterContentWriteError(str(exc)) from exc
+        if not index:
+            return 0
+        try:
+            return _replace_index_unlocked(client, chapter, notes, source_url)
+        except IndexReplacementError:
+            raise
+        except Exception as exc:
+            raise IndexReplacementError("index", exc) from exc
+
+
+def _replace_current_index(
+    client: CloudflareClient,
+    chapter: dict[str, Any],
+    source_url: str,
+) -> tuple[int, str]:
+    """Refresh notes after locking so a queued repair cannot use stale content."""
+    with chapter_index_lock(str(chapter["id"])):
+        try:
+            current_rows = client.query(
+                "SELECT id, subject_id, notes_en FROM chapters WHERE id = ?",
+                [chapter["id"]],
+            )
+        except Exception as exc:
+            raise IndexReplacementError("chapter_read", exc) from exc
+        current = dict(chapter)
+        if current_rows:
+            current.update(current_rows[0])
+        notes = str(current.get("notes_en") or "").strip()
+        if not notes:
+            raise RuntimeError("Chapter has no stored English notes to index")
+        return _replace_index_unlocked(client, current, notes, source_url), notes
+
+
 async def repair_indexes(
     client: CloudflareClient,
     chapters: list[dict[str, Any]],
@@ -1065,6 +1180,7 @@ async def repair_indexes(
     for chapter_id in chapter_ids:
         chapter = chapters_by_id[chapter_id]
         attempt = _index_repair_attempt(chapter_id)
+        notes = str(chapter.get("notes_en") or "").strip()
         if attempt > MAX_INDEX_REPAIR_ATTEMPTS:
             error = (
                 f"Index repair attempt limit reached ({MAX_INDEX_REPAIR_ATTEMPTS}); "
@@ -1081,15 +1197,11 @@ async def repair_indexes(
             log.error("%s: %s", chapter_id, error)
             continue
 
-        notes = str(chapter.get("notes_en") or "").strip()
         try:
-            if not notes:
-                raise RuntimeError("Chapter has no stored English notes to index")
-            chunk_count = await asyncio.to_thread(
-                replace_index,
+            chunk_count, notes = await asyncio.to_thread(
+                _replace_current_index,
                 client,
                 chapter,
-                notes,
                 "index-repair",
             )
             record_progress(
@@ -1716,39 +1828,34 @@ async def _run_main() -> int:
                 generated_cache[source_key] = (notes, sections)
             notes, sections = generated_cache[source_key]
 
-            backup_existing(chapter, str(source["source_pdf_url"]))
-            await asyncio.to_thread(
-                write_notes,
-                client,
-                chapter,
-                notes,
-                sections,
-                str(source["source_pdf_url"]),
-            )
             chunk_count = 0
-            if not args.skip_index:
-                index_attempt = _next_index_attempt(chapter_id)
-                try:
-                    chunk_count = await asyncio.to_thread(
-                        replace_index,
-                        client,
-                        chapter,
-                        notes,
-                        str(source["source_pdf_url"]),
-                    )
-                except Exception as exc:
-                    failed += 1
-                    ACTIVE_RUN_COUNTS["failed"] = failed
-                    _record_index_failure(
-                        chapter_id,
-                        exc,
-                        attempt=index_attempt,
-                        operation=_index_failure_operation(exc, "import"),
-                        source_pdf_url=str(source["source_pdf_url"]),
-                    )
-                    log.exception("Indexing failed after notes write for %s: %s", chapter_id, exc)
-                    await asyncio.sleep(max(0.0, args.delay))
-                    continue
+            index_attempt = _next_index_attempt(chapter_id)
+            try:
+                chunk_count = await asyncio.to_thread(
+                    replace_notes_and_index,
+                    client,
+                    chapter,
+                    notes,
+                    sections,
+                    str(source["source_pdf_url"]),
+                    index=not args.skip_index,
+                )
+            except ChapterContentWriteError as exc:
+                raise exc.__cause__ or exc
+            except IndexReplacementError as exc:
+                failed += 1
+                ACTIVE_RUN_COUNTS["failed"] = failed
+                _record_index_failure(
+                    chapter_id,
+                    exc,
+                    attempt=index_attempt,
+                    operation=_index_failure_operation(exc, "import"),
+                    notes_written=not isinstance(exc, ChapterIndexLockError),
+                    source_pdf_url=str(source["source_pdf_url"]),
+                )
+                log.exception("Chapter write/index failed for %s: %s", chapter_id, exc)
+                await asyncio.sleep(max(0.0, args.delay))
+                continue
             record_progress(
                 chapter_id,
                 "done",
