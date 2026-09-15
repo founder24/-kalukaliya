@@ -604,7 +604,7 @@ function QaCard({ section, index, total, onChange, onDelete, onMove }) {
 
 // ── Multi-image PYQ pages editor ─────────────────────────────────────────────
 
-function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
+function PyqPapersEditor({ chapterId, papers, onPapersChange, onPageUploaded }) {
   const [uploading, setUploading] = useState(false);
   const [uploadQueue, setUploadQueue] = useState([]);
   const [deletingId, setDeletingId] = useState(null);
@@ -628,7 +628,7 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
     setUploadQueue(queue);
     setUploading(true);
 
-    const { uploadedCount } = await uploadPyqFilesInOrder({
+    const { uploadedCount, failed } = await uploadPyqFilesInOrder({
       items: queue,
       uploadFile: async (file) => {
         const fd = new FormData();
@@ -640,7 +640,10 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
         );
         return res.data;
       },
-      onPageUploaded: (latestPapers) => onPapersChange(latestPapers),
+      onPageUploaded: (latestPapers, response) => {
+        onPapersChange(latestPapers);
+        onPageUploaded?.(latestPapers, response);
+      },
       onStatus: (item, status, error = '') => updateQueueItem(item.id, { status, error }),
     });
 
@@ -648,9 +651,11 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
     if (uploadedCount === queue.length) {
       toast.success(`${uploadedCount} page${uploadedCount === 1 ? '' : 's'} added in order`);
     } else if (uploadedCount > 0) {
-      toast.warning(`${uploadedCount} of ${queue.length} pages uploaded; retry the failed pages`);
+      const failedNames = failed.map(item => item.item.file.name).join(', ');
+      toast.warning(`${uploadedCount} of ${queue.length} pages uploaded; failed: ${failedNames}`);
     } else {
-      toast.error('No pages were uploaded');
+      const failedNames = failed.map(item => item.item.file.name).join(', ');
+      toast.error(`No pages were uploaded; failed: ${failedNames}`);
     }
   };
 
@@ -674,6 +679,7 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
     <div className="space-y-3">
       <input
         ref={fileRef}
+        data-testid="chapter-page-upload-input"
         type="file"
         accept=".jpg,.jpeg,.png,.webp,.gif"
         multiple
@@ -727,6 +733,8 @@ function PyqPapersEditor({ chapterId, papers, onPapersChange }) {
 
       {/* Upload zone — portrait A4 ratio when empty, compact strip when pages exist */}
       <button
+        type="button"
+        data-testid="chapter-page-upload-button"
         onClick={() => fileRef.current?.click()}
         disabled={uploading}
         className="w-full border-2 border-dashed border-amber-200 rounded-xl text-amber-500 hover:border-amber-400 hover:bg-amber-50/50 transition-colors disabled:opacity-50 flex flex-col items-center justify-center gap-2"
@@ -857,6 +865,24 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Reindex failed');
     } finally { setReindexing(r => ({ ...r, [scope]: false })); }
+  };
+
+  const handlePageUploaded = (_latestPapers, response) => {
+    const uploadedPage = response?.paper || _latestPapers?.[_latestPapers.length - 1];
+    const url = uploadedPage?.url;
+    if (!url) {
+      toast.error('Image uploaded but the server returned no image URL');
+      return;
+    }
+    setForm(current => {
+      const notes = current?.notes_en || '';
+      const pageCount = (notes.match(/!\[Page \d+\]\([^)]+\)/g) || []).length;
+      const markdown = `![Page ${pageCount + 1}](${url})`;
+      return {
+        ...current,
+        notes_en: notes.trim() ? `${notes.trimEnd()}\n\n${markdown}` : markdown,
+      };
+    });
   };
 
 
@@ -1160,6 +1186,12 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                   <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 text-xs text-blue-700">
                     <strong>Content layer</strong> — the study notes students read on the library page. Use Markdown.
                   </div>
+                  <PyqPapersEditor
+                    chapterId={chapterId}
+                    papers={form?.pyq_papers || []}
+                    onPapersChange={pyqPapers => setForm(current => ({ ...current, pyq_papers: pyqPapers }))}
+                    onPageUploaded={handlePageUploaded}
+                  />
                   <div>
                     <FieldLabel
                       chars={form?.notes_en?.length || 0}

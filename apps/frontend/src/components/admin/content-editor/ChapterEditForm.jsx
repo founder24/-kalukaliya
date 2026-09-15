@@ -405,6 +405,7 @@ export default function ChapterEditForm({
             <div className="flex items-center gap-1">
               <input
                 ref={pageInputRef}
+                data-testid="chapter-page-upload-input"
                 type="file"
                 accept=".jpg,.jpeg,.png,.webp,.gif,image/*"
                 multiple

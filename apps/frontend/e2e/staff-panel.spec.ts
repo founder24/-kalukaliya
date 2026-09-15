@@ -270,9 +270,12 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
     notes_rag_indexed_at: null,
     qa_rag_indexed_at: null,
     notes_generated: false,
+    pyq_papers: [],
     chapter_number: 1,
     version: 0,
   }];
+  const pyqUploadFilenames: string[] = [];
+  let failedPyqFilename: string | null = null;
 
   const json = (route: import('@playwright/test').Route, body: unknown, status = 200) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -382,6 +385,24 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
       });
       return json(route, { ok: true, chapter: chapters.find(item => item.id === chapterId) });
     }
+    if (route.request().method() === 'POST' && path.endsWith('/pyq-papers')) {
+      const postData = route.request().postData() || '';
+      const filename = postData.match(/filename="([^"]+)"/)?.[1] || 'unknown-image';
+      pyqUploadFilenames.push(filename);
+      if (filename === failedPyqFilename) {
+        return json(route, { detail: `Fixture rejected ${filename}` }, 502);
+      }
+      const paper = {
+        id: `paper-${pyqUploadFilenames.length}`,
+        url: `/r2/${filename}`,
+        uploaded_at: '2026-09-15T09:02:00.000Z',
+        ocr_status: 'pending',
+      };
+      const current = chapters.find(item => item.id === chapterId);
+      const pyqPapers = [...(current?.pyq_papers || []), paper];
+      chapters = chapters.map(item => item.id === chapterId ? { ...item, pyq_papers: pyqPapers } : item);
+      return json(route, { ok: true, paper, pyq_papers: pyqPapers }, 201);
+    }
     if (route.request().method() === 'PATCH') {
       chapters = chapters.map(item => item.id === chapterId ? { ...item, ...bodyOf(route), version: (item.version || 0) + 1 } : item);
       return json(route, chapters.find(item => item.id === chapterId) || {});
@@ -427,6 +448,10 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
 
   return {
     requests,
+    pyqUploadFilenames,
+    failPyqUpload(filename: string) {
+      failedPyqFilename = filename;
+    },
     hasRequest(method: string, path: string) {
       return requests.some(request => request.method === method && request.path === path);
     },
@@ -951,6 +976,58 @@ test.describe('Staff panel — sidebar sections', () => {
     expect(fixture.hasRequest('PATCH', '/api/v1/staff/content/chapter/chapter-1')).toBeTruthy();
     expect(fixture.hasRequest('POST', '/api/v1/staff/content/chapter/chapter-1/reindex')).toBeTruthy();
     expect(consoleErrors, 'No uncaught console errors during bilingual chapter editing').toHaveLength(0);
+  });
+
+  test('uploads selected image pages in order and appends consecutive markdown pages', async ({ page }) => {
+    const fixture = await setupContentEditorFixture(page);
+    staffMocks.enableStrictUnexpectedApiRequests();
+
+    await gotoStaff(page);
+    await expect(page.getByRole('heading', { name: 'Subjects', exact: true })).toBeVisible();
+    await page.locator('main select').nth(0).selectOption('board-1');
+    await page.locator('main select').nth(1).selectOption('class-1');
+    await page.locator('main select').nth(2).selectOption('stream-1');
+    await page.getByRole('button', { name: /Physics/ }).click();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await page.getByRole('button', { name: /^Notes RAG/ }).click();
+    const input = page.getByTestId('chapter-page-upload-input');
+    await input.setInputFiles([
+      { name: 'page-1.png', mimeType: 'image/png', buffer: Buffer.from('page one') },
+      { name: 'page-2.png', mimeType: 'image/png', buffer: Buffer.from('page two') },
+    ]);
+
+    const content = page.getByPlaceholder(/Study notes in English/);
+    await expect(content).toHaveValue(/!\[Page 1\]\(\/r2\/page-1\.png\)/);
+    await expect(content).toHaveValue(/!\[Page 2\]\(\/r2\/page-2\.png\)/);
+    expect(fixture.pyqUploadFilenames).toEqual(['page-1.png', 'page-2.png']);
+    expect(fixture.hasRequest('POST', '/api/v1/staff/content/chapter/chapter-1/pyq-papers')).toBeTruthy();
+    expect(fixture.hasRequest('POST', '/api/v1/admin/content/upload-image')).toBeFalsy();
+  });
+
+  test('reports partial image-page failures while keeping successful pages', async ({ page }) => {
+    const fixture = await setupContentEditorFixture(page);
+    fixture.failPyqUpload('bad-page.png');
+    staffMocks.enableStrictUnexpectedApiRequests();
+
+    await gotoStaff(page);
+    await page.locator('main select').nth(0).selectOption('board-1');
+    await page.locator('main select').nth(1).selectOption('class-1');
+    await page.locator('main select').nth(2).selectOption('stream-1');
+    await page.getByRole('button', { name: /Physics/ }).click();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByText(/Ch\. 1 · Motion/)).toBeVisible();
+    await page.getByRole('button', { name: /^Notes RAG/ }).click();
+    await page.getByTestId('chapter-page-upload-input').setInputFiles([
+      { name: 'bad-page.png', mimeType: 'image/png', buffer: Buffer.from('bad page') },
+      { name: 'good-page.png', mimeType: 'image/png', buffer: Buffer.from('good page') },
+    ]);
+
+    await expect(page.getByText(/1 of 2 pages uploaded; failed: bad-page\.png/)).toBeVisible();
+    await expect(page.getByText(/Fixture rejected bad-page\.png/)).toBeVisible();
+    await expect(page.getByPlaceholder(/Study notes in English/))
+      .toHaveValue(/!\[Page 1\]\(\/r2\/good-page\.png\)/);
+    expect(fixture.pyqUploadFilenames).toEqual(['bad-page.png', 'good-page.png']);
   });
 
   // ──────────────────────────────────────────────────────────────────────────
