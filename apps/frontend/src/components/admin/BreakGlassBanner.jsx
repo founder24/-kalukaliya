@@ -13,22 +13,40 @@ export default function BreakGlassBanner({ adminToken }) {
   const [hasSucceededOnce, setHasSucceededOnce] = useState(false);
   const [stale, setStale] = useState(false);
   const pollRef = useRef(null);
+  const requestSequenceRef = useRef(0);
+  const adminTokenRef = useRef(adminToken);
+  adminTokenRef.current = adminToken;
 
   const fetchStatus = useCallback(async () => {
     if (!adminToken) return;
+    const requestToken = adminToken;
+    const requestSequence = ++requestSequenceRef.current;
     setLoading(true);
     try {
       const response = await adminGetBreakGlassStatus(adminToken);
+      if (
+        requestSequence !== requestSequenceRef.current ||
+        requestToken !== adminTokenRef.current
+      ) return;
       setActive(Boolean(response?.data?.active));
       setHasSucceededOnce(true);
       setStale(false);
     } catch {
+      if (
+        requestSequence !== requestSequenceRef.current ||
+        requestToken !== adminTokenRef.current
+      ) return;
       // Keep a last-known active warning visible through transient failures.
       // Before the first successful read, show an explicit unknown state rather
       // than silently implying that Cloudflare Access is enforcing its policy.
       setStale(true);
     } finally {
-      setLoading(false);
+      if (
+        requestSequence === requestSequenceRef.current &&
+        requestToken === adminTokenRef.current
+      ) {
+        setLoading(false);
+      }
     }
   }, [adminToken]);
 
@@ -37,6 +55,8 @@ export default function BreakGlassBanner({ adminToken }) {
     fetchStatus();
     pollRef.current = setInterval(fetchStatus, POLL_MS);
     return () => {
+      // Invalidate any response that belongs to the previous token/effect.
+      requestSequenceRef.current += 1;
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [adminToken, fetchStatus]);

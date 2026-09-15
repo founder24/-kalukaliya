@@ -462,6 +462,13 @@ export const contentAuditLog = sqliteTable('content_audit_log', {
 }, (t) => [
   index('cal_target_idx').on(t.targetType, t.targetId),
   index('cal_expires_idx').on(t.expiresAt),
+  index('cal_roi_download_history_idx').on(
+    t.action,
+    t.targetType,
+    t.targetId,
+    t.createdAt,
+    t.id,
+  ),
 ]);
 
 // Browser analytics is retained as a deliberately small, privacy-preserving
@@ -534,6 +541,19 @@ export const referralRoiControls = sqliteTable('referral_roi_controls', {
   updatedBy: text('updated_by').notNull(),
   updatedAt: integer('updated_at').notNull(),
   expiresAt: integer('expires_at').notNull(),
+});
+
+export const adsenseReconciliationStatus = sqliteTable('adsense_reconciliation_status', {
+  id: text('id').primaryKey(),
+  status: text('status').notNull(),
+  startedAt: integer('started_at').notNull(),
+  completedAt: integer('completed_at'),
+  weeks: integer('weeks').notNull().default(0),
+  fetched: integer('fetched').notNull().default(0),
+  imported: integer('imported').notNull().default(0),
+  idempotent: integer('idempotent').notNull().default(0),
+  calculated: integer('calculated').notNull().default(0),
+  failuresJson: text('failures_json').notNull().default('[]'),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

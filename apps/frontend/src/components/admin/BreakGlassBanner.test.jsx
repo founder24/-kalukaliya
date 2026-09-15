@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 
 vi.mock('@/utils/api', () => ({
@@ -10,6 +10,14 @@ import BreakGlassBanner from './BreakGlassBanner.jsx';
 import { adminGetBreakGlassStatus } from '@/utils/api';
 
 const BANNER = 'break-glass-banner';
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 describe('BreakGlassBanner', () => {
   beforeEach(() => {
@@ -80,6 +88,102 @@ describe('BreakGlassBanner', () => {
     await waitFor(() => expect(adminGetBreakGlassStatus).toHaveBeenCalled());
     expect(await screen.findByTestId(BANNER)).toHaveTextContent(/status is unavailable/i);
     expect(screen.getByTestId('break-glass-banner-stale')).toBeInTheDocument();
+  });
+
+  it('ignores a response started with the previous admin token', async () => {
+    const previousTokenRequest = deferred();
+    const currentTokenRequest = deferred();
+    adminGetBreakGlassStatus
+      .mockReturnValueOnce(previousTokenRequest.promise)
+      .mockReturnValueOnce(currentTokenRequest.promise);
+
+    const { rerender } = render(<BreakGlassBanner adminToken="previous.jwt" />);
+    await waitFor(() => {
+      expect(adminGetBreakGlassStatus).toHaveBeenCalledWith('previous.jwt');
+    });
+
+    rerender(<BreakGlassBanner adminToken="current.jwt" />);
+    await waitFor(() => {
+      expect(adminGetBreakGlassStatus).toHaveBeenCalledWith('current.jwt');
+    });
+
+    await act(async () => {
+      previousTokenRequest.resolve({ data: { active: true } });
+    });
+
+    expect(screen.queryByTestId(BANNER)).toBeNull();
+
+    await act(async () => {
+      currentTokenRequest.resolve({ data: { active: false } });
+    });
+
+    expect(screen.queryByTestId(BANNER)).toBeNull();
+  });
+
+  it('keeps the newer active response when an older manual response is inactive', async () => {
+    vi.useFakeTimers();
+    try {
+      adminGetBreakGlassStatus.mockResolvedValueOnce({ data: { active: true } });
+      const manualRequest = deferred();
+      const automaticRequest = deferred();
+      adminGetBreakGlassStatus
+        .mockReturnValueOnce(manualRequest.promise)
+        .mockReturnValueOnce(automaticRequest.promise);
+
+      render(<BreakGlassBanner adminToken="admin.jwt" />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByTestId('break-glass-banner-recheck'));
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(adminGetBreakGlassStatus).toHaveBeenCalledTimes(3);
+
+      await act(async () => {
+        automaticRequest.resolve({ data: { active: true } });
+      });
+      expect(screen.getByTestId(BANNER)).toHaveTextContent(/Access is bypassed/i);
+
+      await act(async () => {
+        manualRequest.resolve({ data: { active: false } });
+      });
+      expect(screen.getByTestId(BANNER)).toHaveTextContent(/Access is bypassed/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the newer inactive response when an older manual response is active', async () => {
+    vi.useFakeTimers();
+    try {
+      adminGetBreakGlassStatus.mockResolvedValueOnce({ data: { active: true } });
+      const manualRequest = deferred();
+      const automaticRequest = deferred();
+      adminGetBreakGlassStatus
+        .mockReturnValueOnce(manualRequest.promise)
+        .mockReturnValueOnce(automaticRequest.promise);
+
+      render(<BreakGlassBanner adminToken="admin.jwt" />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByTestId('break-glass-banner-recheck'));
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(adminGetBreakGlassStatus).toHaveBeenCalledTimes(3);
+
+      await act(async () => {
+        automaticRequest.resolve({ data: { active: false } });
+      });
+      expect(screen.queryByTestId(BANNER)).toBeNull();
+
+      await act(async () => {
+        manualRequest.resolve({ data: { active: true } });
+      });
+      expect(screen.queryByTestId(BANNER)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not call the retired diagnostics route', async () => {

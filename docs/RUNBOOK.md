@@ -116,6 +116,26 @@ file's chapter list by itself. It fetches the current D1 chapter set, rebuilds
 the cleanup scope, and requires the report's filters, sorted chapter IDs,
 scope fingerprint, change records, and age to match before any write.
 
+### Run the cleanup handoff in GitHub Actions
+
+Use the **AHSEC Cleanup Preview** workflow for an ephemeral preview/apply
+handoff between isolated CI runners:
+
+1. Dispatch the workflow with the class, subject, and optional chapter limit.
+2. Review the retained `ahsec-cleanup-preview-*` artifact from the completed
+   preview job. It contains the JSON report and its SHA-256 checksum and is
+   retained for 90 days.
+3. For a live apply, set `confirm_production_write` when dispatching the
+   workflow. After the preview upload, the apply job pauses at the
+   `ahsec-production` environment so the already-uploaded artifact can be
+   reviewed before approval; it then downloads that named artifact, verifies
+   its checksum, and invokes the importer with
+   `--confirm-production-write`.
+
+Configure required reviewers on the `ahsec-production` GitHub environment
+before using the workflow for live cleanup. Leaving the confirmation input
+disabled produces a review-only run and never starts the apply job.
+
 ## Emergency Contacts / Escalation
 
 - **P1 (site down)**: Page on-call immediately via PagerDuty/Opsgenie

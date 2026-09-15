@@ -12,6 +12,7 @@ import AdminUsers from '@/components/admin/AdminUsers';
 import AdminConversations from '@/components/admin/AdminConversations';
 import StaffOperations from '@/components/staff/StaffOperations';
 import { canStaffCapability, isStaffOrAdmin } from '@/utils/staffAccess';
+import { buildStaffChapterPatchPayload, normalizeStaffChapterCreateStatus } from '@/utils/staffChapterPayload';
 
 const api = () => {
   const token = getToken();
@@ -754,7 +755,7 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
     try {
       // Topics have their own durable API and are intentionally excluded here;
       // sending the stale editor snapshot could overwrite a topic mutation.
-      const { published_topics: _topics, ...chapterPayload } = form;
+      const chapterPayload = buildStaffChapterPatchPayload(form);
       if (!allowed('content:publish')) delete chapterPayload.status;
       await api().patch(`/staff/content/chapter/${chapterId}`, chapterPayload);
       toast.success('Chapter saved');
@@ -1297,8 +1298,9 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
 
 // ── Chapters view ─────────────────────────────────────────────────────────────
 
-function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBack, onEditChapter, onReindexChapter, onChapterCreated }) {
+function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBack, onEditChapter, onReindexChapter, onChapterCreated, user }) {
   const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400';
+  const canPublish = canStaffCapability(user, 'content:publish');
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
@@ -1322,6 +1324,10 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
         subject_id: subject.id,
         chapter_number: newChapterForm.chapter_number ? parseInt(newChapterForm.chapter_number) : undefined,
       };
+      payload.status = normalizeStaffChapterCreateStatus(
+        newChapterForm.status,
+        canStaffCapability(user, 'content:publish'),
+      );
       const res = await api().post('/staff/content/chapters', payload);
       onChapterCreated?.(res.data);
       setNewChapterForm({ title: '', chapter_number: '', content_type: 'notes', status: 'draft', description: '' });
@@ -1619,11 +1625,12 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
             </div>
             <div>
               <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Status</label>
-              <select className={`${inputCls} bg-white`} value={newChapterForm.status} onChange={e => setNewChapterForm(f => ({...f, status: e.target.value}))}>
+              <select className={`${inputCls} bg-white disabled:bg-gray-100 disabled:text-gray-400`} value={newChapterForm.status} disabled={!canPublish} onChange={e => setNewChapterForm(f => ({...f, status: e.target.value}))}>
                 <option value="draft">Draft</option>
                 <option value="published">Published</option>
                 <option value="planned">Planned</option>
               </select>
+              {!canPublish && <p className="mt-1 text-[10px] text-gray-400">Publish permission is required to change this from Draft.</p>}
             </div>
           </div>
           <div>
@@ -2601,6 +2608,20 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
     });
   }, []);
 
+  const handleOpenRepairChapter = useCallback(async (chapterId) => {
+    if (!chapterId) return;
+    try {
+      await api().get(`/staff/content/chapter/${encodeURIComponent(chapterId)}`);
+      setEditingChapterId(chapterId);
+    } catch (error) {
+      if (error?.response?.status === 404) {
+        toast.error('This chapter is no longer available. The repair queue entry was kept.');
+      } else {
+        toast.error(error?.response?.data?.detail || 'Chapter could not be opened.');
+      }
+    }
+  }, []);
+
   const handleViewChange = (v) => {
     if (['dashboard', 'analytics', 'users', 'conversations'].includes(v) && !hasStaffAccess) {
       toast.error('Dashboard, analytics, users, and conversations are available to staff and administrators.');
@@ -2696,6 +2717,7 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
               chapters={chapters}
               selectedSubject={selectedSubject}
               onRefresh={() => selectedSubject && selectSubject(selectedSubject)}
+              onOpenChapter={handleOpenRepairChapter}
             />
           )}
           {view === 'subjects' && (
@@ -2704,7 +2726,7 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
           {view === 'chapters' && selectedSubject && (
             chapterError
               ? <div className="p-8 text-center"><p className="text-sm font-semibold text-red-700">{chapterError}</p><button type="button" onClick={() => selectSubject(selectedSubject)} className="mt-4 px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-semibold">Try again</button></div>
-              : <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} onReindexChapter={handleReindexChapter} onChapterCreated={handleChapterCreated} />
+              : <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} onReindexChapter={handleReindexChapter} onChapterCreated={handleChapterCreated} user={effectiveUser} />
           )}
         </main>
       </div>

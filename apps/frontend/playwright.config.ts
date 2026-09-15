@@ -5,6 +5,7 @@ const systemChromium = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
   || undefined;
 const webServerCommand = process.env.PLAYWRIGHT_WEB_SERVER_COMMAND || 'pnpm dev';
 const webServerUrl = process.env.PLAYWRIGHT_WEB_SERVER_URL || 'http://localhost:5000';
+const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEB_SERVER === '1';
 
 export default defineConfig({
   testDir: './e2e',
@@ -29,10 +30,12 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: webServerCommand,
-    url: webServerUrl,
-    reuseExistingServer: true,
-    timeout: 30000,
-  },
+  ...(skipWebServer ? {} : {
+    webServer: {
+      command: webServerCommand,
+      url: webServerUrl,
+      reuseExistingServer: true,
+      timeout: 30000,
+    },
+  }),
 });
