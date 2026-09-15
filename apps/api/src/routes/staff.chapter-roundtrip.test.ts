@@ -696,8 +696,9 @@ describe('Staff chapter edit round-trip through D1', () => {
       const body = await res.json() as { ok: boolean; pyq_papers: Array<{ id: string }> };
       expect(body.ok).toBe(true);
       expect(body.pyq_papers).not.toContainEqual(expect.objectContaining({ id: paper.id }));
-      expect(deletedIds).toHaveLength(1);
-      expect(deletedIds[0]).toEqual(expect.arrayContaining([
+      expect(deletedIds.length).toBeGreaterThan(1);
+      expect(deletedIds.every(ids => ids.length <= 100)).toBe(true);
+      expect(deletedIds.flat()).toEqual(expect.arrayContaining([
         `${chapterId}_english_pyq_0`,
         `${chapterId}_assamese_pyq_499`,
       ]));
@@ -1286,12 +1287,13 @@ describe('Staff subject-level PYQ deletion', () => {
       expect(body.pyq_papers).not.toContainEqual(expect.objectContaining({ id: paperId }));
       expect(body.pyq_papers).toContainEqual(expect.objectContaining({ id: retainedPaperId }));
 
-      expect(deletedIds).toHaveLength(1);
-      expect(deletedIds[0]).toEqual(expect.arrayContaining([
+      expect(deletedIds.length).toBeGreaterThan(1);
+      expect(deletedIds.every(ids => ids.length <= 100)).toBe(true);
+      expect(deletedIds.flat()).toEqual(expect.arrayContaining([
         `${paperId}_english_pyq_0`,
         `${paperId}_assamese_pyq_499`,
       ]));
-      expect(deletedIds[0]).not.toContain(`${retainedPaperId}_english_pyq_0`);
+      expect(deletedIds.flat()).not.toContain(`${retainedPaperId}_english_pyq_0`);
 
       const mappings = await sharedEnv.DB
         .prepare('SELECT chapter_id, vector_id FROM chunks WHERE source_type = ? ORDER BY chapter_id')

@@ -678,9 +678,10 @@ async function deleteStaleVectors(
   // Union of both sets — duplicates are harmless but wastes budget.
   const allIds = [...new Set([...deterministicIds, ...d1Ids])];
 
-  // Vectorize deleteByIds silently ignores non-existent IDs.
-  // Batch to 1000 per call to stay within API limits.
-  const BATCH = 1000;
+  // Vectorize rejects payloads larger than 100 IDs. Keep this limit local to
+  // the cleanup path because it also sweeps legacy IDs (usually 1,000 IDs
+  // before the D1 mappings are added).
+  const BATCH = 100;
   for (let i = 0; i < allIds.length; i += BATCH) {
     await env.VECTORIZE.deleteByIds(allIds.slice(i, i + BATCH));
   }

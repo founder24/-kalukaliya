@@ -9,12 +9,24 @@ import { toast } from 'sonner';
 import { API, authHeaders } from '@/utils/adminHelpers';
 
 const STATUS_MAP = {
+  done:        { label: 'Saved',      color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
   uploaded:    { label: 'Uploaded',   color: 'text-blue-500',   bg: 'bg-blue-500/10' },
   ocr_running: { label: 'Processing', color: 'text-amber-500',  bg: 'bg-amber-500/10' },
   ocr_done:    { label: 'Done',       color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
   ocr_error:   { label: 'Error',      color: 'text-red-500',    bg: 'bg-red-500/10' },
   fetch_error: { label: 'Fetch Error', color: 'text-red-500',   bg: 'bg-red-500/10' },
 };
+
+function normalizePage(page, index) {
+  return {
+    ...page,
+    filename: page.filename || `Page ${index + 1}`,
+    file_url: page.file_url || page.url || '',
+    is_image: true,
+    processing_status: page.processing_status || 'done',
+    exam_year: page.exam_year || page.year || '',
+  };
+}
 
 const SIZE_PRESETS = [
   { label: 'S', value: 25 },
@@ -207,7 +219,6 @@ export default function PYQUploadPanel({
   const [textContent, setTextContent] = useState('');
   const [submittingText, setSubmittingText] = useState(false);
   const [viewMode, setViewMode] = useState('grid');
-  const [groupImages, setGroupImages] = useState(false);
   const fileInputRef = useRef(null);
   const dropRef = useRef(null);
   const uploadingRef = useRef(false);
@@ -217,10 +228,10 @@ export default function PYQUploadPanel({
     setLoading(true);
     try {
       const res = await axios.get(
-        `${API}/admin/pyq/by-chapter/${chapterId}`,
+        `${API}/staff/content/chapter/${chapterId}`,
         authHeaders(adminToken)
       );
-      setPyqs(res.data?.pyqs || []);
+      setPyqs((res.data?.pyq_papers || []).map(normalizePage));
     } catch {
       setPyqs([]);
     } finally {
@@ -232,12 +243,12 @@ export default function PYQUploadPanel({
 
   const uploadFiles = useCallback(async (fileList) => {
     if (!fileList || fileList.length === 0) return;
-    const allowedExts = ['.pdf','.jpg','.jpeg','.png','.webp','.gif','.bmp','.tiff','.tif'];
+    const allowedExts = ['.jpg','.jpeg','.png','.webp','.gif'];
     const valid = Array.from(fileList).filter(
-      f => f.type === 'application/pdf' || f.type.startsWith('image/') || allowedExts.some(ext => f.name.toLowerCase().endsWith(ext))
+      f => f.type.startsWith('image/') || allowedExts.some(ext => f.name.toLowerCase().endsWith(ext))
     );
     if (valid.length === 0) {
-      toast.error('Only PDF and image files (JPG, PNG, WebP) are supported');
+      toast.error('Select page images (JPG, PNG, WebP, or GIF)');
       return;
     }
     if (valid.some(f => f.size > 50 * 1024 * 1024)) {
@@ -247,39 +258,42 @@ export default function PYQUploadPanel({
     setUploading(true);
     uploadingRef.current = true;
     try {
-      const formData = new FormData();
-      valid.forEach(f => formData.append('files', f));
-      formData.append('exam_year', String(examYear));
-      formData.append('paper_type', 'major');
-      formData.append('subject_id', subjectId || '');
-      formData.append('board_id', boardId || '');
-      formData.append('class_id', classId || '');
-      formData.append('stream_id', streamId || '');
-      formData.append('chapter_id', chapterId || '');
-      // group=true → all images in this batch become one multi-page PYQ entry
-      formData.append('group', groupImages ? 'true' : 'false');
-
-      // NOTE: Do NOT set Content-Type manually — axios auto-adds the correct
-      // multipart/form-data boundary when the body is FormData.
-      const res = await axios.post(`${API}/admin/pyq/upload`, formData, authHeaders(adminToken));
-      const imgCount = valid.filter(f => f.type.startsWith('image/')).length;
-      const pdfCount = valid.length - imgCount;
-      const parts = [];
-      if (pdfCount > 0) parts.push(`${pdfCount} PDF${pdfCount > 1 ? 's' : ''}`);
-      if (imgCount > 0) {
-        if (groupImages && imgCount > 1) parts.push(`${imgCount} images grouped as 1 PYQ`);
-        else parts.push(`${imgCount} image${imgCount > 1 ? 's' : ''}`);
+      // The chapter route stores one image record per request. Upload
+      // sequentially so the selected browser order becomes the public page
+      // order and a failed page does not discard the pages before it.
+      let uploaded = 0;
+      let failed = 0;
+      for (const file of valid) {
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('year', String(examYear));
+          const res = await axios.post(
+            `${API}/staff/content/chapter/${chapterId}/pyq-papers`,
+            formData,
+            authHeaders(adminToken),
+          );
+          setPyqs((res.data?.pyq_papers || []).map(normalizePage));
+          uploaded += 1;
+        } catch {
+          failed += 1;
+        }
       }
-      toast.success(`${parts.join(' + ')} uploaded`);
-      await loadPyqs();
+      if (failed === 0) {
+        toast.success(`${uploaded} page${uploaded === 1 ? '' : 's'} uploaded in order`);
+      } else if (uploaded > 0) {
+        toast.warning(`${uploaded} page${uploaded === 1 ? '' : 's'} uploaded; ${failed} failed — retry the failed pages`);
+      } else {
+        toast.error('No page images were uploaded');
+      }
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Upload failed');
+      toast.error(e.response?.data?.detail || 'Some page images could not be uploaded');
     } finally {
       setUploading(false);
       uploadingRef.current = false;
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, [examYear, subjectId, boardId, classId, streamId, chapterId, adminToken, groupImages, loadPyqs]);
+  }, [examYear, chapterId, adminToken]);
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
@@ -294,54 +308,26 @@ export default function PYQUploadPanel({
   const handleDragOver = useCallback((e) => { e.preventDefault(); setDragging(true); }, []);
   const handleDragLeave = useCallback(() => setDragging(false), []);
 
-  const processOne = useCallback(async (pyqId) => {
-    setProcessing(prev => new Set([...prev, pyqId]));
-    try {
-      await axios.post(
-        `${API}/admin/pyq/agentic-process`,
-        { pyq_id: pyqId },
-        authHeaders(adminToken)
-      );
-      toast.success('PYQ processed — OCR complete');
-      await loadPyqs();
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'Processing failed');
-    } finally {
-      setProcessing(prev => { const s = new Set(prev); s.delete(pyqId); return s; });
-    }
-  }, [adminToken, loadPyqs]);
+  const processOne = useCallback(async () => {
+    toast.info('Image pages are stored directly; OCR is not required.');
+  }, []);
 
-  const processAll = useCallback(async () => {
-    const pending = pyqs.filter(p => p.processing_status === 'uploaded' && (p.is_pdf || p.is_image));
-    if (pending.length === 0) {
-      toast.info('No unprocessed files to process');
-      return;
-    }
-    setBatchProcessing(true);
-    try {
-      const res = await axios.post(
-        `${API}/admin/pyq/batch-process`,
-        { pyq_ids: pending.map(p => p.id) },
-        authHeaders(adminToken)
-      );
-      toast.success(`Processed ${res.data?.succeeded || 0} / ${res.data?.total || 0} files`);
-      await loadPyqs();
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'Batch processing failed');
-    } finally {
-      setBatchProcessing(false);
-    }
-  }, [pyqs, adminToken, loadPyqs]);
+  const processAll = useCallback(() => {
+    toast.info('Image pages are stored directly; OCR is not required.');
+  }, []);
 
   const deleteOne = useCallback(async (pyqId) => {
     try {
-      await axios.delete(`${API}/admin/pyq/${pyqId}`, authHeaders(adminToken));
-      toast.success('PYQ deleted');
+      await axios.delete(
+        `${API}/staff/content/chapter/${chapterId}/pyq-papers/${pyqId}`,
+        authHeaders(adminToken),
+      );
+      toast.success('Page deleted');
       setPyqs(prev => prev.filter(p => p.id !== pyqId));
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Delete failed');
     }
-  }, [adminToken]);
+  }, [adminToken, chapterId]);
 
   const submitText = useCallback(async () => {
     if (!textContent.trim()) {
@@ -443,25 +429,10 @@ export default function PYQUploadPanel({
             )}
           </div>
 
-          {/* Group toggle — shown above the drop zone */}
-          <button
-            onClick={() => setGroupImages(v => !v)}
-            className={`flex items-center gap-2 w-full px-3 py-2 rounded-xl border text-xs font-medium transition-all ${
-              groupImages
-                ? 'border-violet-400 bg-violet-500/10 text-violet-700'
-                : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
-            }`}
-          >
-            <Layers size={13} className={groupImages ? 'text-violet-500' : 'text-gray-400'} />
-            <span className="flex-1 text-left">
-              {groupImages
-                ? 'Group mode ON — all selected images will form one multi-page PYQ'
-                : 'Group images as one PYQ (for multi-page scans)'}
-            </span>
-            <span className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${groupImages ? 'bg-violet-500' : 'bg-gray-200'}`}>
-              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${groupImages ? 'left-4' : 'left-0.5'}`} />
-            </span>
-          </button>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-blue-200 bg-blue-50 text-xs text-blue-700">
+            <Layers size={13} className="text-blue-500" />
+            <span><strong>Pagewise upload:</strong> select multiple images and they will be saved in selection order.</span>
+          </div>
 
           <div
             ref={dropRef}
@@ -478,7 +449,7 @@ export default function PYQUploadPanel({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tiff,.tif,image/*"
+              accept=".jpg,.jpeg,.png,.webp,.gif,image/*"
               multiple
               className="hidden"
               onChange={(e) => uploadFiles(e.target.files)}
@@ -498,7 +469,7 @@ export default function PYQUploadPanel({
                 </div>
                 <div className="text-center">
                   <span className="text-sm font-medium text-gray-700 block">
-                    {groupImages ? 'Drop page images here (will group as one PYQ)' : 'Drop images or PDFs here'}
+                    Drop page images here
                   </span>
                   <span className="text-xs text-gray-400 mt-0.5 block">
                     or <span className="text-amber-600 font-medium">click to browse</span>
@@ -508,7 +479,6 @@ export default function PYQUploadPanel({
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">JPG</span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">PNG</span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">WebP</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">PDF</span>
                 </div>
               </>
             )}

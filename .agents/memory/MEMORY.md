@@ -99,3 +99,4 @@
 - [Vite optimized dependency stability](vite-optimized-dependency-stability.md) — pre-optimize lazy staff/admin UI dependencies to prevent stale browser chunks during dev reloads
 - [Workers AI RAG indexing contract](workers-ai-rag-indexing-contract.md) — normalize bge-m3 array responses and keep Vectorize deletes within the 100-ID request limit
 - [Chapter PYQ page order](pyq-page-order.md) — chapter image records are ordered one-page entries; normalize legacy grouped data only at the viewer boundary
+- [Staff chapter PYQ uploads](staff-pyq-page-upload.md) — admin editor page images must use the Worker staff chapter route, not retired legacy admin PYQ endpoints
