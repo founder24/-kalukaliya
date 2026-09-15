@@ -94,7 +94,9 @@ export default function ChapterEditForm({
     const formData = new FormData();
     formData.append('file', image);
     const res = await axios.post(`${API}/staff/content/chapter/${editTarget.id}/pyq-papers`, formData, authHeaders(adminToken));
-    return res.data.paper?.url;
+    const url = res.data.paper?.url;
+    if (!url) throw new Error('Upload response did not include an image URL');
+    return url;
   }, [adminToken, editTarget?.id]);
 
   const handleAddPages = useCallback(() => {
