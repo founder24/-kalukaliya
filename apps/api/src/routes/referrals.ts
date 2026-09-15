@@ -48,7 +48,7 @@ import {
   calculateWeeklyRoi,
   ingestAdRevenueReport,
   listAdNetworkInventory,
-  listRoiEvidenceDownloadAudits,
+  listRoiEvidenceDownloadAuditPage,
   normalizeRoiAuditLimit,
   normalizeRoiReportLimit,
   recordRoiControls,
@@ -621,13 +621,16 @@ adminReferralRouter.get('/roi/dashboard/export-audits', async (c) => {
   const auth = await requireReferralCapability(c, REFERRAL_POLICY.access.settlementCapability);
   if (auth instanceof Response) return auth;
   try {
-    return c.json({
-      audits: await listRoiEvidenceDownloadAudits(
-        c.env.DB,
-        normalizeRoiAuditLimit(Number(c.req.query('limit') ?? 25)),
-      ),
+    const cursor = c.req.query('cursor')?.trim();
+    const page = await listRoiEvidenceDownloadAuditPage(c.env.DB, {
+      limit: normalizeRoiAuditLimit(Number(c.req.query('limit') ?? 25)),
+      ...(cursor ? { cursor } : {}),
     });
-  } catch {
+    return c.json({ audits: page.audits, next_cursor: page.nextCursor });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Invalid ROI audit cursor') {
+      return c.json({ detail: 'Invalid ROI audit cursor' }, 422);
+    }
     return c.json({ detail: 'Referral ROI evidence audit history unavailable' }, 503);
   }
 });

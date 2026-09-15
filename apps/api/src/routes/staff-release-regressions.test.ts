@@ -243,17 +243,38 @@ describe('release regressions', () => {
       }),
       capturedAt,
     ).run();
+    await env.DB.prepare(`
+      INSERT INTO content_audit_log
+        (id, user_id, action, target_type, target_id, diff, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      'roi-audit-listing-older',
+      'audit-operator-older',
+      'download_referral_roi_evidence',
+      'referral_roi',
+      'dashboard',
+      JSON.stringify({ report_limit: 8 }),
+      capturedAt - 1,
+    ).run();
 
     const denied = await fetchWorker(
       request('/api/v1/admin/referrals/roi/dashboard/export-audits?limit=1', limited),
     );
     expect(denied.status).toBe(403);
 
+    const invalidCursor = await fetchWorker(
+      request('/api/v1/admin/referrals/roi/dashboard/export-audits?cursor=invalid', settler),
+    );
+    expect(invalidCursor.status).toBe(422);
+
     const response = await fetchWorker(
       request('/api/v1/admin/referrals/roi/dashboard/export-audits?limit=1', settler),
     );
     expect(response.status).toBe(200);
-    const body = await response.json();
+    const body = await response.json() as {
+      audits: Array<Record<string, unknown>>;
+      next_cursor: string | null;
+    };
     expect(body).toEqual({
       audits: [{
         actor_id: 'audit-operator',
@@ -261,9 +282,26 @@ describe('release regressions', () => {
         action: 'download_referral_roi_evidence',
         report_limit: 7,
       }],
+      next_cursor: expect.any(String),
     });
     expect(JSON.stringify(body)).not.toContain('must-not-leak');
     expect(JSON.stringify(body)).not.toContain('private-beneficiary-data');
+
+    const nextPage = await fetchWorker(
+      request(
+        `/api/v1/admin/referrals/roi/dashboard/export-audits?limit=1&cursor=${encodeURIComponent(body.next_cursor ?? '')}`,
+        settler,
+      ),
+    );
+    expect(nextPage.status).toBe(200);
+    expect(await nextPage.json()).toMatchObject({
+      audits: [{
+        actor_id: 'audit-operator-older',
+        captured_at: capturedAt - 1,
+        action: 'download_referral_roi_evidence',
+        report_limit: 8,
+      }],
+    });
   });
 
   it('fences an active RAG lease and recovers an expired running lease', async () => {

@@ -926,18 +926,89 @@ export function normalizeRoiAuditLimit(limit: number): number {
   return Math.min(100, Math.max(1, Math.trunc(limit)));
 }
 
-export async function listRoiEvidenceDownloadAudits(
-  db: D1Database,
-  limit = 25,
-): Promise<Array<{
+type RoiEvidenceDownloadAudit = {
   actor_id: string;
   captured_at: number;
   action: 'download_referral_roi_evidence';
   report_limit: number;
-}>> {
+};
+
+type RoiEvidenceDownloadAuditRow = {
+  id: string;
+  user_id: string | null;
+  action: string;
+  diff: string | null;
+  created_at: number;
+};
+
+type RoiEvidenceDownloadAuditCursor = {
+  createdAt: number;
+  id: string;
+};
+
+function encodeRoiEvidenceDownloadAuditCursor(cursor: RoiEvidenceDownloadAuditCursor): string {
+  return btoa(JSON.stringify({ c: cursor.createdAt, i: cursor.id }))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function decodeRoiEvidenceDownloadAuditCursor(value: string | undefined): RoiEvidenceDownloadAuditCursor | null {
+  if (!value) return null;
+  try {
+    const padded = value.replace(/-/g, '+').replace(/_/g, '/')
+      .padEnd(Math.ceil(value.length / 4) * 4, '=');
+    const parsed = JSON.parse(atob(padded)) as { c?: unknown; i?: unknown };
+    if (
+      !Number.isSafeInteger(parsed.c)
+      || typeof parsed.i !== 'string'
+      || !parsed.i
+      || parsed.i.length > 200
+    ) {
+      throw new Error('Invalid ROI audit cursor');
+    }
+    return { createdAt: parsed.c as number, id: parsed.i };
+  } catch {
+    throw new Error('Invalid ROI audit cursor');
+  }
+}
+
+function parseRoiEvidenceDownloadAudit(
+  row: RoiEvidenceDownloadAuditRow,
+): RoiEvidenceDownloadAudit | null {
+  let reportLimit: unknown;
+  try {
+    const parsed = JSON.parse(row.diff ?? '{}') as Record<string, unknown>;
+    reportLimit = parsed.report_limit;
+  } catch {
+    return null;
+  }
+  if (
+    typeof row.user_id !== 'string'
+    || !row.user_id
+    || row.action !== 'download_referral_roi_evidence'
+    || !Number.isSafeInteger(reportLimit)
+    || (reportLimit as number) < 1
+    || (reportLimit as number) > 52
+    || !Number.isSafeInteger(row.created_at)
+  ) {
+    return null;
+  }
+  return {
+    actor_id: row.user_id,
+    captured_at: row.created_at,
+    action: 'download_referral_roi_evidence',
+    report_limit: reportLimit as number,
+  };
+}
+
+export async function listRoiEvidenceDownloadAudits(
+  db: D1Database,
+  limit = 25,
+): Promise<RoiEvidenceDownloadAudit[]> {
   const safeLimit = normalizeRoiAuditLimit(limit);
   const rows = await db.prepare(`
-    SELECT user_id, action, diff, created_at
+    SELECT id, user_id, action, diff, created_at
     FROM content_audit_log
     WHERE action = 'download_referral_roi_evidence'
       AND target_type = 'referral_roi'
@@ -945,6 +1016,7 @@ export async function listRoiEvidenceDownloadAudits(
     ORDER BY created_at DESC, id DESC
     LIMIT ?
   `).bind(safeLimit).all<{
+    id: string;
     user_id: string | null;
     action: string;
     diff: string | null;
@@ -952,31 +1024,50 @@ export async function listRoiEvidenceDownloadAudits(
   }>();
 
   return rows.results.flatMap(row => {
-    let reportLimit: unknown;
-    try {
-      const parsed = JSON.parse(row.diff ?? '{}') as Record<string, unknown>;
-      reportLimit = parsed.report_limit;
-    } catch {
-      return [];
-    }
-    if (
-      typeof row.user_id !== 'string'
-      || !row.user_id
-      || row.action !== 'download_referral_roi_evidence'
-      || !Number.isSafeInteger(reportLimit)
-      || (reportLimit as number) < 1
-      || (reportLimit as number) > 52
-      || !Number.isSafeInteger(row.created_at)
-    ) {
-      return [];
-    }
-    return [{
-      actor_id: row.user_id,
-      captured_at: row.created_at,
-      action: 'download_referral_roi_evidence' as const,
-      report_limit: reportLimit as number,
-    }];
+    const audit = parseRoiEvidenceDownloadAudit(row);
+    return audit ? [audit] : [];
   });
+}
+
+export async function listRoiEvidenceDownloadAuditPage(
+  db: D1Database,
+  input: { limit?: number; cursor?: string } = {},
+): Promise<{
+  audits: RoiEvidenceDownloadAudit[];
+  nextCursor: string | null;
+}> {
+  const safeLimit = normalizeRoiAuditLimit(input.limit ?? 25);
+  const cursor = decodeRoiEvidenceDownloadAuditCursor(input.cursor);
+  const cursorClause = cursor
+    ? 'AND (created_at < ? OR (created_at = ? AND id < ?))'
+    : '';
+  const bindings = cursor
+    ? [cursor.createdAt, cursor.createdAt, cursor.id, safeLimit + 1]
+    : [safeLimit + 1];
+  const rows = await db.prepare(`
+    SELECT id, user_id, action, diff, created_at
+    FROM content_audit_log
+    WHERE action = 'download_referral_roi_evidence'
+      AND target_type = 'referral_roi'
+      AND target_id = 'dashboard'
+      ${cursorClause}
+    ORDER BY created_at DESC, id DESC
+    LIMIT ?
+  `).bind(...bindings).all<RoiEvidenceDownloadAuditRow>();
+  const pageRows = rows.results.slice(0, safeLimit);
+  const lastRow = pageRows.at(-1);
+  return {
+    audits: pageRows.flatMap(row => {
+      const audit = parseRoiEvidenceDownloadAudit(row);
+      return audit ? [audit] : [];
+    }),
+    nextCursor: rows.results.length > safeLimit && lastRow
+      ? encodeRoiEvidenceDownloadAuditCursor({
+        createdAt: lastRow.created_at,
+        id: lastRow.id,
+      })
+      : null,
+  };
 }
 
 export async function roiDashboard(
