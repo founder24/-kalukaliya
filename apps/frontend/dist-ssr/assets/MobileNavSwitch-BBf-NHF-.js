@@ -1,0 +1,1 @@
+import{jsx as o}from"react/jsx-runtime";import{memo as m}from"react";import{aX as r}from"../entry-server.js";import{B as i}from"./BottomNav-Cyec4aF6.js";import{P as a}from"./PublicBottomNav-DWDi3rzU.js";const n=m(function(){const{user:t}=r();return t?o(i,{}):o(a,{})});export{n as M};

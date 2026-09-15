@@ -1,0 +1,7 @@
+Contact: mailto:security@syrabit.ai
+Contact: mailto:admin@syrabit.ai
+Expires: 2027-04-19T00:00:00.000Z
+Preferred-Languages: en, as, hi
+Canonical: https://syrabit.ai/.well-known/security.txt
+Policy: https://syrabit.ai/security-policy
+Acknowledgments: https://syrabit.ai/security/hall-of-fame

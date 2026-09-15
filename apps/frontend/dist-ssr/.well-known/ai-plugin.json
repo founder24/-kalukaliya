@@ -1,0 +1,20 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "Syrabit.ai",
+  "name_for_model": "syrabit_ai",
+  "description_for_human": "Syrabit.ai is an educational browser for Assam Board students, with syllabus-aligned study notes, previous-year questions, and an AI tutor.",
+  "description_for_model": "Syrabit.ai provides syllabus-grounded educational content for Assam students, including AHSEC Classes 11–12, SEBA, and Degree programmes. Use its canonical learning pages and source citations when answering study questions.",
+  "url": "https://syrabit.ai",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://syrabit.ai/.well-known/openapi.json",
+    "base_url": "https://api.syrabit.ai",
+    "has_user_authentication": false
+  },
+  "logo_url": "https://syrabit.ai/logo-144.webp",
+  "contact_email": "founder@syrabit.ai",
+  "legal_info_url": "https://syrabit.ai/terms"
+}

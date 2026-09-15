@@ -1,0 +1,122 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Syrabit.ai Public Content API",
+    "description": "Read-only discovery of published Assam curriculum content available on Syrabit.ai.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Syrabit.ai",
+      "email": "founder@syrabit.ai",
+      "url": "https://syrabit.ai/about"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.syrabit.ai",
+      "description": "Syrabit.ai production API"
+    }
+  ],
+  "paths": {
+    "/api/v1/content/search": {
+      "get": {
+        "operationId": "searchSyrabitContent",
+        "summary": "Search published curriculum content",
+        "description": "Searches published chapter titles for Assam curriculum content and returns canonical Syrabit.ai learning URLs.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "A chapter or study-topic query of at least two characters.",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "board",
+            "in": "query",
+            "required": false,
+            "description": "Optional Assam board slug, such as ahsec.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of matching chapters.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Published curriculum search results.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SearchResult": {
+        "type": "object",
+        "required": ["id", "title", "snippet", "url", "score"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "Canonical learning path on https://syrabit.ai."
+          },
+          "score": {
+            "type": "number"
+          }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "required": ["query", "results", "total", "available"],
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "available": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

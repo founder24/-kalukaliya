@@ -70,12 +70,12 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
 
   const SECTIONS = useMemo(() => {
     const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
-    // Notes section: chapters that aren't dedicated Q&A-only chapters AND have actual content.
-    // notes_generated=false means the ingestion pipeline hasn't produced notes yet — hide those
-    // stubs so students never land on a blank page. They auto-appear once ingestion runs.
+    // The chapter list is the syllabus structure, not a notes-availability list.
+    // Keep every non-Q&A chapter visible in both languages, including chapters
+    // whose notes are still being prepared. The row below shows that state
+    // through its reduced opacity while preserving the chapter and its link.
     const notesChs = chapters.filter(ch =>
-      (!ch.content_type || !QA_TYPES.has(ch.content_type)) && ch.notes_generated
-      && (isAs ? ch.has_assamese : true)
+      !ch.content_type || !QA_TYPES.has(ch.content_type)
     );
     // Questions section: dedicated Q&A chapters (content_type) OR notes chapters that
     // also have Q&A content (has_qa=true, populated by the ingestion pipeline).
