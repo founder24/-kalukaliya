@@ -50,7 +50,8 @@
     "test:release-guards": "vitest run src/test/curriculum-release-guards.test.js src/test/verify-hydration-policy.test.js",
     "test:all": "bash scripts/test-all.sh",
     "test:e2e": "bash scripts/run-e2e.sh",
-    "test:e2e:chat-ads": "bash scripts/run-chat-ads-e2e.sh"
+    "test:e2e:chat-ads": "bash scripts/run-chat-ads-e2e.sh",
+    "test:e2e:ads-release": "bash scripts/run-ads-release-e2e.sh"
   },
   "devDependencies": {
     "@babel/eslint-parser": "^7.29.7",
