@@ -17,6 +17,10 @@ async function token(sub: string, role = 'staff') {
   return new SignJWT({ role, type: 'access' }).setProtectedHeader({ alg: 'HS256' }).setSubject(sub)
     .setIssuedAt().setExpirationTime('1h').sign(new TextEncoder().encode(secret));
 }
+async function adminSession(sub: string) {
+  return new SignJWT({ role: 'admin', type: 'admin' }).setProtectedHeader({ alg: 'HS256' }).setSubject(sub)
+    .setIssuedAt().setExpirationTime('8h').sign(new TextEncoder().encode('admin'));
+}
 function sql() {
   return fs.readdirSync(path.join(root, 'drizzle/migrations')).filter(file => file.endsWith('.sql')).sort()
     .flatMap(file => fs.readFileSync(path.join(root, 'drizzle/migrations', file), 'utf8').split(';'))
@@ -25,6 +29,11 @@ function sql() {
 function request(pathname: string, jwt: string, method = 'GET', body?: unknown) {
   return new Request(`http://worker${pathname}`, { method, headers: { Authorization: `Bearer ${jwt}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
 }
+function cookieRequest(pathname: string, session: string) {
+  return new Request(`http://worker${pathname}`, {
+    headers: { Cookie: `syrabit_admin_session=${session}` },
+  });
+}
 beforeAll(async () => {
   const proxy = await getPlatformProxy<Env>({ configPath: path.join(root, 'wrangler.toml'), remoteBindings: false, persist: false });
   dispose = proxy.dispose;
@@ -32,7 +41,7 @@ beforeAll(async () => {
     AI: { run: async (_m: string, input: { text?: string[] }) => ({ data: (input.text ?? []).map(() => ({ values: [1, 2] })) }) } as unknown as Ai };
   for (const statement of sql()) await env.DB.prepare(statement).run();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO users (id, role, capabilities) VALUES ('limited','staff','[]'),('editor','staff','["content:edit"]'),('reviewer','staff','["referral:review"]'),('settler','staff','["referral:settle"]'),('legacy','staff',NULL),('admin','admin','[]')`),
+    env.DB.prepare(`INSERT INTO users (id, role, capabilities) VALUES ('limited','staff','[]'),('editor','staff','["content:edit"]'),('reviewer','staff','["referral:review"]'),('settler','staff','["referral:settle"]'),('cookie-settler','admin','["referral:settle"]'),('legacy','staff',NULL),('admin','admin','[]')`),
     env.DB.prepare(`INSERT INTO boards (id,name,slug) VALUES ('b','B','b')`),
     env.DB.prepare(`INSERT INTO classes (id,board_id,name,slug) VALUES ('c','b','C','c')`),
     env.DB.prepare(`INSERT INTO streams (id,class_id,name,slug) VALUES ('s','c','S','s')`),
@@ -174,6 +183,42 @@ describe('release regressions', () => {
       target_id: 'dashboard',
     });
     expect(JSON.parse(exportAudit?.diff ?? '{}')).toEqual({ report_limit: 12 });
+    expect(exportAudit?.created_at).toEqual(expect.any(Number));
+  });
+
+  it('records the admin-cookie actor for a read-only ROI export without private metadata', async () => {
+    const session = await adminSession('cookie-settler');
+    const response = await fetchWorkerWithWaitUntil(
+      cookieRequest('/api/v1/admin/referrals/roi/dashboard/export?limit=5', session),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-disposition')).toContain('attachment');
+    expect(response.headers.get('content-type')).toContain('application/json');
+    await response.json();
+    await Promise.all(waitUntilPromises.splice(0));
+
+    const exportAudit = await env.DB.prepare(`
+      SELECT user_id, action, target_type, target_id, diff, created_at
+      FROM content_audit_log
+      WHERE action = 'download_referral_roi_evidence' AND user_id = 'cookie-settler'
+      ORDER BY created_at DESC LIMIT 1
+    `).first<{
+      user_id: string;
+      action: string;
+      target_type: string;
+      target_id: string;
+      diff: string;
+      created_at: number;
+    }>();
+    expect(exportAudit).toMatchObject({
+      user_id: 'cookie-settler',
+      action: 'download_referral_roi_evidence',
+      target_type: 'referral_roi',
+      target_id: 'dashboard',
+    });
+    const metadata = JSON.parse(exportAudit?.diff ?? '{}') as Record<string, unknown>;
+    expect(metadata).toEqual({ report_limit: 5 });
+    expect(Object.keys(metadata)).toEqual(['report_limit']);
     expect(exportAudit?.created_at).toEqual(expect.any(Number));
   });
 
