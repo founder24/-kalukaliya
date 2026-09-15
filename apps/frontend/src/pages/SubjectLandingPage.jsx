@@ -21,7 +21,7 @@ export default function SubjectLandingPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const { contentLang } = useContentLang();
 
-  const { data: subject = null, isLoading: subjectLoading, error: subjectError } = useResolveSubject(board, classSlug, subjectSlug);
+  const { data: subject = null, isLoading: subjectLoading, error: subjectError } = useResolveSubject(board, classSlug, subjectSlug, contentLang);
   const subjectId = subject?.id || subject?._id;
   const { data: chapters = [], isLoading: chaptersLoading } = useChapters(subjectId);
   const loading = subjectLoading || (!!subjectId && chaptersLoading);

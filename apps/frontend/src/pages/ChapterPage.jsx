@@ -184,7 +184,7 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
                             {qText}
                             {typeof q === 'object' && q && (q.year || q.source) && (
                               <span className="ml-2 text-xs text-gray-400">
-                                {[q.year, q.source].filter(Boolean).join(' · ')}
+                                {formatQuestionMeta(q)}
                               </span>
                             )}
                           </li>
@@ -207,7 +207,7 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
                 {qText}
                 {typeof q === 'object' && q && (q.year || q.source) && (
                   <span className="ml-2 text-xs text-gray-400">
-                    {[q.year, q.source].filter(Boolean).join(' · ')}
+                    {formatQuestionMeta(q)}
                   </span>
                 )}
                 {marks && (

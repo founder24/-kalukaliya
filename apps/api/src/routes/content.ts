@@ -128,18 +128,20 @@ contentRouter.get('/subjects', async (c) => {
     // SQLite doesn't support inArray nicely in drizzle; use raw SQL fallback
     const placeholders = streamIds.map(() => '?').join(',');
     const raw = await c.env.DB
-      .prepare(`SELECT id, name, slug, stream_id, description, image_url, is_published
+      .prepare(`SELECT id, name, name_as, slug, stream_id, description, description_as, image_url, is_published
                 FROM subjects WHERE is_published=1 AND stream_id IN (${placeholders})`)
       .bind(...streamIds)
-      .all<{ id: string; name: string; slug: string; stream_id: string | null; description: string | null; image_url: string | null; is_published: number }>();
+      .all<{ id: string; name: string; name_as: string | null; slug: string; stream_id: string | null; description: string | null; description_as: string | null; image_url: string | null; is_published: number }>();
     c.header('Cache-Control', 'public, max-age=300, s-maxage=600');
     return c.json((raw.results ?? []).map(r => ({
       id: r.id,
       name: r.name,
+      name_as: r.name_as ?? null,
       slug: r.slug,
       stream_id: r.stream_id ?? null,
       status: r.is_published ? 'published' : 'draft',
       description: r.description ?? null,
+      description_as: r.description_as ?? null,
       icon: null,
       thumbnail_url: r.image_url ?? null,
       tags: [],
@@ -151,9 +153,11 @@ contentRouter.get('/subjects', async (c) => {
   const rows = await db.select({
     id: subjects.id,
     name: subjects.name,
+    nameAs: subjects.nameAs,
     slug: subjects.slug,
     streamId: subjects.streamId,
     description: subjects.description,
+    descriptionAs: subjects.descriptionAs,
     imageUrl: subjects.imageUrl,
     isPublished: subjects.isPublished,
   }).from(subjects).where(condition);
@@ -162,10 +166,12 @@ contentRouter.get('/subjects', async (c) => {
   return c.json(rows.map(r => ({
     id: r.id,
     name: r.name,
+    name_as: r.nameAs ?? null,
     slug: r.slug,
     stream_id: r.streamId ?? null,
     status: r.isPublished ? 'published' : 'draft',
     description: r.description ?? null,
+    description_as: r.descriptionAs ?? null,
     icon: null,             // not migrated to D1 schema
     thumbnail_url: r.imageUrl ?? null,
     tags: [],
@@ -184,8 +190,10 @@ contentRouter.get('/subjects/:id', async (c) => {
   const row = await db.select({
     id: subjects.id,
     name: subjects.name,
+    nameAs: subjects.nameAs,
     slug: subjects.slug,
     description: subjects.description,
+    descriptionAs: subjects.descriptionAs,
     imageUrl: subjects.imageUrl,
     pyqPapers: subjects.pyqPapers,
     isPublished: subjects.isPublished,
@@ -202,8 +210,10 @@ contentRouter.get('/subjects/:id', async (c) => {
   return c.json({
     id: row.id,
     name: row.name,
+    name_as: row.nameAs ?? null,
     slug: row.slug,
     description: row.description ?? null,
+    description_as: row.descriptionAs ?? null,
     tags: [],
     icon: null,
     gradient: null,
@@ -333,10 +343,10 @@ async function resolveChapterBySlug(
   const streamIds = targetStreams.map(s => s.id);
   const placeholders = streamIds.map(() => '?').join(',');
   const subjectRows = await c.env.DB
-    .prepare(`SELECT id, name, slug, stream_id FROM subjects
+    .prepare(`SELECT id, name, name_as, slug, stream_id FROM subjects
               WHERE is_published=1 AND stream_id IN (${placeholders})`)
     .bind(...streamIds)
-    .all<{ id: string; name: string; slug: string; stream_id: string | null }>();
+    .all<{ id: string; name: string; name_as: string | null; slug: string; stream_id: string | null }>();
 
   const subjectRow = (subjectRows.results ?? []).find(
     s => s.slug === subjectSlug,
@@ -432,7 +442,8 @@ async function resolveChapterBySlug(
     // A topic is a subsection of a chapter, never the chapter's display title.
     // Dedicated topic deep links resolve their own heading on the client.
     topic_title:    displayTitle,
-    subject_name:   subjectRow.name,
+    subject_name:   useSlugAs ? (subjectRow.name_as?.trim() || subjectRow.name) : subjectRow.name,
+    subject_name_as: subjectRow.name_as ?? null,
     subject_slug:   subjectRow.slug,
     board_name:     boardRow.name,
     board_slug:     boardRow.slug,
@@ -520,8 +531,8 @@ contentRouter.get('/library-bundle', async (c) => {
     db.select({ id: classes.id, boardId: classes.boardId, name: classes.name, slug: classes.slug, level: classes.level }).from(classes),
     db.select({ id: streams.id, classId: streams.classId, name: streams.name, slug: streams.slug }).from(streams),
     db.select({
-      id: subjects.id, streamId: subjects.streamId, name: subjects.name, slug: subjects.slug,
-      description: subjects.description, imageUrl: subjects.imageUrl,
+      id: subjects.id, streamId: subjects.streamId, name: subjects.name, nameAs: subjects.nameAs, slug: subjects.slug,
+      description: subjects.description, descriptionAs: subjects.descriptionAs, imageUrl: subjects.imageUrl,
       pyqPapers: subjects.pyqPapers, isPublished: subjects.isPublished,
     }).from(subjects).where(eq(subjects.isPublished, 1)),
   ]);
@@ -589,10 +600,12 @@ contentRouter.get('/library-bundle', async (c) => {
     return {
       id: sub.id,
       name: sub.name,
+      name_as: sub.nameAs ?? null,
       slug: sub.slug,
       stream_id: sub.streamId ?? null,
       status: sub.isPublished ? 'published' : 'draft',
       description: sub.description ?? null,
+      description_as: sub.descriptionAs ?? null,
       icon: null,
       gradient: null,
       thumbnail_url: sub.imageUrl ?? null,
@@ -680,6 +693,7 @@ contentRouter.get('/resolve-subject/:board/:classSlug/:subjectSlug', async (c) =
   const boardSlug   = c.req.param('board')       as string;
   const classSlug   = c.req.param('classSlug')   as string;
   const subjectSlug = c.req.param('subjectSlug') as string;
+  const useAssamese = c.req.query('lang') === 'as';
 
   // Board
   const boardRow = await db.select({ id: boards.id, name: boards.name, slug: boards.slug })
@@ -715,9 +729,13 @@ contentRouter.get('/resolve-subject/:board/:classSlug/:subjectSlug', async (c) =
 
   return c.json({
     id: subjectRow.id,
-    name: subjectRow.name,
+    name: useAssamese ? (subjectRow.nameAs?.trim() || subjectRow.name) : subjectRow.name,
+    name_as: subjectRow.nameAs ?? null,
     slug: subjectRow.slug,
-    description: subjectRow.description ?? null,
+    description: useAssamese
+      ? (subjectRow.descriptionAs?.trim() || subjectRow.description)
+      : subjectRow.description,
+    description_as: subjectRow.descriptionAs ?? null,
     tags: [],
     icon: null,
     gradient: null,

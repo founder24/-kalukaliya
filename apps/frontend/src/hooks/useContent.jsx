@@ -166,16 +166,18 @@ export const useLibraryBundleBoot = (boardId, enabled = true) =>
     enabled: !!boardId && enabled,
   });
 
-const fetchResolveSubject = (board, classSlug, subjectSlug) =>
-  apiClient().get(`/content/resolve-subject/${board}/${classSlug}/${subjectSlug}`).then((r) => r.data);
+const fetchResolveSubject = (board, classSlug, subjectSlug, contentLang = 'en') =>
+  apiClient()
+    .get(`/content/resolve-subject/${board}/${classSlug}/${subjectSlug}?lang=${contentLang === 'as' ? 'as' : 'en'}`)
+    .then((r) => r.data);
 
 const fetchSeoTopics = (board, classSlug, subjectSlug) =>
   apiClient().get(`/seo/topics/${board}/${classSlug}/${subjectSlug}`).then((r) => r.data);
 
-export const useResolveSubject = (board, classSlug, subjectSlug) =>
+export const useResolveSubject = (board, classSlug, subjectSlug, contentLang = 'en') =>
   useQuery({
-    queryKey: ['resolve-subject', board, classSlug, subjectSlug],
-    queryFn: () => fetchResolveSubject(board, classSlug, subjectSlug),
+    queryKey: ['resolve-subject', board, classSlug, subjectSlug, contentLang],
+    queryFn: () => fetchResolveSubject(board, classSlug, subjectSlug, contentLang),
     staleTime: 10 * 60 * 1000,
     enabled: !!board && !!classSlug && !!subjectSlug,
   });

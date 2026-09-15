@@ -114,8 +114,10 @@ export const subjects = sqliteTable('subjects', {
   // SQLite UNIQUE index treats (NULL, slug) as unique per slug, so no conflicts arise.
   streamId: text('stream_id'),
   name: text('name').notNull(),
+  nameAs: text('name_as'),
   slug: text('slug').notNull(),
   description: text('description'),
+  descriptionAs: text('description_as'),
   imageUrl: text('image_url'),
   pyqPapers: text('pyq_papers').default('[]'),                        // JSON PYQPaper[]
   isPublished: integer('is_published').default(0),
