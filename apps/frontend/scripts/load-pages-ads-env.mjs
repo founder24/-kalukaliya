@@ -9,6 +9,10 @@
  */
 
 import { appendFile } from 'node:fs/promises';
+import {
+  ADSENSE_SLOT_ENV_KEYS,
+  validateAdsenseSlotEnv,
+} from '../src/utils/adsenseSlotConfig.js';
 
 const token = process.env.CLOUDFLARE_API_TOKEN?.trim();
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim();
@@ -29,26 +33,35 @@ if (!response.ok || !payload.success) {
 }
 
 const envVars = payload.result?.deployment_configs?.production?.env_vars || {};
-const configured = Object.entries(envVars)
-  .filter(([key]) => /^VITE_ADS_ADSENSE_[A-Z0-9_]+_SLOT$/.test(key))
-  .map(([key, definition]) => [key, String(definition?.value || '').trim()])
-  .filter(([, value]) => value);
+const configured = Object.fromEntries(
+  ADSENSE_SLOT_ENV_KEYS.map((key) => [
+    key,
+    String(envVars[key]?.value || '').trim(),
+  ]),
+);
+const validation = validateAdsenseSlotEnv(configured);
 
-for (const [key, value] of configured) {
-  if (!/^\d{5,20}$/.test(value)) {
-    throw new Error(`${key} is not a valid numeric AdSense slot ID.`);
+if (!validation.valid) {
+  const problems = [];
+  if (validation.missing.length) {
+    problems.push(`missing: ${validation.missing.join(', ')}`);
   }
-}
-
-if (!configured.length) {
-  throw new Error('No production AdSense manual slot IDs are configured in Cloudflare Pages.');
+  if (validation.invalid.length) {
+    problems.push(`invalid numeric ID: ${validation.invalid.join(', ')}`);
+  }
+  if (validation.duplicates.length) {
+    problems.push(`duplicate IDs: ${validation.duplicates.join('; ')}`);
+  }
+  throw new Error(
+    `Cloudflare Pages must define one unique numeric AdSense slot ID per declared placement (${problems.join(' | ')}).`,
+  );
 }
 
 if (githubEnv) {
-  const lines = configured.map(([key, value]) => `${key}=${value}`);
+  const lines = Object.entries(configured).map(([key, value]) => `${key}=${value}`);
   await appendFile(githubEnv, `${lines.join('\n')}\n`, 'utf8');
 }
 
 console.log(
-  `Loaded ${configured.length} production AdSense slot configuration key(s) from Cloudflare Pages: ${configured.map(([key]) => key).join(', ')}`,
+  `Loaded ${Object.keys(configured).length} unique production AdSense slot configuration key(s) from Cloudflare Pages: ${Object.keys(configured).join(', ')}`,
 );
