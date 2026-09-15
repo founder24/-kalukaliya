@@ -143,9 +143,9 @@ async function installFixture(page: Page) {
     body: ONE_BY_ONE_PNG,
   }));
   await page.route(PAGE_TWO_URL, route => route.fulfill({
-    status: 200,
+    status: 404,
     contentType: 'image/png',
-    body: ONE_BY_ONE_PNG,
+    body: '',
   }));
 }
 
@@ -191,21 +191,23 @@ async function installAssameseFixture(page: Page, requests: {
   });
 }
 
-test('public English chapter notes render persisted uploaded page links as images', async ({ page }) => {
+test('public English chapter notes show a fallback when a saved page image is unavailable', async ({ page }) => {
   await installFixture(page);
   await page.goto(`${PUBLIC_ROUTE}?tab=notes`);
 
   const content = page.locator('#chapter-content-top');
   await expect(page.getByRole('heading', { name: 'Image-backed chapter', exact: true })).toBeVisible();
   await expect(content.locator('img[alt="Page 1"]')).toHaveCount(1);
-  await expect(content.locator('img[alt="Page 2"]')).toHaveCount(1);
 
   const pageOne = content.locator('img[alt="Page 1"]');
-  const pageTwo = content.locator('img[alt="Page 2"]');
   await expect(pageOne).toHaveAttribute('src', PAGE_ONE_URL);
-  await expect(pageTwo).toHaveAttribute('src', PAGE_TWO_URL);
   await expect(pageOne).toHaveJSProperty('naturalWidth', 1);
-  await expect(pageTwo).toHaveJSProperty('naturalWidth', 1);
+  const unavailablePage = content.getByTestId('markdown-image-fallback');
+  await expect(unavailablePage).toBeVisible();
+  await expect(unavailablePage).toHaveAttribute('role', 'alert');
+  await expect(unavailablePage).toHaveText('Page 2 image is unavailable.');
+  await expect(content.locator('img[alt="Page 2"]')).toHaveCount(0);
+  await expect(content).toContainText('These pages were saved by the staff chapter editor.');
 });
 
 test('direct Assamese subject and chapter routes keep localized resolution and QA links', async ({ page }) => {
