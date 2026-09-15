@@ -1947,7 +1947,86 @@ const PYQ_EXT_MAP: Record<string, string> = {
   gif: 'image/gif',  tiff: 'image/tiff', tif: 'image/tiff',
 };
 
-type ChapterPYQPage = { id: string; title?: string; year?: number | null; url: string; uploaded_at: string };
+type ChapterPYQFigure = {
+  id?: string;
+  description?: string;
+  location?: string;
+  labels?: string[];
+  alt_text?: string;
+};
+type ChapterPYQPage = {
+  id: string;
+  title?: string;
+  year?: number | null;
+  url: string;
+  uploaded_at: string;
+  ocr_status?: 'pending' | 'processing' | 'complete' | 'failed';
+  ocr_text?: string;
+  figures?: ChapterPYQFigure[];
+  ocr_error?: string;
+  ocr_updated_at?: string;
+  ocr_model?: string;
+};
+
+const PYQ_VISION_MODEL = '@cf/unum/uform-gen2-qwen-500m';
+
+function parseVisionJson(raw: string): { text: string; figures: ChapterPYQFigure[] } {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  try {
+    const parsed = JSON.parse(cleaned) as { text?: unknown; figures?: unknown };
+    return {
+      text: typeof parsed.text === 'string' ? parsed.text.trim() : '',
+      figures: Array.isArray(parsed.figures) ? parsed.figures.filter(Boolean).slice(0, 30) as ChapterPYQFigure[] : [],
+    };
+  } catch {
+    // Vision models occasionally return a short preamble around valid JSON.
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try {
+        const parsed = JSON.parse(cleaned.slice(start, end + 1)) as { text?: unknown; figures?: unknown };
+        return {
+          text: typeof parsed.text === 'string' ? parsed.text.trim() : '',
+          figures: Array.isArray(parsed.figures) ? parsed.figures.filter(Boolean).slice(0, 30) as ChapterPYQFigure[] : [],
+        };
+      } catch { /* fall through to plain transcription */ }
+    }
+    return { text: cleaned, figures: [] };
+  }
+}
+
+async function extractPyqPage(
+  env: Env,
+  page: ChapterPYQPage,
+): Promise<{ text: string; figures: ChapterPYQFigure[] }> {
+  const key = ownedR2Key(env, page.url, `pyq/${page.id}/`);
+  // The URL is keyed by chapter, not page ID. Resolve the object from the URL
+  // at the route before calling this helper; this guard prevents accidental
+  // cross-prefix reads if the data is malformed.
+  if (!key) throw new Error('Stored page URL is not owned by this chapter');
+  const object = await env.R2_BUCKET.get(key);
+  if (!object) throw new Error('Stored page image was not found');
+  const bytes = await object.arrayBuffer();
+  if (bytes.byteLength > 4 * 1024 * 1024) throw new Error('Image is larger than the OCR limit of 4 MB');
+
+  const result = await (env.AI as unknown as {
+    run(model: string, input: Record<string, unknown>): Promise<unknown>;
+  }).run(PYQ_VISION_MODEL, {
+    image: Array.from(new Uint8Array(bytes)),
+    prompt: [
+      'You are extracting an Assam Board question-paper page for searchable study material.',
+      'Transcribe every visible word, number, equation, option, label, and mark value exactly.',
+      'Do not omit text because it is inside a table, graph, circuit, geometry drawing, or diagram.',
+      'Describe every meaningful diagram, graph, figure, circuit, map, or labeled illustration.',
+      'Return only JSON: {"text":"full transcription with line breaks","figures":[{"id":"figure-1","description":"what is shown","location":"where on page","labels":["all visible labels"],"alt_text":"concise accessible description"}]}.',
+    ].join(' '),
+    max_tokens: 4096,
+  });
+  const record = result as { description?: unknown; response?: unknown; result?: { description?: unknown; response?: unknown } } | null;
+  const raw = String(record?.description ?? record?.response ?? record?.result?.description ?? record?.result?.response ?? '');
+  if (!raw.trim()) throw new Error('Vision OCR returned no transcription');
+  return parseVisionJson(raw);
+}
 
 /** Load pyq_papers JSON array from a chapter row. */
 async function loadChapterPapers(

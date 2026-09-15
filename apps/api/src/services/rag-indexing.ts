@@ -11,6 +11,11 @@ import type { Env } from '../types';
 
 export type RagScope = 'notes' | 'qa' | 'pyq';
 type SourceType = 'notes' | 'important_questions' | 'pyq';
+type RagMedia = {
+  url: string;
+  pageId?: string;
+  figures?: Array<Record<string, unknown>>;
+};
 const sourceFor: Record<RagScope, SourceType> = { notes: 'notes', qa: 'important_questions', pyq: 'pyq' };
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -52,7 +57,15 @@ export async function purgeChapterRag(env: Env, chapterId: string): Promise<void
   for (const scope of ['notes', 'qa', 'pyq'] as RagScope[]) await purgeRagScope(env, chapterId, scope);
 }
 
-async function ingest(env: Env, chapterId: string, subjectId: string, text: string, medium: 'english' | 'assamese', scope: RagScope): Promise<number> {
+async function ingest(
+  env: Env,
+  chapterId: string,
+  subjectId: string,
+  text: string,
+  medium: 'english' | 'assamese',
+  scope: RagScope,
+  media: RagMedia[] = [],
+): Promise<number> {
   const content = words(text);
   if (!content.length) return 0;
   const hierarchy = await env.DB.prepare(`
@@ -99,10 +112,28 @@ async function ingest(env: Env, chapterId: string, subjectId: string, text: stri
   })
     .filter((entry): entry is { content: string; values: number[]; id: string } => Boolean(entry.values?.length));
   if (!entries.length) throw new Error('Embedding provider returned no vectors');
-  await env.VECTORIZE.upsert(entries.map(entry => ({ id: entry.id, values: entry.values, metadata: { chapterId, subjectId, medium, sourceType: sourceFor[scope], chunkType: 'text', content: entry.content.slice(0, 512), ...hierarchyMetadata } })));
+  await env.VECTORIZE.upsert(entries.map(entry => ({
+    id: entry.id,
+    values: entry.values,
+    metadata: {
+      chapterId, subjectId, medium, sourceType: sourceFor[scope],
+      chunkType: 'text', content: entry.content.slice(0, 512),
+      ...(media.length ? { media } : {}),
+      ...hierarchyMetadata,
+    },
+  })));
   try {
     const db = createDb(env.DB);
-    await Promise.all(entries.map(entry => db.insert(chunks).values({ id: crypto.randomUUID(), chapterId, subjectId, sourceType: sourceFor[scope], medium, chunkType: 'text', content: entry.content, vectorId: entry.id, metadata: JSON.stringify({ chapterId, subjectId, medium, sourceType: sourceFor[scope], ...hierarchyMetadata }), createdAt: now() }).run()));
+    await Promise.all(entries.map(entry => db.insert(chunks).values({
+      id: crypto.randomUUID(), chapterId, subjectId, sourceType: sourceFor[scope],
+      medium, chunkType: 'text', content: entry.content, vectorId: entry.id,
+      metadata: JSON.stringify({
+        chapterId, subjectId, medium, sourceType: sourceFor[scope],
+        ...(media.length ? { media } : {}),
+        ...hierarchyMetadata,
+      }),
+      createdAt: now(),
+    }).run()));
   } catch (error) {
     await env.VECTORIZE.deleteByIds(entries.map(entry => entry.id)).catch(() => undefined);
     throw error;
@@ -122,17 +153,36 @@ export async function reindexChapterRag(env: Env, chapterId: string, requested: 
   const text: Record<RagScope, [string | null, string | null]> = {
     notes: [append(notes(chapter.ragText ?? chapter.notesEn, chapter.ragSectionsEn), topicText), append(notes(chapter.ragTextAs ?? chapter.notesAs, chapter.ragSectionsAs), topicTextAs)],
     qa: [qa(chapter.qaEn), qa(chapter.qaAs)],
-    // Chapter rag_text belongs to notes, never PYQ. File-only PYQs have no
-    // extractable text and are deliberately not embedded until OCR text exists.
     pyq: [null, null],
   };
+  const pyqPages = parse(chapter.pyqPapers).filter(page => page.ocr_text?.trim());
+  const pyqText = pyqPages.map((page, index) => [
+    `## PYQ page ${index + 1}`,
+    `Original page image: ${page.url}`,
+    page.ocr_text,
+    ...(Array.isArray(page.figures)
+      ? (page.figures as unknown[]).map((figure, figureIndex) => {
+        const item = figure as Record<string, unknown>;
+        return `[Figure ${figureIndex + 1}] ${String(item.description ?? item.alt_text ?? 'Figure preserved in original page image.')}${item.labels ? ` Labels: ${JSON.stringify(item.labels)}` : ''}`;
+      })
+      : []),
+  ].filter(Boolean).join('\n')).join('\n\n');
+  text.pyq = [pyqText || null, null];
+  const pyqMedia: RagMedia[] = pyqPages.map(page => ({
+    url: page.url,
+    ...(page.id ? { pageId: page.id } : {}),
+    ...(Array.isArray(page.figures) ? { figures: page.figures as Array<Record<string, unknown>> } : {}),
+  }));
   const result = {} as Record<RagScope, { chunks: number; error?: string; skipped?: string }>;
   for (const scope of requested) {
     try {
       await purgeRagScope(env, chapterId, scope);
       const [en, as] = text[scope];
       if (!en?.trim() && !as?.trim()) { result[scope] = { chunks: 0, skipped: 'no content' }; continue; }
-      result[scope] = { chunks: (en ? await ingest(env, chapterId, chapter.subjectId, en, 'english', scope) : 0) + (as ? await ingest(env, chapterId, chapter.subjectId, as, 'assamese', scope) : 0) };
+      result[scope] = {
+        chunks: (en ? await ingest(env, chapterId, chapter.subjectId, en, 'english', scope, scope === 'pyq' ? pyqMedia : []) : 0)
+          + (as ? await ingest(env, chapterId, chapter.subjectId, as, 'assamese', scope, scope === 'pyq' ? pyqMedia : []) : 0),
+      };
     } catch (error) { result[scope] = { chunks: 0, error: error instanceof Error ? error.message : String(error) }; }
   }
   if (requested.includes('notes') && !result.notes.error) await db.update(chapters).set({ ragIndexedAt: now(), updatedAt: now() }).where(eq(chapters.id, chapterId));
