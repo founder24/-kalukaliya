@@ -93,12 +93,9 @@ export default function ChapterEditForm({
   const imageUploadHandler = useCallback(async (image) => {
     const formData = new FormData();
     formData.append('file', image);
-    const res = await axios.post(`${API}/admin/content/upload-image`, formData, {
-      ...authHeaders(adminToken),
-      headers: { ...authHeaders(adminToken).headers, 'Content-Type': 'multipart/form-data' },
-    });
-    return res.data.url;
-  }, [adminToken]);
+    const res = await axios.post(`${API}/staff/content/chapter/${editTarget.id}/pyq-papers`, formData, authHeaders(adminToken));
+    return res.data.paper?.url;
+  }, [adminToken, editTarget?.id]);
 
   const handleAddPages = useCallback(() => {
     const input = document.createElement('input');
@@ -129,7 +126,10 @@ export default function ChapterEditForm({
         }
         if (!urls.length) throw new Error('No pages uploaded');
         const current = editorRef.current?.value ?? activeContent;
-        const pagesMd = urls.map((u, i) => `![Page ${i + 1}](${u})`).join('\n\n');
+        const previousPageCount = (current.match(/!\[Page\s+\d+\]\(/gi) || []).length;
+        const pagesMd = urls
+          .map((u, i) => `![Page ${previousPageCount + i + 1}](${u})`)
+          .join('\n\n');
         const field = _contentField();
         setContentForm(f => ({ ...f, [field]: current + (current.trim() ? '\n\n' : '') + pagesMd + '\n' }));
         setEditorKey(k => k + 1);
@@ -398,7 +398,7 @@ export default function ChapterEditForm({
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-all shadow-sm"
               >
                 {imgUploading ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />}
-                {imgUploading ? 'Uploading…' : 'Add Pages'}
+                {imgUploading ? 'Uploading…' : 'Upload image page'}
               </button>
               <button
                 onClick={() => setShowTemplates(v => !v)}
