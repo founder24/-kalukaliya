@@ -32,8 +32,10 @@ def read_jsonl(path):
 class SearchableIndexClient:
     """Small credential-free stand-in for Vectorize plus the D1 chunk map."""
 
-    def __init__(self, *, fail_upsert=False):
+    def __init__(self, *, fail_upsert=False, fail_chunk_insert_after=None):
         self.fail_upsert = fail_upsert
+        self.fail_chunk_insert_after = fail_chunk_insert_after
+        self.partial_failure_consumed = False
         self.vectors = {
             "old-vector": {
                 "metadata": {
@@ -44,7 +46,14 @@ class SearchableIndexClient:
                 },
             }
         }
-        self.chunks = {"old-vector": "stale pre-failure note text"}
+        self.chunk_rows = [
+            {
+                "id": "old-chunk",
+                "chapter_id": "chapter-search-repair",
+                "vector_id": "old-vector",
+                "content": "stale pre-failure note text",
+            }
+        ]
         self.embedded = []
 
     def embed(self, texts):
@@ -54,9 +63,9 @@ class SearchableIndexClient:
     def query(self, sql, params=None):
         if "SELECT vector_id FROM chunks" in sql:
             return [
-                {"vector_id": vector_id}
-                for vector_id, vector in self.vectors.items()
-                if vector["metadata"]["chapterId"] == params[0]
+                {"vector_id": row["vector_id"]}
+                for row in self.chunk_rows
+                if row["chapter_id"] == params[0]
             ]
         return []
 
@@ -73,15 +82,31 @@ class SearchableIndexClient:
     def execute(self, sql, params=None):
         if "DELETE FROM chunks" in sql:
             chapter_id = params[0]
-            self.chunks = {
-                vector_id: content
-                for vector_id, content in self.chunks.items()
-                if self.vectors.get(vector_id, {}).get("metadata", {}).get("chapterId")
-                != chapter_id
-            }
+            self.chunk_rows = [
+                row for row in self.chunk_rows if row["chapter_id"] != chapter_id
+            ]
         elif "INSERT INTO chunks" in sql:
             for offset in range(0, len(params), 8):
-                self.chunks[params[offset + 5]] = params[offset + 4]
+                self.chunk_rows.append(
+                    {
+                        "id": params[offset],
+                        "chapter_id": params[offset + 2],
+                        "vector_id": params[offset + 5],
+                        "content": params[offset + 4],
+                    }
+                )
+                if (
+                    self.fail_chunk_insert_after is not None
+                    and not self.partial_failure_consumed
+                    and offset // 8 + 1 >= self.fail_chunk_insert_after
+                ):
+                    self.partial_failure_consumed = True
+                    raise RuntimeError("chunk mapping batch failed partway through")
+
+    def active_mapping_rows(self, chapter_id):
+        return [
+            row for row in self.chunk_rows if row["chapter_id"] == chapter_id
+        ]
 
     def search(self, query, *, chapter_id):
         """Mirror retrieval's vector filter followed by D1 chunk hydration."""
@@ -95,9 +120,12 @@ class SearchableIndexClient:
                 or metadata.get("sourceType") != "notes"
             ):
                 continue
-            content = self.chunks.get(vector_id)
-            if content and query_terms & set(content.lower().split()):
-                results.append(content)
+            for row in self.active_mapping_rows(chapter_id):
+                if row["vector_id"] != vector_id:
+                    continue
+                content = row["content"]
+                if query_terms & set(content.lower().split()):
+                    results.append(content)
         return results
 
 
@@ -825,6 +853,77 @@ def test_index_repair_search_returns_fresh_notes_or_remains_unresolved(
             normalized_repaired_text
         ]
         assert client.search("stale pre-failure", chapter_id=chapter_id) == []
+
+
+def test_partial_chunk_mapping_write_is_repairable_without_duplicates(
+    monkeypatch, tmp_path
+):
+    progress_file = tmp_path / "progress.jsonl"
+    chapter_id = "chapter-partial-mapping"
+    repaired_text = (
+        "## Motion\n\n"
+        + "fresh batch repair marker explains the corrected acceleration experiment. "
+        * 140
+    )
+    chapter = {
+        "id": chapter_id,
+        "subject_id": "subject-1",
+        "class_name": "HS 1st Year",
+        "subject_name": "Chemistry",
+        "subject_slug": "chemistry",
+        "title": "Motion",
+        "notes_en": repaired_text,
+    }
+    client = SearchableIndexClient(fail_chunk_insert_after=1)
+
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", progress_file)
+    monkeypatch.setattr(importer, "ACTIVE_RUN_ID", "run-partial-mapping")
+    progress_file.write_text(
+        json.dumps(
+            {
+                "chapter_id": chapter_id,
+                "status": importer.INDEX_FAILED_STATUS,
+                "index_attempt": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    first_result = asyncio.run(
+        importer.repair_indexes(client, [chapter], [chapter_id])
+    )
+    first_failure = [
+        row for row in read_jsonl(progress_file) if row.get("chapter_id") == chapter_id
+    ][-1]
+    partial_rows = client.active_mapping_rows(chapter_id)
+    assert first_result == 1
+    assert first_failure["status"] == importer.INDEX_FAILED_STATUS
+    assert first_failure["operation"] == "chunk_mapping_insert"
+    assert len(partial_rows) == 1
+    assert len({row["vector_id"] for row in partial_rows}) == 1
+
+    second_result = asyncio.run(
+        importer.repair_indexes(client, [chapter], [chapter_id])
+    )
+    repaired = [
+        row for row in read_jsonl(progress_file) if row.get("chapter_id") == chapter_id
+    ][-1]
+    final_rows = client.active_mapping_rows(chapter_id)
+    expected_chunks = importer.chunk_text(repaired_text)
+
+    assert second_result == 0
+    assert repaired["status"] == importer.INDEX_REPAIRED_STATUS
+    assert len(final_rows) == len(expected_chunks)
+    assert [row["content"] for row in final_rows] == expected_chunks
+    assert len({row["vector_id"] for row in final_rows}) == len(final_rows)
+    assert {
+        row["vector_id"] for row in final_rows
+    } == {
+        f"{chapter_id}_english_notes_{index}"
+        for index in range(len(expected_chunks))
+    }
 
 
 def test_latest_index_failure_overrides_an_earlier_done_record(monkeypatch, tmp_path):
