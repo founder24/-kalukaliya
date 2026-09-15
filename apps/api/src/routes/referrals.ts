@@ -46,7 +46,9 @@ import {
 } from '../services/referral-settlement';
 import {
   calculateWeeklyRoi,
+  INVALID_ROI_AUDIT_CURSOR_DETAIL,
   ingestAdRevenueReport,
+  isInvalidRoiAuditCursorError,
   listAdNetworkInventory,
   listRoiEvidenceDownloadAuditPage,
   normalizeRoiAuditLimit,
@@ -628,8 +630,8 @@ adminReferralRouter.get('/roi/dashboard/export-audits', async (c) => {
     });
     return c.json({ audits: page.audits, next_cursor: page.nextCursor });
   } catch (error) {
-    if (error instanceof Error && error.message === 'Invalid ROI audit cursor') {
-      return c.json({ detail: 'Invalid ROI audit cursor' }, 422);
+    if (isInvalidRoiAuditCursorError(error)) {
+      return c.json({ detail: INVALID_ROI_AUDIT_CURSOR_DETAIL }, 422);
     }
     return c.json({ detail: 'Referral ROI evidence audit history unavailable' }, 503);
   }
