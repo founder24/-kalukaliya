@@ -711,10 +711,11 @@
   .chapter-textbook h2 {
     font-size: clamp(1.25rem, 1.1rem + 0.35vw, 1.5rem);
     font-weight: 750;
-    margin: 2.5rem 0 0.9rem;
+    margin: 2.75rem 0 1rem;
     color: #172554;
-    border-bottom: 1px solid #dbe3f0;
-    padding-bottom: 0.45rem;
+    border-top: 3px double #b8c7db;
+    border-bottom: 3px double #b8c7db;
+    padding: 0.7rem 0 0.65rem;
   }
   .chapter-textbook h3 {
     font-size: 1.12rem;
