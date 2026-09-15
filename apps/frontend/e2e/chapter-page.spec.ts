@@ -1,8 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-
-const PUBLIC_ROUTE = '/ahsec/class-12/physics/public-image-fixture';
-const PAGE_ONE_URL = 'https://cdn.fixture.test/public-page-1.png';
-const PAGE_TWO_URL = 'https://cdn.fixture.test/public-page-2.png';
+import {
+  fixtureChapter,
+  PAGE_ONE_URL,
+  PAGE_TWO_URL,
+  PUBLIC_ROUTE,
+} from '../src/test/fixtures/public-image-chapter';
 const ONE_BY_ONE_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64',
@@ -10,46 +12,6 @@ const ONE_BY_ONE_PNG = Buffer.from(
 
 const ASSAMESE_SUBJECT_ROUTE = '/as/ahsec/hs-1st-year/physics';
 const ASSAMESE_CHAPTER_ROUTE = `${ASSAMESE_SUBJECT_ROUTE}/goti`;
-
-const fixtureChapter = {
-  chapter_id: 'public-image-fixture',
-  chapter_title: 'Image-backed chapter',
-  title: 'Image-backed chapter',
-  topic_title: 'Image-backed chapter',
-  subject_name: 'Physics',
-  subject_id: 'physics',
-  board_name: 'AHSEC',
-  class_name: 'Class 12',
-  content_type: 'notes',
-  content: [
-    '# Image-backed notes',
-    '',
-    'These pages were saved by the staff chapter editor.',
-    '',
-    `![Page 1](${PAGE_ONE_URL})`,
-    '',
-    `![Page 2](${PAGE_TWO_URL})`,
-  ].join('\n'),
-  content_en: [
-    '# Image-backed notes',
-    '',
-    'These pages were saved by the staff chapter editor.',
-    '',
-    `![Page 1](${PAGE_ONE_URL})`,
-    '',
-    `![Page 2](${PAGE_TWO_URL})`,
-  ].join('\n'),
-  notes_en: [
-    '# Image-backed notes',
-    '',
-    'These pages were saved by the staff chapter editor.',
-    '',
-    `![Page 1](${PAGE_ONE_URL})`,
-    '',
-    `![Page 2](${PAGE_TWO_URL})`,
-  ].join('\n'),
-  published_topics: [],
-};
 
 const assameseSubject = {
   id: 'as-subject-physics',
@@ -96,7 +58,7 @@ const assameseChapter = {
   published_topics: [],
 };
 
-async function installFixture(page: Page) {
+async function installFixture(page: Page, { pageTwoAvailable = false } = {}) {
   await page.route('**/api/v1/**', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -143,9 +105,9 @@ async function installFixture(page: Page) {
     body: ONE_BY_ONE_PNG,
   }));
   await page.route(PAGE_TWO_URL, route => route.fulfill({
-    status: 404,
+    status: pageTwoAvailable ? 200 : 404,
     contentType: 'image/png',
-    body: '',
+    body: pageTwoAvailable ? ONE_BY_ONE_PNG : '',
   }));
 }
 
@@ -208,6 +170,18 @@ test('public English chapter notes show a fallback when a saved page image is un
   await expect(unavailablePage).toHaveText('Page 2 image is unavailable.');
   await expect(content.locator('img[alt="Page 2"]')).toHaveCount(0);
   await expect(content).toContainText('These pages were saved by the staff chapter editor.');
+});
+
+test('public English chapter notes preserve both saved page images through hydration', async ({ page }) => {
+  await installFixture(page, { pageTwoAvailable: true });
+  await page.goto(`${PUBLIC_ROUTE}?tab=notes`);
+
+  const content = page.locator('#chapter-content-top');
+  await expect(page.getByRole('heading', { name: 'Image-backed chapter', exact: true })).toBeVisible();
+  await expect(content.locator('img[alt="Page 1"]')).toHaveAttribute('src', PAGE_ONE_URL);
+  await expect(content.locator('img[alt="Page 2"]')).toHaveAttribute('src', PAGE_TWO_URL);
+  await expect(content.locator('img[alt="Page 1"]')).toHaveJSProperty('naturalWidth', 1);
+  await expect(content.locator('img[alt="Page 2"]')).toHaveJSProperty('naturalWidth', 1);
 });
 
 test('direct Assamese subject and chapter routes keep localized resolution and QA links', async ({ page }) => {
