@@ -96,6 +96,7 @@ const TermsPage          = lazy(() => import("@/pages/TermsPage"));
 const PrivacyPage        = lazy(() => import("@/pages/PrivacyPage"));
 const NotFoundPage       = lazy(() => import("@/pages/NotFoundPage"));
 const AdminPage          = lazy(() => import("@/pages/AdminPage"));
+const StaffDashboard     = lazy(() => import("@/pages/staff/StaffDashboard"));
 const ExamRoutinePage    = lazy(() => import("@/pages/ExamRoutinePage"));
 const CurriculumMap      = lazy(() => import("@/pages/CurriculumMap"));
 const StatusPage         = lazy(() => import("@/pages/StatusPage"));
@@ -366,7 +367,7 @@ export function AppRoutes() {
       )}
 
       {/* ── Unified staff control center ── */}
-      <Route path="/staff" element={<StaffGuard><AdminPage /></StaffGuard>} />
+      <Route path="/staff" element={<StaffGuard><StaffDashboard /></StaffGuard>} />
       <Route path="/staff/login" element={<Navigate to="/login?next=/staff" replace />} />
       <Route path="/staff/content-hub" element={<Navigate to="/staff" replace />} />
       {/* Legacy admin links remain valid, but there is no separate admin UI. */}

@@ -13,6 +13,7 @@ import AdminConversations from '@/components/admin/AdminConversations';
 import StaffOperations from '@/components/staff/StaffOperations';
 import { canStaffCapability, isStaffOrAdmin } from '@/utils/staffAccess';
 import { buildStaffChapterPatchPayload, normalizeStaffChapterCreateStatus } from '@/utils/staffChapterPayload';
+import { formatPastedContent } from '@/utils/formatPastedContent';
 
 const api = () => {
   const token = getToken();
@@ -338,12 +339,28 @@ const EDITOR_TABS = [
   { id: 'pyq',       label: 'PYQ Pages' },
 ];
 
-function FieldLabel({ children, chars }) {
+function FieldLabel({ children, chars, action }) {
   return (
     <div className="flex items-center justify-between mb-1.5">
       <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide">{children}</label>
-      {chars !== undefined && <span className="text-[10px] text-gray-300 tabular-nums">{chars.toLocaleString()} chars</span>}
+      <div className="flex items-center gap-2">
+        {chars !== undefined && <span className="text-[10px] text-gray-300 tabular-nums">{chars.toLocaleString()} chars</span>}
+        {action}
+      </div>
     </div>
+  );
+}
+
+function FormatPastedButton({ onClick, language }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[10px] font-semibold normal-case tracking-normal text-violet-700 transition-colors hover:bg-violet-100"
+      data-testid={`format-pasted-${language}`}
+    >
+      Format pasted content
+    </button>
   );
 }
 
@@ -746,6 +763,18 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
 
   const set    = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
   const setNum = (field) => (e) => setForm(f => ({ ...f, [field]: parseInt(e.target.value, 10) || 0 }));
+  const formatField = (field, label) => {
+    const original = form?.[field] || '';
+    try {
+      const formatted = formatPastedContent(original);
+      setForm(f => ({ ...f, [field]: formatted }));
+      toast.success(`${label} formatted`);
+    } catch {
+      // Formatting is an editing convenience, never a reason to lose pasted
+      // content. Keep the current value if the formatter ever fails.
+      toast.error(`Could not format ${label.toLowerCase()}; original content kept`);
+    }
+  };
 
   const setSubTabFor = (mainTab, val) => setSubTab(s => ({ ...s, [mainTab]: val }));
 
@@ -1079,11 +1108,21 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
                     <strong>Content layer</strong> — the study notes students read on the library page. Use Markdown.
                   </div>
                   <div>
-                    <FieldLabel chars={form?.notes_en?.length || 0}>Notes — English (Markdown)</FieldLabel>
+                    <FieldLabel
+                      chars={form?.notes_en?.length || 0}
+                      action={<FormatPastedButton language="english-notes" onClick={() => formatField('notes_en', 'English notes')} />}
+                    >
+                      Notes — English (Markdown)
+                    </FieldLabel>
                     <BigTextarea value={form?.notes_en || ''} onChange={set('notes_en')} placeholder="## Introduction\n\nStudy notes in English…" rows={16} mono />
                   </div>
                   <div>
-                    <FieldLabel chars={form?.notes_as?.length || 0}>Notes — Assamese (Markdown)</FieldLabel>
+                    <FieldLabel
+                      chars={form?.notes_as?.length || 0}
+                      action={<FormatPastedButton language="assamese-notes" onClick={() => formatField('notes_as', 'Assamese notes')} />}
+                    >
+                      Notes — Assamese (Markdown)
+                    </FieldLabel>
                     <BigTextarea value={form?.notes_as || ''} onChange={set('notes_as')} placeholder="## পৰিচয়\n\nঅসমীয়া ভাষাত টোকা…" rows={12} />
                   </div>
                 </div>
