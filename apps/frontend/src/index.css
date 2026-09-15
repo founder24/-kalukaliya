@@ -721,6 +721,8 @@
     font-weight: 700;
     margin: 1.9rem 0 0.65rem;
     color: #1f2937;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 0.35rem;
   }
   .chapter-textbook h4,
   .chapter-textbook h5,
@@ -729,6 +731,8 @@
     font-weight: 700;
     margin: 1.35rem 0 0.5rem;
     color: #374151;
+    border-bottom: 1px dashed #e5e7eb;
+    padding-bottom: 0.25rem;
   }
   .chapter-textbook p {
     margin: 0 0 1.15rem;
