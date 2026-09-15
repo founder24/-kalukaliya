@@ -32,6 +32,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
   const queryClient = useQueryClient();
   const { contentLang } = useContentLang();
   const isAs = contentLang === 'as';
+  const displaySubjectName = isAs ? (sub.name_as || sub.name) : sub.name;
+  const displaySubjectDescription = isAs
+    ? (sub.description_as || sub.description)
+    : sub.description;
   const thumbColors = useMemo(() => THUMB_GRADIENTS[sub.gradient] || THUMB_GRADIENTS.math, [sub.gradient]);
   const tags = useMemo(() => Array.isArray(sub.tags) ? sub.tags : [], [sub.tags]);
   const visibleTags = useMemo(() => tags.slice(0, 3), [tags]);
@@ -51,16 +55,16 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
 
   const handleShare = useCallback((e) => {
     e.preventDefault();
-    const parts = [sub.name];
-    if (sub.description) parts.push(sub.description);
+    const parts = [displaySubjectName];
+    if (displaySubjectDescription) parts.push(displaySubjectDescription);
     const meta = [sub.board_name || sub.boardName, sub.class_name || sub.className, sub.stream_name || sub.streamName].filter(Boolean).join(' · ');
     if (meta) parts.push(meta);
     const chCount = chapters.length || sub.chapter_count || sub.chapterCount || 0;
     if (chCount > 0) parts.push(`${chCount} chapters`);
     if (sub.tags?.length) parts.push(`Topics: ${sub.tags.join(', ')}`);
     parts.push('Study on Syrabit.ai');
-    share(sub.name, subjectLandingPath, { text: parts.join('\n') });
-  }, [sub, chapters.length, subjectLandingPath, share]);
+    share(displaySubjectName, subjectLandingPath, { text: parts.join('\n') });
+  }, [sub, chapters.length, subjectLandingPath, share, displaySubjectName, displaySubjectDescription]);
 
   const handlePrefetch = useCallback(() => {
     if (sub.boardSlug && sub.classSlug && sub.slug) {
@@ -175,7 +179,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
 
       {/* Subject info */}
       <div className="px-3 sm:px-4 pt-3 pb-2 relative z-[2]">
-        <Link to={subjectLandingPath} className="block group/title static" aria-label={`View ${sub.name}`}>
+        <Link to={subjectLandingPath} className="block group/title static" aria-label={`View ${displaySubjectName}`}>
           <span className="absolute inset-0 z-0" aria-hidden="true" />
           <div className="flex items-start gap-3 mb-2">
             <div
@@ -192,7 +196,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                 className="font-bold group-hover/title:text-purple-300 transition-colors leading-tight"
                 style={{ fontSize: '0.95rem', color: 'hsl(var(--foreground))' }}
               >
-                {sub.name}
+                {displaySubjectName}
               </h3>
               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-0.5">
                 <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded" style={{
@@ -217,10 +221,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           </div>
         </Link>
 
-        {sub.description && (
+        {displaySubjectDescription && (
           <p className="text-xs leading-relaxed mb-1.5 sm:mb-2 line-clamp-1 sm:line-clamp-2 font-medium"
             style={{ color: 'hsl(var(--muted-foreground))' }}>
-            {sub.description}
+            {displaySubjectDescription}
           </p>
         )}
 
@@ -258,7 +262,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           className="flex items-center gap-1.5 px-2.5 py-1.5 overflow-x-auto scrollbar-none"
           style={{ borderBottom: '1px solid rgba(139,92,246,0.06)' }}
           role="group"
-          aria-label={`${sub.name} content sections`}
+           aria-label={`${displaySubjectName} content sections`}
         >
           {SECTIONS.map(sec => (
             <button
@@ -310,7 +314,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                           className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0"
                           style={{ background: section.bg, color: section.accent }}
                         >
-                          {i + 1}
+                       {i + 1}
                         </span>
                         <div className="flex-1 min-w-0">
                           <span className="font-semibold block truncate" style={{ color: section.accent }}>
@@ -408,6 +412,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                 const asSlug = isAs ? (ch.slug_as || effectiveSlug) : effectiveSlug;
                 const hasValidLink = !!(sub.boardSlug && sub.classSlug && sub.slug && effectiveSlug);
                 const hasContent = ch.notes_generated !== false;
+                const chapterTitle = isAs ? (ch.title_as || ch.title) : ch.title;
+                const chapterDescription = isAs
+                  ? (ch.description_as || ch.description)
+                  : ch.description;
                 const chPath = hasValidLink
                   ? (isAs
                     ? `/as/${sub.boardSlug}/${sub.classSlug}/${sub.slug}/${asSlug}`
@@ -428,10 +436,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                     <Link
                       to={chPath}
                       className="truncate transition-colors flex-1 font-medium"
-                      title={`${ch.title} — ${sub.name}`}
+                      title={`${chapterTitle} — ${displaySubjectName}${chapterDescription ? ` — ${chapterDescription}` : ''}`}
                       style={{ color: section.accent, opacity: (hasValidLink && hasContent) ? 1 : 0.5 }}
                     >
-                      {(isAs && ch.title_as) ? ch.title_as : ch.title}
+                      {chapterTitle}
                     </Link>
                     <ExternalLink size={10} className="shrink-0" style={{ color: 'hsl(var(--muted-foreground) / 0.2)' }} />
                   </div>
@@ -460,8 +468,8 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
       >
         <button
           type="button"
-          onClick={() => { onToggleSave(sub.id); try { Analytics.subjectBookmarked(sub.name, !isSaved); } catch {} }}
-          aria-label={isSaved ? `Unsave ${sub.name}` : `Save ${sub.name}`}
+          onClick={() => { onToggleSave(sub.id); try { Analytics.subjectBookmarked(displaySubjectName, !isSaved); } catch {} }}
+          aria-label={isSaved ? `Unsave ${displaySubjectName}` : `Save ${displaySubjectName}`}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95"
           style={
             isSaved
@@ -501,9 +509,9 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           onClick={() => {
             const activeSec = SECTIONS.find(s => s.key === activeSection);
             const firstChapterId = activeSec?.chapters?.[0]?.id || null;
-            onAskAI(sub.id, hasDocument, sub.name, activeSection, firstChapterId);
+            onAskAI(sub.id, hasDocument, displaySubjectName, activeSection, firstChapterId);
           }}
-          aria-label={`Ask AI about ${sub.name}`}
+          aria-label={`Ask AI about ${displaySubjectName}`}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold text-white transition-all duration-200 hover:opacity-90 active:scale-95"
           style={{
             background: hasDocument
@@ -521,7 +529,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           type="button"
           onClick={handleShare}
           disabled={sharing}
-          aria-label={`Share ${sub.name}`}
+          aria-label={`Share ${displaySubjectName}`}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95 disabled:opacity-50"
           style={{
             color: 'hsl(var(--muted-foreground))',

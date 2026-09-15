@@ -190,6 +190,8 @@ async function prewarmSubject(env: Env, subjectId: string): Promise<void> {
     titleAs: chapters.titleAs,
     slug: chapters.slug,
     slugAs: chapters.slugAs,
+    metaDescription: chapters.metaDescription,
+    metaDescriptionAs: chapters.metaDescriptionAs,
     chapterNumber: chapters.chapterNumber,
     status: chapters.status,
     notesEn: chapters.notesEn,

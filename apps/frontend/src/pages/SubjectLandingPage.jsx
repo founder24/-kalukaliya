@@ -67,8 +67,9 @@ export default function SubjectLandingPage() {
     if (!searchQuery.trim()) return activeSectionChapters;
     const q = searchQuery.toLowerCase();
     return activeSectionChapters.filter((ch) =>
-      ch.title?.toLowerCase().includes(q) ||
-      ch.description?.toLowerCase().includes(q)
+      [ch.title, ch.title_as, ch.description, ch.description_as]
+        .filter(Boolean)
+        .some(value => value.toLowerCase().includes(q))
     );
   }, [activeSectionChapters, searchQuery]);
 
@@ -521,8 +522,16 @@ export default function SubjectLandingPage() {
             </div>
           ) : (
             filteredChapters.flatMap((ch, i) => {
-              const chPath = ch.slug
-                ? `${chapterBasePath}/${ch.slug}`
+              const chapterTitle = contentLang === 'as' ? (ch.title_as || ch.title) : ch.title;
+              const chapterDescription = contentLang === 'as'
+                ? (ch.description_as || ch.description)
+                : ch.description;
+              const chapterTopics = contentLang === 'as'
+                ? (ch.syllabus_topics_as?.length ? ch.syllabus_topics_as : ch.syllabus_topics)
+                : ch.syllabus_topics;
+              const chapterSlug = contentLang === 'as' ? (ch.slug_as || ch.slug) : ch.slug;
+              const chPath = chapterSlug
+                ? `${contentLang === 'as' ? `/as/${board}/${classSlug}/${subjectSlug}` : chapterBasePath}/${chapterSlug}`
                 : `${basePath}`;
 
               const card = (
@@ -542,11 +551,11 @@ export default function SubjectLandingPage() {
                     </span>
                     <div className="flex-1 min-w-0">
                       <h2 className="text-sm font-semibold text-foreground group-hover/ch:text-violet-600 transition-colors">
-                        {ch.title}
+                        {chapterTitle}
                       </h2>
-                      {(ch.description || ch.syllabus_topics?.length > 0) && (
+                      {(chapterDescription || chapterTopics?.length > 0) && (
                         <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
-                          {ch.description || ch.syllabus_topics.slice(0, 2).join(' • ')}
+                          {chapterDescription || chapterTopics.slice(0, 2).join(' • ')}
                         </p>
                       )}
                     </div>

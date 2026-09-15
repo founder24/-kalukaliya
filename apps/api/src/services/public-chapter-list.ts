@@ -7,6 +7,8 @@ export type PublicChapterListRow = {
   titleAs: string | null;
   slug: string;
   slugAs: string | null;
+  metaDescription: string | null;
+  metaDescriptionAs: string | null;
   chapterNumber: number | null;
   status: string | null;
   notesEn: string | null;
@@ -22,6 +24,8 @@ export type PublicChapterListItem = {
   chapter_id: string;
   title: string;
   title_as: string | null;
+  description: string | null;
+  description_as: string | null;
   slug: string;
   slug_as: string | null;
   chapter_number: number | null;
@@ -69,6 +73,8 @@ export function serializePublicChapterList(
       chapter_id: chapter.id,
       title: chapter.title,
       title_as: chapter.titleAs ?? null,
+      description: chapter.metaDescription ?? null,
+      description_as: chapter.metaDescriptionAs ?? null,
       slug: chapter.slug,
       slug_as: chapter.slugAs ?? null,
       chapter_number: chapter.chapterNumber ?? null,

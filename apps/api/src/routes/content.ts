@@ -253,9 +253,21 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
   const kvKey = `subject:${subjectId}:chapters`;
   const cached = await c.env.CONTENT_KV.get(kvKey);
   if (cached) {
-    c.header('Cache-Control', 'public, max-age=60, s-maxage=300');
-    c.header('X-Cache', 'HIT');
-    return c.json(JSON.parse(cached));
+    try {
+      const parsed: unknown = JSON.parse(cached);
+      // Older KV entries predate chapter description metadata. Ignore those
+      // entries once so the current serializer can refresh them in place.
+      const hasChapterMetadata = Array.isArray(parsed) && parsed.every((item) =>
+        item && typeof item === 'object' && 'description' in item && 'description_as' in item
+      );
+      if (hasChapterMetadata) {
+        c.header('Cache-Control', 'public, max-age=60, s-maxage=300');
+        c.header('X-Cache', 'HIT');
+        return c.json(parsed);
+      }
+    } catch {
+      // Treat malformed or stale KV content as a cache miss.
+    }
   }
 
   const rows = await db.select({
@@ -264,6 +276,8 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     titleAs: chapters.titleAs,
     slug: chapters.slug,
     slugAs: chapters.slugAs,
+    metaDescription: chapters.metaDescription,
+    metaDescriptionAs: chapters.metaDescriptionAs,
     chapterNumber: chapters.chapterNumber,
     status: chapters.status,
     notesEn: chapters.notesEn,
@@ -549,6 +563,7 @@ contentRouter.get('/library-bundle', async (c) => {
 
   // Load chapters when needed (full mode or boot mode)
   type ChapterRow = { id: string; subjectId: string; title: string; titleAs: string | null; slug: string; slugAs: string | null;
+    metaDescription: string | null; metaDescriptionAs: string | null;
     chapterNumber: number | null; status: string | null; contentType: string | null;
     notesEn: string | null; notesAs: string | null; qaEn: string | null; publishedTopics: string | null; };
 
@@ -557,6 +572,7 @@ contentRouter.get('/library-bundle', async (c) => {
     allChapters = await db.select({
       id: chapters.id, subjectId: chapters.subjectId,
       title: chapters.title, titleAs: chapters.titleAs, slug: chapters.slug, slugAs: chapters.slugAs,
+      metaDescription: chapters.metaDescription, metaDescriptionAs: chapters.metaDescriptionAs,
       chapterNumber: chapters.chapterNumber, status: chapters.status, contentType: chapters.contentType,
       notesEn: chapters.notesEn, notesAs: chapters.notesAs,
       qaEn: chapters.qaEn, publishedTopics: chapters.publishedTopics,
@@ -577,6 +593,8 @@ contentRouter.get('/library-bundle', async (c) => {
       chapter_id: ch.id,
       title: ch.title,
       title_as: ch.titleAs ?? null,
+      description: ch.metaDescription ?? null,
+      description_as: ch.metaDescriptionAs ?? null,
       slug: ch.slug,
       slug_as: ch.slugAs ?? null,
       chapter_number: ch.chapterNumber ?? null,
