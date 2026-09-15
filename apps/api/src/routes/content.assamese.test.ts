@@ -142,6 +142,32 @@ describe('Assamese public content metadata', () => {
     });
   });
 
+  it('keeps Assamese-only and English-only Q&A flags distinct in the full library bundle', async () => {
+    const response = await get('/api/v1/content/library-bundle');
+    expect(response.status).toBe(200);
+
+    const payload = await response.json() as {
+      chapters: Array<{
+        chapter_id: string;
+        has_qa: boolean;
+        has_qa_as: boolean;
+      }>;
+    };
+
+    expect(payload.chapters).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        chapter_id: 'translated',
+        has_qa: false,
+        has_qa_as: true,
+      }),
+      expect.objectContaining({
+        chapter_id: 'fallback',
+        has_qa: true,
+        has_qa_as: false,
+      }),
+    ]));
+  });
+
   it('localizes the topics-published query and preserves English fallbacks', async () => {
     const response = await get('/api/v1/content/chapters/translated/topics-published?lang=as');
     expect(response.status).toBe(200);

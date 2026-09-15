@@ -609,7 +609,7 @@ contentRouter.get('/library-bundle', async (c) => {
       content_type: ch.contentType ?? 'standard',
       notes_generated: !!(ch.notesEn && ch.notesEn.length > 10),
       has_assamese: !!(ch.notesAs && ch.notesAs.length > 10),
-      has_qa: ch.qaEn !== '[]' && ch.qaEn != null,
+      has_qa: (safeParse<unknown[]>(ch.qaEn) ?? []).length > 0,
       has_qa_as: (safeParse<unknown[]>(ch.qaAs) ?? []).length > 0,
       topic_count: topicsArr.length,
       pyq_papers: [],
