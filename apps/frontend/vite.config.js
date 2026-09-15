@@ -840,6 +840,16 @@ export default defineConfig(({ mode }) => ({
       '@tanstack/react-query',
       'react-markdown',
       'remark-gfm',
+      // Keep staff/admin UI dependencies in the initial optimizer graph.
+      // Discovering these after a lazy staff route mounts can invalidate the
+      // current browser chunk and surface as "error loading dynamically
+      // imported module" / misleading invalid-hook-call errors.
+      '@radix-ui/react-accordion',
+      '@radix-ui/react-dropdown-menu',
+      '@radix-ui/react-label',
+      '@radix-ui/react-slot',
+      '@radix-ui/react-switch',
+      '@radix-ui/react-tooltip',
     ],
     needsInterop: [
       'react',
