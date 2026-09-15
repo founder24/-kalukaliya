@@ -455,11 +455,14 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                       to={chPath}
                       className={`flex-1 truncate font-medium transition-colors ${
                         hasValidLink && hasContent
-                          ? 'text-slate-700 group-hover:text-violet-700'
+                          ? 'group-hover:text-violet-700'
                           : 'text-slate-400'
                       }`}
                       title={`${chapterTitle} — ${displaySubjectName}${chapterDescription ? ` — ${chapterDescription}` : ''}`}
-                      style={{ opacity: (hasValidLink && hasContent) ? 1 : 0.5 }}
+                      style={{
+                        color: (hasValidLink && hasContent) ? '#64748b' : '#94a3b8',
+                        opacity: (hasValidLink && hasContent) ? 1 : 0.5,
+                      }}
                     >
                       {chapterTitle}
                     </Link>
