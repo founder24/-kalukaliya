@@ -17,8 +17,12 @@ import {
   validateJsonPayload,
 } from "../../scripts/generate-static-data.mjs";
 import { injectPrerenderPath } from "../../scripts/_prerender-marker.mjs";
-import { rewriteHead } from "../../scripts/prerender-routes.mjs";
+import {
+  injectFaqJsonLdIntoHead,
+  rewriteHead,
+} from "../../scripts/prerender-routes.mjs";
 import { rewriteHead as rewriteStaticHead } from "../../scripts/prerender-static-routes.mjs";
+import { chapterSchema } from "../lib/jsonld.js";
 
 describe("release verifier syntax", () => {
   it("parses without duplicate declarations", () => {
@@ -624,6 +628,73 @@ describe("chapter preload snapshot guards", () => {
     );
 
     expect(result.failures).toEqual([]);
+  });
+});
+
+describe("FAQ JSON-LD normalization", () => {
+  const chapterUrl = "https://syrabit.ai/ahsec/class-12/physics/motion";
+  const faqEntries = [
+    {
+      name: "What is motion?",
+      text: "Motion is the change in position of an object over time.",
+    },
+    {
+      question: "Why is a reference point important?",
+      answer: "A reference point lets us describe an object's position and movement.",
+    },
+    {
+      question: "Too short",
+      answer: "short",
+    },
+    {
+      question: "   ",
+      answer: "This answer is intentionally ignored because the question is blank.",
+    },
+  ];
+
+  it("keeps alias and canonical FAQ fields identical across prerender and hydration", () => {
+    const html = injectFaqJsonLdIntoHead(
+      "<html><head></head><body></body></html>",
+      faqEntries,
+    );
+    const prerenderedScript = html.match(
+      /<script type="application\/ld\+json" data-pm="1">([\s\S]*?)<\/script>/,
+    );
+    expect(prerenderedScript).not.toBeNull();
+    const prerenderedFaq = JSON.parse(prerenderedScript[1]);
+
+    const hydratedSchema = chapterSchema(
+      {
+        title: "Motion",
+        topic_title: "Motion",
+        subject_name: "Physics",
+        board_name: "AHSEC",
+        class_name: "Class 12",
+        meta_description: "Motion notes.",
+        faq_entries: faqEntries,
+      },
+      chapterUrl,
+      "/ahsec/class-12/physics",
+    );
+    const hydratedFaq = hydratedSchema["@graph"].find(
+      (node) => node["@type"] === "FAQPage",
+    );
+
+    expect(hydratedFaq).toBeDefined();
+    expect(prerenderedFaq.mainEntity).toEqual(hydratedFaq.mainEntity);
+    expect(prerenderedFaq.mainEntity).toHaveLength(2);
+  });
+
+  it("does not emit FAQPage when fewer than two valid normalized entries remain", () => {
+    const html = injectFaqJsonLdIntoHead(
+      "<html><head></head><body></body></html>",
+      [
+        { name: "Only one valid question", text: "This answer is long enough." },
+        { question: "Blank answer", answer: "   " },
+      ],
+    );
+
+    expect(html).not.toContain('type="application/ld+json"');
   });
 });
 

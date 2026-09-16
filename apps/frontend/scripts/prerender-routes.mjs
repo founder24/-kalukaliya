@@ -50,6 +50,7 @@ import {
 } from "./_prerender-data.mjs";
 import { injectPrerenderPath } from "./_prerender-marker.mjs";
 import { createJsonRequestPool } from "./_prerender-request-pool.mjs";
+import { normalizeFaqEntries } from "../src/lib/faq-jsonld.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -241,16 +242,15 @@ export function rewriteHead(html, { title, description, canonical, ogImageAlt })
 // .forEach(remove)`) replaces this static script with the React-built
 // equivalent on hydration — no duplicate FAQPage scripts, no SEO
 // penalty for "double markup".
-function injectFaqJsonLdIntoHead(html, faqEntries) {
-  if (!Array.isArray(faqEntries) || faqEntries.length < 2) return html;
-  const mainEntity = faqEntries.slice(0, 10).map((e) => ({
+export function injectFaqJsonLdIntoHead(html, faqEntries) {
+  const mainEntity = normalizeFaqEntries(faqEntries).map((e) => ({
     "@type": "Question",
-    name: String(e.question || "").trim(),
+    name: e.question,
     acceptedAnswer: {
       "@type": "Answer",
-      text: String(e.answer || "").trim(),
+      text: e.answer,
     },
-  })).filter((q) => q.name && q.acceptedAnswer.text);
+  }));
   if (mainEntity.length < 2) return html;
   const ld = {
     "@context": "https://schema.org",

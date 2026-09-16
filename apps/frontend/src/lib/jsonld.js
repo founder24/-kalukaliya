@@ -23,6 +23,7 @@
  */
 
 import { LIBRARY_SEO_TITLE } from "./librarySeo";
+import { normalizeFaqEntries } from "./faq-jsonld.js";
 
 const SITE_ORIGIN = 'https://syrabit.ai';
 const SITE_LOGO = `${SITE_ORIGIN}/icons/icon-192x192.png`;
@@ -549,12 +550,7 @@ export function chapterSchema(data, url, basePath = '') {
   ];
 
   const faq = Array.isArray(data.faq_entries) ? data.faq_entries : [];
-  const cleanedFaq = faq
-    .map(q => ({
-      question: (q.question || q.name || '').trim(),
-      answer: (q.answer || q.text || '').trim(),
-    }))
-    .filter(q => q.question.length > 5 && q.answer.length > 10);
+  const cleanedFaq = normalizeFaqEntries(faq);
   if (cleanedFaq.length >= 2) {
     graph.push({
       '@type': 'FAQPage',
