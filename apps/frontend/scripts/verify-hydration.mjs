@@ -330,6 +330,48 @@ async function chapterStructuredDataIssues(page, route) {
   const scripts = page.locator('script[type="application/ld+json"]');
   const count = await scripts.count();
   const schemas = [];
+  const expectedPath = route.replace(/\/+$/, "") || "/";
+  const sameOriginUrlFields = new Set(["@id", "url", "item"]);
+
+  function isAllowedSameOriginUrl(rawUrl, field) {
+    let parsed;
+    try {
+      parsed = new URL(rawUrl, "https://syrabit.ai");
+    } catch {
+      return true;
+    }
+    if (parsed.origin !== "https://syrabit.ai") return true;
+
+    const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+    if (pathname === "/" || pathname === "/library") return true;
+    if (pathname === expectedPath) return true;
+    if (field === "item" && expectedPath.startsWith(`${pathname}/`)) {
+      return true;
+    }
+    return false;
+  }
+
+  function collectSameOriginUrls(value, path = "") {
+    const urls = [];
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => {
+        urls.push(...collectSameOriginUrls(entry, `${path}[${index}]`));
+      });
+      return urls;
+    }
+    if (value === null || typeof value !== "object") return urls;
+
+    for (const [key, entry] of Object.entries(value)) {
+      const fieldPath = path ? `${path}.${key}` : key;
+      if (sameOriginUrlFields.has(key) && typeof entry === "string") {
+        urls.push({ field: key, fieldPath, value: entry });
+      }
+      if (entry && typeof entry === "object") {
+        urls.push(...collectSameOriginUrls(entry, fieldPath));
+      }
+    }
+    return urls;
+  }
 
   if (count === 0) {
     issues.push({
@@ -394,6 +436,17 @@ async function chapterStructuredDataIssues(page, route) {
       continue;
     }
     schemas.push(schema);
+
+    for (const urlField of collectSameOriginUrls(schema)) {
+      if (isAllowedSameOriginUrl(urlField.value, urlField.field)) continue;
+      issues.push({
+        type: "structured-data",
+        text:
+          `Structured data on ${route}: script ${scriptNumber} has a same-origin ` +
+          `URL at ${urlField.fieldPath} that does not belong to the route; ` +
+          `observed ${urlField.value}`,
+      });
+    }
   }
 
   const faqExpected = await page.evaluate(() => {

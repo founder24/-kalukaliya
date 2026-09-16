@@ -126,7 +126,7 @@ describe("headless hydration release verification", () => {
       const chapterPath = path.join(fixtureDir, "fixture-chapter", "index.html");
       const chapterHead = (
         canonicalTags,
-        structuredData = '<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","name":"Fixture Chapter"}]}</script>',
+        structuredData = '<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://syrabit.ai/fixture-chapter#article","url":"https://syrabit.ai/fixture-chapter"},{"@type":"BreadcrumbList","itemListElement":[{"item":"https://syrabit.ai/"},{"item":"https://syrabit.ai/library"},{"item":"https://syrabit.ai/fixture-chapter"}]}]}</script>',
       ) => [
         "<!doctype html>",
         "<html><head>",
@@ -192,6 +192,18 @@ describe("headless hydration release verification", () => {
           "[chapter /fixture-chapter] (structured-data) Structured data on /fixture-chapter: script 1 is not valid JSON",
         );
         expect(output).toContain("across 1 checked route(s)");
+
+        const staleStructuredData = runVerifier(
+          chapterHead(
+            '<link rel="canonical" href="https://syrabit.ai/fixture-chapter" />',
+            '<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","url":"https://syrabit.ai/stale-chapter"}]}</script>',
+          ),
+        );
+        expect(staleStructuredData.status).toBe(1);
+        const staleOutput = `${staleStructuredData.stdout || ""}\n${staleStructuredData.stderr || ""}`;
+        expect(staleOutput).toContain(
+          "[chapter /fixture-chapter] (structured-data) Structured data on /fixture-chapter: script 1 has a same-origin URL at @graph[0].url that does not belong to the route; observed https://syrabit.ai/stale-chapter",
+        );
       } finally {
         rmSync(fixtureDir, { recursive: true, force: true });
       }
