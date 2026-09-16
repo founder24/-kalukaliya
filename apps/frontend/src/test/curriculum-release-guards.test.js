@@ -167,6 +167,10 @@ describe("headless hydration release verification", () => {
         '<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","url":"https://syrabit.ai/fixture-chapter"},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What does this fixture verify?","acceptedAnswer":{"@type":"Answer","text":"It verifies that chapter FAQ structured data reaches the browser."}},{"@type":"Question","name":"Why does this check matter?","acceptedAnswer":{"@type":"Answer","text":"It prevents available chapter questions from losing search markup."}}]}]}</script>';
       const duplicateFaqStructuredData =
         faqStructuredData + faqStructuredData;
+      const mismatchedFaqStructuredData = faqStructuredData.replace(
+        "It verifies that chapter FAQ structured data reaches the browser.",
+        "It contains stale chapter FAQ content.",
+      );
 
       function runVerifier(document) {
         mkdirSync(path.dirname(chapterPath), { recursive: true });
@@ -205,6 +209,22 @@ describe("headless hydration release verification", () => {
         );
         expect(validFaq.status).toBeUndefined();
         expect(validFaq).toContain("OK — 1 route(s) checked");
+
+        const mismatchedFaq = runVerifier(
+          chapterHead(
+            '<link rel="canonical" href="https://syrabit.ai/fixture-chapter" />',
+            mismatchedFaqStructuredData,
+            faqPreload,
+          ),
+        );
+        expect(mismatchedFaq.status).toBe(1);
+        const mismatchedFaqOutput = `${mismatchedFaq.stdout || ""}\n${mismatchedFaq.stderr || ""}`;
+        expect(mismatchedFaqOutput).toContain(
+          '[chapter /fixture-chapter] (structured-data) Structured data on /fixture-chapter: FAQPage question 1 does not match chapter preload; observed "What does this fixture verify?"',
+        );
+        expect(mismatchedFaqOutput).toContain(
+          '[chapter /fixture-chapter] (structured-data) Structured data on /fixture-chapter: FAQPage is missing chapter preload question "What does this fixture verify?"',
+        );
 
         const duplicateFaq = runVerifier(
           chapterHead(

@@ -380,14 +380,22 @@ async function chapterStructuredDataIssues(page, route) {
     );
   }
 
-  function countFaqPageObjects(schema) {
-    let faqPageCount = hasType(schema["@type"], "FAQPage") ? 1 : 0;
-    if (Array.isArray(schema["@graph"])) {
-      faqPageCount += schema["@graph"].filter((node) =>
-        node && typeof node === "object" && hasType(node["@type"], "FAQPage"),
-      ).length;
+  function faqPageObjects(schema) {
+    const faqPages = [];
+    if (hasType(schema["@type"], "FAQPage")) {
+      faqPages.push(schema);
     }
-    return faqPageCount;
+    if (Array.isArray(schema["@graph"])) {
+      faqPages.push(
+        ...schema["@graph"].filter(
+          (node) =>
+            node &&
+            typeof node === "object" &&
+            hasType(node["@type"], "FAQPage"),
+        ),
+      );
+    }
+    return faqPages;
   }
 
   if (count === 0) {
@@ -466,21 +474,20 @@ async function chapterStructuredDataIssues(page, route) {
     }
   }
 
-  const faqExpected = await page.evaluate(() => {
+  const expectedFaqEntries = await page.evaluate(() => {
     const entries = window.__CHAPTER_PRELOAD__?.data?.faq_entries;
-    if (!Array.isArray(entries)) return false;
-    return entries.filter(
-      (entry) =>
-        entry &&
-        String(entry.question || "").trim() &&
-        String(entry.answer || "").trim(),
-    ).length >= 2;
+    if (!Array.isArray(entries)) return [];
+    return entries
+      .map((entry) => ({
+        question: String(entry?.question || entry?.name || "").trim(),
+        answer: String(entry?.answer || entry?.text || "").trim(),
+      }))
+      .filter((entry) => entry.question.length > 5 && entry.answer.length > 10)
+      .slice(0, 10);
   });
-  if (faqExpected) {
-    const faqPageCount = schemas.reduce(
-      (count, schema) => count + countFaqPageObjects(schema),
-      0,
-    );
+  if (expectedFaqEntries.length >= 2) {
+    const faqPages = schemas.flatMap(faqPageObjects);
+    const faqPageCount = faqPages.length;
     if (faqPageCount === 0) {
       issues.push({
         type: "structured-data",
@@ -495,6 +502,69 @@ async function chapterStructuredDataIssues(page, route) {
           `Structured data on ${route}: expected exactly 1 FAQPage JSON-LD ` +
           `object when chapter FAQ entries are present, observed ${faqPageCount}`,
       });
+    } else {
+      const faqPage = faqPages[0];
+      if (!Array.isArray(faqPage.mainEntity)) {
+        issues.push({
+          type: "structured-data",
+          text:
+            `Structured data on ${route}: FAQPage mainEntity must be an ` +
+            `array of chapter questions`,
+        });
+      } else {
+        const expectedCounts = new Map(
+          expectedFaqEntries.map((entry) => [
+            `${entry.question}\u0000${entry.answer}`,
+            1,
+          ]),
+        );
+
+        faqPage.mainEntity.forEach((entry, index) => {
+          const question =
+            entry && typeof entry === "object"
+              ? String(entry.name || "").trim()
+              : "";
+          const answer =
+            entry?.acceptedAnswer && typeof entry.acceptedAnswer === "object"
+              ? String(entry.acceptedAnswer.text || "").trim()
+              : "";
+          if (!question || !answer) {
+            issues.push({
+              type: "structured-data",
+              text:
+                `Structured data on ${route}: FAQPage question ${index + 1} ` +
+                `must have a non-empty name and acceptedAnswer text`,
+            });
+            return;
+          }
+
+          const key = `${question}\u0000${answer}`;
+          const remaining = expectedCounts.get(key) || 0;
+          if (remaining === 0) {
+            issues.push({
+              type: "structured-data",
+              text:
+                `Structured data on ${route}: FAQPage question ${index + 1} ` +
+                `does not match chapter preload; observed "${question}"`,
+            });
+            return;
+          }
+          expectedCounts.set(key, remaining - 1);
+        });
+
+        for (const expected of expectedFaqEntries) {
+          const key = `${expected.question}\u0000${expected.answer}`;
+          if ((expectedCounts.get(key) || 0) > 0) {
+            issues.push({
+              type: "structured-data",
+              text:
+                `Structured data on ${route}: FAQPage is missing chapter ` +
+                `preload question "${expected.question}"`,
+            });
+            expectedCounts.set(key, 0);
+          }
+        }
+      }
     }
   }
 
