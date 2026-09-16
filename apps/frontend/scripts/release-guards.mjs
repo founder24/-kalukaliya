@@ -51,6 +51,110 @@ export function validateLibrarySnapshot(rel, body, { strict = false } = {}) {
   return { failures, warnings };
 }
 
+export function validateSubjectPreload(rel, body) {
+  const failures = [];
+  const marker = "window.__SSR_QUERIES__=";
+  const markerStart = body.indexOf(marker);
+
+  if (markerStart === -1) {
+    failures.push(`${rel}: missing inlined window.__SSR_QUERIES__ payload`);
+    return { queries: null, failures };
+  }
+
+  const payloadStart = markerStart + marker.length;
+  const payloadEnd = body.indexOf(";</script>", payloadStart);
+  if (payloadEnd === -1) {
+    failures.push(
+      `${rel}: window.__SSR_QUERIES__ script is missing its closing </script> boundary`,
+    );
+    return { queries: null, failures };
+  }
+
+  let queries;
+  try {
+    queries = JSON.parse(body.slice(payloadStart, payloadEnd));
+  } catch (err) {
+    failures.push(
+      `${rel}: window.__SSR_QUERIES__ is not valid JSON (${err.message})`,
+    );
+    return { queries: null, failures };
+  }
+
+  if (!Array.isArray(queries)) {
+    failures.push(
+      `${rel}: window.__SSR_QUERIES__ must be an array of subject query records`,
+    );
+    return { queries, failures };
+  }
+
+  const subjectQuery = queries.find(
+    (query) => Array.isArray(query?.key) && query.key[0] === "resolve-subject",
+  );
+  if (!subjectQuery) {
+    failures.push(
+      `${rel}: window.__SSR_QUERIES__ is missing a resolve-subject query`,
+    );
+  } else {
+    const subjectKey = subjectQuery.key;
+    if (
+      subjectKey.length < 4 ||
+      subjectKey.slice(1, 4).some(
+        (value) => typeof value !== "string" || !value.trim(),
+      )
+    ) {
+      failures.push(
+        `${rel}: resolve-subject query key must include non-empty board, class, and subject slugs`,
+      );
+    }
+
+    const subject = subjectQuery.data;
+    if (
+      subject === null ||
+      typeof subject !== "object" ||
+      Array.isArray(subject)
+    ) {
+      failures.push(
+        `${rel}: resolve-subject query must contain a subject data object`,
+      );
+    } else if (
+      !(
+        (typeof subject.id === "string" && subject.id.trim()) ||
+        (typeof subject._id === "string" && subject._id.trim())
+      )
+    ) {
+      failures.push(
+        `${rel}: resolve-subject query subject data must include a non-empty id or _id`,
+      );
+    }
+  }
+
+  const chaptersQuery = queries.find(
+    (query) => Array.isArray(query?.key) && query.key[0] === "chapters",
+  );
+  if (!chaptersQuery) {
+    failures.push(
+      `${rel}: window.__SSR_QUERIES__ is missing a chapters query`,
+    );
+  } else {
+    if (
+      chaptersQuery.key.length < 2 ||
+      typeof chaptersQuery.key[1] !== "string" ||
+      !chaptersQuery.key[1].trim()
+    ) {
+      failures.push(
+        `${rel}: chapters query key must include a non-empty subject ID`,
+      );
+    }
+    if (!Array.isArray(chaptersQuery.data)) {
+      failures.push(
+        `${rel}: chapters query must contain a chapter array`,
+      );
+    }
+  }
+
+  return { queries, failures };
+}
+
 export function validateChapterPreload(rel, body) {
   const failures = [];
   const marker = "window.__CHAPTER_PRELOAD__=";

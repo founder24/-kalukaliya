@@ -20,6 +20,7 @@ import {
   validateChapterPreload,
   validateLibrarySnapshot,
   validatePrerenderManifest,
+  validateSubjectPreload,
 } from "./release-guards.mjs";
 import { AI_PLUGIN_METADATA } from "./cloudflare-production-contract.mjs";
 
@@ -288,15 +289,13 @@ for (const page of pages) {
         kind === "chapter" ? "__CHAPTER_PRELOAD__" : "__SSR_QUERIES__";
       const seedIdx = page.body.indexOf(`window.${seedKey}`);
       const moduleIdx = page.body.indexOf('<script type="module"');
-      if (seedIdx === -1) {
-        if (kind === "subject") {
-          fail(`${route}: missing inlined window.${seedKey} payload`);
-        }
-      } else if (moduleIdx === -1 || seedIdx > moduleIdx) {
+      if (seedIdx !== -1 && (moduleIdx === -1 || seedIdx > moduleIdx)) {
         fail(`${route}: window.${seedKey} must be inlined BEFORE main module script`);
       }
       if (kind === "chapter") {
         failures.push(...validateChapterPreload(route, page.body).failures);
+      } else if (kind === "subject") {
+        failures.push(...validateSubjectPreload(route, page.body).failures);
       }
       if (/<div id="__shell"/.test(page.body)) {
         fail(`${route}: legacy #__shell overlay still present`);

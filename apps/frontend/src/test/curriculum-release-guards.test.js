@@ -9,6 +9,7 @@ import {
   validateChapterPreload,
   validateLibrarySnapshot,
   validatePrerenderManifest,
+  validateSubjectPreload,
 } from "../../scripts/release-guards.mjs";
 import {
   fetchWithFallback,
@@ -392,6 +393,74 @@ describe("chapter preload snapshot guards", () => {
     );
 
     expect(result.failures).toEqual([]);
+  });
+});
+
+describe("subject preload snapshot guards", () => {
+  const subjectRoute = "ahsec/class-12/physics/index.html";
+  const validQueries = [
+    {
+      key: ["resolve-subject", "ahsec", "class-12", "physics"],
+      data: {
+        id: "subject-physics",
+        name: "Physics",
+      },
+    },
+    {
+      key: ["chapters", "subject-physics"],
+      data: [{ id: "chapter-motion", slug: "motion", title: "Motion" }],
+    },
+  ];
+
+  const routeDocument = (payload) =>
+    `<div id="root" data-hydrate="subject">rendered subject</div>` +
+    `<script>window.__SSR_QUERIES__=${payload};</script>`;
+
+  it("accepts a valid subject query preload", () => {
+    const result = validateSubjectPreload(
+      subjectRoute,
+      routeDocument(JSON.stringify(validQueries)),
+    );
+
+    expect(result.failures).toEqual([]);
+    expect(result.queries).toEqual(validQueries);
+  });
+
+  it("fails malformed subject preload JSON with an actionable route", () => {
+    const result = validateSubjectPreload(
+      subjectRoute,
+      routeDocument('[{"key":["resolve-subject"],'),
+    );
+
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toContain(
+      `${subjectRoute}: window.__SSR_QUERIES__ is not valid JSON`,
+    );
+  });
+
+  it("fails when required subject queries or fields are missing", () => {
+    const result = validateSubjectPreload(
+      subjectRoute,
+      routeDocument(
+        JSON.stringify([
+          {
+            key: ["resolve-subject", "ahsec", "", "physics"],
+            data: { name: "Physics" },
+          },
+          {
+            key: ["chapters", ""],
+            data: {},
+          },
+        ]),
+      ),
+    );
+
+    expect(result.failures).toEqual([
+      `${subjectRoute}: resolve-subject query key must include non-empty board, class, and subject slugs`,
+      `${subjectRoute}: resolve-subject query subject data must include a non-empty id or _id`,
+      `${subjectRoute}: chapters query key must include a non-empty subject ID`,
+      `${subjectRoute}: chapters query must contain a chapter array`,
+    ]);
   });
 });
 
