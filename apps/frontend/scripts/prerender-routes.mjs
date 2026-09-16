@@ -156,7 +156,7 @@ function clean(obj) {
   return obj;
 }
 
-function rewriteHead(html, { title, description, canonical, ogImageAlt }) {
+export function rewriteHead(html, { title, description, canonical, ogImageAlt }) {
   html = html.replace(
     /<title>[^<]*<\/title>/,
     `<title>${escapeHtml(title)}</title>`,

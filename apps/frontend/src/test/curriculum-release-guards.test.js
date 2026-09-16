@@ -15,6 +15,8 @@ import {
   JSON_ENDPOINTS,
   validateJsonPayload,
 } from "../../scripts/generate-static-data.mjs";
+import { injectPrerenderPath } from "../../scripts/_prerender-marker.mjs";
+import { rewriteHead } from "../../scripts/prerender-routes.mjs";
 
 describe("release verifier syntax", () => {
   it("parses without duplicate declarations", () => {
@@ -27,6 +29,7 @@ describe("release verifier syntax", () => {
     ).not.toThrow();
   });
 });
+
 
 describe("headless hydration release verification", () => {
   it.skipIf(process.env.REQUIRE_HYDRATION_BROWSER !== "true")(
@@ -335,5 +338,114 @@ describe("chapter preload snapshot guards", () => {
       "ahsec/class-12/physics/motion/index.html: window.__CHAPTER_PRELOAD__.subjectSlug must be a non-empty route string",
       "ahsec/class-12/physics/motion/index.html: window.__CHAPTER_PRELOAD__.data.chapter_id must be a non-empty chapter ID",
     ]);
+  });
+});
+
+describe("chapter release-document SEO metadata", () => {
+  const chapterRoute =
+    "/ahsec/class-12/physics/newtons-laws-of-motion";
+  const chapterCanonical = `https://syrabit.ai${chapterRoute}`;
+  const chapterTitle =
+    "Newton's Laws of Motion — Physics | AHSEC Class 12 Complete Notes";
+  const chapterDescription =
+    "Complete Newton's laws of motion notes for AHSEC Class 12 Physics students.";
+  const otherRoute = "/ahsec/class-11/chemistry/atomic-structure";
+
+  const releaseShell = `<!doctype html>
+<html lang="en">
+  <head>
+    <title>Syrabit.ai</title>
+    <meta name="description" content="Generic description" />
+    <link rel="canonical" href="https://syrabit.ai${otherRoute}" />
+    <link rel="canonical" href="https://syrabit.ai/old-route" />
+    <meta property="og:url" content="https://syrabit.ai/old-route" />
+    <meta property="og:title" content="Generic title" />
+    <meta property="og:description" content="Generic description" />
+    <meta property="og:image:alt" content="Generic image alt" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Generic title" />
+    <meta name="twitter:description" content="Generic description" />
+    <meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />
+    <meta name="twitter:image:alt" content="Generic image alt" />
+  </head>
+  <body><div id="root"></div></body>
+</html>`;
+
+  const count = (document, pattern) => document.match(pattern)?.length ?? 0;
+
+  it("keeps one route-specific SEO set after final route injection", () => {
+    const document = injectPrerenderPath(
+      rewriteHead(releaseShell, {
+        title: chapterTitle,
+        description: chapterDescription,
+        canonical: chapterCanonical,
+        ogImageAlt: `${chapterTitle} — Syrabit.ai`,
+      }),
+      chapterRoute,
+    );
+
+    expect(count(document, /<title>/g)).toBe(1);
+    expect(document).toContain(`<title>Newton&#39;s Laws of Motion`);
+    expect(count(document, /<meta name="description"/g)).toBe(1);
+    expect(document).toContain(
+      'content="Complete Newton&#39;s laws of motion notes for AHSEC Class 12 Physics students."',
+    );
+
+    expect(count(document, /<link rel="canonical"/g)).toBe(1);
+    expect(document).toContain(
+      `<link rel="canonical" href="${chapterCanonical}" />`,
+    );
+    expect(count(document, /<link rel="alternate" hreflang="en-IN"/g)).toBe(1);
+    expect(document).toContain(
+      `<link rel="alternate" hreflang="en-IN" href="${chapterCanonical}" />`,
+    );
+
+    const socialMetadata = [
+      [
+        /<meta property="og:url"/g,
+        `<meta property="og:url" content="${chapterCanonical}" />`,
+      ],
+      [
+        /<meta property="og:title"/g,
+        'content="Newton&#39;s Laws of Motion — Physics | AHSEC Class 12 Complete Notes"',
+      ],
+      [
+        /<meta property="og:description"/g,
+        'content="Complete Newton&#39;s laws of motion notes for AHSEC Class 12 Physics students."',
+      ],
+      [
+        /<meta property="og:image:alt"/g,
+        'content="Newton&#39;s Laws of Motion — Physics | AHSEC Class 12 Complete Notes — Syrabit.ai"',
+      ],
+      [
+        /<meta name="twitter:title"/g,
+        'content="Newton&#39;s Laws of Motion — Physics | AHSEC Class 12 Complete Notes"',
+      ],
+      [
+        /<meta name="twitter:description"/g,
+        'content="Complete Newton&#39;s laws of motion notes for AHSEC Class 12 Physics students."',
+      ],
+      [
+        /<meta name="twitter:image" content=/g,
+        'content="https://syrabit.ai/opengraph.jpg"',
+      ],
+      [
+        /<meta name="twitter:image:alt"/g,
+        'content="Newton&#39;s Laws of Motion — Physics | AHSEC Class 12 Complete Notes — Syrabit.ai"',
+      ],
+    ];
+
+    for (const [selector, expected] of socialMetadata) {
+      expect(count(document, selector)).toBe(1);
+      expect(document).toContain(expected);
+    }
+
+    expect(count(document, /name="syrabit-prerender-path"/g)).toBe(1);
+    expect(document).toContain(
+      `<meta name="syrabit-prerender-path" content="${chapterRoute}" />`,
+    );
+    expect(document).not.toContain(otherRoute);
+    expect(document).not.toContain("Generic description");
+    expect(document).not.toContain("Generic title");
   });
 });
