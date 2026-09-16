@@ -128,6 +128,7 @@ describe("headless hydration release verification", () => {
         canonicalTags,
         structuredData = '<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://syrabit.ai/fixture-chapter#article","url":"https://syrabit.ai/fixture-chapter"},{"@type":"BreadcrumbList","itemListElement":[{"item":"https://syrabit.ai/"},{"item":"https://syrabit.ai/library"},{"item":"https://syrabit.ai/fixture-chapter"}]}]}</script>',
         preloadScript = "",
+        refreshScript = "",
       ) => [
         "<!doctype html>",
         "<html><head>",
@@ -147,6 +148,7 @@ describe("headless hydration release verification", () => {
         "</head><body>",
         '<div id="root" data-hydrate="chapter">Fixture chapter</div>',
         preloadScript,
+        refreshScript,
         "</body></html>",
       ].join("");
       const faqPreload = `<script>window.__CHAPTER_PRELOAD__=${JSON.stringify({
@@ -171,6 +173,49 @@ describe("headless hydration release verification", () => {
         "It verifies that chapter FAQ structured data reaches the browser.",
         "It contains stale chapter FAQ content.",
       );
+      const noFaqSchema = {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Article",
+            "url": "https://syrabit.ai/fixture-chapter",
+          },
+        ],
+      };
+      const refreshedFaqEntries = [
+        {
+          question: "How does the refreshed fixture work?",
+          answer: "It proves that updated chapter FAQ answers reach the browser.",
+        },
+        {
+          question: "What must the refreshed fixture preserve?",
+          answer: "It must replace old FAQ content without leaving stale entries.",
+        },
+      ];
+      const refreshedFaqSchema = {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Article",
+            "url": "https://syrabit.ai/fixture-chapter",
+          },
+          {
+            "@type": "FAQPage",
+            "mainEntity": refreshedFaqEntries.map((entry) => ({
+              "@type": "Question",
+              "name": entry.question,
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": entry.answer,
+              },
+            })),
+          },
+        ],
+      };
+      const refreshFaqScript = (entries, schema) =>
+        `<script>window.setTimeout(() => { window.__CHAPTER_PRELOAD__.data.faq_entries = ${JSON.stringify(
+          entries,
+        )}; const schema = ${JSON.stringify(schema)}; const ld = document.querySelector('script[type="application/ld+json"]'); if (ld) ld.textContent = JSON.stringify(schema); }, 25);</script>`;
 
       function runVerifier(document) {
         mkdirSync(path.dirname(chapterPath), { recursive: true });
@@ -209,6 +254,28 @@ describe("headless hydration release verification", () => {
         );
         expect(validFaq.status).toBeUndefined();
         expect(validFaq).toContain("OK — 1 route(s) checked");
+
+        const refreshedFaq = runVerifier(
+          chapterHead(
+            '<link rel="canonical" href="https://syrabit.ai/fixture-chapter" />',
+            faqStructuredData,
+            faqPreload,
+            refreshFaqScript(refreshedFaqEntries, refreshedFaqSchema),
+          ),
+        );
+        expect(refreshedFaq.status).toBeUndefined();
+        expect(refreshedFaq).toContain("OK — 1 route(s) checked");
+
+        const removedFaq = runVerifier(
+          chapterHead(
+            '<link rel="canonical" href="https://syrabit.ai/fixture-chapter" />',
+            faqStructuredData,
+            faqPreload,
+            refreshFaqScript([], noFaqSchema),
+          ),
+        );
+        expect(removedFaq.status).toBeUndefined();
+        expect(removedFaq).toContain("OK — 1 route(s) checked");
 
         const mismatchedFaq = runVerifier(
           chapterHead(

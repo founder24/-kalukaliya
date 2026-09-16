@@ -485,9 +485,9 @@ async function chapterStructuredDataIssues(page, route) {
       .filter((entry) => entry.question.length > 5 && entry.answer.length > 10)
       .slice(0, 10);
   });
+  const faqPages = schemas.flatMap(faqPageObjects);
+  const faqPageCount = faqPages.length;
   if (expectedFaqEntries.length >= 2) {
-    const faqPages = schemas.flatMap(faqPageObjects);
-    const faqPageCount = faqPages.length;
     if (faqPageCount === 0) {
       issues.push({
         type: "structured-data",
@@ -566,6 +566,13 @@ async function chapterStructuredDataIssues(page, route) {
         }
       }
     }
+  } else if (faqPageCount > 0) {
+    issues.push({
+      type: "structured-data",
+      text:
+        `Structured data on ${route}: FAQPage JSON-LD exists without ` +
+        `at least 2 valid chapter FAQ entries, observed ${faqPageCount}`,
+    });
   }
 
   return issues;
