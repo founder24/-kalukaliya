@@ -30,6 +30,107 @@ def read_jsonl(path):
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
+def test_dry_run_reports_index_preflight_without_writes(
+    monkeypatch, tmp_path, caplog
+):
+    args = make_args(
+        dry_run=True,
+        confirm_production_write=False,
+        limit=None,
+        skip_index=False,
+    )
+    chapters = [
+        {
+            "id": "chapter-small-preflight",
+            "subject_id": "subject-1",
+            "class_name": "HS 1st Year",
+            "subject_name": "Chemistry",
+            "subject_slug": "chemistry",
+            "title": "Motion",
+            "chapter_number": 1,
+        },
+        {
+            "id": "chapter-large-preflight",
+            "subject_id": "subject-1",
+            "class_name": "HS 1st Year",
+            "subject_name": "Chemistry",
+            "subject_slug": "chemistry",
+            "title": "Energy",
+            "chapter_number": 2,
+        },
+    ]
+    sources = [
+        {
+            "title": "Motion",
+            "effective_number": 1,
+            "body_text": "small source word " * 100,
+            "source_pdf_url": "https://example.test/motion.pdf",
+        },
+        {
+            "title": "Energy",
+            "effective_number": 2,
+            "body_text": "large source word " * 4000,
+            "source_pdf_url": "https://example.test/energy.pdf",
+        },
+    ]
+
+    class ReadOnlyClient:
+        def __init__(self):
+            self.write_attempts = 0
+
+        def execute(self, *args, **kwargs):
+            self.write_attempts += 1
+            raise AssertionError("dry-run must not write")
+
+    client = ReadOnlyClient()
+    monkeypatch.setattr(importer, "parse_args", lambda: args)
+    monkeypatch.setattr(importer, "CloudflareClient", lambda: client)
+    monkeypatch.setattr(importer, "fetch_chapters", lambda _client: chapters)
+    monkeypatch.setattr(
+        importer,
+        "extract_sources",
+        lambda _args: asyncio.sleep(0, result={("11", "chemistry"): sources}),
+    )
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+
+    with caplog.at_level("INFO", logger="ahsec_d1_import"):
+        assert asyncio.run(importer._run_main()) == 0
+
+    preflight_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("PREFLIGHT ")
+    ]
+    assert len(preflight_lines) == 2
+    assert any(
+        "chapter_id=chapter-small-preflight" in line
+        and "estimated_d1_mapping_batches=1" in line
+        for line in preflight_lines
+    )
+    large_workload = importer.estimate_index_workload(sources[1]["body_text"])
+    assert large_workload["estimated_d1_mapping_batches"] > 1
+    assert any(
+        "chapter_id=chapter-large-preflight" in line
+        and (
+            f"estimated_chunks={large_workload['estimated_chunks']}"
+            in line
+        )
+        and (
+            "estimated_vectorize_batches="
+            f"{large_workload['estimated_vectorize_batches']}"
+        )
+        in line
+        and (
+            "estimated_d1_mapping_batches="
+            f"{large_workload['estimated_d1_mapping_batches']}"
+        )
+        in line
+        and "MULTI_BATCH_D1_MAPPING" in line
+        for line in preflight_lines
+    )
+    assert client.write_attempts == 0
+
+
 class SearchableIndexClient:
     """Small credential-free stand-in for Vectorize plus the D1 chunk map."""
 

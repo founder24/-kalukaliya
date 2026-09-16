@@ -39,6 +39,7 @@ import getpass
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -111,6 +112,7 @@ MAX_INDEX_REPAIR_ATTEMPTS = 3
 D1_BIND_PARAMETER_LIMIT = 100
 CHUNK_MAPPING_BIND_PARAMETERS = 8
 CHUNK_MAPPING_BATCH_SIZE = 10
+VECTORIZE_BATCH_SIZE = 100
 INDEX_LOCK_TIMEOUT_SECONDS = float(
     os.getenv("AHSEC_INDEX_LOCK_TIMEOUT_SECONDS", "30")
 )
@@ -367,10 +369,10 @@ class CloudflareClient:
     def vector_delete(self, ids: list[str]) -> None:
         if not ids:
             return
-        for offset in range(0, len(ids), 100):
+        for offset in range(0, len(ids), VECTORIZE_BATCH_SIZE):
             self._post(
                 f"{self.api}/vectorize/v2/indexes/{VECTOR_INDEX}/delete_by_ids",
-                {"ids": ids[offset : offset + 100]},
+                {"ids": ids[offset : offset + VECTORIZE_BATCH_SIZE]},
             )
 
 
@@ -425,6 +427,46 @@ def chunk_text(text: str, max_words: int = 400, overlap: int = 50) -> list[str]:
         chunks.append(" ".join(words[start : start + max_words]))
         start += max_words - overlap
     return chunks
+
+
+def estimate_index_workload(text: str) -> dict[str, int]:
+    """Estimate provider requests without embedding, generation, or writes."""
+    estimated_chunks = len(chunk_text(text))
+    return {
+        "estimated_chunks": estimated_chunks,
+        "estimated_vectorize_batches": math.ceil(
+            estimated_chunks / VECTORIZE_BATCH_SIZE
+        ),
+        "estimated_d1_mapping_batches": math.ceil(
+            estimated_chunks / CHUNK_MAPPING_BATCH_SIZE
+        ),
+    }
+
+
+def log_index_preflight(
+    matches: list[tuple[dict[str, Any], dict[str, Any], float]],
+) -> None:
+    """Report the read-only index workload for every matched chapter."""
+    log.info("Index preflight: chapters=%d", len(matches))
+    for chapter, source, score in matches:
+        workload = estimate_index_workload(str(source.get("body_text") or ""))
+        d1_batch_note = (
+            " MULTI_BATCH_D1_MAPPING"
+            if workload["estimated_d1_mapping_batches"] > 1
+            else ""
+        )
+        log.info(
+            "PREFLIGHT chapter_id=%s title=%s match=%.2f basis=source_text "
+            "estimated_chunks=%d estimated_vectorize_batches=%d "
+            "estimated_d1_mapping_batches=%d%s",
+            chapter["id"],
+            chapter["title"],
+            score,
+            workload["estimated_chunks"],
+            workload["estimated_vectorize_batches"],
+            workload["estimated_d1_mapping_batches"],
+            d1_batch_note,
+        )
 
 
 def _progress_files() -> list[Path]:
@@ -1886,7 +1928,7 @@ async def _run_main() -> int:
         log.warning("Unmatched report: %s", unmatched_path)
 
     if args.dry_run:
-        for chapter, source, score in matches[:20]:
+        for chapter, source, score in matches:
             log.info(
                 "MATCH %.2f %s / %s / %s <- %s",
                 score,
@@ -1895,6 +1937,7 @@ async def _run_main() -> int:
                 chapter["title"],
                 source["title"],
             )
+        log_index_preflight(matches)
         return 0
 
     # The prompt contains destination class/subject/chapter identity. Do not
