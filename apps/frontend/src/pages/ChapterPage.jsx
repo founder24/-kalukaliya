@@ -131,6 +131,7 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
   const markWise = pyqData.mark_wise || {};
   const sortedMarks = Object.keys(markWise).sort((a, b) => Number(a) - Number(b));
   const flatPyqs = pyqData.pyqs || [];
+  const isUnsolved = pyqData.mode === 'unsolved' || pyqData.has_answers === false;
 
   // Unmarked PYQs should render as one numbered list, not as an
   // "unknown-Mark Questions" bucket.
@@ -141,14 +142,23 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
       <div className="flex items-center gap-2 mb-4">
         <HelpCircle size={20} className="text-purple-600" />
         <h2 className="text-xl font-bold text-gray-900" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", border: 'none', margin: 0, padding: 0 }}>
-          {contentLang === 'as' ? 'গুৰুত্বপূৰ্ণ প্ৰশ্নসমূহ' : 'Important Questions'}
+          {contentLang === 'as'
+            ? (isUnsolved ? 'সমাধান নথকা গুৰুত্বপূৰ্ণ প্ৰশ্ন' : 'গুৰুত্বপূৰ্ণ প্ৰশ্নসমূহ')
+            : (isUnsolved ? 'Unsolved Important Questions' : 'Important Questions')}
         </h2>
       </div>
       <p className="text-sm text-gray-500 mb-5" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
         {contentLang === 'as'
-          ? `${chapterTitle} ৰ পূৰ্বৰ বছৰৰ আৰু প্ৰত্যাশিত প্ৰশ্ন (${pyqData.total} টা প্ৰশ্ন)`
-          : `Previous year and expected questions for ${chapterTitle} (${pyqData.total} questions)`}
+          ? `${chapterTitle} ৰ পূৰ্বৰ বছৰৰ প্ৰশ্ন — ইয়াত উত্তৰ দিয়া হোৱা নাই (${pyqData.total} টা প্ৰশ্ন)`
+          : `Previous-year question prompts for ${chapterTitle} — answers are not included (${pyqData.total} questions)`}
       </p>
+      {isUnsolved && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {contentLang === 'as'
+            ? 'এইবোৰ অনুশীলনৰ বাবে প্ৰশ্নৰ তালিকা; এই পৃষ্ঠাত সমাধান উপলব্ধ নহয়।'
+            : 'These are practice prompts only. Solutions are not included on this page.'}
+        </div>
+      )}
 
       {hasMW ? (
         <div className="space-y-3">

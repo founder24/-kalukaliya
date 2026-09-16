@@ -14,3 +14,9 @@ Cloudflare’s current Vectorize REST API uses the underscore form `delete_by_id
 **Why:** A chapter note write can complete while an outdated Vectorize cleanup path or oversized mapping statement aborts the index refresh, leaving search stale or incomplete.
 
 **How to apply:** Validate the REST endpoint with a non-destructive request before a repair, keep purge/upsert batches within provider limits, and only mark the chapter indexed after the D1 mappings are read back successfully.
+
+When a repair is queued directly in `rag_reindex_jobs`, deploy the current Worker before resetting the job to `pending`; an older production Worker can retain obsolete Vectorize limits even when the repository code is already fixed.
+
+**Why:** A queued job executes production code, not the local checkout, so retrying before deployment can repeat a stale cleanup failure.
+
+**How to apply:** Deploy first, reset the durable job, wait for the scheduled resume, and verify the job is `done` plus each item has a non-zero chunk result.

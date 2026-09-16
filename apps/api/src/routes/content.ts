@@ -554,6 +554,39 @@ function safeParse<T = unknown>(json: string | null | undefined): T | null {
   try { return JSON.parse(json) as T; } catch { return null; }
 }
 
+type PublicQAItem = {
+  id?: string;
+  question?: string;
+  question_as?: string;
+  answer?: string;
+  solution?: string;
+  content?: string;
+  marks?: number;
+  year?: number;
+  source?: string;
+};
+
+function buildAnsweredFaqEntries(raw: PublicQAItem[]): Array<{
+  '@type': 'Question';
+  name: string;
+  acceptedAnswer: { '@type': 'Answer'; text: string };
+}> {
+  return raw
+    .map(item => {
+      const question = typeof item.question === 'string' ? item.question.trim() : '';
+      const answer = [item.answer, item.solution, item.content]
+        .find(value => typeof value === 'string' && value.trim())?.trim() ?? '';
+      return { question, answer };
+    })
+    .filter(item => item.question && item.answer)
+    .slice(0, 20)
+    .map(item => ({
+      '@type': 'Question' as const,
+      name: item.question,
+      acceptedAnswer: { '@type': 'Answer' as const, text: item.answer },
+    }));
+}
+
 // ── GET /library-bundle ────────────────────────────────────────────────────────
 // Critical pre-load endpoint — the frontend requests this at app start.
 //   ?slim=1  → boards/classes/streams/subjects only (no chapters)
@@ -867,20 +900,29 @@ contentRouter.get('/chapters/:chapterId/topic-pyqs', async (c) => {
     .from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
-  type QAItem = { id?: string; question?: string; answer?: string; marks?: number; year?: number; source?: string };
   const rawQA = lang === 'as'
-    ? (safeParse<QAItem[]>(ch.qaAs) ?? safeParse<QAItem[]>(ch.qaEn) ?? [])
-    : (safeParse<QAItem[]>(ch.qaEn) ?? []);
+    ? (safeParse<PublicQAItem[]>(ch.qaAs) ?? safeParse<PublicQAItem[]>(ch.qaEn) ?? [])
+    : (safeParse<PublicQAItem[]>(ch.qaEn) ?? []);
+  const hasAnswers = rawQA.some(item => [item.answer, item.solution, item.content]
+    .some(value => typeof value === 'string' && value.trim()));
 
   // Build mark_wise grouping
-  const markWise: Record<string, QAItem[]> = {};
+  const markWise: Record<string, PublicQAItem[]> = {};
   for (const item of rawQA) {
     const key = String(item.marks ?? 'unknown');
     if (!markWise[key]) markWise[key] = [];
     markWise[key].push(item);
   }
 
-  return c.json({ chapter_id: ch.id, total: rawQA.length, pyqs: rawQA, mark_wise: markWise });
+  return c.json({
+    chapter_id: ch.id,
+    total: rawQA.length,
+    pyqs: rawQA,
+    mark_wise: markWise,
+    mode: hasAnswers ? 'answered' : 'unsolved',
+    has_answers: hasAnswers,
+    label: hasAnswers ? 'Questions and answers' : 'Unsolved previous-year questions',
+  });
 });
 
 contentRouter.get('/chapters/:chapterId/pyq-images', async (c) => {
@@ -903,20 +945,20 @@ contentRouter.get('/chapters/:chapterId/faq-jsonld', async (c) => {
     .from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
-  type QAItem = { question?: string; answer?: string };
-  const qaArr = safeParse<QAItem[]>(ch.qaEn) ?? [];
+  const qaArr = buildAnsweredFaqEntries(safeParse<PublicQAItem[]>(ch.qaEn) ?? []);
 
   const faqJsonLd = qaArr.length > 0 ? {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
-    mainEntity: qaArr.slice(0, 20).map(q => ({
-      '@type': 'Question',
-      name: q.question ?? '',
-      acceptedAnswer: { '@type': 'Answer', text: q.answer ?? '' },
-    })),
+    mainEntity: qaArr,
   } : null;
 
-  return c.json({ chapter_id: ch.id, faq_jsonld: faqJsonLd });
+  return c.json({
+    chapter_id: ch.id,
+    faq_jsonld: faqJsonLd,
+    entries: qaArr,
+    has_answers: qaArr.length > 0,
+  });
 });
 
 // ── GET /question-papers ───────────────────────────────────────────────────────
