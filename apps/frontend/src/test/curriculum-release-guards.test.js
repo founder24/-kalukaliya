@@ -293,6 +293,7 @@ describe("chapter preload snapshot guards", () => {
     data: {
       chapter_id: "chapter-motion",
       title: "Motion",
+      content: "## Motion\n\nNewton's laws of motion.",
     },
   };
 
@@ -329,7 +330,10 @@ describe("chapter preload snapshot guards", () => {
         JSON.stringify({
           ...validPreload,
           subjectSlug: "",
-          data: {},
+          data: {
+            ...validPreload.data,
+            chapter_id: "",
+          },
         }),
       ),
     );
@@ -338,6 +342,56 @@ describe("chapter preload snapshot guards", () => {
       "ahsec/class-12/physics/motion/index.html: window.__CHAPTER_PRELOAD__.subjectSlug must be a non-empty route string",
       "ahsec/class-12/physics/motion/index.html: window.__CHAPTER_PRELOAD__.data.chapter_id must be a non-empty chapter ID",
     ]);
+  });
+
+  it.each([
+    [
+      "missing",
+      (({ content, ...data }) => data)(validPreload.data),
+    ],
+    ["blank", { ...validPreload.data, content: "   " }],
+    ["non-string", { ...validPreload.data, content: ["## Motion"] }],
+  ])("fails when chapter content is %s", (_label, data) => {
+    const route = "ahsec/class-12/physics/motion/index.html";
+    const result = validateChapterPreload(
+      route,
+      routeDocument(JSON.stringify({ ...validPreload, data })),
+    );
+
+    expect(result.failures).toEqual([
+      `${route}: window.__CHAPTER_PRELOAD__.data.content must be a non-empty string`,
+    ]);
+  });
+
+  it.each([
+    [
+      "notes",
+      { content_type: "notes", content: "## Notes\n\nStudy material." },
+    ],
+    [
+      "question-paper",
+      { content_type: "question_paper", content: "# Question Paper\n\n1. Explain." },
+    ],
+    [
+      "Assamese",
+      {
+        content_type: "notes",
+        content: "## গতি\n\nঅসমীয়া অধ্যায়ৰ বিষয়বস্তু।",
+        content_as: "## গতি\n\nঅসমীয়া অধ্যায়ৰ বিষয়বস্তু।",
+      },
+    ],
+  ])("accepts valid %s chapter content snapshots", (_label, data) => {
+    const result = validateChapterPreload(
+      "ahsec/class-12/physics/motion/index.html",
+      routeDocument(
+        JSON.stringify({
+          ...validPreload,
+          data: { ...validPreload.data, ...data },
+        }),
+      ),
+    );
+
+    expect(result.failures).toEqual([]);
   });
 });
 

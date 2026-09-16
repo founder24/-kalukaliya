@@ -99,11 +99,12 @@ export function validateChapterPreload(rel, body) {
     }
   }
 
-  if (
-    preload.data === null ||
-    typeof preload.data !== "object" ||
-    Array.isArray(preload.data)
-  ) {
+  const hasChapterDataObject =
+    preload.data !== null &&
+    typeof preload.data === "object" &&
+    !Array.isArray(preload.data);
+
+  if (!hasChapterDataObject) {
     failures.push(
       `${rel}: window.__CHAPTER_PRELOAD__.data must be a chapter data object`,
     );
@@ -113,6 +114,16 @@ export function validateChapterPreload(rel, body) {
   ) {
     failures.push(
       `${rel}: window.__CHAPTER_PRELOAD__.data.chapter_id must be a non-empty chapter ID`,
+    );
+  }
+
+  if (
+    hasChapterDataObject &&
+    (typeof preload.data.content !== "string" ||
+      !preload.data.content.trim())
+  ) {
+    failures.push(
+      `${rel}: window.__CHAPTER_PRELOAD__.data.content must be a non-empty string`,
     );
   }
 
