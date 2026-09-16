@@ -165,6 +165,8 @@ describe("headless hydration release verification", () => {
       })};</script>`;
       const faqStructuredData =
         '<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","url":"https://syrabit.ai/fixture-chapter"},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What does this fixture verify?","acceptedAnswer":{"@type":"Answer","text":"It verifies that chapter FAQ structured data reaches the browser."}},{"@type":"Question","name":"Why does this check matter?","acceptedAnswer":{"@type":"Answer","text":"It prevents available chapter questions from losing search markup."}}]}]}</script>';
+      const duplicateFaqStructuredData =
+        faqStructuredData + faqStructuredData;
 
       function runVerifier(document) {
         mkdirSync(path.dirname(chapterPath), { recursive: true });
@@ -203,6 +205,19 @@ describe("headless hydration release verification", () => {
         );
         expect(validFaq.status).toBeUndefined();
         expect(validFaq).toContain("OK — 1 route(s) checked");
+
+        const duplicateFaq = runVerifier(
+          chapterHead(
+            '<link rel="canonical" href="https://syrabit.ai/fixture-chapter" />',
+            duplicateFaqStructuredData,
+            faqPreload,
+          ),
+        );
+        expect(duplicateFaq.status).toBe(1);
+        const duplicateFaqOutput = `${duplicateFaq.stdout || ""}\n${duplicateFaq.stderr || ""}`;
+        expect(duplicateFaqOutput).toContain(
+          "[chapter /fixture-chapter] (structured-data) Structured data on /fixture-chapter: expected exactly 1 FAQPage JSON-LD object when chapter FAQ entries are present, observed 2",
+        );
 
         const invalid = runVerifier(
           chapterHead(

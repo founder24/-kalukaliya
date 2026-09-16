@@ -373,6 +373,23 @@ async function chapterStructuredDataIssues(page, route) {
     return urls;
   }
 
+  function hasType(value, expectedType) {
+    return (
+      value === expectedType ||
+      (Array.isArray(value) && value.includes(expectedType))
+    );
+  }
+
+  function countFaqPageObjects(schema) {
+    let faqPageCount = hasType(schema["@type"], "FAQPage") ? 1 : 0;
+    if (Array.isArray(schema["@graph"])) {
+      faqPageCount += schema["@graph"].filter((node) =>
+        node && typeof node === "object" && hasType(node["@type"], "FAQPage"),
+      ).length;
+    }
+    return faqPageCount;
+  }
+
   if (count === 0) {
     issues.push({
       type: "structured-data",
@@ -460,19 +477,23 @@ async function chapterStructuredDataIssues(page, route) {
     ).length >= 2;
   });
   if (faqExpected) {
-    const hasFaqPage = schemas.some((schema) => {
-      if (schema["@type"] === "FAQPage") return true;
-      return (
-        Array.isArray(schema["@graph"]) &&
-        schema["@graph"].some((node) => node?.["@type"] === "FAQPage")
-      );
-    });
-    if (!hasFaqPage) {
+    const faqPageCount = schemas.reduce(
+      (count, schema) => count + countFaqPageObjects(schema),
+      0,
+    );
+    if (faqPageCount === 0) {
       issues.push({
         type: "structured-data",
         text:
           `Structured data on ${route}: chapter preload contains FAQ entries ` +
           `but no FAQPage JSON-LD object was found`,
+      });
+    } else if (faqPageCount !== 1) {
+      issues.push({
+        type: "structured-data",
+        text:
+          `Structured data on ${route}: expected exactly 1 FAQPage JSON-LD ` +
+          `object when chapter FAQ entries are present, observed ${faqPageCount}`,
       });
     }
   }
