@@ -115,7 +115,7 @@ describe("headless hydration release verification", () => {
   );
 
   it.skipIf(process.env.REQUIRE_HYDRATION_BROWSER !== "true")(
-    "checks one prerendered chapter head in the browser and reports duplicate tags",
+    "checks chapter metadata and conditional FAQ structured data in the browser",
     () => {
       const fixtureDir = mkdtempSync(path.join(tmpdir(), "syrabit-seo-"));
       const verifierPath = path.resolve(
@@ -127,6 +127,7 @@ describe("headless hydration release verification", () => {
       const chapterHead = (
         canonicalTags,
         structuredData = '<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://syrabit.ai/fixture-chapter#article","url":"https://syrabit.ai/fixture-chapter"},{"@type":"BreadcrumbList","itemListElement":[{"item":"https://syrabit.ai/"},{"item":"https://syrabit.ai/library"},{"item":"https://syrabit.ai/fixture-chapter"}]}]}</script>',
+        preloadScript = "",
       ) => [
         "<!doctype html>",
         "<html><head>",
@@ -145,8 +146,25 @@ describe("headless hydration release verification", () => {
         structuredData,
         "</head><body>",
         '<div id="root" data-hydrate="chapter">Fixture chapter</div>',
+        preloadScript,
         "</body></html>",
       ].join("");
+      const faqPreload = `<script>window.__CHAPTER_PRELOAD__=${JSON.stringify({
+        data: {
+          faq_entries: [
+            {
+              question: "What does this fixture verify?",
+              answer: "It verifies that chapter FAQ structured data reaches the browser.",
+            },
+            {
+              question: "Why does this check matter?",
+              answer: "It prevents available chapter questions from losing search markup.",
+            },
+          ],
+        },
+      })};</script>`;
+      const faqStructuredData =
+        '<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","url":"https://syrabit.ai/fixture-chapter"},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What does this fixture verify?","acceptedAnswer":{"@type":"Answer","text":"It verifies that chapter FAQ structured data reaches the browser."}},{"@type":"Question","name":"Why does this check matter?","acceptedAnswer":{"@type":"Answer","text":"It prevents available chapter questions from losing search markup."}}]}]}</script>';
 
       function runVerifier(document) {
         mkdirSync(path.dirname(chapterPath), { recursive: true });
@@ -176,11 +194,22 @@ describe("headless hydration release verification", () => {
         expect(valid.status).toBeUndefined();
         expect(valid).toContain("OK — 1 route(s) checked");
 
+        const validFaq = runVerifier(
+          chapterHead(
+            '<link rel="canonical" href="https://syrabit.ai/fixture-chapter" />',
+            faqStructuredData,
+            faqPreload,
+          ),
+        );
+        expect(validFaq.status).toBeUndefined();
+        expect(validFaq).toContain("OK — 1 route(s) checked");
+
         const invalid = runVerifier(
           chapterHead(
             '<link rel="canonical" href="https://syrabit.ai/fixture-chapter" />' +
               '<link rel="canonical" href="https://syrabit.ai/stale-route" />',
             '<script type="application/ld+json">{malformed json</script>',
+            faqPreload,
           ),
         );
         expect(invalid.status).toBe(1);
@@ -190,6 +219,9 @@ describe("headless hydration release verification", () => {
         );
         expect(output).toContain(
           "[chapter /fixture-chapter] (structured-data) Structured data on /fixture-chapter: script 1 is not valid JSON",
+        );
+        expect(output).toContain(
+          "[chapter /fixture-chapter] (structured-data) Structured data on /fixture-chapter: chapter preload contains FAQ entries but no FAQPage JSON-LD object was found",
         );
         expect(output).toContain("across 1 checked route(s)");
 
