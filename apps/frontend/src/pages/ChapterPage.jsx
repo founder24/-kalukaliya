@@ -123,53 +123,123 @@ function filterTopicHeadings(headings) {
 }
 
 
+function legacyQuestionBank(data, contentLang) {
+  const items = (data?.pyqs || []).map((item, index) => ({
+    id: item.id || `legacy-pyq-${index}`,
+    kind: 'pyq',
+    kind_label: 'PYQ',
+    question: contentLang === 'as' ? (item.question_as || item.question) : item.question,
+    solution: item.answer || '',
+    answer: item.answer || '',
+    marks: Number(item.marks || item.mark) || 2,
+    year: item.year,
+    source: item.source || 'Chapter PYQ',
+    section: '',
+    pyq_frequency: 1,
+    importance_score: 100,
+    has_solution: Boolean(item.answer),
+  }));
+  const markWise = {};
+  items.forEach(item => {
+    const mark = String(item.marks);
+    if (!markWise[mark]) markWise[mark] = [];
+    markWise[mark].push(item);
+  });
+  return {
+    ...data,
+    total: items.length,
+    items,
+    mark_wise: markWise,
+    counts: { pyq: items.length, important: 0, exercise: 0 },
+    pyq_years: [...new Set(items.map(item => item.year).filter(Boolean).map(String))].sort().reverse(),
+    sources: { notes: false, chapter_qa: false, pyq: items.length > 0 },
+  };
+}
+
 function ImportantQuestions({ chapterTitle, pyqData }) {
-  const [expandedMark, setExpandedMark] = useState(null);
+  const [activeKind, setActiveKind] = useState('all');
+  const [expandedMarks, setExpandedMarks] = useState({});
+  const [openSolutions, setOpenSolutions] = useState({});
   const { contentLang } = useContentLang();
   if (!pyqData || pyqData.total === 0) return null;
 
   const markWise = pyqData.mark_wise || {};
   const sortedMarks = Object.keys(markWise).sort((a, b) => Number(a) - Number(b));
-  const flatPyqs = pyqData.pyqs || [];
-  const isUnsolved = pyqData.mode === 'unsolved' || pyqData.has_answers === false;
-
-  // Unmarked PYQs should render as one numbered list, not as an
-  // "unknown-Mark Questions" bucket.
-  const hasMW = sortedMarks.some(m => m !== 'unknown' && (markWise[m] || []).length > 0);
+  const counts = pyqData.counts || {};
+  const filters = [
+    { id: 'all', label: contentLang === 'as' ? 'সকলো' : 'All', count: pyqData.total },
+    { id: 'pyq', label: 'PYQ', count: counts.pyq || 0 },
+    { id: 'important', label: contentLang === 'as' ? 'গুৰুত্বপূৰ্ণ' : 'Important', count: counts.important || 0 },
+    { id: 'exercise', label: contentLang === 'as' ? 'অনুশীলনী' : 'Exercise', count: counts.exercise || 0 },
+  ].filter(filter => filter.id === 'all' || filter.count > 0);
+  const visibleGroups = sortedMarks
+    .map(mark => ({
+      mark,
+      questions: (markWise[mark] || []).filter(
+        question => activeKind === 'all' || question.kind === activeKind,
+      ),
+    }))
+    .filter(group => group.questions.length > 0);
+  const sourceSummary = [
+    pyqData.sources?.notes && (contentLang === 'as' ? 'অধ্যায়ৰ নোট' : 'chapter notes'),
+    pyqData.sources?.pyq && 'PYQ history',
+  ].filter(Boolean).join(contentLang === 'as' ? ' + ' : ' + ');
 
   return (
-    <div className="chapter-textbook rounded-2xl p-3 sm:p-4 mt-4">
+    <div className="chapter-textbook rounded-2xl p-3 sm:p-4 mt-4" data-testid="chapter-question-bank">
       <div className="flex items-center gap-2 mb-4">
         <HelpCircle size={20} className="text-purple-600" />
         <h2 className="text-xl font-bold text-gray-900" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", border: 'none', margin: 0, padding: 0 }}>
-          {contentLang === 'as'
-            ? (isUnsolved ? 'সমাধান নথকা গুৰুত্বপূৰ্ণ প্ৰশ্ন' : 'গুৰুত্বপূৰ্ণ প্ৰশ্নসমূহ')
-            : (isUnsolved ? 'Unsolved Important Questions' : 'Important Questions')}
+          {contentLang === 'as' ? 'অধ্যায় প্ৰশ্ন বেংক' : 'Chapter Question Bank'}
         </h2>
+        <span className="ml-auto inline-flex items-center rounded-full bg-violet-50 px-2 py-1 text-[10px] font-bold text-violet-700">
+          {pyqData.total}
+        </span>
       </div>
       <p className="text-sm text-gray-500 mb-5" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
         {contentLang === 'as'
-          ? `${chapterTitle} ৰ পূৰ্বৰ বছৰৰ প্ৰশ্ন — ইয়াত উত্তৰ দিয়া হোৱা নাই (${pyqData.total} টা প্ৰশ্ন)`
-          : `Previous-year question prompts for ${chapterTitle} — answers are not included (${pyqData.total} questions)`}
+          ? `${chapterTitle} ৰ নোট, অনুশীলনী আৰু PYQ ধাৰাৰ ওপৰত ভিত্তি কৰি নম্বৰ অনুসৰি সজোৱা প্ৰশ্ন আৰু সমাধান`
+          : `Source-grounded questions and solutions for ${chapterTitle}, arranged by marks from chapter notes, exercises, and PYQ patterns.`}
       </p>
-      {isUnsolved && (
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {contentLang === 'as'
-            ? 'এইবোৰ অনুশীলনৰ বাবে প্ৰশ্নৰ তালিকা; এই পৃষ্ঠাত সমাধান উপলব্ধ নহয়।'
-            : 'These are practice prompts only. Solutions are not included on this page.'}
-        </div>
+
+      <div className="flex gap-1.5 overflow-x-auto scrollbar-none mb-4 pb-0.5" role="tablist" aria-label={contentLang === 'as' ? 'প্ৰশ্নৰ ধৰণ' : 'Question type'}>
+        {filters.map(filter => (
+          <button
+            key={filter.id}
+            type="button"
+            role="tab"
+            aria-selected={activeKind === filter.id}
+            onClick={() => setActiveKind(filter.id)}
+            className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide transition-all whitespace-nowrap ${
+              activeKind === filter.id
+                ? 'bg-violet-600 text-white shadow-sm'
+                : 'bg-violet-50 text-violet-700 hover:bg-violet-100'
+            }`}
+          >
+            {filter.label}
+            <span className={activeKind === filter.id ? 'text-violet-100' : 'text-violet-400'}>{filter.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {sourceSummary && (
+        <p className="mb-4 text-[11px] text-gray-400">
+          {contentLang === 'as' ? 'উৎস: ' : 'Sources: '}{sourceSummary}
+          {pyqData.pyq_years?.length > 0 && (
+            <span className="ml-1">· {contentLang === 'as' ? 'PYQ বছৰ' : 'PYQ years'}: {pyqData.pyq_years.join(', ')}</span>
+          )}
+        </p>
       )}
 
-      {hasMW ? (
+      {visibleGroups.length > 0 ? (
         <div className="space-y-3">
-          {sortedMarks.map(mark => {
-            const questions = markWise[mark] || [];
-            if (questions.length === 0) return null;
-            const isOpen = expandedMark === mark;
+          {visibleGroups.map(({ mark, questions }) => {
+            const isOpen = expandedMarks[mark] ?? true;
             return (
               <div key={mark} className="border border-gray-200 rounded-xl overflow-hidden">
                 <button
-                  onClick={() => setExpandedMark(isOpen ? null : mark)}
+                  type="button"
+                  onClick={() => setExpandedMarks(previous => ({ ...previous, [mark]: !isOpen }))}
                   className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition-colors"
                   style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}
                 >
@@ -188,15 +258,63 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
                   <div className="px-4 pb-4 pt-1">
                     <ol className="space-y-2" style={{ color: '#333', listStyle: 'decimal', paddingLeft: '1.25rem' }}>
                       {questions.map((q, i) => {
-                        const qText = typeof q === 'string' ? q : q.question || q.text || JSON.stringify(q);
+                        const solutionKey = `${mark}-${q.id || i}`;
+                        const hasSolution = Boolean(q.solution || q.answer);
+                        const isSolutionOpen = openSolutions[solutionKey];
                         return (
-                          <li key={i} className="text-sm leading-relaxed text-gray-700 pl-1">
-                            {qText}
-                            {typeof q === 'object' && q && (q.year || q.source) && (
-                              <span className="ml-2 text-xs text-gray-400">
-                                {formatQuestionMeta(q)}
-                              </span>
-                            )}
+                          <li key={q.id || i} className="text-sm leading-relaxed text-gray-700 pl-1">
+                            <div className="flex items-start gap-2">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium">{q.question}</p>
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-gray-400">
+                                  <span className={`rounded px-1.5 py-0.5 font-bold ${
+                                    q.kind === 'pyq'
+                                      ? 'bg-amber-50 text-amber-700'
+                                      : q.kind === 'exercise'
+                                        ? 'bg-emerald-50 text-emerald-700'
+                                        : 'bg-blue-50 text-blue-700'
+                                  }`}>
+                                    {q.kind_label || q.kind}
+                                  </span>
+                                  {q.year && <span>{q.year}</span>}
+                                  {q.section && <span>{q.section}</span>}
+                                  {q.pyq_frequency > 0 && q.kind !== 'pyq' && (
+                                    <span className="text-violet-600">
+                                      {q.pyq_frequency}× PYQ pattern
+                                    </span>
+                                  )}
+                                </div>
+                                {hasSolution && isSolutionOpen && (
+                                  <div className="mt-2 rounded-lg border border-violet-100 bg-violet-50/60 px-3 py-2 text-xs leading-relaxed text-gray-700">
+                                    <span className="font-bold text-violet-700">
+                                      {contentLang === 'as' ? 'সমাধান: ' : 'Solution: '}
+                                    </span>
+                                    {q.solution || q.answer}
+                                  </div>
+                                )}
+                                {!hasSolution && (
+                                  <p className="mt-1 text-[10px] italic text-gray-400">
+                                    {contentLang === 'as'
+                                      ? 'এই উৎসত সমাধান উপলব্ধ নহয়।'
+                                      : 'Solution not available in the current source.'}
+                                  </p>
+                                )}
+                              </div>
+                              {hasSolution && (
+                                <button
+                                  type="button"
+                                  onClick={() => setOpenSolutions(previous => ({
+                                    ...previous,
+                                    [solutionKey]: !isSolutionOpen,
+                                  }))}
+                                  className="shrink-0 rounded-md border border-violet-100 px-2 py-1 text-[10px] font-semibold text-violet-700 hover:bg-violet-50"
+                                >
+                                  {isSolutionOpen
+                                    ? (contentLang === 'as' ? 'লুকুৱাওক' : 'Hide')
+                                    : (contentLang === 'as' ? 'সমাধান' : 'Solution')}
+                                </button>
+                              )}
+                            </div>
                           </li>
                         );
                       })}
@@ -207,28 +325,6 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
             );
           })}
         </div>
-      ) : flatPyqs.length > 0 ? (
-        <ol className="space-y-2" style={{ color: '#333', listStyle: 'decimal', paddingLeft: '1.25rem' }}>
-          {flatPyqs.map((q, i) => {
-            const qText = typeof q === 'string' ? q : q.question || q.text || JSON.stringify(q);
-            const marks = q.marks;
-            return (
-              <li key={i} className="text-sm leading-relaxed text-gray-700 pl-1">
-                {qText}
-                {typeof q === 'object' && q && (q.year || q.source) && (
-                  <span className="ml-2 text-xs text-gray-400">
-                    {formatQuestionMeta(q)}
-                  </span>
-                )}
-                {marks && (
-                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
-                    {marks}M
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ol>
       ) : null}
     </div>
   );
@@ -622,11 +718,15 @@ export default function ChapterPage() {
     setPyqImagesLoaded(false);
     if (!data?.chapter_id) return;
     let cancelled = false;
-    // Text PYQs (important questions)
+    // Source-grounded chapter question bank: PYQs, important questions,
+    // and textbook exercises with mark-wise solutions.
     apiClient()
-      .get(`/content/chapters/${data.chapter_id}/topic-pyqs?limit=50&lang=${contentLang === 'as' ? 'as' : 'en'}`)
+      .get(`/content/chapters/${data.chapter_id}/question-bank?limit=200&lang=${contentLang === 'as' ? 'as' : 'en'}`)
       .then(r => { if (!cancelled) setPyqData(r.data); })
-      .catch(() => { if (!cancelled) setPyqData(null); });
+      .catch(() => apiClient()
+        .get(`/content/chapters/${data.chapter_id}/topic-pyqs?limit=200&lang=${contentLang === 'as' ? 'as' : 'en'}`)
+        .then(r => { if (!cancelled) setPyqData(legacyQuestionBank(r.data, contentLang)); })
+        .catch(() => { if (!cancelled) setPyqData(null); }));
     // Image-based question papers uploaded via admin panel → R2
     apiClient()
       .get(`/content/chapters/${data.chapter_id}/pyq-images`)
@@ -1490,7 +1590,9 @@ export default function ChapterPage() {
                     <>
                       <div className="py-10 text-center space-y-3" data-testid="qa-empty-state">
                         <p className="text-xs text-muted-foreground">
-                          {contentLang === 'as' ? 'এই অধ্যায়ৰ বাবে Q&A উপলব্ধ নহয়।' : 'No Q&A available for this chapter yet.'}
+                          {contentLang === 'as'
+                            ? 'এই অধ্যায়ৰ বাবে নোট-ভিত্তিক প্ৰশ্ন আৰু সমাধান এতিয়াও উপলব্ধ নহয়।'
+                            : 'No source-grounded questions and solutions are available for this chapter yet.'}
                         </p>
                         <button
                           data-testid="qa-empty-view-notes"

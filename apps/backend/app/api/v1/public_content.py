@@ -46,6 +46,192 @@ def _library_bundle_headers() -> dict[str, str]:
     }
 
 
+_QUESTION_STOP_WORDS = {
+    "about", "after", "again", "also", "and", "are", "been", "being",
+    "between", "both", "could", "does", "from", "have", "into", "more",
+    "most", "other", "should", "some", "such", "than", "that", "their",
+    "there", "these", "they", "this", "those", "through", "under", "what",
+    "when", "where", "which", "while", "with", "would", "your",
+}
+
+
+def _question_text(value) -> str:
+    return str(value or "").strip()
+
+
+def _question_marks(item: dict, default: int = 2) -> int:
+    raw = item.get("marks", item.get("mark", item.get("points", default)))
+    if isinstance(raw, str):
+        match = re.search(r"\d+", raw)
+        raw = match.group(0) if match else default
+    try:
+        marks = int(raw)
+    except (TypeError, ValueError):
+        marks = default
+    return max(1, min(marks, 20))
+
+
+def _question_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]{3,}", text.lower())
+        if token not in _QUESTION_STOP_WORDS
+    }
+
+
+def _question_overlap(left: str, right: str) -> float:
+    left_tokens = _question_tokens(left)
+    right_tokens = _question_tokens(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / min(len(left_tokens), len(right_tokens))
+
+
+def _infer_question_marks(question: str, answer: str) -> int:
+    """Use a conservative mark bucket when source content has no marks field."""
+    answer_words = len(answer.split())
+    question_words = len(question.split())
+    if question_words <= 12 and answer_words <= 28:
+        return 2
+    if answer_words <= 60:
+        return 3
+    return 5
+
+
+def _build_chapter_question_bank(
+    chapter,
+    limit: int = 200,
+    lang: str = "en",
+) -> dict:
+    """Build a source-grounded, mark-wise question bank for one chapter.
+
+    `faq_jsonld` is the chapter's existing PYQ/MCQ-derived question source.
+    `qa_rag_sections_en` is generated from the stored chapter notes and can
+    contain either important questions or textbook exercises.  We only expose
+    records that carry a question and an answer/solution; this prevents the
+    public page from presenting an invented solution as if it came from the
+    chapter.
+    """
+    chapter_id = str(chapter.id)
+    pyq_items: list[dict] = []
+    for index, raw in enumerate(getattr(chapter, "faq_jsonld", None) or []):
+        if not isinstance(raw, dict):
+            continue
+        question = _question_text(raw.get("question") or raw.get("name"))
+        answer = _question_text(raw.get("answer") or raw.get("text"))
+        if not question:
+            continue
+        marks = _question_marks(raw, default=2)
+        pyq_items.append({
+            "id": f"{chapter_id}-pyq-{index}",
+            "kind": "pyq",
+            "kind_label": "PYQ",
+            "question": question,
+            "solution": answer,
+            "answer": answer,
+            "marks": marks,
+            "year": raw.get("year"),
+            "source": _question_text(raw.get("source")) or "Chapter PYQ",
+            "section": "",
+            "pyq_frequency": 1,
+            "importance_score": 100 + marks,
+            "has_solution": bool(answer),
+        })
+
+    pyq_questions = [item["question"] for item in pyq_items]
+    qa_items: list[dict] = []
+    qa_field = "qa_rag_sections_as" if lang == "as" else "qa_rag_sections_en"
+    for index, raw in enumerate(getattr(chapter, qa_field, None) or []):
+        if not isinstance(raw, dict):
+            continue
+        question = _question_text(raw.get("question") or raw.get("name"))
+        answer = _question_text(
+            raw.get("solution") or raw.get("answer") or raw.get("text")
+        )
+        if not question or not answer:
+            continue
+        section = _question_text(raw.get("section") or raw.get("title"))
+        is_exercise = bool(re.search(
+            r"exercise|textbook|intext|practice|problem|review",
+            section,
+            re.IGNORECASE,
+        ))
+        kind = "exercise" if is_exercise else "important"
+        frequency = sum(
+            1 for pyq_question in pyq_questions
+            if _question_overlap(question, pyq_question) >= 0.35
+        )
+        marks = _question_marks(
+            raw,
+            default=_infer_question_marks(question, answer),
+        )
+        qa_items.append({
+            "id": f"{chapter_id}-{kind}-{index}",
+            "kind": kind,
+            "kind_label": "Exercise" if is_exercise else "Important",
+            "question": question,
+            "solution": answer,
+            "answer": answer,
+            "marks": marks,
+            "year": raw.get("year"),
+            "source": "Chapter notes",
+            "section": section,
+            "pyq_frequency": frequency,
+            "importance_score": 100 + (frequency * 25) + marks,
+            "has_solution": True,
+        })
+
+    all_items = pyq_items + qa_items
+    all_items = all_items[:limit]
+    mark_wise: dict[str, list[dict]] = {}
+    for item in all_items:
+        mark_wise.setdefault(str(item["marks"]), []).append(item)
+
+    for items in mark_wise.values():
+        items.sort(key=lambda item: (
+            0 if item["kind"] == "pyq" else 1 if item["kind"] == "important" else 2,
+            -item["importance_score"],
+            item["question"].lower(),
+        ))
+
+    pyq_years = sorted({
+        str(item["year"]).strip()
+        for item in pyq_items
+        if item.get("year") is not None and str(item["year"]).strip()
+    }, reverse=True)
+    pattern = [
+        {
+            "marks": marks,
+            "count": len(mark_wise[marks]),
+            "pyq_count": sum(1 for item in mark_wise[marks] if item["kind"] == "pyq"),
+        }
+        for marks in sorted(mark_wise, key=lambda value: int(value))
+    ]
+    counts = {
+        "pyq": sum(1 for item in all_items if item["kind"] == "pyq"),
+        "important": sum(1 for item in all_items if item["kind"] == "important"),
+        "exercise": sum(1 for item in all_items if item["kind"] == "exercise"),
+    }
+
+    return {
+        "chapter_id": chapter_id,
+        "total": len(all_items),
+        "counts": counts,
+        "items": all_items,
+        "mark_wise": mark_wise,
+        "pattern": pattern,
+        "pyq_years": pyq_years,
+        "sources": {
+            "notes": bool(
+                getattr(chapter, "notes_as" if lang == "as" else "notes_en", None)
+                or getattr(chapter, "content_as" if lang == "as" else "content_en", None)
+            ),
+            "chapter_qa": bool(getattr(chapter, qa_field, None)),
+            "pyq": bool(pyq_items),
+        },
+    }
+
+
 def _slugify(text: str, max_length: int = 200) -> str:
     """Generate a URL-friendly slug from text.
 
@@ -1131,6 +1317,28 @@ async def get_topic_pyqs(
         "pyqs": pyqs,
         "mark_wise": mark_wise,
     }
+
+
+@router.get("/chapters/{chapter_id}/question-bank")
+async def get_chapter_question_bank(
+    chapter_id: str,
+    limit: int = Query(200, ge=1, le=400),
+    lang: str = Query("en", pattern="^(en|as)$"),
+):
+    """Return source-grounded PYQ, important, and exercise questions.
+
+    This is intentionally separate from the legacy ``topic-pyqs`` response:
+    the chapter page can opt into solved, mark-wise data without changing the
+    compact contract used by other surfaces.
+    """
+    try:
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid chapter_id")
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    return _build_chapter_question_bank(chapter, limit=limit, lang=lang)
 
 
 @router.get("/question-papers")
