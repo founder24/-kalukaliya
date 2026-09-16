@@ -325,6 +325,108 @@ async function chapterSeoIssues(page, route) {
   return issues;
 }
 
+async function chapterStructuredDataIssues(page, route) {
+  const issues = [];
+  const scripts = page.locator('script[type="application/ld+json"]');
+  const count = await scripts.count();
+  const schemas = [];
+
+  if (count === 0) {
+    issues.push({
+      type: "structured-data",
+      text:
+        `Structured data on ${route}: expected at least 1 chapter ` +
+        `application/ld+json script, observed 0`,
+    });
+  }
+
+  for (let index = 0; index < count; index += 1) {
+    const scriptNumber = index + 1;
+    const raw = (await scripts.nth(index).textContent())?.trim() || "";
+    if (!raw) {
+      issues.push({
+        type: "structured-data",
+        text:
+          `Structured data on ${route}: script ${scriptNumber} has empty JSON`,
+      });
+      continue;
+    }
+
+    let schema;
+    try {
+      schema = JSON.parse(raw);
+    } catch (err) {
+      issues.push({
+        type: "structured-data",
+        text:
+          `Structured data on ${route}: script ${scriptNumber} is not valid JSON ` +
+          `(${err.message})`,
+      });
+      continue;
+    }
+
+    if (
+      schema === null ||
+      typeof schema !== "object" ||
+      Array.isArray(schema) ||
+      typeof schema["@context"] !== "string" ||
+      !schema["@context"].trim()
+    ) {
+      issues.push({
+        type: "structured-data",
+        text:
+          `Structured data on ${route}: script ${scriptNumber} must contain ` +
+          `a JSON-LD object with a non-empty @context`,
+      });
+      continue;
+    }
+
+    const graphIsValid =
+      Array.isArray(schema["@graph"]) && schema["@graph"].length > 0;
+    const typedObject = typeof schema["@type"] === "string" && schema["@type"].trim();
+    if (!graphIsValid && !typedObject) {
+      issues.push({
+        type: "structured-data",
+        text:
+          `Structured data on ${route}: script ${scriptNumber} must contain ` +
+          `a non-empty @graph or @type`,
+      });
+      continue;
+    }
+    schemas.push(schema);
+  }
+
+  const faqExpected = await page.evaluate(() => {
+    const entries = window.__CHAPTER_PRELOAD__?.data?.faq_entries;
+    if (!Array.isArray(entries)) return false;
+    return entries.filter(
+      (entry) =>
+        entry &&
+        String(entry.question || "").trim() &&
+        String(entry.answer || "").trim(),
+    ).length >= 2;
+  });
+  if (faqExpected) {
+    const hasFaqPage = schemas.some((schema) => {
+      if (schema["@type"] === "FAQPage") return true;
+      return (
+        Array.isArray(schema["@graph"]) &&
+        schema["@graph"].some((node) => node?.["@type"] === "FAQPage")
+      );
+    });
+    if (!hasFaqPage) {
+      issues.push({
+        type: "structured-data",
+        text:
+          `Structured data on ${route}: chapter preload contains FAQ entries ` +
+          `but no FAQPage JSON-LD object was found`,
+      });
+    }
+  }
+
+  return issues;
+}
+
 async function main() {
   let chromium;
   try {
@@ -412,6 +514,13 @@ async function main() {
       if (target.kind === "chapter") {
         const seoIssues = await chapterSeoIssues(page, target.route);
         for (const issue of seoIssues) {
+          findings.push({ route: target.route, kind: target.kind, ...issue });
+        }
+        const structuredDataIssues = await chapterStructuredDataIssues(
+          page,
+          target.route,
+        );
+        for (const issue of structuredDataIssues) {
           findings.push({ route: target.route, kind: target.kind, ...issue });
         }
       }

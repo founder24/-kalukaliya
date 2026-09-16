@@ -124,7 +124,10 @@ describe("headless hydration release verification", () => {
       );
       const route = "/fixture-chapter";
       const chapterPath = path.join(fixtureDir, "fixture-chapter", "index.html");
-      const chapterHead = (canonicalTags) => [
+      const chapterHead = (
+        canonicalTags,
+        structuredData = '<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","name":"Fixture Chapter"}]}</script>',
+      ) => [
         "<!doctype html>",
         "<html><head>",
         "<title>Fixture Chapter</title>",
@@ -139,6 +142,7 @@ describe("headless hydration release verification", () => {
         '<meta name="twitter:description" content="Fixture chapter notes for browser verification." />',
         '<meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />',
         '<meta name="twitter:image:alt" content="Fixture Chapter — Syrabit.ai" />',
+        structuredData,
         "</head><body>",
         '<div id="root" data-hydrate="chapter">Fixture chapter</div>',
         "</body></html>",
@@ -176,12 +180,16 @@ describe("headless hydration release verification", () => {
           chapterHead(
             '<link rel="canonical" href="https://syrabit.ai/fixture-chapter" />' +
               '<link rel="canonical" href="https://syrabit.ai/stale-route" />',
+            '<script type="application/ld+json">{malformed json</script>',
           ),
         );
         expect(invalid.status).toBe(1);
         const output = `${invalid.stdout || ""}\n${invalid.stderr || ""}`;
         expect(output).toContain(
           "[chapter /fixture-chapter] (seo) SEO canonical on /fixture-chapter: expected exactly 1 matching tag, observed 2",
+        );
+        expect(output).toContain(
+          "[chapter /fixture-chapter] (structured-data) Structured data on /fixture-chapter: script 1 is not valid JSON",
         );
         expect(output).toContain("across 1 checked route(s)");
       } finally {
