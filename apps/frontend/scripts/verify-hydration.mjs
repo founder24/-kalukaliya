@@ -232,6 +232,99 @@ function handlePlaywrightEnvProblem(reason) {
   softSkip(reason);
 }
 
+const CHAPTER_SEO_CHECKS = [
+  { label: "canonical", selector: 'link[rel="canonical"]', attribute: "href" },
+  { label: "title", selector: "title", attribute: null },
+  {
+    label: "description",
+    selector: 'meta[name="description"]',
+    attribute: "content",
+  },
+  { label: "og:url", selector: 'meta[property="og:url"]', attribute: "content" },
+  {
+    label: "og:title",
+    selector: 'meta[property="og:title"]',
+    attribute: "content",
+  },
+  {
+    label: "og:description",
+    selector: 'meta[property="og:description"]',
+    attribute: "content",
+  },
+  {
+    label: "og:image:alt",
+    selector: 'meta[property="og:image:alt"]',
+    attribute: "content",
+  },
+  {
+    label: "twitter:card",
+    selector: 'meta[name="twitter:card"]',
+    attribute: "content",
+  },
+  {
+    label: "twitter:title",
+    selector: 'meta[name="twitter:title"]',
+    attribute: "content",
+  },
+  {
+    label: "twitter:description",
+    selector: 'meta[name="twitter:description"]',
+    attribute: "content",
+  },
+  {
+    label: "twitter:image",
+    selector: 'meta[name="twitter:image"]',
+    attribute: "content",
+  },
+  {
+    label: "twitter:image:alt",
+    selector: 'meta[name="twitter:image:alt"]',
+    attribute: "content",
+  },
+];
+
+async function chapterSeoIssues(page, route) {
+  const issues = [];
+  const expectedCanonical = `https://syrabit.ai${route}`;
+
+  for (const check of CHAPTER_SEO_CHECKS) {
+    const locator = page.locator(check.selector);
+    const count = await locator.count();
+    if (count !== 1) {
+      issues.push({
+        type: "seo",
+        text:
+          `SEO ${check.label} on ${route}: expected exactly 1 matching tag, ` +
+          `observed ${count}`,
+      });
+      continue;
+    }
+
+    const value =
+      check.attribute === null
+        ? await locator.textContent()
+        : await locator.getAttribute(check.attribute);
+    if (!value || !value.trim()) {
+      issues.push({
+        type: "seo",
+        text: `SEO ${check.label} on ${route}: tag value is empty`,
+      });
+      continue;
+    }
+
+    if (check.label === "canonical" && value !== expectedCanonical) {
+      issues.push({
+        type: "seo",
+        text:
+          `SEO canonical on ${route}: expected ${expectedCanonical}, ` +
+          `observed ${value}`,
+      });
+    }
+  }
+
+  return issues;
+}
+
 async function main() {
   let chromium;
   try {
@@ -315,6 +408,12 @@ async function main() {
       const offenders = browserIssuesForTarget(target, messages);
       for (const o of offenders) {
         findings.push({ route: target.route, kind: target.kind, ...o });
+      }
+      if (target.kind === "chapter") {
+        const seoIssues = await chapterSeoIssues(page, target.route);
+        for (const issue of seoIssues) {
+          findings.push({ route: target.route, kind: target.kind, ...issue });
+        }
       }
 
       await context.close();

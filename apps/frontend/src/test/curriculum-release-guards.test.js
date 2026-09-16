@@ -113,6 +113,82 @@ describe("headless hydration release verification", () => {
       }
     },
   );
+
+  it.skipIf(process.env.REQUIRE_HYDRATION_BROWSER !== "true")(
+    "checks one prerendered chapter head in the browser and reports duplicate tags",
+    () => {
+      const fixtureDir = mkdtempSync(path.join(tmpdir(), "syrabit-seo-"));
+      const verifierPath = path.resolve(
+        process.cwd(),
+        "scripts/verify-hydration.mjs",
+      );
+      const route = "/fixture-chapter";
+      const chapterPath = path.join(fixtureDir, "fixture-chapter", "index.html");
+      const chapterHead = (canonicalTags) => [
+        "<!doctype html>",
+        "<html><head>",
+        "<title>Fixture Chapter</title>",
+        '<meta name="description" content="Fixture chapter notes for browser verification." />',
+        canonicalTags,
+        '<meta property="og:url" content="https://syrabit.ai/fixture-chapter" />',
+        '<meta property="og:title" content="Fixture Chapter" />',
+        '<meta property="og:description" content="Fixture chapter notes for browser verification." />',
+        '<meta property="og:image:alt" content="Fixture Chapter — Syrabit.ai" />',
+        '<meta name="twitter:card" content="summary_large_image" />',
+        '<meta name="twitter:title" content="Fixture Chapter" />',
+        '<meta name="twitter:description" content="Fixture chapter notes for browser verification." />',
+        '<meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />',
+        '<meta name="twitter:image:alt" content="Fixture Chapter — Syrabit.ai" />',
+        "</head><body>",
+        '<div id="root" data-hydrate="chapter">Fixture chapter</div>',
+        "</body></html>",
+      ].join("");
+
+      function runVerifier(document) {
+        mkdirSync(path.dirname(chapterPath), { recursive: true });
+        writeFileSync(chapterPath, document);
+        try {
+          return execFileSync(process.execPath, [verifierPath], {
+            cwd: process.cwd(),
+            env: {
+              ...process.env,
+              REQUIRE_HYDRATION_BROWSER: "true",
+              VERIFY_HYDRATION_DIST_DIR: fixtureDir,
+            },
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+        } catch (error) {
+          return error;
+        }
+      }
+
+      try {
+        const valid = runVerifier(
+          chapterHead(
+            '<link rel="canonical" href="https://syrabit.ai/fixture-chapter" />',
+          ),
+        );
+        expect(valid.status).toBeUndefined();
+        expect(valid).toContain("OK — 1 route(s) checked");
+
+        const invalid = runVerifier(
+          chapterHead(
+            '<link rel="canonical" href="https://syrabit.ai/fixture-chapter" />' +
+              '<link rel="canonical" href="https://syrabit.ai/stale-route" />',
+          ),
+        );
+        expect(invalid.status).toBe(1);
+        const output = `${invalid.stdout || ""}\n${invalid.stderr || ""}`;
+        expect(output).toContain(
+          "[chapter /fixture-chapter] (seo) SEO canonical on /fixture-chapter: expected exactly 1 matching tag, observed 2",
+        );
+        expect(output).toContain("across 1 checked route(s)");
+      } finally {
+        rmSync(fixtureDir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("curriculum release strictness", () => {
