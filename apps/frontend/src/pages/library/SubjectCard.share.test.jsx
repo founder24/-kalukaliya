@@ -103,6 +103,45 @@ describe('SubjectCard share destination', () => {
     expect(chapterLink).toHaveStyle({ opacity: '0.5' });
   });
 
+  it('renders chapters in syllabus order even when the bundle is unsorted', () => {
+    mockContentLanguage.value = 'en';
+    const subject = {
+      id: 'physics-id',
+      name: 'Physics',
+      boardName: 'AHSEC',
+      className: 'Class 11',
+      boardSlug: 'ahsec',
+      classSlug: 'hs-1st-year',
+      slug: 'physics',
+    };
+    const chapters = [
+      { id: 'ch7', title: 'Gravitation', slug: 'gravitation', chapter_number: 7, content_type: 'notes' },
+      { id: 'ch3', title: 'Motion in a Plane', slug: 'motion-in-a-plane', chapter_number: 3, content_type: 'notes' },
+      { id: 'ch1', title: 'Units and Measurements', slug: 'units-and-measurements', chapter_number: 1, content_type: 'notes' },
+      { id: 'ch2', title: 'Motion in a Straight Line', slug: 'motion-in-a-straight-line', chapter_number: 2, content_type: 'notes' },
+    ];
+
+    render(
+      <SubjectCard
+        sub={subject}
+        chapters={chapters}
+        isSaved={false}
+        onToggleSave={vi.fn()}
+        onAskAI={vi.fn()}
+        index={0}
+      />,
+    );
+
+    const chapterLinks = screen.getAllByRole('link').filter((link) =>
+      chapters.some((chapter) => link.textContent.includes(chapter.title)),
+    );
+    expect(chapterLinks.map((link) => link.textContent.trim())).toEqual([
+      'Units and Measurements',
+      'Motion in a Straight Line',
+      'Motion in a Plane',
+    ]);
+  });
+
   it('uses the Assamese subject destination and preserves the Questions tab', () => {
     mockContentLanguage.value = 'as';
     const subject = {

@@ -82,13 +82,34 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     }
   }, [queryClient, sub, contentLang]);
 
+  // The library bundle is intentionally compact and does not guarantee that
+  // each subject's chapter array is already in syllabus order. Cards must
+  // normalize that order locally so a cache or bundle write cannot move
+  // chapters between the numbers shown to students.
+  const orderedChapters = useMemo(() => (
+    chapters
+      .map((chapter, index) => ({ chapter, index }))
+      .sort((a, b) => {
+        const aNumber = Number(
+          a.chapter.chapter_number ?? a.chapter.order_index ?? a.chapter.order,
+        );
+        const bNumber = Number(
+          b.chapter.chapter_number ?? b.chapter.order_index ?? b.chapter.order,
+        );
+        const aSortable = Number.isFinite(aNumber) ? aNumber : Number.POSITIVE_INFINITY;
+        const bSortable = Number.isFinite(bNumber) ? bNumber : Number.POSITIVE_INFINITY;
+        return aSortable - bSortable || a.index - b.index;
+      })
+      .map(({ chapter }) => chapter)
+  ), [chapters]);
+
   const SECTIONS = useMemo(() => {
     const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
     // The chapter list is the syllabus structure, not a notes-availability list.
     // Keep every non-Q&A chapter visible in both languages, including chapters
     // whose notes are still being prepared. The row below shows that state
     // through its reduced opacity while preserving the chapter and its link.
-    const notesChs = chapters.filter(ch =>
+    const notesChs = orderedChapters.filter(ch =>
       !ch.content_type || !QA_TYPES.has(ch.content_type)
     );
     // Questions section: dedicated Q&A chapters (content_type) OR notes chapters that
@@ -97,7 +118,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     // hide it from the Q section whenever the subject also has properly-named Q&A
     // chapters, so the Questions tab doesn't mirror the Notes tab with "Full Book" ×N.
     const _GENERIC_TITLE = /^full\s+book$/i;
-    const _allQaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type) || (
+    const _allQaChs = orderedChapters.filter(ch => QA_TYPES.has(ch.content_type) || (
       isAs
         ? (typeof ch.has_qa_as === 'boolean' ? ch.has_qa_as : ch.has_qa)
         : ch.has_qa
@@ -124,7 +145,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
       { key: 'qa',             label: isAs ? 'প্ৰশ্ন' : 'Questions', chapters: qaChs,    pyqGroups: null,  accent: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
       { key: 'question_paper', label: isAs ? 'পিৱাইকিউ' : 'PYQs',   chapters: [],       pyqGroups,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)' },
     ];
-  }, [chapters, sub.pyq_papers, isAs]);
+  }, [orderedChapters, sub.pyq_papers, isAs]);
 
   const _lsKey = `syrabit_section_${sub.id}`;
   const [expandedSection, setExpandedSection] = useState(() => {
