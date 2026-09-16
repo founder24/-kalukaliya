@@ -1,5 +1,6 @@
 - [Syrabit dev setup](syrabit-dev-setup.md) — Replit dev environment setup details for this monorepo
 - [Wrangler remote D1 writes](wrangler-remote-d1-writes.md) — remote D1 file execution rejects raw transaction-control SQL; verify and invalidate caches after writes
+- [Remote D1 transport fallback](remote-d1-transport.md) — standalone D1 API calls can falsely return 7404; use verified Wrangler remote execution when that happens
 - [Production RAG maintenance](production-rag-maintenance.md) — out-of-band chapter writes must refresh Vectorize, D1 chunk mappings, timestamps, and subject KV
 - [Syrabit content architecture](syrabit-content-arch.md) — Chapter model, 3-section model (Notes/Q&A/Question Paper), content_type field, translation pipeline
 - [Chapter formatting contract](chapter-formatting-contract.md) — preserve source content while grouping topics, tightening same-subtopic notes, and using restrained study emphasis
