@@ -1,0 +1,524 @@
+Chapter 7: Gravitation
+1. Planetary Kinematics and Kepler's Laws of Planetary Motion
+Historically, planetary descriptions progressed from early geocentric models (Ptolemy) to the heliocentric framework (Copernicus, Galileo) and culminated in Johannes Kepler's empirical laws derived from Tycho Brahe's observational data. Newton later showed that Kepler's laws are a direct mathematical consequence of the inverse-square law of universal gravitation and the conservation of angular momentum.
+                     KEPLER'S THREE LAWS
+                              |
+      +-----------------------+-----------------------+
+      |                       |                       |
+1. Law of Orbits        2. Law of Areas         3. Law of Periods
+All planets move in     The radius vector       The square of orbital
+ellipses with the Sun   sweeps equal areas in   period is proportional
+at one focus[span_2](start_span)[span_2](end_span).         equal times (dA/dt)[span_3](start_span)[span_3](end_span).   to cube of semi-major axis:
+                                                T² ∝ a³[span_4](start_span)[span_4](end_span)
+
+Kepler's Three Laws of Planetary Motion
+ * First Law (Law of Orbits): Every planet revolves around the Sun in an elliptical orbit, with the Sun situated at one of the two foci of the ellipse.
+ * Second Law (Law of Areas): The line joining the planet to the Sun (the radius vector) sweeps out equal areas in equal intervals of time; that is, the areal velocity of the planet is strictly constant:
+   
+   
+   Consequence: A planet travels fastest when nearest to the Sun (perihelion) and slowest when farthest away (aphelion).
+ * Third Law (Law of Periods): The square of the orbital period of revolution (T) of a planet is directly proportional to the cube of the semi-major axis (a) of its elliptical orbit:
+   
+   
+   where K_S is Kepler's constant, which depends only on the mass of the central attracting body (the Sun).
+                           ELLIPTICAL PLANETARY ORBIT
+                                      Minor Axis
+                                          |
+                                      B   | b
+                                      *---+---*
+                                    .'    |    '.
+                                  .'      |      '.
+                     Perihelion P*  S·    |       * A  Aphelion
+                     (Fastest)    '.(Sun) |      .'    (Slowest)
+                                    '.    |    .'
+                                      *---+---*
+                                          |
+                                    <---- a ---->
+                                   Semi-major Axis[span_12](start_span)[span_12](end_span)
+
+Derivation: Areal Velocity Conservation from Angular Momentum
+Consider a planet of mass m orbiting the Sun (mass M_\odot) located at the coordinate origin.
+                                  P'(r + Δr)
+                                  *
+                                 / \
+                                /   \ Δr ≈ v·Δt
+                               / ΔA  \
+                              /       \
+                             *---------* P(r)
+                            O(Sun)
+
+In an infinitesimal time interval \Delta t, the position vector \vec{r} of the planet rotates through an angle \Delta \theta, advancing by a displacement vector \Delta \vec{r} \approx \vec{v}\Delta t. The area \Delta \vec{A} of the narrow triangle swept out by the radius vector is:
+
+
+Dividing across by \Delta t and evaluating the limit as \Delta t \to 0:
+
+
+Expressing the velocity vector in terms of linear momentum (\vec{p} = m\vec{v} \implies \vec{v} = \frac{\vec{p}}{m}):
+
+
+Because the orbital angular momentum vector is defined as \vec{L} = \vec{r} \times \vec{p}:
+
+The gravitational force exerted by the Sun on the planet is a central force directed radially inward along -\hat{r}. Therefore, the net torque acting on the planet about the Sun vanishes identically:
+
+
+From rotational dynamics, \vec{\tau} = \frac{d\vec{L}}{dt} = \vec{0} \implies \vec{L} = \text{constant vector}.
+Because \vec{L} and m are constants of motion, the areal velocity \frac{d\vec{A}}{dt} is strictly constant:
+
+
+This completes the analytical proof of Kepler's Second Law.
+Analytical Case Studies & Dynamic Evaluations
+Conceptual Diagnostic: Stating Kepler's Laws of Planetary Motion [PYQ 2020 Final, PYQ 2025 Half-Yearly, PYQ 2026 Final]
+ * Step 1: System Isolation: Consider a planet of mass m executing a closed, bound orbit around a central body of mass M (M \gg m).
+ * Step 2: Component Law Statements:
+   * Law 1 (Orbits): The planetary orbit is an ellipse with the Sun located at one focus.
+   * Law 2 (Areas): The line joining the planet to the Sun sweeps out equal areas in equal time intervals (\frac{d\vec{A}}{dt} = \frac{\vec{L}}{2m} = \text{constant}).
+   * Law 3 (Periods): The square of the orbital period varies directly with the cube of the orbit's semi-major axis (T^2 \propto a^3).
+ * Step 3: Analytical Verification: These three laws govern all bound gravitational systems, including planets orbiting stars and satellites orbiting planets.
+Dynamic Evaluation: Equal-Area Transit Times in Elliptical Planetary Orbits [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation & Diagram: Let a planet move in an elliptical orbit where the radius vector sweeps out two distinct surface segments A_1 and A_2 over time intervals \Delta t_1 and \Delta t_2.
+                            Area A₁
+                           /======/
+                          /======/
+                         *------* (Transit Δt₁)
+                        /
+                       O (Sun)
+                        \
+                         *------* (Transit Δt₂)
+                          \======\
+                           \======\
+                            Area A₂
+
+ * Step 2: Component Equations: By Kepler's second law, areal velocity is invariant throughout the orbit:
+   
+ * Step 3: Analytical Execution:
+   Given that the two swept sector regions have equal areas (A_1 = A_2):
+   
+ * Step 4: Explicit Final Verification: Because areal velocity is strictly constant, the time required to sweep out equal areas is identical (\Delta t_1 = \Delta t_2), regardless of where the segments are located along the ellipse.
+Dynamic Evaluation: Orbital Radius Scaling Under Period Multiplication [PYQ 2026 Final]
+ * Step 1: System Isolation: A satellite orbits a central planet in a circular path of initial radius r_1 with an initial period T_1 = 5.0\text{ hours}. Its orbital radius is increased to r_2 = 4r_1.
+ * Step 2: Governing Relation: From Kepler's Third Law (T^2 \propto r^3):
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Taking the square root on both sides:
+   
+   
+   Substitute the numerical value T_1 = 5.0\text{ h}:
+   
+ * Step 4: Explicit Final Verification: The new orbital period of the satellite is 40\text{ hours}.
+Analytical Case Study: Planetary Orbital Radii for Non-Standard Solar Years [Textbook Exercise 7.3]
+ * Step 1: System Isolation: A hypothetical planet orbits the Sun twice as fast as the Earth (T_p = \frac{1}{2} T_E). Let Earth's semi-major axis be a_E = 1.0\text{ AU}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The semi-major axis of the planet's orbit is 0.63 times that of the Earth (or approximately 0.63\text{ AU}).
+Dynamic Evaluation: Mass Determination of Jupiter via Satellite Io Kinematics [Textbook Exercise 7.4]
+ * Step 1: System Isolation: Jupiter's moon Io orbits with period T_{\text{Io}} = 1.769\text{ days} = 1.769 \times 86\,400\text{ s} \approx 1.5284 \times 10^5\text{ s} at an orbital radius r_{\text{Io}} = 4.22 \times 10^8\text{ m}. Earth orbits the Sun with T_E = 365.25\text{ days} \approx 3.1557 \times 10^7\text{ s} at r_E = 1.496 \times 10^{11}\text{ m}.
+ * Step 2: Governing Equations:
+   Balancing the centripetal force against gravity for a circular orbit gives M = \frac{4\pi^2 r^3}{G T^2}:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The mass of Jupiter is approximately one-thousandth (\approx 10^{-3}) that of the Sun.
+Dynamic Evaluation: Galactic Orbital Period of Edge Stars in the Milky Way [Textbook Exercise 7.5]
+ * Step 1: System Isolation: The Milky Way galaxy contains N = 2.5 \times 10^{11}\text{ stars}, each of solar mass M_\odot = 2.0 \times 10^{30}\text{ kg}. Total mass interior to the orbit is M_G = N \cdot M_\odot = (2.5 \times 10^{11})(2.0 \times 10^{30}) = 5.0 \times 10^{41}\text{ kg}. A star orbits at radius r = 50\,000\text{ ly}.
+ * Step 2: Unit Conversions and Orbital Equations:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Converting into years (1\text{ yr} \approx 3.156 \times 10^7\text{ s}):
+   
+ * Step 4: Explicit Final Verification: The star takes approximately 3.5 \times 10^8\text{ years} (350\text{ million years}) to complete one galactic revolution.
+Dynamic Evaluation: Orbital Radii and "Weighing the Sun" [Textbook Exercises 7.13 & 7.14]
+ * Weighing the Sun [Textbook Exercise 7.13]:
+   * Earth's orbital radius r = 1.5 \times 10^{11}\text{ m}, period T = 1\text{ yr} = 3.156 \times 10^7\text{ s}.
+   * Balancing gravitational pull with centripetal acceleration:
+     
+ * Orbital Distance of Saturn [Textbook Exercise 7.14]:
+   * Given T_S = 29.5\, T_E and r_E = 1.5 \times 10^{11}\text{ m}:
+     
+Conceptual Diagnostic: Conserved Dynamic Variables in Elliptical Comet Orbits [Textbook Exercise 7.8]
+ * A comet travels in a highly eccentric orbit around the Sun:
+   * (a) Linear speed: Variable. Speed peaks at perihelion and reaches its minimum at aphelion.
+   * (b) Angular speed: Variable. The angular sweep rate \omega = \frac{v_\perp}{r} increases sharply near the Sun.
+   * (c) Angular momentum: Strictly constant. The gravitational force is central, producing zero torque (\vec{\tau} = \vec{r} \times \vec{F}_g = \vec{0} \implies \frac{d\vec{L}}{dt} = \vec{0}).
+   * (d) Kinetic energy: Variable. Varies directly with v^2.
+   * (e) Potential energy: Variable. U(r) = -\frac{G M_\odot m}{r} becomes more negative near the Sun.
+   * (f) Total mechanical energy: Strictly constant. Gravity is a conservative field, so E = K + U = \text{constant} across the entire closed trajectory.
+2. Universal Gravitation, the Shell Theorems, and Gravitational Field Superposition
+                         NEWTON'S LAW OF GRAVITATION
+                                      |
+         +----------------------------+----------------------------+
+         |                                                         |
+   POINT-MASS FORMULATION                                   SHELL THEOREMS
+   Fg = -G·(m₁·m₂/r²)·r̂[span_65](start_span)[span_65](end_span)                                 • External point: Shell acts as if
+   Universal, attractive, central,                         all mass is at center[span_66](start_span)[span_66](end_span).
+   conservative, obeys Third Law[span_67](start_span)[span_67](end_span).                         • Internal point: Net force = 0[span_68](start_span)[span_68](end_span).
+
+Newton's Universal Law of Gravitation states that every mass particle in the universe attracts every other particle with a force directly proportional to the product of their masses and inversely proportional to the square of the distance between them:
+
+
+where G = 6.674 \times 10^{-11}\text{ N m}^2\text{kg}^{-2} is the universal gravitational constant, determined experimentally by Henry Cavendish using a torsion balance.
+Newton's Shell Theorems
+ * Shell Theorem I (Point Mass Outside a Uniform Spherical Shell): The gravitational attraction exerted by a thin, uniform spherical shell on an external point mass is identical to the force that would arise if the entire mass of the shell were concentrated at its geometric center.
+       SHELL THEOREM I (External Point)           SHELL THEOREM II (Internal Point)
+                  R                                          R
+             .--------.                                 .--------.
+            /          \                               /    P     \
+           |     O      |    m                        |     *      | Net F = 0
+            \          /    *                          \          /  everywhere
+             '--------'    P                            '--------'   inside[span_73](start_span)[span_73](end_span)
+                 <---- r ---->
+             F = G·M·m / r² (r > R)[span_74](start_span)[span_74](end_span)
+
+ * Shell Theorem II (Point Mass Inside a Uniform Spherical Shell): The gravitational force exerted by a uniform spherical shell on a point mass placed anywhere inside it is identically zero.
+   * Mechanism: At any interior point P, decomposing the shell into opposing double cones reveals that the surface area (and thus mass) of a patch scales with r^2, while the force per unit mass scales with \frac{1}{r^2}. The geometric factors cancel, leaving the net force from opposing patches balanced in every direction.
+Analytical Case Studies & Dynamic Evaluations
+Conceptual Diagnostic: Gravitational Shielding, Extended Frames, and Tidal Forces [Textbook Exercise 7.1]
+ * (a) Gravitational Shielding:
+   Unlike electrostatic forces—where mobile charges in a conductor redistribute to produce an interior field \vec{E} = \vec{0}—gravitational mass is strictly positive, and there are no negative gravitational charges. Gravitational attraction depends only on the intervening masses and cannot be shielded by enclosing a body within a hollow shell or other barrier.
+ * (b) Gravity Detection in Large Space Stations:
+   In a small spacecraft, all parts fall with essentially identical gravitational acceleration, rendering the local frame weightless. However, in a very large space station, the gradient of gravity (\frac{\partial g}{\partial r} \propto \frac{1}{r^3}) produces measurable differences in acceleration between the near and far ends of the structure, generating observable tidal stresses.
+ * (c) Tidal Force Disparity (Moon vs. Sun):
+   The absolute gravitational pull of the Sun on Earth is roughly 180 times stronger than that of the Moon (F \propto \frac{M}{r^2}). However, tidal effects depend on the differential gradient of gravitational force across Earth's diameter (2R_E):
+   
+   
+   Because the Moon is much closer to Earth than the Sun, the factor \left(\frac{r_S}{r_M}\right)^3 \approx (389)^3 \approx 5.8 \times 10^7 outweighs the Sun's larger mass ratio (\frac{M_\odot}{M_M} \approx 2.7 \times 10^7). Consequently, the Moon's tidal force is approximately twice as strong as that of the Sun.
+Dynamic Evaluation: Neutral Gravity Point in the Earth-Sun System [Textbook Exercise 7.12]
+ * Step 1: System Isolation & Diagram: A rocket travels along the line connecting the Earth (mass M_E = 6.0 \times 10^{24}\text{ kg}) and the Sun (mass M_\odot = 2.0 \times 10^{30}\text{ kg}). The orbital separation is R = 1.5 \times 10^{11}\text{ m}. Let the net gravitational force vanish at a distance r from the Earth's center.
+           Earth (ME)               Point P (Fnet = 0)              Sun (M_sun)
+               *----------------------------*----------------------------*
+               <------------ r ------------><---------- R - r ---------->
+               <--------------------------- R --------------------------->[span_88](start_span)[span_88](end_span)
+
+ * Step 2: Component Equations: Setting the opposing gravitational pulls equal:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The gravitational null point is located 2.6 \times 10^8\text{ m} from the center of the Earth.
+Dynamic Evaluation: Point Mass Centered Inside a Spherically Symmetrical Tunnel [Textbook Exercises 7.10 & 7.11]
+ * Setup: A point mass m is located inside a cavity or hollow spherical shell of uniform density at an arbitrary radial distance r from the center.
+ * Gravitational Force Magnitude [Exercise 7.10]: By Shell Theorem II, the net gravitational force on any particle anywhere inside a uniform spherical shell is identically zero:
+   
+ * Gravitational Intensity Direction [Exercise 7.11]: Because the field strength inside the shell vanishes everywhere, the gravitational intensity vector is \vec{E}_g = \vec{0}. There is no net force, and its direction is undefined (or zero).
+Dynamic Evaluation: Field and Potential at the Midpoint of Two Spheres [Textbook Exercise 7.21]
+ * Step 1: System Isolation & Diagram: Two lead spheres, each of mass M = 100\text{ kg} and radius R_0 = 0.10\text{ m}, are placed with their centers separated by D = 1.0\text{ m} on a horizontal plane. Consider the midpoint P between their centers (r = 0.50\text{ m}).
+              Sphere 1 (M)               P (Midpoint)             Sphere 2 (M)
+                 ( * )-----------------------*-----------------------( * )
+                         <---- 0.50 m ---->     <---- 0.50 m ---->[span_96](start_span)[span_96](end_span)
+
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * Gravitational Force on a Test Mass m at P:
+     The opposing field vectors cancel by symmetry:
+     
+   * Gravitational Potential (V): Potential is a scalar, so contributions add constructively:
+     
+   * Stability of Equilibrium: An object placed at P is in equilibrium (\vec{F} = \vec{0}). If displaced along the line connecting the centers, the attraction from the nearer sphere increases while that from the farther sphere decreases, pulling the object further from P. Therefore, this equilibrium is unstable.
+ * Step 4: Explicit Final Verification: The gravitational force at the midpoint is 0, and the gravitational potential is -2.7 \times 10^{-8}\text{ J kg}^{-1} (an unstable equilibrium).
+3. Acceleration Due to Gravity (g) and its Variations with Altitude and Depth
+                        VARIATIONS IN GRAVITY (g)
+                                   |
+         +-------------------------+-------------------------+
+         |                                                   |
+   ALTITUDE VARIATION (h)                              DEPTH VARIATION (d)
+   gh = g·[RE / (RE + h)]²[span_101](start_span)[span_101](end_span)                             gd = g·(1 - d / RE)[span_102](start_span)[span_102](end_span)
+   gh ≈ g·(1 - 2h / RE) for h << RE[span_103](start_span)[span_103](end_span)                     Linear decrease to zero at center[span_104](start_span)[span_104](end_span)
+
+Surface Acceleration Due to Gravity (g)
+Consider an object of mass m on the surface of a spherically symmetric Earth of mass M_E and radius R_E. Equating Newton's gravitational force to the body's weight (F = mg):
+
+
+Taking M_E \approx 5.97 \times 10^{24}\text{ kg} and R_E \approx 6.37 \times 10^6\text{ m}, the standard surface value is g \approx 9.8\text{ m s}^{-2}. Note that g depends on the mass and radius of the Earth, and is completely independent of the mass m of the falling body.
+Derivation: Variation of g with Altitude (h)
+Consider a point mass m raised to an altitude h above the Earth's surface (r = R_E + h):
+                                    m * (At Altitude h)
+                                      |
+                                    h |
+                                      v
+                                  .--------.
+                                 /          \
+                                |     RE     |
+                                 \          /
+                                  '--------' Earth (ME)[span_111](start_span)[span_111](end_span)
+
+From Newton's law of gravitation:
+
+
+Substitute the surface value g = \frac{G M_E}{R_E^2}:
+
+
+For small altitudes (h \ll R_E), expanding with the binomial theorem and neglecting higher-order terms (\frac{h^2}{R_E^2} \to 0):
+
+
+Acceleration due to gravity decreases with increasing altitude.
+Derivation: Variation of g with Depth (d)
+Consider a point mass m lowered to a depth d below the Earth's surface, placing it at a distance r = R_E - d from the center.
+                                  .--------. Earth Surface
+                                 /   d      \
+                                |   *- - - - | m at r = RE - d
+                                |  (  Ms  )  |
+                                 \  '----'  /
+                                  '--------[span_120](start_span)'[span_120](end_span)
+
+Assuming the Earth has a uniform mass density \rho = \frac{M_E}{\frac{4}{3}\pi R_E^3}:
+ * By Shell Theorem II, the outer spherical shell of thickness d exerts no net gravitational force on mass m.
+ * The net gravitational force is exerted solely by the inner sphere of radius r = R_E - d and mass M_s:
+   
+ * The gravitational force acting on mass m is:
+   
+ * The acceleration due to gravity at depth d is g(d) = \frac{F(d)}{m}:
+   
+Acceleration due to gravity decreases linearly with increasing depth, reaching g = 0 at the center of the Earth (d = R_E).
+      g(r)
+        ^                     Inside Earth           Outside Earth
+        |                     g(r) ∝ r               g(r) ∝ 1/r²[span_131](start_span)[span_131](end_span)
+      g +                         . ' * ' .
+        |                     . '           ' .
+        |                 . '                   ' .
+        |             . '                           ' .
+        0------------+------------------------------------> r
+                   r = 0 (Center)                r = RE (Surface)[span_132](start_span)[span_132](end_span)
+
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Explaining Gravity Variations with Altitude and Depth [PYQ 2023 Final & Textbook Exercise 7.2]
+ * Altitude Effect: g(h) = g\left(\frac{R_E}{R_E + h}\right)^2 \implies g decreases with altitude.
+ * Depth Effect: g(d) = g\left(1 - \frac{d}{R_E}\right) \implies g decreases with depth.
+ * Independence of Body Mass: g = \frac{G M_E}{R_E^2} depends on Earth's mass, but is independent of the falling body's mass m.
+ * Potential Energy Formulation Accuracy: The formula \Delta U = -G M_E m\left(\frac{1}{r_2} - \frac{1}{r_1}\right) is more accurate than mg(r_2 - r_1), because mg\Delta r assumes g is strictly constant, which holds only when \Delta r \ll R_E.
+Dynamic Evaluation: Gravitational Force at Half-Earth Radius [Textbook Exercise 7.15]
+ * Step 1: System Isolation: A body weighs W_0 = 63\text{ N} on the surface of the Earth. It is moved to an altitude h = \frac{R_E}{2}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The gravitational force on the body at altitude h = R_E/2 is 28\text{ N}.
+Dynamic Evaluation: Weight Halfway to the Center of the Earth [Textbook Exercise 7.16]
+ * Step 1: System Isolation: A body weighs W_0 = 250\text{ N} on the Earth's surface (d = 0). Find its weight at a depth halfway down to the center (d = \frac{R_E}{2}).
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The body weighs 125\text{ N} halfway to the Earth's center.
+4. Gravitational Potential Energy, Escape Speed, and Orbital Mechanics
+                   ENERGY RELATIONS FOR ORBITING SATELLITE (Radius r)
+                                           |
+         +---------------------------------+---------------------------------+
+         |                                 |                                 |
+   KINETIC ENERGY (K)              POTENTIAL ENERGY (U)              TOTAL ENERGY (E)
+   K = +G·M·m / (2r)[span_145](start_span)[span_145](end_span)              U = -G·M·m / r[span_146](start_span)[span_146](end_span)                   E = K + U = -G·M·m / (2r)[span_147](start_span)[span_147](end_span)
+                                                                     E = -K = U / 2 (Bound State)[span_148](start_span)[span_148](end_span)
+
+Gravitational Potential Energy (U)
+Gravitational potential energy is the work done by an external agent in bringing a mass m from infinity to a radial distance r within the gravitational field of mass M:
+
+
+The potential energy is chosen to be zero at infinity (r \to \infty). The negative sign indicates a bound system under an attractive force.
+Derivation: Escape Speed (v_e) from a Planetary Surface
+Escape speed is the minimum initial speed required for a body projected from a planet's surface to overcome the planet's gravitational pull and reach infinity with zero net mechanical energy.
+                     ESCAPE SPEED MECHANICS
+                           
+               v = 0, U = 0, E_total = 0 (At r -> ∞)[span_155](start_span)[span_155](end_span)
+                         ^
+                         | Trajectory to Infinity
+                         |
+                       [ m ] (Speed ve)
+                         |
+                         v
+                    .--------.
+                   /          \
+                  |  Earth ME  | Radius RE[span_156](start_span)[span_156](end_span)
+                   \          /
+                    '--------'
+
+ * Total Mechanical Energy at the Surface (r = R_E):
+   
+ * Total Mechanical Energy at Infinity (r \to \infty):
+   
+ * Conservation of Mechanical Energy (E_i = E_f):
+   
+   
+   Using g = \frac{G M_E}{R_E^2} \implies \frac{G M_E}{R_E} = g R_E:
+   
+ * Numerical Value for Earth:
+   
+ * Independence Properties: The escape speed is independent of the mass of the projectile, its projection angle, and its direction of launch. It depends only on the mass and radius of the celestial body.
+Derivation: Orbital Velocity (v_o) of an Artificial Satellite
+Consider a satellite of mass m orbiting Earth at an altitude h in a circular path of radius r = R_E + h.
+                         ORBITING SATELLITE
+                                  
+                                    * m (Speed vo)[span_168](start_span)[span_168](end_span)
+                                  .'|'.
+                                .'  |  '.
+                               /    |    \
+                              |  (Earth)  | Radius r = RE + h[span_169](start_span)[span_169](end_span)
+                               \    |    /
+                                '.  |  .'
+                                  '.'
+
+The gravitational attraction provides the necessary centripetal force for circular motion:
+
+
+For a satellite orbiting close to the surface (h \ll R_E \implies r \approx R_E):
+
+Relation Between Escape Speed and Orbital Speed
+Comparing v_e = \sqrt{2g R_E} with v_o = \sqrt{g R_E}:
+
+
+Increasing the orbital speed of a near-Earth satellite by a factor of \sqrt{2} (about a 41.4\% increase) causes it to escape Earth's gravitational field along a parabolic trajectory.
+Derivation: Mechanical Energy Breakdown of an Orbiting Satellite
+For a satellite of mass m in a stable circular orbit of radius r:
+ * Kinetic Energy (K):
+   
+ * Potential Energy (U):
+   
+ * Total Mechanical Energy (E):
+   
+ * Energy Proportionalities:
+   
+   
+   The negative total energy indicates that the satellite is in a gravitationally bound orbit. To free the satellite from orbit, an amount of energy equal to its binding energy (E_{\text{binding}} = -E = +\frac{G M_E m}{2r}) must be supplied.
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Orbital Velocity and Mechanical Energy Relations [PYQ 2023 Final, PYQ 2025 Half-Yearly, PYQ 2026 Final]
+ * Step 1: System Isolation: Consider a satellite of mass m orbiting a planet of mass M at radius r.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Verification:
+   * Kinetic energy is strictly positive (K > 0).
+   * Potential energy is negative (U < 0).
+   * Total mechanical energy is negative (E = -K = \frac{U}{2} < 0), confirming a bound elliptical or circular orbit.
+ * Step 4: Explicit Final Verification: If a satellite's total energy is negative, it remains bound to the central body; if its total energy is zero or positive, its trajectory becomes parabolic or hyperbolic, escaping into unbounded space.
+Conceptual Diagnostic: Satellite Energetics and Atmospheric Drag Paradox [Textbook Exercises 7.6 & 5.5(c)]
+ * Total Energy vs. Energies: With potential energy defined as zero at infinity, the total mechanical energy of an orbiting satellite is the negative of its kinetic energy (E = -K) and equals half its potential energy (E = \frac{U}{2}).
+ * Escape Work for Orbiting vs. Stationary Body:
+   * For an orbiting satellite: E_{\text{orbit}} = -\frac{G M_E m}{2r}, so energy required to escape is \Delta E_{\text{escape}} = +\frac{G M_E m}{2r}.
+   * For a stationary object at the same altitude: E_{\text{stat}} = -\frac{G M_E m}{r}, so energy required to escape is \Delta E = +\frac{G M_E m}{r}.
+   * Therefore, launching an orbiting satellite to infinity requires less energy than projecting a stationary object from the same height, because the satellite already possesses orbital kinetic energy.
+ * The Atmospheric Drag Paradox: As a satellite in low Earth orbit experiences frictional drag from the thin upper atmosphere, its total mechanical energy gradually dissipates (E becomes more negative). Because E = -\frac{G M_E m}{2r}, a decrease in E forces the orbital radius r to shrink. Since orbital speed is v_o = \sqrt{\frac{G M_E}{r}}, a smaller radius leads to an increased orbital speed. The loss of potential energy exceeds the energy dissipated by friction, with the remainder converting into kinetic energy.
+Conceptual Diagnostic: Parameter Invariance of Planetary Escape Speed [Textbook Exercise 7.7]
+ * From v_e = \sqrt{\frac{2G M_E}{R_E}}:
+   * (a) Mass of the body: Independent. All objects, from dust grains to space probes, have the same escape speed.
+   * (b) Location of projection: Slightly dependent. Earth's slight equatorial bulge and rotational speed make escape speed slightly lower at the equator than at the poles.
+   * (c) Direction of projection: Independent. Gravitational potential energy is isotropic, so escape speed is the same in any launch direction (neglecting atmospheric effects and planetary rotation).
+   * (d) Altitude of launch point: Dependent. From an initial altitude h, the escape speed decreases to v_e(h) = \sqrt{\frac{2G M_E}{R_E + h}}.
+Dynamic Evaluation: Ballistic Apex Altitude from Sub-Orbital Launch Speeds [Textbook Exercise 7.17]
+ * Step 1: System Isolation: A rocket is launched vertically upward from Earth's surface with speed v_0 = 5.0\text{ km s}^{-1} = 5.0 \times 10^3\text{ m s}^{-1}. Earth has mass M_E = 6.0 \times 10^{24}\text{ kg} and radius R_E = 6.4 \times 10^6\text{ m}.
+ * Step 2: Energy Conservation Formulation:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Altitude above the surface:
+   
+ * Step 4: Explicit Final Verification: The rocket reaches a maximum distance of 8.0 \times 10^6\text{ m} from the Earth's center (an altitude of 1.6 \times 10^3\text{ km} above the surface).
+Dynamic Evaluation: Asymptotic Velocity for Super-Escape Projectiles [Textbook Exercise 7.18]
+ * Step 1: System Isolation: A body is launched from Earth's surface with initial speed v_0 = 3 v_e, where v_e = 11.2\text{ km s}^{-1} is the surface escape speed. Let v_\infty be its speed far from Earth (r \to \infty).
+ * Step 2: Conservation of Mechanical Energy:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Substitute v_0 = 3v_e:
+   
+ * Step 4: Explicit Final Verification: Far away from Earth, the body coasts at a constant speed of 31.7\text{ km s}^{-1}.
+Dynamic Evaluation: Orbital Escape Energy for Low Earth Satellites [Textbook Exercise 7.19]
+ * Step 1: System Isolation: A satellite of mass m = 200\text{ kg} orbits Earth at an altitude h = 400\text{ km} = 0.4 \times 10^6\text{ m}. Earth has mass M_E = 6.0 \times 10^{24}\text{ kg} and radius R_E = 6.4 \times 10^6\text{ m}.
+ * Step 2: Component Equations:
+   
+   
+   Total mechanical energy in orbit:
+   
+   
+   Energy required to escape to infinity (E_\infty = 0):
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The energy that must be expended to free the satellite from Earth's gravity is 5.9 \times 10^9\text{ J}.
+Dynamic Evaluation: Mutual Gravitational Infall and Collision Dynamics [Textbook Exercise 7.20]
+ * Step 1: System Isolation & Diagram: Two identical stars of mass M = 2.0 \times 10^{30}\text{ kg} and radius R = 10^4\text{ km} = 10^7\text{ m} are released from rest from an initial separation r_i = 10^9\text{ km} = 10^{12}\text{ m}.
+           Star 1 (M)                                          Star 2 (M)
+              ( * ) -------------------------------------------- ( * )
+              Initial Separation ri = 10¹² m (Speed ≈ 0)
+              
+              Collision Contact: Center separation rf = 2R = 2 × 10⁷ m
+
+ * Step 2: Conservation of Mechanical Energy:
+   Initially, both stars are essentially at rest (K_i = 0):
+   
+   
+   At collision, the centers are separated by r_f = 2R. By symmetry, both stars move at the same speed v:
+   
+ * Step 3: Analytical Execution:
+   Equating initial and final energy:
+   
+   
+   Because r_i = 10^{12}\text{ m} \gg 2R = 2 \times 10^7\text{ m}, the term \frac{1}{r_i} is negligible:
+   
+ * Step 4: Explicit Final Verification: The stars collide at a relative speed of v_{\text{rel}} = 2v \approx 5.16 \times 10^6\text{ m s}^{-1}, with each moving at 2.6 \times 10^6\text{ m s}^{-1} relative to the center of mass.
+5. Weightlessness and Physiological Effects in Orbital Space
+                           WEIGHTLESSNESS
+                                 |
+         +-----------------------+-----------------------+
+         |                                               |
+   PHYSICAL ORIGIN                                PHYSIOLOGICAL RESPONSES
+   Free fall: a = g                               • Absence of hydrostatic blood pressure
+   Normal contact force N = 0[span_223](start_span)[span_223](end_span)                    • Facial puffiness, muscle atrophy
+   Gravity is NOT zero[span_224](start_span)[span_224](end_span)                           • Loss of bone mineral density[span_225](start_span)[span_225](end_span)
+
+The Physical Nature of Weightlessness
+Weight is defined as the contact reaction force exerted by a supporting floor or balance on a body (W_{\text{apparent}} = N).
+In an orbiting spacecraft, both the astronaut and the vessel fall freely with the identical gravitational acceleration (a = g(r)):
+
+
+The sensation of weightlessness does not arise from the absence of gravity; at orbital altitudes of 400\text{ km}, Earth's gravitational field remains roughly 89\% of its surface strength. Weightlessness is entirely a consequence of continuous unconstrained free fall.
+Analytical Case Studies & Dynamic Evaluations
+Conceptual Diagnostic: Physics and Physiological Symptoms of Weightlessness [PYQ 2023 Final & Textbook Exercise 7.9]
+ * Step 1: System Isolation: Analyze an astronaut orbiting Earth in a microgravity environment.
+ * Step 2: Symptom Diagnostic Breakdown:
+   * (a) Swollen feet: Unlikely. On Earth, gravity causes blood and fluids to pool in the lower extremities. In microgravity, fluids redistribute upward toward the thoracic and cranial cavities, reducing foot swelling while causing facial puffiness.
+   * (b) Swollen face: Likely. Fluid shifts toward the head increase facial volume and nasal congestion.
+   * (c) Headache: Likely. Fluid shifts increase intracranial pressure, commonly causing headaches during adaptation.
+   * (d) Orientational problems: Likely. The vestibular system in the inner ear relies on gravity to signal "up" and "down". Without this stimulus, spatial disorientation (space motion sickness) is common.
+ * Step 3: Explicit Final Verification: An astronaut in orbit is most likely to experience swollen face, headache, and orientational problems; swollen feet do not occur.
+6. Master Consolidated Reference Tables
+Table A: Master PYQ Index
+| Exam / Year | Question Summary | Core Governing Concept | Final Analytical / Numerical Result |
+|---|---|---|---|
+| 2025 HY | Swept areas in different time intervals | Kepler's 2nd Law (\frac{dA}{dt} = \text{const}) | A_1 = A_2 \implies \mathbf{\Delta t_1 = \Delta t_2} (times are equal). |
+| 2026 Final | State Kepler's laws of planetary motion | Three empirical planetary laws | 1. Orbits (ellipses); 2. Areas (\frac{dA}{dt} = \text{const}); 3. Periods (T^2 \propto a^3). |
+| 2025 HY | Kepler's laws and derive orbital velocity | Centripetal force balance (F_c = F_g) | v_o = \mathbf{\sqrt{\frac{G M}{R_E + h}} = \sqrt{g R_E}} (for h \ll R_E). |
+| 2026 Final | Period of satellite with radius multiplied by 4 | Kepler's 3rd Law: T^2 \propto r^3 | T_2 = T_1 \times 4^{3/2} = 5 \times 8 = \mathbf{40.0\text{ hours}}. |
+| 2026 Final | Derive orbital velocity of artificial satellite | Dynamic circular equilibrium | \frac{mv^2}{r} = \frac{GMm}{r^2} \implies \mathbf{v_o = \sqrt{\frac{GM}{r}}}. |
+| 2020 Final | State Kepler's laws of planetary motion | Classical central force laws | Proved \frac{d\vec{A}}{dt} = \frac{\vec{L}}{2m} = \text{constant}; T^2 \propto a^3. |
+| 2023 Final | Total mechanical energy of orbiting satellite | Sum of kinetic and potential energy | E = K + U = \frac{GMm}{2r} - \frac{GMm}{r} = \mathbf{-\frac{GMm}{2r}}. |
+| 2023 Final | Variations of g with altitude and depth | Binomial expansion and Shell Theorem | g(h) \approx g(1 - 2h/R_E); g(d) = g(1 - d/R_E). |
+| 2023 Final | Note on physical weightlessness | Normal force in free-fall frame (N = 0) | Contact force vanishes because satellite and occupant fall at identical rates. |
+| 2023 Final | Relation between orbital motion and total energy | Bound-state energy conditions | E = -K = \frac{U}{2} < 0; negative total energy confirms a bound orbit. |
+Table B: Textbook Exercises Index
+| Exercise # | Topic / Scenario | Analytical / Numerical Result (with Units) |
+|---|---|---|
+| 7.1 | Gravitational shielding, large stations, tidal pull | (a) No shielding; (b) Large stations experience tidal gradients; (c) Lunar tides dominate via 1/r^3. |
+| 7.2 | Conceptual diagnostics on g and energy | (a) Decreases; (b) Decreases; (c) Body mass; (d) More accurate. |
+| 7.3 | Planet revolving twice as fast as Earth | Semi-major axis a_p = (0.25)^{1/3} a_E \approx \mathbf{0.63\text{ AU}}. |
+| 7.4 | Jupiter mass estimation from Io's orbit | M_J / M_\odot \approx \mathbf{1 / 1045 \approx 10^{-3}}. |
+| 7.5 | Milky Way edge star revolution time | Orbital period T \approx \mathbf{3.5 \times 10^8\text{ years}}. |
+| 7.6 | Satellite energy alternatives and launch work | (a) Kinetic energy; (b) Less energy required. |
+| 7.7 | Parametric dependencies of escape speed | Independent of mass and angle; dependent on planet mass, radius, altitude. |
+| 7.8 | Dynamic variables in eccentric comet orbits | Linear/angular speed and K, U vary; angular momentum \vec{L} and total energy E are constant. |
+| 7.9 | Physiological symptoms of weightlessness | Afflicts swollen face, headache, disorientation; not swollen feet. |
+| 7.10 | Force on mass inside hollow spherical shell | Net gravitational force is zero (F = 0). |
+| 7.11 | Field intensity inside hollow spherical shell | Intensity is zero; direction is undefined. |
+| 7.12 | Earth-Sun gravitational null point distance | Located at r \approx \mathbf{2.6 \times 10^8\text{ m}} from the Earth's center. |
+| 7.13 | Mass of the Sun from Earth's orbital data | M_\odot = \frac{4\pi^2 r^3}{G T^2} \approx \mathbf{2.0 \times 10^{30}\text{ kg}}. |
+| 7.14 | Orbital distance of Saturn from Earth year | r_S = (29.5)^{2/3} r_E \approx \mathbf{1.43 \times 10^{12}\text{ m}}. |
+| 7.15 | Weight of 63\text{ N} body at altitude h = R_E/2 | Gravitational force = \mathbf{28.0\text{ N}}. |
+| 7.16 | Weight of 250\text{ N} body at depth d = R_E/2 | Apparent weight = \mathbf{125.0\text{ N}}. |
+| 7.17 | Vertical rocket launch (v_0 = 5\text{ km/s}) | r_{\text{max}} = \mathbf{8.0 \times 10^6\text{ m}} (h = \mathbf{1.6 \times 10^3\text{ km}} above surface). |
+| 7.18 | Asymptotic speed for launch at 3v_e | Far from Earth, v_\infty = \sqrt{8}\, v_e \approx \mathbf{31.7\text{ km s}^{-1}}. |
+| 7.19 | Escape energy for satellite at h = 400\text{ km} | Required energy input \Delta E = +\frac{G M_E m}{2r} \approx \mathbf{5.9 \times 10^9\text{ J}}. |
+| 7.20 | Collision speed of two gravitating stars | Each star reaches speed v \approx \mathbf{2.6 \times 10^6\text{ m s}^{-1}}. |
+| 7.21 | Force and potential at midpoint of two spheres | Force is zero; Potential V = \mathbf{-2.7 \times 10^{-8}\text{ J kg}^{-1}} (unstable). |
