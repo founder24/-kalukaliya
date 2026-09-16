@@ -1,0 +1,832 @@
+Chapter 4: Laws of Motion
+1. Classical Dynamics, Aristotelian Fallacy, and the Law of Inertia (Newton's First Law)
+Kinematics describes the geometry of motion in terms of displacement, velocity, and acceleration without examining its physical causes. Dynamics investigates the physical interactions that govern, sustain, or alter that motion.
+                             CLASSICAL DYNAMICS
+                                     |
+         +---------------------------+---------------------------+
+         |                                                       |
+   ARISTOTELIAN VIEW                                   GALILEAN LAW OF INERTIA
+   "An external force is continuously                  "A body continues in uniform rectilinear
+   required to sustain uniform velocity."              motion or rest unless acted upon by a
+   Flaw: Neglected opposing contact friction[span_2](start_span)[span_2](end_span). net non-zero external force[span_3](start_span)"[span_3](end_span).
+
+The Aristotelian Fallacy vs. Galilean Inertia
+ * Aristotle's View: Stated that an external force is required to keep a body in uniform motion (e.g., an arrow stays in flight because air rushes behind it to push it forward).
+ * The Galilean Resolution: Moving bodies on Earth naturally come to rest because of opposing resistive forces: dry contact friction, viscous drag, and air resistance. On Earth, an applied force is required solely to counteract these resistive forces so that the net external force sums to zero:
+   
+   
+   In an ideal world free of all friction, a body initiated into horizontal motion continues to travel at constant velocity indefinitely without any propulsion.
+                     GALILEO'S DOUBLE INCLINED PLANE
+                      
+      Plane 1 (Release)           Plane 2 (Steep)           Plane 2 (Gentle)
+        \      h                   /      h                   /        h
+         \    ---                 /      ---                 /        ---
+          \                      /                          /
+           \                    /                          /
+            \__________________/                          /__________________
+                     Horizontal Track                  Limit: Infinite Distance (Slope = 0)[span_9](start_span)[span_9](end_span)
+
+ * Galileo's Double-Incline Thought Experiment:
+   * A sphere rolling down an inclined plane accelerates, gaining speed.
+   * Rolling up an opposing incline retards the sphere until it reaches its original release height h.
+   * Lowering the slope of the upward incline forces the ball to travel a longer distance along the plane to reach height h.
+   * In the limit where the opposing slope is zero (a horizontal plane), the ball must travel an infinite distance to recover its initial height—its motion never ceases.
+ * Definition of Inertia: The inherent resistance of any material body to change its state of rest or uniform rectilinear motion. Inertial mass (m) is the quantitative scalar measure of inertia.
+Newton's First Law of Motion and Particle Equilibrium
+> Newton's First Law: Every body continues in its state of rest or of uniform motion in a straight line unless compelled to change that state by an applied external force.
+> 
+                     EQUILIBRIUM: NET FORCE IS ZERO
+    
+    (a) Book at Rest on Table                (b) Terminal Raindrop Descent
+               Normal Reaction (N)                      Air Drag / Viscous Force (F_drag)
+                      ^                                              ^
+                      |                                              |
+                 [  Book  ]                                       ( Rain )
+                      |                                              |
+                      v                                              v
+                 Weight (mg)                                    Gravity (mg)
+             N - mg = 0 -> a = 0                         F_drag - mg = 0 -> v = const.[span_18](start_span)[span_18](end_span)
+
+ * Physical Meaning of Equilibrium:
+   * Zero acceleration does not imply the absence of forces; it means all external forces balance out.
+   * Internal forces between constituent particles of a body always cancel in pairs and cannot accelerate the body's center of mass.
+Manifestations of Inertia & Everyday Mechanics
+ * Inertia of Rest: When a stationary vehicle accelerates forward abruptly, the feet of standing passengers accelerate forward through floor friction, while the upper torso remains behind due to inertia, causing passengers to jerk backward relative to the vehicle.
+ * Inertia of Motion: When a speeding vehicle brakes, the lower limbs decelerate with the chassis, while the upper torso continues moving forward at the previous speed due to inertia, pitching passengers forward.
+ * Inertia of Direction: Mud particles thrown from a spinning vehicle tire travel tangentially to the tire perimeter because cohesive forces cannot supply the inward centripetal acceleration needed to keep them on the curve.
+ * Locomotion in Empty Space: A horse cannot pull a cart in a vacuum. Forward motion requires the horse to exert an inclined backward-downward contact force against the ground, which generates an equal and opposite reaction force whose horizontal component provides forward thrust. In empty space, there is no external surface to supply this reaction force.
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Diagnostic Identification of Net External Force [Textbook Exercise 4.1]
+ * Step 1: System Isolation: Identify the kinematic state (\vec{v}, \vec{a}) for each isolated scenario.
+ * Step 2: Component Equations: Apply Newton's first and second laws: \sum \vec{F}_{\text{ext}} = m\vec{a}.
+ * Step 3: Analytical Execution:
+   * (a) Raindrop falling vertically at constant terminal speed:
+     
+     
+     Upward aerodynamic drag balances downward gravity.
+   * (b) Cork of mass 10\text{ g} floating on water:
+     The cork is stationary on the surface (\vec{a} = \vec{0}). Upward buoyant force balances downward gravity:
+     
+   * (c) Kite skillfully held stationary in the sky:
+     The kite is in static equilibrium (\vec{a} = \vec{0}). The vector sum of string tension, wind lift, and gravity is zero:
+     
+   * (d) Car cruising at constant 30\text{ km h}^{-1} on a rough road:
+     Velocity is uniform (\vec{v} = \text{constant} \implies \vec{a} = \vec{0}). Forward engine thrust balances road friction and air resistance:
+     
+   * (e) High-speed electron in interstellar space far from all matter and fields:
+     No gravitational, electrostatic, or magnetic fields act on the electron:
+     
+ * Step 4: Explicit Final Verification: In every case where \vec{a} = \vec{0}, the net external force is zero (\mathbf{\vec{F}_{\text{net}} = \vec{0}}).
+Dynamic Evaluation: Net Force Invariance on an Airborne Projectile [Textbook Exercise 4.2]
+ * Step 1: System Isolation & Diagram: Consider a pebble of mass m = 0.05\text{ kg} thrown vertically upward (+y), passing through ascent, apex (v = 0), and descent, with air resistance neglected.
+                 Ascent (v > 0)          Apex (v = 0)         Descent (v < 0)
+                      ^                       *                      |
+                      |                      / \                     |
+                   [Pebble]               [Pebble]                   v
+                      |                       |                   [Pebble]
+                      v                       v                      |
+                   mg = 0.49 N             mg = 0.49 N               v
+                                                                  mg = 0.49 N[span_40](start_span)[span_40](end_span)
+
+ * Step 2: Force Formulation: Once airborne, direct physical contact ceases. The only force acting on the pebble throughout its flight is gravity:
+   
+ * Step 3: Analytical Execution Across Trajectory Phases:
+   * (a) During upward motion: \mathbf{F_{\text{net}} = 0.49\text{ N}} directed vertically downward.
+   * (b) During downward motion: \mathbf{F_{\text{net}} = 0.49\text{ N}} directed vertically downward.
+   * (c) At the highest point (v = 0): \mathbf{F_{\text{net}} = 0.49\text{ N}} directed vertically downward.
+   * Effect of oblique projection at 45^\circ: The horizontal acceleration is zero (a_x = 0). The vertical acceleration remains a_y = -g. Thus, the net force remains 0.49\text{ N} directed vertically downward at all points along the path.
+ * Step 4: Explicit Final Verification: The net force is constant at 0.49\text{ N} downward throughout the trajectory.
+Dynamic Evaluation: Instantaneous Locality of Force: Train-Drop Experiments [Textbook Exercise 4.3]
+ * Step 1: System Isolation: A stone of mass m = 0.1\text{ kg} is dropped from the window of a train under four different conditions (g = 10\text{ m s}^{-2}).
+ * Step 2: Physical Principle: Newton's second law is local in time: acceleration at any instant is determined solely by the forces acting at that exact moment. The stone retains no kinematic "memory" of past accelerations once contact is severed.
+ * Step 3: Analytical Execution:
+   * (a) Just after release from a stationary train:
+     The stone is in free fall. The only acting force is gravity:
+     
+   * (b) Just after release from a train moving at constant v = 36\text{ km h}^{-1}:
+     Horizontal contact is broken. Neglecting air drag, F_x = 0, so the net force is:
+     
+   * (c) Just after release from a train accelerating at a_T = 1.0\text{ m s}^{-2}:
+     Once released, contact with the train is severed; the train cannot exert any horizontal force through the air. The net force remains:
+     
+   * (d) Lying at rest on the floor of a train accelerating at a_T = 1.0\text{ m s}^{-2}:
+     The stone remains in contact with the floor, sharing the train's forward acceleration. Vertical forces cancel (N - mg = 0). Static friction supplies the horizontal accelerating force:
+     
+ * Step 4: Explicit Final Verification: For detached falling stones (a, b, c), F_{\text{net}} = \mathbf{1.0\text{ N downward}}; for the stone on the accelerating floor (d), F_{\text{net}} = \mathbf{0.1\text{ N forward}}.
+Conceptual Diagnostic: Mechanical Causes of Terrestrial Locomotion and Forward Inertia [Textbook Exercise 4.23 (a, b)]
+ * (a) Why a horse cannot pull a cart in empty space:
+   To accelerate forward, a horse pushes backward and downward against the ground. By Newton's third law, the ground pushes forward and upward on the horse. The forward horizontal component of this reaction force propels the horse and cart. In empty space, there is no surface to push against, so no external reaction force can be generated, making locomotion impossible.
+ * (b) Why passengers are pitched forward when a bus stops suddenly:
+   Before braking, the passenger's entire body moves forward at the bus's cruising speed. When brakes are applied, friction between the floor and the passenger's feet brings their lower body to rest along with the chassis. Because the body is flexible, the upper torso continues moving forward at the previous velocity due to inertia of motion, pitching the passenger forward.
+2. Linear Momentum, Newton's Second Law, and Impulse Mechanics
+                           NEWTON'S SECOND LAW
+                                    |
+        +---------------------------+---------------------------+
+        |                                                       |
+   MOMENTUM CONSTRUCT                                    DYNAMIC EQUATION
+   p = m·v (Vector quantity)[span_72](start_span)[span_72](end_span)                   F_ext = dp/dt = d(mv)/dt[span_73](start_span)[span_73](end_span)
+   Measures quantity of motion[span_74](start_span)[span_74](end_span)                 For constant mass: F_ext = m·a[span_75](start_span)[span_75](end_span)
+
+Linear Momentum and Newton's Second Law
+Linear momentum \vec{p} is defined as the product of inertial mass and instantaneous velocity:
+
+> Newton's Second Law: The rate of change of linear momentum of a body is directly proportional to the applied net external force and occurs in the direction along which the force acts.
+> 
+
+Setting the proportionality constant k = 1 under the SI definition of the newton:
+
+For systems of constant mass m:
+
+ * Component Resolution: Newton's second law is a vector relationship equivalent to three independent scalar equations along Cartesian axes:
+   
+   
+   A force acting along the x-axis changes only v_x; perpendicular velocity components (v_y, v_z) remain unchanged.
+Mechanical Impulse and the Impulse-Momentum Theorem
+An impulsive force is a large force that acts over a very short time interval \Delta t, producing a finite change in momentum (such as a bat striking a ball). Impulse \vec{J} is the time integral of the force over the contact duration:
+
+    FORCE-TIME PROFILE                              CONSTANT AVERAGE FORCE EQUIVALENT
+        Force F                                          Force F
+          ^        .---.                                   ^
+          |       /     \                                  |   +----------------+
+          |      /       \                                 |   |                | F_avg
+          |     /  Area = \                                |   |  Area = J      |
+          |    /  Impulse  \                               |   |                |
+          0---+-------------+---> Time t                   0---+----------------+---> Time t
+              t1            t2                                 t1               t2
+                                                                   Δt = t2 - t1[span_90](start_span)[span_90](end_span)
+
+Derivation: Impulse-Momentum Theorem [PYQ 2025 Half-Yearly]
+From Newton's second law:
+
+
+Integrating both sides from t_1 (momentum \vec{p}_1) to t_2 (momentum \vec{p}_2):
+
+ * Why Cricketers Pull Their Hands Back While Catching:
+   Stopping a cricket ball requires a fixed change in momentum (\Delta \vec{p} = -\vec{p}_i). The average impact force is:
+   
+   
+   By pulling their hands backward along the ball's path, a cricketer increases the contact time \Delta t. This reduces the average force \vec{F}_{\text{avg}} on their hands, preventing injury.
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Force on Identical Accelerated Bodies [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: A constant force F acts on mass m_1 = 4.0\text{ kg}, producing acceleration a_1 = 2.0\text{ m s}^{-2}. The same force is then applied to mass m_2 = 5.0\text{ kg}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The acceleration of the 5\text{ kg} mass is 1.6\text{ m s}^{-2}.
+Dynamic Evaluation: Force from Rapid Velocity Change [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: A mass m = 5.0\text{ kg} accelerates from rest (u = 0) to v = 60.0\text{ m s}^{-1} in \Delta t = 1.0\text{ s}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The applied force is 300\text{ N}.
+Dynamic Evaluation: Determining Inertial Mass from Force and Acceleration [PYQ 2026 Final]
+ * Step 1: System Isolation: A force F = 10.0\text{ N} produces an acceleration a = 1.0\text{ m s}^{-2}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The mass of the body is 10\text{ kg}.
+Dynamic Evaluation: Retardation and Stopping Time Under Constant Force [Textbook Exercise 4.5]
+ * Step 1: System Isolation: A body of mass m = 20.0\text{ kg} moves with initial velocity v_0 = 15.0\text{ m s}^{-1} when an opposing retarding force F = 50.0\text{ N} is applied.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Setting final speed to zero (v = 0):
+   
+ * Step 4: Explicit Final Verification: The body comes to a stop in 6.0\text{ s}.
+Dynamic Evaluation: Constant Force from Extended Acceleration [Textbook Exercise 4.6]
+ * Step 1: System Isolation: A body of mass m = 3.0\text{ kg} changes speed from u = 2.0\text{ m s}^{-1} to v = 3.5\text{ m s}^{-1} over \Delta t = 25.0\text{ s} without changing direction.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The force has a magnitude of 0.18\text{ N} and acts in the direction of motion.
+Dynamic Evaluation: Resultant Acceleration Under Orthogonal Forces [Textbook Exercise 4.7]
+ * Step 1: System Isolation & Diagram: A body of mass m = 5.0\text{ kg} is acted on simultaneously by perpendicular forces F_x = 8.0\text{ N} and F_y = 6.0\text{ N}.
+                 y
+                 ^
+                 |      . F_net = 10 N
+             6 N |    .'|
+                 |  .'  |
+                 |.' θ  |
+                 0------+-----> x
+                       8 N
+
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The acceleration is 2.0\text{ m s}^{-2} directed at 37^\circ to the 8\text{ N} force.
+Dynamic Evaluation: Emergency Braking Force on a Loaded Three-Wheeler [Textbook Exercise 4.8]
+ * Step 1: System Isolation: A three-wheeler of mass m_v = 400\text{ kg} carrying a driver m_d = 65\text{ kg} (total mass M = 465\text{ kg}) travels at v_0 = 36.0\text{ km h}^{-1} and stops in t = 4.0\text{ s}.
+ * Step 2: Unit Conversion and Kinematics:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The average retarding force is 1.16 \times 10^3\text{ N}.
+Dynamic Evaluation: Initial Vertical Blast Thrust of a Launch Vehicle [Textbook Exercise 4.9]
+ * Step 1: System Isolation & Diagram: A rocket of mass M = 20\,000\text{ kg} accelerates vertically upward at a = 5.0\text{ m s}^{-2} (g = 10.0\text{ m s}^{-2}).
+                     ^ Thrust F_thrust
+                     |
+                 [ Rocket ]
+                     |
+                     v Gravity Mg
+
+ * Step 2: Component Equation:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The initial thrust is 3.0 \times 10^5\text{ N}.
+Dynamic Evaluation: Multi-Stage Kinematics Under a Southward Force [Textbook Exercise 4.10]
+ * Step 1: System Isolation: A body of mass m = 0.40\text{ kg} starts at x = 0 at t = 0 moving North (+x) at u = +10.0\text{ m s}^{-1}. A constant southward force F = -8.0\text{ N} acts from t = 0 to t = 30.0\text{ s}.
+ * Step 2: Acceleration Formulation:
+   For 0 \le t \le 30\text{ s}:
+   
+ * Step 3: Analytical Execution Across Instants:
+   * Position at t = -5.0\text{ s}: For t < 0, the force is zero (a = 0):
+     
+   * Position at t = 25.0\text{ s} (0 \le t \le 30\text{ s}):
+     
+   * Position at t = 100.0\text{ s}:
+     Find position and velocity when the force ends at t = 30\text{ s}:
+     
+     
+     From t = 30\text{ s} to 100\text{ s} (\Delta t = 70\text{ s}), the body coasts at constant velocity:
+     
+ * Step 4: Explicit Final Verification: Positions are -50\text{ m} at t = -5\text{ s}, -6\text{ km} at t = 25\text{ s}, and -50\text{ km} at t = 100\text{ s}.
+Dynamic Evaluation: Two-Dimensional Kinematics of a Stone Dropped from an Accelerating Truck [Textbook Exercise 4.11]
+ * Step 1: System Isolation: A truck starts from rest (u = 0) and accelerates at a_T = 2.0\text{ m s}^{-2}. At t = 10.0\text{ s}, a stone is dropped from a platform h = 6.0\text{ m} above the ground. Analyze the stone at t = 11.0\text{ s}.
+ * Step 2: Velocity Components:
+   At t = 10.0\text{ s}, the truck's speed is:
+   
+   
+   Due to inertia, the stone inherits this horizontal velocity: v_{0x} = 20.0\text{ m s}^{-1}.
+ * Step 3: Analytical Execution at t = 11.0\text{ s} (Time of free fall t_f = 1.0\text{ s}):
+   * Horizontal velocity remains constant (neglecting air resistance):
+     
+   * Vertical velocity acquired under gravity (g = 9.8\text{ m s}^{-2}):
+     
+   * Resultant speed:
+     
+   * Acceleration at t = 11.0\text{ s}: Contact with the truck is severed, so the only acceleration is gravity:
+     
+ * Step 4: Explicit Final Verification: At t = 11\text{ s}, the stone moves at 22.3\text{ m s}^{-1} at 26.1^\circ below the horizontal, with an acceleration of 9.8\text{ m s}^{-2} downward.
+Dynamic Evaluation: Impulse and Force from Piecewise Position-Time Graphs [Textbook Exercise 4.14]
+ * Step 1: System Isolation & Diagram: A particle of mass m = 4.0\text{ kg} follows the position-time curve shown below:
+     x (m)
+       3 |                 A +-----------------------------
+         |                  /
+         |                 /
+         |                /
+       0 +---------------+---------------------------------> t (s)
+         0               4[span_114](start_span)[span_114](end_span)
+
+ * Step 2: Velocity Formulation Across Intervals:
+   * For t < 0: x(t) = 0 \implies v_1 = 0
+   * For 0 < t < 4\text{ s}: x(t) rises linearly from 0 to 3\text{ m}:
+     
+   * For t > 4\text{ s}: x(t) = 3.0\text{ m} \implies v_3 = 0
+ * Step 3: Analytical Execution:
+   * Forces:
+     In each segment, velocity is constant, so acceleration is zero:
+     
+   * Impulse at t = 0:
+     
+   * Impulse at t = 4\text{ s}:
+     
+ * Step 4: Explicit Final Verification: The force is zero in all three intervals; impulse is +3.0\text{ N s} at t = 0 and -3.0\text{ N s} at t = 4\text{ s}.
+Dynamic Evaluation: Rebound Impulse in Head-On Billiard Collisions [Textbook Exercise 4.18]
+ * Step 1: System Isolation: Two billiard balls of mass m = 0.05\text{ kg} move toward each other at u = 6.0\text{ m s}^{-1} along the x-axis, collide, and rebound at the same speed (v = 6.0\text{ m s}^{-1}).
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * For Ball 1 (initially moving along +x):
+     
+   * For Ball 2 (initially moving along -x):
+     
+ * Step 4: Explicit Final Verification: The impulse imparted to each ball by the other has a magnitude of 0.60\text{ N s} (directed opposite to each ball's incoming motion).
+Dynamic Evaluation: Vector Impulse in 2D Angular Deflection of a Cricket Ball [Textbook Exercise 4.20]
+ * Step 1: System Isolation & Diagram: A batsman deflects a ball of mass m = 0.15\text{ kg} by an angle of \theta = 45^\circ without changing its speed v = 54.0\text{ km h}^{-1}.
+                     Initial Velocity v₁              Final Velocity v₂
+                     -------------------->                     ^
+                              \                               /
+                               \                             /
+                                \                           /
+                                 \                         /  θ = 45°
+                                  \                       /
+                                   *--------------------->
+                                      Δv = v₂ - v₁ (Vector Subtraction)[span_124](start_span)[span_124](end_span)
+
+ * Step 2: Unit Conversion and Vector Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The impulse imparted to the ball is 1.72\text{ N s} directed along the angle bisector away from the incoming path.
+3. Newton's Third Law, System Boundary Definitions, and Linear Momentum Conservation
+                        INTERACTION MECHANICS
+                                  |
+        +-------------------------+-------------------------+
+        |                                                   |
+   NEWTON'S THIRD LAW                             CONSERVATION OF MOMENTUM
+   Forces occur in matched pairs:                 In an isolated system (F_ext = 0),
+   F_AB = -F_BA (Act on DIFFERENT bodies)[span_126](start_span)[span_126](end_span)       total momentum is strictly conserved:
+                                                  Σp_initial = Σp_final[span_127](start_span)[span_127](end_span)
+
+Clarifying Misconceptions About Action and Reaction
+> Newton's Third Law: To every action, there is always an equal and opposite reaction.
+> 
+ * "Action" and "Reaction" are Forces: These terms refer strictly to simultaneous mechanical forces.
+ * Simultaneity: Action and reaction occur at the same instant. There is no cause-and-effect time delay; either force can be called the action, and the other the reaction.
+ * Forces Act on Different Bodies: If body A exerts a force \vec{F}_{BA} on body B, then body B simultaneously exerts a force \vec{F}_{AB} = -\vec{F}_{BA} on body A:
+   
+   
+   Because action and reaction act on separate bodies, they never balance or cancel each other to produce equilibrium on a single body. They cancel only when both bodies are grouped together into a single combined system.
+Derivation: Conservation of Linear Momentum from Newton's Laws [PYQ 2020 Final & PYQ 2025 Half-Yearly]
+Consider an isolated system composed of two interacting bodies A and B, free from any net external force (\vec{F}_{\text{ext}} = \vec{0}). Let the bodies interact over a time interval \Delta t:
+ * By Newton's second law, the force \vec{F}_{AB} exerted on A by B produces a change in momentum in A:
+   
+ * Similarly, the force \vec{F}_{BA} exerted on B by A produces a change in momentum in B:
+   
+ * Applying Newton's third law (\vec{F}_{AB} = -\vec{F}_{BA}):
+   
+   
+   The total linear momentum of an isolated system of interacting particles is strictly conserved.
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Binary Radioactive Disintegration Kinematics [Textbook Exercise 4.17]
+ * Step 1: System Isolation: A parent nucleus of mass M at rest (\vec{p}_i = \vec{0}) disintegrates into two daughter fragments of masses m_1 and m_2 with velocities \vec{v}_1 and \vec{v}_2.
+ * Step 2: Component Equations: Because the disintegration is driven entirely by internal nuclear forces, the system is isolated (\vec{F}_{\text{ext}} = \vec{0}):
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The negative sign confirms that \vec{v}_1 and \vec{v}_2 are antiparallel: the two product nuclei must move in opposite directions along a common straight line.
+Dynamic Evaluation: Recoil Dynamics of a Heavy Artillery Firearm [Textbook Exercise 4.19]
+ * Step 1: System Isolation: A gun of mass M = 100.0\text{ kg} fires a shell of mass m = 0.020\text{ kg} with a muzzle velocity v = 80.0\text{ m s}^{-1}.
+ * Step 2: Component Equations: The gun-shell system is initially at rest (\vec{p}_i = \vec{0}):
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The recoil velocity of the gun is -0.016\text{ m s}^{-1} (or 1.6\text{ cm s}^{-1} backward).
+Dynamic Evaluation: Concurrent Equilibrium of a Suspended Midpoint Load [Textbook Example 4.6]
+ * Step 1: System Isolation & Diagram: A mass M = 6.0\text{ kg} is suspended by a rope of length L = 2.0\text{ m} from the ceiling. A horizontal force F = 50.0\text{ N} is applied at the midpoint P (g = 10.0\text{ m s}^{-2}).
+              Ceiling
+              +---------------+
+              | \ θ
+              |  \  Upper Segment (Tension T₁)
+              |   \
+              |    * P (Midpoint)
+              |    | \
+              |    |  \-------> F = 50 N
+              |    |
+              |    | Lower Segment (Tension T₂)
+              |    v
+              |   [W = 60 N][span_153](start_span)[span_153](end_span)
+
+ * Step 2: Component Equilibrium Equations:
+   * For the suspended mass:
+     
+   * For the midpoint knot P under concurrent forces \vec{T}_1, \vec{T}_2, \vec{F}:
+     
+ * Step 3: Analytical Execution:
+   Divide the horizontal equation by the vertical equation:
+   
+ * Step 4: Explicit Final Verification: The upper rope makes an angle of approximately 40^\circ with the vertical.
+4. Contact Forces, Friction Mechanics, and Incline Dynamics
+                           CONTACT FORCES
+                                  |
+        +-------------------------+-------------------------+
+        |                                                   |
+   NORMAL REACTION (N)                               FRICTIONAL FORCE (f)
+   Perpendicular to contact plane;                   Parallel to contact plane;
+   electromagnetic in origin;                        opposes impending or actual
+   self-adjusting up to structural yield[span_162](start_span)[span_162](end_span).  relative sliding motion[span_163](start_span)[span_163](end_span).
+
+Friction: Static, Limiting, Kinetic, and Rolling
+Friction is the component of contact force parallel to the interface that opposes impending or actual relative motion between surfaces.
+     Frictional Force (f)
+               ^
+               |                Impending Motion
+               |               /
+     (fs)_max -+              * Peak (Limiting Static Friction)
+               |             / \
+               |            /   \___________________ Kinetic Friction (fk = μk · N)
+               |           /
+               |          /
+               |         /  Static Region (f = F_applied)
+               0--------+-----------------------------------> Applied Force (F)[span_165](start_span)[span_165](end_span)
+
+ * Static Friction (f_s): Opposes impending motion and matches the applied shear force up to a limiting maximum:
+   
+   
+   where \mu_s is the coefficient of static friction, which depends on the material pair and interface conditions, independent of the apparent contact area.
+ * Kinetic (Sliding) Friction (f_k): Opposes actual relative sliding motion once the limiting static friction is exceeded:
+   
+   
+   where \mu_k is the coefficient of kinetic friction. Experiments show \mu_k < \mu_s.
+ * Rolling Friction (f_r): Arises during rolling motion because localized elastic deformation forms a small contact patch. Rolling friction is orders of magnitude smaller than sliding friction (f_r \ll f_k \ll f_s), which is why ball bearings and wheels are widely used.
+Derivation: Angle of Friction (\lambda) and Angle of Repose (\theta_R) [PYQ 2026 Final & PYQ 2023 Final]
+ * Angle of Friction (\lambda): The angle between the normal force \vec{N} and the total contact reaction force \vec{R}_{\text{net}} = \vec{N} + \vec{f}_s when static friction reaches its limiting value (f_s)_{\text{max}}:
+   
+                BODY ON INCLINED PLANE AT ANGLE OF REPOSE (θ)
+                                    
+                                     ^ Normal Reaction (N)
+                                    /
+                       fs          /
+                        ^     [Block]
+                         \     / | \
+                          \   /  |  \
+                           \ v   |   v
+                   mg·sin θ      |    mg·cos θ
+                                 v
+                            Weight (mg)
+               ------------------------------------
+               Base Inclination Angle: θ[span_175](start_span)[span_175](end_span)
+
+ * Angle of Repose (\theta_R): The minimum inclination angle of a rough plane at which an object resting on it just begins to slide down under its own weight.
+   Resolving gravity into components perpendicular and parallel to the incline:
+   
+   
+   At the threshold of slipping, f_s = (f_s)_{\text{max}} = \mu_s N:
+   
+   
+   The angle of repose is equal to the angle of friction.
+Derivation: Acceleration of a Body Sliding Down a Rough Incline [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: Consider a body of mass m sliding down an inclined plane angled at \theta > \theta_R with a kinetic friction coefficient \mu_k.
+ * Step 2: Component Equations:
+   * Perpendicular to incline:
+     
+   * Kinetic friction opposing motion:
+     
+   * Parallel to incline:
+     
+ * Step 3: Analytical Execution:
+   
+   
+   Dividing across by mass m:
+   
+ * Step 4: Explicit Final Verification: The acceleration down the rough incline is a = g(\sin\theta - \mu_k\cos\theta).
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Self-Adjusting Static Friction on a Flat Surface [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: A block of mass m = 2.0\text{ kg} rests on a horizontal floor with \mu_s = 0.4 (g = 9.8\text{ m s}^{-2}). A horizontal force F = 2.8\text{ N} is applied.
+ * Step 2: Limiting Friction Threshold:
+   
+ * Step 3: Analytical Execution:
+   The applied force is smaller than the limiting friction (F = 2.8\text{ N} < 7.84\text{ N}). The block does not move; static friction self-adjusts to balance the applied force:
+   
+ * Step 4: Explicit Final Verification: The frictional force is 2.8\text{ N}, acting opposite to the applied force.
+Dynamic Evaluation: Coefficient of Friction from Angle of Friction [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: The angle of friction is given as \lambda = 30^\circ.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The coefficient of friction is \frac{1}{\sqrt{3}} \approx 0.58.
+Dynamic Evaluation: Coefficient of Static Friction from Incline Slipping Threshold [PYQ 2023 Final & Textbook Example 4.8]
+ * Step 1: System Isolation: A mass m = 4.0\text{ kg} resting on an inclined plane begins to slide when the angle reaches \theta = 15.0^\circ.
+ * Step 2: Governing Formula:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The static friction coefficient is 0.27 (independent of the 4\text{ kg} mass).
+Dynamic Evaluation: Maximum Acceleration of a Box on an Accelerating Train Floor [Textbook Example 4.7]
+ * Step 1: System Isolation: A box sits on the floor of a train accelerating at a with \mu_s = 0.15 (g = 10.0\text{ m s}^{-2}).
+ * Step 2: Component Equations: Static friction provides the forward acceleration for the box:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The maximum acceleration without the box slipping is 1.5\text{ m s}^{-2}.
+Conceptual Diagnostic: Why Pulling a Lawn Mower is Easier than Pushing It [Textbook Exercise 4.23 (c)]
+ * Step 1: System Isolation & Diagram: Let a force F be applied at an angle \theta to the horizontal to move a mower of mass m across a rough lawn.
+           PULLING A LAWN MOWER                         PUSHING A LAWN MOWER
+                  F                                           
+                   ^                                          \
+                    \  F·sin θ (Upward)                        \
+             F·cos θ \ |                                        \ F
+          <-----------*                                          v
+                      |                                       [ Mower ] ---> F·cos θ
+                      v mg                                       | \
+              N = mg - F·sin θ                                   |  v F·sin θ (Downward)
+           Friction fk is REDUCED                                v mg
+                                                          N = mg + F·sin θ
+                                                       Friction fk is INCREASED[span_194](start_span)[span_194](end_span)
+
+ * Step 2: Normal Force and Friction Equations:
+   * When Pulling:
+     
+   * When Pushing:
+     
+ * Step 3: Analytical Comparison:
+   Because N_1 < N_2, the kinetic friction encountered while pulling is strictly less than while pushing (f_{k,1} < f_{k,2}).
+ * Step 4: Explicit Final Verification: Pulling reduces the normal force and hence the frictional resistance, making a lawn mower easier to pull than to push.
+5. Free-Body Diagrams, Coupled Systems, and Non-Inertial Frames
+                        PROBLEM-SOLVING ALGORITHM
+                                    |
+     1. Isolate the target body from its mechanical environment[span_197](start_span)[span_197](end_span).
+     2. Identify all external forces acting on it (mg, normal N, tensions T, friction f)[span_198](start_span)[span_198](end_span).
+     3. Establish Cartesian axes (align one axis with the direction of acceleration)[span_199](start_span)[span_199](end_span).
+     4. Resolve forces along axes: ΣFx = m·ax, ΣFy = m·ay[span_200](start_span)[span_200](end_span).
+
+Apparent Weight in Accelerated Elevator Frames
+Consider a passenger of mass m standing on a weighing scale fixed to the floor of an elevator (true weight W = mg):
+      (a) Accelerating Up (+a)     (b) Accelerating Down (-a)      (c) Free Fall (a = g)
+                 ^ N                          ^ N                            ^ N = 0
+                 |                            |                              |
+              [Person]                     [Person]                       [Person]
+                 |                            |                              |
+                 v mg                         v mg                           v mg
+             N = m(g + a)                 N = m(g - a)                     N = m(g - g) = 0
+          Apparent Weight Increases    Apparent Weight Decreases        Weightlessness[span_202](start_span)[span_202](end_span)
+
+The scale measures the normal reaction force N:
+ * Uniform Velocity (\vec{a} = \vec{0}):
+   
+ * Uniform Upward Acceleration (+a):
+   
+ * Uniform Downward Acceleration (-a with a < g):
+   
+ * Free Fall (Cable Snaps, a = g):
+   
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Apparent Weight across Elevator Kinematic States [Textbook Exercise 4.13]
+ * Step 1: System Isolation: A person of mass m = 70.0\text{ kg} stands on a spring balance inside an elevator (g = 10.0\text{ m s}^{-2}).
+ * Step 2: Governing Formulation: The scale reading indicates apparent weight R = \frac{N}{g} in kilograms.
+ * Step 3: Analytical Execution:
+   * (a) Moving upward with uniform speed v = 10\text{ m s}^{-1} (a = 0):
+     
+   * (b) Moving downward with uniform acceleration a = 5.0\text{ m s}^{-2}:
+     
+   * (c) Moving upward with uniform acceleration a = 5.0\text{ m s}^{-2}:
+     
+   * (d) Elevator cable snaps, falling freely (a = g):
+     
+ * Step 4: Explicit Final Verification: Apparent weights are 700\text{ N}, 350\text{ N}, 1050\text{ N}, and 0\text{ N} respectively.
+Dynamic Evaluation: Tension in an Accelerating Elevator Hoist Cable [PYQ 2026 Final]
+ * Step 1: System Isolation: An elevator of total mass M = 1000.0\text{ kg} accelerates upward at a = 1.0\text{ m s}^{-2} (g = 9.8\text{ m s}^{-2}).
+ * Step 2: Component Equation:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The tension in the hoist cable is 1.08 \times 10^4\text{ N}.
+Derivation: Atwood Machine Dynamics for Suspended Pulleys [PYQ 2025 Half-Yearly & Textbook Exercise 4.16]
+ * Step 1: System Isolation & Diagram: Two masses m_1 and m_2 (m_1 > m_2) are connected by a light, inextensible string passing over a frictionless, massless pulley.
+                            ( Pulley )
+                             /      \
+                            /        \
+                    Tension T        Tension T
+                          /            \
+                         v              v
+                     [ m₂ ]            [ m₁ ]
+                       |                  |
+                       v m₂g              v m₁g
+                  Accelerates UP      Accelerates DOWN (m₁ > m₂)[span_216](start_span)[span_216](end_span)
+
+ * Step 2: Component Equations:
+   * For descending mass m_1:
+     
+   * For ascending mass m_2:
+     
+ * Step 3: Analytical Execution:
+   Add equations (1) and (2) to eliminate T:
+   
+   
+   Substitute a into equation (2) to find T:
+   
+   * Numerical Case 1 (m_1 = 10\text{ kg}, m_2 = 5\text{ kg}, g = 9.8\text{ m s}^{-2}) [PYQ 2025 Half-Yearly]:
+     
+   * Numerical Case 2 (m_1 = 12\text{ kg}, m_2 = 8\text{ kg}, g = 10.0\text{ m s}^{-2}) [Textbook Exercise 4.16]:
+     
+ * Step 4: Explicit Final Verification: For the 12\text{ kg} / 8\text{ kg} system, acceleration is 2.0\text{ m s}^{-2} and string tension is 96\text{ N}.
+Dynamic Evaluation: Horizontal Table Trolley System with Friction [Textbook Example 4.9]
+ * Step 1: System Isolation & Diagram: A trolley of mass M = 20.0\text{ kg} on a horizontal table is attached via a string over a frictionless pulley to a hanging block of mass m = 3.0\text{ kg}. The kinetic friction coefficient is \mu_k = 0.04 (g = 10.0\text{ m s}^{-2}).
+             [ Trolley M = 20 kg ] ---- Tension T ---- ( Pulley )
+             |                   |                         |
+            fk                   |                         | Tension T
+             +-------------------+                         |
+                                                           v
+                                                      [ Hanging m = 3 kg ]
+                                                           |
+                                                           v mg = 30 N[span_222](start_span)[span_222](end_span)
+
+ * Step 2: Component Equations:
+   * For the hanging block:
+     
+   * For the trolley:
+     
+ * Step 3: Analytical Execution:
+   Add equations (1) and (2):
+   
+   
+   Substitute a into (2):
+   
+ * Step 4: Explicit Final Verification: The acceleration is 0.96\text{ m s}^{-2} and the string tension is 27.1\text{ N}.
+Dynamic Evaluation: Tension Variations in Connected Blocks Under Symmetrical Pulling [Textbook Exercise 4.15]
+ * Step 1: System Isolation: Blocks A (m_1 = 10.0\text{ kg}) and B (m_2 = 20.0\text{ kg}) rest on a smooth surface connected by a string. A force F = 600.0\text{ N} is applied.
+ * Step 2: Total System Acceleration:
+   
+ * Step 3: Analytical Execution:
+   * Case (i): Force applied to Block A (10\text{ kg}):
+     String tension accelerates the trailing block B (20\text{ kg}):
+     
+   * Case (ii): Force applied to Block B (20\text{ kg}):
+     String tension accelerates the trailing block A (10\text{ kg}):
+     
+ * Step 4: Explicit Final Verification: Tension is 400\text{ N} when pulled from the 10\text{ kg} block, and 200\text{ N} when pulled from the 20\text{ kg} block.
+Dynamic Evaluation: Action on Yielding Surfaces and Action-Reaction Decomposition [Textbook Example 4.12]
+ * Step 1: System Isolation & Diagram: A block of mass m = 2.0\text{ kg} rests on a floor. A cylinder of mass M = 25.0\text{ kg} is placed on top of it. The floor yields, causing the combined assembly to accelerate downward at a = 0.10\text{ m s}^{-2} (g = 10.0\text{ m s}^{-2}).
+                 Before Floor Yields               After Floor Yields (a = 0.1 m/s²)
+                        ^ N1                                      ^ N2
+                        |                                         |
+                   [ 2 kg Block ]                        [ 25 kg Cylinder ]
+                        |                                [  2 kg Block   ]
+                        v mg = 20 N                               |
+                                                                  v (M + m)g = 270 N[span_241](start_span)[span_241](end_span)
+
+ * Step 2: Component Equations:
+   * (a) Before yielding (Static equilibrium, a = 0):
+     
+     
+     By Newton's third law, the action of the block on the floor is equal and opposite: 20\text{ N} vertically downward.
+   * (b) After yielding (Accelerating downward at a = 0.10\text{ m s}^{-2}):
+     Total system mass M_{\text{tot}} = 2.0 + 25.0 = 27.0\text{ kg}.
+     
+ * Step 3: Analytical Execution:
+   
+   
+   By Newton's third law, the downward action on the floor is 267.3\text{ N}.
+ * Step 4: Explicit Final Verification:
+   * Action-Reaction Pairs Identified:
+     * Earth's gravity on system (\mathbf{270\text{ N}} downward) and system's gravity on Earth (\mathbf{270\text{ N}} upward).
+     * Contact force of floor on block (N_2 = \mathbf{267.3\text{ N}} upward) and action of block on floor (\mathbf{267.3\text{ N}} downward).
+     * Normal force between block and cylinder:
+       For the cylinder: Mg - N_{\text{cyl}} = Ma \implies N_{\text{cyl}} = 25.0(9.90) = \mathbf{247.5\text{ N}} upward on cylinder, and \mathbf{247.5\text{ N}} downward on block.
+6. Circular Dynamics, Road Banking, and Curvilinear Separations
+                          CENTRIPETAL FORCE DYNAMICS
+                                      |
+         +----------------------------+----------------------------+
+         |                                                         |
+   LEVEL CIRCULAR TRACK                                  BANKED CIRCULAR TRACK
+   Friction ALONE provides inward pull:                  Normal force component SUPPORTS friction:
+   fc = mv²/R <= μs · mg                                 Optimum speed: v₀ = √(R·g·tan θ)[span_251](start_span)[span_251](end_span)
+   v_max = √(μs · R · g)[span_252](start_span)[span_252](end_span)                       v_max = √[R·g(μs + tan θ)/(1 - μs·tan θ)][span_253](start_span)[span_253](end_span)
+
+Centripetal force is not an independent type of force; it is the label given to whatever net inward radial force produces the centripetal acceleration (a_c = \frac{v^2}{R}) required for circular motion:
+
+Derivation: Motion of a Car on a Level Road [PYQ 2023 Final]
+For a vehicle of mass m navigating a flat, unbanked curve of radius R at speed v:
+ * Vertical equilibrium:
+   
+ * The inward centripetal force is supplied entirely by lateral static friction between the road and tires:
+   
+ * Because static friction cannot exceed its limiting value (f_s \le \mu_s N):
+   
+Derivation: Dynamics of a Car on a Banked Road [Summary Point 8]
+To reduce lateral tire wear and prevent skidding at higher speeds, turns are banked at an angle \theta to the horizontal:
+                     BANKED ROAD FREE-BODY DIAGRAM
+                                   
+                                      ^ Normal Force (N)
+                                     /|
+                                    / | N·cos θ
+                                   /  |
+                                  *---+-------> N·sin θ
+                         f·cos θ /|   |
+                                v |   v mg
+                           f·sin θ v
+                       Road Inclination: θ[span_264](start_span)[span_264](end_span)
+
+Resolving forces along vertical and horizontal axes:
+ * Vertical Force Balance (Zero Vertical Acceleration):
+   
+ * Horizontal Force Balance (Supplying Centripetal Acceleration):
+   
+ * Evaluating Maximum Safe Speed (v_{\text{max}}):
+   Substitute the limiting static friction f_s = \mu_s N into (1) and (2):
+   From (1):
+   
+   
+   Substitute N into (2):
+   
+   
+   Divide the numerator and denominator by \cos\theta:
+   
+Optimum Speed (Zero Lateral Friction)
+At the optimum speed v_0, the horizontal component of the normal force alone provides the required centripetal acceleration, requiring no lateral friction (\mu_s = 0):
+
+
+Driving at this design speed eliminates lateral wear on tires.
+Vertical Circular Motion and String Ruptures
+Consider a mass m attached to a string of length R rotating in a vertical circle under gravity:
+                            Apex (Point C)
+                                  *
+                                 / \
+                                v   v mg
+                                T_top
+                                  
+                                ( O )
+                                  
+                                ^ T_bottom
+                                |
+                                *
+                                |
+                                v mg
+                           Lowest (Point A)[span_276](start_span)[span_276](end_span)
+
+ * At the Lowest Point (A): Tension and gravity oppose each other:
+   
+ * At the Highest Point (C): Tension and gravity act together inward:
+   
+   
+   Because speed is greatest at the bottom due to gravity (v_A > v_C), string tension reaches its absolute maximum at the lowest point. If the whirling speed is increased until the string exceeds its breaking strength, the string will break at the bottom of the circle.
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Slipping Threshold for a Cyclist on a Level Road [Textbook Example 4.10]
+ * Step 1: System Isolation: A cyclist speeds at v = 18.0\text{ km h}^{-1} around a flat turn of radius R = 3.0\text{ m} with \mu_s = 0.10 (g = 9.8\text{ m s}^{-2}).
+ * Step 2: No-Slip Condition:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Because v^2 > \mu_s R g (25.0 > 2.94), static friction cannot provide the required centripetal acceleration.
+ * Step 4: Explicit Final Verification: The cyclist will slip and fall while attempting the turn.
+Dynamic Evaluation: Banking Parameters for a Circular Racetrack [Textbook Example 4.11]
+ * Step 1: System Isolation: A track of radius R = 300.0\text{ m} is banked at \theta = 15.0^\circ with \mu_s = 0.20 (g = 9.8\text{ m s}^{-2}).
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * Optimum Speed (v_0):
+     
+   * Maximum Permissible Speed (v_{\text{max}}):
+     
+ * Step 4: Explicit Final Verification: The optimum speed is 28.1\text{ m s}^{-1} (101\text{ km h}^{-1}) and the maximum safe speed is 38.1\text{ m s}^{-1} (137\text{ km h}^{-1}).
+Conceptual Diagnostic: Inward Radial Force in Horizontal Circular Motion [Textbook Exercise 4.4]
+ * Scenario: A particle of mass m tied to a string of length l moves in a circle at speed v on a frictionless horizontal table.
+ * Analysis: The normal reaction balances gravity vertically (N - mg = 0). The only horizontal force acting on the particle is string tension T, directed radially inward toward the peg.
+ * Explicit Final Verification: The net force directed toward the center is simply (i) T. The term \frac{mv^2}{l} is the mass-acceleration product (ma_c), not an independent applied force.
+Dynamic Evaluation: Tension and Tensile Limits in a Horizontally Whirled Stone [Textbook Exercise 4.21]
+ * Step 1: System Isolation: A stone of mass m = 0.25\text{ kg} is whirled on a string of radius R = 1.5\text{ m} at a frequency \nu = 40\text{ rev/min} in a horizontal plane.
+ * Step 2: Angular Conversion and Force Formulation:
+   
+ * Step 3: Analytical Execution:
+   * Initial tension:
+     
+   * Maximum speed for T_{\text{max}} = 200.0\text{ N}:
+     
+ * Step 4: Explicit Final Verification: The string tension is 6.6\text{ N}, and the maximum whirl speed before the string snaps is 34.6\text{ m s}^{-1}.
+Conceptual Diagnostic: Trajectory of a Particle Following String Rupture [Textbook Exercise 4.22]
+ * Analysis: When a string snaps during horizontal circular motion, the inward centripetal force abruptly drops to zero (T = 0). By Newton's first law, the stone continues in motion along its instantaneous direction of travel, which is tangent to the circle.
+ * Explicit Final Verification: The stone (b) flies off tangentially from the instant the string breaks.
+Conceptual Diagnostic: Trajectory of an Oscillating Pendulum Bob After String Severance [Textbook Exercise 4.12]
+ * (a) Cut at an extreme position: At the extreme amplitude, the bob is momentarily at rest (v = 0). With tension removed, gravity accelerates the bob vertically downward. It falls vertically straight down.
+ * (b) Cut at the mean position: At the bottom, the bob's velocity is strictly horizontal (v = 1.0\text{ m s}^{-1}). With tension removed, it undergoes free fall with a horizontal initial velocity, tracing a parabolic projectile path to the floor.
+Conceptual Diagnostic: Centrifugal Separation Dynamics of Milk and Cream [PYQ 2026 Final]
+ * Mechanism: Milk is a suspension of less dense fat droplets (cream, \rho_{\text{cream}} < \rho_{\text{skim}}) in denser watery liquid (skim milk).
+ * When milk is churned in a centrifuge, both components must accelerate inward along circular paths (F_c = m\omega^2 r). The denser skim milk requires a larger centripetal force and is driven outward against the container walls by pressure gradients. The less dense cream droplets require less centripetal force and are displaced inward toward the rotation axis, where they coalesce and separate.
+7. Master Consolidated Reference Tables
+Table A: Master PYQ Index
+| Exam / Year | Question Summary | Core Governing Concept | Final Analytical / Numerical Result |
+|---|---|---|---|
+| 2025 HY | Acceleration of 5 kg mass with same force | F = m_1 a_1 = m_2 a_2 | a_2 = \frac{8.0\text{ N}}{5.0\text{ kg}} = \mathbf{1.6\text{ m s}^{-2}}. |
+| 2025 HY | Force on 5 kg accelerating 0 to 60 m/s in 1 s | F = m \frac{\Delta v}{\Delta t} | F = (5.0)(60.0) = \mathbf{300\text{ N}}. |
+| 2026 Final | Mass for 10 N producing 1 m/s² | m = F / a | m = \frac{10.0}{1.0} = \mathbf{10\text{ kg}}. |
+| 2025 HY | Atwood acceleration for 5 kg and 10 kg | a = \frac{m_1 - m_2}{m_1 + m_2}g | a = \frac{5}{15}(9.8) = \mathbf{3.27\text{ m s}^{-2}}. |
+| 2025 HY | Friction on 2 kg under 2.8 N (\mu_s = 0.4) | f_s \le \mu_s N; self-adjusting | (f_s)_{\text{max}} = 7.84\text{ N} \implies \mathbf{f_s = 2.8\text{ N}}. |
+| 2025 HY | Coefficient of friction for \lambda = 30^\circ | \mu = \tan\lambda | \mu = \tan 30^\circ = \frac{1}{\sqrt{3}} \approx \mathbf{0.577}. |
+| 2026 Final | Define \mu, \lambda and derive relation | Vector resolution of contact force | Derived: \tan\lambda = \frac{f_s}{N} = \frac{\mu_s N}{N} \implies \mathbf{\mu_s = \tan\lambda}. |
+| 2025 HY | Acceleration down rough incline | Dynamic force balance along incline | Derived: \mathbf{a = g(\sin\theta - \mu_k\cos\theta)}. |
+| 2026 Final | Tension in lift cable (1000 kg, a = 1\text{ m/s}^2 up) | T = M(g + a) | T = 1000(9.8 + 1.0) = \mathbf{10\,800\text{ N} = 10.8\text{ kN}}. |
+| 2026 Final | Why cream separates when milk is churned | Centripetal force demand vs. density | Denser skim milk moves outward; lighter cream collects at the axis. |
+| 2026 Final | String breaking point in vertical circle | Vertical tension: T = mg + \frac{mv^2}{R} | Tension peaks at the lowest point, where the string breaks. |
+| 2025 HY | Impulse definition and momentum proof | \vec{J} = \int \vec{F}\, dt = \Delta \vec{p} | Derived from \vec{F} = \frac{d\vec{p}}{dt} \implies \mathbf{\vec{J} = \Delta \vec{p}}. |
+| 2025 HY | State and prove linear momentum conservation | Internal forces cancel in pairs | \vec{F}_{AB} = -\vec{F}_{BA} \implies \Delta \vec{p}_A + \Delta \vec{p}_B = \vec{0}. |
+| 2020 Final | Newton's Third Law & momentum conservation | F_{AB} \Delta t = -F_{BA} \Delta t | Mutual impulse balance ensures \mathbf{\vec{p}_{\text{initial}} = \vec{p}_{\text{final}}}. |
+| 2020 Final | Laws of friction | Empirical contact force properties | f_s \le \mu_s N, f_k = \mu_k N; independent of apparent area. |
+| 2023 Final | Incline slipping threshold proof: \tan\theta = \mu | Limiting equilibrium: mg\sin\theta = \mu_s mg\cos\theta | Derived: \mathbf{\tan\theta_R = \mu_s}. |
+| 2023 Final | Static friction coefficient for 4 kg at 15^\circ | \mu_s = \tan\theta_{\text{repose}} | \mu_s = \tan 15.0^\circ \approx \mathbf{0.27}. |
+| 2023 Final | Maximum safe speed on level road | f_s = \frac{mv^2}{R} \le \mu_s mg | Derived: \mathbf{v_{\text{max}} = \sqrt{\mu_s R g}}. |
+Table B: Textbook Exercises Index
+| Exercise # | Topic / Scenario | Analytical / Numerical Result (with Units) |
+|---|---|---|
+| 4.1 | Net force on drop, cork, kite, car, electron | (a) 0; (b) 0; (c) 0; (d) 0; (e) 0. |
+| 4.2 | Net force on 0.05\text{ kg} pebble in flight | \mathbf{0.49\text{ N vertically downward}} in all cases. |
+| 4.3 | Net force on 0.1\text{ kg} stone dropped from train | (a, b, c) \mathbf{1.0\text{ N downward}}; (d) \mathbf{0.1\text{ N horizontally forward}}. |
+| 4.4 | Inward radial force on particle in horizontal circle | Correct alternative: (i) T. |
+| 4.5 | Stopping time under retarding force (50\text{ N}, 20\text{ kg}, 15\text{ m/s}) | a = -2.5\text{ m s}^{-2} \implies \mathbf{t = 6.0\text{ s}}. |
+| 4.6 | Force on 3\text{ kg} body accelerating over 25\text{ s} | a = 0.06\text{ m s}^{-2} \implies \mathbf{F = 0.18\text{ N}} along motion. |
+| 4.7 | Acceleration under perpendicular forces (8\text{ N} and 6\text{ N}) | a = \mathbf{2.0\text{ m s}^{-2}} at \mathbf{37^\circ} to the 8\text{ N} force. |
+| 4.8 | Average retarding force on stopping three-wheeler | a = -2.5\text{ m s}^{-2} \implies \mathbf{F = 1.16 \times 10^3\text{ N}}. |
+| 4.9 | Initial rocket thrust (M = 20\,000\text{ kg}, a = 5\text{ m/s}^2) | F = M(g + a) = \mathbf{3.0 \times 10^5\text{ N}}. |
+| 4.10 | Positions of 0.4\text{ kg} body under opposing force | x(-5) = \mathbf{-50\text{ m}}; x(25) = \mathbf{-6.0\text{ km}}; x(100) = \mathbf{-50\text{ km}}. |
+| 4.11 | Stone dropped from accelerating truck | v \approx \mathbf{22.3\text{ m s}^{-1}} at 26.1^\circ below horizontal; a = \mathbf{9.8\text{ m s}^{-2}\text{ down}}. |
+| 4.12 | Oscillating pendulum cut at extremes vs. mean | Extreme: straight down; Mean: parabolic path. |
+| 4.13 | Apparent weight of 70\text{ kg} man in moving lift | (a) \mathbf{700\text{ N}}; (b) \mathbf{350\text{ N}}; (c) \mathbf{1050\text{ N}}; (d) \mathbf{0\text{ N}}. |
+| 4.14 | x-t graph analysis (4\text{ kg} mass) | Forces: all \mathbf{0}; Impulse at t=0: \mathbf{+3.0\text{ N s}}; at t=4: \mathbf{-3.0\text{ N s}}. |
+| 4.15 | Tension in connected blocks (10\text{ kg} and 20\text{ kg}) | (i) Force on 10\text{ kg} \implies \mathbf{400\text{ N}}; (ii) Force on 20\text{ kg} \implies \mathbf{200\text{ N}}. |
+| 4.16 | Atwood machine (12\text{ kg} and 8\text{ kg}) | a = \mathbf{2.0\text{ m s}^{-2}}; Tension T = \mathbf{96\text{ N}}. |
+| 4.17 | Radioactive disintegration into two nuclei | Momentum conservation: \vec{v}_1 = -(m_2/m_1)\vec{v}_2 \implies opposite directions. |
+| 4.18 | Rebounding billiard balls (0.05\text{ kg}, 6\text{ m/s}) | Impulse on each ball = \mathbf{0.60\text{ N s}}. |
+| 4.19 | Recoil velocity of 100\text{ kg} gun firing 0.02\text{ kg} shell | V_{\text{recoil}} = \mathbf{-0.016\text{ m s}^{-1} = -1.6\text{ cm s}^{-1}}. |
+| 4.20 | Cricket ball deflected by 45^\circ | J = 2mv\sin(22.5^\circ) \approx \mathbf{1.72\text{ N s}}. |
+| 4.21 | Whirled stone (0.25\text{ kg}, 1.5\text{ m}, 40\text{ rpm}) | T \approx \mathbf{6.6\text{ N}}; Max speed for T = 200\text{ N} is \mathbf{34.6\text{ m s}^{-1}}. |
+| 4.22 | Trajectory when whirling string breaks | Breaks \implies Flies off tangentially along straight line. |
+| 4.23 | Conceptual mechanics explanations | (a) No ground reaction; (b) Inertia of motion; (c) N_{\text{pull}} < N_{\text{push}}; (d) Extends \Delta t. |
