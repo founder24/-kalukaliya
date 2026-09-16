@@ -1,0 +1,844 @@
+Chapter 5: Work, Energy and Power
+1. The Scalar Product (Dot Product) and Work Done by a Constant Force
+The study of dynamics in two and three dimensions requires algebraic operations for multiplying vector quantities. The scalar product (or dot product) maps two spatial vectors into a scalar invariant that quantifies directional alignment and energy transfer.
+                        VECTOR MULTIPLICATION
+                                  |
+        +-------------------------+-------------------------+
+        |                                                   |
+   SCALAR (DOT) PRODUCT                               VECTOR (CROSS) PRODUCT
+   A · B = A·B·cos θ (Scalar result)[span_2](start_span)[span_2](end_span)                 A × B = A·B·sin θ·n̂ (Vector result)
+   Work, Power, Potential flux                         Torque, Angular momentum
+
+Mathematical Formulation and Geometric Projection
+The scalar product of two vectors \vec{A} and \vec{B} subtending an angle \theta \in [0, \pi] is defined as:
+
+
+where A = |\vec{A}| and B = |\vec{B}| denote the absolute non-negative magnitudes of the vectors.
+               B                                            B
+               ^                                            ^
+              /                                            /
+             /                                            /
+            / θ                                          / θ
+           *------------------> A                       *------------------> A
+           <--- B·cos θ ------->                        <--- A·cos θ ------->
+           Projection of B on A                         Projection of A on B[span_6](start_span)[span_6](end_span)
+
+ * Geometric Interpretation: \vec{A} \cdot \vec{B} equals the magnitude of \vec{A} multiplied by the scalar projection of \vec{B} along \vec{A} (B\cos\theta), or equivalently, the magnitude of \vec{B} multiplied by the scalar projection of \vec{A} along \vec{B} (A\cos\theta):
+   
+ * Commutative Property:
+   
+ * Distributive Property over Addition:
+   
+ * Orthogonal Basis Products in Cartesian Coordinates:
+   
+ * Component-Wise Algebraic Evaluation:
+   For \vec{A} = A_x \hat{i} + A_y \hat{j} + A_z \hat{k} and \vec{B} = B_x \hat{i} + B_y \hat{j} + B_z \hat{k}:
+   
+ * Condition for Orthogonality: Two non-zero vectors are mutually perpendicular if and only if their scalar product vanishes:
+   
+Mechanical Definition of Work Done by a Constant Force
+Work is done on a body when an external force produces a displacement along the direction of the applied force. If a constant force \vec{F} acts on a point particle causing a vector displacement \vec{d}, the work done W is defined as the scalar dot product:
+
+                           F
+                           ^
+                          /
+                         /
+                        / θ
+                       *---------------------> Displacement d
+                       <---- F·cos θ -------->
+                        Effective Component[span_20](start_span)[span_20](end_span)
+
+ * Dimensional Formula: [W] = [F][d] = [M L T^{-2}][L] = \mathbf{[M L^2 T^{-2}]}.
+ * SI Unit: Joule (\text{J}) (1\text{ J} = 1\text{ N m} = 1\text{ kg m}^2\text{s}^{-2}).
+ * CGS Unit: Erg (1\text{ J} = 10^7\text{ ergs}).
+Classification of Work by Sign
+                       SIGNS OF MECHANICAL WORK
+                                   |
+         +-------------------------+-------------------------+
+         |                         |                         |
+   POSITIVE WORK              ZERO WORK                 NEGATIVE WORK
+   0° <= θ < 90°              θ = 90° or d = 0          90° < θ <= 180°
+   cos θ > 0                  cos θ = 0                 cos θ < 0
+   Energy supplied to body[span_24](start_span)[span_24](end_span)   No mechanical transfer[span_25](start_span)[span_25](end_span)   Energy removed from body[span_26](start_span)[span_26](end_span)
+
+ * Positive Work (W > 0): Occurs when the component of force aligns with the direction of displacement (0 \le \theta < \frac{\pi}{2}). Examples include lifting a load via an upward tension force or a vehicle accelerating under engine thrust.
+ * Zero Work (W = 0): Occurs when:
+   * Net displacement vanishes (\vec{d} = \vec{0}), even if the applied force is large (e.g., pushing firmly against an immovable concrete wall).
+   * The applied force is zero (\vec{F} = \vec{0}).
+   * The force is strictly perpendicular to the displacement (\theta = \frac{\pi}{2} \implies \cos 90^\circ = 0). Examples include gravitational pull on a planet in a circular orbit, normal reaction on a horizontal sliding block, or a porter carrying a load on a level floor.
+ * Negative Work (W < 0): Occurs when the force opposes the direction of displacement (\frac{\pi}{2} < \theta \le \pi). Examples include kinetic friction opposing sliding motion (\theta = 180^\circ \implies W = -f_k d) or gravity acting on a body ascending vertically.
+Analytical Case Studies & Dynamic Evaluations
+Conceptual Diagnostic: Physical Quantity Represented by \vec{F} \cdot d\vec{s} [PYQ 2026 Final]
+ * Step 1: System Isolation: Identify the physical operational product of the vector force \vec{F} and the infinitesimal displacement vector d\vec{s}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution: Dimensional decomposition:
+   
+   
+   This represents the infinitesimal mechanical energy transferred to or from the system.
+ * Step 4: Explicit Final Verification: The scalar product \vec{F} \cdot d\vec{s} represents infinitesimal work done (dW) by the force during displacement d\vec{s}.
+Conceptual Diagnostic: Work Done on an Immovable Boundary [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: A person pushes against a rigid wall with a continuous force \vec{F}, but the wall does not move.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   Because the wall remains stationary, its displacement is zero: \vec{d} = \vec{0}.
+   
+ * Step 4: Explicit Final Verification: The mechanical work done on the wall is identically zero. Internal chemical energy expended by contracting and relaxing muscle fibers is dissipated internally as thermal energy (heat), explaining physical fatigue without mechanical work.
+Conceptual Diagnostic: Classification of Work Signs in Physical Scenarios [Textbook Exercise 5.1]
+ * Scenario (a): Man lifting a bucket out of a well by an attached rope:
+   The upward tension force \vec{T} applied by the man acts in the same direction as the upward displacement \vec{d} of the bucket (\theta = 0^\circ \implies \cos 0^\circ = +1).
+   
+ * Scenario (b): Gravitational force on the bucket in the above case:
+   The downward gravitational force m\vec{g} opposes the upward displacement \vec{d} (\theta = 180^\circ \implies \cos 180^\circ = -1).
+   
+ * Scenario (c): Friction on a body sliding down an inclined plane:
+   Kinetic friction \vec{f}_k acts parallel to and up the incline, opposing the downward displacement \vec{d} (\theta = 180^\circ \implies \cos 180^\circ = -1).
+   
+ * Scenario (d): Applied force on a body moving with uniform velocity on a rough horizontal surface:
+   To maintain uniform velocity, the applied force \vec{F}_{\text{app}} acts in the forward direction of motion (\theta = 0^\circ \implies \cos 0^\circ = +1).
+   
+ * Scenario (e): Resistive air drag on an oscillating pendulum bob brought to rest:
+   The aerodynamic drag force \vec{F}_{\text{drag}} opposes the instantaneous velocity and displacement vectors (\theta = 180^\circ).
+   
+Dynamic Evaluation: Spatial Work Done by a Three-Dimensional Vector Force [Textbook Exercise 5.11]
+ * Step 1: System Isolation: A particle is constrained to translate purely along the z-axis (x = 0, y = 0) under a constant spatial force:
+   
+ * Step 2: Component Equations:
+   The displacement vector through a distance of 4.0\text{ m} along the positive z-axis is:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The mechanical work done by the force is 12\text{ J}.
+Dynamic Evaluation: Angle and Projection Between Arbitrary Vector Fields [Textbook Example 5.1]
+ * Step 1: System Isolation: Consider a force vector \vec{F} = 3\hat{i} + 4\hat{j} - 5\hat{k} and a displacement vector \vec{d} = 5\hat{i} + 4\hat{j} + 3\hat{k}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Calculate the angle \theta between the vectors:
+   
+   
+   The scalar projection of \vec{F} onto \vec{d} is:
+   
+ * Step 4: Explicit Final Verification: The scalar product is 16\text{ units}, the subtended angle is \cos^{-1}(0.32) \approx 71.3^\circ, and the projection of \vec{F} on \vec{d} is \frac{16}{\sqrt{50}}.
+Conceptual Diagnostic: Work Invariance Across Interacting Bodies [Textbook Example 5.3 & Exercise 5.5 (d)]
+ * Cyclist Skidding to a Stop [Textbook Example 5.3]:
+   A cyclist skids to a halt over d = 10\text{ m} under a backward road friction force of F = 200\text{ N}.
+   * (a) Work done by road on cycle: The stopping force opposes displacement (\theta = 180^\circ):
+     
+   * (b) Work done by cycle on road: By Newton's third law, the cycle exerts an equal and opposite force of 200\text{ N} forward on the road. However, the road surface undergoes no displacement (d_{\text{road}} = 0):
+     
+   * Marking Takeaway: Action and reaction forces are equal and opposite, but the work done by two interacting bodies on each other is not necessarily equal and opposite because their displacements may differ.
+ * Carrying Mass vs. Hoisting via Pulley [Textbook Exercise 5.5 (d)]:
+   * In case (i), a man walks 2\text{ m} horizontally carrying a 15\text{ kg} load in his hands. The supporting force acts vertically upward, perpendicular to the horizontal displacement (\theta = 90^\circ \implies W = 0).
+   * In case (ii), the man walks 2\text{ m} pulling a rope that hoists a 15\text{ kg} mass through a vertical height of 2\text{ m} via a fixed pulley. The tension force acts along the displacement (\theta = 0^\circ):
+     
+   * Work done is significantly greater in case (ii).
+2. Kinetic Energy, Work Done by Variable Forces, and the Work-Energy Theorem
+                       WORK-ENERGY THEOREM (Net Work)
+                                      |
+         +----------------------------+----------------------------+
+         |                                                         |
+   CONSTANT FORCE REGIME                                    VARIABLE FORCE REGIME
+   W = F · d = mas = (m/2)(v² - u²)[span_75](start_span)[span_75](end_span)                      W = ∫ F(x) dx = ∫ m·v·(dv/dx) dx[span_76](start_span)[span_76](end_span)
+   W_net = Kf - Ki = ΔK[span_77](start_span)[span_77](end_span)                                 W_net = ∫ m·v dv = (1/2)mv² - (1/2)mu²[span_78](start_span)[span_78](end_span)
+
+Kinetic Energy and Its Relation to Linear Momentum
+Kinetic energy K is the scalar capacity of a body to perform mechanical work by virtue of its translational motion:
+
+
+Kinetic energy is strictly non-negative (K \ge 0).
+Momentum-Kinetic Energy Formulations
+Because linear momentum has magnitude p = mv, kinetic energy can be expressed as:
+
+Work Done by a Spatially Variable Force
+Real-world physical forces are rarely constant over extended displacements. Consider a one-dimensional force F(x) that varies continuously with position x:
+      F(x) ^
+           |                     .--------.
+           |                   .'          '.
+           |                 .'|  Strip:    |'.
+           |                /  | ΔW = F·Δx  |  \
+           |               /   |   |        |   \
+           0--------------+----+---+--------+----+----> Position x
+                          xi       x        xf[span_84](start_span)[span_84](end_span)
+
+Dividing the interval [x_i, x_f] into N small sub-intervals \Delta x, the total work done is approximately the sum of the rectangular strip areas:
+
+
+Taking the limit as \Delta x \to 0 (N \to \infty), the Riemann sum converges to the definite integral:
+
+
+On an F(x) versus x graph, the total work done equals the area under the force curve bounded between the initial and final positions.
+Derivations & Analytical Case Studies
+Derivation: The Work-Energy Theorem for Constant and Variable Forces [PYQ 2020 Final & PYQ 2026 Final]
+> Work-Energy Theorem: The change in the kinetic energy of a particle is equal to the net work done on it by all acting forces (conservative, non-conservative, internal, and external):
+> 
+> 
+ * Case 1: Constant Acceleration Derivation [PYQ 2020 Final]:
+   Consider a body of constant mass m undergoing rectilinear acceleration a from initial velocity u to final velocity v over distance s:
+   
+   
+   Multiply both sides by \frac{1}{2}m:
+   
+   
+   Substituting Newton's second law (F = ma):
+   
+ * Case 2: Variable Force Calculus Derivation [PYQ 2026 Final]:
+   Consider a particle of mass m acted on by a variable force F(x). The time rate of change of its kinetic energy is:
+   
+   
+   Substituting acceleration a = \frac{dv}{dt} and Newton's second law F = ma:
+   
+   
+   Multiplying both sides by the differential time dt:
+   
+   
+   Integrating from initial state (x_i, K_i) to final state (x_f, K_f):
+   
+Dynamic Evaluation: Percentage Scaling Between Momentum and Kinetic Energy [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: A particle of mass m has its linear momentum increased by 50\%.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   Calculate the new kinetic energy K_2:
+   
+   
+   Compute the percentage increase:
+   
+ * Step 4: Explicit Final Verification: When linear momentum increases by 50\%, kinetic energy increases by 125\%.
+Dynamic Evaluation: Kinetic Energy Change in High-Altitude Free Fall [PYQ 2026 Final]
+ * Step 1: System Isolation: An object of mass m = 1.0\text{ g} = 1.0 \times 10^{-3}\text{ kg} is dropped from rest (u = 0) through a vertical height h = 1.0\text{ km} = 1000\text{ m}. It strikes the ground with a measured speed v = 50.0\text{ m s}^{-1}.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The change in kinetic energy is 1.25\text{ J}.
+   *(Note: Gravitational work is W_g = mgh = 10^{-3} \times 9.8 \times 1000 = 9.8\text{ J}. By the work-energy theorem, air resistance did negative work: W_{\text{drag}} = \Delta K - W_g = 1.25 - 9.8 = \mathbf{-8.55\text{ J}}).
+Dynamic Evaluation: Work and Energy Balance on a Rough Surface [Textbook Exercise 5.2]
+ * Step 1: System Isolation & Diagram: A block of mass m = 2.0\text{ kg} initially at rest (u = 0) is pulled horizontally by an applied force F = 7.0\text{ N} across a table with \mu_k = 0.10 (g = 9.8\text{ m s}^{-2}).
+                     ^ Normal Reaction N
+                     |
+        fk <--- [ Block 2 kg ] ---> Applied Force F = 7 N
+                     |
+                     v Gravity mg[span_116](start_span)[span_116](end_span)
+
+ * Step 2: Dynamic Equations:
+   
+   
+   Displacement over t = 10.0\text{ s}:
+   
+   
+   Final velocity at t = 10.0\text{ s}:
+   
+ * Step 3: Analytical Execution:
+   * (a) Work done by applied force in 10\text{ s}:
+     
+   * (b) Work done by friction in 10\text{ s}:
+     
+   * (c) Work done by net force in 10\text{ s}:
+     
+   * (d) Change in kinetic energy in 10\text{ s}:
+     
+ * Step 4: Explicit Final Verification: W_{\text{net}} = W_F + W_f = 882.0 - 246.96 = 635.04\text{ J} = \Delta K, directly confirming the Work-Energy Theorem.
+Dynamic Evaluation: Piecewise Linear Work Integration from F-x Curves [Textbook Example 5.5]
+ * Step 1: System Isolation & Diagram: A woman pushes a trunk across a rough platform: she applies F = 100.0\text{ N} from x = 0 to 10.0\text{ m}, after which the force decreases linearly to 50.0\text{ N} at x = 20.0\text{ m}. A constant opposing frictional force f = 50.0\text{ N} acts over the entire distance.
+       Force (N)
+         100 |       +-------------------+
+             |       |                   |\
+          50 |       |                   | \
+             |       |                   |  +
+           0 +-------+-------------------+--+--------> Displacement x (m)
+             0                          10  20
+         -50 |------------------------------| Opposing Friction f = -50 N[span_121](start_span)[span_121](end_span)
+
+ * Step 2: Area Integration Formulation:
+   
+ * Step 3: Analytical Execution:
+   * Work done by the woman (W_F):
+     
+   * Work done by friction (W_f):
+     
+   * Net mechanical work:
+     
+ * Step 4: Explicit Final Verification: The woman does 1750\text{ J} of work, friction does -1000\text{ J}, and the net work done on the trunk is 750\text{ J}.
+Dynamic Evaluation: Work from Non-Linear Position-Dependent Velocities [Textbook Exercise 5.20]
+ * Step 1: System Isolation: A particle of mass m = 0.50\text{ kg} travels along a straight track with velocity given by:
+   
+   
+   The particle moves from x = 0 to x = 2.0\text{ m}.
+ * Step 2: Component Equations: Apply the Work-Energy Theorem:
+   
+ * Step 3: Analytical Execution:
+   * At x = 0: v_i = a(0)^{3/2} = 0 \implies K_i = 0.
+   * At x = 2.0\text{ m}:
+     
+     
+     Calculate work done:
+     
+ * Step 4: Explicit Final Verification: The work done by the net force is 50\text{ J}.
+Dynamic Evaluation: Relativistic Particle Speeds in Cosmic Ray Detection [Textbook Exercise 5.12]
+ * Step 1: System Isolation: An electron (m_e = 9.11 \times 10^{-31}\text{ kg}) has kinetic energy K_e = 10.0\text{ keV}, while a proton (m_p = 1.67 \times 10^{-27}\text{ kg}) has kinetic energy K_p = 100.0\text{ keV}.
+ * Step 2: Energy Conversion and Speed Formulation:
+   
+ * Step 3: Analytical Execution:
+   * Ratio of speeds:
+     
+   * Individual speeds:
+     
+ * Step 4: Explicit Final Verification: The electron is faster than the proton by a factor of approximately 13.5.
+Dynamic Evaluation: Viscous Resistance and Energy Loss for a Terminal Raindrop [Textbook Exercise 5.13]
+ * Step 1: System Isolation: A spherical raindrop of radius r = 2.0\text{ mm} = 2.0 \times 10^{-3}\text{ m} falls from rest from h = 500.0\text{ m}. It accelerates down to h/2 = 250.0\text{ m}, where it reaches terminal velocity, and continues at uniform speed to hit the ground at v = 10.0\text{ m s}^{-1}.
+ * Step 2: Mass and Force Calculations:
+   
+ * Step 3: Analytical Execution:
+   * Work done by gravity in the first half of the descent (d_1 = 250\text{ m}):
+     
+   * Work done by gravity in the second half of the descent (d_2 = 250\text{ m}):
+     
+   * Total work done by gravity over the entire journey:
+     
+   * Kinetic energy at impact:
+     
+   * Work done by air resistance over the full fall (by Work-Energy Theorem):
+     
+ * Step 4: Explicit Final Verification: Work done by gravity is 0.082\text{ J} in each half; the total work done by air resistance is -0.163\text{ J}.
+3. Potential Energy, Conservative Systems, and Mechanical Energy Conservation
+                        POTENTIAL ENERGY FUNCTION V(x)
+                                      |
+         +----------------------------+----------------------------+
+         |                                                         |
+   DEFINITION CRITERIA                                      CONSERVATION LAW
+   Defined IF AND ONLY IF force is conservative:            If only conservative forces act:
+   F(x) = -dV/dx <=> ΔV = -W_conservative[span_135](start_span)[span_135](end_span)                  E_mech = K + V = constant[span_136](start_span)[span_136](end_span)
+   Closed loop: ∮ F_c · dr = 0[span_137](start_span)[span_137](end_span)                             ΔK + ΔV = 0 => Ki + Vi = Kf + Vf[span_138](start_span)[span_138](end_span)
+
+Potential Energy (V) and Conservative Forces
+Potential energy is the energy stored within a system by virtue of the relative spatial configuration or positions of its interacting parts.
+ * Conservative Force Definition: A force \vec{F}(\vec{r}) is conservative if:
+   * The work done on a particle depends solely on the initial and final endpoints, not on the intermediate path taken:
+     
+   * The net work done around any closed loop is identically zero:
+     
+   * The force equals the negative gradient of a scalar potential function:
+     
+Derivation: Conservation of Total Mechanical Energy
+Consider a body undergoing displacement \Delta x under the action of a conservative force F_c(x).
+ * From the Work-Energy Theorem:
+   
+ * From the definition of potential energy:
+   
+ * Summing the two expressions:
+   
+   
+   If non-conservative forces (like friction F_{\text{nc}}) also act, mechanical energy is dissipated as heat:
+   
+Potential Energy Curves and Classical Turning Points
+Consider a one-dimensional potential energy curve V(x) for a particle with fixed total mechanical energy E:
+      Energy ^
+             |                 Classically Forbidden: E < V(x)
+             |                 [ K = E - V < 0 -> Impossible! ][span_158](start_span)[span_158](end_span)
+             |                     +-----------------------+
+           E +---------------------|---*---------------*---|---- (Total Energy Line)
+             |                    /|    \             /    |\
+             |                   / |     \           /     | \
+             |         V(x) ----+  |      \         /      |  +----
+             |                     |       '.     .'       |
+             0---------------------+---------'---'---------+--------> x
+                                   x_left                 x_right
+                                   Turning Point          Turning Point
+                                   (K = 0)                (K = 0)[span_159](start_span)[span_159](end_span)
+
+ * Classically Allowed Region: Kinetic energy cannot be negative (K = E - V(x) \ge 0). Motion is physically possible only where E \ge V(x).
+ * Turning Points: Boundaries where E = V(x) \implies K = 0. Here, the particle stops momentarily and reverses its direction of motion.
+ * Classically Forbidden Region: Coordinates where V(x) > E would require negative kinetic energy (K < 0), meaning an imaginary velocity, which is physically impossible in classical mechanics.
+Derivation: Vertical Circular Loop Dynamics (String-Tethered Bob) [Textbook Example 5.7]
+Let a bob of mass m attached to a light string of length L be given a horizontal velocity v_0 at its lowest point A. Find the critical speeds required to complete a vertical circle without the string going slack before the top (point C).
+                            C (Top: Tc >= 0)
+                                 *
+                                / \
+                               v   v mg
+                              Tc   vc
+                                |
+                                L
+                                |
+                               ( O )
+                                |
+                                L
+                                |
+                     TB ^       * TA
+                        |      / \
+               B *------+     v   v mg
+                (Midway)      TA  v0 (Bottom A)[span_167](start_span)[span_167](end_span)
+
+ * Condition at the Top (C):
+   Centripetal force is supplied by string tension T_C and gravity:
+   
+   
+   To complete the circle without going slack, tension must remain non-negative at the apex (T_C \ge 0). The critical threshold occurs when T_C = 0:
+   
+ * Conservation of Mechanical Energy between Bottom (A) and Top (C):
+   Setting potential energy V = 0 at the lowest point A:
+   
+   
+   Equating total mechanical energy (E_A = E_C):
+   
+ * Speed at the Horizontal Midpoint (B):
+   At point B, height is h = L:
+   
+ * Kinetic Energy Ratio (K_B / K_C):
+   
+ * Trajectory if String Snaps at C:
+   At point C, velocity is strictly horizontal (\vec{v}_C = -\sqrt{gL}\hat{i}). If the string is cut at C, tension vanishes while gravity provides a downward acceleration g. The bob behaves as a projectile launched horizontally from height 2L, tracing a parabolic trajectory to the ground.
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Gravitational Potential Energy Decrease in Free Fall [PYQ 2026 Final]
+ * Step 1: System Isolation: A body of mass m = 20.0\text{ kg} falls vertically downward through distance h = 50.0\text{ cm} = 0.50\text{ m} under gravity (g = 9.8\text{ m s}^{-2}).
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The decrease in potential energy is 98\text{ J} (or 100\text{ J} taking g = 10\text{ m s}^{-2}).
+Conceptual Diagnostic: Turning Point Validation in Simple Harmonic Oscillators [Textbook Exercise 5.4]
+ * Step 1: System Isolation: A particle moves under the simple harmonic oscillator potential V(x) = \frac{1}{2}kx^2 with k = 0.50\text{ N m}^{-1} and total energy E = 1.0\text{ J}.
+ * Step 2: Component Equations:
+   
+   
+   Turning points occur where kinetic energy drops to zero (K = 0 \implies E = V(x)).
+ * Step 3: Analytical Execution:
+   
+   
+   For |x| > 2.0\text{ m}, V(x) > 1.0\text{ J}, which would require K < 0 (impossible in classical mechanics).
+ * Step 4: Explicit Final Verification: The particle must turn back at x = \pm 2.0\text{ m}, confirming that its motion is bounded within [-2\text{ m}, +2\text{ m}].
+Conceptual Diagnostic: Classification of Potential Energy Profiles [Textbook Exercise 5.3]
+ * General Diagnostic Principle:
+   A particle with total energy E cannot exist in regions where V(x) > E, because that would require negative kinetic energy (K < 0). The minimum required total energy to exist anywhere in the potential is E_{\text{min}} = V_{\text{min}}.
+ * Profile-by-Profile Analysis (Fig. 5.11):
+   * (a) Square Well Potential (V = 0 for 0 \le x \le a, and V = V_0 > E elsewhere):
+     The particle cannot enter regions x < 0 and x > a. Minimum total energy: \mathbf{E_{\text{min}} = 0}. Physical context: A bead sliding along a wire between rigid stops.
+   * (b) Potential Step/Well with Varying Shelves (V_0 > E across parts of x):
+     The particle cannot exist where V(x) > E. Minimum total energy: \mathbf{E_{\text{min}} = V_1} (the lowest potential shelf).
+   * (c) Symmetric Harmonic Well (V(x) \propto x^2):
+     Turning points occur at x = \pm x_0 where V(x_0) = E. The particle is forbidden from |x| > x_0. Minimum total energy: \mathbf{E_{\text{min}} = 0} at x = 0. Physical context: Mass-spring oscillator.
+   * (d) Periodic Barrier Potential:
+     Motion is confined to valleys where V(x) \le E; barrier peaks where V > E are forbidden. Minimum total energy: \mathbf{E_{\text{min}} = -V_1}. Physical context: Electron moving in a periodic crystal lattice.
+Conceptual Diagnostic: Work-Energy Nuances in Orbital and Atmospheric Systems [Textbook Exercise 5.5 (a, b, c) & 5.6]
+ * (a) Burning of Rocket Casings:
+   The thermal energy required to burn up a rocket casing during atmospheric reentry comes at the expense of the rocket's total mechanical energy (kinetic plus potential energy), not from the atmosphere. Friction converts the rocket's mechanical energy into heat.
+ * (b) Closed-Orbit Work on Comets:
+   Although the Sun's gravitational force is not generally perpendicular to the comet's velocity in an eccentric orbit, gravity is a conservative force. The work done around any complete closed path is identically zero:
+   
+ * (c) Satellite Orbital Decay Speed Paradox:
+   As atmospheric drag slowly siphons mechanical energy from an orbiting satellite, its total energy decreases (E = -\frac{G M_E m}{2r} becomes more negative). This forces the orbital radius r to shrink. Because orbital velocity is v_o = \sqrt{\frac{G M_E}{r}}, a smaller radius causes the satellite's speed to progressively increase. The loss in potential energy is twice the gain in kinetic energy, with the difference dissipated as frictional heat.
+ * (d) Direct Theory Alternatives [Textbook Exercise 5.6]:
+   * When a conservative force does positive work, potential energy decreases (\Delta V = -W).
+   * Work done by a body against friction results in a loss of its kinetic energy.
+   * The rate of change of total momentum is proportional to the external force.
+   * In an inelastic collision, total linear momentum and total energy remain unchanged, but kinetic energy changes.
+Dynamic Evaluation: Work and Dissipation in High-Repetition Weightlifting [Textbook Exercise 5.22]
+ * Step 1: System Isolation: A person lifts a mass m = 10.0\text{ kg} a height h = 0.50\text{ m} a total of N = 1000 times, with the potential energy dissipated on each downward stroke.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   * Work done against gravity:
+     
+   * Fat metabolized: Fat yields 3.8 \times 10^7\text{ J kg}^{-1} and is converted to mechanical work at \eta = 20\% = 0.20 efficiency:
+     
+ * Step 4: Explicit Final Verification: The mechanical work performed is 4.9 \times 10^4\text{ J}, using up 6.45\text{ g} of body fat.
+Dynamic Evaluation: Pendulum Speed with Dissipative Losses [Textbook Exercise 5.18]
+ * Step 1: System Isolation: A pendulum bob is released from rest from a horizontal orientation (\theta = 90^\circ relative to vertical, height h = L = 1.5\text{ m}). It dissipates 5.0\% of its initial energy against air drag on the way down.
+ * Step 2: Energy Conservation Formulation:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The bob reaches the lowest point with a speed of 5.3\text{ m s}^{-1}.
+4. Hooke's Law and the Potential Energy of an Elastic Spring
+                       ELASTIC SPRING MECHANICS
+                                  |
+        +-------------------------+-------------------------+
+        |                                                   |
+   HOOKE'S FORCE LAW                                  SPRING POTENTIAL ENERGY
+   Fs = -kx (Linear restoring force)[span_215](start_span)[span_215](end_span)                U(x) = (1/2)kx² (Always positive for x != 0)[span_216](start_span)[span_216](end_span)
+   k = Force constant [N m⁻¹][span_217](start_span)[span_217](end_span)                       Parabolic potential well[span_218](start_span)[span_218](end_span)
+
+Hooke's Law and the Restoring Spring Force
+An ideal spring is assumed to be massless and follows Hooke's Law for small elongations or compressions:
+
+
+where x is the displacement of the spring's free end from its unstretched equilibrium position (x = 0), and k is the spring constant (measure of stiffness, with dimensions [M L^0 T^{-2}] and SI units \text{N m}^{-1}). The negative sign indicates that the restoring force always opposes displacement.
+  (a) Equilibrium: x = 0, Fs = 0
+      |---/\/\/\/\/\---[ Block ]
+      |                x = 0
+  (b) Stretched: x > 0, Fs < 0 (Pulls Left)
+      |-----/\/\/\/\/\/\/\-----> [ Block ]
+      |                x = 0    <--- Fs
+  (c) Compressed: x < 0, Fs > 0 (Pushes Right)
+      |--/\/\/\/\--< [ Block ]
+      |      Fs --->   x = 0[span_223](start_span)[span_223](end_span)
+
+Derivation: Potential Energy of a Stretched or Compressed Spring [PYQ 2025 Half-Yearly]
+ * Step 1: System Isolation: Consider a block of mass m attached to a spring of force constant k on a frictionless horizontal plane.
+ * Step 2: Work Done by Spring Force:
+   Pulling the block from equilibrium (x = 0) to an extension x_m, the work done by the restoring spring force is:
+   
+ * Step 3: Potential Energy Formulation:
+   By definition, the change in potential energy is the negative of the work done by the conservative spring force (\Delta U_s = -W_s). Setting U_s(0) = 0 at equilibrium:
+   
+      Energy ^
+             |                 E = K + U = (1/2)k·xm² (Total Mechanical Energy)
+           E +-----------------*---------------------------------------
+             |               .'|'.                   Potential Energy:
+             |             .'  |  '.                 U(x) = (1/2)kx²
+             |           .'    |    '.
+             |         .'      |      '.             Kinetic Energy:
+             |       .'        |        '.           K(x) = E - (1/2)kx²
+             0------+----------+----------+---------------------------> x
+                   -xm         0         +xm
+                               Equilibrium[span_230](start_span)[span_230](end_span)
+
+ * Step 4: Maximum Velocity Determination:
+   By conservation of mechanical energy, all potential energy transforms into kinetic energy as the block passes through equilibrium (x = 0):
+   
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Incremental Energy of Extended Springs [PYQ 2026 Final]
+ * Step 1: System Isolation: An ideal spring stores U_1 = 100.0\text{ J} of potential energy when stretched by an initial extension x_1 = 2.0\text{ cm} = 0.020\text{ m}.
+ * Step 2: Component Equations:
+   
+   
+   Stretching it by an additional 2.0\text{ cm} brings the total extension to:
+   
+ * Step 3: Analytical Execution:
+   Calculate the total energy at extension x_2:
+   
+   
+   Compute the additional work required:
+   
+ * Step 4: Explicit Final Verification: The increase in stored potential energy is 300\text{ J}.
+Dynamic Evaluation: Vehicle Buffer Spring Compression in Frictionless and Rough Conditions [Textbook Examples 5.8 & 5.9]
+ * Frictionless Impact [Textbook Example 5.8]:
+   A car of mass m = 1000.0\text{ kg} travels at v = 18.0\text{ km h}^{-1} = 5.0\text{ m s}^{-1} and collides with a horizontal spring of constant k = 5.25 \times 10^3\text{ N m}^{-1}.
+   * At maximum compression x_m, all initial kinetic energy converts to spring potential energy:
+     
+ * Impact with Surface Friction (\mu = 0.50) [Textbook Example 5.9]:
+   Both the spring force and surface friction oppose compression:
+   
+   
+   Substitute the values (m = 1000\text{ kg}, k = 5250\text{ N m}^{-1}, \mu mg = 0.50 \times 1000 \times 10 = 5000\text{ N}, mv^2 = 25\,000\text{ J}):
+   
+   
+   Solve using the quadratic formula:
+   
+ * Step 4: Explicit Final Verification: Maximum spring compression is 2.0\text{ m} without friction and 1.35\text{ m} with friction.
+5. Power and Sustainable Energy Conversion Systems
+                           MECHANICAL POWER
+                                   |
+         +-------------------------+-------------------------+
+         |                                                   |
+   AVERAGE POWER                                      INSTANTANEOUS POWER
+   P_avg = ΔW / Δt (Scalar rate)[span_243](start_span)[span_243](end_span)                    P = dW/dt = F · (dr/dt) = F · v[span_244](start_span)[span_244](end_span)
+   SI Unit: Watt (1 W = 1 J s⁻¹)[span_245](start_span)[span_245](end_span)                    Commercial unit: kWh = 3.6 × 10⁶ J[span_246](start_span)[span_246](end_span)
+
+Power Formulations and SI Conventions
+Power is defined as the time rate at which work is done or energy is transferred:
+ * Average Power:
+   
+ * Instantaneous Power:
+   
+   
+   Since dW = \vec{F} \cdot d\vec{r}:
+   
+ * Units and Dimensions:
+   * Dimensions: [P] = \frac{[M L^2 T^{-2}]}{[T]} = \mathbf{[M L^2 T^{-3}]}.
+   * SI Unit: Watt (\text{W}), where 1\text{ W} = 1\text{ J s}^{-1} = 1\text{ kg m}^2\text{s}^{-3}.
+   * Horsepower: 1\text{ hp} = 746\text{ W}.
+   * Electrical Energy: Kilowatt-hour (\text{kWh}), where 1\text{ kWh} = 10^3\text{ W} \times 3600\text{ s} = \mathbf{3.6 \times 10^6\text{ J}}.
+Analytical Case Studies & Dynamic Evaluations
+Conceptual Diagnostic: SI Unit of the Scalar Product \vec{F} \cdot \vec{v} [PYQ 2023 Final]
+ * Step 1: System Isolation: Evaluate the product P = \vec{F} \cdot \vec{v}.
+ * Step 2: Analytical Execution:
+   
+ * Step 3: Explicit Final Verification: The SI unit of \vec{F} \cdot \vec{v} is the watt (\text{W}) or \text{J s}^{-1}.
+Dynamic Evaluation: Kinematic Scaling of Power Under Uniform Acceleration [Textbook Exercise 5.9]
+ * Step 1: System Isolation: A body of mass m starts from rest (u = 0) and accelerates with constant acceleration a.
+ * Step 2: Analytical Execution:
+   
+ * Step 3: Explicit Final Verification: Under constant acceleration from rest, delivered power is directly proportional to time t (Option ii).
+Dynamic Evaluation: Position Scaling Under Constant Driving Power [Textbook Exercise 5.10]
+ * Step 1: System Isolation: A particle moves unidirectionally under a source of constant power P = \text{constant}.
+ * Step 2: Differential Equations:
+   
+ * Step 3: Analytical Execution:
+   Integrating from rest (u = 0 at t = 0):
+   
+   
+   Express velocity as v = \frac{dx}{dt}:
+   
+ * Step 4: Explicit Final Verification: Under constant power, displacement scales with t^{3/2} (Option iii).
+Dynamic Evaluation: Commercial Power Demands for Lift Hoisting Motors [Textbook Example 5.10]
+ * Step 1: System Isolation & Diagram: An elevator carrying a total mass M = 1800.0\text{ kg} rises at constant speed v = 2.0\text{ m s}^{-1} while opposing a constant frictional drag F_r = 4000.0\text{ N} (g = 10.0\text{ m s}^{-2}).
+                     ^ Hoisting Force F_motor
+                     |
+                [ Elevator ] ---> v = 2 m/s (Constant)
+                     |
+                     v Downward Load = Mg + Fr[span_264](start_span)[span_264](end_span)
+
+ * Step 2: Component Equations:
+   For uniform motion (a = 0):
+   
+ * Step 3: Analytical Execution:
+   
+   
+   Converting to horsepower:
+   
+ * Step 4: Explicit Final Verification: The motor must deliver 44\text{ kW} (59\text{ hp}).
+Dynamic Evaluation: Commercial Hydraulic Pump Power Consumption [Textbook Exercise 5.15]
+ * Step 1: System Isolation: A pump fills a storage tank of volume V = 30.0\text{ m}^3 located at height h = 40.0\text{ m} in time t = 15.0\text{ min} = 900.0\text{ s}. The pump operates at an efficiency \eta = 30\% = 0.30 (g = 9.8\text{ m s}^{-2}).
+ * Step 2: Mass and Work Equations:
+   
+ * Step 3: Analytical Execution:
+   
+ * Step 4: Explicit Final Verification: The electric power consumed by the pump is 43.6\text{ kW}.
+Dynamic Evaluation: Aerodynamic Windmill Power Generation [Textbook Exercise 5.21]
+ * Step 1: System Isolation: Wind of density \rho = 1.2\text{ kg m}^{-3} flows at speed v = 36.0\text{ km h}^{-1} = 10.0\text{ m s}^{-1} perpendicular to windmill blades sweeping out an area A = 30.0\text{ m}^2. The conversion efficiency is \eta = 25\% = 0.25.
+ * Step 2: Mass and Kinetic Energy Formulations:
+   In time t, the wind sweeps through a cylinder of length L = vt:
+   
+ * Step 3: Analytical Execution:
+   * Total wind kinetic power available:
+     
+   * Electrical power produced:
+     
+ * Step 4: Explicit Final Verification: Mass flow rate is \rho Av t, kinetic energy is \frac{1}{2}\rho Av^3 t, and electrical power output is 4.5\text{ kW}.
+Dynamic Evaluation: Solar Collector Sizing for Residential Power [Textbook Exercise 5.23]
+ * Step 1: System Isolation: A household requires an average power P_{\text{req}} = 8.0\text{ kW} = 8000.0\text{ W}. Solar radiation delivers I = 200.0\text{ W m}^{-2} on a horizontal surface, converted at an efficiency \eta = 20\% = 0.20.
+ * Step 2: Component Equations:
+   
+ * Step 3: Analytical Execution:
+   
+   
+   A typical residential house has roof dimensions of roughly 10\text{ m} \times 20\text{ m} = 200\text{ m}^2.
+ * Step 4: Explicit Final Verification: The required solar collector surface area is 200\text{ m}^2, which is comparable to the roof area of a typical residential house.
+6. Collisions in One and Two Dimensions (Elastic, Inelastic, and Oblique Mechanics)
+                            COLLISION DYNAMICS
+                                    |
+         +--------------------------+--------------------------+
+         |                                                     |
+   ELASTIC COLLISION                                   INELASTIC COLLISION
+   • Linear momentum conserved[span_282](start_span)[span_282](end_span)                       • Linear momentum conserved[span_283](start_span)[span_283](end_span)
+   • Kinetic energy conserved[span_284](start_span)[span_284](end_span)                        • Kinetic energy NOT conserved (Heat/Sound)[span_285](start_span)[span_285](end_span)
+   • Internal forces are conservative[span_286](start_span)[span_286](end_span)                 • Maximum loss: Perfectly inelastic (Bodies stick)[span_287](start_span)[span_287](end_span)
+
+Momentum Conservation Across All Collisions
+During a collision between two masses m_1 and m_2 lasting over a contact duration \Delta t, the interaction forces \vec{F}_{12} and \vec{F}_{21} are internal to the two-body system. By Newton's third law, \vec{F}_{12}(t) = -\vec{F}_{21}(t) at every instant:
+
+
+Linear momentum is strictly conserved in all collisions, whether elastic or inelastic.
+Derivation: One-Dimensional Elastic Collision Velocities [PYQ 2023 Final & PYQ 2026 Final]
+Consider two masses m_1 and m_2 moving along a straight line with initial velocities u_1 and u_2 (u_1 > u_2). They collide head-on and separate with final velocities v_1 and v_2.
+     Before:    [ m₁ ] ---> u₁        [ m₂ ] ---> u₂
+     
+     Contact:   [ m₁ ][ m₂ ] (Compression / Elastic deformation)[span_294](start_span)[span_294](end_span)
+     
+     After:     [ m₁ ] ---> v₁        [ m₂ ] ---> v₂[span_295](start_span)[span_295](end_span)
+
+ * Conservation of Linear Momentum:
+   
+ * Conservation of Kinetic Energy:
+   
+   
+   Factoring both sides:
+   
+ * Relative Velocity Theorem:
+   Dividing equation (2) by equation (1):
+   
+ * Final Velocity Expressions:
+   Substituting v_2 = u_1 - u_2 + v_1 back into equation (1):
+   
+Special Cases of One-Dimensional Elastic Collisions
+ * Case 1: Equal Masses (m_1 = m_2 = m):
+   
+   
+   The bodies completely swap their velocities upon impact. If the target is initially stationary (u_2 = 0), the incoming body comes to a complete standstill (v_1 = 0), and the target moves off with the initial velocity of the incoming body (v_2 = u_1).
+ * Case 2: Heavy Projectile Striking Light Target (m_1 \gg m_2 with u_2 = 0):
+   
+   
+   The heavy projectile continues with nearly its original speed, while the light target is propelled forward at roughly twice the projectile's speed.
+ * Case 3: Light Projectile Striking Heavy Target (m_1 \ll m_2 with u_2 = 0):
+   
+   
+   The heavy target remains essentially at rest, while the light projectile rebounds backward with its initial speed reversed.
+Derivation: Maximum Kinetic Energy Transfer Condition [PYQ 2026 Final]
+Let mass m_1 collide head-on elastically with a stationary mass m_2 (u_2 = 0). The final kinetic energy transferred to the target mass m_2 is:
+
+
+The fraction of kinetic energy transferred is:
+
+
+To find the mass ratio that maximizes energy transfer, differentiate f_2 with respect to \beta = \frac{m_2}{m_1} and set the derivative to zero:
+
+
+Conclusion: Kinetic energy transfer is maximized (f_2 = 1.0 \implies 100\% transfer) when the two interacting bodies have identical masses (m_1 = m_2).
+Derivation: Completely Inelastic Collisions and Mechanical Energy Dissipation [PYQ 2023 Final]
+In a completely inelastic collision, the two colliding bodies stick together and move with a common final velocity v_f.
+     Before:    [ m₁ ] ---> u₁        [ m₂ ] ---> u₂
+     
+     After:     [ m₁ + m₂ ] ------------> vf (Fused together)[span_319](start_span)[span_319](end_span)
+
+ * Common Final Velocity:
+   
+ * Mechanical Energy Dissipated:
+   
+   
+   Substituting v_f:
+   
+   
+   Expanding and simplifying algebraically:
+   
+   
+   Because m_1, m_2 > 0 and (u_1 - u_2)^2 \ge 0, \Delta K \ge 0. Kinetic energy is always lost in completely inelastic collisions, converted into internal thermal, acoustic, or deformation energy.
+Derivation: Oblique Two-Dimensional Elastic Collisions [Textbook Example 5.12]
+Consider a glancing elastic collision between two identical masses (m_1 = m_2 = m) where target m_2 is initially at rest.
+                     y
+                     ^
+                     |          * m₁ (Final v₁f at angle θ₁)
+                     |         /
+      m₁ ----> v₁i   |        /
+      (Target m₂=0)  0-------+--------> x
+                             \
+                              \
+                               * m₂ (Final v₂f at angle θ₂)[span_327](start_span)[span_327](end_span)
+
+ * Conservation of Linear Momentum (Vector Form):
+   
+   
+   Taking the scalar dot product of this vector equation with itself:
+   
+ * Conservation of Kinetic Energy:
+   
+ * Orthogonality of Scattering Angles:
+   Equating expressions (1) and (2):
+   
+   
+   For a glancing collision where neither final speed vanishes (v_{1f}, v_{2f} \ne 0):
+   
+   
+   Theorem: When two bodies of equal mass undergo an oblique, non-head-on elastic collision with one initially at rest, they scatter at right angles (90^\circ) to each other.
+Analytical Case Studies & Dynamic Evaluations
+Dynamic Evaluation: Nuclear Fission Neutron Moderation [Textbook Example 5.11]
+ * Step 1: System Isolation: In a nuclear reactor, fast fission neutrons (m_1 = 1.0\text{ u}, v \sim 10^7\text{ m s}^{-1}) must be slowed to thermal speeds (v \sim 10^3\text{ m s}^{-1}) via elastic head-on collisions with moderator nuclei of mass m_2 initially at rest.
+ * Step 2: Component Equations: The fraction of kinetic energy retained by the neutron is:
+   
+   
+   The fraction of kinetic energy transferred to the moderator nucleus is:
+   
+ * Step 3: Analytical Execution:
+   * Collision with Deuterium (m_2 = 2.0\text{ u}, Heavy Water \text{D}_2\text{O}):
+     
+     
+     Almost 90\% of the neutron's energy is transferred in a single head-on collision.
+   * Collision with Carbon (m_2 = 12.0\text{ u}, Graphite):
+     
+ * Step 4: Explicit Final Verification: Light nuclei like deuterium are much more effective moderators than heavier nuclei because their masses are comparable to that of a neutron, maximizing kinetic energy transfer.
+Dynamic Evaluation: Ballistic Pendulum Elastic Rebound [Textbook Exercise 5.17]
+ * Step 1: System Isolation & Diagram: Pendulum bob A of mass m is released from 30^\circ to the vertical and strikes an identical stationary bob B of mass m resting on a support.
+                     \ 30°
+                      \
+                       \  Length L
+                        \
+                         * Bob A (Hits Bob B at bottom)
+                         |
+                       ( * ) Bob B (Stationary, mB = mA)[span_353](start_span)[span_353](end_span)
+
+ * Step 2: Governing Velocity Swap Principle:
+   In a one-dimensional elastic collision between equal masses (m_A = m_B), the bodies swap velocities completely:
+   
+ * Step 3: Analytical Execution:
+   Immediately following impact, bob A comes to a complete rest (v_A = 0). Because its kinetic energy drops to zero, it cannot rise:
+   
+   
+   Bob B takes on bob A's velocity and is launched horizontally off the table.
+ * Step 4: Explicit Final Verification: Bob A remains at rest at the collision point and rises to a height of zero (0\text{ m}).
+Dynamic Evaluation: Simultaneous Conservation in Ball Bearing Chains [Textbook Exercise 5.16]
+ * Step 1: System Isolation: A single steel ball bearing of mass m moving at speed V strikes two identical ball bearings (2 and 3, each of mass m) at rest in contact on a frictionless rail.
+     Incoming:   ( 1 ) ---> V       ( 2 )( 3 ) (At rest)
+     
+     Candidate Outcomes:
+       Case (i):   ( 1 ) at rest;  ( 2 )( 3 ) move together with V/2[span_361](start_span)[span_361](end_span)
+       Case (ii):  ( 1 )( 2 ) at rest; ( 3 ) flies off with V[span_362](start_span)[span_362](end_span)
+
+ * Step 2: Conservation Checks:
+   * Candidate Case (i): Balls 2 and 3 move together with speed V/2:
+     * Linear Momentum: P_i = mV; P_f = (2m)(V/2) = mV (Momentum conserved).
+     * Kinetic Energy:
+       
+       
+       Kinetic energy is not conserved (50\% loss), which violates the elastic collision condition.
+   * Candidate Case (ii): Balls 1 and 2 remain at rest, ball 3 flies off with speed V:
+     * Linear Momentum: P_f = m V = P_i.
+     * Kinetic Energy: K_f = \frac{1}{2}mV^2 = K_i.
+ * Step 3: Explicit Final Verification: Only Case (ii) satisfies both momentum conservation and kinetic energy conservation simultaneously.
+Dynamic Evaluation: Momentum Transport in Leaking Systems [Textbook Exercise 5.19]
+ * Step 1: System Isolation: A trolley of mass M_0 = 300.0\text{ kg} carrying a sandbag of mass m_s = 25.0\text{ kg} rolls on a frictionless track at uniform speed v_0 = 27.0\text{ km h}^{-1}. Sand leaks vertically downward through a hole in the floor at \frac{dm}{dt} = 0.05\text{ kg s}^{-1}.
+ * Step 2: Component Equations:
+   Consider the horizontal forces acting on the trolley. Because the track is frictionless and sand drops straight down without horizontal propulsion, no horizontal external force acts on the trolley (\sum F_x = 0).
+ * Step 3: Analytical Execution:
+   As each grain of sand leaves the trolley, it carries away its own horizontal momentum at speed v_0. The remaining sand and trolley continue forward with their horizontal velocity unaltered:
+   
+ * Step 4: Explicit Final Verification: The speed of the trolley remains unchanged at 27\text{ km h}^{-1} after the sandbag empties.
+Conceptual Diagnostic: Conservation Properties Across Collision Regimes [Textbook Exercises 5.7, 5.8, 5.14]
+ * Exercise 5.7 Diagnostics:
+   * (a) Momentum and energy of each body are conserved in an elastic collision: False. Total momentum and total energy of the combined system are conserved, but the colliding bodies exchange momentum and energy with each other.
+   * (b) Total energy of a system is always conserved regardless of internal/external forces: False. Total energy is conserved only for an isolated system (\vec{F}_{\text{ext}} = \vec{0}). External forces can do work on the system, altering its total energy.
+   * (c) Closed-loop work is zero for every force in nature: False. This holds only for conservative forces; non-conservative forces like friction and viscosity dissipate energy over closed paths (\oint \vec{f}_k \cdot d\vec{r} \ne 0).
+   * (d) In an inelastic collision, final kinetic energy is always less than initial kinetic energy: True. Part of the initial kinetic energy is converted into non-mechanical forms (heat, sound, and permanent deformation).
+ * Exercise 5.8 Diagnostics:
+   * (a) Total kinetic energy during the collision contact interval: Not conserved. During contact, colliding bodies deform like compressed springs, temporarily storing part of their kinetic energy as elastic potential energy. The initial kinetic energy is recovered only after separation.
+   * (b) Total linear momentum during contact: Strictly conserved. At every instant during impact, internal interaction forces balance in pairs (\vec{F}_{12} = -\vec{F}_{21}), maintaining total momentum conservation throughout.
+   * (c) Inelastic collisions: Linear momentum remains conserved at every instant, but kinetic energy is not conserved during or after impact.
+   * (d) Potential energy depending only on center-to-center separation distance: The collision is elastic. If the interaction potential depends solely on separation distance (V = V(r)), the interaction force is conservative, which ensures total kinetic energy is conserved after separation.
+ * Gas Molecule Rebound [Exercise 5.14]:
+   A molecule strikes a wall at 200\text{ m s}^{-1} and rebounds at the same speed. Momentum is conserved for the closed system (wall plus molecule), though the wall's large mass means its recoil velocity is negligible. Because rebound speed equals impact speed, kinetic energy is conserved, and the collision is elastic.
+7. Master Consolidated Reference Tables
+Table A: Master PYQ Index
+| Exam / Year | Question Summary | Core Governing Concept | Final Analytical / Numerical Result |
+|---|---|---|---|
+| 2025 HY | Work done pushing an immovable wall | W = \vec{F} \cdot \vec{d}; d = 0 | \mathbf{W = 0\text{ J}} (Muscular energy lost as heat). |
+| 2026 Final | Physical quantity represented by \vec{F} \cdot d\vec{s} | Definition of mechanical work | \mathbf{\text{Work Done (}dW\text{)}} by force over displacement. |
+| 2025 HY | Percentage KE change if momentum rises by 50% | K = p^2 / (2m) | K_2 = (1.5)^2 K_1 = 2.25 K_1 \implies \mathbf{\% \Delta K = 125\%}. |
+| 2026 Final | KE change of 1 g object falling 1 km at 50 m/s | \Delta K = \frac{1}{2}mv^2 - 0 | \Delta K = \frac{1}{2}(10^{-3})(50)^2 = \mathbf{1.25\text{ J}}. |
+| 2026 Final | Potential energy drop for 20 kg falling 50 cm | \Delta U = -mgh | \Delta U = -(20)(9.8)(0.5) = \mathbf{-98.0\text{ J}} (or \mathbf{-100\text{ J}} for g=10). |
+| 2026 Final | Energy added stretching spring another 2 cm (initial 100 J) | U \propto x^2; U_2 = 4U_1 | \Delta U = 400 - 100 = \mathbf{300.0\text{ J}}. |
+| 2025 HY | Define conservative force; derive spring potential energy | \Delta U = -W_c; Hooke's Law | U(x) = -\int_0^x (-kx)\,dx = \mathbf{\frac{1}{2}kx^2}. |
+| 2026 Final | Express power as product of force and velocity | P = dW/dt = \vec{F} \cdot (d\vec{r}/dt) | Derived: \mathbf{P = \vec{F} \cdot \vec{v}}. |
+| 2026 Final | State and prove Work-Energy Theorem | dK/dt = Fv \implies dK = F\,dx | Derived: \int dK = \int F\,dx \implies \mathbf{W_{\text{net}} = \Delta K}. |
+| 2025 HY | Define elastic and inelastic collisions | Energy conservation criteria | Elastic: \Delta K = 0; Inelastic: \Delta K \ne 0 (Momentum conserved in both). |
+| 2026 Final | Mass condition for max KE transfer in 1D elastic collision | Fraction f_2 = 4m_1m_2/(m_1+m_2)^2 | Maximum transfer occurs when \mathbf{m_1 = m_2} (100\% transfer). |
+| 2020 Final | Show work done equals change in kinetic energy | Calculus integration of dynamic force | \int_{u}^v mv\,dv = \mathbf{\frac{1}{2}mv^2 - \frac{1}{2}mu^2 = W}. |
+| 2023 Final | SI unit of scalar product of force and velocity | Units of mechanical power | [\vec{F} \cdot \vec{v}] = \text{N m s}^{-1} = \text{J s}^{-1} = \mathbf{\text{Watt (W)}}. |
+| 2023 Final | Discuss 1D collisions and derive energy relations | Momentum & kinetic energy conservation | Derived: v_1, v_2 formulas and \Delta K_{\text{inelastic}} = \frac{1}{2}\frac{m_1m_2}{m_1+m_2}(u_1-u_2)^2. |
+Table B: Textbook Exercises Index
+| Exercise # | Topic / Scenario | Analytical / Numerical Result (with Units) |
+|---|---|---|
+| 5.1 | Signs of work done across physical scenarios | (a) Positive; (b) Negative; (c) Negative; (d) Positive; (e) Negative. |
+| 5.2 | Work and energy for 2 kg block under 7 N force | (a) W_F = \mathbf{882\text{ J}}; (b) W_f = \mathbf{-247\text{ J}}; (c) W_{\text{net}} = \mathbf{635\text{ J}}; (d) \Delta K = \mathbf{635\text{ J}}. |
+| 5.3 | Potential energy curves (Fig. 5.11) diagnostics | Regions with V(x) > E are forbidden; minimum energy E_{\text{min}} = V_{\text{min}}. |
+| 5.4 | Simple harmonic oscillator turning points (k = 0.5\text{ N/m}, E = 1\text{ J}) | x = \pm\sqrt{2E/k} = \mathbf{\pm 2.0\text{ m}} (turns back at boundaries). |
+| 5.5 | Conceptual energy conservation questions | (a) Rocket's mechanical energy; (b) \oint \vec{F}_g \cdot d\vec{r} = 0; (c) Orbital decay decreases r; (d) Case (ii) is greater. |
+| 5.6 | Multiple-choice physics definitions | (a) Decreases; (b) Kinetic energy; (c) External force; (d) Linear momentum & total energy. |
+| 5.7 | True/False statements on energy and collisions | (a) False; (b) False; (c) False; (d) True. |
+| 5.8 | Conceptual details of billiard ball collisions | (a) No (stored as elastic PE); (b) Yes; (c) KE lost, p conserved; (d) Elastic (F is conservative). |
+| 5.9 | Power delivery under constant acceleration | P(t) = F \cdot v = (ma)(at) \implies \mathbf{P \propto t} (Option ii). |
+| 5.10 | Displacement under constant driving power | v \propto t^{1/2} \implies x(t) = \int v\,dt \implies \mathbf{x \propto t^{3/2}} (Option iii). |
+| 5.11 | Work by 3D force along z-axis | W = \vec{F} \cdot \vec{d} = (3\text{ N})(4\text{ m}) = \mathbf{12.0\text{ J}}. |
+| 5.12 | Cosmic ray electron (10\text{ keV}) vs. proton (100\text{ keV}) | Electron is faster; speed ratio v_e / v_p \approx \mathbf{13.5}. |
+| 5.13 | Raindrop (r = 2\text{ mm}) fall work accounting | W_{g,1} = W_{g,2} = \mathbf{0.082\text{ J}}; W_{\text{resistive}} = \mathbf{-0.163\text{ J}}. |
+| 5.14 | Gas molecule rebound from container wall | Total momentum conserved (wall + molecule); collision is elastic. |
+| 5.15 | Water pump power (30\text{ m}^3 to 40\text{ m} in 15\text{ min}, \eta = 30\%) | Useful output = 13.07\text{ kW}; Input power consumed = \mathbf{43.6\text{ kW}}. |
+| 5.16 | Ball bearing chain collision outcomes | Only Case (ii) satisfies momentum and kinetic energy conservation simultaneously. |
+| 5.17 | Equal-mass pendulum impact | Bob A comes to a complete stop; rise height is 0\text{ m}. |
+| 5.18 | Pendulum speed with 5% drag loss (L = 1.5\text{ m}) | Arrival speed at lowest point v = \sqrt{1.9gL} \approx \mathbf{5.3\text{ m s}^{-1}}. |
+| 5.19 | Trolley with leaking sandbag | No external horizontal force \implies Speed remains 27\text{ km h}^{-1}. |
+| 5.20 | Work done for v = a x^{3/2} (m = 0.5\text{ kg}, x = 0 \to 2\text{ m}) | W = \Delta K = \frac{1}{2}(0.50)(10\sqrt{2})^2 = \mathbf{50.0\text{ J}}. |
+| 5.21 | Windmill aerodynamics (A = 30\text{ m}^2, v = 10\text{ m/s}) | Mass = \rho Avt; K = \frac{1}{2}\rho Av^3t; Output electrical power = \mathbf{4.5\text{ kW}}. |
+| 5.22 | Dieter lifting 10 kg mass 1000 times (h = 0.5\text{ m}) | Work = \mathbf{4.9 \times 10^4\text{ J}}; Fat metabolized at 20% efficiency = \mathbf{6.45\text{ g}}. |
+| 5.23 | Solar collector area for 8 kW residential load | Area needed = \mathbf{200\text{ m}^2} (Comparable to typical house roof area). |
