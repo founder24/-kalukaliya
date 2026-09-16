@@ -183,4 +183,54 @@ describe('SubjectCard share destination', () => {
       '/as/ahsec/hs-1st-year/physics',
     );
   });
+
+  it('shows every syllabus chapter in Questions even when has_qa is missing', () => {
+    mockContentLanguage.value = 'en';
+    const subject = {
+      id: 'physics-question-catalog',
+      name: 'Physics',
+      boardSlug: 'ahsec',
+      classSlug: 'hs-1st-year',
+      slug: 'physics',
+    };
+    const chapters = [
+      {
+        id: 'ch1',
+        title: 'Units and Measurements',
+        slug: 'units-and-measurements',
+        chapter_number: 1,
+        content_type: 'notes',
+        has_qa: false,
+      },
+      {
+        id: 'ch2',
+        title: 'Motion in a Straight Line',
+        slug: 'motion-in-a-straight-line',
+        chapter_number: 2,
+        content_type: 'notes',
+        has_qa: true,
+      },
+    ];
+
+    render(
+      <SubjectCard
+        sub={subject}
+        chapters={chapters}
+        isSaved={false}
+        onToggleSave={vi.fn()}
+        onAskAI={vi.fn()}
+        index={0}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Questions\s*2/ }));
+    expect(screen.getByRole('link', { name: 'Units and Measurements' })).toHaveAttribute(
+      'href',
+      '/ahsec/hs-1st-year/physics/units-and-measurements?tab=qa',
+    );
+    expect(screen.getByRole('link', { name: 'Motion in a Straight Line' })).toHaveAttribute(
+      'href',
+      '/ahsec/hs-1st-year/physics/motion-in-a-straight-line?tab=qa',
+    );
+  });
 });

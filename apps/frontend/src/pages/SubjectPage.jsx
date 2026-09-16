@@ -412,14 +412,12 @@ export default function SubjectPage() {
   const loading = subjectLoading || chaptersLoading;
 
   const subjectSections = useMemo(() => {
-    const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
+    const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs', 'question_paper']);
     const notesChs = chapters.filter(ch => !ch.content_type || !QA_TYPES.has(ch.content_type));
-    const qaChs = chapters.filter(ch => {
-      const hasQuestions = isAssamese
-        ? (typeof ch.has_qa_as === 'boolean' ? ch.has_qa_as : ch.has_qa)
-        : ch.has_qa;
-      return hasQuestions && (QA_TYPES.has(ch.content_type) || ch.has_qa);
-    });
+    // Every syllabus chapter has a Questions view. Do not hide it just because
+    // the catalogue has not populated has_qa yet; the chapter page owns the
+    // source fallback and will show the appropriate empty state if needed.
+    const qaChs = chapters.filter(ch => ch.content_type !== 'question_paper');
     // Subject-level PYQ papers — [{id, name, class_name, year, description, pages}]
     const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => ({
       id:          p.id || `pyq-${pi}`,

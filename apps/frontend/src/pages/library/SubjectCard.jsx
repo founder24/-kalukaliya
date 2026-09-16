@@ -104,7 +104,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
   ), [chapters]);
 
   const SECTIONS = useMemo(() => {
-    const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
+    const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs', 'question_paper']);
     // The chapter list is the syllabus structure, not a notes-availability list.
     // Keep every non-Q&A chapter visible in both languages, including chapters
     // whose notes are still being prepared. The row below shows that state
@@ -112,17 +112,15 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     const notesChs = orderedChapters.filter(ch =>
       !ch.content_type || !QA_TYPES.has(ch.content_type)
     );
-    // Questions section: dedicated Q&A chapters (content_type) OR notes chapters that
-    // also have Q&A content (has_qa=true, populated by the ingestion pipeline).
+    // Questions are the question view of the same syllabus chapters shown in
+    // Notes. ChapterPage resolves the chapter's stored Q&A/PYQ source when
+    // ?tab=qa is opened, so a missing has_qa flag must not hide the chapter
+    // from this section.
     // "Full Book" is a generic ingestion artifact title used when a PDF has no TOC —
     // hide it from the Q section whenever the subject also has properly-named Q&A
     // chapters, so the Questions tab doesn't mirror the Notes tab with "Full Book" ×N.
     const _GENERIC_TITLE = /^full\s+book$/i;
-    const _allQaChs = orderedChapters.filter(ch => QA_TYPES.has(ch.content_type) || (
-      isAs
-        ? (typeof ch.has_qa_as === 'boolean' ? ch.has_qa_as : ch.has_qa)
-        : ch.has_qa
-    ));
+    const _allQaChs = orderedChapters.filter(ch => ch.content_type !== 'question_paper');
     const _hasNamedQa = _allQaChs.some(ch => !_GENERIC_TITLE.test((ch.title || '').trim()));
     const qaChs = _hasNamedQa
       ? _allQaChs.filter(ch => !_GENERIC_TITLE.test((ch.title || '').trim()))

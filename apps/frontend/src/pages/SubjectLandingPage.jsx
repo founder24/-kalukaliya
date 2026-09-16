@@ -43,11 +43,10 @@ export default function SubjectLandingPage() {
     // filter. Keep chapters visible while content is being generated so numbers
     // and names do not shift between visits.
     const notesChs = chapters;
-    const qaChs = chapters.filter(ch => (
-      isAssamese
-        ? (typeof ch.has_qa_as === 'boolean' ? ch.has_qa_as : ch.has_qa)
-        : ch.has_qa
-    ));
+    // Questions is the Q&A view of the syllabus, not a filter on whether the
+    // backend has already populated a has_qa flag. ChapterPage can resolve
+    // PYQs or note-derived questions when the student opens ?tab=qa.
+    const qaChs = chapters.filter(ch => ch.content_type !== 'question_paper');
     // Subject-level PYQ papers — read from subject.pyq_papers (not chapters)
     const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => ({
       id:          p.id || `pyq-${pi}`,
