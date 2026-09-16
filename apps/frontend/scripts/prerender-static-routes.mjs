@@ -39,7 +39,7 @@
 
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { injectPrerenderPath } from "./_prerender-marker.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -219,7 +219,10 @@ function escapeHtml(s = "") {
     .replace(/'/g, "&#39;");
 }
 
-function rewriteHead(html, { title, description, canonical, robots, ogImageAlt }) {
+export function rewriteHead(
+  html,
+  { title, description, canonical, robots, ogImageAlt },
+) {
   html = html.replace(
     /<title>[^<]*<\/title>/,
     `<title>${escapeHtml(title)}</title>`,
@@ -417,4 +420,9 @@ function main() {
   );
 }
 
-main();
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  main();
+}

@@ -18,6 +18,7 @@ import {
 } from "../../scripts/generate-static-data.mjs";
 import { injectPrerenderPath } from "../../scripts/_prerender-marker.mjs";
 import { rewriteHead } from "../../scripts/prerender-routes.mjs";
+import { rewriteHead as rewriteStaticHead } from "../../scripts/prerender-static-routes.mjs";
 
 describe("release verifier syntax", () => {
   it("parses without duplicate declarations", () => {
@@ -570,5 +571,135 @@ describe("chapter release-document SEO metadata", () => {
     expect(document).not.toContain(otherRoute);
     expect(document).not.toContain("Generic description");
     expect(document).not.toContain("Generic title");
+  });
+});
+
+describe("subject and static release-document SEO metadata", () => {
+  const subjectRoute = "/ahsec/class-12/physics";
+  const subjectCanonical = `https://syrabit.ai${subjectRoute}`;
+  const subjectTitle =
+    "Physics — AHSEC Class 12 Notes, MCQs & PYQs | Syrabit.ai";
+  const subjectDescription =
+    "Complete AHSEC Class 12 Physics notes, MCQs and solved previous-year questions.";
+  const staticRoute = "/ahsec/hs-2nd-year";
+  const staticCanonical = `https://syrabit.ai${staticRoute}`;
+  const staticTitle =
+    "AHSEC HS 2nd Year (Class 12) Notes, MCQs & PYQs — Syrabit.ai";
+  const staticDescription =
+    "Free AHSEC Class 12 notes, MCQs, definitions and solved previous-year questions for all subjects.";
+
+  const releaseShell = `<!doctype html>
+<html lang="en">
+  <head>
+    <title>Stale route title</title>
+    <meta name="description" content="Stale route description" />
+    <link rel="canonical" href="https://syrabit.ai/stale-route" />
+    <meta property="og:url" content="https://syrabit.ai/stale-route" />
+    <meta property="og:title" content="Stale route title" />
+    <meta property="og:description" content="Stale route description" />
+    <meta property="og:image:alt" content="Stale route image" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Stale route title" />
+    <meta name="twitter:description" content="Stale route description" />
+    <meta name="twitter:image" content="https://syrabit.ai/opengraph.jpg" />
+    <meta name="twitter:image:alt" content="Stale route image" />
+  </head>
+  <body><div id="root"></div></body>
+</html>`;
+
+  const count = (document, pattern) => document.match(pattern)?.length ?? 0;
+  const escapeHtml = (value) =>
+    String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  function expectRouteMetadata(document, {
+    route,
+    canonical,
+    title,
+    description,
+    imageAlt,
+  }) {
+    const escapedTitle = escapeHtml(title);
+    const escapedDescription = escapeHtml(description);
+    const escapedImageAlt = escapeHtml(imageAlt);
+
+    expect(count(document, /<title>/g)).toBe(1);
+    expect(document).toContain(`<title>${escapedTitle}</title>`);
+    expect(count(document, /<meta name="description"/g)).toBe(1);
+    expect(document).toContain(`content="${escapedDescription}"`);
+
+    expect(count(document, /<link rel="canonical"/g)).toBe(1);
+    expect(document).toContain(`<link rel="canonical" href="${canonical}" />`);
+    expect(count(document, /<meta property="og:url"/g)).toBe(1);
+    expect(document).toContain(
+      `<meta property="og:url" content="${canonical}" />`,
+    );
+    expect(count(document, /<meta property="og:title"/g)).toBe(1);
+    expect(document).toContain(`content="${escapedTitle}"`);
+    expect(count(document, /<meta property="og:description"/g)).toBe(1);
+    expect(document).toContain(`content="${escapedDescription}"`);
+    expect(count(document, /<meta property="og:image:alt"/g)).toBe(1);
+    expect(document).toContain(`content="${escapedImageAlt}"`);
+
+    expect(count(document, /<meta name="twitter:title"/g)).toBe(1);
+    expect(document).toContain(`content="${escapedTitle}"`);
+    expect(count(document, /<meta name="twitter:description"/g)).toBe(1);
+    expect(document).toContain(`content="${escapedDescription}"`);
+    expect(count(document, /<meta name="twitter:image"/g)).toBe(1);
+    expect(document).toContain(
+      'content="https://syrabit.ai/opengraph.jpg"',
+    );
+    expect(count(document, /<meta name="twitter:image:alt"/g)).toBe(1);
+    expect(document).toContain(`content="${escapedImageAlt}"`);
+
+    expect(document).toContain(
+      `<meta name="syrabit-prerender-path" content="${route}" />`,
+    );
+    expect(document).not.toContain("Stale route");
+    expect(document).not.toContain("stale-route");
+  }
+
+  it("keeps subject metadata route-specific through subject prerender assembly", () => {
+    const document = injectPrerenderPath(
+      rewriteHead(releaseShell, {
+        title: subjectTitle,
+        description: subjectDescription,
+        canonical: subjectCanonical,
+        ogImageAlt: `${subjectTitle} — Syrabit.ai`,
+      }),
+      subjectRoute,
+    );
+
+    expectRouteMetadata(document, {
+      route: subjectRoute,
+      canonical: subjectCanonical,
+      title: subjectTitle,
+      description: subjectDescription,
+      imageAlt: `${subjectTitle} — Syrabit.ai`,
+    });
+  });
+
+  it("keeps static metadata route-specific through static prerender assembly", () => {
+    const document = injectPrerenderPath(
+      rewriteStaticHead(releaseShell, {
+        title: staticTitle,
+        description: staticDescription,
+        canonical: staticCanonical,
+        ogImageAlt: "AHSEC Class 12 study materials — Syrabit.ai",
+      }),
+      staticRoute,
+    );
+
+    expectRouteMetadata(document, {
+      route: staticRoute,
+      canonical: staticCanonical,
+      title: staticTitle,
+      description: staticDescription,
+      imageAlt: "AHSEC Class 12 study materials — Syrabit.ai",
+    });
   });
 });
