@@ -104,3 +104,4 @@
 - [Chapter PYQ page order](pyq-page-order.md) — chapter image records are ordered one-page entries; normalize legacy grouped data only at the viewer boundary
 - [Staff chapter PYQ uploads](staff-pyq-page-upload.md) — admin editor page images must use the Worker staff chapter route, not retired legacy admin PYQ endpoints
 - [Chapter question-bank rollout](question-bank-rollout.md) — keep legacy PYQs visible during backend rollout; never fabricate missing solutions
+- [Cloudflare live audit migration drift](cloudflare-live-audit.md) — Worker health can pass while production D1 lags behind code; compare migrations and require chat smoke evidence
