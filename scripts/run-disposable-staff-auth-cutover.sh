@@ -33,7 +33,17 @@ reap_expired_fixtures() {
 
 cleanup_fixture() {
   local cleanup_sql
-  cleanup_sql="DELETE FROM refresh_token_claims WHERE user_id = '${fixture_id}';
+  cleanup_sql="DELETE FROM password_reset_tokens WHERE user_id = '${fixture_id}';
+    DELETE FROM quota_usage WHERE user_id = '${fixture_id}';
+    DELETE FROM payments WHERE user_id = '${fixture_id}';
+    DELETE FROM transactions WHERE user_id = '${fixture_id}';
+    DELETE FROM refund_requests WHERE user_id = '${fixture_id}';
+    DELETE FROM payments_pending WHERE user_id = '${fixture_id}';
+    DELETE FROM chat_feedback WHERE user_id = '${fixture_id}';
+    DELETE FROM refresh_token_claims WHERE user_id = '${fixture_id}';
+    DELETE FROM chat_request_claims WHERE user_id = '${fixture_id}';
+    DELETE FROM chats WHERE user_id = '${fixture_id}';
+    DELETE FROM memory_brain WHERE user_id = '${fixture_id}';
     DELETE FROM content_audit_log WHERE user_id = '${fixture_id}' OR target_id = '${fixture_id}';
     DELETE FROM analytics_events WHERE id = '${telemetry_id}' OR route_path = '${telemetry_route}';
     DELETE FROM users WHERE id = '${fixture_id}' OR email = '${fixture_email}';

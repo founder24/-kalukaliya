@@ -44,11 +44,11 @@ function parseSse(text) {
     .filter(Boolean);
 }
 
-async function streamChat(body) {
+async function streamChat(body, headers = authHeaders) {
   const response = await fetch(`${origin}/api/v1/chat/stream`, {
     method: 'POST',
     headers: {
-      ...authHeaders,
+      ...headers,
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
     },
@@ -58,6 +58,7 @@ async function streamChat(body) {
   const text = await response.text();
   const events = parseSse(text);
   assert(response.status === 200, `chat stream returned HTTP ${response.status}: ${text.slice(0, 300)}`);
+  assert(events[0]?.event === 'source_card', `chat stream first event was ${events[0]?.event ?? 'missing'}, expected source_card`);
   assert(events.some(event => event.event === 'source_card'), 'chat stream did not emit source_card');
   assert(events.some(event => typeof event.content === 'string' && event.content.length > 0), 'chat stream emitted no content');
   const done = events.find(event => event.event === 'syrabit_done');
@@ -69,6 +70,8 @@ async function streamChat(body) {
 const requestPrefix = `release_${Date.now()}_${randomUUID().replaceAll('-', '')}`;
 const englishRequestId = `${requestPrefix}_en`;
 const sessionId = `${requestPrefix}_session`;
+const anonymousRequestId = `${requestPrefix}_anon`;
+const anonymousId = `anon_${randomUUID().replaceAll('-', '')}`;
 
 const library = await request('/api/v1/content/library-bundle?slim=1', {
   headers: { Accept: 'application/json' },
@@ -84,6 +87,16 @@ assert(search.response.status === 200, `content search returned HTTP ${search.re
 assert(search.body?.available === true && Array.isArray(search.body.results), 'live content search is unavailable');
 assert(search.body.results.length > 0, 'live content search returned no physics results');
 console.log(`[live-chat] content search: ${search.body.results.length} results`);
+
+const anonymous = await streamChat({
+  message: 'Explain one key idea from this subject in two short sentences.',
+  lang: 'en',
+  client_request_id: anonymousRequestId,
+}, {
+  'X-Anon-ID': anonymousId,
+});
+assert(anonymous.done.lang === 'en', `Anonymous stream reported lang=${anonymous.done.lang}`);
+console.log('[live-chat] anonymous stream: first source card, content, and completion passed');
 
 const englishBody = {
   message: 'Explain one key idea from this subject in two short sentences.',

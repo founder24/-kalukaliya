@@ -62,6 +62,7 @@ fi
 
 run_disposable_staff_auth_check() {
   local required_var cookie_jar login_body response headers status access_token refresh_token now
+  local refresh_body refreshed_tokens chat_body chat_request_id
   local -a access_headers
   for required_var in \
     CUTOVER_STAFF_EMAIL CUTOVER_STAFF_PASSWORD CUTOVER_STAFF_LEASE_EXPIRES_AT \
@@ -167,6 +168,112 @@ PY
   status=$(curl --silent --show-error --max-time 30 \
     "${access_headers[@]}" \
     --header "Authorization: Bearer ${access_token}" \
+    --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
+    "${EDGE_BASE}/api/v1/auth/me")
+  test "$status" = "200" || {
+    echo "Disposable /auth/me check failed with HTTP ${status}; response suppressed." >&2
+    exit 1
+  }
+  grep -qi '^x-syrabit-route: worker-native' "$headers"
+  python3 - "$response" "$CUTOVER_STAFF_EMAIL" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+assert payload.get("email") == sys.argv[2]
+assert payload.get("id")
+PY
+
+  for profile_path in users/me users/profile; do
+    status=$(curl --silent --show-error --max-time 30 \
+      "${access_headers[@]}" \
+      --header "Authorization: Bearer ${access_token}" \
+      --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
+      "${EDGE_BASE}/api/v1/${profile_path}")
+    test "$status" = "200" || {
+      echo "Disposable protected profile ${profile_path} failed with HTTP ${status}; response suppressed." >&2
+      exit 1
+    }
+    grep -qi '^x-syrabit-route: worker-native' "$headers"
+    python3 - "$response" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+assert payload.get("id")
+PY
+  done
+
+  refresh_body=$(CUTOVER_REFRESH_TOKEN="$refresh_token" python3 -c '
+import json, os
+print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
+')
+  status=$(curl --silent --show-error --max-time 30 \
+    "${access_headers[@]}" \
+    --request POST --header 'Content-Type: application/json' \
+    --data "$refresh_body" --output "$response" --write-out '%{http_code}' \
+    "${EDGE_BASE}/api/v1/auth/refresh")
+  test "$status" = "200" || {
+    echo "Disposable refresh failed with HTTP ${status}; response suppressed." >&2
+    exit 1
+  }
+  refreshed_tokens=$(python3 - "$response" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+access = payload.get("access_token")
+refresh = payload.get("refresh_token")
+assert isinstance(access, str) and access and isinstance(refresh, str) and refresh
+print(access)
+print(refresh)
+PY
+)
+  readarray -t auth_tokens <<<"$refreshed_tokens"
+  test "${#auth_tokens[@]}" = "2" || {
+    echo "Disposable refresh response did not contain exactly two rotated session tokens." >&2
+    exit 1
+  }
+  access_token="${auth_tokens[0]}"
+  refresh_token="${auth_tokens[1]}"
+
+  chat_request_id="${fixture_id}-chat"
+  chat_body=$(CUTOVER_CHAT_REQUEST_ID="$chat_request_id" python3 -c '
+import json, os
+print(json.dumps({
+    "message": "Explain one key idea from this subject in two short sentences.",
+    "lang": "en",
+    "client_request_id": os.environ["CUTOVER_CHAT_REQUEST_ID"],
+}))
+')
+  status=$(curl --silent --show-error --max-time 60 \
+    "${access_headers[@]}" \
+    --request POST --header 'Content-Type: application/json' \
+    --header 'Accept: text/event-stream' \
+    --header "Authorization: Bearer ${access_token}" \
+    --data "$chat_body" --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
+    "${EDGE_BASE}/api/v1/chat/stream")
+  test "$status" = "200" || {
+    echo "Disposable authenticated chat failed with HTTP ${status}; response suppressed." >&2
+    exit 1
+  }
+  grep -qi '^x-syrabit-route: worker-native' "$headers" || {
+    echo "Disposable authenticated chat did not use the native Worker route." >&2
+    exit 1
+  }
+  python3 - "$response" <<'PY'
+import json, sys
+events = []
+with open(sys.argv[1], encoding="utf-8") as handle:
+    for line in handle:
+        if line.startswith("data: "):
+            events.append(json.loads(line[6:]))
+assert events and events[0].get("event") == "source_card", events
+assert any(event.get("event") == "syrabit_done" for event in events), events
+assert any(isinstance(event.get("content"), str) and event["content"] for event in events), events
+assert not any(event.get("error") for event in events), events
+PY
+
+  status=$(curl --silent --show-error --max-time 30 \
+    "${access_headers[@]}" \
+    --header "Authorization: Bearer ${access_token}" \
     --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=7")
   test "$status" = "200" || {
@@ -192,6 +299,15 @@ print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
     "${EDGE_BASE}/api/v1/auth/logout")
   test "$status" = "200" || {
     echo "Bearer logout failed with HTTP ${status}; response suppressed." >&2
+    exit 1
+  }
+  status=$(curl --silent --show-error --max-time 30 \
+    "${access_headers[@]}" \
+    --request POST --header 'Content-Type: application/json' \
+    --data "$logout_body" --output "$response" --write-out '%{http_code}' \
+    "${EDGE_BASE}/api/v1/auth/refresh")
+  test "$status" = "401" || {
+    echo "Post-logout refresh reuse returned HTTP ${status}, expected 401; response suppressed." >&2
     exit 1
   }
 

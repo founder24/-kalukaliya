@@ -220,11 +220,11 @@ describe('SubjectPage — axe accessibility audit', () => {
     });
 
     render(<SubjectPage />);
-    expect(screen.getByRole('button', { name: /প্ৰশ্ন1/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /প্ৰশ্ন2/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /প্ৰশ্ন/ }));
 
     expect(screen.getAllByText('গতি').length).toBeGreaterThan(0);
-    expect(screen.queryByRole('link', { name: /ইংৰাজী প্ৰশ্ন — Questions/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /ইংৰাজী প্ৰশ্ন — Questions/ })).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /Questions|প্ৰশ্ন|গতি/ }).some((link) =>
       link.getAttribute('href') === '/as/ahsec/class-11/english/goti?tab=qa'
     )).toBe(true);

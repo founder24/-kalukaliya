@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       validate_authenticated:
-        description: 'Require disposable authenticated API checks after deployment'
+        description: 'Required disposable authenticated API checks after deployment'
         required: false
-        default: false
+        default: true
         type: boolean
       validate_reset_delivery:
         description: 'Require a fresh disposable password-reset email proof after deployment'
@@ -25,9 +25,9 @@ on:
   workflow_call:
     inputs:
       validate_authenticated:
-        description: 'Require disposable authenticated API checks after deployment'
+        description: 'Required disposable authenticated API checks after deployment'
         required: false
-        default: false
+        default: true
         type: boolean
       validate_reset_delivery:
         description: 'Require a fresh disposable password-reset email proof after deployment'
@@ -82,6 +82,14 @@ jobs:
       - name: Validate D1 configuration
         run: |
           bash scripts/validate-d1-config.sh apps/api/wrangler.toml
+
+      - name: Require authenticated production validation
+        run: |
+          if [[ "${{ inputs.validate_authenticated }}" != "true" ]]; then
+            echo "::error::Authenticated production validation is mandatory for Cloudflare releases."
+            echo "Re-run with validate_authenticated=true after provisioning the disposable fixture secrets."
+            exit 1
+          fi
 
       - name: Validate required Cloudflare bindings and crawler routes
         run: python3 scripts/validate-cloudflare-release-config.py
@@ -226,11 +234,11 @@ jobs:
       - name: Apply D1 migrations
         run: pnpm --filter syrabit-api exec wrangler d1 migrations apply syrabit-db --remote --env production
 
-      - name: Verify atomic claims, rollout guard, and fixture lease migrations are applied
+      - name: Verify all required D1 migrations and chat quota columns are applied
         run: |
           set -euo pipefail
           applied_migrations="$(pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production --json \
-            --command "SELECT name FROM d1_migrations WHERE name IN ('0013_reset_token_cutover_nonce.sql', '0014_atomic_quota_and_refresh_claims.sql', '0015_refresh_claim_rollout_guard.sql', '0020_release_staff_auth_leases.sql') ORDER BY name")"
+            --command "SELECT name FROM d1_migrations WHERE name IN ('0013_reset_token_cutover_nonce.sql', '0014_atomic_quota_and_refresh_claims.sql', '0015_refresh_claim_rollout_guard.sql', '0020_release_staff_auth_leases.sql', '0031_adsense_reconciliation_status.sql', '0032_roi_audit_history_idx.sql', '0033_bilingual_subject_metadata.sql', '0034_referral_access_rewards.sql', '0035_chapter_slug_redirects.sql') ORDER BY name")"
           if ! printf '%s\n' "$applied_migrations" | python3 -c '
           import json
           import sys
@@ -240,6 +248,11 @@ jobs:
               "0014_atomic_quota_and_refresh_claims.sql",
               "0015_refresh_claim_rollout_guard.sql",
               "0020_release_staff_auth_leases.sql",
+              "0031_adsense_reconciliation_status.sql",
+              "0032_roi_audit_history_idx.sql",
+              "0033_bilingual_subject_metadata.sql",
+              "0034_referral_access_rewards.sql",
+              "0035_chapter_slug_redirects.sql",
           }
           found = {
               row.get("name")
@@ -258,7 +271,19 @@ jobs:
             echo "::error::Production D1 is missing required claims, rollout guard, or fixture lease migrations; refusing API Worker deployment."
             exit 1
           fi
-          echo "Production D1 reset-token, atomic claims, rollout guard, and fixture lease migrations are applied."
+          columns="$(pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db --remote --env production --json \
+            --command "SELECT name FROM pragma_table_info('chat_request_claims') WHERE name IN ('monthly_period', 'monthly_base_reserved', 'monthly_bonus_reserved') ORDER BY name")"
+          printf '%s\n' "$columns" | python3 -c '
+          import json
+          import sys
+          rows = json.load(sys.stdin)
+          required = {"monthly_period", "monthly_base_reserved", "monthly_bonus_reserved"}
+          found = {row.get("name") for result in rows for row in result.get("results", [])}
+          missing = sorted(required - found)
+          if missing:
+              raise SystemExit("Production chat_request_claims is missing: " + ", ".join(missing))
+          '
+          echo "Production D1 required migrations and chat quota columns are applied."
 
       - name: Guard refresh-token bridge cleanup safety window
         run: |
