@@ -1112,6 +1112,24 @@ async function main() {
           staticChaptersBySubjectSlug.get(`${subjectId}:${chapterSlug}`) ||
           staticChaptersBySlug.get(chapterSlug);
         if (!staticChapter || !publishedChapterPaths.has(chapterUrl)) {
+          // A stale sitemap can survive the bundle prefilter when duplicate
+          // hierarchy records share one public subject path. A definitive
+          // chapter 404 with no static recovery payload is publication drift,
+          // not a transient backend outage; remove only that path from the
+          // strict expected sets. Timeouts and other errors still fail closed.
+          if (
+            !staticChapter &&
+            publishedChapterPaths.has(chapterUrl) &&
+            /\bHTTP 404\b/.test(err.message || "")
+          ) {
+            publishedChapterPaths.delete(chapterUrl);
+            chapterExpectedPaths.delete(chapterUrl);
+            console.warn(
+              `[prerender-routes] ignoring stale sitemap chapter ${chapterUrl}: ` +
+                "chapter API returned 404 and no static curriculum fallback exists",
+            );
+            return;
+          }
           console.warn(
             `[prerender-routes] chapter data fetch failed for ${chapterUrl}: ${err.message}`,
           );
