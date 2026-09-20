@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from beanie.exceptions import CollectionWasNotInitialized
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -11,7 +11,7 @@ import json
 import asyncio
 import httpx
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import File, UploadFile, Form
 from app.models.user import User
@@ -52,6 +52,27 @@ def _enforce_chat_body_size(request: Request) -> None:
             status_code=413,
             detail="Chat request body is too large.",
         )
+
+
+def _rate_limit_headers(
+    current_count: int,
+    limit: int,
+    *,
+    retry_after: Optional[int] = None,
+) -> dict[str, str]:
+    """Build one consistent rate-limit header set for chat responses."""
+    now = datetime.now(timezone.utc)
+    next_month = (now.replace(day=28) + timedelta(days=4)).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    )
+    headers = {
+        "X-RateLimit-Limit": str(limit),
+        "X-RateLimit-Remaining": str(max(0, limit - current_count)),
+        "X-RateLimit-Reset": str(int(next_month.timestamp())),
+    }
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
+    return headers
 
 
 def _chat_correlation_id(http_request: Optional[Request]) -> str:
@@ -221,6 +242,7 @@ async def chat(
     request: ChatRequest,
     user: Optional[User] = Depends(get_current_user_optional),
     http_request: Request = None,
+    response: Response = None,
     _body_size_check: None = Depends(_enforce_chat_body_size),
 ):
     """
@@ -483,17 +505,19 @@ async def chat(
 
             # Check rate limit result - always enforced, even for cache hits
             allowed, current_count, limit, limit_type = rate_result
+            if response is not None:
+                response.headers.update(_rate_limit_headers(current_count, limit))
             # Admin/staff users are never rate-limited
             _is_admin = user and getattr(user, "role", None) in ("admin", "staff")
             if not allowed and not _is_admin:
                 raise HTTPException(
                     status_code=429,
                     detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
-                    headers={
-                        "X-RateLimit-Limit": str(limit),
-                        "X-RateLimit-Remaining": "0",
-                        "Retry-After": "3600",
-                    },
+                    headers=_rate_limit_headers(
+                        current_count,
+                        limit,
+                        retry_after=3600,
+                    ),
                 )
 
             # GreetingRAG fast-path — bypass cache + LLM for known greetings/meta queries.
@@ -917,11 +941,7 @@ async def chat_stream(
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
-            headers={
-                "X-RateLimit-Limit": str(limit),
-                "X-RateLimit-Remaining": "0",
-                "Retry-After": "3600",
-            },
+            headers=_rate_limit_headers(current_count, limit, retry_after=3600),
         )
 
     # Sanitize input to prevent prompt injection
@@ -1773,6 +1793,7 @@ async def chat_stream(
             "Connection": "keep-alive",
             "X-Content-Type-Options": "nosniff",
             "X-Accel-Buffering": "no",
+            **_rate_limit_headers(current_count, limit),
         },
     )
 
@@ -1866,20 +1887,24 @@ async def get_chat_messages(
     skip: int = 0,
     limit: int = 50,
     user: Optional[User] = Depends(get_current_user_optional),
+    http_request: Request = None,
 ):
     """Get paginated messages for a specific chat session"""
     from app.models.chat import Chat
 
-    chat = await Chat.find_one({"session_id": session_id})
+    if user:
+        owner_id = str(user.id)
+    else:
+        anon_id = resolve_anon_id(http_request)
+        if not anon_id or not ANON_ID_PATTERN.match(anon_id):
+            raise HTTPException(status_code=401, detail="Anonymous identity required")
+        owner_id = anon_id
+
+    # Bind the lookup itself to the request identity.  Querying by session_id
+    # first would let an unauthenticated caller probe another user's session.
+    chat = await Chat.find_one({"session_id": session_id, "user_id": owner_id})
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
-
-    # Verify ownership: authenticated chats require the owner to be logged in
-    if chat.user_id:
-        if not user:
-            raise HTTPException(status_code=401, detail="Authentication required")
-        if chat.user_id != str(user.id):
-            raise HTTPException(status_code=403, detail="Access denied")
 
     # Paginate messages
     limit = min(limit, 200)

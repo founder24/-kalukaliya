@@ -56,6 +56,19 @@ def test_chat_body_size_guard_rejects_oversized_content_length():
     assert exc_info.value.status_code == 413
 
 
+def test_rate_limit_headers_include_remaining_and_month_reset():
+    from app.api.v1.chat import _rate_limit_headers
+
+    headers = _rate_limit_headers(3, 30)
+    assert headers["X-RateLimit-Limit"] == "30"
+    assert headers["X-RateLimit-Remaining"] == "27"
+    assert int(headers["X-RateLimit-Reset"]) > 0
+
+    exhausted = _rate_limit_headers(31, 30, retry_after=3600)
+    assert exhausted["X-RateLimit-Remaining"] == "0"
+    assert exhausted["Retry-After"] == "3600"
+
+
 @pytest.mark.anyio
 async def test_chat_rate_limit_returns_429(client: AsyncClient):
     """Test rate limiting returns 429"""

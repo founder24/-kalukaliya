@@ -229,3 +229,35 @@ async def test_anon_invalid_anon_id_conversations_alias_returns_empty(
     assert data["chats"] == []
     assert data["pagination"]["total"] == 0
     mock_find.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_anon_get_messages_is_bound_to_request_identity(anon_client: AsyncClient):
+    """Anonymous message reads only return the matching anon-owned session."""
+    mock_chat = _make_mock_chat("anon-session", VALID_ANON_ID)
+
+    with patch(
+        "app.models.chat.Chat.find_one",
+        new_callable=AsyncMock,
+        return_value=mock_chat,
+    ) as find_one:
+        response = await anon_client.get(
+            "/api/v1/chat/anon-session/messages",
+            headers={"x-anon-id": VALID_ANON_ID},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["messages"][0]["content"] == "hello"
+    find_one.assert_awaited_once_with(
+        {"session_id": "anon-session", "user_id": VALID_ANON_ID}
+    )
+
+
+@pytest.mark.anyio
+async def test_anon_get_messages_requires_valid_identity(anon_client: AsyncClient):
+    """A session id alone cannot be used to read anonymous chat history."""
+    with patch("app.models.chat.Chat.find_one", new_callable=AsyncMock) as find_one:
+        response = await anon_client.get("/api/v1/chat/anon-session/messages")
+
+    assert response.status_code == 401
+    find_one.assert_not_awaited()
