@@ -20,7 +20,10 @@ cd "$ROOT"
 
 # ─── Configuration ────────────────────────────────────────────────────────
 
-ENV_SHARED=".env.shared"
+# The runtime .env.shared file is intentionally untracked.  CI validates
+# against this committed, value-free contract instead of requiring secrets in
+# the repository.  ENV_SHARED_FILE is available for local checks.
+ENV_SHARED="${ENV_SHARED_FILE:-.github/env.shared.template}"
 BACKEND_DIR="apps/backend/app"
 EDGE_DIR="apps/edge/src"
 FRONTEND_DIR="apps/frontend"

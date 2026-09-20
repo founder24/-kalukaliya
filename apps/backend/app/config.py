@@ -285,6 +285,12 @@ class Settings(BaseSettings):
                 )
 
         if self.APP_ENV in ("production", "staging"):
+            def require_production_value(label: str, value: Optional[str]) -> None:
+                if not value:
+                    msg = f"{label} is required in production"
+                    self.startup_errors.append(msg)
+                    logger.error(f"CONFIG ERROR: {msg}")
+
             if not self.JWT_SECRET:
                 msg = "JWT_SECRET is required in production"
                 self.startup_errors.append(msg)
@@ -335,6 +341,26 @@ class Settings(BaseSettings):
                     msg = "JWT_PUBLIC_KEY is required when JWT_ALGORITHM is RS256"
                     self.startup_errors.append(msg)
                     logger.error(f"CONFIG ERROR: {msg}")
+            # These are the active runtime dependencies.  Vertex/Sarvam/Azure
+            # settings from the retired deployment are intentionally not
+            # required here.
+            require_production_value("MONGODB_URI", self.MONGODB_URI)
+            if self.TRUST_EDGE_AUTH:
+                require_production_value("EDGE_SHARED_SECRET", self.EDGE_SHARED_SECRET)
+                if not (self.WORKERS_AI_INTERNAL_URL or self.CF_WORKER_URL):
+                    require_production_value(
+                        "WORKERS_AI_INTERNAL_URL or CF_WORKER_URL",
+                        None,
+                    )
+            if self.RAG_LEGACY_FALLBACK_ENABLED:
+                require_production_value(
+                    "CF_ACCOUNT_ID or CLOUDFLARE_ACCOUNT_ID",
+                    self.CF_ACCOUNT_ID or self.CLOUDFLARE_ACCOUNT_ID,
+                )
+                require_production_value(
+                    "CF_WORKER_AI_TOKEN or CF_API_TOKEN",
+                    self.CF_WORKER_AI_TOKEN or self.CF_API_TOKEN,
+                )
             if not self.MONGODB_URI:
                 logger.warning("MONGODB_URI is not set in production")
             if not self.EDGE_SHARED_SECRET:

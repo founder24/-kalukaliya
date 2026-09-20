@@ -395,6 +395,18 @@ def create_app() -> FastAPI:
         response.headers["Strict-Transport-Security"] = (
             "max-age=31536000; includeSubDomains"
         )
+        # This API never serves executable browser content.  A restrictive
+        # policy prevents an accidentally reflected response from becoming an
+        # execution context when the backend is accessed directly.
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; frame-ancestors 'none'; "
+            "base-uri 'none'; form-action 'none'"
+        )
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Permissions-Policy"] = (
+            "accelerometer=(), autoplay=(), camera=(), geolocation=(), "
+            "microphone=(), payment=(), usb=()"
+        )
         logger.info(
             "request_completed",
             extra={
