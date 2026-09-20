@@ -76,10 +76,15 @@ async def _csrf_check(request: Request):
                 parsed = urlparse(referer)
                 if parsed.scheme and parsed.netloc:
                     origin = f"{parsed.scheme}://{parsed.netloc}"
-        # Skip CSRF check if no Origin/Referer header is present.
-        # CSRF protection is only meaningful when a browser sends a cross-origin
-        # request. API clients and test runners do not send Origin headers.
+        # A cookie-authenticated mutation without either browser provenance
+        # header is ambiguous and must fail closed. Bearer-authenticated API
+        # clients do not carry the session cookie and remain compatible.
         if not origin:
+            if request.cookies.get("syrabit_admin_session"):
+                raise HTTPException(
+                    status_code=403,
+                    detail="CSRF validation failed: origin or referer required",
+                )
             return
         # Use is_origin_allowed() which handles wildcard patterns for Replit dev
         # domains (e.g. https://*.sisko.replit.dev) and CF Pages preview URLs,
