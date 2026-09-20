@@ -615,15 +615,15 @@ adminContentRouter.get('/content/chapters', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
   const subjectId = c.req.query('subject_id');
   if (!subjectId) return c.json({ detail: 'subject_id is required' }, 422);
-  return c.redirect(new URL(`/api/v1/admin/content/chapters/${encodeURIComponent(subjectId)}`, c.req.url).toString(), 307);
+  return c.redirect(new URL(`/api/v1/staff/content/chapters/${encodeURIComponent(subjectId)}`, c.req.url).toString(), 307);
 });
 adminContentRouter.patch('/content/chapters/:chapterId', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
-  return c.redirect(new URL(`/api/v1/admin/content/chapter/${encodeURIComponent(c.req.param('chapterId'))}`, c.req.url).toString(), 307);
+  return c.redirect(new URL(`/api/v1/staff/content/chapter/${encodeURIComponent(c.req.param('chapterId'))}`, c.req.url).toString(), 307);
 });
 adminContentRouter.delete('/content/chapters/:chapterId', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
-  return c.redirect(new URL(`/api/v1/admin/content/chapter/${encodeURIComponent(c.req.param('chapterId'))}`, c.req.url).toString(), 307);
+  return c.redirect(new URL(`/api/v1/staff/content/chapter/${encodeURIComponent(c.req.param('chapterId'))}`, c.req.url).toString(), 307);
 });
 
 adminContentRouter.post('/content/chapters/:chapterId/generate-notes', async c => {

@@ -1,0 +1,1 @@
+ALTER TABLE subjects ADD COLUMN name_as TEXT;

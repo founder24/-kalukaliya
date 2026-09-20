@@ -1298,7 +1298,7 @@ function ChapterEditor({ chapterId, subjectName, subjectContext, onClose, onSave
 
 // ── Chapters view ─────────────────────────────────────────────────────────────
 
-function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBack, onEditChapter, onReindexChapter, onChapterCreated, user }) {
+function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBack, onEditChapter, onReindexChapter, onChapterCreated, onChapterDeleted, user }) {
   const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400';
   const canPublish = canStaffCapability(user, 'content:publish');
   const [search, setSearch] = useState('');
@@ -1322,6 +1322,7 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
       const payload = {
         ...newChapterForm,
         subject_id: subject.id,
+        meta_description: newChapterForm.description,
         chapter_number: newChapterForm.chapter_number ? parseInt(newChapterForm.chapter_number) : undefined,
       };
       payload.status = normalizeStaffChapterCreateStatus(
@@ -1337,6 +1338,17 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
       toast.error(err?.response?.data?.detail || 'Create failed');
     } finally {
       setCreatingChapter(false);
+    }
+  };
+
+  const handleDeleteChapter = async (chapter) => {
+    if (!window.confirm(`Delete "${chapter.title}"? This permanently removes its content, PYQ pages, and RAG data.`)) return;
+    try {
+      await api().delete(`/staff/content/chapter/${chapter.id}`);
+      onChapterDeleted?.(chapter.id);
+      toast.success('Chapter deleted');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Delete failed');
     }
   };
 
@@ -1733,6 +1745,9 @@ function ChaptersView({ subject, subjectContext, chapters, loadingChapters, onBa
                   <button onClick={() => onEditChapter(ch.id)} className="flex-shrink-0 flex items-center gap-1 px-2.5 py-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 transition-colors mt-0.5 min-h-[36px] min-w-[36px] justify-center">
                     <EditIcon /><span className="hidden sm:inline">Edit</span>
                   </button>
+                   <button onClick={() => handleDeleteChapter(ch)} className="flex-shrink-0 flex items-center gap-1 px-2.5 py-2 sm:px-3 sm:py-1.5 rounded-lg text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 transition-colors mt-0.5 min-h-[36px] min-w-[36px] justify-center">
+                     <TrashIcon /><span className="hidden sm:inline">Delete</span>
+                   </button>
                 </div>
               );
             })}
@@ -2161,7 +2176,7 @@ function SubjectPYQsView({ subjectId }) {
 
 // ── Subjects view ─────────────────────────────────────────────────────────────
 
-function SubjectsView({ subjects, boards, classes, streams, loading, error, onRetry, onSelectSubject, onSubjectCreated }) {
+function SubjectsView({ subjects, boards, classes, streams, loading, error, onRetry, onSelectSubject, onSubjectCreated, onSubjectUpdated, onSubjectDeleted }) {
   const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400';
   const [search,       setSearch]       = useState('');
   const [filterBoard,  setFilterBoard]  = useState('');
@@ -2185,6 +2200,36 @@ function SubjectsView({ subjects, boards, classes, streams, loading, error, onRe
       toast.error(err?.response?.data?.detail || 'Create failed');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleEditSubject = async (subject) => {
+    const name = window.prompt('Subject name (English)', subject.name || '');
+    if (name === null) return;
+    if (!name.trim()) { toast.error('Name is required'); return; }
+    const nameAs = window.prompt('Subject name (Assamese)', subject.name_as || '') ?? '';
+    const description = window.prompt('Description', subject.description || '') ?? '';
+    const status = window.prompt('Status: draft or published', subject.status || 'draft') ?? subject.status;
+    if (!['draft', 'published'].includes(status)) { toast.error('Status must be draft or published'); return; }
+    try {
+      await api().patch(`/staff/content/subjects/${subject.id}`, {
+        name: name.trim(), name_as: nameAs.trim(), description: description.trim(), status,
+      });
+      onSubjectUpdated?.({ ...subject, name: name.trim(), name_as: nameAs.trim() || null, description: description.trim() || null, status });
+      toast.success('Subject updated');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Update failed');
+    }
+  };
+
+  const handleDeleteSubject = async (subject) => {
+    if (!window.confirm(`Delete "${subject.name}" and all its chapters, PYQs, and RAG data? This cannot be undone.`)) return;
+    try {
+      await api().delete(`/staff/content/subjects/${subject.id}`);
+      onSubjectDeleted?.(subject.id);
+      toast.success('Subject deleted');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Delete failed');
     }
   };
 
@@ -2417,6 +2462,8 @@ function SubjectsView({ subjects, boards, classes, streams, loading, error, onRe
                 boards={boards}
                 classes={classes}
                 onClick={() => onSelectSubject(subj)}
+                onEdit={() => handleEditSubject(subj)}
+                onDelete={() => handleDeleteSubject(subj)}
               />
             ))}
           </div>
@@ -2426,21 +2473,29 @@ function SubjectsView({ subjects, boards, classes, streams, loading, error, onRe
   );
 }
 
-function SubjectCard({ subject, boards, classes, onClick }) {
+function SubjectCard({ subject, boards, classes, onClick, onEdit, onDelete }) {
   const board = boards.find(b => b.id === subject.board_id);
   const cls   = classes.find(c => c.id === subject.class_id);
   // stream_name is resolved server-side and returned on the subject object
   const courseName = subject.stream_name || null;
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && onClick()}
       className="w-full min-w-0 overflow-hidden text-left p-4 bg-white rounded-2xl border border-gray-100 hover:border-violet-200 hover:shadow-md transition-all group"
     >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-50 to-violet-100 flex items-center justify-center text-violet-600 flex-shrink-0"><BookIcon /></div>
-        <StatusBadge status={subject.status} />
+        <div className="flex items-center gap-1.5">
+          <StatusBadge status={subject.status} />
+          <button type="button" onClick={e => { e.stopPropagation(); onEdit(); }} className="p-1.5 rounded-lg text-gray-400 hover:text-violet-700 hover:bg-violet-50" title="Edit subject"><EditIcon /></button>
+          <button type="button" onClick={e => { e.stopPropagation(); onDelete(); }} className="p-1.5 rounded-lg text-gray-400 hover:text-red-700 hover:bg-red-50" title="Delete subject"><TrashIcon /></button>
+        </div>
       </div>
       <div className="font-semibold text-gray-900 text-sm leading-snug group-hover:text-violet-700 transition-colors line-clamp-2 mb-2 break-words">{subject.name}</div>
+      {subject.name_as && <div className="text-xs text-gray-500 line-clamp-1 mb-2">{subject.name_as}</div>}
       {/* Hierarchy breadcrumb: Board → Class → Course */}
       <div className="flex items-center gap-1 flex-wrap text-[10px] text-gray-400 min-w-0">
         {board && <span className="px-1.5 py-0.5 rounded bg-gray-50 border border-gray-100 truncate max-w-[7rem]" title={board.name}>{board.name}</span>}
@@ -2449,7 +2504,7 @@ function SubjectCard({ subject, boards, classes, onClick }) {
         {(cls && courseName) && <span className="text-gray-300 flex-shrink-0">›</span>}
         {courseName && <span className="px-1.5 py-0.5 rounded bg-violet-50 border border-violet-100 text-violet-500 truncate max-w-[7rem]" title={courseName}>{courseName}</span>}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -2601,6 +2656,24 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
     setSubjects(prev => [...prev, newSubj]);
   }, []);
 
+  const handleSubjectUpdated = useCallback((updatedSubject) => {
+    setSubjects(prev => prev.map(subject => subject.id === updatedSubject.id ? updatedSubject : subject));
+    setSelectedSubject(prev => prev?.id === updatedSubject.id ? { ...prev, ...updatedSubject } : prev);
+  }, []);
+
+  const handleSubjectDeleted = useCallback((subjectId) => {
+    setSubjects(prev => prev.filter(subject => subject.id !== subjectId));
+    if (selectedSubject?.id === subjectId) {
+      setSelectedSubject(null);
+      setChapters([]);
+      setView('subjects');
+    }
+  }, [selectedSubject]);
+
+  const handleChapterDeleted = useCallback((chapterId) => {
+    setChapters(prev => prev.filter(chapter => chapter.id !== chapterId));
+  }, []);
+
   const handleChapterCreated = useCallback((newCh) => {
     setChapters(prev => {
       const inserted = [...prev, newCh];
@@ -2721,12 +2794,12 @@ export default function StaffDashboard({ adminCookieAccess = false }) {
             />
           )}
           {view === 'subjects' && (
-            <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} error={contentError} onRetry={loadContent} onSelectSubject={selectSubject} onSubjectCreated={handleSubjectCreated} />
+             <SubjectsView subjects={subjects} boards={boards} classes={classes} streams={streams} loading={loading} error={contentError} onRetry={loadContent} onSelectSubject={selectSubject} onSubjectCreated={handleSubjectCreated} onSubjectUpdated={handleSubjectUpdated} onSubjectDeleted={handleSubjectDeleted} />
           )}
           {view === 'chapters' && selectedSubject && (
             chapterError
               ? <div className="p-8 text-center"><p className="text-sm font-semibold text-red-700">{chapterError}</p><button type="button" onClick={() => selectSubject(selectedSubject)} className="mt-4 px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-semibold">Try again</button></div>
-              : <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} onReindexChapter={handleReindexChapter} onChapterCreated={handleChapterCreated} user={effectiveUser} />
+              : <ChaptersView subject={selectedSubject} subjectContext={subjectContext} chapters={chapters} loadingChapters={loadingChapters} onBack={() => handleViewChange('subjects')} onEditChapter={setEditingChapterId} onReindexChapter={handleReindexChapter} onChapterCreated={handleChapterCreated} onChapterDeleted={handleChapterDeleted} user={effectiveUser} />
           )}
         </main>
       </div>

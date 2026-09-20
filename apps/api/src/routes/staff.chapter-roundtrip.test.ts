@@ -394,6 +394,41 @@ describe('Staff chapter edit round-trip through D1', () => {
     expect(await response.json()).toEqual(expect.any(Array));
   });
 
+  it('persists bilingual subject metadata and validates the selected hierarchy', async () => {
+    const response = await workerFetch(new Request('http://worker/api/v1/staff/content/subjects', {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({
+        name: 'Chemistry Contract',
+        name_as: 'ৰসায়ন চুক্তি',
+        board_id: 'b-test',
+        class_id: 'c-test',
+        stream_id: 's-test',
+        description: 'A subject created by the staff contract test.',
+        status: 'draft',
+      }),
+    }));
+    expect(response.status).toBe(201);
+    const created = await response.json() as { id: string; name_as: string; board_id: string; class_id: string };
+    expect(created.name_as).toBe('ৰসায়ন চুক্তি');
+    expect(created.board_id).toBe('b-test');
+    expect(created.class_id).toBe('c-test');
+
+    const subjects = await workerFetch(new Request('http://worker/api/v1/staff/content/subjects', {
+      headers: authHeaders(token),
+    }));
+    expect(subjects.status).toBe(200);
+    expect((await subjects.json() as Array<{ id: string; name_as: string }>).find(item => item.id === created.id))
+      .toMatchObject({ name_as: 'ৰসায়ন চুক্তি' });
+
+    const mismatch = await workerFetch(new Request('http://worker/api/v1/staff/content/subjects', {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({ name: 'Invalid hierarchy', board_id: 'wrong', stream_id: 's-test' }),
+    }));
+    expect(mismatch.status).toBe(422);
+  });
+
   // ── Step 1: Create chapter ──────────────────────────────────────────────────
 
   it('Step 1 — POST creates a chapter and returns 201', async () => {
@@ -411,6 +446,23 @@ describe('Staff chapter edit round-trip through D1', () => {
     const body = await res.json() as { id: string };
     expect(typeof body.id).toBe('string');
     chapterId = body.id;
+  });
+
+  it('returns the chapter-list fields consumed by the staff dashboard', async () => {
+    const res = await workerFetch(new Request(`http://worker/api/v1/staff/content/chapters/${subjectId}`, {
+      headers: authHeaders(token),
+    }));
+    expect(res.status).toBe(200);
+    const chapter = (await res.json() as Array<Record<string, unknown>>).find(row => row.id === chapterId);
+    expect(chapter).toMatchObject({
+      has_content_en: false,
+      has_content_as: false,
+      has_qa_rag_sections: false,
+      has_pyq_pdf: false,
+      has_pyq_papers: false,
+      qa_rag_stale: false,
+      pyq_rag_stale: false,
+    });
   });
 
   // ── Step 2: PATCH with real content ────────────────────────────────────────
