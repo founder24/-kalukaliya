@@ -14,6 +14,7 @@ from typing import AsyncGenerator
 import httpx
 
 from app.config import settings
+from app.core.circuit_breaker import workers_ai_circuit_breaker
 from app.services.ai.note_quality import validate_generated_notes
 
 logger = logging.getLogger(__name__)
@@ -61,26 +62,40 @@ class WorkersAIClient:
             "Content-Type": "application/json",
         }
 
-        last_error: Exception | None = None
-        for attempt in range(2):
-            try:
-                response = await self._client.post(self.endpoint, headers=headers, json=payload)
-                response.raise_for_status()
-                body = response.json()
-                text = str(body.get("text") or "").strip()
-                if not text:
-                    raise RuntimeError("Workers AI returned an empty generation")
-                return text
-            except (httpx.TimeoutException, httpx.HTTPStatusError, ValueError, RuntimeError) as exc:
-                last_error = exc
-                status = getattr(getattr(exc, "response", None), "status_code", None)
-                retryable = status is None or status in (429, 500, 502, 503, 504)
-                if attempt == 0 and retryable:
-                    await asyncio.sleep(1.5)
-                    continue
-                break
+        async def _generate_with_retry() -> str:
+            last_error: Exception | None = None
+            for attempt in range(2):
+                try:
+                    response = await self._client.post(
+                        self.endpoint,
+                        headers=headers,
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    body = response.json()
+                    text = str(body.get("text") or "").strip()
+                    if not text:
+                        raise RuntimeError("Workers AI returned an empty generation")
+                    return text
+                except (
+                    httpx.TimeoutException,
+                    httpx.HTTPStatusError,
+                    ValueError,
+                    RuntimeError,
+                ) as exc:
+                    last_error = exc
+                    status = getattr(getattr(exc, "response", None), "status_code", None)
+                    retryable = status is None or status in (429, 500, 502, 503, 504)
+                    if attempt == 0 and retryable:
+                        await asyncio.sleep(1.5)
+                        continue
+                    break
 
-        raise RuntimeError(f"Workers AI generation failed: {last_error}") from last_error
+            raise RuntimeError(
+                f"Workers AI generation failed: {last_error}"
+            ) from last_error
+
+        return await workers_ai_circuit_breaker.call(_generate_with_retry)
 
     async def generate_curriculum_notes(
         self,

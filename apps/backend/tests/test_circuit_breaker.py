@@ -4,6 +4,7 @@ Circuit Breaker Tests: Resilience Pattern Validation
 
 import pytest
 import asyncio
+from unittest.mock import AsyncMock, patch
 from app.core.circuit_breaker import CircuitBreaker, CircuitState, CircuitBreakerError
 
 
@@ -127,3 +128,36 @@ class TestCircuitBreaker:
         assert status["state"] == "CLOSED"
         assert status["failure_count"] == 0
         assert status["failure_threshold"] == 5
+
+    @pytest.mark.asyncio
+    async def test_workers_ai_client_routes_generation_through_breaker(self, monkeypatch):
+        from app.services.ai import workers_ai_client as module
+
+        monkeypatch.setattr(module.settings, "EDGE_SHARED_SECRET", "test-edge-secret")
+        response = AsyncMock()
+        response.json.return_value = {"text": "generated"}
+        response.raise_for_status.return_value = None
+
+        async def invoke(func, *args, **kwargs):
+            return await func(*args, **kwargs)
+
+        client = module.WorkersAIClient()
+        try:
+            with (
+                patch.object(
+                    client._client,
+                    "post",
+                    new=AsyncMock(return_value=response),
+                ),
+                patch.object(
+                    module.workers_ai_circuit_breaker,
+                    "call",
+                    new=AsyncMock(side_effect=invoke),
+                ) as breaker_call,
+            ):
+                result = await client.generate("system", "question")
+
+            assert result == "generated"
+            breaker_call.assert_awaited_once()
+        finally:
+            await client.close()
