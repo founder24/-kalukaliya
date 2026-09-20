@@ -33,6 +33,26 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Chat"])
 
+MAX_CHAT_BODY_BYTES = 64 * 1024
+MAX_CONTEXT_MESSAGE_BYTES = 8 * 1024
+MAX_CONTEXT_MESSAGES = 10
+
+
+def _enforce_chat_body_size(request: Request) -> None:
+    """Reject oversized JSON before it reaches the chat pipeline."""
+    raw_length = request.headers.get("content-length")
+    if raw_length is None:
+        return
+    try:
+        content_length = int(raw_length)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
+    if content_length > MAX_CHAT_BODY_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Chat request body is too large.",
+        )
+
 
 def _chat_correlation_id(http_request: Optional[Request]) -> str:
     """Return a non-user-derived identifier for chat observability."""
@@ -94,7 +114,10 @@ class ChatRequest(BaseModel):
     # conversation_id is the legacy frontend key — coalesced into session_id
     # by the model_validator below so existing clients keep working.
     conversation_id: Optional[str] = None
-    context_messages: List[dict] = Field(default=[], max_length=10)
+    context_messages: List[dict] = Field(
+        default_factory=list,
+        max_length=MAX_CONTEXT_MESSAGES,
+    )
     # Card context — set when user asks from within a chapter card.
     # chapter_id biases RAG retrieval toward the active chapter when the
     # topic matcher confidence is low/none (spec §1 "card context").
@@ -140,6 +163,34 @@ class ChatRequest(BaseModel):
             raise ValueError("message must not exceed 2000 characters")
         return v
 
+    @field_validator("context_messages")
+    @classmethod
+    def validate_context_messages(cls, value: List[dict]) -> List[dict]:
+        """Bound nested history items as well as the list length."""
+        total_bytes = 0
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError("context_messages items must be objects")
+            try:
+                item_bytes = len(
+                    json.dumps(
+                        item,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError("context_messages items must be JSON serializable") from exc
+            if item_bytes > MAX_CONTEXT_MESSAGE_BYTES:
+                raise ValueError(
+                    "each context_messages item must not exceed "
+                    f"{MAX_CONTEXT_MESSAGE_BYTES} bytes"
+                )
+            total_bytes += item_bytes
+        if total_bytes > MAX_CHAT_BODY_BYTES:
+            raise ValueError("context_messages payload is too large")
+        return value
+
     @field_validator("session_id", "conversation_id")
     @classmethod
     def validate_session_id(cls, v: Optional[str]) -> Optional[str]:
@@ -170,6 +221,7 @@ async def chat(
     request: ChatRequest,
     user: Optional[User] = Depends(get_current_user_optional),
     http_request: Request = None,
+    _body_size_check: None = Depends(_enforce_chat_body_size),
 ):
     """
     Main chat endpoint with RAG support.
@@ -827,6 +879,7 @@ async def chat_stream(
     request: ChatRequest,
     user: Optional[User] = Depends(get_current_user_optional),
     http_request: Request = None,
+    _body_size_check: None = Depends(_enforce_chat_body_size),
 ):
     """
     Streaming chat endpoint - Server-Sent Events (SSE).
@@ -1493,56 +1546,109 @@ async def chat_stream(
         if source_card is not None and source_card.source_type != "llm_only":
             yield f"data: {json.dumps(source_card.to_sse_dict())}\n\n"
 
-        # NOTE: The timeout check below fires between chunks only. If the upstream
-        # LLM connection stalls mid-chunk (never yields), this timeout will not
-        # trigger. In that scenario, the effective timeout is httpx's internal
-        # read timeout (configured via PROXY_TIMEOUT / connection pool settings).
-        async for event in ChatService.stream_llm(
-            system_prompt=system_prompt,
-            sanitized_message=sanitized_message,
-            target_model=target_model,
-            detected_lang=detected_lang,
-            user_id=user_id,
-            request_message=sanitized_message,
-            correlation_id=correlation_id,
-        ):
-            # Check stream timeout
-            elapsed = time.time() - stream_start
-            if elapsed > MAX_STREAM_DURATION:
-                logger.warning(
-                    "chat_stream_timeout",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "elapsed_seconds": round(elapsed, 1),
-                    },
-                )
-                yield f"data: {json.dumps({'error': 'Stream timeout exceeded', 'done': True})}\n\n"
-                return
-
-            # Send heartbeat comment if no data sent recently
-            now = time.time()
-            if now - last_heartbeat >= HEARTBEAT_INTERVAL:
-                yield ": heartbeat\n\n"
-                last_heartbeat = now
-
-            # Internal sentinel carries the full response and actual model.
-            # Parse JSON structurally to avoid substring collision with user content.
-            raw = event
-            if raw.startswith("data: "):
-                raw = raw[6:].strip()
-            try:
-                data = json.loads(raw)
-                if (
-                    isinstance(data, dict)
-                    and "__syrabit_stream_complete_7f3a9b2e__" in data
+        try:
+            # The context manager also cancels a stalled upstream iterator; the
+            # old elapsed-time check could only fire after another chunk arrived.
+            async with asyncio.timeout(MAX_STREAM_DURATION):
+                async for event in ChatService.stream_llm(
+                    system_prompt=system_prompt,
+                    sanitized_message=sanitized_message,
+                    target_model=target_model,
+                    detected_lang=detected_lang,
+                    user_id=user_id,
+                    request_message=sanitized_message,
+                    correlation_id=correlation_id,
                 ):
-                    full_response = data["full_response"]
-                    actual_model = data["actual_model"]
-                    continue
-            except (json.JSONDecodeError, ValueError):
-                pass
-            yield event
-            last_heartbeat = time.time()
+                    # Send heartbeat comment if no data sent recently.
+                    now = time.time()
+                    if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                        yield ": heartbeat\n\n"
+                        last_heartbeat = now
+
+                    # Internal sentinel carries the full response and actual
+                    # model. Parse JSON structurally to avoid substring
+                    # collisions with user content.
+                    raw = event
+                    if raw.startswith("data: "):
+                        raw = raw[6:].strip()
+                    try:
+                        data = json.loads(raw)
+                        if isinstance(data, dict):
+                            if "__syrabit_stream_complete_7f3a9b2e__" in data:
+                                full_response = data["full_response"]
+                                actual_model = data["actual_model"]
+                                continue
+                            # Never forward provider/debug details from a
+                            # lower-level stream implementation to clients.
+                            if "error" in data:
+                                logger.warning(
+                                    "chat_stream_upstream_error",
+                                    extra={
+                                        "correlation_id": correlation_id,
+                                        "error_class": "upstream_runtime",
+                                    },
+                                )
+                                yield (
+                                    "data: "
+                                    + json.dumps(
+                                        {
+                                            "error": (
+                                                "Service temporarily unavailable. "
+                                                "Please try again."
+                                            ),
+                                            "done": True,
+                                        }
+                                    )
+                                    + "\n\n"
+                                )
+                                return
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                    yield event
+                    last_heartbeat = time.time()
+        except asyncio.TimeoutError:
+            logger.warning(
+                "chat_stream_timeout",
+                extra={
+                    "correlation_id": correlation_id,
+                    "elapsed_seconds": round(time.time() - stream_start, 1),
+                },
+            )
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "error": (
+                            "The response took too long. Please try a shorter "
+                            "question."
+                        ),
+                        "done": True,
+                    }
+                )
+                + "\n\n"
+            )
+            return
+        except Exception as exc:
+            logger.error(
+                "chat_stream_unexpected_error",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_class": _classify_chat_error(exc),
+                },
+            )
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "error": (
+                            "Service temporarily unavailable. Please try again."
+                        ),
+                        "done": True,
+                    }
+                )
+                + "\n\n"
+            )
+            return
 
         # -- Final event --
         latency_ms = int((time.time() - start_time) * 1000)

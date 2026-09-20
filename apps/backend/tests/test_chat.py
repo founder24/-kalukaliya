@@ -3,6 +3,9 @@ from httpx import AsyncClient
 from unittest.mock import patch, AsyncMock
 import json
 
+from fastapi import HTTPException
+from pydantic import ValidationError
+
 
 @pytest.mark.anyio
 async def test_chat_empty_message(client: AsyncClient):
@@ -16,6 +19,41 @@ async def test_chat_message_too_long(client: AsyncClient):
     """Test that messages over 2000 chars are rejected"""
     response = await client.post("/api/v1/chat/", json={"message": "x" * 2001})
     assert response.status_code == 422
+
+
+def test_chat_request_bounds_nested_context_messages():
+    from app.api.v1.chat import ChatRequest, MAX_CONTEXT_MESSAGE_BYTES
+
+    with pytest.raises(ValidationError):
+        ChatRequest(
+            message="hello",
+            context_messages=[
+                {"role": "user", "content": "x" * MAX_CONTEXT_MESSAGE_BYTES}
+            ],
+        )
+
+    with pytest.raises(ValidationError):
+        ChatRequest(message="hello", context_messages=["not an object"])
+
+
+def test_chat_body_size_guard_rejects_oversized_content_length():
+    from app.api.v1.chat import MAX_CHAT_BODY_BYTES, _enforce_chat_body_size
+    from starlette.requests import Request
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/",
+            "headers": [
+                (b"content-length", str(MAX_CHAT_BODY_BYTES + 1).encode()),
+            ],
+        }
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        _enforce_chat_body_size(request)
+    assert exc_info.value.status_code == 413
 
 
 @pytest.mark.anyio
