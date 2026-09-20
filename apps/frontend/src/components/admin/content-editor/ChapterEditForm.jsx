@@ -14,6 +14,17 @@ import { API, autoSlug, authHeaders } from '@/utils/adminHelpers';
 import PYQUploadPanel from './PYQUploadPanel';
 import RagSyncBadge from './RagSyncBadge';
 import ChapterAuditLog from './ChapterAuditLog';
+import {
+  MDXEditor,
+  headingsPlugin, listsPlugin, quotePlugin, thematicBreakPlugin,
+  markdownShortcutPlugin, codeBlockPlugin, codeMirrorPlugin, tablePlugin,
+  linkPlugin, diffSourcePlugin, toolbarPlugin, imagePlugin,
+  UndoRedo, BoldItalicUnderlineToggles, BlockTypeSelect,
+  CreateLink, CodeToggle, InsertTable, InsertThematicBreak,
+  ListsToggle, Separator, DiffSourceToggleWrapper, InsertCodeBlock,
+  InsertImage,
+} from '@mdxeditor/editor';
+import '@mdxeditor/editor/style.css';
 
 const CONTENT_TYPES = [
   { value: 'notes', label: 'Notes', color: 'violet' },
@@ -86,8 +97,7 @@ export default function ChapterEditForm({
         // Reader mode: notes_en/as are primary; content/content_as are legacy (loaded as fallback on open)
         : (editorLang === 'as' ? (contentForm.notes_as || '') : (contentForm.notes_en || '')));
 
-  const handleContentChange = useCallback((e) => {
-    const md = e.target.value;
+  const handleContentChange = useCallback((md) => {
     setContentForm(f => ({ ...f, [_contentField()]: md }));
   }, [_contentField, setContentForm]);
 
@@ -129,7 +139,7 @@ export default function ChapterEditForm({
           }
         }
         if (!urls.length) throw new Error('No pages uploaded');
-        const current = editorRef.current?.value ?? activeContent;
+        const current = editorRef.current?.getMarkdown?.() ?? activeContent;
         const pagesMd = urls.map((u, i) => `![Page ${i + 1}](${u})`).join('\n\n');
         const field = _contentField();
         setContentForm(f => ({ ...f, [field]: current + (current.trim() ? '\n\n' : '') + pagesMd + '\n' }));
@@ -157,7 +167,7 @@ export default function ChapterEditForm({
   const canFormat = contentForm.content_type === 'notes' || isQA;
   const handleFixFormatting = useCallback(async () => {
     const field = _contentField();
-    const current = editorRef.current?.value ?? activeContent;
+    const current = editorRef.current?.getMarkdown?.() ?? activeContent;
     if (!current.trim()) { toast.error('Nothing to format yet'); return; }
     setFormatting(true);
     const tid = toast.loading('Fixing formulas and tables…');
@@ -435,17 +445,6 @@ export default function ChapterEditForm({
                 <LayoutTemplate size={10} />
                 Templates
               </button>
-              {canFormat && (
-                <button
-                  onClick={handleFixFormatting}
-                  disabled={formatting}
-                  title="Fix formulas and tables broken by pasting raw text"
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-fuchsia-500 text-white hover:bg-fuchsia-600 disabled:opacity-50 transition-all shadow-sm"
-                >
-                  {formatting ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
-                  {formatting ? 'Fixing…' : 'Fix Formatting'}
-                </button>
-              )}
             </div>
             <div className="ml-auto flex items-center gap-1.5">
               <span className="text-[10px] text-gray-300 font-mono">{activeContent.length}</span>
@@ -472,7 +471,7 @@ export default function ChapterEditForm({
                 <button
                   key={t.label}
                   onClick={() => {
-                    const current = editorRef.current?.value ?? activeContent;
+                    const current = editorRef.current?.getMarkdown?.() ?? activeContent;
                     const field = _contentField();
                     setContentForm(f => ({ ...f, [field]: current + t.shortcode }));
                     setEditorKey(k => k + 1);
@@ -507,30 +506,78 @@ export default function ChapterEditForm({
                 </div>
               )}
               <div className="flex-1 min-h-0 overflow-hidden" style={{ background: '#fff' }}>
-                <textarea
+                <MDXEditor
                   ref={editorRef}
-                  key={`${editTarget?.id ?? '__new__'}-${editorKey}-${editorLang}`}
-                  value={activeContent}
+                  key={`${editTarget?.id ?? '__new__'}-${editorKey}-${editorLang}-${contentMode}`}
+                  markdown={activeContent}
                   onChange={handleContentChange}
+                  className="mdx-editor-light h-full"
+                  contentEditableClassName="cms-editor-content"
                   placeholder={isQA
                     ? (contentMode === 'rag'
                         ? 'Write expanded Q&A retrieval text here (for AI search)…'
                         : 'Write Q&A content here — use ## for questions, answers below…')
                     : 'Write markdown content here…'
                   }
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    padding: '16px',
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                    fontSize: 13,
-                    lineHeight: 1.7,
-                    color: '#1a1a1a',
-                    background: '#ffffff',
-                    border: 'none',
-                    outline: 'none',
-                    resize: 'none',
-                  }}
+                  plugins={[
+                    headingsPlugin(),
+                    listsPlugin(),
+                    quotePlugin(),
+                    thematicBreakPlugin(),
+                    markdownShortcutPlugin(),
+                    codeBlockPlugin({ defaultCodeBlockLanguage: 'text' }),
+                    codeMirrorPlugin({
+                      codeBlockLanguages: { js: 'JavaScript', ts: 'TypeScript', python: 'Python', text: 'Text', html: 'HTML', css: 'CSS' },
+                    }),
+                    tablePlugin(),
+                    linkPlugin(),
+                    imagePlugin({ imageUploadHandler }),
+                    diffSourcePlugin({ viewMode: 'rich-text', diffMarkdown: '' }),
+                    toolbarPlugin({
+                      toolbarContents: () => (
+                        <DiffSourceToggleWrapper>
+                          <UndoRedo />
+                          <Separator />
+                          <BoldItalicUnderlineToggles />
+                          <CodeToggle />
+                          <Separator />
+                          <ListsToggle />
+                          <Separator />
+                          <BlockTypeSelect />
+                          <Separator />
+                          <CreateLink />
+                          <InsertImage />
+                          <InsertTable />
+                          <InsertThematicBreak />
+                          <InsertCodeBlock />
+                          {canFormat && (
+                            <>
+                              <Separator />
+                              <button
+                                type="button"
+                                onClick={handleFixFormatting}
+                                disabled={formatting}
+                                title="Fix formulas and tables broken by pasting raw text"
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: 4,
+                                  padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+                                  color: '#c026d3', background: 'rgba(217,70,239,0.10)',
+                                  border: '1px solid rgba(217,70,239,0.20)',
+                                  cursor: formatting ? 'not-allowed' : 'pointer',
+                                  opacity: formatting ? 0.5 : 1,
+                                }}
+                              >
+                                {formatting
+                                  ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                                  : <Wand2 size={12} />}
+                                {formatting ? 'Fixing…' : 'Fix Formatting'}
+                              </button>
+                            </>
+                          )}
+                        </DiffSourceToggleWrapper>
+                      ),
+                    }),
+                  ]}
                 />
               </div>
               {mobilePreview && (
