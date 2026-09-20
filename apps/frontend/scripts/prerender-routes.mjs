@@ -629,14 +629,14 @@ function filterStaleChapterPaths(chapterPaths, bundleRoutes, staticBundle) {
   // strict coverage check remain authoritative in that case.
   if (staticChapters.length === 0) return chapterPaths;
 
-  const subjectIdsByPath = new Map();
+  const subjectIdByPath = new Map();
   for (const route of bundleRoutes) {
     const id = route.subject?.id || route.subject?._id;
     if (!id) continue;
     const key = subjectPath(route);
-    const ids = subjectIdsByPath.get(key) || new Set();
-    ids.add(String(id));
-    subjectIdsByPath.set(key, ids);
+    // Match enumerateSitemapSubjectRoutes(), whose last bundle record wins
+    // when duplicate source rows share one canonical public path.
+    subjectIdByPath.set(key, String(id));
   }
 
   const validPaths = new Set();
@@ -648,13 +648,13 @@ function filterStaleChapterPaths(chapterPaths, bundleRoutes, staticBundle) {
       continue;
     }
     const [board, classSlug, subjectSlug, chapterSlug] = segments;
-    const subjectIds = subjectIdsByPath.get(
+    const subjectId = subjectIdByPath.get(
       `/${board}/${classSlug}/${subjectSlug}`,
     );
-    const hasStaticChapter = subjectIds
+    const hasStaticChapter = subjectId
       ? staticChapters.some(
           (chapter) =>
-            subjectIds.has(String(chapter.subject_id)) &&
+            String(chapter.subject_id) === subjectId &&
             chapter.slug === chapterSlug,
         )
       : false;
