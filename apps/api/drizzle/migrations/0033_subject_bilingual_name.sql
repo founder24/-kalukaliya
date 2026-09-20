@@ -1,1 +1,0 @@
-ALTER TABLE `subjects` ADD `name_as` text;
