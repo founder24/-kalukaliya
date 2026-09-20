@@ -506,8 +506,13 @@ describe('atomic refresh-token rotation', () => {
       env,
     );
     expect(replay.status).toBe(401);
+    // Logout now bumps the account-wide session cutoff (so a leaked access
+    // token cannot survive logout either), and the refresh route checks that
+    // cutoff before the single-token jti claim. The account-level message
+    // fires first; the jti is still consumed so the token can never mint a
+    // new session either way.
     await expect(replay.json()).resolves.toMatchObject({
-      detail: 'Refresh token has already been used or revoked',
+      detail: 'Session expired after password change. Sign in again.',
     });
   });
 
