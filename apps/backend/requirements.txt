@@ -149,6 +149,8 @@ markupsafe==3.0.3
     # via jinja2
 motor==3.7.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
+msgpack==1.2.2
+    # via -r /home/runner/workspace/apps/backend/requirements.in
 multidict==6.7.1
     # via
     #   aiohttp
