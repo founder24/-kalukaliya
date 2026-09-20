@@ -119,11 +119,26 @@ adminContentRouter.get('/verify', async c => {
 });
 
 adminContentRouter.post('/logout', async c => {
-  // Logout is harmless from a data perspective, but requiring the same
-  // session boundary as every other admin route prevents anonymous callers
-  // from using it as an apparent authenticated admin probe.
+  // Logout requires the same session boundary as every other admin route so
+  // anonymous callers cannot use it as an apparent authenticated admin probe.
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
-  const response = c.json({ status: 'ok', message: 'Logged out', server_revocation: false });
+  // Bump the account-wide session cutoff so the presented admin cookie or
+  // staff/admin bearer token (and any other outstanding session for this
+  // account) is rejected by isSessionValid() on the next request. Previously
+  // this route only cleared the client cookie and never revoked anything
+  // server-side, so a copied cookie or bearer token stayed valid until it
+  // naturally expired.
+  let revoked = true;
+  try {
+    const validAfter = Math.floor(Date.now() / 1000) + 1;
+    await c.env.DB.prepare(
+      `UPDATE users SET session_valid_after = MAX(session_valid_after + 1, ?) WHERE id = ?`,
+    ).bind(validAfter, actor).run();
+  } catch (err) {
+    console.error('[admin-content] session revocation on logout unavailable:', err);
+    revoked = false;
+  }
+  const response = c.json({ status: 'ok', message: 'Logged out', server_revocation: revoked });
   response.headers.set('Set-Cookie', 'syrabit_admin_session=; Path=/api/; Max-Age=0; HttpOnly; SameSite=Lax');
   return response;
 });
@@ -615,15 +630,15 @@ adminContentRouter.get('/content/chapters', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
   const subjectId = c.req.query('subject_id');
   if (!subjectId) return c.json({ detail: 'subject_id is required' }, 422);
-  return c.redirect(new URL(`/api/v1/admin/content/chapters/${encodeURIComponent(subjectId)}`, c.req.url).toString(), 307);
+  return c.redirect(new URL(`/api/v1/staff/content/chapters/${encodeURIComponent(subjectId)}`, c.req.url).toString(), 307);
 });
 adminContentRouter.patch('/content/chapters/:chapterId', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
-  return c.redirect(new URL(`/api/v1/admin/content/chapter/${encodeURIComponent(c.req.param('chapterId'))}`, c.req.url).toString(), 307);
+  return c.redirect(new URL(`/api/v1/staff/content/chapter/${encodeURIComponent(c.req.param('chapterId'))}`, c.req.url).toString(), 307);
 });
 adminContentRouter.delete('/content/chapters/:chapterId', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
-  return c.redirect(new URL(`/api/v1/admin/content/chapter/${encodeURIComponent(c.req.param('chapterId'))}`, c.req.url).toString(), 307);
+  return c.redirect(new URL(`/api/v1/staff/content/chapter/${encodeURIComponent(c.req.param('chapterId'))}`, c.req.url).toString(), 307);
 });
 
 adminContentRouter.post('/content/chapters/:chapterId/generate-notes', async c => {
@@ -677,6 +692,35 @@ async function generateAssameseNotes(c: Context<{ Bindings: Env }>): Promise<Res
 }
 adminContentRouter.post('/content/chapters/:chapterId/generate-notes/as', generateAssameseNotes);
 adminContentRouter.post('/content/chapters/:chapterId/translate', generateAssameseNotes);
+
+// Cleans up content pasted from PDFs/Word docs: rebuilds broken LaTeX math
+// delimiters and reflows ASCII-art tables into proper Markdown tables,
+// without paraphrasing or altering the underlying text.
+adminContentRouter.post('/content/format-text', async c => {
+  const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
+  const body = await safeBody(c);
+  const text = typeof body.text === 'string' ? body.text : '';
+  if (!text.trim()) return c.json({ detail: 'text is required' }, 422);
+  if (text.length > 12000) return c.json({ detail: 'text is too long to format in one pass (max 12000 characters)' }, 422);
+  try {
+    const result = await generate(c.env.AI, {
+      systemPrompt: [
+        'You are a formatting-only editor for study notes pasted from PDFs and Word documents.',
+        'Fix ONLY structural formatting damage introduced by copy-pasting:',
+        '- Rebuild broken math into valid inline ($...$) or block ($$...$$) LaTeX (fix stray spaces, split symbols, missing delimiters, garbled exponents/subscripts/fractions).',
+        '- Reflow misaligned or ASCII-art tables into proper GitHub-flavoured Markdown tables (header row + |---| separator).',
+        '- Fix broken Markdown headings, list markers, and line breaks that were mangled by the paste.',
+        'Never rewrite, summarize, translate, shorten, or add content. Preserve every fact, number, and word.',
+        'Return ONLY the corrected Markdown — no commentary, no code fences, no explanation.',
+      ].join(' '),
+      userMessage: text,
+      maxTokens: 2048,
+    });
+    return c.json({ status: 'formatted', formatted_text: result.text.trim(), model: result.model });
+  } catch (error) {
+    return c.json({ detail: error instanceof Error ? error.message : 'Formatting failed' }, 502);
+  }
+});
 
 adminContentRouter.get('/content/translation-progress', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;

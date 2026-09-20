@@ -17,6 +17,7 @@ import {
   isSessionValid,
   sessionIssuedAt,
 } from '../middleware/auth';
+import { reconcileReferralAccount } from '../services/referral-attribution';
 import type { Env } from '../types';
 
 export const authRouter = new Hono<{ Bindings: Env }>();
@@ -74,6 +75,18 @@ authRouter.post('/signup', async (c) => {
 
   const accessToken = await signAccessToken(id, 'student', c.env.JWT_SECRET);
   const { token: refreshToken } = await signRefreshToken(id, 'student', c.env.JWT_SECRET);
+
+  // Credit whichever influencer's link brought this signup, if the visitor
+  // still carries the referral cookie set by /r/:code. Signup previously
+  // never looked at it, so referrers were never credited for conversions.
+  // Best-effort: a reconciliation failure must not block account creation.
+  if (c.env.REFERRAL_PROGRAM_RUNTIME_ENABLED === 'true') {
+    try {
+      await reconcileReferralAccount(c.env.DB, c.req.raw, id, c.env.EDGE_SHARED_SECRET);
+    } catch (err) {
+      console.error('[auth] referral reconciliation on signup failed:', err);
+    }
+  }
 
   return c.json({
     access_token: accessToken,
@@ -196,9 +209,19 @@ authRouter.post('/logout', async (c) => {
   } catch {
     // Logout remains idempotent when the client has no refresh token/body.
   }
+  // Resolve the account to revoke from whichever credential is present. A
+  // bearer access token is decoded independently of the body's refresh
+  // token so both can contribute an identity even if only one is valid.
+  let userId: string | undefined;
+  if (bearerToken) {
+    const accessPayload = await verifyToken(bearerToken, c.env.JWT_SECRET);
+    if (accessPayload?.sub) userId = accessPayload.sub;
+  }
+
   const token = bodyToken ?? bearerToken;
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
+    if (!userId && payload?.sub) userId = payload.sub;
     if (payload?.type === 'refresh' && payload.jti) {
       const expiresAt = payload.exp
         ?? Math.floor(Date.now() / 1000) + REFRESH_TOKEN_TTL_S;
@@ -236,6 +259,28 @@ authRouter.post('/logout', async (c) => {
       // REFRESH_TOKEN_ROLLOUT_GUARD: logout-kv:end
     }
   }
+
+  // Bump the account-wide session cutoff so the presented access token (and
+  // any other outstanding token issued before this moment) is rejected by
+  // isSessionValid() on the very next request, everywhere it is checked.
+  // This is the same mechanism already used for password-change revocation;
+  // without it, a captured access token kept working after "logout" until
+  // its natural 7-day expiry.
+  if (userId) {
+    try {
+      const validAfter = Math.floor(Date.now() / 1000) + 1;
+      await c.env.DB.prepare(
+        `UPDATE users SET session_valid_after = MAX(session_valid_after + 1, ?) WHERE id = ?`,
+      ).bind(validAfter, userId).run();
+    } catch (err) {
+      console.error('[auth] session revocation on logout unavailable:', err);
+      return c.json({
+        detail: 'Unable to revoke session right now. Please try again.',
+        error_code: 'auth_storage_unavailable',
+      }, 503);
+    }
+  }
+
   return c.json({ message: 'Logged out successfully' });
 });
 // REFRESH_TOKEN_ROLLOUT_GUARD: logout-route:end

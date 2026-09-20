@@ -80,7 +80,7 @@ export default function DangerZone({ profile, deletionPending, setShowDeleteConf
               <div className="flex-1">
                 <p className="text-sm font-semibold text-foreground">Delete Account</p>
                 <p className="text-xs text-muted-foreground/70 mt-0.5">
-                  Permanently delete your account and all data after a 72-hour grace period.
+                  Permanently delete your account and all data after a 14-day grace period.
                 </p>
               </div>
               <button

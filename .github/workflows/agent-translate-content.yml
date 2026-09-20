@@ -88,6 +88,10 @@ jobs:
             JOB=$(echo "$RESPONSE" | jq -r '.job // "unknown"')
             RUN_ID=$(echo "$RESPONSE" | jq -r '.run_id // "none"')
             echo "::notice::Translation content dispatch succeeded: $JOB (run: $RUN_ID)"
+          elif [[ "$HTTP_STATUS" == "409" ]]; then
+            # A prior run is still in flight. This is expected under the cron's
+            # own concurrency guard, not a failure — skip this run benignly.
+            echo "::notice::Translation content dispatch skipped: a run is already in progress (HTTP 409)."
           elif [[ "$HTTP_STATUS" == "401" || "$HTTP_STATUS" == "403" ]]; then
             echo "::error::Translation content dispatch was rejected after alignment probe (HTTP ${HTTP_STATUS})."
             exit 1

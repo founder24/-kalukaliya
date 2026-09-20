@@ -418,7 +418,7 @@ export default function HistoryPage() {
             >
               <img src="/logo-56.webp" alt="Syrabit.ai" width="20" height="20" className="w-5 h-5 rounded flex-shrink-0" />
               <span className="text-muted-foreground flex flex-col leading-snug">
-                <span>Guest chats expire after 7 days.</span>
+                <span>Guest chats expire after 90 days.</span>
                 <span>
                   <button onClick={() => navigate('/login')} className="text-primary font-semibold hover:underline">
                     Sign up

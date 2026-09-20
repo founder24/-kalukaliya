@@ -332,6 +332,30 @@ export default {
       );
     }
 
+    // Short referral links are advertised as root-level /r/:code URLs, but
+    // attribution (cookie set + destination redirect) is implemented by the
+    // API Worker's /api/v1/referrals/visit/:code route. Rewrite here so the
+    // public link format never has to change to match the Worker's API
+    // namespace, and the click-to-cookie hop stays a single redirect.
+    const referralShortLinkMatch = /^\/r\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
+    if (referralShortLinkMatch) {
+      if (!env.API_WORKER) {
+        const unavailable = jsonResponse(503, {
+          error: 'API Worker service binding unavailable',
+          error_code: 'api_worker_binding_unavailable',
+        });
+        unavailable.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(unavailable.headers, request.headers.get('Origin') || '');
+        return unavailable;
+      }
+      const rewrittenUrl = new URL(request.url);
+      rewrittenUrl.pathname = `/api/v1/referrals/visit/${referralShortLinkMatch[1]}`;
+      const rewrittenRequest = new Request(rewrittenUrl.toString(), request);
+      const visitResponse = await proxyToApiWorker(rewrittenRequest, env);
+      visitResponse.headers.set('X-Request-ID', requestId);
+      return visitResponse;
+    }
+
     // Public crawler artifacts live at root URLs, but the native API Worker
     // exposes them under /api/v1/seo. Keep the canonical public URLs stable
     // while routing them through the Worker during a staged cutover.

@@ -148,7 +148,7 @@ export default function ChapterList({
                       size="xs"
                     />
                     {ch.content_type === 'question_paper' && (
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" style={{ background: 'rgba(245,158,11,0.15)', color: '#d97706', border: '1px solid rgba(245,158,11,0.25)' }}>Question Paper</span>
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" style={{ background: 'rgba(245,158,11,0.15)', color: '#d97706', border: '1px solid rgba(245,158,11,0.25)' }}>PYQ</span>
                     )}
                     {ch.content_type && ch.content_type !== 'notes' && ch.content_type !== 'question_paper' && (
                       <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-gray-100 text-gray-400 uppercase tracking-wide">{ch.content_type}</span>

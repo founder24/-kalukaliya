@@ -757,7 +757,7 @@ staffRouter.get('/content/subjects', async (c) => {
   const db = createDb(c.env.DB);
   const [allSubjects, allStreams, allClasses] = await Promise.all([
     db.select({
-      id: subjects.id, name: subjects.name, streamId: subjects.streamId,
+      id: subjects.id, name: subjects.name, nameAs: subjects.nameAs, streamId: subjects.streamId,
       isPublished: subjects.isPublished, slug: subjects.slug,
       description: subjects.description, updatedAt: subjects.updatedAt,
     }).from(subjects),
@@ -773,6 +773,7 @@ staffRouter.get('/content/subjects', async (c) => {
     return {
       id:          s.id,
       name:        s.name,
+      name_as:     s.nameAs ?? null,
       slug:        s.slug,
       status:      s.isPublished ? 'published' : 'draft',
       stream_id:   s.streamId ?? null,
@@ -800,6 +801,8 @@ staffRouter.post('/content/subjects', async (c) => {
   const now      = nowTs();
   const id       = crypto.randomUUID();
   const streamId = String(body['stream_id'] ?? '').trim() || null;
+  const requestedBoardId = String(body['board_id'] ?? '').trim() || null;
+  const requestedClassId = String(body['class_id'] ?? '').trim() || null;
 
   // Resolve context for response
   let streamName: string | null = null;
@@ -816,9 +819,15 @@ staffRouter.post('/content/subjects', async (c) => {
       if (clsRow) { classId = clsRow.id; boardId = clsRow.boardId; }
     }
   }
+  if ((requestedBoardId && requestedBoardId !== boardId) || (requestedClassId && requestedClassId !== classId)) {
+    return c.json({ detail: 'The selected board, class, and course do not match.' }, 422);
+  }
+  if ((requestedBoardId || requestedClassId) && !streamId) {
+    return c.json({ detail: 'Select a course before setting its board or class.' }, 422);
+  }
 
   await db.insert(subjects).values({
-    id, name, slug,
+    id, name, nameAs: String(body['name_as'] ?? '').trim() || null, slug,
     streamId: streamId ?? undefined,
     description: String(body['description'] ?? '').trim() || null,
     imageUrl:    String(body['image_url']   ?? '').trim() || null,
@@ -828,7 +837,7 @@ staffRouter.post('/content/subjects', async (c) => {
   });
 
   await auditLog(c.env, auth.sub ?? '', 'create_subject', 'subject', id, { name, streamId });
-  return c.json({ id, name, slug, status: body['status'] === 'published' ? 'published' : 'draft',
+  return c.json({ id, name, name_as: String(body['name_as'] ?? '').trim() || null, slug, status: body['status'] === 'published' ? 'published' : 'draft',
     stream_id: streamId, stream_name: streamName, class_id: classId, board_id: boardId }, 201);
 });
 
@@ -847,12 +856,13 @@ staffRouter.patch('/content/subjects/:id', async (c) => {
   if (!existing) return c.json({ detail: 'Subject not found' }, 404);
 
   type SubjectUpdate = Partial<{
-    name: string; slug: string; description: string | null; imageUrl: string | null;
+    name: string; nameAs: string | null; slug: string; description: string | null; imageUrl: string | null;
     isPublished: number; streamId: string | null; updatedAt: number;
   }>;
   const updates: SubjectUpdate = { updatedAt: nowTs() };
 
   if ('name' in body)        updates.name        = String(body['name'] ?? '').trim();
+  if ('name_as' in body)    updates.nameAs     = String(body['name_as'] ?? '').trim() || null;
   if ('description' in body) updates.description = String(body['description'] ?? '').trim() || null;
   if ('image_url' in body)   updates.imageUrl    = String(body['image_url'] ?? '').trim() || null;
   if ('status' in body)      updates.isPublished = body['status'] === 'published' ? 1 : 0;
@@ -953,19 +963,23 @@ staffRouter.get('/content/chapters/:subjectId', async (c) => {
     content_type:     ch.contentType ?? 'standard',
     chapter_number:   ch.chapterNumber ?? null,
     has_notes_en:     Boolean(ch.notesEn),
-    has_notes_as:     Boolean(ch.notesAs),
+     has_notes_as:     Boolean(ch.notesAs),
+     has_content_en:   Boolean(ch.notesEn),
+     has_content_as:   Boolean(ch.notesAs),
     has_qa_en:        Boolean(ch.qaEn && ch.qaEn !== '[]'),
-    has_qa_as:        Boolean(ch.qaAs && ch.qaAs !== '[]'),
+     has_qa_as:        Boolean(ch.qaAs && ch.qaAs !== '[]'),
+     has_qa_rag_sections: Boolean(ch.qaEn && ch.qaEn !== '[]'),
     has_rag_en:       Boolean(ch.ragText),
     has_rag_as:       Boolean(ch.ragTextAs),
     has_rag_sections: Boolean(ch.ragSectionsEn && ch.ragSectionsEn !== '[]'),
-    has_qa_rag_sections: Boolean(ch.qaEn && ch.qaEn !== '[]'),
     has_pyq_pdf:      Boolean(ch.pyqPdfUrl),
     has_pyq_papers:   Boolean(ch.pyqPapers && ch.pyqPapers !== '[]'),
     word_count:       ch.wordCountEn ?? 0,
     rag_updated_at:   ts(ch.ragUpdatedAt),
     rag_indexed_at:   ts(ch.ragIndexedAt),
-    notes_rag_stale:  isStale(ch.ragUpdatedAt, ch.ragIndexedAt),
+     notes_rag_stale:  isStale(ch.ragUpdatedAt, ch.ragIndexedAt),
+     qa_rag_stale:     isStale(ch.ragUpdatedAt, ch.ragIndexedAt),
+     pyq_rag_stale:    isStale(ch.ragUpdatedAt, ch.ragIndexedAt),
     updated_at:       ts(ch.updatedAt),
   })));
 });
@@ -1041,13 +1055,19 @@ staffRouter.post('/content/chapters', async (c) => {
     content_type:   body['content_type'] ?? 'standard',
     chapter_number: chapterNumber,
     subject_id:     subjectId,
-    has_notes_en: false, has_notes_as: false,
+    has_notes_en: Boolean(body.notes_en ?? body.content),
+    has_notes_as: Boolean(body.notes_as ?? body.content_as),
+    has_content_en: Boolean(body.notes_en ?? body.content),
+    has_content_as: Boolean(body.notes_as ?? body.content_as),
     has_qa_en: false,    has_qa_as: false,
+    has_qa_rag_sections: false,
     has_rag_en: false,   has_rag_as: false,
     has_rag_sections: false,
+    has_pyq_pdf: false, has_pyq_papers: false,
     word_count: 0,
     rag_updated_at: null, rag_indexed_at: null,
-    notes_rag_stale: false,
+    notes_rag_stale: Boolean(body.notes_en || body.notes_as || body.content || body.content_as),
+    qa_rag_stale: false, pyq_rag_stale: false,
     updated_at: new Date(now * 1000).toISOString(),
   }, 201);
 });
@@ -1113,6 +1133,14 @@ staffRouter.get('/content/chapter/:chapterId', async (c) => {
     rag_indexed_at:  ts(ch.ragIndexedAt),
     rag_stale:       isStale(ch.ragUpdatedAt, ch.ragIndexedAt),
     notes_rag_stale: isStale(ch.ragUpdatedAt, ch.ragIndexedAt),
+     notes_rag_updated_at: ts(ch.ragUpdatedAt),
+     notes_rag_indexed_at: ts(ch.ragIndexedAt),
+     qa_rag_updated_at: ts(ch.ragUpdatedAt),
+     qa_rag_indexed_at: ts(ch.ragIndexedAt),
+     qa_rag_stale: isStale(ch.ragUpdatedAt, ch.ragIndexedAt),
+     pyq_rag_updated_at: ts(ch.ragUpdatedAt),
+     pyq_rag_indexed_at: ts(ch.ragIndexedAt),
+     pyq_rag_stale: isStale(ch.ragUpdatedAt, ch.ragIndexedAt),
     updated_at:      ts(ch.updatedAt),
     created_at:      ts(ch.createdAt),
     word_count:      ch.wordCountEn ?? 0,
@@ -1174,14 +1202,24 @@ staffRouter.patch('/content/chapter/:chapterId', async (c) => {
   if ('status' in body) updates.status = String(body.status);
   if ('content_type' in body && !CHAPTER_TYPES.has(String(body.content_type))) return c.json({ detail: 'Invalid chapter content type' }, 422);
   if ('content_type' in body) updates.contentType = String(body.content_type);
+  if ('description' in body && body['description'] !== undefined) updates.metaDescription = String(body['description'] ?? '').trim() || null;
+  if (Array.isArray(body.topics)) updates.publishedTopics = JSON.stringify(body.topics);
 
   // Presence means intent: explicit empty strings clear editor fields.
   if ('notes_en' in body && body['notes_en'] !== undefined) {
     updates.notesEn = String(body['notes_en'] ?? '');
     contentChanged = ragChanged = true;
   }
+  if (!('notes_en' in body) && 'content' in body && body['content'] !== undefined) {
+    updates.notesEn = String(body['content'] ?? '');
+    contentChanged = ragChanged = true;
+  }
   if ('notes_as' in body && body['notes_as'] !== undefined) {
     updates.notesAs = String(body['notes_as'] ?? '');
+    contentChanged = ragChanged = true;
+  }
+  if (!('notes_as' in body) && 'content_as' in body && body['content_as'] !== undefined) {
+    updates.notesAs = String(body['content_as'] ?? '');
     contentChanged = ragChanged = true;
   }
 

@@ -2,8 +2,11 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
+// AdminDashboard.jsx is statically imported by StaffDashboard.jsx (no longer
+// lazy-loaded), so it no longer produces its own manifest entry/chunk and was
+// dropped from this list. AdminAnalytics.jsx remains lazy-loaded from
+// AdminPage.jsx and keeps the cross-chunk TDZ regression guard below.
 const TARGETS = [
-  'src/components/admin/AdminDashboard.jsx',
   'src/components/admin/AdminAnalytics.jsx',
 ];
 const TDZ_ERROR = /cannot access .+ before initialization|can't access lexical declaration|temporal dead zone/i;

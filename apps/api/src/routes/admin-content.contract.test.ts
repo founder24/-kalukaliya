@@ -86,6 +86,14 @@ beforeAll(async () => {
     INSERT INTO users (id, email, hashed_password, role, name)
     VALUES ('native-admin', 'admin@example.test', ?, 'admin', 'Native Admin')
   `).bind(await hashPassword('correct-password')).run();
+  // Dedicated account for the login/verify/logout lifecycle test below.
+  // Logout bumps the account-wide session cutoff, which would otherwise
+  // invalidate the shared `session` cookie (minted from 'native-admin') that
+  // every other test in this file relies on.
+  await env.DB.prepare(`
+    INSERT INTO users (id, email, hashed_password, role, name)
+    VALUES ('native-admin-lifecycle', 'admin-lifecycle@example.test', ?, 'admin', 'Lifecycle Admin')
+  `).bind(await hashPassword('correct-password')).run();
   chapterId = 'chapter';
   session = await adminSession();
   const { default: worker } = await import('../index.js');
@@ -184,7 +192,7 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     const login = await workerFetch(new Request('http://worker/api/v1/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'admin@example.test', password: 'correct-password' }),
+      body: JSON.stringify({ email: 'admin-lifecycle@example.test', password: 'correct-password' }),
     }));
     expect(login.status).toBe(200);
     const cookie = login.headers.get('Set-Cookie');

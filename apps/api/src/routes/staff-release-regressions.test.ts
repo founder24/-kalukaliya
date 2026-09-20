@@ -392,7 +392,7 @@ describe('release regressions', () => {
 
   it('uses estimated vectors in destructive impact preview', async () => {
     const legacy = await token('legacy');
-    const response = await fetchWorker(request('/api/v1/staff/content/chapter/chapter', legacy, 'PATCH', { notes_en: 'audited edit' }));
+    const response = await fetchWorker(request('/api/v1/staff/content/bulk/impact-preview', legacy, 'POST', { chapter_ids: ['chapter'] }));
     expect(response.status).toBe(200);
     const body = await response.json() as Record<string, unknown>;
     expect(body).toHaveProperty('vectors_estimated'); expect(body).not.toHaveProperty('vectors');
@@ -412,17 +412,17 @@ describe('release regressions', () => {
     const legacy = await token('legacy');
     const preview = await fetchWorker(request('/api/v1/staff/content/bulk/impact-preview', legacy, 'POST', { chapter_ids: ['chapter'] }));
     const previewToken = (await preview.json() as { preview_token: string }).preview_token;
-    const changed = await fetchWorker(request('/api/v1/staff/content/bulk/delete', legacy, 'POST', { chapter_ids: ['chapter'], preview_token: previewToken }));
+    const changed = await fetchWorker(request('/api/v1/staff/content/bulk/delete', legacy, 'POST', { chapter_ids: ['delete-me'], preview_token: previewToken }));
     expect(changed.status).toBe(409);
-    const first = await fetchWorker(request('/api/v1/staff/content/bulk/delete', legacy, 'POST', { chapter_ids: ['delete-me'], preview_token: previewToken }));
+    const first = await fetchWorker(request('/api/v1/staff/content/bulk/delete', legacy, 'POST', { chapter_ids: ['chapter'], preview_token: previewToken }));
     // Local Vectorize may make cleanup partial, but token is consumed before execution.
     expect([200, 502]).toContain(first.status);
-    expect((await fetchWorker(request('/api/v1/staff/content/bulk/delete', legacy, 'POST', { chapter_ids: ['delete-me'], preview_token: previewToken }))).status).toBe(409);
+    expect((await fetchWorker(request('/api/v1/staff/content/bulk/delete', legacy, 'POST', { chapter_ids: ['chapter'], preview_token: previewToken }))).status).toBe(409);
   });
 
   it('rejects bulk translation without applying a shared translation', async () => {
     const legacy = await token('legacy');
-    const response = await fetchWorker(request('/api/v1/staff/content/chapter/chapter', legacy, 'PATCH', { notes_en: 'audited edit' }));
+    const response = await fetchWorker(request('/api/v1/staff/content/bulk/translate', legacy, 'POST', { chapter_ids: ['chapter'], translation: 'shared output' }));
     expect(response.status).toBe(400);
   });
 

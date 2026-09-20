@@ -155,7 +155,6 @@ jobs:
       INPUT_SUBJECT: ${{ inputs.subject }}
       INPUT_LIMIT: ${{ inputs.limit }}
       OPERATOR: ${{ inputs.operator }}
-      PREVIEW_DIR: ${{ runner.temp }}/ahsec-cleanup-preview
     steps:
       - uses: actions/checkout@v4
         with:
@@ -222,5 +221,5 @@ jobs:
             --confirm-production-write \
             --operator "$operator" \
             --delay 1 \
-            --cleanup-preview-report "$PREVIEW_DIR/preamble-cleanup-preview.json" \
+            --cleanup-preview-report "$RUNNER_TEMP/ahsec-cleanup-preview/preamble-cleanup-preview.json" \
             "${filter_args[@]}"

@@ -755,7 +755,12 @@ export default defineConfig(({ mode }) => ({
             // its tightly-coupled siblings in the same chunk eliminates the
             // cross-chunk cycle.
             has('hastscript') || has('web-namespaces') ||
-            has('stringify-entities') || has('zwitch')
+            has('stringify-entities') || has('zwitch') ||
+            // `parse-entities` is imported by mdast-util-from-markdown (in
+            // 'markdown') and, left in its own auto chunk, forms the same
+            // kind of markdown <-> dep-parse-entities cross-chunk cycle
+            // described above. Keep it in 'markdown' too.
+            has('parse-entities')
           ) return 'markdown';
           if (has('lucide-react')) return 'icons';
           if (has('react-syntax-highlighter') || has('refractor') || has('prismjs') || has('highlight.js')) return 'syntax';

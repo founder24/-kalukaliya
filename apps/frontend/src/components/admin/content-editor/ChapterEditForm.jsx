@@ -3,7 +3,7 @@ import {
   ArrowLeft, Save, Loader2, Eye, Link2, BarChart3,
   RefreshCw, Layers, LayoutTemplate, Upload,
   FileText, Globe, CheckCircle, Smartphone, Monitor,
-  ImagePlus, Languages, Database, Clock,
+  ImagePlus, Languages, Database, Clock, Wand2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -14,11 +14,22 @@ import { API, autoSlug, authHeaders } from '@/utils/adminHelpers';
 import PYQUploadPanel from './PYQUploadPanel';
 import RagSyncBadge from './RagSyncBadge';
 import ChapterAuditLog from './ChapterAuditLog';
+import {
+  MDXEditor,
+  headingsPlugin, listsPlugin, quotePlugin, thematicBreakPlugin,
+  markdownShortcutPlugin, codeBlockPlugin, codeMirrorPlugin, tablePlugin,
+  linkPlugin, diffSourcePlugin, toolbarPlugin, imagePlugin,
+  UndoRedo, BoldItalicUnderlineToggles, BlockTypeSelect,
+  CreateLink, CodeToggle, InsertTable, InsertThematicBreak,
+  ListsToggle, Separator, DiffSourceToggleWrapper, InsertCodeBlock,
+  InsertImage,
+} from '@mdxeditor/editor';
+import '@mdxeditor/editor/style.css';
 
 const CONTENT_TYPES = [
   { value: 'notes', label: 'Notes', color: 'violet' },
-  { value: 'qa', label: 'Q&A', color: 'blue' },
-  { value: 'question_paper', label: 'Question Paper', color: 'amber' },
+  { value: 'qa', label: 'Questions', color: 'blue' },
+  { value: 'question_paper', label: 'PYQ', color: 'amber' },
   { value: 'formula', label: 'Formula Sheet', color: 'pink' },
   { value: 'summary', label: 'Summary', color: 'emerald' },
   { value: 'solution', label: 'Solution', color: 'blue' },
@@ -42,6 +53,7 @@ export default function ChapterEditForm({
   const [editorLang, setEditorLang] = useState('en');
   const [contentMode, setContentMode] = useState('reader'); // 'reader' | 'rag'
   const [translating, setTranslating] = useState(false);
+  const [formatting, setFormatting] = useState(false);
 
   const handleTranslateToAssamese = useCallback(async () => {
     if (!editTarget?.id) return;
@@ -85,8 +97,7 @@ export default function ChapterEditForm({
         // Reader mode: notes_en/as are primary; content/content_as are legacy (loaded as fallback on open)
         : (editorLang === 'as' ? (contentForm.notes_as || '') : (contentForm.notes_en || '')));
 
-  const handleContentChange = useCallback((e) => {
-    const md = e.target.value;
+  const handleContentChange = useCallback((md) => {
     setContentForm(f => ({ ...f, [_contentField()]: md }));
   }, [_contentField, setContentForm]);
 
@@ -128,7 +139,7 @@ export default function ChapterEditForm({
           }
         }
         if (!urls.length) throw new Error('No pages uploaded');
-        const current = editorRef.current?.value ?? activeContent;
+        const current = editorRef.current?.getMarkdown?.() ?? activeContent;
         const pagesMd = urls.map((u, i) => `![Page ${i + 1}](${u})`).join('\n\n');
         const field = _contentField();
         setContentForm(f => ({ ...f, [field]: current + (current.trim() ? '\n\n' : '') + pagesMd + '\n' }));
@@ -148,6 +159,33 @@ export default function ChapterEditForm({
   }, [imageUploadHandler, editorRef, activeContent, setContentForm, setEditorKey, _contentField]);
 
   const [showAuditLog, setShowAuditLog] = useState(false);
+
+  // Cleans up content pasted from PDFs/Word docs — rebuilds broken LaTeX
+  // formulas and reflows ASCII-art tables into proper Markdown, without
+  // rewriting the underlying text. Available for Notes and Q&A only, since
+  // those are the types students read (PYQ/Question Paper store PDFs).
+  const canFormat = contentForm.content_type === 'notes' || isQA;
+  const handleFixFormatting = useCallback(async () => {
+    const field = _contentField();
+    const current = editorRef.current?.getMarkdown?.() ?? activeContent;
+    if (!current.trim()) { toast.error('Nothing to format yet'); return; }
+    setFormatting(true);
+    const tid = toast.loading('Fixing formulas and tables…');
+    try {
+      const res = await axios.post(
+        `${API}/admin/content/format-text`,
+        { text: current },
+        authHeaders(adminToken)
+      );
+      setContentForm(f => ({ ...f, [field]: res.data.formatted_text || current }));
+      setEditorKey(k => k + 1);
+      toast.success('Formatting fixed', { id: tid });
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Formatting failed', { id: tid });
+    } finally {
+      setFormatting(false);
+    }
+  }, [_contentField, activeContent, adminToken, editorRef, setContentForm, setEditorKey]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -271,14 +309,14 @@ export default function ChapterEditForm({
                   className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${contentMode === 'reader' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600 hover:bg-violet-100'}`}
                   title="Student-facing content (content_en / content_as)"
                 >
-                  Reader
+                  Frontend Editor
                 </button>
                 <button
                   onClick={() => { setContentMode('rag'); setEditorKey(k => k + 1); }}
                   className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${contentMode === 'rag' ? 'text-white bg-emerald-600 shadow-sm' : 'text-emerald-700 hover:bg-emerald-50'}`}
                   title="Clean retrieval text for AI (rag_text_en / rag_text_as)"
                 >
-                  RAG Text
+                  RAG Editor
                 </button>
               </div>
               {contentMode === 'rag' && (
@@ -433,7 +471,7 @@ export default function ChapterEditForm({
                 <button
                   key={t.label}
                   onClick={() => {
-                    const current = editorRef.current?.value ?? activeContent;
+                    const current = editorRef.current?.getMarkdown?.() ?? activeContent;
                     const field = _contentField();
                     setContentForm(f => ({ ...f, [field]: current + t.shortcode }));
                     setEditorKey(k => k + 1);
@@ -468,30 +506,78 @@ export default function ChapterEditForm({
                 </div>
               )}
               <div className="flex-1 min-h-0 overflow-hidden" style={{ background: '#fff' }}>
-                <textarea
+                <MDXEditor
                   ref={editorRef}
-                  key={`${editTarget?.id ?? '__new__'}-${editorKey}-${editorLang}`}
-                  value={activeContent}
+                  key={`${editTarget?.id ?? '__new__'}-${editorKey}-${editorLang}-${contentMode}`}
+                  markdown={activeContent}
                   onChange={handleContentChange}
+                  className="mdx-editor-light h-full"
+                  contentEditableClassName="cms-editor-content"
                   placeholder={isQA
                     ? (contentMode === 'rag'
                         ? 'Write expanded Q&A retrieval text here (for AI search)…'
                         : 'Write Q&A content here — use ## for questions, answers below…')
                     : 'Write markdown content here…'
                   }
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    padding: '16px',
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                    fontSize: 13,
-                    lineHeight: 1.7,
-                    color: '#1a1a1a',
-                    background: '#ffffff',
-                    border: 'none',
-                    outline: 'none',
-                    resize: 'none',
-                  }}
+                  plugins={[
+                    headingsPlugin(),
+                    listsPlugin(),
+                    quotePlugin(),
+                    thematicBreakPlugin(),
+                    markdownShortcutPlugin(),
+                    codeBlockPlugin({ defaultCodeBlockLanguage: 'text' }),
+                    codeMirrorPlugin({
+                      codeBlockLanguages: { js: 'JavaScript', ts: 'TypeScript', python: 'Python', text: 'Text', html: 'HTML', css: 'CSS' },
+                    }),
+                    tablePlugin(),
+                    linkPlugin(),
+                    imagePlugin({ imageUploadHandler }),
+                    diffSourcePlugin({ viewMode: 'rich-text', diffMarkdown: '' }),
+                    toolbarPlugin({
+                      toolbarContents: () => (
+                        <DiffSourceToggleWrapper>
+                          <UndoRedo />
+                          <Separator />
+                          <BoldItalicUnderlineToggles />
+                          <CodeToggle />
+                          <Separator />
+                          <ListsToggle />
+                          <Separator />
+                          <BlockTypeSelect />
+                          <Separator />
+                          <CreateLink />
+                          <InsertImage />
+                          <InsertTable />
+                          <InsertThematicBreak />
+                          <InsertCodeBlock />
+                          {canFormat && (
+                            <>
+                              <Separator />
+                              <button
+                                type="button"
+                                onClick={handleFixFormatting}
+                                disabled={formatting}
+                                title="Fix formulas and tables broken by pasting raw text"
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: 4,
+                                  padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+                                  color: '#c026d3', background: 'rgba(217,70,239,0.10)',
+                                  border: '1px solid rgba(217,70,239,0.20)',
+                                  cursor: formatting ? 'not-allowed' : 'pointer',
+                                  opacity: formatting ? 0.5 : 1,
+                                }}
+                              >
+                                {formatting
+                                  ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                                  : <Wand2 size={12} />}
+                                {formatting ? 'Fixing…' : 'Fix Formatting'}
+                              </button>
+                            </>
+                          )}
+                        </DiffSourceToggleWrapper>
+                      ),
+                    }),
+                  ]}
                 />
               </div>
               {mobilePreview && (
