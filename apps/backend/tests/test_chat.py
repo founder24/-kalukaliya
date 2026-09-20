@@ -69,6 +69,19 @@ def test_rate_limit_headers_include_remaining_and_month_reset():
     assert exhausted["Retry-After"] == "3600"
 
 
+def test_response_quality_scores_language_and_length_signals():
+    from app.services.ai.response_quality import score_response_quality
+
+    assert score_response_quality("This is a detailed English answer.", "en") == {
+        "score": 1.0,
+        "passed": True,
+        "flags": [],
+    }
+    short = score_response_quality("ok", "en")
+    assert short["passed"] is False
+    assert "too_short" in short["flags"]
+
+
 @pytest.mark.anyio
 async def test_save_chat_reports_success_for_stream_completion():
     from app.services.chat_service import ChatService

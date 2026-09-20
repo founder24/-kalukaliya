@@ -76,6 +76,18 @@ from app.api.webhooks import razorpay
 
 logger = logging.getLogger(__name__)
 
+OPENAPI_DESCRIPTION = """
+Syrabit provides curriculum-grounded AI assistance for Assamboard students.
+
+## API versioning
+
+Stable public routes are currently under `/api/v1`. Responses include
+`X-API-Version` with the deployed application version. New versions will be
+introduced as additive route prefixes; a future deprecation will be announced
+with a `Sunset` response header and documented migration period before a
+version is removed.
+"""
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -342,7 +354,7 @@ def create_app() -> FastAPI:
     is_prod = settings.APP_ENV in ("production", "staging")
     app = FastAPI(
         title="Syrabit API",
-        description="Educational AI Assistant for Assamese Students",
+        description=OPENAPI_DESCRIPTION,
         version="3.0.0",
         lifespan=lifespan,
         docs_url=None if is_prod else "/docs",

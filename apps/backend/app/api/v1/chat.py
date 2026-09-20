@@ -28,6 +28,7 @@ from app.api.deps.rate_limit import check_rate_limit
 from app.utils.tracking import track_chat_completed
 from app.config import settings
 from app.services.memory_service import write_qa_memory
+from app.services.ai.response_quality import score_response_quality
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +231,7 @@ class ChatResponse(BaseModel):
     model_used: str
     latency_ms: int
     sources: List[dict] = []
+    quality: dict = Field(default_factory=dict)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -237,7 +239,20 @@ class ChatResponse(BaseModel):
 # ═══════════════════════════════════════════════════════════════
 
 
-@router.post("/", response_model=ChatResponse)
+@router.post(
+    "/",
+    response_model=ChatResponse,
+    summary="Generate a curriculum-grounded chat response",
+    description=(
+        "Accepts an authenticated or anonymous student question and returns a "
+        "Workers AI response with retrieval sources and a deterministic quality score."
+    ),
+    responses={
+        413: {"description": "The request body exceeds the chat size limit."},
+        429: {"description": "The monthly chat quota has been exhausted."},
+        503: {"description": "The generation or database service is unavailable."},
+    },
+)
 async def chat(
     request: ChatRequest,
     user: Optional[User] = Depends(get_current_user_optional),
@@ -526,6 +541,7 @@ async def chat(
                 from app.services.ai.greeting_rag import greeting_rag as _greeting_rag
                 _canned = _greeting_rag.fast_match(sanitized_message, detected_lang)
                 if _canned:
+                    quality = score_response_quality(_canned, detected_lang)
                     logger.info(
                         "greeting_rag_canned_hit",
                         extra={
@@ -538,6 +554,7 @@ async def chat(
                         model_used="greeting_rag",
                         latency_ms=int((time.time() - start_time) * 1000),
                         sources=[],
+                        quality=quality,
                     )
 
             # 2b. Check response cache after rate limit enforcement.
@@ -556,6 +573,7 @@ async def chat(
                 )
             if cached:
                 latency_ms = int((time.time() - start_time) * 1000)
+                quality = score_response_quality(cached["response"], detected_lang)
                 logger.info(
                     "chat_cache_hit",
                     extra={
@@ -568,6 +586,7 @@ async def chat(
                     model_used=cached["model"],
                     latency_ms=latency_ms,
                     sources=[],
+                    quality=quality,
                 )
 
             # 2c. Web search — runs for every non-generic query, in parallel
@@ -685,6 +704,17 @@ async def chat(
                 user_id=user_id,
                 correlation_id=correlation_id,
             )
+            quality = score_response_quality(response_text, detected_lang)
+            if not quality["passed"]:
+                logger.warning(
+                    "chat_response_quality_warning",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "lang": detected_lang,
+                        "quality_score": quality["score"],
+                        "quality_flags": quality["flags"],
+                    },
+                )
 
             # Calculate latency
             latency_ms = int((time.time() - start_time) * 1000)
@@ -792,6 +822,7 @@ async def chat(
                     }
                     for c in context_chunks
                 ],
+                quality=quality,
             )
 
         result = await asyncio.wait_for(_process_chat(), timeout=15.0)
@@ -1698,6 +1729,18 @@ async def chat_stream(
             'matched_board':   (source_card.board_name if source_card else None)
                                or (topic_match.get('board_slug') if topic_match else None),
         }
+        quality = score_response_quality(full_response, detected_lang)
+        _rt["quality"] = quality
+        if not quality["passed"]:
+            logger.warning(
+                "chat_stream_response_quality_warning",
+                extra={
+                    "correlation_id": correlation_id,
+                    "lang": detected_lang,
+                    "quality_score": quality["score"],
+                    "quality_flags": quality["flags"],
+                },
+            )
         # Persist before acknowledging completion so the client can distinguish
         # a saved chat from a response that only made it to the stream.
         try:
@@ -1811,7 +1854,17 @@ async def chat_stream(
 ANON_HISTORY_LIMIT = 5
 
 
-@router.get("/history")
+@router.get(
+    "/history",
+    summary="List the current user's chat sessions",
+    description=(
+        "Returns paginated history. Anonymous callers must provide the same "
+        "validated identity used when the session was created."
+    ),
+    responses={
+        503: {"description": "The chat database is unavailable."},
+    },
+)
 async def get_chat_history(
     skip: int = 0,
     limit: int = 20,
@@ -1886,7 +1939,18 @@ async def get_chat_history(
     }
 
 
-@router.get("/{session_id}/messages")
+@router.get(
+    "/{session_id}/messages",
+    summary="Read messages from an owned chat session",
+    description=(
+        "The session lookup is bound to the authenticated user or validated "
+        "anonymous request identity; a session ID alone is not sufficient."
+    ),
+    responses={
+        401: {"description": "Authentication or anonymous identity is required."},
+        404: {"description": "The session does not exist for this caller."},
+    },
+)
 async def get_chat_messages(
     session_id: str,
     skip: int = 0,
