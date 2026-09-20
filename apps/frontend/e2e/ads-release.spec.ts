@@ -2,7 +2,7 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 
 const FIXTURE_ROUTE = '/ahsec/class-12/physics/release-ad-fixture';
 const PRODUCTION_ROUTE = process.env.E2E_ADS_PRODUCTION_PATH
-  || '/ahsec/class-12/physics/laws-of-motion';
+  || '/ahsec/hs-1st-year/physics/laws-of-motion';
 const GOOGLE_LOADER = '**/pagead/js/adsbygoogle.js*';
 
 const fixtureChapter = {

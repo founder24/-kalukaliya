@@ -497,7 +497,7 @@ jobs:
         env:
           E2E_ADS_PRODUCTION: '1'
           BASE_URL: ${{ env.FRONTEND_URL }}
-          E2E_ADS_PRODUCTION_PATH: /ahsec/class-12/physics/laws-of-motion
+          E2E_ADS_PRODUCTION_PATH: /ahsec/hs-1st-year/physics/laws-of-motion
           PLAYWRIGHT_SKIP_WEB_SERVER: '1'
         run: |
           set -euo pipefail
