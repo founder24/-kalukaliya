@@ -20,6 +20,12 @@ def clean_env(monkeypatch):
         "JWT_PRIVATE_KEY",
         "JWT_PUBLIC_KEY",
         "RESET_TOKEN_SECRET",
+        "MONGODB_URI",
+        "CF_ACCOUNT_ID",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "CF_WORKER_AI_TOKEN",
+        "CF_API_TOKEN",
+        "RAG_LEGACY_FALLBACK_ENABLED",
     ]
     for var in env_vars_to_clear:
         monkeypatch.delenv(var, raising=False)
@@ -133,6 +139,23 @@ class TestConfigResilienceProduction:
         assert isinstance(s, Settings)
         assert any("JWT_PRIVATE_KEY" in e for e in s.startup_errors)
         assert any("JWT_PUBLIC_KEY" in e for e in s.startup_errors)
+
+    def test_active_production_dependencies_are_reported(self, monkeypatch):
+        """Production reports missing active services, not retired providers."""
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.setenv(
+            "JWT_SECRET", "a-valid-production-secret-that-is-long-enough-32"
+        )
+        monkeypatch.setenv("ADMIN_JWT_SECRET", "admin-secret-value-here")
+        monkeypatch.setenv("TRUST_EDGE_AUTH", "False")
+        monkeypatch.setenv("RAG_LEGACY_FALLBACK_ENABLED", "True")
+
+        from app.config import Settings
+
+        s = Settings()
+        assert any("MONGODB_URI" in e for e in s.startup_errors)
+        assert any("CF_ACCOUNT_ID" in e for e in s.startup_errors)
+        assert any("CF_WORKER_AI_TOKEN" in e for e in s.startup_errors)
 
     def test_multiple_errors_collected(self, monkeypatch):
         """Multiple validation failures are all collected in startup_errors."""

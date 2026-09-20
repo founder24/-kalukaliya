@@ -179,14 +179,18 @@ async def test_rate_limit_uses_incr_without_edge_header():
 @pytest.mark.anyio
 async def test_middleware_adds_security_headers(sync_client):
     """
-    A single unified middleware should add X-Content-Type-Options,
-    X-Frame-Options, X-Request-ID, and Strict-Transport-Security.
+    A single unified middleware should add the core security headers.
     """
     response = await sync_client.get("/health")
 
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
     assert response.headers.get("X-Frame-Options") == "DENY"
     assert "max-age=" in response.headers.get("Strict-Transport-Security", "")
+    assert "default-src 'none'" in response.headers.get(
+        "Content-Security-Policy", ""
+    )
+    assert response.headers.get("Referrer-Policy") == "no-referrer"
+    assert response.headers.get("Permissions-Policy")
     assert response.headers.get("X-Request-ID") is not None
     assert len(response.headers.get("X-Request-ID", "")) > 0
 
