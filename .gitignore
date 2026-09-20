@@ -22,9 +22,14 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 dist/
+dist-ssr/
 build/
 target/
 .gradle/
+
+# Playwright artifacts
+playwright-report/
+blob-report/
 
 # OS generated files
 .DS_Store
