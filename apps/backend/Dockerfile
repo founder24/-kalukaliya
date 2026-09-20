@@ -1,9 +1,11 @@
-# Pinned to the `bookworm` (Debian 12) variant rather than the floating
-# `python:3.12-slim` tag. `slim` now resolves to `trixie` (Debian 13), which
-# is too new for Debian's security team to have backported fixes for most
-# published CVEs yet — Trivy flags dozens of "no fix available" findings on
-# trixie that bookworm (still receiving active security backports) resolves.
-FROM python:3.12-slim-bookworm as builder
+# NOTE: tried pinning to `python:3.12-slim-bookworm` (Debian 12) here on the
+# theory that a more mature release would have fewer unpatched CVEs than the
+# `slim` tag's current `trixie` (Debian 13) base — measured result was worse
+# (added 5 critical-severity findings trixie didn't have, plus more highs).
+# Both releases carry OS-package CVEs Debian's security team has not (and in
+# some cases will never) issue a patch for; that's addressed in the scan
+# workflow via `ignore-unfixed`, not by picking a different base image.
+FROM python:3.12-slim as builder
 
 WORKDIR /app
 
@@ -21,7 +23,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir --user -r requirements-nohash.txt \
     && pip install --no-cache-dir --user "email-validator>=2.0"
 
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim
 
 WORKDIR /app
 
