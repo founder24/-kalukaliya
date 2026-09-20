@@ -13,18 +13,37 @@ def detect_language(text: str) -> str:
     """
     Detect language of input text.
     Returns 'as' for Assamese, 'en' for English.
+
+    Assamese and Bengali share the same Unicode block, so this intentionally
+    uses conservative script heuristics rather than treating a few characters
+    in an otherwise English/code-heavy prompt as Assamese.
     """
+    if not text:
+        return "en"
+
+    # Code comments and string literals are not reliable language signals.
+    # Remove fenced and inline code before measuring the natural-language
+    # script, while retaining the original text for code detection.
+    natural_text = re.sub(r"```[\s\S]*?```", " ", text)
+    natural_text = re.sub(r"`[^`]*`", " ", natural_text)
     assamese_pattern = re.compile(r"[\u0980-\u09FF]")
-    assamese_chars = len(assamese_pattern.findall(text))
-    total_chars = len(text.replace(" ", ""))
+    assamese_chars = len(assamese_pattern.findall(natural_text))
+    total_chars = len(re.sub(r"\s+", "", natural_text))
 
     if total_chars == 0:
         return "en"
 
     assamese_ratio = assamese_chars / total_chars
-    if assamese_ratio > 0.3 and assamese_chars >= 3:
-        return "as"
-    return "en"
+    if assamese_chars < 5 or assamese_ratio < 0.35:
+        return "en"
+
+    code_markers = re.compile(
+        r"(?:\b(?:def|class|function|const|let|import|return|SELECT|FROM)\b|"
+        r"=>|[{};]|</?[A-Za-z][^>]*>)"
+    )
+    if code_markers.search(text) and assamese_ratio < 0.55:
+        return "en"
+    return "as"
 
 
 def detect_language_and_route(text: str) -> tuple[str, str]:

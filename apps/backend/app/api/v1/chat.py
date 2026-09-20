@@ -697,7 +697,7 @@ async def chat(
                     )
                 )
 
-            # 5. Save chat to MongoDB (fire-and-forget)
+            # 5. Save chat to MongoDB in the background for the non-streaming path
             task = asyncio.create_task(
                 ChatService.save_chat(
                     user_id=user_id,
@@ -1698,7 +1698,34 @@ async def chat_stream(
             'matched_board':   (source_card.board_name if source_card else None)
                                or (topic_match.get('board_slug') if topic_match else None),
         }
-        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'credits_used_total': _credits_used_total, 'remaining_credits': _remaining_credits, 'route_trace': _rt})}\n\n"
+        # Persist before acknowledging completion so the client can distinguish
+        # a saved chat from a response that only made it to the stream.
+        try:
+            persistence_saved = await ChatService.save_chat(
+                user_id=user_id,
+                session_id=request.session_id,
+                user_message=sanitized_message,
+                assistant_response=full_response,
+                target_model=actual_model,
+                latency_ms=latency_ms,
+                context_chunks=context_chunks,
+                detected_lang=detected_lang,
+                source_card=source_card,
+                chapter_id=request.chapter_id,
+                subject_id=request.subject_id,
+                correlation_id=correlation_id,
+            )
+        except Exception as persistence_error:
+            persistence_saved = False
+            logger.error(
+                "chat_stream_persistence_failed",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_class": _classify_chat_error(persistence_error),
+                },
+            )
+
+        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'credits_used_total': _credits_used_total, 'remaining_credits': _remaining_credits, 'persistence_status': 'saved' if persistence_saved else 'failed', 'route_trace': _rt})}\n\n"
 
         # Record final metrics in OTel span
         with tracer.start_as_current_span("chat.stream.complete") as final_span:
@@ -1742,28 +1769,6 @@ async def chat_stream(
                         "error_class": _classify_chat_error(_ue),
                     },
                 )
-
-        # -- Persist chat (fire-and-forget) --
-        task = asyncio.create_task(
-            ChatService.save_chat(
-                user_id=user_id,
-                session_id=request.session_id,
-                user_message=sanitized_message,
-                assistant_response=full_response,
-                target_model=actual_model,
-                latency_ms=latency_ms,
-                context_chunks=context_chunks,
-                detected_lang=detected_lang,
-                source_card=source_card,
-                # Raw IDs stored for multi-turn curriculum context inheritance
-                chapter_id=request.chapter_id,
-                subject_id=request.subject_id,
-                correlation_id=correlation_id,
-            )
-        )
-        task.add_done_callback(
-            lambda completed: _log_task_exception(completed, correlation_id)
-        )
 
         # -- Write Q&A memory (fire-and-forget, authenticated users only) --
         if user:

@@ -1,6 +1,6 @@
 import pytest
 from httpx import AsyncClient
-from unittest.mock import patch, AsyncMock
+from unittest.mock import MagicMock, patch, AsyncMock
 import json
 
 from fastapi import HTTPException
@@ -67,6 +67,38 @@ def test_rate_limit_headers_include_remaining_and_month_reset():
     exhausted = _rate_limit_headers(31, 30, retry_after=3600)
     assert exhausted["X-RateLimit-Remaining"] == "0"
     assert exhausted["Retry-After"] == "3600"
+
+
+@pytest.mark.anyio
+async def test_save_chat_reports_success_for_stream_completion():
+    from app.services.chat_service import ChatService
+
+    chat_doc = MagicMock()
+    chat_doc.save = AsyncMock()
+    chat_class = MagicMock(return_value=chat_doc)
+    chat_class.find_one = AsyncMock(return_value=None)
+
+    with (
+        patch("app.models.chat.Chat", chat_class),
+        patch.object(
+            ChatService,
+            "_invalidate_history_cache",
+            new_callable=AsyncMock,
+        ),
+    ):
+        saved = await ChatService.save_chat(
+            user_id="anon_test",
+            session_id="session-test",
+            user_message="hello",
+            assistant_response="hi",
+            target_model="@cf/test",
+            latency_ms=10,
+            context_chunks=[],
+            detected_lang="en",
+        )
+
+    assert saved is True
+    chat_doc.save.assert_awaited_once()
 
 
 @pytest.mark.anyio
