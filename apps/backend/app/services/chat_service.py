@@ -6,7 +6,7 @@ Responsibilities:
 - RAG retrieval (embedding + MongoDB vector search)
 - Prompt building with citation format
 - LLM calling via Sarvam AI
-- Chat persistence (fire-and-forget) with dead letter on double failure
+- Chat persistence with retry and dead-letter recording on repeated failure
 - Conversation history loading with Redis caching
 """
 
@@ -1241,7 +1241,7 @@ class ChatService:
         yield f"data: {json.dumps({'__syrabit_stream_complete_7f3a9b2e__': True, 'full_response': full_response, 'actual_model': actual_model})}\n\n"
 
     # ------------------------------------------------------------------
-    # Chat persistence (fire-and-forget)
+    # Chat persistence with retry and dead-letter recording
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -1284,8 +1284,8 @@ class ChatService:
         chapter_id: Optional[str] = None,   # stored for multi-turn context inheritance
         subject_id: Optional[str] = None,   # stored for multi-turn context inheritance
         correlation_id: Optional[str] = None,
-    ) -> None:
-        """Persist chat to MongoDB. Designed to be called via asyncio.create_task."""
+    ) -> bool:
+        """Persist chat to MongoDB and report whether it was saved."""
         rag_sources = ChatService._serialize_messages([
             {"doc_id": c["id"], "title": c["title"], "score": c["score"]}
             for c in context_chunks
@@ -1352,6 +1352,7 @@ class ChatService:
             # Invalidate history cache so next read refills from MongoDB
             if session_id:
                 await ChatService._invalidate_history_cache(session_id)
+            return True
 
         except Exception as e:
             logger.error(
@@ -1383,6 +1384,7 @@ class ChatService:
 
                 if session_id:
                     await ChatService._invalidate_history_cache(session_id)
+                return True
             except Exception as retry_err:
                 logger.error(
                     "chat_message_lost",
@@ -1402,6 +1404,7 @@ class ChatService:
                     _safe_error_class(retry_err),
                     correlation_id=correlation_id,
                 )
+                return False
 
     # ------------------------------------------------------------------
     # Conversation history (with Redis caching, 30-min TTL)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from beanie.exceptions import CollectionWasNotInitialized
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -11,7 +11,7 @@ import json
 import asyncio
 import httpx
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import File, UploadFile, Form
 from app.models.user import User
@@ -28,6 +28,7 @@ from app.api.deps.rate_limit import check_rate_limit
 from app.utils.tracking import track_chat_completed
 from app.config import settings
 from app.services.memory_service import write_qa_memory
+from app.services.ai.response_quality import score_response_quality
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,27 @@ def _enforce_chat_body_size(request: Request) -> None:
             status_code=413,
             detail="Chat request body is too large.",
         )
+
+
+def _rate_limit_headers(
+    current_count: int,
+    limit: int,
+    *,
+    retry_after: Optional[int] = None,
+) -> dict[str, str]:
+    """Build one consistent rate-limit header set for chat responses."""
+    now = datetime.now(timezone.utc)
+    next_month = (now.replace(day=28) + timedelta(days=4)).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    )
+    headers = {
+        "X-RateLimit-Limit": str(limit),
+        "X-RateLimit-Remaining": str(max(0, limit - current_count)),
+        "X-RateLimit-Reset": str(int(next_month.timestamp())),
+    }
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
+    return headers
 
 
 def _chat_correlation_id(http_request: Optional[Request]) -> str:
@@ -209,6 +231,7 @@ class ChatResponse(BaseModel):
     model_used: str
     latency_ms: int
     sources: List[dict] = []
+    quality: dict = Field(default_factory=dict)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -216,11 +239,25 @@ class ChatResponse(BaseModel):
 # ═══════════════════════════════════════════════════════════════
 
 
-@router.post("/", response_model=ChatResponse)
+@router.post(
+    "/",
+    response_model=ChatResponse,
+    summary="Generate a curriculum-grounded chat response",
+    description=(
+        "Accepts an authenticated or anonymous student question and returns a "
+        "Workers AI response with retrieval sources and a deterministic quality score."
+    ),
+    responses={
+        413: {"description": "The request body exceeds the chat size limit."},
+        429: {"description": "The monthly chat quota has been exhausted."},
+        503: {"description": "The generation or database service is unavailable."},
+    },
+)
 async def chat(
     request: ChatRequest,
     user: Optional[User] = Depends(get_current_user_optional),
     http_request: Request = None,
+    response: Response = None,
     _body_size_check: None = Depends(_enforce_chat_body_size),
 ):
     """
@@ -483,17 +520,19 @@ async def chat(
 
             # Check rate limit result - always enforced, even for cache hits
             allowed, current_count, limit, limit_type = rate_result
+            if response is not None:
+                response.headers.update(_rate_limit_headers(current_count, limit))
             # Admin/staff users are never rate-limited
             _is_admin = user and getattr(user, "role", None) in ("admin", "staff")
             if not allowed and not _is_admin:
                 raise HTTPException(
                     status_code=429,
                     detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
-                    headers={
-                        "X-RateLimit-Limit": str(limit),
-                        "X-RateLimit-Remaining": "0",
-                        "Retry-After": "3600",
-                    },
+                    headers=_rate_limit_headers(
+                        current_count,
+                        limit,
+                        retry_after=3600,
+                    ),
                 )
 
             # GreetingRAG fast-path — bypass cache + LLM for known greetings/meta queries.
@@ -502,6 +541,7 @@ async def chat(
                 from app.services.ai.greeting_rag import greeting_rag as _greeting_rag
                 _canned = _greeting_rag.fast_match(sanitized_message, detected_lang)
                 if _canned:
+                    quality = score_response_quality(_canned, detected_lang)
                     logger.info(
                         "greeting_rag_canned_hit",
                         extra={
@@ -514,6 +554,7 @@ async def chat(
                         model_used="greeting_rag",
                         latency_ms=int((time.time() - start_time) * 1000),
                         sources=[],
+                        quality=quality,
                     )
 
             # 2b. Check response cache after rate limit enforcement.
@@ -532,6 +573,7 @@ async def chat(
                 )
             if cached:
                 latency_ms = int((time.time() - start_time) * 1000)
+                quality = score_response_quality(cached["response"], detected_lang)
                 logger.info(
                     "chat_cache_hit",
                     extra={
@@ -544,6 +586,7 @@ async def chat(
                     model_used=cached["model"],
                     latency_ms=latency_ms,
                     sources=[],
+                    quality=quality,
                 )
 
             # 2c. Web search — runs for every non-generic query, in parallel
@@ -661,6 +704,17 @@ async def chat(
                 user_id=user_id,
                 correlation_id=correlation_id,
             )
+            quality = score_response_quality(response_text, detected_lang)
+            if not quality["passed"]:
+                logger.warning(
+                    "chat_response_quality_warning",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "lang": detected_lang,
+                        "quality_score": quality["score"],
+                        "quality_flags": quality["flags"],
+                    },
+                )
 
             # Calculate latency
             latency_ms = int((time.time() - start_time) * 1000)
@@ -673,7 +727,7 @@ async def chat(
                     )
                 )
 
-            # 5. Save chat to MongoDB (fire-and-forget)
+            # 5. Save chat to MongoDB in the background for the non-streaming path
             task = asyncio.create_task(
                 ChatService.save_chat(
                     user_id=user_id,
@@ -768,6 +822,7 @@ async def chat(
                     }
                     for c in context_chunks
                 ],
+                quality=quality,
             )
 
         result = await asyncio.wait_for(_process_chat(), timeout=15.0)
@@ -917,11 +972,7 @@ async def chat_stream(
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Upgrade to Pro for unlimited messages.",
-            headers={
-                "X-RateLimit-Limit": str(limit),
-                "X-RateLimit-Remaining": "0",
-                "Retry-After": "3600",
-            },
+            headers=_rate_limit_headers(current_count, limit, retry_after=3600),
         )
 
     # Sanitize input to prevent prompt injection
@@ -1678,7 +1729,46 @@ async def chat_stream(
             'matched_board':   (source_card.board_name if source_card else None)
                                or (topic_match.get('board_slug') if topic_match else None),
         }
-        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'credits_used_total': _credits_used_total, 'remaining_credits': _remaining_credits, 'route_trace': _rt})}\n\n"
+        quality = score_response_quality(full_response, detected_lang)
+        _rt["quality"] = quality
+        if not quality["passed"]:
+            logger.warning(
+                "chat_stream_response_quality_warning",
+                extra={
+                    "correlation_id": correlation_id,
+                    "lang": detected_lang,
+                    "quality_score": quality["score"],
+                    "quality_flags": quality["flags"],
+                },
+            )
+        # Persist before acknowledging completion so the client can distinguish
+        # a saved chat from a response that only made it to the stream.
+        try:
+            persistence_saved = await ChatService.save_chat(
+                user_id=user_id,
+                session_id=request.session_id,
+                user_message=sanitized_message,
+                assistant_response=full_response,
+                target_model=actual_model,
+                latency_ms=latency_ms,
+                context_chunks=context_chunks,
+                detected_lang=detected_lang,
+                source_card=source_card,
+                chapter_id=request.chapter_id,
+                subject_id=request.subject_id,
+                correlation_id=correlation_id,
+            )
+        except Exception as persistence_error:
+            persistence_saved = False
+            logger.error(
+                "chat_stream_persistence_failed",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_class": _classify_chat_error(persistence_error),
+                },
+            )
+
+        yield f"data: {json.dumps({'content': '', 'done': True, 'event': 'syrabit_done', 'latency_ms': latency_ms, 'model': actual_model, 'lang': detected_lang, 'credits_used_total': _credits_used_total, 'remaining_credits': _remaining_credits, 'persistence_status': 'saved' if persistence_saved else 'failed', 'route_trace': _rt})}\n\n"
 
         # Record final metrics in OTel span
         with tracer.start_as_current_span("chat.stream.complete") as final_span:
@@ -1723,28 +1813,6 @@ async def chat_stream(
                     },
                 )
 
-        # -- Persist chat (fire-and-forget) --
-        task = asyncio.create_task(
-            ChatService.save_chat(
-                user_id=user_id,
-                session_id=request.session_id,
-                user_message=sanitized_message,
-                assistant_response=full_response,
-                target_model=actual_model,
-                latency_ms=latency_ms,
-                context_chunks=context_chunks,
-                detected_lang=detected_lang,
-                source_card=source_card,
-                # Raw IDs stored for multi-turn curriculum context inheritance
-                chapter_id=request.chapter_id,
-                subject_id=request.subject_id,
-                correlation_id=correlation_id,
-            )
-        )
-        task.add_done_callback(
-            lambda completed: _log_task_exception(completed, correlation_id)
-        )
-
         # -- Write Q&A memory (fire-and-forget, authenticated users only) --
         if user:
             mem_task = asyncio.create_task(
@@ -1773,6 +1841,7 @@ async def chat_stream(
             "Connection": "keep-alive",
             "X-Content-Type-Options": "nosniff",
             "X-Accel-Buffering": "no",
+            **_rate_limit_headers(current_count, limit),
         },
     )
 
@@ -1785,7 +1854,17 @@ async def chat_stream(
 ANON_HISTORY_LIMIT = 5
 
 
-@router.get("/history")
+@router.get(
+    "/history",
+    summary="List the current user's chat sessions",
+    description=(
+        "Returns paginated history. Anonymous callers must provide the same "
+        "validated identity used when the session was created."
+    ),
+    responses={
+        503: {"description": "The chat database is unavailable."},
+    },
+)
 async def get_chat_history(
     skip: int = 0,
     limit: int = 20,
@@ -1860,26 +1939,41 @@ async def get_chat_history(
     }
 
 
-@router.get("/{session_id}/messages")
+@router.get(
+    "/{session_id}/messages",
+    summary="Read messages from an owned chat session",
+    description=(
+        "The session lookup is bound to the authenticated user or validated "
+        "anonymous request identity; a session ID alone is not sufficient."
+    ),
+    responses={
+        401: {"description": "Authentication or anonymous identity is required."},
+        404: {"description": "The session does not exist for this caller."},
+    },
+)
 async def get_chat_messages(
     session_id: str,
     skip: int = 0,
     limit: int = 50,
     user: Optional[User] = Depends(get_current_user_optional),
+    http_request: Request = None,
 ):
     """Get paginated messages for a specific chat session"""
     from app.models.chat import Chat
 
-    chat = await Chat.find_one({"session_id": session_id})
+    if user:
+        owner_id = str(user.id)
+    else:
+        anon_id = resolve_anon_id(http_request)
+        if not anon_id or not ANON_ID_PATTERN.match(anon_id):
+            raise HTTPException(status_code=401, detail="Anonymous identity required")
+        owner_id = anon_id
+
+    # Bind the lookup itself to the request identity.  Querying by session_id
+    # first would let an unauthenticated caller probe another user's session.
+    chat = await Chat.find_one({"session_id": session_id, "user_id": owner_id})
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
-
-    # Verify ownership: authenticated chats require the owner to be logged in
-    if chat.user_id:
-        if not user:
-            raise HTTPException(status_code=401, detail="Authentication required")
-        if chat.user_id != str(user.id):
-            raise HTTPException(status_code=403, detail="Access denied")
 
     # Paginate messages
     limit = min(limit, 200)

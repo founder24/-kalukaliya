@@ -25,6 +25,17 @@ class TestDetectLanguageAndRoute:
         assert lang == "as"
         assert model.startswith("@cf/")
 
+    def test_mixed_english_prompt_with_few_assamese_terms_stays_english(self):
+        from app.services.ai.router import detect_language
+
+        assert detect_language("Explain photosynthesis in English: পোহৰ কি?") == "en"
+
+    def test_code_comments_do_not_change_language_route(self):
+        from app.services.ai.router import detect_language
+
+        prompt = "```python\n# অসমীয়া মন্তব্য\nreturn value\n```\nExplain this in English"
+        assert detect_language(prompt) == "en"
+
 
 class TestResolveLanguageAndModel:
     """Explicit language selection must use Workers AI for both chat modes."""

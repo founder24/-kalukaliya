@@ -1,6 +1,6 @@
 import pytest
 from httpx import AsyncClient
-from unittest.mock import patch, AsyncMock
+from unittest.mock import MagicMock, patch, AsyncMock
 import json
 
 from fastapi import HTTPException
@@ -54,6 +54,64 @@ def test_chat_body_size_guard_rejects_oversized_content_length():
     with pytest.raises(HTTPException) as exc_info:
         _enforce_chat_body_size(request)
     assert exc_info.value.status_code == 413
+
+
+def test_rate_limit_headers_include_remaining_and_month_reset():
+    from app.api.v1.chat import _rate_limit_headers
+
+    headers = _rate_limit_headers(3, 30)
+    assert headers["X-RateLimit-Limit"] == "30"
+    assert headers["X-RateLimit-Remaining"] == "27"
+    assert int(headers["X-RateLimit-Reset"]) > 0
+
+    exhausted = _rate_limit_headers(31, 30, retry_after=3600)
+    assert exhausted["X-RateLimit-Remaining"] == "0"
+    assert exhausted["Retry-After"] == "3600"
+
+
+def test_response_quality_scores_language_and_length_signals():
+    from app.services.ai.response_quality import score_response_quality
+
+    assert score_response_quality("This is a detailed English answer.", "en") == {
+        "score": 1.0,
+        "passed": True,
+        "flags": [],
+    }
+    short = score_response_quality("ok", "en")
+    assert short["passed"] is False
+    assert "too_short" in short["flags"]
+
+
+@pytest.mark.anyio
+async def test_save_chat_reports_success_for_stream_completion():
+    from app.services.chat_service import ChatService
+
+    chat_doc = MagicMock()
+    chat_doc.save = AsyncMock()
+    chat_class = MagicMock(return_value=chat_doc)
+    chat_class.find_one = AsyncMock(return_value=None)
+
+    with (
+        patch("app.models.chat.Chat", chat_class),
+        patch.object(
+            ChatService,
+            "_invalidate_history_cache",
+            new_callable=AsyncMock,
+        ),
+    ):
+        saved = await ChatService.save_chat(
+            user_id="anon_test",
+            session_id="session-test",
+            user_message="hello",
+            assistant_response="hi",
+            target_model="@cf/test",
+            latency_ms=10,
+            context_chunks=[],
+            detected_lang="en",
+        )
+
+    assert saved is True
+    chat_doc.save.assert_awaited_once()
 
 
 @pytest.mark.anyio
