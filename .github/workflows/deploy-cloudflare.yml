@@ -67,9 +67,9 @@ jobs:
       R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
       TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
@@ -148,9 +148,9 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
@@ -313,9 +313,9 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
@@ -387,9 +387,9 @@ jobs:
       INDEXNOW_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
       INDEXNOW_BACKEND_URL: https://api.syrabit.ai
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
@@ -408,7 +408,7 @@ jobs:
 
       - name: Cache Playwright Chromium
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-${{ hashFiles('pnpm-lock.yaml') }}
@@ -428,7 +428,7 @@ jobs:
 
       - name: Upload chat ad Playwright diagnostics
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: chat-ads-playwright-diagnostics
           path: apps/frontend/test-results/
@@ -458,7 +458,7 @@ jobs:
 
       - name: Upload staff production chunk diagnostics
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: staff-production-chunk-diagnostics
           path: |
@@ -517,7 +517,7 @@ jobs:
 
       - name: Upload live ad smoke diagnostics
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: live-ad-smoke-diagnostics
           path: apps/frontend/test-results/
@@ -537,7 +537,7 @@ jobs:
       needs.deploy-edge.result == 'success' &&
       needs.deploy-frontend.result == 'success'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: API Worker is live and Worker-native
         run: |
@@ -723,14 +723,14 @@ jobs:
       needs.deploy-edge.result == 'success' &&
       needs.deploy-frontend.result == 'success'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Worker chat performance gate regression test
         run: node --test scripts/worker-chat-performance-gate.test.mjs
 
       - name: Download recent worker chat performance timings
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const fs = require('fs');
@@ -791,7 +791,7 @@ jobs:
       - name: Notify maintainers of persistent worker chat latency
         if: ${{ always() && hashFiles('chat-performance-notification-state.json') != '' }}
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const fs = require('fs');
@@ -874,7 +874,7 @@ jobs:
 
       - name: Upload worker chat performance timings
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: worker-chat-performance-${{ github.run_attempt }}
           path: chat-performance-report.json
@@ -896,7 +896,7 @@ jobs:
       PUBLIC_EDGE_URL: https://api.syrabit.ai
       FRONTEND_URL: https://syrabit.ai
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Service binding, D1 content, and anonymous credits work publicly
         run: |
           set -euo pipefail
@@ -941,7 +941,7 @@ jobs:
       PUBLIC_EDGE_URL: https://api.syrabit.ai
       STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Run live Worker chat contract
         run: node scripts/test-live-chat-contract.mjs
@@ -956,9 +956,9 @@ jobs:
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
@@ -977,7 +977,7 @@ jobs:
 
       - name: Cache Playwright Chromium
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-${{ hashFiles('pnpm-lock.yaml') }}
@@ -1003,7 +1003,7 @@ jobs:
 
       - name: Upload failed staff portal browser diagnostics
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: staff-portal-playwright-diagnostics-${{ github.run_attempt }}
           path: staff-portal-diagnostics/
@@ -1113,7 +1113,7 @@ jobs:
       CUTOVER_RESET_PASSWORD: ${{ secrets.CUTOVER_RESET_PASSWORD }}
       CUTOVER_RESET_NONCE: ${{ needs.request-reset-email.outputs.nonce }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Confirm the newly delivered link exactly once
         run: |

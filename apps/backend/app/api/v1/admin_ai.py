@@ -69,13 +69,14 @@ async def ai_providers():
 
 @router.get("/ai/circuit-breakers")
 async def get_circuit_breakers():
-    """Workers AI retries primary-to-fallback internally; no local breaker exists."""
+    """Return the local state for active generation resilience."""
+    from app.core.circuit_breaker import workers_ai_circuit_breaker
+
     return {
         "circuit_breakers": [
             {
                 "provider": "cf_workers_ai",
-                "state": "managed",
-                "note": "Primary-to-fallback retry is managed in the API Worker",
+                **workers_ai_circuit_breaker.get_status(),
             },
         ]
     }
@@ -83,10 +84,13 @@ async def get_circuit_breakers():
 
 @router.post("/ai/reset-circuit")
 async def reset_circuit_breakers():
-    """Compatibility endpoint: API Worker retry state is per-request."""
+    """Reset the local Workers AI breaker after an operator confirms recovery."""
+    from app.core.circuit_breaker import workers_ai_circuit_breaker
+
+    workers_ai_circuit_breaker.reset()
     return {
         "status": "ok",
-        "message": "Workers AI retry state is stateless; nothing to reset",
+        "message": "Workers AI circuit breaker reset",
     }
 
 

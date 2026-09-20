@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import re
 from pathlib import Path
 
 import yaml
@@ -22,7 +23,9 @@ FRONTEND_JOB = "deploy-frontend"
 BUILD_COMMAND = "pnpm --filter @workspace/syrabit run build"
 STAFF_CHECK_COMMAND = "pnpm --filter @workspace/syrabit run check:staff-chunks"
 PUBLISH_COMMAND = "wrangler pages deploy"
-DIAGNOSTIC_ACTION = "actions/upload-artifact@v4"
+DIAGNOSTIC_ACTION_PATTERN = re.compile(
+    r"^actions/upload-artifact@(?:v4|[0-9a-f]{40})$"
+)
 DIAGNOSTIC_NAME = "staff-production-chunk-diagnostics"
 DIAGNOSTIC_PATHS = {
     "apps/frontend/dist/.vite/manifest.json",
@@ -81,7 +84,8 @@ def validate_staff_chunk_release_gate(workflow: Path) -> list[str]:
         step
         for step in steps
         if isinstance(step, dict)
-        and step.get("uses") == DIAGNOSTIC_ACTION
+        and isinstance(step.get("uses"), str)
+        and DIAGNOSTIC_ACTION_PATTERN.fullmatch(step["uses"])
         and isinstance(step.get("with"), dict)
         and step["with"].get("name") == DIAGNOSTIC_NAME
     ]

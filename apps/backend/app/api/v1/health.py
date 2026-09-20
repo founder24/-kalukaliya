@@ -703,8 +703,12 @@ async def circuit_breaker_status():
     Get status of all circuit breakers.
     Useful for monitoring service resilience.
     """
-    from app.core.circuit_breaker import sarvam_circuit_breaker
+    from app.core.circuit_breaker import (
+        sarvam_circuit_breaker,
+        workers_ai_circuit_breaker,
+    )
 
     return {
         "sarvam_ai": sarvam_circuit_breaker.get_status(),
+        "workers_ai": workers_ai_circuit_breaker.get_status(),
     }

@@ -235,3 +235,10 @@ class CircuitBreaker:
 sarvam_circuit_breaker = CircuitBreaker(
     name="Sarvam AI", failure_threshold=5, reset_timeout=30
 )
+
+# The active generation provider is the authenticated Cloudflare Workers AI
+# boundary. Keep a distinct breaker so generation outages fail fast without
+# affecting unrelated provider integrations or health probes.
+workers_ai_circuit_breaker = CircuitBreaker(
+    name="Cloudflare Workers AI", failure_threshold=5, reset_timeout=30
+)
