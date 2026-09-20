@@ -37,6 +37,8 @@ export const users = sqliteTable('users', {
   voiceEnabled: integer('voice_enabled').default(1),
   theme: text('theme').default('light'),
   savedSubjects: text('saved_subjects').default('[]'),                // JSON string[]
+  courseType: text('course_type'),                                    // major | minor | sec | vac | mdc | aec
+  selectedSubjects: text('selected_subjects').default('[]'),          // JSON {id,name}[]
   phone: text('phone'),
 
   // Onboarding

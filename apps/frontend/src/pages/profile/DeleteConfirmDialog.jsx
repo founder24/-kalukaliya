@@ -21,15 +21,15 @@ export default function DeleteConfirmDialog({
           </div>
           <div>
             <h3 className="font-semibold text-foreground">Delete Account?</h3>
-            <p className="text-xs text-muted-foreground">This cannot be undone after 72 hours</p>
+            <p className="text-xs text-muted-foreground">This cannot be undone after 14 days</p>
           </div>
         </div>
       }
     >
       <div className="rounded-xl p-3" style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)' }}>
-        <p className="text-xs text-amber-700 font-medium">72-hour grace period</p>
+        <p className="text-xs text-amber-700 font-medium">14-day grace period</p>
         <p className="text-xs text-muted-foreground/70 mt-0.5">
-          You can cancel deletion within 72 hours. After that, all data is permanently erased.
+          You can cancel deletion within 14 days. After that, all data is permanently erased.
         </p>
       </div>
 

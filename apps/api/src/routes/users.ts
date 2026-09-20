@@ -40,6 +40,12 @@ import type { Env } from '../types';
 
 export const usersRouter = new Hono<{ Bindings: Env }>();
 
+// Single source of truth for the account-deletion grace window. The GET
+// /profile response and the DELETE /account scheduler must agree on this
+// value — they previously used 72 hours and 14 days respectively, so a
+// reloaded profile page showed a hard-delete date three times too soon.
+const ACCOUNT_DELETION_GRACE_DAYS = 14;
+
 // Credit limits — authoritative, must match billing pipeline
 const CHAT_REQUESTS_PER_MINUTE = CHAT_RPM_LIMIT;
 const CREDITS_LIMITS: Record<string, number> = {
@@ -81,20 +87,26 @@ function buildProfileResponse(user: typeof users.$inferSelect): Record<string, u
   let deletionHardAt: string | null = null;
   if (user.deletedAt) {
     status = 'pending_deletion';
-    // Soft-delete grace: 72h after scheduled
-    deletionHardAt = new Date((user.deletedAt + 72 * 3600) * 1000).toISOString();
+    deletionHardAt = new Date(
+      (user.deletedAt + ACCOUNT_DELETION_GRACE_DAYS * 24 * 3600) * 1000,
+    ).toISOString();
   }
 
   let savedSubjects: string[] = [];
   try { savedSubjects = JSON.parse(user.savedSubjects ?? '[]') as string[]; } catch { /* leave empty */ }
   let capabilities: string[] | null = null;
   try { capabilities = user.capabilities === null ? null : JSON.parse(user.capabilities ?? '[]') as string[]; } catch { capabilities = []; }
+  let selectedSubjects: Array<{ id: string; name: string }> = [];
+  try { selectedSubjects = JSON.parse(user.selectedSubjects ?? '[]') as Array<{ id: string; name: string }>; } catch { /* leave empty */ }
 
   return {
     id:                    user.id,
     name:                  user.name ?? '',
     email:                 user.email ?? '',
     role:                  user.role,
+    is_admin:              user.role === 'admin',
+    avatar_url:            user.avatarUrl ?? null,
+    created_at:            user.createdAt != null ? new Date(user.createdAt * 1000).toISOString() : null,
     // null explicitly communicates the backwards-compatible full-staff policy.
     capabilities,
     subscription_tier:     tier,
@@ -111,6 +123,8 @@ function buildProfileResponse(user: typeof users.$inferSelect): Record<string, u
     class_name:            user.className ?? null,
     stream_id:             user.streamId ?? null,
     stream_name:           user.streamName ?? null,
+    course_type:           user.courseType ?? null,
+    selected_subjects:     selectedSubjects,
     credits_used:          creditsUsed,
     credits_limit:         creditsLimit,
     credits_remaining:     creditsRemaining,
@@ -176,6 +190,8 @@ usersRouter.patch('/profile', async (c) => {
     stream_id?: string;
     stream_name?: string;
     phone?: string;
+    course_type?: string;
+    selected_subjects?: Array<{ id: string; name: string }>;
   };
   try { body = await c.req.json() as typeof body; } catch { return c.json({ detail: 'Invalid JSON' }, 400); }
 
@@ -190,6 +206,10 @@ usersRouter.patch('/profile', async (c) => {
   if (body.stream_id         != null) updates.streamId          = body.stream_id;
   if (body.stream_name       != null) updates.streamName        = body.stream_name;
   if (body.phone             != null) updates.phone             = body.phone;
+  // These two were previously accepted by the client and silently dropped
+  // here — the UI reported success but nothing was ever persisted.
+  if (body.course_type       != null) updates.courseType        = body.course_type;
+  if (body.selected_subjects != null) updates.selectedSubjects  = JSON.stringify(body.selected_subjects);
 
   if (Object.keys(updates).length > 1) {
     await db.update(users).set(updates).where(eq(users.id, id));

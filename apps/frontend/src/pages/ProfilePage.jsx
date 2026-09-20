@@ -119,7 +119,7 @@ export default function ProfilePage() {
       setDeletionHardAt(res.data.hard_delete_at);
       setShowDeleteConfirm(false);
       setDeleteText('');
-      toast.success('Account scheduled for deletion — 72 hours to cancel');
+      toast.success('Account scheduled for deletion — 14 days to cancel');
     } catch {
       toast.error('Failed to schedule deletion');
     } finally {

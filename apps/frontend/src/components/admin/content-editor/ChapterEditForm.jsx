@@ -3,7 +3,7 @@ import {
   ArrowLeft, Save, Loader2, Eye, Link2, BarChart3,
   RefreshCw, Layers, LayoutTemplate, Upload,
   FileText, Globe, CheckCircle, Smartphone, Monitor,
-  ImagePlus, Languages, Database, Clock,
+  ImagePlus, Languages, Database, Clock, Wand2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -17,8 +17,8 @@ import ChapterAuditLog from './ChapterAuditLog';
 
 const CONTENT_TYPES = [
   { value: 'notes', label: 'Notes', color: 'violet' },
-  { value: 'qa', label: 'Q&A', color: 'blue' },
-  { value: 'question_paper', label: 'Question Paper', color: 'amber' },
+  { value: 'qa', label: 'Questions', color: 'blue' },
+  { value: 'question_paper', label: 'PYQ', color: 'amber' },
   { value: 'formula', label: 'Formula Sheet', color: 'pink' },
   { value: 'summary', label: 'Summary', color: 'emerald' },
   { value: 'solution', label: 'Solution', color: 'blue' },
@@ -42,6 +42,7 @@ export default function ChapterEditForm({
   const [editorLang, setEditorLang] = useState('en');
   const [contentMode, setContentMode] = useState('reader'); // 'reader' | 'rag'
   const [translating, setTranslating] = useState(false);
+  const [formatting, setFormatting] = useState(false);
 
   const handleTranslateToAssamese = useCallback(async () => {
     if (!editTarget?.id) return;
@@ -148,6 +149,33 @@ export default function ChapterEditForm({
   }, [imageUploadHandler, editorRef, activeContent, setContentForm, setEditorKey, _contentField]);
 
   const [showAuditLog, setShowAuditLog] = useState(false);
+
+  // Cleans up content pasted from PDFs/Word docs — rebuilds broken LaTeX
+  // formulas and reflows ASCII-art tables into proper Markdown, without
+  // rewriting the underlying text. Available for Notes and Q&A only, since
+  // those are the types students read (PYQ/Question Paper store PDFs).
+  const canFormat = contentForm.content_type === 'notes' || isQA;
+  const handleFixFormatting = useCallback(async () => {
+    const field = _contentField();
+    const current = editorRef.current?.value ?? activeContent;
+    if (!current.trim()) { toast.error('Nothing to format yet'); return; }
+    setFormatting(true);
+    const tid = toast.loading('Fixing formulas and tables…');
+    try {
+      const res = await axios.post(
+        `${API}/admin/content/format-text`,
+        { text: current },
+        authHeaders(adminToken)
+      );
+      setContentForm(f => ({ ...f, [field]: res.data.formatted_text || current }));
+      setEditorKey(k => k + 1);
+      toast.success('Formatting fixed', { id: tid });
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Formatting failed', { id: tid });
+    } finally {
+      setFormatting(false);
+    }
+  }, [_contentField, activeContent, adminToken, editorRef, setContentForm, setEditorKey]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -271,14 +299,14 @@ export default function ChapterEditForm({
                   className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${contentMode === 'reader' ? 'text-white bg-violet-600 shadow-sm' : 'text-violet-600 hover:bg-violet-100'}`}
                   title="Student-facing content (content_en / content_as)"
                 >
-                  Reader
+                  Frontend Editor
                 </button>
                 <button
                   onClick={() => { setContentMode('rag'); setEditorKey(k => k + 1); }}
                   className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${contentMode === 'rag' ? 'text-white bg-emerald-600 shadow-sm' : 'text-emerald-700 hover:bg-emerald-50'}`}
                   title="Clean retrieval text for AI (rag_text_en / rag_text_as)"
                 >
-                  RAG Text
+                  RAG Editor
                 </button>
               </div>
               {contentMode === 'rag' && (
@@ -407,6 +435,17 @@ export default function ChapterEditForm({
                 <LayoutTemplate size={10} />
                 Templates
               </button>
+              {canFormat && (
+                <button
+                  onClick={handleFixFormatting}
+                  disabled={formatting}
+                  title="Fix formulas and tables broken by pasting raw text"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-fuchsia-500 text-white hover:bg-fuchsia-600 disabled:opacity-50 transition-all shadow-sm"
+                >
+                  {formatting ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                  {formatting ? 'Fixing…' : 'Fix Formatting'}
+                </button>
+              )}
             </div>
             <div className="ml-auto flex items-center gap-1.5">
               <span className="text-[10px] text-gray-300 font-mono">{activeContent.length}</span>
