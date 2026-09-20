@@ -51,6 +51,18 @@ source files but cannot modify `.github/workflows/*` without GitHub's separate
 `workflow` permission; GitHub reports this as a misleading 404 from the Trees
 API. A stale workspace `GITHUB_TOKEN` may independently fail normal pushes.
 
+When rebasing a PR branch after a GitHub squash merge, the default
+`--force-with-lease` can report stale info through this workspace's authenticated remote.
+Fetch the remote branch and pass its exact SHA explicitly in
+`--force-with-lease=refs/heads/<branch>:<sha>` before updating the PR branch.
+
+**Why:** the remote branch was unchanged, but the implicit lease still rejected the
+rebased push; an explicit lease against the `ls-remote` SHA succeeded without using an
+unprotected force push.
+
+**How to apply:** after rebasing, run `git ls-remote origin refs/heads/<branch>`,
+then use that exact remote SHA as the explicit lease value.
+
 **Why:** A reconciliation succeeded incrementally until the deployment workflow
 path, where both proxy and native Octokit tree creation returned 404 despite
 healthy repository write access.
