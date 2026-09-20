@@ -34,10 +34,51 @@ const MAX_TTS_TEXT_LENGTH = 5_000;
 const MAX_OCR_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_OCR_MULTIPART_BYTES = MAX_OCR_IMAGE_BYTES + 64 * 1024;
 const MAX_OCR_PROMPT_LENGTH = 2_000;
+const MAX_CHAT_LANGUAGE_PREFIX_BYTES = 4 * 1024;
 const TTS_RATE_LIMIT = 20;
 const OCR_RATE_LIMIT = 10;
 const REFERRAL_VISIT_RATE_LIMIT = 60;
 const REFERRAL_VISIT_RATE_WINDOW_MS = 60_000;
+
+/**
+ * Read only a small prefix of the cloned chat body for rate-limit bucketing.
+ *
+ * The original request stream is still forwarded to the API Worker. Reading
+ * the clone through a bounded reader avoids materializing an arbitrarily large
+ * request body just to discover the optional `lang` field.
+ */
+export async function readChatLanguagePrefix(request: Request): Promise<'en' | 'as' | null> {
+  const body = request.clone().body;
+  if (!body) return null;
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let prefix = '';
+
+  try {
+    while (bytesRead < MAX_CHAT_LANGUAGE_PREFIX_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const remaining = MAX_CHAT_LANGUAGE_PREFIX_BYTES - bytesRead;
+      const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+      bytesRead += chunk.byteLength;
+      prefix += decoder.decode(chunk, { stream: bytesRead < MAX_CHAT_LANGUAGE_PREFIX_BYTES });
+
+      const match = prefix.match(/"lang"\s*:\s*"(en|as)"/);
+      if (match) return match[1] as 'en' | 'as';
+    }
+  } catch {
+    return null;
+  } finally {
+    // Do not await cancellation: Request tee streams can wait for the
+    // untouched original branch to finish before resolving cancel().
+    void reader.cancel().catch(() => undefined);
+  }
+
+  return null;
+}
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -180,17 +221,9 @@ export default {
          ? anonymousIdentityId ?? anonymousNetworkRateLimitIdentity(request)
         : authenticatedUserId;
 
-      // Best-effort lang extraction from request body
-      let lang = 'en';
-      try {
-        const cloned = request.clone();
-        const body = await cloned.json() as { lang?: string };
-        if (body.lang === 'en' || body.lang === 'as') {
-          lang = body.lang;
-        }
-      } catch {
-        // Body parsing failed — default to 'en'
-      }
+      // Best-effort lang extraction from a bounded body prefix. The full
+      // request remains untouched for the API Worker.
+      const lang = await readChatLanguagePrefix(request) ?? 'en';
 
        const isAnonymous = authenticatedUserId === 'anonymous';
         const edgeLimit = CHAT_REQUESTS_PER_MINUTE;
