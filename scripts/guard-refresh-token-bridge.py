@@ -18,8 +18,16 @@ BRIDGE_MARKER = re.compile(
 ROUTE_GUARDS = {
     "logout-route": {
         "bridge_blocks": ("logout-kv",),
-        "full_hash": "5630d3a1f512d27af5114db056063dee55595a30788c6b09d858ef10b7c4f55b",
-        "d1_hash": "1974b5eec70bbd183950420bb5013a339dffc8c8603dac7a3ec6600aa2c3d1ab",
+        # Rebaselined 2026-09-20 after the reviewed, merged session-revocation
+        # hardening (bumping users.session_valid_after on logout so a
+        # captured access token is rejected immediately instead of surviving
+        # until its natural TTL). That change legitimately touches the
+        # authoritative D1 logout path, so the pre-existing baseline hash
+        # (from when the guard script was added) went stale and started
+        # failing closed on every release. Confirmed via `git show` that the
+        # only diff since the previous baseline is that reviewed addition.
+        "full_hash": "984a1828300257f3d6a77067fb452b66947bf54037527afd01e5f738f3605c5b",
+        "d1_hash": "79383a9a1be527972f0f2100645084a89ad79c84dc6c7acd4803ad48bffb6a83",
     },
     "refresh-route": {
         "bridge_blocks": ("legacy-read", "refresh-kv"),
