@@ -789,11 +789,6 @@ async function main() {
       .filter((chapter) => chapter?.subject_id && chapter?.slug)
       .map((chapter) => [`${chapter.subject_id}:${chapter.slug}`, chapter]),
   );
-  const staticChaptersBySlug = new Map(
-    (staticBundle.chapters || [])
-      .filter((chapter) => chapter?.slug)
-      .map((chapter) => [chapter.slug, chapter]),
-  );
   const publishedChapterPaths = filterStaleChapterPaths(
     readPublishedChapterPaths(),
     allSubjectRoutes,
@@ -1084,7 +1079,15 @@ async function main() {
         })
       : chapterCandidates;
     const candidateChapters = [
-      ...new Map(rankedChapters.map((chapter) => [chapter.slug, chapter])).values(),
+      ...new Map(
+        rankedChapters
+          .filter(
+            (chapter) =>
+              !STRICT_CURRICULUM_BUILD ||
+              publishedChapterPaths.has(`${url}/${chapter.slug}`),
+          )
+          .map((chapter) => [chapter.slug, chapter]),
+      ).values(),
     ].slice(0, CHAPTERS_PER_SUBJECT);
     for (const chapter of candidateChapters) {
       chapterExpectedPaths.add(`${url}/${chapter.slug}`);
@@ -1109,8 +1112,7 @@ async function main() {
         // briefly. Render it through the normal SSR pipeline from the static
         // curriculum bundle instead of dropping its deployable HTML file.
         const staticChapter =
-          staticChaptersBySubjectSlug.get(`${subjectId}:${chapterSlug}`) ||
-          staticChaptersBySlug.get(chapterSlug);
+          staticChaptersBySubjectSlug.get(`${subjectId}:${chapterSlug}`);
         if (!staticChapter || !publishedChapterPaths.has(chapterUrl)) {
           // A stale sitemap can survive the bundle prefilter when duplicate
           // hierarchy records share one public subject path. A definitive
