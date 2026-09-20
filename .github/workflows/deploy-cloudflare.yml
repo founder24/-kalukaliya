@@ -501,7 +501,19 @@ jobs:
           PLAYWRIGHT_SKIP_WEB_SERVER: '1'
         run: |
           set -euo pipefail
-          pnpm --filter @workspace/syrabit exec playwright test e2e/ads-release.spec.ts
+          # Pages can briefly serve the new HTML before its hashed assets are
+          # available at every edge. Keep the stale-asset assertions strict,
+          # but give propagation a bounded window before failing the release.
+          for attempt in 1 2 3 4; do
+            echo "Live ad smoke attempt ${attempt}/4"
+            if pnpm --filter @workspace/syrabit exec playwright test e2e/ads-release.spec.ts; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 4 ]]; then
+              sleep 45
+            fi
+          done
+          exit 1
 
       - name: Upload live ad smoke diagnostics
         if: ${{ failure() }}
