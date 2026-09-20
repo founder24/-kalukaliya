@@ -618,6 +618,64 @@ function enumerateSitemapSubjectRoutes(chapterPaths, bundleRoutes) {
   return [...routes.values()];
 }
 
+function filterStaleChapterPaths(chapterPaths, bundleRoutes, staticBundle) {
+  const staticChapters = Array.isArray(staticBundle?.chapters)
+    ? staticBundle.chapters.filter(
+        (chapter) => chapter?.subject_id && chapter?.slug,
+      )
+    : [];
+  // If the full bundle was not available, do not infer that the sitemap is
+  // stale from an incomplete/slim payload. The per-chapter API request and
+  // strict coverage check remain authoritative in that case.
+  if (staticChapters.length === 0) return chapterPaths;
+
+  const subjectIdsByPath = new Map();
+  for (const route of bundleRoutes) {
+    const id = route.subject?.id || route.subject?._id;
+    if (!id) continue;
+    const key = subjectPath(route);
+    const ids = subjectIdsByPath.get(key) || new Set();
+    ids.add(String(id));
+    subjectIdsByPath.set(key, ids);
+  }
+
+  const validPaths = new Set();
+  const stalePaths = [];
+  for (const chapterPath of chapterPaths) {
+    const segments = chapterPath.split("/").filter(Boolean);
+    if (segments.length !== 4) {
+      validPaths.add(chapterPath);
+      continue;
+    }
+    const [board, classSlug, subjectSlug, chapterSlug] = segments;
+    const subjectIds = subjectIdsByPath.get(
+      `/${board}/${classSlug}/${subjectSlug}`,
+    );
+    const hasStaticChapter = subjectIds
+      ? staticChapters.some(
+          (chapter) =>
+            subjectIds.has(String(chapter.subject_id)) &&
+            chapter.slug === chapterSlug,
+        )
+      : false;
+    if (hasStaticChapter) {
+      validPaths.add(chapterPath);
+    } else {
+      stalePaths.push(chapterPath);
+    }
+  }
+
+  if (stalePaths.length > 0) {
+    console.warn(
+      `[prerender-routes] ignoring ${stalePaths.length} sitemap chapter path(s) ` +
+        "missing from the full static curriculum bundle: " +
+        stalePaths.slice(0, 5).join(", ") +
+        (stalePaths.length > 5 ? ", ..." : ""),
+    );
+  }
+  return validPaths;
+}
+
 function subjectPath(route) {
   return `/${route.board}/${route.classSlug}/${route.subjectSlug}`;
 }
@@ -736,7 +794,11 @@ async function main() {
       .filter((chapter) => chapter?.slug)
       .map((chapter) => [chapter.slug, chapter]),
   );
-  const publishedChapterPaths = readPublishedChapterPaths();
+  const publishedChapterPaths = filterStaleChapterPaths(
+    readPublishedChapterPaths(),
+    allSubjectRoutes,
+    staticBundle,
+  );
   const sitemapSubjectRoutes = enumerateSitemapSubjectRoutes(
     publishedChapterPaths,
     allSubjectRoutes,
