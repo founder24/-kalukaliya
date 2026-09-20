@@ -30,5 +30,7 @@ GHSA-6v7p-g79w-8964
 # setuptools: Trivy's SBOM-sourced result reports 70.3.0; the image's
 # Dockerfile explicitly runs `pip install --upgrade setuptools` in both
 # build stages and the built image actually has 84.0.0 (verified via
-# `pip list` inside the built image).
+# `pip list` inside the built image). Same phantom finding surfaces under
+# two separate CVE IDs for the same stale reported version.
 CVE-2025-47273
+CVE-2026-59890
