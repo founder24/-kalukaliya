@@ -18,7 +18,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir --upgrade pip \
+RUN pip install --no-cache-dir --upgrade pip setuptools \
     && sed 's/ *\\$//' requirements.txt | grep -v '^\s*--hash' > requirements-nohash.txt \
     && pip install --no-cache-dir --user -r requirements-nohash.txt \
     && pip install --no-cache-dir --user "email-validator>=2.0"
@@ -33,7 +33,7 @@ WORKDIR /app
 # builder — otherwise the shipped image still carries the base image's
 # stale, vulnerable pip regardless of what the builder stage did.
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --upgrade pip
+    && pip install --no-cache-dir --upgrade pip setuptools
 
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 

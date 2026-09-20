@@ -35,3 +35,11 @@ tenacity
 uvicorn
 pypdf>=6.15.0
 pymupdf>=1.26.0
+
+# Pinned directly (not otherwise a direct dependency) to force a resolved
+# transitive version high enough to clear a known CVE flagged by the
+# container vulnerability scan. (setuptools needs the same treatment but
+# pip-compile treats it as "unsafe" and refuses to pin it here — it's
+# upgraded via `pip install --upgrade setuptools` in the Dockerfile instead,
+# same as pip itself.)
+msgpack>=1.2.1
