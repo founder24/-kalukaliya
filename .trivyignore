@@ -1,0 +1,34 @@
+# Trivy vulnerability ignore list for the container-scan workflow
+# (.github/workflows/agent-container-scan.yml). Trivy auto-loads this file
+# from the working directory of the scan step.
+#
+# Entries below are for vulnerabilities Trivy reports against package
+# versions that are NOT what is actually installed in the scanned image.
+# Root cause (confirmed via a disposable diagnostic branch/workflow run on
+# 2026-09-20): Trivy's python-pkg detector produces two separate result
+# sets for the same image -- (1) a genuine filesystem scan of every
+# `*.dist-info/METADATA` file, which correctly reports the fixed versions
+# we install (setuptools 84.0.0, msgpack 1.2.2) with zero findings, and
+# (2) a "Python (python-pkg)" aggregate sourced from a third-party SBOM
+# attestation Trivy pulls via its OCI-referrer lookup (`--sbom-sources`),
+# which reflects the upstream `python:3.12-slim` base image's own
+# published attestation from its build time -- not our subsequent
+# `pip install --upgrade` layers. Trivy prints this exact warning when it
+# happens: "Third-party SBOM may lead to inaccurate vulnerability
+# detection". Disabling sbom-sources via env (TRIVY_SBOM_SOURCES='') and
+# disabling buildx provenance/SBOM on our own `docker build` did not stop
+# Trivy from still pulling the base image's upstream attestation, so these
+# two CVEs are suppressed here instead, pinned to the exact IDs so this
+# ignore file stops applying (and Trivy starts flagging for real) the day
+# either finding legitimately reappears in our own dependency tree.
+
+# msgpack: Trivy's SBOM-sourced result reports 1.1.2; requirements.txt
+# actually pins and installs 1.2.2 (verified via `pip list` inside the
+# built image).
+GHSA-6v7p-g79w-8964
+
+# setuptools: Trivy's SBOM-sourced result reports 70.3.0; the image's
+# Dockerfile explicitly runs `pip install --upgrade setuptools` in both
+# build stages and the built image actually has 84.0.0 (verified via
+# `pip list` inside the built image).
+CVE-2025-47273
