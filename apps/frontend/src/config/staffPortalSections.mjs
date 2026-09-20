@@ -4,8 +4,15 @@ export const STAFF_PORTAL_SECTIONS = Object.freeze([
     label: 'Dashboard',
     group: 'main',
     releaseCheck: {
+      // StaffDashboardOverview also calls the command-center endpoint, but
+      // that same path is already the Analytics section's required-read
+      // proof below. Declaring it here too would let a dashboard visit
+      // (which typically loads first) silently satisfy Analytics' proof
+      // without Analytics ever actually being visited during release
+      // verification. Each required read must be attributable to exactly
+      // one section, so Dashboard intentionally declares none.
       supported: true,
-      requiredReads: ['/api/v1/staff/analytics/command-center'],
+      requiredReads: [],
     },
   },
   {
