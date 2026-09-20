@@ -27,7 +27,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+# The final stage starts from a fresh base image and never inherits the
+# builder stage's system pip (only /root/.local is copied across), so the
+# base image's bundled pip must be upgraded here too, not just in the
+# builder — otherwise the shipped image still carries the base image's
+# stale, vulnerable pip regardless of what the builder stage did.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir --upgrade pip
 
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 
