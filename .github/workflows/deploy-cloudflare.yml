@@ -1031,6 +1031,7 @@ jobs:
           CHAT_PERFORMANCE_RESULT: ${{ needs.chat-performance.result }}
           LIVE_CHAT_CONTRACT_RESULT: ${{ needs.live-chat-contract.result }}
           STAFF_ACCESS_RESULT: ${{ needs.disposable-staff-auth.result }}
+          AUTH_VALIDATION_ENABLED: ${{ inputs.validate_authenticated == true }}
         run: |
           {
             echo "## Independent release checks"
@@ -1045,14 +1046,16 @@ jobs:
           if [[ "$CHAT_PERFORMANCE_RESULT" != "success" ]]; then
             echo "::error::Chat first-token latency check result: ${CHAT_PERFORMANCE_RESULT}"
           fi
-          if [[ "$LIVE_CHAT_CONTRACT_RESULT" != "success" ]]; then
+          if [[ "$LIVE_CHAT_CONTRACT_RESULT" != "success" \
+            && ! ( "$AUTH_VALIDATION_ENABLED" != "true" && "$LIVE_CHAT_CONTRACT_RESULT" == "skipped" ) ]]; then
             echo "::error::Live chat/content contract result: ${LIVE_CHAT_CONTRACT_RESULT}"
           fi
           if [[ "$STAFF_ACCESS_RESULT" != "success" ]]; then
             echo "::error::Disposable staff access check result: ${STAFF_ACCESS_RESULT}"
           fi
           [[ "$CHAT_PERFORMANCE_RESULT" == "success" \
-            && "$LIVE_CHAT_CONTRACT_RESULT" == "success" \
+            && ( "$LIVE_CHAT_CONTRACT_RESULT" == "success" \
+              || ( "$AUTH_VALIDATION_ENABLED" != "true" && "$LIVE_CHAT_CONTRACT_RESULT" == "skipped" ) ) \
             && "$STAFF_ACCESS_RESULT" == "success" ]]
 
   request-reset-email:
