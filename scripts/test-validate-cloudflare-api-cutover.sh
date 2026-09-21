@@ -192,7 +192,7 @@ run_portal_case() {
 }
 
 run_case success success
-expected_steps=$'cookie_login\ncookie_read_7\ncookie_read_30\nbearer_login\nbearer_read\nbearer_logout\ncookie_logout\npost_logout'
+expected_steps=$'cookie_login\ncookie_read_7\ncookie_read_30\nbearer_login\nbearer_read\ncookie_logout\nbearer_logout\npost_logout'
 [[ "$(cat "$SANDBOX/success/curl.log")" == "$expected_steps" ]] || {
   echo "success case did not cover the complete cookie and bearer lifecycle" >&2
   exit 1
