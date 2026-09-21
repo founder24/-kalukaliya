@@ -219,7 +219,7 @@ print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
     echo "Admin-cookie logout failed with HTTP ${status}; response suppressed." >&2
     exit 1
   }
-  status=$(curl --silent --show-error --max-time 30 \
+  status=$(staff_curl --silent --show-error --max-time 30 \
     "${access_headers[@]}" \
     --cookie "$cookie_jar" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=7")
