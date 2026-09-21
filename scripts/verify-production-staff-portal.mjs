@@ -78,6 +78,41 @@ const requestSections = new WeakMap();
 const requestContentHubTabs = new WeakMap();
 const REQUIRED_READ_TIMEOUT_MS = 15_000;
 
+function classifyStaffPortalFailure(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('did not complete required read-only Worker requests')) return 'required_reads_timeout';
+  if (message.includes('is documented as unsupported but initiated API reads')) return 'unsupported_route_read';
+  if (message.includes('Content Editor issued Worker reads without bearer')) return 'content_read_without_bearer';
+  if (message.includes('issued forbidden requests')) return 'forbidden_request';
+  if (message.includes('issued failed requests')) return 'failed_request';
+  if (message.includes('global error boundary')) return 'global_error_boundary';
+  if (message.includes('section error boundary')) return 'section_error_boundary';
+  if (message.includes('UI sign-out left authentication storage behind')) return 'logout_storage';
+  if (message.includes('Protected route did not redirect')) return 'post_logout_redirect';
+  if (message.includes('Post-logout authentication probes')) return 'post_logout_auth';
+  if (message.includes('runtime errors')) return 'runtime_error';
+  return 'browser_assertion';
+}
+
+function reportStaffPortalFailure(error) {
+  let location = 'unknown';
+  try {
+    const url = new URL(page.url());
+    location = `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    // Keep the diagnostic annotation safe if the browser has no valid URL.
+  }
+  const failureClass = classifyStaffPortalFailure(error);
+  console.error(
+    `::error title=Staff portal browser validation failed::phase=${activeSection}, `
+      + `content_tab=${activeContentHubTab || 'none'}, class=${failureClass}, `
+      + `location=${location}, runtime_errors=${runtimeErrors.length}, `
+      + `failed_requests=${failedRequests.length}, forbidden_requests=${forbiddenRequests.length}, `
+      + `content_reads_without_bearer=${contentReadsWithoutBearer.length}, `
+      + `post_logout_probe=${postLogoutProbe}.`,
+  );
+}
+
 await context.tracing.start(STAFF_PORTAL_TRACE_OPTIONS);
 
 async function waitForRequiredReads(id, label, expected) {
@@ -428,6 +463,7 @@ try {
   }
   console.log('Production staff portal browser lifecycle passed.');
 } catch (error) {
+  reportStaffPortalFailure(error);
   await mkdir(diagnosticsDir, { recursive: true });
   const screenshotPath = resolve(diagnosticsDir, 'staff-portal-failure.png');
   const tracePath = resolve(diagnosticsDir, 'staff-portal-trace.zip');
