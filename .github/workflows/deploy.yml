@@ -53,6 +53,8 @@ jobs:
     if: ${{ !cancelled() && (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') }}
     uses: ./.github/workflows/deploy-cloudflare.yml
     with:
-      validate_authenticated: ${{ inputs.validate_authenticated == true }}
+      # Automatic main/tag releases must include the authenticated contract.
+      # Manual runs retain the explicit input for intentionally public-only rehearsals.
+      validate_authenticated: ${{ github.event_name == 'push' || inputs.validate_authenticated == true }}
       validate_reset_delivery: ${{ inputs.validate_reset_delivery == true }}
     secrets: inherit
