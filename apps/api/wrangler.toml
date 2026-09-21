@@ -54,7 +54,7 @@ crons = [
 # ── Production environment ────────────────────────────────────────────────────
 [env.production]
 name = "syrabit-api-prod"
-vars = { ALLOWED_ORIGINS = "https://syrabit.ai,https://api.syrabit.ai", APP_ENV = "production", WEB_SEARCH_ENABLED = "true" }
+vars = { ALLOWED_ORIGINS = "https://syrabit.ai,https://api.syrabit.ai", APP_ENV = "production", WEB_SEARCH_ENABLED = "true", REFERRAL_PROGRAM_RUNTIME_ENABLED = "true" }
 
 [[env.production.d1_databases]]
 binding = "DB"
