@@ -228,6 +228,13 @@ page.on('requestfailed', request => {
 // authenticates the request without adding those header names to the browser's
 // CORS preflight contract. The application bearer token remains unchanged.
 await page.route(`${site}/**`, async route => {
+  const requestUrl = new URL(route.request().url());
+  const isApiRequest = requestUrl.pathname.startsWith('/api/');
+  const isProtectedAdminRequest = requestUrl.pathname.startsWith('/api/v1/admin/');
+  if (isApiRequest && !isProtectedAdminRequest) {
+    await route.continue();
+    return;
+  }
   await route.continue({
     headers: { ...route.request().headers(), ...accessHeaders },
   });
