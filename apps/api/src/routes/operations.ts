@@ -172,6 +172,23 @@ analyticsRouter.post('/:event', async (c) => {
   return c.json({ status: 'ok' });
 });
 
+analyticsRouter.get('/public-stats', async (c) => {
+  try {
+    const row = await c.env.DB.prepare(`
+      SELECT COUNT(*) AS total_users
+      FROM users
+      WHERE deleted_at IS NULL
+    `).first<{ total_users: number | string }>();
+    const totalUsers = Number(row?.total_users ?? 0);
+    return c.json({
+      total_users: Number.isFinite(totalUsers) ? Math.max(0, Math.trunc(totalUsers)) : 0,
+    });
+  } catch {
+    // Keep the public login/signup surface usable during a D1 outage.
+    return c.json({ total_users: 0 });
+  }
+});
+
 analyticsRouter.get('/top-routes', async (c) => {
   const since = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
   try {

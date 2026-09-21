@@ -131,6 +131,29 @@ describe('Worker-native site-operation routes', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it('serves the public active-user count at the frontend contract path', async () => {
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          bind: () => statement,
+          run: async () => ({ meta: { changes: 0 } }),
+          all: async () => ({ results: [] }),
+          first: async () => query.includes('COUNT(*) AS total_users')
+            ? { total_users: 321 }
+            : null,
+        };
+        return statement;
+      },
+    };
+    const response = await api.fetch(
+      request('/api/v1/analytics/public-stats'),
+      { ...testEnv(), DB: database } as unknown as Env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ total_users: 321 });
+  });
+
   it('preserves explicitly classified hydration subtypes without consent', async () => {
     const writes: unknown[][] = [];
     const database = {
