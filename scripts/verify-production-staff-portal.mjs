@@ -233,6 +233,11 @@ await page.route(`${site}/**`, async route => {
   });
 });
 await page.route(`${edge}/**`, async route => {
+  const requestUrl = new URL(route.request().url());
+  if (!requestUrl.pathname.startsWith('/api/v1/admin/')) {
+    await route.continue();
+    return;
+  }
   await route.continue({
     headers: { ...route.request().headers(), ...accessHeaders },
   });
