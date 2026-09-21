@@ -951,6 +951,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: post-native-smoke
     env:
+      # Keep the public auth targets explicit here. This job is intentionally
+      # independent from the broader release validation env so a future
+      # refactor cannot silently point the disposable fixture at an unset or
+      # non-production origin.
+      API_WORKER_URL: https://syrabit-api-prod.axomxplain.workers.dev
+      PUBLIC_EDGE_URL: https://api.syrabit.ai
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}

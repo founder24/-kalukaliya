@@ -60,6 +60,13 @@ if [[ -n "${ADMIN_SESSION_TOKEN:-}" ]]; then
   : "${CF_ACCESS_CLIENT_SECRET:?Set CF_ACCESS_CLIENT_SECRET when ADMIN_SESSION_TOKEN is supplied}"
 fi
 
+staff_curl() {
+  # D1 writes and the public edge can briefly converge at different times
+  # during a release. Retry transport failures and transient 4xx/5xx responses
+  # without ever printing the response body or any auth material.
+  curl --retry 2 --retry-delay 1 --retry-max-time 12 "$@"
+}
+
 run_disposable_staff_auth_check() {
   local required_var cookie_jar login_body response headers status access_token refresh_token now
   local -a access_headers
@@ -96,7 +103,7 @@ import json, os
 print(json.dumps({"email": os.environ["CUTOVER_STAFF_EMAIL"], "password": os.environ["CUTOVER_STAFF_PASSWORD"]}))
 ')
 
-  status=$(curl --silent --show-error --max-time 30 \
+  status=$(staff_curl --silent --show-error --max-time 30 \
     "${access_headers[@]}" \
     --request POST --header 'Content-Type: application/json' \
     --data "$login_body" --cookie-jar "$cookie_jar" \
@@ -106,20 +113,27 @@ print(json.dumps({"email": os.environ["CUTOVER_STAFF_EMAIL"], "password": os.env
     echo "Disposable admin-cookie login failed with HTTP ${status}; response suppressed." >&2
     exit 1
   }
-  grep -qi '^x-syrabit-route: worker-native' "$headers"
+  grep -qi '^x-syrabit-route: worker-native' "$headers" || {
+    echo "Disposable admin-cookie login did not use the native Worker route." >&2
+    exit 1
+  }
   grep -q $'\tsyrabit_admin_session\t' "$cookie_jar" || {
     echo "Disposable admin-cookie login did not set the session cookie." >&2
     exit 1
   }
-  python3 - "$response" <<'PY'
+  if ! python3 - "$response" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     payload = json.load(handle)
 assert payload.get("status") == "ok" and payload.get("user_id")
 PY
+  then
+    echo "Disposable admin-cookie login returned an invalid success payload; response suppressed." >&2
+    exit 1
+  fi
 
   for days in 7 30; do
-    status=$(curl --silent --show-error --max-time 30 \
+    status=$(staff_curl --silent --show-error --max-time 30 \
       "${access_headers[@]}" \
       --cookie "$cookie_jar" --output "$response" --write-out '%{http_code}' \
       "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=${days}")
@@ -136,7 +150,7 @@ assert {"users", "content", "rag", "chat", "ads", "consent", "incidents", "audit
 PY
   done
 
-  status=$(curl --silent --show-error --max-time 30 \
+  status=$(staff_curl --silent --show-error --max-time 30 \
     "${access_headers[@]}" \
     --request POST --header 'Content-Type: application/json' \
     --data "$login_body" --output "$response" --write-out '%{http_code}' \
@@ -164,7 +178,7 @@ PY
   access_token="${auth_tokens[0]}"
   refresh_token="${auth_tokens[1]}"
 
-  status=$(curl --silent --show-error --max-time 30 \
+  status=$(staff_curl --silent --show-error --max-time 30 \
     "${access_headers[@]}" \
     --header "Authorization: Bearer ${access_token}" \
     --output "$response" --write-out '%{http_code}' \
@@ -184,7 +198,7 @@ PY
 import json, os
 print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
 ')
-  status=$(curl --silent --show-error --max-time 30 \
+  status=$(staff_curl --silent --show-error --max-time 30 \
     "${access_headers[@]}" \
     --request POST --header 'Content-Type: application/json' \
     --header "Authorization: Bearer ${access_token}" \
@@ -195,7 +209,7 @@ print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
     exit 1
   }
 
-  status=$(curl --silent --show-error --max-time 30 \
+  status=$(staff_curl --silent --show-error --max-time 30 \
     "${access_headers[@]}" \
     --request POST \
     --cookie "$cookie_jar" --cookie-jar "$cookie_jar" \
