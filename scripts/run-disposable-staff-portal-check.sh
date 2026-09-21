@@ -57,7 +57,7 @@ create_sql="INSERT INTO release_staff_auth_leases
     (id, email, hashed_password, auth_provider, role, capabilities, name, created_at, updated_at)
   VALUES
     ('${fixture_id}', '${fixture_email}', '${fixture_hash}', 'local', 'staff',
-     '["referral:review","referral:settle"]',
+     '[\"referral:review\",\"referral:settle\"]',
      'Release Staff Portal', unixepoch(), unixepoch());
   INSERT INTO analytics_events
     (id, event_name, event_subtype, classification, payload, route_path, created_at)
