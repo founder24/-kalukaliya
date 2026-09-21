@@ -67,6 +67,46 @@ staff_curl() {
   curl --retry 2 --retry-delay 1 --retry-max-time 12 "$@"
 }
 
+report_staff_auth_request_failure() {
+  local label="$1" status="$2" headers_file="$3" response_file="$4" expected="$5"
+  local route content_type access_redirect body_class location body_class_file
+  route="$(awk 'BEGIN { IGNORECASE=1 } /^x-syrabit-route:/ { sub(/\r$/, ""); sub(/^[^:]*:[[:space:]]*/, ""); print; exit }' "$headers_file" 2>/dev/null || true)"
+  content_type="$(awk 'BEGIN { IGNORECASE=1 } /^content-type:/ { sub(/\r$/, ""); sub(/^[^:]*:[[:space:]]*/, ""); print; exit }' "$headers_file" 2>/dev/null || true)"
+  location="$(awk 'BEGIN { IGNORECASE=1 } /^location:/ { sub(/\r$/, ""); sub(/^[^:]*:[[:space:]]*/, ""); print; exit }' "$headers_file" 2>/dev/null || true)"
+  access_redirect=false
+  if [[ "$location" == *"cloudflareaccess.com/cdn-cgi/access/login"* ]] \
+    || grep -qiE 'cloudflare access|attention required' "$response_file" 2>/dev/null; then
+    access_redirect=true
+  fi
+  body_class="non_json"
+  body_class_file="$(mktemp)"
+  TMP_FILES+=("$body_class_file")
+  if python3 - "$response_file" <<'PY' >"$body_class_file" 2>/dev/null
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        payload = json.load(handle)
+except Exception:
+    raise SystemExit(1)
+detail = payload.get("detail") if isinstance(payload, dict) else None
+error = payload.get("error") if isinstance(payload, dict) else None
+value = detail if isinstance(detail, str) else error if isinstance(error, str) else ""
+safe = {
+    "Invalid credentials": "invalid_credentials",
+    "Insufficient permissions": "insufficient_permissions",
+    "Authentication required": "authentication_required",
+    "Invalid or expired admin session": "invalid_admin_session",
+    "Session expired after password change. Sign in again.": "session_expired",
+    "Not found": "not_found",
+}
+print(safe.get(value, "json_other"))
+PY
+  then
+    body_class="$(cat "$body_class_file")"
+  fi
+  echo "::error title=Disposable staff authentication request failed::${label}: HTTP ${status} (expected ${expected}); route=${route:-missing}, content_type=${content_type:-missing}, access_redirect=${access_redirect}, body=${body_class}."
+}
+
 run_disposable_staff_auth_check() {
   local required_var cookie_jar login_body response headers status access_token refresh_token now
   local -a access_headers
@@ -110,7 +150,7 @@ print(json.dumps({"email": os.environ["CUTOVER_STAFF_EMAIL"], "password": os.env
     --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/login")
   test "$status" = "200" || {
-    echo "Disposable admin-cookie login failed with HTTP ${status}; response suppressed." >&2
+    report_staff_auth_request_failure "admin cookie login" "$status" "$headers" "$response" "200"
     exit 1
   }
   grep -qi '^x-syrabit-route: worker-native' "$headers" || {
@@ -135,10 +175,10 @@ PY
   for days in 7 30; do
     status=$(staff_curl --silent --show-error --max-time 30 \
       "${access_headers[@]}" \
-      --cookie "$cookie_jar" --output "$response" --write-out '%{http_code}' \
+      --cookie "$cookie_jar" --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
       "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=${days}")
     test "$status" = "200" || {
-      echo "Admin-cookie ${days}-day command-center read failed with HTTP ${status}; response suppressed." >&2
+      report_staff_auth_request_failure "admin cookie command-center read (${days} days)" "$status" "$headers" "$response" "200"
       exit 1
     }
     python3 - "$response" "$days" <<'PY'
@@ -153,10 +193,10 @@ PY
   status=$(staff_curl --silent --show-error --max-time 30 \
     "${access_headers[@]}" \
     --request POST --header 'Content-Type: application/json' \
-    --data "$login_body" --output "$response" --write-out '%{http_code}' \
+    --data "$login_body" --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/auth/login")
   test "$status" = "200" || {
-    echo "Disposable bearer login failed with HTTP ${status}; response suppressed." >&2
+    report_staff_auth_request_failure "bearer login" "$status" "$headers" "$response" "200"
     exit 1
   }
   auth_tokens_output=$(python3 - "$response" <<'PY'
@@ -181,10 +221,10 @@ PY
   status=$(staff_curl --silent --show-error --max-time 30 \
     "${access_headers[@]}" \
     --header "Authorization: Bearer ${access_token}" \
-    --output "$response" --write-out '%{http_code}' \
+    --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=7")
   test "$status" = "200" || {
-    echo "Bearer command-center read failed with HTTP ${status}; response suppressed." >&2
+    report_staff_auth_request_failure "bearer command-center read" "$status" "$headers" "$response" "200"
     exit 1
   }
   python3 - "$response" <<'PY'
@@ -202,10 +242,10 @@ print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
     "${access_headers[@]}" \
     --request POST --header 'Content-Type: application/json' \
     --header "Authorization: Bearer ${access_token}" \
-    --data "$logout_body" --output "$response" --write-out '%{http_code}' \
+    --data "$logout_body" --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/auth/logout")
   test "$status" = "200" || {
-    echo "Bearer logout failed with HTTP ${status}; response suppressed." >&2
+    report_staff_auth_request_failure "bearer logout" "$status" "$headers" "$response" "200"
     exit 1
   }
 
@@ -213,18 +253,18 @@ print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
     "${access_headers[@]}" \
     --request POST \
     --cookie "$cookie_jar" --cookie-jar "$cookie_jar" \
-    --output "$response" --write-out '%{http_code}' \
+    --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/logout")
   test "$status" = "200" || {
-    echo "Admin-cookie logout failed with HTTP ${status}; response suppressed." >&2
+    report_staff_auth_request_failure "admin cookie logout" "$status" "$headers" "$response" "200"
     exit 1
   }
   status=$(staff_curl --silent --show-error --max-time 30 \
     "${access_headers[@]}" \
-    --cookie "$cookie_jar" --output "$response" --write-out '%{http_code}' \
+    --cookie "$cookie_jar" --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
     "${EDGE_BASE}/api/v1/admin/analytics/command-center?days=7")
   test "$status" = "401" || {
-    echo "Post-logout command-center request returned HTTP ${status}, expected 401; response suppressed." >&2
+    report_staff_auth_request_failure "post-logout command-center read" "$status" "$headers" "$response" "401"
     exit 1
   }
   echo "Disposable staff cookie and bearer authentication lifecycle passed."
