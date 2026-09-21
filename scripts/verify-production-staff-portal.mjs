@@ -240,8 +240,12 @@ page.on('requestfailed', request => {
 await page.route(`${site}/**`, async route => {
   const requestUrl = new URL(route.request().url());
   const isProtectedAdminRequest = requestUrl.pathname.startsWith('/api/v1/admin/');
-  const isDocumentNavigation = route.request().resourceType() === 'document';
-  if (!isDocumentNavigation && !isProtectedAdminRequest) {
+  const isProtectedPagesDocument =
+    requestUrl.pathname === '/staff'
+    || requestUrl.pathname.startsWith('/staff/')
+    || requestUrl.pathname === '/admin'
+    || requestUrl.pathname.startsWith('/admin/');
+  if (!isProtectedPagesDocument && !isProtectedAdminRequest) {
     await route.continue();
     return;
   }
