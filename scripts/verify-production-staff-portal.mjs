@@ -103,11 +103,21 @@ function reportStaffPortalFailure(error) {
     // Keep the diagnostic annotation safe if the browser has no valid URL.
   }
   const failureClass = classifyStaffPortalFailure(error);
+  const failedRequestSamples = failedRequests.slice(0, 5).map(entry => {
+    const match = entry.match(/^\[[^\]]+\]\s+(\d+|NETWORK)\s+([A-Z]+)\s+(\S+)/);
+    if (!match) return 'unparsed';
+    try {
+      return `${match[1]} ${match[2]} ${new URL(match[3]).pathname}`;
+    } catch {
+      return `${match[1]} ${match[2]} invalid-url`;
+    }
+  }).join('|') || 'none';
   console.error(
     `::error title=Staff portal browser validation failed::phase=${activeSection}, `
       + `content_tab=${activeContentHubTab || 'none'}, class=${failureClass}, `
       + `location=${location}, runtime_errors=${runtimeErrors.length}, `
       + `failed_requests=${failedRequests.length}, forbidden_requests=${forbiddenRequests.length}, `
+      + `failed_request_samples=${failedRequestSamples}, `
       + `content_reads_without_bearer=${contentReadsWithoutBearer.length}, `
       + `post_logout_probe=${postLogoutProbe}.`,
   );
