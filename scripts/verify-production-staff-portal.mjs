@@ -221,8 +221,11 @@ page.on('requestfailed', request => {
   if (
     postLogoutProbe
     && request.method() === 'GET'
-    && url.pathname.startsWith('/assets/')
     && failureText === 'net::ERR_ABORTED'
+    && (
+      url.pathname.startsWith('/assets/')
+      || url.pathname === '/api/v1/analytics/public-stats'
+    )
   ) return;
   if (
     request.method() === 'HEAD'
