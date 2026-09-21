@@ -900,19 +900,34 @@ jobs:
       - name: Service binding, D1 content, and anonymous credits work publicly
         run: |
           set -euo pipefail
-          status="$(curl -sS -D /tmp/edge.headers -o /tmp/edge.json -w '%{http_code}' \
-            "${PUBLIC_EDGE_URL}/health" --max-time 30)"
-          test "$status" = "200"
-          grep -qi '^x-syrabit-health-backend: api-worker' /tmp/edge.headers
-          curl -sS -D /tmp/content.headers --max-time 20 \
-            "${PUBLIC_EDGE_URL}/api/v1/content/library-bundle?slim=1" \
-            | python3 -c 'import json,sys; p=json.load(sys.stdin); assert all(k in p for k in ("boards","classes","streams","subjects")), p'
-          grep -qi '^x-syrabit-route: worker-native' /tmp/content.headers
-          anon_id="anon_$(openssl rand -hex 16)"
-          curl -sS -D /tmp/credits.headers --max-time 20 -H "X-Anon-ID: ${anon_id}" \
-            "${PUBLIC_EDGE_URL}/api/v1/users/credits" \
-            | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["credits_remaining"] >= 0 and p["anon_id"].startswith("anon_"), p'
-          grep -qi '^x-syrabit-route: worker-native' /tmp/credits.headers
+          check_public_native_routes() {
+            local status anon_id
+            status="$(curl -sS -D /tmp/edge.headers -o /tmp/edge.json -w '%{http_code}' \
+              "${PUBLIC_EDGE_URL}/health" --max-time 30)"
+            [[ "$status" == "200" ]] || return 1
+            grep -qi '^x-syrabit-health-backend: api-worker' /tmp/edge.headers || return 1
+            curl -sS -D /tmp/content.headers --max-time 20 \
+              "${PUBLIC_EDGE_URL}/api/v1/content/library-bundle?slim=1" \
+              | python3 -c 'import json,sys; p=json.load(sys.stdin); assert all(k in p for k in ("boards","classes","streams","subjects")), p' || return 1
+            grep -qi '^x-syrabit-route: worker-native' /tmp/content.headers || return 1
+            anon_id="anon_$(openssl rand -hex 16)"
+            curl -sS -D /tmp/credits.headers --max-time 20 -H "X-Anon-ID: ${anon_id}" \
+              "${PUBLIC_EDGE_URL}/api/v1/users/credits" \
+              | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["credits_remaining"] >= 0 and p["anon_id"].startswith("anon_"), p' || return 1
+            grep -qi '^x-syrabit-route: worker-native' /tmp/credits.headers || return 1
+          }
+          for attempt in 1 2 3 4; do
+            echo "Public native route probe attempt ${attempt}/4"
+            if check_public_native_routes; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 4 ]]; then
+              echo "Cloudflare edge propagation is still converging; retrying in 30 seconds."
+              sleep 30
+            fi
+          done
+          echo "::error::Public native route probes did not converge after four attempts."
+          exit 1
 
       - name: Validate authenticated Cloudflare API routing
         env:
