@@ -234,6 +234,20 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 assert payload.get("days") == 7 and isinstance(payload.get("users"), dict)
 PY
 
+  # Admin logout advances the account-wide session cutoff. Run it before bearer
+  # logout so the bearer revocation cannot invalidate the cookie before the
+  # cookie lifecycle has proved its own authenticated logout path.
+  status=$(staff_curl --silent --show-error --max-time 30 \
+    "${access_headers[@]}" \
+    --request POST \
+    --cookie "$cookie_jar" --cookie-jar "$cookie_jar" \
+    --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
+    "${EDGE_BASE}/api/v1/admin/logout")
+  test "$status" = "200" || {
+    report_staff_auth_request_failure "admin cookie logout" "$status" "$headers" "$response" "200"
+    exit 1
+  }
+
   logout_body=$(CUTOVER_REFRESH_TOKEN="$refresh_token" python3 -c '
 import json, os
 print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
@@ -249,16 +263,6 @@ print(json.dumps({"refresh_token": os.environ["CUTOVER_REFRESH_TOKEN"]}))
     exit 1
   }
 
-  status=$(staff_curl --silent --show-error --max-time 30 \
-    "${access_headers[@]}" \
-    --request POST \
-    --cookie "$cookie_jar" --cookie-jar "$cookie_jar" \
-    --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
-    "${EDGE_BASE}/api/v1/admin/logout")
-  test "$status" = "200" || {
-    report_staff_auth_request_failure "admin cookie logout" "$status" "$headers" "$response" "200"
-    exit 1
-  }
   status=$(staff_curl --silent --show-error --max-time 30 \
     "${access_headers[@]}" \
     --cookie "$cookie_jar" --dump-header "$headers" --output "$response" --write-out '%{http_code}' \
