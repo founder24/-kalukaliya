@@ -8,7 +8,7 @@ export function usePublicStats() {
 
   useEffect(() => {
     if (_cached) return;
-    fetch(`${WORKER_API}/analytics/public-stats`)
+    fetch('/api/v1/analytics/public-stats')
       .then(r => r.json())
       .then(d => {
         _cached = d;
