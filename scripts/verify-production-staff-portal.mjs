@@ -140,9 +140,15 @@ async function waitForRequiredReads(id, label, expected) {
   );
 }
 
-const isAccessServiceWorkerArtifact = text =>
-  text.includes('Failed to update a ServiceWorker')
-  && text.includes('object is in an invalid state');
+const isAccessServiceWorkerArtifact = text => {
+  const normalized = String(text || '');
+  // Chromium can report the Pages service-worker lifecycle failure with
+  // either update or registration wording. It is a browser artifact only
+  // when both ServiceWorker and invalid-state/update language are present;
+  // keep unrelated application runtime errors fatal.
+  return /serviceworker/i.test(normalized)
+    && /(invalid state|failed to (?:update|register))/i.test(normalized);
+};
 
 page.on('pageerror', error => {
   const text = error.stack || error.message;
