@@ -365,6 +365,7 @@ async function auditItem7HealthCheck() {
 async function auditItem8ZeroTrust() {
   const requiredDestinations = [
     'syrabit.ai/staff*',
+    'syrabit.ai/api/v1/admin*',
     'api.syrabit.ai/api/v1/admin*',
     'api.syrabit.ai/admin*',
   ];

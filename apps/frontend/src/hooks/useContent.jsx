@@ -126,10 +126,14 @@ const useChunks = (chapterId) =>
 /** Saved subject IDs for authenticated user (1min stale) */
 export const useSavedSubjects = (user) =>
   useQuery({
-    queryKey: ['saved-subjects'],
+    // Keep bookmarks isolated per authenticated identity. A global key lets
+    // React Query briefly display the previous account's subjects after
+    // logout/login or profile hydration.
+    queryKey: ['saved-subjects', user?.id || 'anonymous'],
     queryFn: fetchSavedSubjects,
     staleTime: 1 * 60 * 1000,
     enabled: !!user,
+    refetchOnMount: 'always',
   });
 
 export const useLibraryBundle = (enabled = true) =>

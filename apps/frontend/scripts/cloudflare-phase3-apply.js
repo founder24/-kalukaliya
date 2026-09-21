@@ -59,6 +59,11 @@ const WAITING_ROOM_TOTAL_ACTIVE   = parseInt(process.env.WAITING_ROOM_TOTAL_ACTI
 const APPLY_WAITING_ROOM          = process.env.APPLY_WAITING_ROOM === 'true';
 const ADMIN_DESTINATIONS = [
   'syrabit.ai/staff*',
+  // The Pages same-origin API proxy must be inside the same Access
+  // application. Otherwise the browser can reach the proxy without an
+  // Access assertion, and the protected API origin will challenge the
+  // internal hop.
+  'syrabit.ai/api/v1/admin*',
   'api.syrabit.ai/api/v1/admin*',
   'api.syrabit.ai/admin*',
 ];

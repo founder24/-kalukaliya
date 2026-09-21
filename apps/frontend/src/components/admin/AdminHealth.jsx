@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import axios from 'axios';
-import { llmCosts, API_BASE } from '@/utils/api';
+import { llmCosts, API_BASE, HEALTH_API } from '@/utils/api';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import { adminHeaders } from './health/shared';
 
@@ -1212,7 +1212,7 @@ export default function AdminHealth({ adminToken, onNavigate }) {
     return () => clearInterval(interval);
   }, [loadMetrics]);
 
-  const healthUrl = `${import.meta.env.VITE_BACKEND_URL || ''}/health`;
+  const healthUrl = HEALTH_API;
   const handleCopy = () => {
     navigator.clipboard.writeText(healthUrl);
     setCopied(true);

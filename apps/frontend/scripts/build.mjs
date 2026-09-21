@@ -30,6 +30,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const distDir = path.join(repoRoot, "dist");
 
+// Cloudflare Pages release builds may not expose VITE_BACKEND_URL when the
+// project-level Pages variable has been removed or a build is being replayed.
+// Keep the production API connection alive at the build boundary, and pass
+// the resolved value to every child stage (Vite, prerender, and verification).
+// Non-release/local builds retain the strict env check below.
+const IS_PAGES_RELEASE =
+  process.env.CLOUDFLARE_RELEASE_BUILD === "true" ||
+  process.env.CF_PAGES === "1" ||
+  process.env.NODE_ENV === "production";
+if (IS_PAGES_RELEASE && !(process.env.VITE_BACKEND_URL || "").trim()) {
+  process.env.VITE_BACKEND_URL = "https://api.syrabit.ai";
+  console.warn(
+    "[build] VITE_BACKEND_URL is unset; using the canonical production API " +
+      "https://api.syrabit.ai for this Cloudflare Pages release build.",
+  );
+}
+
 const BUDGET_MS = (() => {
   const raw = process.env.BUILD_BUDGET_MS;
   const n = raw ? Number.parseInt(raw, 10) : NaN;

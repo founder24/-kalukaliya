@@ -225,6 +225,7 @@ async function main() {
         .map(destination => destination.uri);
       const requiredDestinations = [
         'syrabit.ai/staff*',
+        'syrabit.ai/api/v1/admin*',
         'api.syrabit.ai/api/v1/admin*',
         'api.syrabit.ai/admin*',
       ];

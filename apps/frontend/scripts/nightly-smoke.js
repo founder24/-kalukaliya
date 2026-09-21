@@ -280,6 +280,7 @@ async function main() {
     const adminApp = zt.result.find(a => a.name === 'Syrabit Admin');
     const requiredDestinations = [
       'syrabit.ai/staff*',
+      'syrabit.ai/api/v1/admin*',
       'api.syrabit.ai/api/v1/admin*',
       'api.syrabit.ai/admin*',
     ];

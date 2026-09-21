@@ -3,8 +3,7 @@
  * Mirrors the spec: useToggleSavedSubject (optimistic mutation)
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
-import { API_BASE } from '@/utils/api';
+import { apiClient } from '@/utils/api';
 
 /**
  * useToggleSavedSubject — optimistic bookmark toggle.
@@ -13,24 +12,28 @@ import { API_BASE } from '@/utils/api';
  *   - On error: reverts to snapshot + shows error toast.
  *   - On settled: invalidates ['saved-subjects'] to refetch authoritative state.
  */
-export const useToggleSavedSubject = () => {
+export const useToggleSavedSubject = (user) => {
   const queryClient = useQueryClient();
+  // Preserve the legacy key for the anonymous/unit-test surface, while
+  // authenticated pages receive an identity-scoped cache.
+  const savedSubjectsKey = user?.id
+    ? ['saved-subjects', user.id]
+    : ['saved-subjects'];
 
   return useMutation({
     mutationFn: (subjectId) =>
-      axios
+      apiClient()
         .post(
-          `${API_BASE}/user/saved-subjects/${subjectId}`,
+          `/user/saved-subjects/${subjectId}`,
           {},
-          { withCredentials: true }
         )
         .then((r) => r.data),
 
     // ── Optimistic update ──────────────────────────────────────────────────
     onMutate: async (subjectId) => {
-      await queryClient.cancelQueries({ queryKey: ['saved-subjects'] });
-      const previous = queryClient.getQueryData(['saved-subjects']);
-      queryClient.setQueryData(['saved-subjects'], (old = []) => {
+      await queryClient.cancelQueries({ queryKey: savedSubjectsKey });
+      const previous = queryClient.getQueryData(savedSubjectsKey);
+      queryClient.setQueryData(savedSubjectsKey, (old = []) => {
         if (old.includes(subjectId)) {
           return old.filter((id) => id !== subjectId);
         }
@@ -44,7 +47,7 @@ export const useToggleSavedSubject = () => {
       // An anonymous query has no cache entry, so `previous` is undefined.
       // Still write an empty authoritative value: otherwise the optimistic
       // [subjectId] created in onMutate remains visibly Saved after a 401.
-      queryClient.setQueryData(['saved-subjects'], context?.previous ?? []);
+      queryClient.setQueryData(savedSubjectsKey, context?.previous ?? []);
       const unauthorized = err?.response?.status === 401;
       import('sonner').then(({ toast }) => {
         if (unauthorized) {
@@ -65,7 +68,7 @@ export const useToggleSavedSubject = () => {
 
     // ── Invalidate on settled (success or error) ───────────────────────────
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['saved-subjects'] });
+      queryClient.invalidateQueries({ queryKey: savedSubjectsKey });
       queryClient.invalidateQueries({ queryKey: ['library-bundle'] });
     },
   });

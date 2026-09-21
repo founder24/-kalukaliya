@@ -10,7 +10,7 @@ import { buildCardContext } from '@/utils/cardContext';
 import { AlertTriangle, Sparkles, X as XIcon } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useContentLang } from '@/context/LanguageContext';
-import { getConversation, getAnonConversation, getSubject, getChapters, API_BASE, apiClient, getAnonId } from '@/utils/api';
+import { getConversation, getAnonConversation, getSubject, getChapters, API_BASE, HEALTH_API, apiClient, getAnonId } from '@/utils/api';
 import { getToken } from '@/hooks/useTokenManager';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { toast } from 'sonner';
@@ -50,7 +50,7 @@ function createChatRequestId() {
 
 // ── ChatPage ──────────────────────────────────────────────────────────────────
 export default function ChatPage() {
-  const { user, authChecked } = useAuth();
+  const { user, authChecked, updateUser } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
@@ -106,13 +106,38 @@ export default function ChatPage() {
   // (potentially 'as'), breaking hydration on the language toggle.
   // (Task #387 — architect review.)
   const [responseLang, setResponseLang] = useState('en');
+  const responseLanguageHydratedRef = useRef(false);
   useEffect(() => {
+    // Do not let the initial anonymous render overwrite the authenticated
+    // profile preference while AuthContext is still resolving.
+    if (authChecked === false || responseLanguageHydratedRef.current) return;
+    const profileLanguage = user?.preferred_language === 'as' ? 'as' : null;
+    let initialLanguage = profileLanguage || 'en';
     try {
       const stored = localStorage.getItem('syrabit_response_lang');
-      if (stored && stored !== 'en') setResponseLang(stored);
+      // A saved profile preference is canonical for signed-in users. Guests
+      // retain the existing local preference across visits.
+      if (!profileLanguage && (stored === 'en' || stored === 'as')) {
+        initialLanguage = stored;
+      }
     } catch {}
-  }, []);
+    setResponseLang(initialLanguage);
+    responseLanguageHydratedRef.current = true;
+  }, [authChecked, user?.preferred_language]);
   const handleCopy = useCallback((msgId) => setCopiedMsgId(msgId), []);
+
+  const handleResponseLanguageChange = useCallback((nextLanguage) => {
+    const next = nextLanguage === 'as' ? 'as' : 'en';
+    setResponseLang(next);
+    try { localStorage.setItem('syrabit_response_lang', next); } catch {}
+
+    if (!user || user.preferred_language === next) return;
+    apiClient().patch('/user/profile', { preferred_language: next })
+      .then(() => updateUser?.({ preferred_language: next }))
+      .catch(() => {
+        toast.error('Chat language changed, but profile sync failed');
+      });
+  }, [updateUser, user]);
 
 
   const messagesEndRef    = useRef(null);
@@ -180,11 +205,15 @@ export default function ChatPage() {
 
   // Read the current one-minute D1 bucket without consuming a request.
   const [creditsRefreshKey, setCreditsRefreshKey] = useState(0);
+  const creditsRequestKeyRef = useRef(null);
   useEffect(() => {
     // Wait for the /me round-trip so logged-in students don't fire a
     // throwaway anonymous request first; on the very first paint
     // ``user`` is null even for them.
     if (!authChecked) return;
+    const requestKey = `${user?.id || 'anonymous'}:${creditsRefreshKey}`;
+    if (creditsRequestKeyRef.current === requestKey) return;
+    creditsRequestKeyRef.current = requestKey;
     const anonId = user ? null : getAnonId();
     const creditHeaders = anonId ? { 'x-anon-id': anonId } : undefined;
     apiClient().get('/user/credits', creditHeaders ? { headers: creditHeaders } : undefined)
@@ -234,12 +263,12 @@ export default function ChatPage() {
   useEffect(() => {
     const check = () => {
       if (document.visibilityState === 'visible') {
-        fetch(`${API_BASE}/health`).then(() => setSyncState('idle')).catch(() => setSyncState('offline'));
+        fetch(HEALTH_API).then(() => setSyncState('idle')).catch(() => setSyncState('offline'));
       }
     };
     const goOffline = () => setSyncState('offline');
     const goOnline = () => {
-      fetch(`${API_BASE}/health`).then(() => setSyncState('idle')).catch(() => setSyncState('offline'));
+      fetch(HEALTH_API).then(() => setSyncState('idle')).catch(() => setSyncState('offline'));
     };
     document.addEventListener('visibilitychange', check);
     window.addEventListener('offline', goOffline);
@@ -1065,7 +1094,7 @@ export default function ChatPage() {
           model={model} setModel={setModel}
           showModelMenu={showModelMenu} setShowModelMenu={setShowModelMenu}
           modelMenuRef={modelMenuRef} handleNewChat={handleNewChat}
-          responseLang={responseLang} setResponseLang={setResponseLang}
+          responseLang={responseLang} setResponseLang={handleResponseLanguageChange}
         />
       }>
       <div className="flex flex-col chat-viewport-height">
@@ -1142,8 +1171,7 @@ export default function ChatPage() {
                         // english_rag_chat.
                         onSwitchToEnglish={msg.isAssameseUnavailable && msg.retryText ? () => {
                           if (autoRetryTimerRef.current) { clearTimeout(autoRetryTimerRef.current); autoRetryTimerRef.current = null; }
-                          setResponseLang('en');
-                          try { localStorage.setItem('syrabit_response_lang', 'en'); } catch {}
+                          handleResponseLanguageChange('en');
                           setMessages((prev) => prev.filter((m) => m.id !== msg.id));
                           // Defer one tick so the responseLang state
                           // commits before sendMsg captures the payload.

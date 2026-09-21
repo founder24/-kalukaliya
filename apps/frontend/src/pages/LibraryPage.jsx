@@ -160,10 +160,13 @@ export default function LibraryPage() {
     };
   }, []);
   const activeBoardId = useMemo(
-    () => onboardingProfile?.board_id || user?.board_id || null,
+    // The profile is the canonical source once authenticated. An older
+    // onboarding record must not keep the library on a previous board after
+    // the user changes their academic profile.
+    () => user?.board_id || onboardingProfile?.board_id || null,
     [onboardingProfile?.board_id, user?.board_id],
   );
-  const { data: bootBundle } = useLibraryBundleBoot(activeBoardId, !!activeBoardId);
+  const { data: bootBundle, refetch: refetchBoot } = useLibraryBundleBoot(activeBoardId, !!activeBoardId);
 
   // Tier 3 — full bundle (every board's chapters, ~1MB). Required for
   // cross-board chapter search. Deferred behind interaction or a long
@@ -203,13 +206,20 @@ export default function LibraryPage() {
     [subjects],
   );
   const { data: savedSubjects = [] } = useSavedSubjects(user);
-  const toggleSaved = useToggleSavedSubject();
+  const toggleSaved = useToggleSavedSubject(user);
   const handleToggleSave = useCallback((id) => toggleSaved.mutate(id), [toggleSaved]);
 
   useEffect(() => {
-    const handleContentUploaded = () => { refetchBundle(); };
+    const handleContentUploaded = () => {
+      // Staff publishing/reindexing changes the public catalog. Refresh all
+      // active tiers so the library and staff portal converge without a hard
+      // reload; disabled queries remain harmless no-ops.
+      refetchSlim();
+      refetchBundle();
+      if (activeBoardId) refetchBoot();
+    };
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') refetchBundle();
+      if (document.visibilityState === 'visible') handleContentUploaded();
     };
     window.addEventListener('content-uploaded', handleContentUploaded);
     document.addEventListener('visibilitychange', handleVisibility);
@@ -217,7 +227,7 @@ export default function LibraryPage() {
       window.removeEventListener('content-uploaded', handleContentUploaded);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [refetchBundle]);
+  }, [activeBoardId, refetchBoot, refetchBundle, refetchSlim]);
 
   const streamMap = useMemo(() => new Map(streams.map(s => [s.id, s])), [streams]);
   const classMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);

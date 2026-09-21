@@ -67,6 +67,7 @@ vi.mock('@/components/ErrorBoundary', () => ({
 
 vi.mock('@/utils/api', () => ({
   API_BASE: 'http://test.local',
+  HEALTH_API: 'http://test.local/health',
   llmCosts: vi.fn(() => Promise.resolve({ data: {} })),
 }));
 

@@ -584,7 +584,7 @@ function backendPreconnectPlugin() {
         // goes through the Vite proxy in dev and the CDN edge in production.
         // crossOrigin='use-credentials' matches fetch({ credentials:'include' })
         // so the browser can reuse the preloaded response (fixes mode-mismatch warning).
-        const preloadScript = `<script>(function(){if(/^\\/library(\\/|$)/.test(location.pathname)){var l=document.createElement('link');l.rel='preload';l.as='fetch';l.crossOrigin='use-credentials';l.href='/api/content/library-bundle?slim=1';document.head.appendChild(l);}})();</script>`;
+        const preloadScript = `<script>(function(){if(/^\\/library(\\/|$)/.test(location.pathname)){var l=document.createElement('link');l.rel='preload';l.as='fetch';l.crossOrigin='use-credentials';l.href='/api/v1/content/library-bundle?slim=1';document.head.appendChild(l);}})();</script>`;
         const tags = [preconnectTags, preloadScript].filter(Boolean).join('\n    ');
         return html.replace('<!--BACKEND_PRECONNECT-->', tags);
       } catch {
