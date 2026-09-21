@@ -229,9 +229,9 @@ page.on('requestfailed', request => {
 // CORS preflight contract. The application bearer token remains unchanged.
 await page.route(`${site}/**`, async route => {
   const requestUrl = new URL(route.request().url());
-  const isApiRequest = requestUrl.pathname.startsWith('/api/');
   const isProtectedAdminRequest = requestUrl.pathname.startsWith('/api/v1/admin/');
-  if (isApiRequest && !isProtectedAdminRequest) {
+  const isDocumentNavigation = route.request().resourceType() === 'document';
+  if (!isDocumentNavigation && !isProtectedAdminRequest) {
     await route.continue();
     return;
   }
