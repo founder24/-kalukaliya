@@ -12,7 +12,7 @@ import {
 import { apiClient } from '@/utils/api';
 import { useAuth } from '@/context/AuthContext';
 
-export default function PrivacyControls({ profile }) {
+export default function PrivacyControls({ profile, onProfileUpdate }) {
   const { user } = useAuth();
   const [optedOut, setOptedOut] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -63,6 +63,7 @@ export default function PrivacyControls({ profile }) {
     setSaving(true);
     try {
       await apiClient().patch('/user/profile', { ads_opt_out: next });
+      onProfileUpdate?.({ ads_opt_out: next });
       toast.success(
         next
           ? 'Ads disabled across all your devices — takes effect on next page load'

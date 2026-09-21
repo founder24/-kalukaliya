@@ -245,6 +245,45 @@ describe("Pages worker crawler snapshots", () => {
     expect(response.headers.get("X-Robots-Tag")).toContain("noindex");
   });
 
+  it("proxies browser API calls same-origin with application and Access credentials", async () => {
+    const backendFetch = vi.fn().mockResolvedValue(
+      new Response('{"active":false}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", backendFetch);
+
+    const request = new Request(
+      "https://syrabit.ai/api/v1/admin/break-glass-status",
+      {
+        headers: {
+          Authorization: "Bearer staff-jwt",
+          Cookie: "syrabit_admin_session=session; CF_Authorization=access",
+          "Cf-Access-Jwt-Assertion": "signed-access-assertion",
+        },
+      },
+    );
+    const response = await worker.fetch(request, {
+      ASSETS: { fetch: vi.fn() },
+      API_BACKEND_URL: "https://api.syrabit.ai",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Source")).toBe("pages-api-proxy");
+    expect(await response.json()).toEqual({ active: false });
+    expect(backendFetch).toHaveBeenCalledOnce();
+    const forwarded = backendFetch.mock.calls[0][0];
+    expect(forwarded.url).toBe(
+      "https://api.syrabit.ai/api/v1/admin/break-glass-status",
+    );
+    expect(forwarded.headers.get("Authorization")).toBe("Bearer staff-jwt");
+    expect(forwarded.headers.get("Cookie")).toContain("CF_Authorization=access");
+    expect(forwarded.headers.get("Cf-Access-Jwt-Assertion")).toBe(
+      "signed-access-assertion",
+    );
+  });
+
   it.each([
     ["browser navigation", { Accept: "text/html" }, 404],
     ["crawler with a Pages HTML fallback", BOT_HEADERS, 200],

@@ -350,7 +350,7 @@ async function precacheApiData() {
     // library-bundle?slim=1 is the single fetch that backs useBoards, useClasses,
     // useStreams and useSubjects on every page — prime it first so all four hooks
     // hit the cache on mount rather than racing to the network.
-    '/api/content/library-bundle?slim=1',
+    '/api/v1/content/library-bundle?slim=1',
     '/api/content/boards',
     '/api/content/subjects',
   ];

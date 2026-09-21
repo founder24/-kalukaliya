@@ -14,7 +14,7 @@ const routeImports = {
 };
 
 const apiWarmups = {
-  '/library': '/api/content/library-bundle?slim=1',
+  '/library': '/api/v1/content/library-bundle?slim=1',
 };
 
 function schedule(fn) {

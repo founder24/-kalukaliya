@@ -188,6 +188,47 @@ async function sitemapProxy(request, env, url) {
   }
 }
 
+// Browser API traffic normally uses the same-origin path so staff requests do
+// not need a CORS preflight. The Pages Worker forwards the original
+// Authorization, application cookies, and Cloudflare Access cookies/assertion
+// to the protected API origin. The API Worker remains the authority for both
+// application authentication and route authorization.
+async function apiProxy(request, env, url) {
+  const backend = (env && env.API_BACKEND_URL) || DEFAULT_BACKEND;
+  const backendUrl = backend + url.pathname + url.search;
+  const headers = new Headers(request.headers);
+  headers.delete("Host");
+  headers.delete("Content-Length");
+  try {
+    const upstream = await fetch(new Request(backendUrl, {
+      method: request.method,
+      headers,
+      body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
+      redirect: "manual",
+    }));
+    const responseHeaders = new Headers(upstream.headers);
+    responseHeaders.set("Cache-Control", "no-store");
+    responseHeaders.set("X-Source", "pages-api-proxy");
+    return new Response(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: responseHeaders,
+    });
+  } catch {
+    return new Response(
+      JSON.stringify({ detail: "API service unavailable" }),
+      {
+        status: 503,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+          "X-Source": "pages-api-proxy",
+        },
+      },
+    );
+  }
+}
+
 function seoUpstreamError(request, url, isXml, reason) {
   let body = null;
   if (request.method !== "HEAD") {
@@ -411,6 +452,14 @@ export default {
       request.headers.get("X-Sitemap-Proxy") !== "1"
     ) {
       return sitemapProxy(request, env, url);
+    }
+
+    // Keep API calls on the Pages origin. This is especially important for
+    // /api/v1/admin/*: Access cannot authenticate a browser CORS preflight,
+    // while a same-origin request carries the normal application credentials
+    // without preflight.
+    if (url.pathname.startsWith("/api/") || url.pathname === "/health" || url.pathname.startsWith("/health/")) {
+      return apiProxy(request, env, url);
     }
 
     // Root redirect: send bare / and /home to /library for real browsers.

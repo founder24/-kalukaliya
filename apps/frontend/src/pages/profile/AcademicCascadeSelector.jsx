@@ -91,9 +91,8 @@ export default function AcademicCascadeSelector({ profile, onProfileUpdate }) {
   const [selBoard,  setSelBoard]  = useState(savedBoard);
   const [selClass,  setSelClass]  = useState(savedClass);
   const [selStream, setSelStream] = useState(savedStream);
-  const [selSubject, setSelSubject] = useState(
-    profile?.saved_subjects?.[0] ? profile.saved_subjects[0] : null
-  );
+  const savedSubject = profile?.selected_subjects?.[0] || null;
+  const [selSubject, setSelSubject] = useState(savedSubject);
 
   // Dropdown lists
   const [boards,   setBoards]   = useState([]);
@@ -120,7 +119,8 @@ export default function AcademicCascadeSelector({ profile, onProfileUpdate }) {
   const isDirty =
     selBoard?.id  !== savedBoard?.id  ||
     selClass?.id  !== savedClass?.id  ||
-    selStream?.id !== savedStream?.id;
+    selStream?.id !== savedStream?.id ||
+    selSubject?.id !== savedSubject?.id;
 
   // ── fetch boards on mount ─────────────────────────────────────────────────
   useEffect(() => {
@@ -208,13 +208,13 @@ export default function AcademicCascadeSelector({ profile, onProfileUpdate }) {
       class_id:   selClass.id,
       class_name: selClass.name,
     };
-    if (selStream) {
-      payload.stream_id   = selStream.id;
-      payload.stream_name = selStream.name;
-    }
-    if (selSubject) {
-      payload.saved_subjects = [{ id: selSubject.id, name: selSubject.name }];
-    }
+    payload.stream_id   = selStream?.id || null;
+    payload.stream_name = selStream?.name || null;
+    // `saved_subjects` is the user's bookmark list. Academic preference is
+    // stored separately so editing this page never changes saved content.
+    payload.selected_subjects = selSubject
+      ? [{ id: selSubject.id, name: selSubject.name }]
+      : [];
     try {
       await apiClient().patch('/user/profile', payload);
       if (onProfileUpdate) onProfileUpdate(payload);

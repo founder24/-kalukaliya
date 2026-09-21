@@ -18,7 +18,7 @@ import { hydrateAdsOptOutFromServer } from '@/utils/adsConfig';
 import ReferralProfileCard from './profile/ReferralProfileCard';
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const navigate = useNavigate();
 
   const [profile, setProfile]               = useState(null);
@@ -37,39 +37,46 @@ export default function ProfilePage() {
   const [copiedId, setCopiedId]             = useState(false);
   const editInputRef = useRef(null);
 
-  const loadProfile = useCallback(() => {
-    if (!user) return;
+  const loadProfile = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setProfileError(false);
-    Promise.all([
-      apiClient().get('/user/profile'),
-      apiClient().get('/user/stats'),
-    ])
-      .then(([profileRes, statsRes]) => {
-        const p = profileRes.data;
-        if (!p || typeof p !== 'object') {
-          setProfileError(true);
-          return;
-        }
-        setProfile(p);
-        setStats(statsRes.data || { conversations: 0, saved_subjects: 0, total_tokens: 0, credits_used: 0 });
-        // Task #530: rehydrate the local opt-out flag from the server so
-        // signing in on a new device immediately applies the user's
-        // cross-device choice on the next ad-bearing route they visit.
-        hydrateAdsOptOutFromServer(p?.ads_opt_out);
-        if (p?.status === 'pending_deletion' && p?.deletion_hard_at) {
-          setDeletionPending(true);
-          setDeletionHardAt(p.deletion_hard_at);
-        }
-      })
-      .catch(() => {
-        setProfileError(true);
-        toast.error('Failed to load profile');
-      })
-      .finally(() => setLoading(false));
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+    try {
+      // Profile identity is required; usage stats are supplementary. A
+      // temporary stats failure must not blank the whole account page.
+      const [profileResult, statsResult] = await Promise.allSettled([
+        apiClient().get('/user/profile'),
+        apiClient().get('/user/stats'),
+      ]);
+      if (profileResult.status === 'rejected') throw profileResult.reason;
 
-  useEffect(() => { loadProfile(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+      const p = profileResult.value.data;
+      if (!p || typeof p !== 'object') throw new Error('Invalid profile response');
+
+      setProfile(p);
+      updateUser?.(p);
+      if (statsResult.status === 'fulfilled' && statsResult.value.data && typeof statsResult.value.data === 'object') {
+        setStats(statsResult.value.data);
+      }
+      // Task #530: rehydrate the local opt-out flag from the server so
+      // signing in on a new device immediately applies the user's
+      // cross-device choice on the next ad-bearing route they visit.
+      hydrateAdsOptOutFromServer(p?.ads_opt_out);
+      const pending = p?.status === 'pending_deletion' && Boolean(p?.deletion_hard_at);
+      setDeletionPending(pending);
+      setDeletionHardAt(pending ? p.deletion_hard_at : null);
+    } catch {
+      setProfileError(true);
+      toast.error('Failed to load profile');
+    } finally {
+      setLoading(false);
+    }
+  }, [user, updateUser]);
+
+  useEffect(() => { loadProfile(); }, [loadProfile]);
 
   useEffect(() => {
     if (editField) {
@@ -95,7 +102,9 @@ export default function ProfilePage() {
     setEditLoading(true);
     try {
       await apiClient().patch('/user/profile', { [editField.key]: editValue.trim() });
-      setProfile((p) => ({ ...p, [editField.key]: editValue.trim() }));
+      const value = editValue.trim();
+      setProfile((p) => ({ ...p, [editField.key]: value }));
+      updateUser?.({ [editField.key]: value });
       toast.success(`${editField.label} updated`);
       if (['board_id', 'board_name', 'class_id', 'class_name', 'stream_id', 'stream_name'].includes(editField.key)) {
         window.dispatchEvent(new CustomEvent('syrabit:onboarding-updated', {
@@ -117,6 +126,12 @@ export default function ProfilePage() {
       const res = await apiClient().delete('/user/account');
       setDeletionPending(true);
       setDeletionHardAt(res.data.hard_delete_at);
+      setProfile((p) => ({
+        ...p,
+        status: 'pending_deletion',
+        deletion_hard_at: res.data.hard_delete_at,
+      }));
+      updateUser?.({ status: 'pending_deletion', deletion_hard_at: res.data.hard_delete_at });
       setShowDeleteConfirm(false);
       setDeleteText('');
       toast.success('Account scheduled for deletion — 14 days to cancel');
@@ -134,6 +149,7 @@ export default function ProfilePage() {
       setDeletionPending(false);
       setDeletionHardAt(null);
       setProfile((p) => ({ ...p, status: 'active' }));
+      updateUser?.({ status: 'active', deletion_hard_at: null });
       toast.success('Account deletion cancelled — your account is safe!');
     } catch {
       toast.error('Failed to cancel deletion');
@@ -152,6 +168,11 @@ export default function ProfilePage() {
     setEditField({ key, label, placeholder });
     setEditValue(profile?.[key] || '');
   };
+
+  const handleProfileUpdate = useCallback((updates) => {
+    setProfile((p) => ({ ...p, ...updates }));
+    updateUser?.(updates);
+  }, [updateUser]);
 
   if (!user) {
     return (
@@ -251,10 +272,10 @@ export default function ProfilePage() {
           cancellingDelete={cancellingDelete} handleCancelDeletion={handleCancelDeletion}
         />
         <AcademicDetails profile={profile} isDegreeProfile={isDegreeProfile} openEdit={openEdit}
-          onProfileUpdate={(updates) => setProfile((p) => ({ ...p, ...updates }))} />
+          onProfileUpdate={handleProfileUpdate} />
         <AiCredits stats={stats} />
         <ReferralProfileCard />
-        <PrivacyControls profile={profile} />
+        <PrivacyControls profile={profile} onProfileUpdate={handleProfileUpdate} />
         <DangerZone
           profile={profile} deletionPending={deletionPending}
           setShowDeleteConfirm={setShowDeleteConfirm}

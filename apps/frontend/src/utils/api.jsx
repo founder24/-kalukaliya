@@ -2,9 +2,15 @@ import axios from 'axios';
 import { toast } from 'sonner';
 
 const _VITE_BACKEND = import.meta.env.VITE_BACKEND_URL || '';
+// Production staff requests must stay same-origin. A cross-origin admin
+// request with Authorization triggers a CORS preflight, which Cloudflare
+// Access challenges before the API Worker can respond. The Pages Worker
+// forwards same-origin /api requests to the protected API origin instead.
+const _USE_SAME_ORIGIN_API = import.meta.env.VITE_SAME_ORIGIN_API === 'true';
 const BACKEND_URL = _VITE_BACKEND ||
-  (import.meta.env.PROD ? 'https://api.syrabit.ai' : '');
-if (!_VITE_BACKEND) {
+  (import.meta.env.PROD && !_USE_SAME_ORIGIN_API ? 'https://api.syrabit.ai' : '');
+const EFFECTIVE_BACKEND_URL = _USE_SAME_ORIGIN_API ? '' : BACKEND_URL;
+if (!_VITE_BACKEND && !_USE_SAME_ORIGIN_API) {
   if (import.meta.env.PROD) {
     console.warn(
       '[Syrabit] VITE_BACKEND_URL is not set in the CF Pages environment. ' +
@@ -12,11 +18,11 @@ if (!_VITE_BACKEND) {
       'Add VITE_BACKEND_URL=https://api.syrabit.ai in CF Pages → Settings → Environment Variables and redeploy to remove this warning.'
     );
   } else {
-    console.error('[Syrabit] VITE_BACKEND_URL is not set. API requests will use relative paths (/api/v1) via the Vite dev proxy.');
+    console.info('[Syrabit] VITE_BACKEND_URL is not set. API requests will use relative paths (/api/v1) via the Vite dev proxy.');
   }
 }
-export const API_BASE = `${BACKEND_URL}/api/v1`;
-export const HEALTH_API = `${BACKEND_URL}/health`;
+export const API_BASE = `${EFFECTIVE_BACKEND_URL}/api/v1`;
+export const HEALTH_API = `${EFFECTIVE_BACKEND_URL}/health`;
 
 const _RENDER_URL = (import.meta.env.VITE_RENDER_API_URL || '').replace(/\/+$/, '');
 const _WORKER_URL = (import.meta.env.VITE_WORKER_API_URL || '').replace(/\/+$/, '');
@@ -108,10 +114,12 @@ axios.interceptors.response.use(
     if (error.response?.status === 401) {
       const reqUrl = config?.url || '';
       const isAdminContentCall = reqUrl.includes('/admin/content/') || reqUrl.includes('/admin/studio/');
-      const isStaffPortal = window.location.pathname.startsWith('/staff');
-      if (isStaffPortal && !isAdminContentCall) {
+      const protectedPagePrefixes = ['/staff', '/profile', '/history', '/read', '/notebook', '/flashcards', '/guardian'];
+      const isProtectedPage = protectedPagePrefixes.some((prefix) => window.location.pathname.startsWith(prefix));
+      if (isProtectedPage && !isAdminContentCall) {
         toast.error('Session expired. Please log in again.');
-        window.location.href = '/login?next=/staff';
+        const next = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        window.location.href = `/login?next=${encodeURIComponent(next)}`;
       }
     }
     return Promise.reject(error);

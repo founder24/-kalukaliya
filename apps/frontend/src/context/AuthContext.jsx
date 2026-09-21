@@ -27,66 +27,81 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [authChecked, setAuthChecked] = useState(false);
   const justAuthenticated = useRef(false);
+  const fetchMeInFlight = useRef(null);
 
-  const fetchMe = useCallback(async () => {
-    let resolvedUserId = null;
-    try {
-      const token = getToken();
-      const headers = token
-        ? { Authorization: `Bearer ${token}` }
-        : {};
-      let res;
+  const fetchMe = useCallback(() => {
+    // React StrictMode re-runs mount effects in development. Reuse the same
+    // probe while it is pending so anonymous pages do not issue duplicate
+    // /users/me requests (and duplicate expected 401 responses).
+    if (fetchMeInFlight.current) return fetchMeInFlight.current;
+
+    const request = (async () => {
+      let resolvedUserId = null;
       try {
-        res = await axios.get(`${API_BASE}/users/me`, {
-          withCredentials: true,
-          headers,
-        });
-      } catch (err) {
-        const status = err?.response?.status;
-        const detail = err?.response?.data?.detail;
-        if (status === 401 && (detail === 'token_expired' || detail === 'jwt_expired')) {
-          if (getRefreshToken()) {
-            try {
-              const newToken = await silentRefresh();
-              setToken(newToken);
-              res = await axios.get(`${API_BASE}/users/me`, {
-                withCredentials: true,
-                headers: newToken ? { Authorization: `Bearer ${newToken}` } : {},
-              });
-            } catch {
+        const token = getToken();
+        const headers = token
+          ? { Authorization: `Bearer ${token}` }
+          : {};
+        let res;
+        try {
+          res = await axios.get(`${API_BASE}/users/me`, {
+            withCredentials: true,
+            headers,
+          });
+        } catch (err) {
+          const status = err?.response?.status;
+          const detail = err?.response?.data?.detail;
+          if (status === 401 && (detail === 'token_expired' || detail === 'jwt_expired')) {
+            if (getRefreshToken()) {
+              try {
+                const newToken = await silentRefresh();
+                setToken(newToken);
+                res = await axios.get(`${API_BASE}/users/me`, {
+                  withCredentials: true,
+                  headers: newToken ? { Authorization: `Bearer ${newToken}` } : {},
+                });
+              } catch {
+                throw err;
+              }
+            } else {
               throw err;
             }
           } else {
             throw err;
           }
-        } else {
-          throw err;
         }
+        const userData = res.data;
+        if (userData && userData.id) {
+          resolvedUserId = userData.id;
+          hydrateAdsOptOutFromServer(userData.ads_opt_out);
+          // Set the plan before publishing the user so ad-bearing route
+          // effects cannot run once with anonymous consent during hydration.
+          setAdsPlan(userData.plan);
+          setUser(userData);
+        } else {
+          setAdsPlan(null);
+          setUser(null);
+        }
+        justAuthenticated.current = false;
+        return !!resolvedUserId;
+      } catch {
+        if (!justAuthenticated.current) {
+          setAdsPlan(null);
+          setUser(null);
+        }
+        return false;
+      } finally {
+        setAuthChecked(true);
+        setAdsAuthChecked(true);
       }
-      const userData = res.data;
-      if (userData && userData.id) {
-        resolvedUserId = userData.id;
-        hydrateAdsOptOutFromServer(userData.ads_opt_out);
-        // Set the plan before publishing the user so ad-bearing route
-        // effects cannot run once with anonymous consent during hydration.
-        setAdsPlan(userData.plan);
-        setUser(userData);
-      } else {
-        setAdsPlan(null);
-        setUser(null);
-      }
-      justAuthenticated.current = false;
-      return !!resolvedUserId;
-    } catch {
-      if (!justAuthenticated.current) {
-        setAdsPlan(null);
-        setUser(null);
-      }
-      return false;
-    } finally {
-      setAuthChecked(true);
-      setAdsAuthChecked(true);
-    }
+    })();
+
+    fetchMeInFlight.current = request;
+    request.then(
+      () => { if (fetchMeInFlight.current === request) fetchMeInFlight.current = null; },
+      () => { if (fetchMeInFlight.current === request) fetchMeInFlight.current = null; },
+    );
+    return request;
   }, []);
 
   useEffect(() => {
@@ -98,16 +113,13 @@ export const AuthProvider = ({ children }) => {
       fetchMe();
       return;
     }
-    // Keep the guard in its loading state until the anonymous session probe
-    // has completed. Marking this true before fetchMe() races with protected
-    // routes: /profile can redirect to /login for one render in production,
-    // and the subsequent successful probe cannot restore the original route.
-    const probe = () => { fetchMe(); };
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      window.requestIdleCallback(probe, { timeout: 1500 });
-    } else {
-      setTimeout(probe, 600);
-    }
+    // No access token means this is an anonymous session. The protected
+    // /users/me endpoint would only return an expected 401, so publish the
+    // anonymous state directly instead of creating a noisy failed request.
+    setAdsPlan(null);
+    setUser(null);
+    setAuthChecked(true);
+    setAdsAuthChecked(true);
   }, [fetchMe]);
 
   // Sync anonymous study data when user signs in

@@ -5,13 +5,19 @@ import axios from 'axios';
 import { useToggleSavedSubject } from './useUser';
 
 vi.mock('axios');
+vi.mock('@/utils/api', () => ({
+  apiClient: vi.fn(),
+}));
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 
 describe('useToggleSavedSubject', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('rolls an anonymous 401 back to unsaved instead of retaining optimism', async () => {
-    axios.post.mockRejectedValueOnce({ response: { status: 401 } });
+    const { apiClient } = await import('@/utils/api');
+    apiClient.mockReturnValue({
+      post: vi.fn().mockRejectedValueOnce({ response: { status: 401 } }),
+    });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const wrapper = ({ children }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
