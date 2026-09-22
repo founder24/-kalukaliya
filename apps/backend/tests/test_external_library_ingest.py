@@ -64,19 +64,21 @@ def test_text_cap_and_pdf_signature_validation():
 
 
 def test_image_only_pdf_can_defer_ocr():
-    import fitz
+    from io import BytesIO
+    from pypdf import PdfWriter
 
-    document = fitz.open()
-    document.new_page()
-    data = document.tobytes()
-    document.close()
+    document = PdfWriter()
+    document.add_blank_page(width=72, height=72)
+    output = BytesIO()
+    document.write(output)
+    data = output.getvalue()
     text, pages, truncated, method = extract_pdf(
         data, "Scanned question paper", max_ocr_pages=0
     )
     assert text == ""
     assert pages == 1
     assert truncated is True
-    assert method == "pymupdf+image-pages-deferred"
+    assert method == "pdfium+image-pages-deferred"
 
 
 def test_exact_other_seed_urls_and_dspace_title_cleanup():

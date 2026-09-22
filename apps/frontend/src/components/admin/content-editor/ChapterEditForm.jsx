@@ -430,6 +430,19 @@ export default function ChapterEditForm({
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex items-center gap-1.5 mb-1.5 flex-shrink-0">
             <div className="flex items-center gap-1">
+              {canFormat && (
+                <button
+                  type="button"
+                  onClick={handleFixFormatting}
+                  disabled={formatting}
+                  data-testid="ai-format-button"
+                  title="Use AI to fix formulas, tables, and Markdown formatting"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-fuchsia-700 bg-fuchsia-50 border border-fuchsia-200 hover:bg-fuchsia-100 disabled:opacity-50 transition-all shadow-sm"
+                >
+                  {formatting ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                  {formatting ? 'Formatting…' : 'AI Format'}
+                </button>
+              )}
               <button
                 onClick={handleAddPages}
                 disabled={imgUploading}
@@ -570,7 +583,7 @@ export default function ChapterEditForm({
                                 {formatting
                                   ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
                                   : <Wand2 size={12} />}
-                                {formatting ? 'Fixing…' : 'Fix Formatting'}
+                                 {formatting ? 'Formatting…' : 'AI Format'}
                               </button>
                             </>
                           )}

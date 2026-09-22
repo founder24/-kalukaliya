@@ -8,6 +8,7 @@ import {
   detectAuthoritativeIntent,
   semanticRetrievalFilters,
   shouldBypassSemanticRetrieval,
+  shouldSkipSemanticRetrievalForWebIntent,
   shouldResolveCurriculumScopeForChat,
   shouldStartWebSearchForChat,
   terminalChatErrorEvent,
@@ -53,6 +54,12 @@ describe('chapter-scoped chat retrieval', () => {
     expect(shouldStartWebSearchForChat(true, undefined, null, false)).toBe(true);
     expect(shouldStartWebSearchForChat(true, undefined, 'syllabus', false)).toBe(false);
     expect(shouldStartWebSearchForChat(false, undefined, null, true)).toBe(false);
+  });
+
+  it('skips semantic retrieval for unscoped freshness turns but preserves explicit chapter grounding', () => {
+    expect(shouldSkipSemanticRetrievalForWebIntent(undefined, true)).toBe(true);
+    expect(shouldSkipSemanticRetrievalForWebIntent('chapter-1', true)).toBe(false);
+    expect(shouldSkipSemanticRetrievalForWebIntent(undefined, false)).toBe(false);
   });
 
   it.each([

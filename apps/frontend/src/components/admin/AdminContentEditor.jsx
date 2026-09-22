@@ -64,6 +64,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const [trackedJobIds, setTrackedJobIds] = useState([]);
   const [publishJobIds, setPublishJobIds] = useState([]);
   const [publishingChapters, setPublishingChapters] = useState(new Set());
+  const [formattingChapters, setFormattingChapters] = useState(new Set());
   const [chaptersLoading, setChaptersLoading] = useState(false);
 
   const subjectData = subjects.find(s => s.id === selSubject);
@@ -400,6 +401,49 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       return false;
     } finally { setGeneratingNotes(prev => { const next = new Set(prev); next.delete(chapterId); return next; }); }
   };
+
+  const handleFormatChapter = useCallback(async (chapterId, chapterTitle) => {
+    setFormattingChapters(prev => new Set([...prev, chapterId]));
+    const tid = toast.loading(`Formatting "${chapterTitle}"…`);
+    try {
+      let chapter = chapters.find(ch => ch.id === chapterId);
+      if (!chapter?.content && !chapter?.notes_en) {
+        const response = await axios.get(`${API}/admin/content/chapter/${chapterId}`, authHeaders(adminToken));
+        chapter = response.data;
+      }
+      const source = chapter?.notes_en || chapter?.content_en || chapter?.content || '';
+      if (!source.trim()) {
+        toast.info('Add notes before using AI Format', { id: tid });
+        return;
+      }
+      const formatted = await axios.post(
+        `${API}/admin/content/format-text`,
+        { text: source },
+        authHeaders(adminToken),
+      );
+      const formattedText = formatted.data?.formatted_text;
+      if (!formattedText?.trim()) throw new Error('The formatter returned empty content');
+
+      await axios.patch(
+        `${API}/staff/content/chapter/${chapterId}`,
+        { notes_en: formattedText },
+        authHeaders(adminToken),
+      );
+      setChapters(prev => prev.map(ch => ch.id === chapterId
+        ? { ...ch, content: formattedText, notes_en: formattedText }
+        : ch));
+      await loadChapterCards(selSubject);
+      toast.success(`AI formatting applied to "${chapterTitle}"`, { id: tid });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || e?.message || 'AI formatting failed', { id: tid });
+    } finally {
+      setFormattingChapters(prev => {
+        const next = new Set(prev);
+        next.delete(chapterId);
+        return next;
+      });
+    }
+  }, [adminToken, chapters, loadChapterCards, selSubject]);
 
   const toggleSubjectSelect = (id) => {
     setSelectedSubjectIds(prev => {
@@ -902,6 +946,8 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                       chapterAssets={chapterAssets}
                       generatingNotes={generatingNotes}
                       onGenerateNotes={handleGenerateNotes} onDeleteChapter={handleDeleteChapter}
+                      onFormatChapter={handleFormatChapter}
+                      formattingChapters={formattingChapters}
                       onChangeChapterStatus={handleChapterStatusChange}
                       selectedIds={selectedChapterIds}
                       onToggleSelect={toggleChapterSelect}

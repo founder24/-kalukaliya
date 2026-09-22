@@ -19,6 +19,7 @@ fixture_hash="$(CUTOVER_STAFF_PASSWORD="$fixture_password" pnpm --filter syrabit
   const bcrypt = require("bcryptjs");
   bcrypt.hash(process.env.CUTOVER_STAFF_PASSWORD, 12).then(hash => process.stdout.write(hash));
 ')"
+phase="fixture preparation"
 
 reap_expired_fixtures() {
   local reaper_sql
@@ -49,6 +50,9 @@ cleanup_fixture() {
 finish() {
   local status=$?
   trap - EXIT
+  if (( status != 0 )); then
+    echo "::error title=Disposable staff authentication failed::Phase '${phase}' failed with exit code ${status}; fixture cleanup will still run."
+  fi
   cleanup_fixture || status=1
   exit "$status"
 }
@@ -56,8 +60,10 @@ trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+phase="reaping expired fixtures"
 reap_expired_fixtures
 
+phase="creating temporary admin"
 create_sql="INSERT INTO release_staff_auth_leases
     (fixture_id, telemetry_id, telemetry_route, expires_at)
   VALUES
@@ -75,6 +81,7 @@ create_sql="INSERT INTO release_staff_auth_leases
 pnpm --filter syrabit-api exec wrangler d1 execute syrabit-db \
   --remote --env production --command "$create_sql" >/dev/null
 
+phase="validating public authentication lifecycle"
 CUTOVER_STAFF_AUTH_ONLY=true \
 CUTOVER_STAFF_EMAIL="$fixture_email" \
 CUTOVER_STAFF_PASSWORD="$fixture_password" \

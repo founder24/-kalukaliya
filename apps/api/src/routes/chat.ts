@@ -1073,6 +1073,20 @@ export function shouldStartWebSearchForChat(
     && (!authoritativeIntent || requestedWebIntent);
 }
 
+/**
+ * A freshness/web-intent turn without an explicit chapter is grounded by the
+ * verified web result, not by a second semantic curriculum search. Keep the
+ * page-provided subject for curriculum scope and prompt labeling, but avoid
+ * paying for an unrelated embedding + Vectorize round trip on the first-token
+ * path.
+ */
+export function shouldSkipSemanticRetrievalForWebIntent(
+  directChapterId: string | undefined,
+  explicitWebIntent: boolean,
+): boolean {
+  return explicitWebIntent && directChapterId === undefined;
+}
+
 export async function fetchMatchedChunkContext(
   d1: D1Database,
   matches: VectorizeMatch[],
@@ -1823,9 +1837,33 @@ chatRouter.post('/stream', async (c) => {
       c.req.raw,
       c.env.EDGE_SHARED_SECRET,
     );
-    const existingClaim = clientRequestId
-      ? await getChatRequestClaim(c.env.DB, clientRequestId)
-      : null;
+    let existingClaim: ChatRequestClaim | null = null;
+    let quotaReservation: {
+      allowed: boolean;
+      count: number;
+      limit: number;
+    } | null = null;
+
+    if (edgeRateLimitUsage) {
+      // The edge already owns the atomic quota decision. Only the optional
+      // idempotency claim needs a D1 read on this path.
+      existingClaim = clientRequestId
+        ? await getChatRequestClaim(c.env.DB, clientRequestId)
+        : null;
+    } else {
+      // These reads do not depend on one another for a fresh request. Running
+      // them together removes one cross-region D1 round trip from the
+      // first-token path. If the request key already exists, release the
+      // temporary quota reservation before replaying/waiting below.
+      const claimPromise = clientRequestId
+        ? getChatRequestClaim(c.env.DB, clientRequestId)
+        : Promise.resolve(null);
+      const quotaPromise = !isAnon
+        ? reserveAuthQuota(c.env.DB, userId, userTier, userRole, reservationPeriod)
+        : reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId, reservationPeriod);
+      [existingClaim, quotaReservation] = await Promise.all([claimPromise, quotaPromise]);
+    }
+
     if (existingClaim && existingClaim.user_id !== userId) {
       c.header('X-Failure-Stage', 'request_validation');
       return c.json({
@@ -1837,9 +1875,17 @@ chatRouter.post('/stream', async (c) => {
     }
 
     if (existingClaim?.status === 'completed') {
+      if (quotaReservation?.allowed && userRole !== 'admin' && userRole !== 'staff') {
+        await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
+          .catch(releaseErr => console.error('[chat] duplicate claim quota release failed:', releaseErr));
+      }
       return replayCompletedChatRequest(existingClaim, serverRequestId);
     }
     if (existingClaim?.status === 'cancelled') {
+      if (quotaReservation?.allowed && userRole !== 'admin' && userRole !== 'staff') {
+        await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
+          .catch(releaseErr => console.error('[chat] duplicate claim quota release failed:', releaseErr));
+      }
       return c.json({
         detail: 'This chat request was cancelled.',
         error_code: 'chat_request_cancelled',
@@ -1849,6 +1895,10 @@ chatRouter.post('/stream', async (c) => {
     }
 
     if (existingClaim) {
+      if (quotaReservation?.allowed && userRole !== 'admin' && userRole !== 'staff') {
+        await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
+          .catch(releaseErr => console.error('[chat] duplicate claim quota release failed:', releaseErr));
+      }
       return waitForInFlightChatRequest(
         c.env.DB,
         clientRequestId!,
@@ -1860,13 +1910,8 @@ chatRouter.post('/stream', async (c) => {
       quotaCount = edgeRateLimitUsage.count;
       quotaLimit = edgeRateLimitUsage.limit;
     } else {
-      if (!isAnon) {
-        ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-          await reserveAuthQuota(c.env.DB, userId, userTier, userRole, reservationPeriod));
-      } else {
-        ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-          await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId, reservationPeriod));
-      }
+      if (!quotaReservation) throw new Error('Quota reservation was not established');
+      ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } = quotaReservation);
       ownsQuotaReservation = quotaAllowed && userRole !== 'admin' && userRole !== 'staff';
     }
 
@@ -1970,6 +2015,24 @@ chatRouter.post('/stream', async (c) => {
   // available. Semantic retrieval remains the fallback for stale/missing IDs.
   const directChapterId = body.chapter_id?.trim() || undefined;
   const authoritativeIntent = detectAuthoritativeIntent(message);
+  const requestedWebIntent = shouldUseWebSearch({
+    question: message,
+    chapterId: directChapterId,
+    subjectId: body.subject_id,
+  });
+  // Start the bounded web branch before the curriculum hierarchy lookup so the
+  // two independent reads overlap on the first-token critical path.
+  const webSearchEnabled = shouldStartWebSearchForChat(
+    c.env.WEB_SEARCH_ENABLED === 'true',
+    directChapterId,
+    authoritativeIntent,
+    requestedWebIntent,
+  );
+  const explicitWebIntent = requestedWebIntent;
+  const webSearchPromise = webSearchEnabled
+    ? searchWeb(message, lang, { cache: c.env.CONTENT_KV })
+    : Promise.resolve(skippedWebSearch());
+
   let curriculumScope: CurriculumScope;
   if (!shouldResolveCurriculumScopeForChat(directChapterId, authoritativeIntent)) {
     // The chapter lookup below verifies this exact published chapter. Reuse
@@ -2007,30 +2070,12 @@ chatRouter.post('/stream', async (c) => {
       failure_stage: 'curriculum_scope',
     }, 422);
   }
-  const requestedWebIntent = shouldUseWebSearch({
-    question: message,
-    chapterId: directChapterId,
-    subjectId: body.subject_id,
-  });
   // D1 is authoritative for syllabus/PYQ availability. Do not dilute a list
   // request with web snippets unless the student explicitly asks for current
   // information. Freshness-qualified syllabus requests use both sources, with
   // D1 curriculum content remaining authoritative if they conflict.
-  const webSearchEnabled = shouldStartWebSearchForChat(
-    c.env.WEB_SEARCH_ENABLED === 'true',
-    directChapterId,
-    authoritativeIntent,
-    requestedWebIntent,
-  );
   // Keep intent independent from provider availability. If verified current
   // retrieval is disabled, the answer-level gate must still fail closed.
-  const explicitWebIntent = requestedWebIntent;
-  // Prestart bounded web lookup before any D1/embedding await. Its result is
-  // discarded when curriculum evidence is already strong, so ordinary textbook
-  // answers stay authoritative while weak RAG gets a zero-waterfall fallback.
-  const webSearchPromise = webSearchEnabled
-    ? searchWeb(message, lang, { cache: c.env.CONTENT_KV })
-    : Promise.resolve(skippedWebSearch());
   const memoryPromise = loadMemories(db, userId, isAnon);
   let historyLoaded = false;
   if (authoritativeIntent && !curriculumScope.unresolved) {
@@ -2103,21 +2148,22 @@ chatRouter.post('/stream', async (c) => {
   }
 
   if (!authoritativeIntent && contextChunks.length === 0 && !curriculumScope.unresolved) {
-  const skipSemanticForUnscopedWebIntent = explicitWebIntent
-    && directChapterId === undefined
-       && !scopedSubjectId;
-  // Embed + history in parallel — zero extra latency vs serial
-  // Pass userId so history is scoped to its owner (session ownership enforcement)
-  const [embedResult, historyResult] = await startRetrievalFanout({
-    // An explicit unscoped current/web request has no curriculum target to
-    // filter against. Avoid a wasted embedding + Vectorize round trip while
-    // still running history and bounded web retrieval in parallel.
-    embed: () => skipSemanticForUnscopedWebIntent
-      ? Promise.resolve([] as number[])
-      : embedQuery(c.env.AI, buildEmbeddingQuery(message, lang)),
-    history: () => historyLoaded ? Promise.resolve(history) : loadHistory(db, sessionId, userId),
-    web: () => webSearchPromise,
-  });
+    const skipSemanticForWebIntent = shouldSkipSemanticRetrievalForWebIntent(
+      directChapterId,
+      explicitWebIntent,
+    );
+    // Embed + history in parallel — zero extra latency vs serial
+    // Pass userId so history is scoped to its owner (session ownership enforcement)
+    const [embedResult, historyResult] = await startRetrievalFanout({
+      // An explicit unscoped current/web request has no curriculum target to
+      // filter against. Avoid a wasted embedding + Vectorize round trip while
+      // still running history and bounded web retrieval in parallel.
+      embed: () => skipSemanticForWebIntent
+        ? Promise.resolve([] as number[])
+        : embedQuery(c.env.AI, buildEmbeddingQuery(message, lang)),
+      history: () => historyLoaded ? Promise.resolve(history) : loadHistory(db, sessionId, userId),
+      web: () => webSearchPromise,
+    });
 
   if (historyResult.status === 'fulfilled' && !historyLoaded) history = historyResult.value;
 
