@@ -49,7 +49,7 @@ export default function HierarchyTree({
   onUpdateStatus,
 }) {
   return (
-    <div className="w-72 border-r border-gray-200 flex flex-col overflow-y-auto" style={{ background: '#ffffff' }}>
+    <div className="hidden md:flex md:w-72 border-r border-gray-200 flex-col overflow-y-auto flex-shrink-0" style={{ background: '#ffffff' }}>
       <div className="p-3 space-y-1">
         <p className="text-[10px] uppercase tracking-wider text-gray-400 px-2 mb-2 font-semibold">Boards</p>
         {boards.map(b => (
