@@ -24,10 +24,10 @@ from typing import Iterable, Optional
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from urllib.robotparser import RobotFileParser
 
-import fitz
 import requests
 from bs4 import BeautifulSoup
 from pymongo import ASCENDING, MongoClient
+from scripts.pdfium_compat import close_pdf, open_pdf, page_image, page_text
 
 PDF_LIMIT = 50 * 1024 * 1024
 PDF_TEXT_LIMIT = 6 * 1024 * 1024
@@ -198,9 +198,11 @@ def extract_pdf(
 ) -> tuple[str, int, bool, str]:
     if not is_pdf_response("", data):
         raise ValueError("response is not a PDF")
-    with fitz.open(stream=data, filetype="pdf") as document:
-        pages = [page.get_text("text") for page in document]
-        method = "pymupdf"
+    document = open_pdf(data)
+    try:
+        pdf_pages = [document[index] for index in range(len(document))]
+        pages = [page_text(page) for page in pdf_pages]
+        method = "pdfium"
         # OCR a representative prefix of image-only scans. College repositories
         # contain thousands of scans; unbounded page-by-page OCR would make a
         # refresh take days. The complete public PDF remains linked and hashed.
@@ -208,16 +210,14 @@ def extract_pdf(
         skipped_image_pages = 0
         if max_ocr_pages > 0 and shutil.which("tesseract"):
             with tempfile.TemporaryDirectory(prefix="syrabit-library-ocr-") as tmp:
-                for number, (page, text) in enumerate(zip(document, pages)):
+                for number, (page, text) in enumerate(zip(pdf_pages, pages)):
                     if text.strip():
                         continue
                     if ocr_pages >= max_ocr_pages:
                         skipped_image_pages += 1
                         continue
                     image = os.path.join(tmp, f"{number}.png")
-                    page.get_pixmap(
-                        matrix=fitz.Matrix(0.9, 0.9), alpha=False
-                    ).save(image)
+                    page_image(page, 0.9).save(image)
                     try:
                         output = subprocess.run(
                             [
@@ -230,18 +230,20 @@ def extract_pdf(
                             check=False,
                         )
                         pages[number] = output.stdout if output.returncode == 0 else ""
-                        method = "pymupdf+ocr"
+                        method = "pdfium+ocr"
                     except subprocess.TimeoutExpired:
                         pass
                     ocr_pages += 1
         text, truncated = _cap_text("\n".join(pages), PDF_TEXT_LIMIT)
         if skipped_image_pages:
             truncated = True
-            method = "pymupdf+partial-ocr"
+            method = "pdfium+partial-ocr"
         elif any(not page.strip() for page in pages):
             truncated = True
-            method = "pymupdf+image-pages-deferred"
-        return text, len(document), truncated, method
+            method = "pdfium+image-pages-deferred"
+        return text, len(pdf_pages), truncated, method
+    finally:
+        close_pdf(document)
 
 
 class PoliteClient:
