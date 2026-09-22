@@ -84,18 +84,42 @@ echo "-- Early Hints (103 / Link rel=preload) --"
 # response that Cloudflare sends before the 200.  -o /dev/null discards body.
 ALL_HEADERS=$(curl -sD - -o /dev/null --max-time 10 "$TARGET" 2>/dev/null || true)
 
-# Hashed asset Early Hints are intentionally disabled. A 103 response that
-# contains an old `/assets/*` preload is a release-convergence failure, not a
-# successful Early Hints result.
+# Hashed asset Early Hints are safe only when every hinted bundle is present in
+# the document currently served by the edge. A 103 response can outlive the
+# HTML response during a Pages rollout, so compare the hinted paths with the
+# live document instead of treating every hashed preload as stale.
 EARLY_HINTS_HEADER=$(echo "$ALL_HEADERS" | grep -i "^early-hints:" || true)
 LINK_HEADERS=$(echo "$ALL_HEADERS" | grep -i "^link:" | grep -i "rel=preload" || true)
-HASHED_PRELOAD_LINKS=$(echo "$LINK_HEADERS" | grep -iE "<\/assets\/[^>]+>" || true)
+HASHED_PRELOAD_LINKS=$(echo "$LINK_HEADERS" | grep -oiE "</assets/[^>]+>" | sort -u || true)
 HASHED_PRELOAD_DISABLED=$(echo "$ALL_HEADERS" | grep -i "^x-syrabit-hashed-preload: *disabled" || true)
-HAS_103=$(echo "$ALL_HEADERS" | grep -qiE "^HTTP/[0-9.]+ 103")
+HAS_103=false
+if echo "$ALL_HEADERS" | grep -qiE "^HTTP/[0-9.]+ 103"; then
+  HAS_103=true
+fi
 
 if [ -n "$HASHED_PRELOAD_LINKS" ]; then
-  fail "Stale hashed asset preload link(s) detected in Early Hints"
-  echo "$HASHED_PRELOAD_LINKS" | sed 's/^/     /'
+  LIVE_HTML=$(curl -fsS --max-time 10 "$TARGET" 2>/dev/null || true)
+  STALE_HASHED_PRELOAD_LINKS=""
+  while IFS= read -r link; do
+    [ -z "$link" ] && continue
+    asset_path="${link#<}"
+    asset_path="${asset_path%>}"
+    relative_asset_path="${asset_path#/}"
+    asset_filename="${asset_path##*/}"
+    if [[ "$LIVE_HTML" != *"$asset_path"* \
+      && "$LIVE_HTML" != *"$relative_asset_path"* \
+      && "$LIVE_HTML" != *"$asset_filename"* ]]; then
+      STALE_HASHED_PRELOAD_LINKS="${STALE_HASHED_PRELOAD_LINKS}${asset_path}"$'\n'
+    fi
+  done <<< "$HASHED_PRELOAD_LINKS"
+
+  if [ -n "$STALE_HASHED_PRELOAD_LINKS" ]; then
+    fail "Stale hashed asset preload link(s) detected in Early Hints"
+    echo "$STALE_HASHED_PRELOAD_LINKS" | sed 's/^/     /'
+  else
+    ok "Hashed asset Early Hints match the live HTML bundle set"
+    PASS=$((PASS + 1))
+  fi
 elif [ -n "$HASHED_PRELOAD_DISABLED" ]; then
   ok "Hashed asset Early Hints intentionally disabled for release convergence"
   PASS=$((PASS + 1))
