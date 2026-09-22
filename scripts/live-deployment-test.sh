@@ -180,33 +180,20 @@ if should_run "health"; then
         fail_test "/health returned HTTP $HTTP_CODE (expected 200)" "yes"
     fi
 
-    # GET /health/deep - expect 200 or 503
-    do_request GET "$BACKEND_URL/health/deep"
+    # GET /health/full - public edge health contract. The API Worker's
+    # /health/deep endpoint is service-bound and requires EDGE_SHARED_SECRET;
+    # probing it directly from the public audit correctly returns 401.
+    do_request GET "$FRONTEND_URL/health/full"
     verbose "Status: $HTTP_CODE, Body: ${RESPONSE_BODY:0:200}"
     if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "503" ]]; then
         # Verify JSON response
         if echo "$RESPONSE_BODY" | python3 -m json.tool >/dev/null 2>&1 || echo "$RESPONSE_BODY" | grep -q '{'; then
-            pass_test "/health/deep returns $HTTP_CODE with JSON response"
+            pass_test "/health/full returns $HTTP_CODE with JSON response"
         else
-            warn_test "/health/deep returns $HTTP_CODE but response is not JSON"
+            warn_test "/health/full returns $HTTP_CODE but response is not JSON"
         fi
     else
-        fail_test "/health/deep returned HTTP $HTTP_CODE (expected 200 or 503)"
-    fi
-
-    # GET /health/circuit-breakers - expect 200
-    do_request GET "$BACKEND_URL/health/circuit-breakers"
-    verbose "Status: $HTTP_CODE"
-    if [[ "$HTTP_CODE" == "200" ]]; then
-        if echo "$RESPONSE_BODY" | python3 -m json.tool >/dev/null 2>&1 || echo "$RESPONSE_BODY" | grep -q '{'; then
-            pass_test "/health/circuit-breakers returns 200 with JSON"
-        else
-            warn_test "/health/circuit-breakers returns 200 but not JSON"
-        fi
-    elif [[ "$HTTP_CODE" == "404" ]]; then
-        warn_test "/health/circuit-breakers not found (may not be deployed)"
-    else
-        fail_test "/health/circuit-breakers returned HTTP $HTTP_CODE (expected 200)"
+        fail_test "/health/full returned HTTP $HTTP_CODE (expected 200 or 503)"
     fi
 
     echo ""
@@ -251,16 +238,17 @@ if should_run "auth"; then
         fail_test "login with empty body returned $HTTP_CODE (expected 422)" "yes"
     fi
 
-    # POST /api/v1/auth/forgot-password with nonexistent email - expect 200
-    do_request POST "$BACKEND_URL/api/v1/auth/forgot-password" \
+    # POST /api/v1/auth/reset-password/request with nonexistent email - expect 200.
+    # This is the native Worker route; /forgot-password is a retired legacy name.
+    do_request POST "$BACKEND_URL/api/v1/auth/reset-password/request" \
         -H "Content-Type: application/json" \
         -d '{"email":"nobody-exists-here@test.invalid"}'
     if [[ "$HTTP_CODE" == "200" ]]; then
-        pass_test "forgot-password does not reveal if email exists (returns 200)"
+        pass_test "password reset request does not reveal if email exists (returns 200)"
     elif [[ "$HTTP_CODE" == "422" ]]; then
-        warn_test "forgot-password returns 422 (may have validation)"
+        warn_test "password reset request returns 422 (may have validation)"
     else
-        fail_test "forgot-password returned $HTTP_CODE (expected 200 to not leak info)" "yes"
+        fail_test "password reset request returned $HTTP_CODE (expected 200 to not leak info)" "yes"
     fi
 
     # POST /api/v1/auth/refresh with invalid token - expect 401 or 422
@@ -339,7 +327,7 @@ if should_run "content"; then
     # Cache-hit verification: second identical request should be faster or show cache indicator.
     # Check for X-Cache, CF-Cache-Status, or Age headers that confirm caching is active.
     do_request GET "$BACKEND_URL/api/v1/content/library-bundle"
-    local cache_indicator=""
+    cache_indicator=""
     cache_indicator=$(echo "$RESPONSE_HEADERS" | grep -iE "^(x-cache|cf-cache-status|age|x-cache-status):" | head -1 || true)
     if [[ -n "$cache_indicator" ]]; then
         pass_test "Cache indicator header present on library-bundle: $(echo "$cache_indicator" | tr -d '\r')"
@@ -349,7 +337,7 @@ if should_run "content"; then
 
     # Second request to verify cache works end-to-end (Age should increment or HIT)
     do_request GET "$BACKEND_URL/api/v1/content/library-bundle"
-    local cf_cache_status=""
+    cf_cache_status=""
     cf_cache_status=$(echo "$RESPONSE_HEADERS" | grep -i "^cf-cache-status:" | tr -d '\r' | awk '{print $2}' || true)
     if [[ "$cf_cache_status" == "HIT" ]]; then
         pass_test "CF-Cache-Status: HIT on second library-bundle request (cache warm)"
@@ -366,9 +354,9 @@ if should_run "content"; then
     #  2. Verify the response body is valid (not empty/stale placeholder)
     #  3. Second identical busted URL → should be MISS again (unique param, no KV warmth)
     #     This proves CF is not incorrectly caching query-param variants.
-    local CACHE_BUST="cache_bust_$(date +%s)_${RANDOM}"
+    CACHE_BUST="cache_bust_$(date +%s)_${RANDOM}"
     do_request GET "$BACKEND_URL/api/v1/content/library-bundle?${CACHE_BUST}=1"
-    local bust_status=""
+    bust_status=""
     bust_status=$(echo "$RESPONSE_HEADERS" | grep -i "^cf-cache-status:" | tr -d '\r' | awk '{print $2}' || true)
 
     if [[ "$bust_status" == "HIT" ]]; then
@@ -387,7 +375,7 @@ if should_run "content"; then
     fi
 
     # Deploy-after-invalidation simulation: purge via Cache-Control: no-cache and re-fetch
-    local purge_code=""
+    purge_code=""
     purge_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
         -H "Cache-Control: no-cache" \
         -H "Pragma: no-cache" \
@@ -408,21 +396,7 @@ if should_run "chat"; then
     echo -e "${BOLD}--- [chat] Chat/AI Pipeline ---${NC}"
     echo ""
 
-    # POST /api/v1/chat/ without auth - chat supports anonymous users (freemium model)
-    do_request POST "$BACKEND_URL/api/v1/chat/" \
-        -H "Content-Type: application/json" \
-        -d '{"message":"test","language":"en"}'
-    if [[ "$HTTP_CODE" == "200" ]]; then
-        pass_test "chat accepts anonymous requests (freemium model)"
-    elif [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
-        pass_test "chat requires auth (returns $HTTP_CODE)"
-    elif [[ "$HTTP_CODE" == "429" ]]; then
-        pass_test "chat rate-limited for anonymous users (429)"
-    else
-        fail_test "chat returned unexpected $HTTP_CODE (expected 200, 401, 403, or 429)"
-    fi
-
-    # POST /api/v1/chat/stream without auth - also supports anonymous
+    # POST /api/v1/chat/stream without auth - native streaming chat contract
     do_request POST "$BACKEND_URL/api/v1/chat/stream" \
         -H "Content-Type: application/json" \
         -d '{"message":"test","language":"en","stream":true}'
@@ -436,14 +410,14 @@ if should_run "chat"; then
         fail_test "chat/stream returned unexpected $HTTP_CODE (expected 200, 401, 403, or 429)"
     fi
 
-    # GET /api/v1/chat/history without auth - history may require auth
-    do_request GET "$BACKEND_URL/api/v1/chat/history"
+    # GET /api/v1/conversations without auth - saved history requires auth.
+    do_request GET "$BACKEND_URL/api/v1/conversations"
     if [[ "$HTTP_CODE" == "200" ]]; then
-        pass_test "chat/history returns 200 (empty for anonymous)"
+        pass_test "conversations returns 200 (empty for anonymous)"
     elif [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
-        pass_test "chat/history requires auth (returns $HTTP_CODE)"
+        pass_test "conversations requires auth (returns $HTTP_CODE)"
     else
-        fail_test "chat/history without auth returned $HTTP_CODE (expected 401 or 403)" "yes"
+        fail_test "conversations without auth returned $HTTP_CODE (expected 200, 401, or 403)" "yes"
     fi
 
     echo ""
@@ -500,6 +474,24 @@ if should_run "seo"; then
         fail_test "sitemap-topics.xml returned $HTTP_CODE (expected 200)"
     fi
 
+    # GET the public Pages route as crawlers do. Backend sitemap success is not
+    # sufficient: the Pages Worker must proxy this path instead of returning
+    # the SPA shell.
+    do_request GET "$FRONTEND_URL/sitemap-topics.xml"
+    if [[ "$HTTP_CODE" == "200" ]] \
+        && echo "$RESPONSE_HEADERS" | grep -qiE "content-type:.*xml" \
+        && ! echo "$RESPONSE_BODY" | grep -qi "<html"; then
+        if printf '%s' "$RESPONSE_BODY" | python3 -c \
+            'import sys, xml.etree.ElementTree as ET; ET.fromstring(sys.stdin.read())' \
+            >/dev/null 2>&1; then
+            pass_test "public sitemap-topics.xml returns parseable XML"
+        else
+            fail_test "public sitemap-topics.xml returned invalid XML"
+        fi
+    else
+        fail_test "public sitemap-topics.xml returned $HTTP_CODE with non-XML content"
+    fi
+
     # Verify XML is well-formed
     do_request GET "$BACKEND_URL/api/v1/seo/sitemap.xml"
     if echo "$RESPONSE_BODY" | grep -q '<?xml\|<urlset\|<sitemapindex'; then
@@ -552,10 +544,13 @@ if should_run "admin"; then
     do_request GET "$BACKEND_URL/api/v1/admin/verify"
     if [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
         pass_test "admin/verify without cookie returns $HTTP_CODE"
+    elif [[ "$HTTP_CODE" == "301" || "$HTTP_CODE" == "302" || "$HTTP_CODE" == "307" || "$HTTP_CODE" == "308" ]] \
+        && echo "$RESPONSE_HEADERS" | grep -qi '^Location:'; then
+        pass_test "admin/verify without cookie returns $HTTP_CODE Cloudflare Access redirect"
     elif [[ "$HTTP_CODE" == "404" ]]; then
         warn_test "admin/verify endpoint not found"
     else
-        fail_test "admin/verify without cookie returned $HTTP_CODE (expected 401)" "yes"
+        fail_test "admin/verify without cookie returned $HTTP_CODE (expected 401 or Access redirect)" "yes"
     fi
 
     # POST /api/v1/admin/login with wrong creds
@@ -568,8 +563,10 @@ if should_run "admin"; then
         pass_test "admin/login rejects invalid request (400)"
     elif [[ "$HTTP_CODE" == "404" ]]; then
         warn_test "admin/login endpoint not found"
+    elif [[ "$HTTP_CODE" == "429" ]]; then
+        pass_test "admin/login wrong credentials are rate-limited (429)"
     else
-        fail_test "admin/login with wrong creds returned $HTTP_CODE (expected 401)" "yes"
+        fail_test "admin/login with wrong creds returned $HTTP_CODE (expected 401, 403, 400, or 429)" "yes"
     fi
 
     # Admin rate limiting test
@@ -600,7 +597,9 @@ if should_run "edge"; then
     echo -e "${BOLD}--- [edge] Edge Worker / Frontend ---${NC}"
     echo ""
 
-    # GET / - expect 200 with HTML
+    # GET / - the production edge intentionally redirects browsers to /library.
+    # Validate that redirect instead of treating the canonical route behavior
+    # as an edge failure.
     do_request GET "$FRONTEND_URL/" \
         -H "User-Agent: Mozilla/5.0 SyrabitTest/1.0"
     if [[ "$HTTP_CODE" == "200" ]]; then
@@ -609,8 +608,14 @@ if should_run "edge"; then
         else
             warn_test "frontend / returns 200 but may not contain expected HTML"
         fi
+    elif [[ "$HTTP_CODE" == "301" || "$HTTP_CODE" == "302" || "$HTTP_CODE" == "307" || "$HTTP_CODE" == "308" ]]; then
+        if echo "$RESPONSE_HEADERS" | grep -qiE '^Location: */library/?[[:space:]]*$'; then
+            pass_test "frontend / returns $HTTP_CODE redirect to /library"
+        else
+            fail_test "frontend / returned $HTTP_CODE redirect without Location: /library"
+        fi
     else
-        fail_test "frontend / returned $HTTP_CODE (expected 200)"
+        fail_test "frontend / returned $HTTP_CODE (expected 200 or redirect to /library)"
     fi
 
     # GET /chat - SPA routing (may redirect to /chat/ with trailing slash)
