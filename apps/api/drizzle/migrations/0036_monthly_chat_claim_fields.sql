@@ -1,7 +1,5 @@
 ALTER TABLE chat_request_claims
   ADD COLUMN monthly_quota_reserved INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE chat_request_claims
-  ADD COLUMN monthly_period TEXT;
 
 CREATE TABLE IF NOT EXISTS monthly_quota_usage (
   user_id TEXT NOT NULL REFERENCES users(id),
