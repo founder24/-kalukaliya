@@ -3,7 +3,7 @@ export const PLANS = {
   free: {
     label: 'Free',
     credits: 30,
-    creditsLabel: '30/day',
+    creditsLabel: '30/month',
     price: '₹0',
     period: 'forever',
     badge: 'FREE',
