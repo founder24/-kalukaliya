@@ -135,7 +135,14 @@ export default function SubjectLandingPage() {
       .then((rows) => {
         if (cancelled) return;
         const payload = rows?.data ?? rows;
-        const list = Array.isArray(payload) ? payload : (payload?.related || payload?.items || []);
+        const list = Array.isArray(payload)
+          ? payload
+          : (
+            payload?.related
+            || payload?.items
+            || payload?.related_topics
+            || []
+          );
         setSeoRelated(list.map((r) => ({
           id: r.id || r.slug,
           title: r.title,
