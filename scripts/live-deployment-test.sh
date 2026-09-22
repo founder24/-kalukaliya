@@ -365,10 +365,10 @@ if should_run "content"; then
         pass_test "Cache invalidation: busted URL returned ${bust_status} (not HIT) — fresh content served"
     elif [[ -z "$bust_status" ]]; then
         # No CF header — backend direct or cache headers stripped; validate body freshness instead
-        if [[ "$RESPONSE_CODE" == "200" ]] && echo "$RESPONSE_BODY" | grep -q '"boards"'; then
+        if [[ "$HTTP_CODE" == "200" ]] && echo "$RESPONSE_BODY" | grep -q '"boards"'; then
             pass_test "Cache invalidation: busted URL returned fresh content (200, boards present)"
         else
-            warn_test "Cache invalidation: no CF-Cache-Status header and body check inconclusive (HTTP ${RESPONSE_CODE})"
+            warn_test "Cache invalidation: no CF-Cache-Status header and body check inconclusive (HTTP ${HTTP_CODE})"
         fi
     else
         warn_test "Cache invalidation: unexpected CF-Cache-Status '${bust_status}' on busted URL"
