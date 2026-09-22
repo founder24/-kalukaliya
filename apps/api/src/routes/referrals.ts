@@ -55,6 +55,10 @@ import {
   recordRoiEvidenceDownloadAudit,
   roiDashboard,
 } from '../services/referral-roi';
+import {
+  getConsumerReferralStatus,
+  redeemReferralPoints,
+} from '../services/consumer-referrals';
 import type { Env, JwtPayload } from '../types';
 
 export const referralRouter = new Hono<{ Bindings: Env }>();
@@ -269,9 +273,37 @@ referralRouter.get('/me', async (c) => {
   const auth = await requireAccessUser(c);
   if (auth instanceof Response) return auth;
   try {
-    return c.json(await referralExperience(c.env.DB, auth.sub));
+    return c.json({
+      ...(await referralExperience(c.env.DB, auth.sub)),
+      consumer: await getConsumerReferralStatus(c.env.DB, auth.sub),
+    });
   } catch {
     return c.json({ detail: 'Referral experience unavailable' }, 503);
+  }
+});
+
+referralRouter.post('/me/redeem', async (c) => {
+  const auth = await requireAccessUser(c);
+  if (auth instanceof Response) return auth;
+  if (!allowedMutationOrigin(c)) {
+    return c.json({ detail: 'Trusted Origin required' }, 403);
+  }
+  const body = await requestBody(c);
+  const benefit = body?.benefit;
+  if (benefit !== 'upgrade' && benefit !== 'ads_free') {
+    return c.json({ detail: 'Benefit must be upgrade or ads_free' }, 422);
+  }
+  try {
+    const redeemed = await redeemReferralPoints(c.env.DB, auth.sub, benefit);
+    if (!redeemed) {
+      return c.json({ detail: 'Not enough referral points for this benefit.' }, 409);
+    }
+    return c.json({
+      redeemed,
+      consumer: await getConsumerReferralStatus(c.env.DB, auth.sub),
+    });
+  } catch {
+    return c.json({ detail: 'Referral points are temporarily unavailable.' }, 503);
   }
 });
 
