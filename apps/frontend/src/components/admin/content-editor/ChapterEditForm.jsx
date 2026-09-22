@@ -188,8 +188,8 @@ export default function ChapterEditForm({
   }, [_contentField, activeContent, adminToken, editorRef, setContentForm, setEditorKey]);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-6 pt-5 pb-3 flex-shrink-0">
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <div className="px-3 sm:px-4 md:px-6 pt-4 md:pt-5 pb-3 flex-shrink-0">
         <div className="flex items-center justify-between mb-4">
           <button onClick={onCancel} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors"><ArrowLeft size={15} /> Back</button>
           {editView === 'edit-chapter' && editTarget?.id && (
@@ -215,7 +215,7 @@ export default function ChapterEditForm({
         />
       )}
 
-      <div className="flex-1 flex flex-col min-h-0 px-6 pb-6 gap-3 overflow-y-auto">
+      <div className="flex-1 flex flex-col min-h-0 px-3 sm:px-4 md:px-6 pb-4 md:pb-6 gap-3 overflow-y-auto">
         <div className="flex-shrink-0 grid grid-cols-1 lg:grid-cols-2 gap-2.5">
           <div>
             <label className="text-xs text-gray-500 block mb-1">Title *</label>
@@ -301,7 +301,7 @@ export default function ChapterEditForm({
         {(editView === 'edit-chapter' || editView === 'new-chapter') && contentForm.content_type !== 'question_paper' && (
           <div className="flex-shrink-0 flex flex-col gap-2 px-3 py-2 rounded-lg bg-violet-50/50 border border-violet-200/50">
             {/* Content mode: Reader vs RAG */}
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[10px] font-bold text-violet-500 uppercase tracking-wider w-8">Mode</span>
               <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ background: 'rgba(139,92,246,0.1)' }}>
                 <button
@@ -430,6 +430,19 @@ export default function ChapterEditForm({
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex items-center gap-1.5 mb-1.5 flex-shrink-0">
             <div className="flex items-center gap-1">
+              {canFormat && (
+                <button
+                  type="button"
+                  onClick={handleFixFormatting}
+                  disabled={formatting}
+                  data-testid="ai-format-button"
+                  title="Use AI to fix formulas, tables, and Markdown formatting"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-fuchsia-700 bg-fuchsia-50 border border-fuchsia-200 hover:bg-fuchsia-100 disabled:opacity-50 transition-all shadow-sm"
+                >
+                  {formatting ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                  {formatting ? 'Formatting…' : 'AI Format'}
+                </button>
+              )}
               <button
                 onClick={handleAddPages}
                 disabled={imgUploading}
@@ -484,9 +497,9 @@ export default function ChapterEditForm({
             </div>
           )}
 
-          <div className={`flex-1 min-h-0 flex ${showPreview ? 'gap-3' : 'flex-col'}`}>
+          <div className={`flex-1 min-h-[360px] min-w-0 flex ${showPreview ? 'flex-col lg:flex-row gap-3' : 'flex-col'}`}>
             <div
-              className={`flex-1 min-h-0 overflow-hidden flex flex-col transition-all duration-200 ${
+              className={`flex-1 min-h-[320px] min-w-0 overflow-hidden flex flex-col transition-all duration-200 ${
                 mobilePreview ? 'mx-auto' : ''
               }`}
               style={mobilePreview ? {
@@ -570,7 +583,7 @@ export default function ChapterEditForm({
                                 {formatting
                                   ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
                                   : <Wand2 size={12} />}
-                                {formatting ? 'Fixing…' : 'Fix Formatting'}
+                                 {formatting ? 'Formatting…' : 'AI Format'}
                               </button>
                             </>
                           )}
@@ -589,7 +602,7 @@ export default function ChapterEditForm({
 
             {showPreview && (
               <div
-                className={`min-h-0 overflow-y-auto flex-1 transition-all duration-200 ${mobilePreview ? 'mx-auto' : ''}`}
+                className={`min-h-[240px] overflow-y-auto flex-1 min-w-0 transition-all duration-200 ${mobilePreview ? 'mx-auto' : ''}`}
                 style={mobilePreview ? {
                   width: 400,
                   maxWidth: '100%',
@@ -656,7 +669,7 @@ export default function ChapterEditForm({
           </div>
         )}
 
-        <div className="flex gap-2.5 flex-shrink-0 pt-1">
+        <div className="flex gap-2.5 flex-shrink-0 pt-1 sticky bottom-0 bg-[#f8f9fc]">
           <button onClick={onCancel} className="flex-1 h-11 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors">Cancel</button>
           <button
             onClick={onSave}
