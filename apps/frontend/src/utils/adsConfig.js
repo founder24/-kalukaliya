@@ -363,9 +363,10 @@ export function setAdsAuthChecked(checked) {
 const AD_FREE_PLANS = new Set(['starter', 'pro', 'premium']);
 let _adFreePlan = false;
 
-export function setAdsPlan(plan) {
+export function setAdsPlan(plan, adsFreeUntil = null) {
   const normalizedPlan = typeof plan === 'string' ? plan.trim().toLowerCase() : '';
-  const next = AD_FREE_PLANS.has(normalizedPlan);
+  const referralAdFree = Number(adsFreeUntil || 0) * 1000 > Date.now();
+  const next = AD_FREE_PLANS.has(normalizedPlan) || referralAdFree;
   if (next === _adFreePlan) return;
 
   _adFreePlan = next;

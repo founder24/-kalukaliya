@@ -288,35 +288,6 @@
     </a>
 
 
-    <script>
-      (function(){
-        function runCacheCleanup(){
-          var V='18';
-          var keep=new Set(['syrabit-static-v'+V,'syrabit-runtime-v'+V,'syrabit-api-v'+V]);
-          if('caches' in window){
-            caches.keys().then(function(names){
-              names.forEach(function(name){
-                if(!keep.has(name)) caches.delete(name);
-              });
-            });
-          }
-          if('serviceWorker' in navigator){
-            navigator.serviceWorker.getRegistrations().then(function(regs){
-              regs.forEach(function(r){ r.update(); });
-            });
-          }
-        }
-        function schedule(){
-          if('requestIdleCallback' in window){
-            requestIdleCallback(runCacheCleanup,{timeout:4000});
-          } else {
-            setTimeout(runCacheCleanup,2000);
-          }
-        }
-        if(document.readyState==='complete'){ schedule(); }
-        else { window.addEventListener('load', schedule, {once:true}); }
-      })();
-    </script>
     <noscript>
       <div style="font-family:system-ui,-apple-system,sans-serif;max-width:800px;margin:0 auto;padding:2rem;color:#1a1a1a;line-height:1.6">
         <h1>Syrabit.ai — Educational Browser For Assam Board Students</h1>

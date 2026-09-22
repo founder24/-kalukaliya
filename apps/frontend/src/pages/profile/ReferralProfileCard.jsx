@@ -17,9 +17,9 @@ export default function ReferralProfileCard() {
           <Megaphone size={20} />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-foreground">Campus Influencer Program</p>
+           <p className="text-sm font-bold text-foreground">Referral points</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Apply for one of 100 reviewed places and earn from mature, verified weekly referrals.
+             Earn points from unique verified visitors and redeem 500 points for a 30-day chat upgrade or an ad-free month.
           </p>
           <button
             type="button"

@@ -244,8 +244,8 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                       ? 'assamese-unavailable-card'
                       : 'ai-unavailable-card'
                 }
-                className="flex flex-col gap-3 rounded-2xl px-4 py-3.5 mt-1 bg-card border border-border"
-                style={{ maxWidth: '26rem' }}
+                 className="flex w-full min-w-0 flex-col gap-3 rounded-2xl px-4 py-3.5 mt-1 bg-card border border-border"
+                 style={{ maxWidth: '26rem', boxSizing: 'border-box' }}
               >
                 <div className="flex items-start gap-3">
                   <div
@@ -257,7 +257,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                     </svg>
                   </div>
-                  <div lang={
+                   <div className="min-w-0 flex-1" lang={
                     msg.isAssameseUnavailable ||
                     (msg.isConnectionInterrupted && responseLang === 'as')
                       ? 'as'
@@ -266,38 +266,38 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                     {msg.isConnectionInterrupted ? (
                       responseLang === 'as' ? (
                         <>
-                          <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.55' }}>
+                           <p className="break-words text-sm font-semibold text-foreground" style={{ lineHeight: '1.55' }}>
                             সংযোগ সাময়িকভাৱে বিচ্ছিন্ন হৈছে
                           </p>
-                          <p className="text-[12.5px] text-muted-foreground mt-0.5" style={{ lineHeight: '1.55' }}>
+                           <p className="break-words text-[12.5px] text-muted-foreground mt-0.5" style={{ lineHeight: '1.55' }}>
                             আপোনাৰ প্ৰশ্নটো সুৰক্ষিত আছে। সংযোগ ঘূৰি আহিলে আকৌ চেষ্টা কৰক।
                           </p>
                         </>
                       ) : (
                         <>
-                          <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.45' }}>
+                           <p className="break-words text-sm font-semibold text-foreground" style={{ lineHeight: '1.45' }}>
                             Connection interrupted
                           </p>
-                          <p className="text-[12.5px] text-muted-foreground mt-0.5">
+                           <p className="break-words text-[12.5px] text-muted-foreground mt-0.5">
                             Your question is saved. Retry when your connection is back.
                           </p>
                         </>
                       )
                     ) : msg.isAssameseUnavailable ? (
                       <>
-                        <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.55' }}>
+                         <p className="break-words text-sm font-semibold text-foreground" style={{ lineHeight: '1.55' }}>
                           অসমীয়া চেট সেৱা সাময়িকভাৱে অনুপলব্ধ
                         </p>
-                        <p className="text-[12.5px] text-muted-foreground mt-0.5" style={{ lineHeight: '1.55' }}>
+                         <p className="break-words text-[12.5px] text-muted-foreground mt-0.5" style={{ lineHeight: '1.55' }}>
                           অনুগ্ৰহ কৰি কিছু সময়ৰ পিছত আকৌ চেষ্টা কৰক, বা ইংৰাজী মোডলৈ সলনি কৰক।
                         </p>
                       </>
                     ) : (
                       <>
-                        <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.45' }}>
+                         <p className="break-words text-sm font-semibold text-foreground" style={{ lineHeight: '1.45' }}>
                           Syra is resting — try again in a moment
                         </p>
-                        <p className="text-[12.5px] text-muted-foreground mt-0.5">
+                         <p className="break-words text-[12.5px] text-muted-foreground mt-0.5">
                            {msg.autoRetryScheduled
                              ? 'Your question is saved and will retry automatically.'
                              : 'Your question is saved. Retry when you are ready.'}
@@ -306,11 +306,11 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                     )}
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                 <div className="flex w-full min-w-0 flex-wrap items-center gap-2 pt-1" data-testid="ai-unavailable-actions">
                   <button
                     type="button"
                     onClick={() => { if (onRetry) onRetry(); }}
-                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white transition-colors"
+                     className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white transition-colors"
                     aria-label={
                       msg.isAssameseUnavailable ||
                       (msg.isConnectionInterrupted && responseLang === 'as')
@@ -329,7 +329,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                     <button
                       type="button"
                       onClick={onSwitchToEnglish}
-                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30"
+                       className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30"
                       aria-label="Switch to English mode and retry"
                       data-testid="assamese-switch-english"
                     >
@@ -338,7 +338,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                     </button>
                   )}
                   {retryCountdown !== null && (
-                    <span className="text-[12px] text-muted-foreground flex items-center gap-1">
+                     <span className="min-w-0 text-[12px] leading-5 text-muted-foreground flex items-center gap-1">
                       <Loader2 size={11} className="animate-spin" />
                       Auto-retry in {retryCountdown}s…
                     </span>

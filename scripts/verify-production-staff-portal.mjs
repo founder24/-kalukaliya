@@ -140,15 +140,9 @@ async function waitForRequiredReads(id, label, expected) {
   );
 }
 
-const isAccessServiceWorkerArtifact = text => {
-  const normalized = String(text || '');
-  // Chromium can report the Pages service-worker lifecycle failure with
-  // either update or registration wording. It is a browser artifact only
-  // when both ServiceWorker and invalid-state/update language are present;
-  // keep unrelated application runtime errors fatal.
-  return /serviceworker/i.test(normalized)
-    && /(invalid state|failed to (?:update|register))/i.test(normalized);
-};
+const isAccessServiceWorkerArtifact = text =>
+  text.includes('Failed to update a ServiceWorker')
+  && text.includes('object is in an invalid state');
 
 page.on('pageerror', error => {
   const text = error.stack || error.message;
@@ -220,25 +214,12 @@ page.on('response', response => {
 page.on('requestfailed', request => {
   const requestSection = requestSections.get(request) || activeSection;
   const url = new URL(request.url());
-  const failureText = request.failure()?.errorText || 'unknown error';
-  // The expected post-logout navigation can abort login-page asset fetches
-  // while the browser settles on /login?next=/staff. Those are not failed
-  // responses or privileged requests; keep real asset/network errors fatal.
-  if (
-    postLogoutProbe
-    && request.method() === 'GET'
-    && failureText === 'net::ERR_ABORTED'
-    && (
-      url.pathname.startsWith('/assets/')
-      || url.pathname === '/api/v1/analytics/public-stats'
-    )
-  ) return;
   if (
     request.method() === 'HEAD'
     && url.pathname.startsWith('/cdn-cgi/image/')
   ) return;
   failedRequests.push(
-    `[${requestSection}] NETWORK ${request.method()} ${request.url()} — ${failureText}`,
+    `[${requestSection}] NETWORK ${request.method()} ${request.url()} — ${request.failure()?.errorText || 'unknown error'}`,
   );
 });
 
@@ -247,27 +228,11 @@ page.on('requestfailed', request => {
 // authenticates the request without adding those header names to the browser's
 // CORS preflight contract. The application bearer token remains unchanged.
 await page.route(`${site}/**`, async route => {
-  const requestUrl = new URL(route.request().url());
-  const isProtectedAdminRequest = requestUrl.pathname.startsWith('/api/v1/admin/');
-  const isProtectedPagesDocument =
-    requestUrl.pathname === '/staff'
-    || requestUrl.pathname.startsWith('/staff/')
-    || requestUrl.pathname === '/admin'
-    || requestUrl.pathname.startsWith('/admin/');
-  if (!isProtectedPagesDocument && !isProtectedAdminRequest) {
-    await route.continue();
-    return;
-  }
   await route.continue({
     headers: { ...route.request().headers(), ...accessHeaders },
   });
 });
 await page.route(`${edge}/**`, async route => {
-  const requestUrl = new URL(route.request().url());
-  if (!requestUrl.pathname.startsWith('/api/v1/admin/')) {
-    await route.continue();
-    return;
-  }
   await route.continue({
     headers: { ...route.request().headers(), ...accessHeaders },
   });

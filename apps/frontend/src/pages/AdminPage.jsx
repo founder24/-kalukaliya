@@ -5,7 +5,7 @@ import {
   MessageSquare, TrendingUp, Bell, Settings, HeartPulse, LogOut,
   ChevronLeft, ChevronRight, Loader2, Globe,
   Cpu, Activity, ShieldAlert, UserRoundCheck, WalletCards,
-  ExternalLink, Gauge, Bug, FileText,
+  ExternalLink, Gauge, Bug, FileText, Menu, X,
 } from 'lucide-react';
 import axios from 'axios';
 import { adminVerify, adminLogout, HEALTH_API } from '@/utils/api';
@@ -225,6 +225,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
     const resolved = resolveSectionRedirect(section, ctx);
     setNavContext(resolved.navContext);
     setActiveSection(resolved.section);
+    setMobileNavOpen(false);
     // Mirror to URL so back/forward and deep-links work.
     const params = { s: resolved.section };
     if (resolved.navContext?.tab)    params.t  = String(resolved.navContext.tab);
@@ -233,6 +234,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
   }, [setSearchParams]);
 
   const [collapsed, setCollapsed]         = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [verifying, setVerifying]         = useState(true);
   const [sysStatus, setSysStatus]         = useState('ok');
 
@@ -348,7 +350,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
     <SyraProvider activeSection={activeSection} adminToken={adminToken} adminEmail={adminEmail}>
     <div className="min-h-screen flex bg-[#f8f9fc]" data-testid="admin-dashboard">
       <aside
-        className="flex flex-col h-screen sticky top-0 transition-all duration-300 flex-shrink-0 z-20 bg-white"
+        className="hidden md:flex flex-col h-screen sticky top-0 transition-all duration-300 flex-shrink-0 z-20 bg-white"
         style={{
           width: collapsed ? 68 : 252,
           borderRight: '1px solid #e5e7eb',
@@ -469,13 +471,119 @@ export default function AdminPage({ adminCookieAccess = false }) {
         </div>
       </aside>
 
+      {mobileNavOpen && (
+        <div className="md:hidden fixed inset-0 z-50">
+          <button
+            type="button"
+            aria-label="Close staff navigation"
+            onClick={() => setMobileNavOpen(false)}
+            className="absolute inset-0 bg-gray-900/30"
+          />
+          <div className="relative flex flex-col h-full w-[min(86vw,300px)] bg-white shadow-2xl">
+            <div className="flex items-center justify-between px-4 border-b border-gray-100" style={{ height: 60 }}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-violet-50">
+                  <img src="/logo-56.webp" alt="Syrabit.ai" width="24" height="24" className="w-6 h-6 rounded-lg object-cover" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-gray-900 tracking-tight" style={{ lineHeight: 1.2 }}>Syrabit.ai</p>
+                  <p className="text-[9px] font-semibold tracking-[0.15em] text-violet-500 uppercase">Staff Control Center</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(false)}
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-gray-500 hover:bg-gray-50"
+                aria-label="Close staff navigation"
+              >
+                <X size={19} />
+              </button>
+            </div>
+            <nav className="flex-1 overflow-y-auto py-3 px-2.5 space-y-0.5">
+              {GROUPS.map((group) => {
+                const groupSections = SECTIONS.filter((s) => s.group === group);
+                const label = GROUP_LABELS[group];
+                return (
+                  <div key={group}>
+                    {label && (
+                      <p className="px-3 pt-3 pb-1 text-[9px] font-bold tracking-[0.15em] text-gray-400 uppercase">
+                        {label}
+                      </p>
+                    )}
+                    {groupSections.map(({ id, icon: Icon, label: sectionLabel }) => {
+                      const isActive = activeSection === id;
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => handleNavigate(id)}
+                          className={`relative w-full min-h-11 flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-left ${
+                            isActive
+                              ? 'bg-violet-50 text-violet-700 font-semibold'
+                              : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                          data-testid={`admin-mobile-nav-${id}`}
+                        >
+                          {isActive && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-violet-500" />}
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-violet-100' : 'bg-gray-50'}`}>
+                            <Icon size={16} className={isActive ? 'text-violet-600' : 'text-gray-500'} />
+                          </div>
+                          <span className="text-sm truncate">{sectionLabel}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </nav>
+            <div className="border-t border-gray-100 px-3 py-3 space-y-1">
+              <div className="flex items-center gap-2.5 px-3 py-2 mb-1 rounded-xl bg-violet-50">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-violet-600">
+                  <span className="text-xs font-bold text-white">{adminName?.charAt(0)?.toUpperCase() || 'A'}</span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-gray-700 font-medium truncate">{adminName}</p>
+                  <p className="text-[10px] text-gray-400 truncate">{adminEmail || 'Active session'}</p>
+                </div>
+              </div>
+              <Link to="/library" onClick={() => setMobileNavOpen(false)}>
+                <span className="w-full min-h-10 flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-gray-500 hover:bg-gray-50">
+                  <ExternalLink size={14} /> Student View
+                </span>
+              </Link>
+              <button
+                onClick={() => setDebugOpen((v) => !v)}
+                className="w-full min-h-10 flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-gray-500 hover:bg-gray-50"
+                data-testid="admin-mobile-debug-toggle"
+              >
+                <Bug size={14} /> Debug
+              </button>
+              <button
+                onClick={handleLogout}
+                className="w-full min-h-10 flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-red-500 hover:bg-red-50"
+              >
+                <LogOut size={14} /> Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <BreakGlassBanner adminToken={adminToken} />
         <header
-          className="flex items-center justify-between px-6 border-b border-gray-200 flex-shrink-0 z-10 bg-white"
+          className="flex items-center justify-between gap-2 px-3 sm:px-4 md:px-6 border-b border-gray-200 flex-shrink-0 z-10 bg-white"
           style={{ height: 60 }}
         >
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              className="md:hidden w-10 h-10 -ml-1 rounded-xl flex items-center justify-center text-gray-600 hover:bg-gray-50"
+              aria-label="Open staff navigation"
+              data-testid="admin-mobile-menu"
+            >
+              <Menu size={20} />
+            </button>
             <h1 className="text-sm font-semibold text-gray-900">{activeLabel}</h1>
             <span className="text-gray-200">|</span>
             <span className="text-xs text-gray-400 flex items-center gap-1.5">
@@ -484,7 +592,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
             </span>
           </div>
 
-          <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium border ${sc.text} ${sc.border} ${sc.bg}`}>
+          <div className={`hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium border ${sc.text} ${sc.border} ${sc.bg}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${sc.dot} animate-pulse`} />
             <span className="text-[11px]">{sc.label}</span>
           </div>

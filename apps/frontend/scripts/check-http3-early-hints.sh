@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-http3-early-hints.sh
-# Verifies that https://syrabit.ai/ is served over HTTP/3 (QUIC) and that
-# Early Hints (103 / Link rel=preload) are active.
+# Verifies that https://syrabit.ai/library is served over HTTP/3 (QUIC) and
+# that Early Hints (103 / Link rel=preload) are active.
 #
 # Usage:
 #   bash artifacts/syrabit/scripts/check-http3-early-hints.sh
@@ -24,7 +24,10 @@
 
 set -euo pipefail
 
-TARGET="https://syrabit.ai/"
+# / redirects intentionally, so use a real HTML navigation route for both
+# protocol and Early Hints checks. Cloudflare only emits navigational Early
+# Hints for an HTML response, not for the root redirect.
+TARGET="https://syrabit.ai/library"
 PASS=0
 FAIL=0
 
@@ -81,31 +84,56 @@ echo "-- Early Hints (103 / Link rel=preload) --"
 # response that Cloudflare sends before the 200.  -o /dev/null discards body.
 ALL_HEADERS=$(curl -sD - -o /dev/null --max-time 10 "$TARGET" 2>/dev/null || true)
 
-# Check for a 103 Early Hints status line (strongest signal).
+# Hashed asset Early Hints are safe only when every hinted bundle is present in
+# the document currently served by the edge. A 103 response can outlive the
+# HTML response during a Pages rollout, so compare the hinted paths with the
+# live document instead of treating every hashed preload as stale.
+EARLY_HINTS_HEADER=$(echo "$ALL_HEADERS" | grep -i "^early-hints:" || true)
+LINK_HEADERS=$(echo "$ALL_HEADERS" | grep -i "^link:" | grep -i "rel=preload" || true)
+HASHED_PRELOAD_LINKS=$(echo "$LINK_HEADERS" | grep -oiE "</assets/[^>]+>" | sort -u || true)
+HASHED_PRELOAD_DISABLED=$(echo "$ALL_HEADERS" | grep -i "^x-syrabit-hashed-preload: *disabled" || true)
+HAS_103=false
 if echo "$ALL_HEADERS" | grep -qiE "^HTTP/[0-9.]+ 103"; then
+  HAS_103=true
+fi
+
+if [ -n "$HASHED_PRELOAD_DISABLED" ]; then
+  ok "Hashed asset Early Hints intentionally disabled for release convergence"
+  PASS=$((PASS + 1))
+elif [ -n "$HASHED_PRELOAD_LINKS" ]; then
+  LIVE_HTML=$(curl -fsS --max-time 10 "$TARGET" 2>/dev/null || true)
+  STALE_HASHED_PRELOAD_LINKS=""
+  while IFS= read -r link; do
+    [ -z "$link" ] && continue
+    asset_path="${link#<}"
+    asset_path="${asset_path%>}"
+    relative_asset_path="${asset_path#/}"
+    asset_filename="${asset_path##*/}"
+    if [[ "$LIVE_HTML" != *"$asset_path"* \
+      && "$LIVE_HTML" != *"$relative_asset_path"* \
+      && "$LIVE_HTML" != *"$asset_filename"* ]]; then
+      STALE_HASHED_PRELOAD_LINKS="${STALE_HASHED_PRELOAD_LINKS}${asset_path}"$'\n'
+    fi
+  done <<< "$HASHED_PRELOAD_LINKS"
+
+  if [ -n "$STALE_HASHED_PRELOAD_LINKS" ]; then
+    fail "Stale hashed asset preload link(s) detected in Early Hints"
+    echo "$STALE_HASHED_PRELOAD_LINKS" | sed 's/^/     /'
+  else
+    ok "Hashed asset Early Hints match the live HTML bundle set"
+    PASS=$((PASS + 1))
+  fi
+elif [ "$HAS_103" = true ]; then
   EH_LINE=$(echo "$ALL_HEADERS" | grep -iE "^HTTP/[0-9.]+ 103" | head -1)
-  ok "103 Early Hints response received: $EH_LINE"
+  ok "103 Early Hints response received without hashed asset preloads: $EH_LINE"
+  PASS=$((PASS + 1))
+elif [ -n "$EARLY_HINTS_HEADER" ]; then
+  ok "Early-Hints header present without hashed asset preloads: $(echo "$EARLY_HINTS_HEADER" | head -1)"
   PASS=$((PASS + 1))
 else
-  # 103 not observed — fall back to weaker signals in priority order:
-  #   1. An explicit "Early-Hints: on" (or similar) header token in the response.
-  #   2. A Link: rel=preload header (Cloudflare surfaces preload links when EH is on).
-  EARLY_HINTS_HEADER=$(echo "$ALL_HEADERS" | grep -i "^early-hints:" || true)
-  LINK_HEADERS=$(echo "$ALL_HEADERS" | grep -i "^link:" | grep -i "rel=preload" || true)
-
-  if [ -n "$EARLY_HINTS_HEADER" ]; then
-    ok "Early-Hints header present: $(echo "$EARLY_HINTS_HEADER" | head -1)"
-    PASS=$((PASS + 1))
-  elif [ -n "$LINK_HEADERS" ]; then
-    ok "Link rel=preload header present (Early Hints active): $(echo "$LINK_HEADERS" | head -1)"
-    PASS=$((PASS + 1))
-  else
-    fail "Neither 103 Early Hints response, Early-Hints header, nor Link rel=preload header found"
-    echo "     All Link headers in response:"
-    echo "$ALL_HEADERS" | grep -i "^link:" | sed 's/^/     /' || echo "     <none>"
-    echo "     Tip: ensure Early Hints is ON in Cloudflare → Speed → Optimization"
-    echo "          and that _headers / _worker.js emits at least one Link preload."
-  fi
+  fail "No release-safe Early Hints signal or hashed-preload-disabled marker found"
+  echo "     All Link headers in response:"
+  echo "$ALL_HEADERS" | grep -i "^link:" | sed 's/^/     /' || echo "     <none>"
 fi
 
 echo

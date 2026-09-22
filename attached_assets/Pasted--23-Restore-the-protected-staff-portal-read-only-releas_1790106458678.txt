@@ -1,0 +1,34 @@
+#23 - Restore the protected staff portal read-only release check
+What & Why
+The independent production workflow still fails at Verify every production staff portal section read-only. GitHub exposes the failed step but not its logs through the current connector, and the local script requires protected CF Access/staff credentials plus a disposable production fixture, so it was not rerun from this workspace.
+
+Done looks like
+Run the disposable staff portal audit with the protected fixture and CF Access credentials
+Capture the failure class and sanitized diagnostics if it fails
+Confirm every required section is read-only and the fixture cleanup succeeds
+Relevant files
+scripts/run-disposable-staff-portal-check.sh
+scripts/verify-production-staff-portal.mjs
+.github/workflows/deploy-cloudflare.yml                                          #22 - Keep every Pages release on the live production domain
+What & Why
+The Pages artifact is correct and is live in Production now, but the GitHub OAuth connector cannot update the .github workflow file. Without persisting the explicit --branch=main flag, a future release from the release branch can upload only a Preview deployment and leave syrabit.ai on an older artifact.
+
+Done looks like
+Reauthorize or otherwise restore repository workflow-write access for the GitHub connection
+Persist the production-branch Pages command in .github/workflows/deploy-cloudflare.yml
+Run the release once and verify the Pages deployment list reports Production / main
+Relevant files
+.github/workflows/deploy-cloudflare.yml
+apps/frontend/public/_worker.js
+apps/frontend/public/_routes.jso                                                      #24 - Close the two remaining production header warnings
+What & Why
+The full read-only live suite is 47/49 with no failures, but it still reports missing Cache-Control on a content response and missing X-Frame-Options on the frontend root response. These do not block the current release, but resolving them would make the public edge/security score fully green.
+
+Done looks like
+Add or verify an intentional Cache-Control policy for content responses
+Ensure the frontend root/redirect response carries the intended frame policy
+Rerun scripts/live-deployment-test.sh and confirm both warnings are gone
+Relevant files
+scripts/live-deployment-test.sh
+apps/frontend/public/_headers
+apps/frontend/public/_worker.js             

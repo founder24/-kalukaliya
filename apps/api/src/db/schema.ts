@@ -28,6 +28,11 @@ export const users = sqliteTable('users', {
   creditsRemaining: integer('credits_remaining').default(0),
   creditsUsed: integer('credits_used').default(0),
   totalTokensUsed: integer('total_tokens_used').default(0),
+  referralPoints: integer('referral_points').default(0),
+  referralVisitorsVerified: integer('referral_visitors_verified').default(0),
+  referralUpgradeUntil: integer('referral_upgrade_until'),
+  referralAdsFreeUntil: integer('referral_ads_free_until'),
+  consumerReferralCode: text('consumer_referral_code'),
 
   // Profile
   name: text('name'),
@@ -66,6 +71,7 @@ export const users = sqliteTable('users', {
 }, (t) => [
   uniqueIndex('users_email_idx').on(t.email),
   index('users_subscription_idx').on(t.subscriptionTier),
+  uniqueIndex('users_consumer_referral_code_idx').on(t.consumerReferralCode),
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -259,6 +265,16 @@ export const anonymousQuotaUsage = sqliteTable('anonymous_quota_usage', {
   uniqueIndex('anonymous_quota_period_idx').on(t.anonId, t.period),
 ]);
 
+export const monthlyQuotaUsage = sqliteTable('monthly_quota_usage', {
+  userId: text('user_id').notNull(),
+  period: text('period').notNull(),                                   // YYYY-MM
+  count: integer('count').notNull().default(0),
+  updatedAt: integer('updated_at').default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('monthly_quota_period_idx').on(t.userId, t.period),
+  index('monthly_quota_updated_idx').on(t.updatedAt),
+]);
+
 // A stable browser request key makes a transport retry one logical turn
 // instead of charging a second quota slot.
 export const chatRequestClaims = sqliteTable('chat_request_claims', {
@@ -267,6 +283,8 @@ export const chatRequestClaims = sqliteTable('chat_request_claims', {
   period: text('period').notNull(),
   isAnon: integer('is_anon').notNull().default(1),
   quotaReserved: integer('quota_reserved').notNull().default(1),
+  monthlyQuotaReserved: integer('monthly_quota_reserved').notNull().default(0),
+  monthlyPeriod: text('monthly_period'),
   status: text('status').notNull().default('reserved'),
   sessionId: text('session_id'),
   responseContent: text('response_content'),

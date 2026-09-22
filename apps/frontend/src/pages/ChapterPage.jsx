@@ -337,7 +337,14 @@ export default function ChapterPage() {
       .then((rows) => {
         if (cancelled) return;
         const payload = rows?.data ?? rows;
-        const list = Array.isArray(payload) ? payload : (payload?.related || payload?.items || []);
+        const list = Array.isArray(payload)
+          ? payload
+          : (
+            payload?.related
+            || payload?.items
+            || payload?.related_topics
+            || []
+          );
         setRelatedChapterTopics(Array.isArray(list) ? list : []);
       })
       .catch(() => { if (!cancelled) setRelatedChapterTopics([]); });
