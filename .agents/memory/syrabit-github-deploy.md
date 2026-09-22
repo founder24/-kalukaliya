@@ -23,3 +23,11 @@ Both cases produce a hard failure on `Creating Revision`.
 **Why:** Cloud Run's revision spec is immutable — once a secret ref is embedded it persists across deploys until explicitly removed. The `--remove-secrets` call cleans up stale refs proactively.
 
 **How to apply:** Any new optional secret must go into the `_check` block, never into the main `--update-secrets` line.
+
+## GitHub connector release path
+
+The installed GitHub connector can read refs, create a release branch, and update ordinary repository files through the Contents API. Direct updates to protected `main` are rejected until required status checks pass, and workflow-file writes require separate workflow-write permission. Use a release branch and PR for source synchronization; do not bypass branch protection.
+
+**Why:** The connector's Git transport is not available to the local checkout, the repository's Git Data tree endpoint is not usable through the connector, and protected-branch/workflow permissions are enforced independently.
+
+**How to apply:** Create a branch from the current `main` ref, sync source through the Contents API, open a PR, wait for required checks, and handle `.github/workflows/*` through an authorized workflow-permission path before merging.
