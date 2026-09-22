@@ -175,7 +175,7 @@ jobs:
             --quiet
 
       - name: Download the exact preview artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.preview.outputs.artifact_name }}
           path: ${{ runner.temp }}/ahsec-cleanup-preview
