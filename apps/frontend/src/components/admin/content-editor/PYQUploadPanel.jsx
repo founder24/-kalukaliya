@@ -3,6 +3,7 @@ import {
   Upload, FileText, Loader2, Trash2, Play,
   Download, ExternalLink, ChevronDown, ChevronUp,
   Type, Image, Maximize2, Minimize2, ChevronLeft, ChevronRight, Layers,
+  ImagePlus,
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -208,6 +209,11 @@ export default function PYQUploadPanel({
   const [submittingText, setSubmittingText] = useState(false);
   const [viewMode, setViewMode] = useState('grid');
   const [groupImages, setGroupImages] = useState(false);
+  const [chapterPages, setChapterPages] = useState([]);
+  const [pagesLoading, setPagesLoading] = useState(false);
+  const [pageUploading, setPageUploading] = useState(false);
+  const [pageLabel, setPageLabel] = useState('');
+  const pageInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const dropRef = useRef(null);
   const uploadingRef = useRef(false);
@@ -229,6 +235,90 @@ export default function PYQUploadPanel({
   }, [chapterId, adminToken]);
 
   useEffect(() => { loadPyqs(); }, [loadPyqs]);
+
+  const loadChapterPages = useCallback(async () => {
+    if (!chapterId) return;
+    setPagesLoading(true);
+    try {
+      const res = await axios.get(
+        `${API}/content/chapters/${chapterId}/pyq-images`,
+        authHeaders(adminToken),
+      );
+      setChapterPages(res.data?.papers || []);
+    } catch {
+      setChapterPages([]);
+    } finally {
+      setPagesLoading(false);
+    }
+  }, [chapterId, adminToken]);
+
+  useEffect(() => { loadChapterPages(); }, [loadChapterPages]);
+
+  const uploadChapterPages = useCallback(async (fileList) => {
+    const valid = Array.from(fileList || []).filter(file =>
+      file.type.startsWith('image/')
+      || /\.(jpe?g|png|webp|gif|tiff?)$/i.test(file.name),
+    );
+    if (valid.length === 0) {
+      toast.error('Choose one or more image files (JPG, PNG, WebP, GIF, or TIFF)');
+      return;
+    }
+    if (valid.some(file => file.size > 20 * 1024 * 1024)) {
+      toast.error('Each page image must be under 20 MB');
+      return;
+    }
+
+    setPageUploading(true);
+    const uploaded = [];
+    const failed = [];
+    try {
+      for (let index = 0; index < valid.length; index += 1) {
+        const file = valid[index];
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('year', String(examYear));
+        formData.append(
+          'title',
+          `${pageLabel.trim() || 'Page'} ${chapterPages.length + index + 1}`,
+        );
+        try {
+          const response = await axios.post(
+            `${API}/staff/content/chapter/${chapterId}/pyq-papers`,
+            formData,
+            authHeaders(adminToken),
+          );
+          if (response.data?.paper) uploaded.push(response.data.paper);
+        } catch {
+          failed.push(file.name);
+        }
+      }
+      await loadChapterPages();
+      if (uploaded.length > 0) {
+        toast.success(
+          `${uploaded.length} image page${uploaded.length === 1 ? '' : 's'} uploaded`,
+        );
+      }
+      if (failed.length > 0) {
+        toast.error(`Could not upload: ${failed.join(', ')}`);
+      }
+    } finally {
+      setPageUploading(false);
+      if (pageInputRef.current) pageInputRef.current.value = '';
+    }
+  }, [adminToken, chapterId, chapterPages.length, examYear, loadChapterPages, pageLabel]);
+
+  const deleteChapterPage = useCallback(async (pageId) => {
+    try {
+      await axios.delete(
+        `${API}/staff/content/chapter/${chapterId}/pyq-papers/${pageId}`,
+        authHeaders(adminToken),
+      );
+      setChapterPages(prev => prev.filter(page => page.id !== pageId));
+      toast.success('Image page deleted');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Could not delete image page');
+    }
+  }, [adminToken, chapterId]);
 
   const uploadFiles = useCallback(async (fileList) => {
     if (!fileList || fileList.length === 0) return;
@@ -376,6 +466,90 @@ export default function PYQUploadPanel({
   const currentYear = new Date().getFullYear();
 
   return (
+    <>
+      <div
+        className="rounded-xl border border-blue-500/20 bg-blue-500/5 overflow-hidden mb-3"
+        data-testid="chapter-pyq-pages-panel"
+      >
+        <div className="px-3 sm:px-4 py-3 border-b border-blue-500/10 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
+            <ImagePlus size={16} className="text-blue-500 flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900">Image-wise PYQ pages</p>
+              <p className="text-[10px] text-gray-500 truncate">
+                Upload each scanned page separately for the student-facing question paper
+              </p>
+            </div>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 flex-shrink-0">
+              {chapterPages.length} page{chapterPages.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <button
+            onClick={() => pageInputRef.current?.click()}
+            disabled={pageUploading}
+            className="w-full sm:w-auto justify-center flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors flex-shrink-0"
+            data-testid="upload-pyq-pages"
+          >
+            {pageUploading ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />}
+            {pageUploading ? 'Uploading…' : 'Upload page images'}
+          </button>
+          <input
+            ref={pageInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif,image/tiff"
+            multiple
+            className="hidden"
+            onChange={(e) => uploadChapterPages(e.target.files)}
+          />
+        </div>
+
+        <div className="px-3 sm:px-4 py-3 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <label className="text-[11px] text-gray-500">Page label prefix</label>
+            <input
+              value={pageLabel}
+              onChange={(e) => setPageLabel(e.target.value)}
+              placeholder="Optional, e.g. HS 2025"
+              className="h-9 flex-1 min-w-0 px-2.5 rounded-lg text-xs text-gray-900 bg-white border border-gray-200 outline-none focus:border-blue-400"
+            />
+            <span className="text-[10px] text-gray-400">Year uses the selected {examYear} value below.</span>
+          </div>
+
+          {pagesLoading ? (
+            <div className="flex items-center justify-center py-5 text-xs text-gray-400">
+              <Loader2 size={14} className="animate-spin mr-2" /> Loading image pages…
+            </div>
+          ) : chapterPages.length > 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              {chapterPages.map((page, index) => (
+                <div key={page.id} className="relative rounded-lg border border-gray-200 bg-white overflow-hidden group">
+                  <img
+                    src={page.url}
+                    alt={page.title || `PYQ page ${index + 1}`}
+                    className="w-full h-28 object-contain bg-gray-50"
+                  />
+                  <div className="px-2 py-1.5 border-t border-gray-100">
+                    <p className="text-[10px] font-medium text-gray-700 truncate">{page.title || `Page ${index + 1}`}</p>
+                    <p className="text-[9px] text-gray-400">{page.year || 'Year not set'}</p>
+                  </div>
+                  <button
+                    onClick={() => deleteChapterPage(page.id)}
+                    title="Delete image page"
+                    className="absolute top-1.5 right-1.5 p-2 rounded-md bg-white/90 text-red-500 shadow-sm opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400 text-center py-3">
+              No image pages uploaded yet. Select all pages together or add them one at a time.
+            </p>
+          )}
+        </div>
+      </div>
+
     <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 overflow-hidden">
       <button
         onClick={() => setExpanded(e => !e)}
@@ -632,5 +806,6 @@ export default function PYQUploadPanel({
         </div>
       )}
     </div>
+    </>
   );
 }
