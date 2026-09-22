@@ -476,7 +476,9 @@ export default {
         status: 301,
         headers: {
           "Location": "/library",
-          "Cache-Control": "public, max-age=3600",
+          "Cache-Control": "public, max-age=0, must-revalidate",
+          "X-Frame-Options": "DENY",
+          "X-Content-Type-Options": "nosniff",
         },
       });
     }
