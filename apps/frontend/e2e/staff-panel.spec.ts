@@ -229,7 +229,10 @@ async function setupMocks(page: import('@playwright/test').Page) {
  * mutating requests update this in-memory copy, so the browser test cannot
  * read or write production curriculum data.
  */
-async function setupContentEditorFixture(page: import('@playwright/test').Page) {
+async function setupContentEditorFixture(
+  page: import('@playwright/test').Page,
+  { includeSecondChapter = false }: { includeSecondChapter?: boolean } = {},
+) {
   const requests: Array<{ method: string; path: string }> = [];
   const boards = [{ id: 'board-1', name: 'AHSEC', slug: 'ahsec', status: 'published' }];
   const classes = [{ id: 'class-1', name: 'Class 12', board_id: 'board-1', status: 'published' }];
@@ -246,20 +249,46 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
       chapter_count: 0,
     },
   ];
-  let chapters = [{
-    id: 'chapter-1',
-    subject_id: 'subject-1',
-    title: 'Motion',
-    slug: 'motion',
-    description: 'Motion fundamentals',
-    status: 'published',
-    content_type: 'notes',
-    content: '',
-    notes_en: '',
-    notes_generated: false,
-    chapter_number: 1,
-    version: 0,
-  }];
+  let chapters = [
+    {
+      id: 'chapter-1',
+      subject_id: 'subject-1',
+      title: 'Motion',
+      slug: 'motion',
+      description: 'Motion fundamentals',
+      status: 'published',
+      content_type: 'notes',
+      content: 'Raw Motion notes with a pasted table.',
+      notes_en: 'Raw Motion notes with a pasted table.',
+      notes_generated: false,
+      chapter_number: 1,
+      version: 0,
+    },
+    ...(includeSecondChapter ? [{
+      id: 'chapter-2',
+      subject_id: 'subject-1',
+      title: 'Energy',
+      slug: 'energy',
+      description: 'Energy fundamentals',
+      status: 'published',
+      content_type: 'notes',
+      content: 'Raw Energy notes with a pasted table.',
+      notes_en: 'Raw Energy notes with a pasted table.',
+      notes_generated: false,
+      chapter_number: 2,
+      version: 0,
+    }] : []),
+  ];
+  let chapterPages: Array<{
+    id: string;
+    title: string;
+    year: number;
+    url: string;
+    uploaded_at: string;
+  }> = [];
+  let nextChapterPageId = 1;
+  const chapterPageImage =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
   const json = (route: import('@playwright/test').Route, body: unknown, status = 200) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -354,7 +383,18 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
     const chapter = chapters.find(item => item.id === chapterId);
     if (route.request().method() === 'GET') return json(route, chapter || {}, chapter ? 200 : 404);
     if (route.request().method() === 'PATCH') {
-      chapters = chapters.map(item => item.id === chapterId ? { ...item, ...bodyOf(route), version: (item.version || 0) + 1 } : item);
+      const input = bodyOf(route);
+      chapters = chapters.map(item => item.id === chapterId
+        ? {
+            ...item,
+            ...input,
+            // The chapter list still renders the legacy content field, while
+            // the formatter intentionally persists notes_en. Mirror the
+            // backend's normalized response so reload tests read saved notes.
+            ...(input.notes_en !== undefined ? { content: input.notes_en } : {}),
+            version: (item.version || 0) + 1,
+          }
+        : item);
       return json(route, chapters.find(item => item.id === chapterId) || {});
     }
     if (route.request().method() === 'DELETE') {
@@ -362,6 +402,15 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
       return json(route, { ok: true });
     }
     return json(route, {});
+  });
+  await page.route('**/api/v1/admin/content/format-text', route => {
+    record(route);
+    const input = bodyOf(route);
+    const source = String(input.text || '');
+    const title = source.includes('Energy') ? 'Energy' : 'Motion';
+    return json(route, {
+      formatted_text: `## Formatted ${title}\n\nCleaned notes with a normalized table.`,
+    });
   });
   await page.route('**/api/v1/admin/content/subject/*/chapter-cards', route => {
     record(route);
@@ -394,6 +443,30 @@ async function setupContentEditorFixture(page: import('@playwright/test').Page) 
       ? { ...chapter, content: generated, notes_en: generated, notes_generated: true }
       : chapter);
     return json(route, { content: generated, notes_en: generated, word_count: generated.split(/\s+/).length });
+  });
+  await page.route('**/api/v1/content/chapters/*/pyq-images', route => {
+    record(route);
+    return json(route, { papers: chapterPages });
+  });
+  await page.route('**/api/v1/staff/content/chapter/*/pyq-papers', route => {
+    record(route);
+    if (route.request().method() !== 'POST') return json(route, {}, 405);
+    const paper = {
+      id: `chapter-page-${nextChapterPageId++}`,
+      title: 'HS 2025 Page 1',
+      year: 2025,
+      url: chapterPageImage,
+      uploaded_at: new Date().toISOString(),
+    };
+    chapterPages = [...chapterPages, paper];
+    return json(route, { ok: true, paper, pyq_papers: chapterPages }, 201);
+  });
+  await page.route('**/api/v1/staff/content/chapter/*/pyq-papers/*', route => {
+    record(route);
+    if (route.request().method() !== 'DELETE') return json(route, {}, 405);
+    const pageId = pathOf(route).split('/').pop();
+    chapterPages = chapterPages.filter(page => page.id !== pageId);
+    return json(route, { ok: true, pyq_papers: chapterPages });
   });
 
   return {
@@ -450,11 +523,12 @@ test.describe('Staff panel — sidebar sections', () => {
   // Helpers
   // ──────────────────────────────────────────────────────────────────────────
 
-  /** Navigate to /staff and wait until the sidebar appears (guard passed). */
+  /** Navigate to /staff and wait until the authenticated staff shell appears. */
   async function gotoStaff(p: import('@playwright/test').Page) {
     await p.goto('/staff');
-    // <aside> is only rendered when StaffGuard is satisfied (user.role===staff)
-    await p.waitForSelector('aside', { timeout: 20_000 });
+    // The desktop sidebar is hidden at mobile widths, so use the shared shell
+    // marker rather than requiring a visible desktop-only element.
+    await p.waitForSelector('[data-testid="admin-dashboard"]', { timeout: 20_000 });
   }
 
   /** Click a sidebar nav button by its visible label. */
@@ -934,6 +1008,109 @@ test.describe('Staff panel — sidebar sections', () => {
     expect(fixture.hasRequest('DELETE', '/api/v1/staff/content/chapter/chapter-1')).toBeTruthy();
     expect(fixture.hasRequest('POST', '/api/v1/admin/content/chapters/chapter-1/generate-notes')).toBeTruthy();
     expect(consoleErrors, 'No uncaught console errors during content CRUD').toHaveLength(0);
+  });
+
+  test('authenticated Content Editor regression preserves AI formatting and chapter PYQ pages', async ({ page }) => {
+    const fixture = await setupContentEditorFixture(page, { includeSecondChapter: true });
+    staffMocks.enableStrictUnexpectedApiRequests();
+
+    const openContentEditorSubject = async () => {
+      await gotoStaff(page);
+      await clickSidebar(page, 'Content Editor');
+      await expect(page.getByTestId('content-hub-panel-editor')).toBeVisible();
+      const subjectSearch = page.getByTestId('search-subjects');
+      await subjectSearch.fill('Physics');
+      await page.getByTestId('search-result-subject-1').click();
+      await expect(page.getByText('Chapters (2)')).toBeVisible();
+    };
+
+    await openContentEditorSubject();
+
+    const aiFormatButtons = page.locator('[data-testid^="ai-format-"]');
+    await expect(aiFormatButtons).toHaveCount(2);
+    await expect(page.getByTestId('ai-format-chapter-1')).toBeVisible();
+    await expect(page.getByTestId('ai-format-chapter-2')).toBeVisible();
+
+    await page.getByTestId('ai-format-chapter-1').click();
+    await expect(page.getByText('Formatted Motion', { exact: false })).toBeVisible();
+    await page.getByTestId('ai-format-chapter-2').click();
+    await expect(page.getByText('Formatted Energy', { exact: false })).toBeVisible();
+
+    // The fixture persists PATCH results outside the page instance. Reloading
+    // proves the formatter result was saved, not only painted into React state.
+    await openContentEditorSubject();
+    await expect(page.getByText('Formatted Motion', { exact: false })).toBeVisible();
+    await expect(page.getByText('Formatted Energy', { exact: false })).toBeVisible();
+
+    await page.getByTestId('edit-chapter-chapter-1').click();
+    await expect(page.getByRole('heading', { name: 'Edit Chapter' })).toBeVisible();
+
+    const pagesPanel = page.getByTestId('chapter-pyq-pages-panel');
+    await expect(pagesPanel).toContainText('0 pages');
+    await pagesPanel.getByPlaceholder('Optional, e.g. HS 2025').fill('HS 2025');
+    await pagesPanel.locator('input[type="file"]').setInputFiles({
+      name: 'hs-2025-page-1.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('isolated-pyq-page'),
+    });
+
+    await expect(pagesPanel.getByAltText('HS 2025 Page 1')).toBeVisible();
+    await expect(pagesPanel).toContainText('1 page');
+
+    await pagesPanel.getByTitle('Delete image page').click();
+    await expect(pagesPanel.getByAltText('HS 2025 Page 1')).toHaveCount(0);
+    await expect(pagesPanel).toContainText('No image pages uploaded yet');
+
+    // Re-opening the chapter confirms deletion was persisted by the staff
+    // route, rather than only removing the card from local component state.
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByTestId('edit-chapter-chapter-1').click();
+    await expect(page.getByTestId('chapter-pyq-pages-panel')).toContainText('0 pages');
+
+    expect(fixture.hasRequest('POST', '/api/v1/admin/content/format-text')).toBeTruthy();
+    expect(fixture.hasRequest('PATCH', '/api/v1/staff/content/chapter/chapter-1')).toBeTruthy();
+    expect(fixture.hasRequest('PATCH', '/api/v1/staff/content/chapter/chapter-2')).toBeTruthy();
+    expect(fixture.hasRequest('GET', '/api/v1/content/chapters/chapter-1/pyq-images')).toBeTruthy();
+    expect(fixture.hasRequest('POST', '/api/v1/staff/content/chapter/chapter-1/pyq-papers')).toBeTruthy();
+    expect(fixture.hasRequest('DELETE', '/api/v1/staff/content/chapter/chapter-1/pyq-papers/chapter-page-1')).toBeTruthy();
+    expect(consoleErrors, 'No uncaught console errors during the Content Editor regression').toHaveLength(0);
+  });
+
+  test('mobile Content Editor keeps navigation, formatting, and image pages reachable', async ({ page }) => {
+    const fixture = await setupContentEditorFixture(page, { includeSecondChapter: true });
+    staffMocks.enableStrictUnexpectedApiRequests();
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    await gotoStaff(page);
+    await expect(page.getByTestId('admin-mobile-menu')).toBeVisible();
+    await page.getByTestId('admin-mobile-menu').click();
+    await expect(page.getByTestId('admin-mobile-nav-contenthub')).toBeVisible();
+    await page.getByTestId('admin-mobile-nav-contenthub').click();
+
+    await page.getByTestId('mobile-select-board').selectOption('board-1');
+    await page.getByTestId('mobile-select-class').selectOption('class-1');
+    await page.getByTestId('mobile-select-stream').selectOption('stream-1');
+    await page.getByTestId('mobile-select-subject').selectOption('subject-1');
+    await expect(page.getByText('Chapters (2)')).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+
+    await page.getByTestId('edit-chapter-chapter-1').click();
+    await expect(page.getByTestId('ai-format-button')).toBeVisible();
+    await page.getByTestId('ai-format-button').click();
+    await expect(page.getByText('Formatted Motion', { exact: false })).toBeVisible();
+
+    const pagesPanel = page.getByTestId('chapter-pyq-pages-panel');
+    await expect(pagesPanel.getByTestId('upload-pyq-pages')).toBeVisible();
+    await pagesPanel.locator('input[type="file"]').setInputFiles({
+      name: 'mobile-page.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('mobile-pyq-page'),
+    });
+    await expect(pagesPanel.getByAltText('HS 2025 Page 1')).toBeVisible();
+
+    expect(fixture.hasRequest('POST', '/api/v1/admin/content/format-text')).toBeTruthy();
+    expect(fixture.hasRequest('POST', '/api/v1/staff/content/chapter/chapter-1/pyq-papers')).toBeTruthy();
+    expect(consoleErrors, 'No uncaught console errors in the mobile Content Editor').toHaveLength(0);
   });
 
   // ──────────────────────────────────────────────────────────────────────────
