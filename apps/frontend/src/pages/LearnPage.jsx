@@ -94,7 +94,12 @@ export default function LearnPage() {
             .then(fr => setFlashcards(fr.data?.flashcards || []))
             .catch(() => {});
           seoRelatedByChapter(chId, r.data?.linked_topic_id || null, 6)
-            .then(rr => setRelatedTopics(rr.data?.related || rr.data?.items || []))
+            .then(rr => setRelatedTopics(
+              rr.data?.related
+              || rr.data?.items
+              || rr.data?.related_topics
+              || [],
+            ))
             .catch(() => {});
         }
       })
