@@ -2,7 +2,7 @@
 AHSEC Textbook Content Ingestion Pipeline
 ==========================================
 Crawls AHSEC HS 1st-year (Class 11) and 2nd-year (Class 12) textbook pages,
-downloads English and Assamese medium PDFs, extracts chapter text via PyMuPDF,
+downloads English and Assamese medium PDFs, extracts chapter text via PDFium,
 generates concise notes + Q&A solutions using Sarvam AI, and populates each
 chapter's notes, RAG sections and Q&A RAG sections in MongoDB.
 
@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.services.ai.note_quality import validate_generated_notes
+from scripts.pdfium_compat import close_pdf, open_pdf, page_image, page_text
 
 logging.basicConfig(
     level=logging.INFO,
@@ -580,7 +581,7 @@ def build_catalogue(class11: bool = True, class12: bool = True) -> list[dict]:
     # ── Biology XI English gap note ───────────────────────────────────────────
     # AHSEC does not publish an English-medium Biology textbook for Class XI;
     # only the Assamese edition (BIOLOGY_1ST-YR_*.pdf) is hosted.  That PDF
-    # also uses a proprietary non-Unicode Assamese font so PyMuPDF extracts
+    # also uses a proprietary non-Unicode Assamese font so PDFium extracts
     # garbled characters rather than readable text — passing that to Sarvam
     # would produce low-quality notes.
     #
@@ -636,7 +637,7 @@ def _download_pdf(url: str, total_timeout: int = 300) -> bytes:
 
 
 def _ocr_page(page, lang: str = "asm+eng") -> str:
-    """Render a PyMuPDF page to an image and OCR it with Tesseract.
+    """Render a PDFium page to an image and OCR it with Tesseract.
 
     Performance tuning:
     - 1.5× zoom (225 dpi equivalent) — sufficient for clear Assamese/English
@@ -648,9 +649,7 @@ def _ocr_page(page, lang: str = "asm+eng") -> str:
     from PIL import Image
     import io
 
-    matrix = __import__("fitz").Matrix(1.5, 1.5)
-    pix = page.get_pixmap(matrix=matrix, colorspace=__import__("fitz").csRGB)
-    img = Image.open(io.BytesIO(pix.tobytes("png")))
+    img = page_image(page, 1.5)
     return pytesseract.image_to_string(img, lang=lang, config="--psm 6")
 
 
@@ -663,7 +662,7 @@ OCR_PAGE_TIMEOUT = 120
 
 async def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
     """
-    Download a PDF and extract text per page using PyMuPDF (fitz).
+    Download a PDF and extract text per page using PDFium.
     For Assamese PDFs: if a page's embedded text is garbled (non-Unicode
     Assamese font), fall back to Tesseract OCR with lang='asm+eng'.
 
@@ -673,17 +672,16 @@ async def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
 
     Returns [{page_num, text}].  Pages with < 20 chars are skipped.
     """
-    import fitz  # PyMuPDF
-
     data = await asyncio.to_thread(_download_pdf, url)
     pages = []
     ocr_count = 0
     ocr_skipped = 0
     ocr_start = time.monotonic()
 
-    with fitz.open(stream=data, filetype="pdf") as doc:
+    doc = open_pdf(data)
+    try:
         for i, page in enumerate(doc):
-            text = page.get_text("text")
+            text = page_text(page)
             text = re.sub(r"\n{3,}", "\n\n", text).strip()
 
             # For Assamese medium: if the embedded text looks garbled
@@ -707,7 +705,7 @@ async def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
 
             # For ANY medium: if the page is image-only (no embedded text at
             # all), fall back to Tesseract.  This handles scanned PDFs like
-            # Hornbill and Chemistry Part II that return 0 chars from PyMuPDF.
+            # Hornbill and Chemistry Part II that return 0 chars from PDFium.
             elif len(text) < 20:
                 try:
                     lang = "asm+eng" if medium == "as" else "eng"
@@ -730,6 +728,8 @@ async def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
 
             if len(text) >= 20:
                 pages.append({"page_num": i + 1, "text": text})
+    finally:
+        close_pdf(doc)
 
     if ocr_count or ocr_skipped:
         ocr_elapsed = time.monotonic() - ocr_start
@@ -762,7 +762,7 @@ _AS_DIGIT_MAP = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 # Exercise / questions section markers (English)
 # Primary: actual exercise/question/problem headings (preferred).
 # Require the line to end without a trailing period — a period signals a
-# mid-sentence word-wrap by PyMuPDF, not a standalone section heading.
+# mid-sentence word-wrap by PDFium, not a standalone section heading.
 _EN_EXERCISE_RE = re.compile(
     r"^(?:"
     # Explicit exercise/question section headers (NCERT / AHSEC standard)
