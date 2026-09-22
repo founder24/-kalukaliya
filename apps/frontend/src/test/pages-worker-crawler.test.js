@@ -284,6 +284,43 @@ describe("Pages worker crawler snapshots", () => {
     );
   });
 
+  it("proxies the dynamic public topic sitemap as XML instead of SPA HTML", async () => {
+    const backendFetch = vi.fn().mockResolvedValue(
+      new Response('<?xml version="1.0"?><urlset></urlset>', {
+        status: 200,
+        headers: { "Content-Type": "application/xml" },
+      }),
+    );
+    vi.stubGlobal("fetch", backendFetch);
+
+    const response = await worker.fetch(
+      new Request("https://syrabit.ai/sitemap-topics.xml"),
+      { ASSETS: { fetch: vi.fn() }, SEO_BACKEND_URL: "https://seo.example.test" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("application/xml");
+    expect(response.headers.get("X-Source")).toBe("sitemap-proxy");
+    expect(await response.text()).toContain("<urlset>");
+    expect(backendFetch).toHaveBeenCalledOnce();
+    expect(backendFetch.mock.calls[0][0]).toBe(
+      "https://seo.example.test/api/v1/seo/sitemap-topics.xml",
+    );
+  });
+
+  it("protects the browser root redirect with deploy-safe headers", async () => {
+    const response = await worker.fetch(
+      new Request("https://syrabit.ai/", { headers: { Accept: "text/html" } }),
+      { ASSETS: { fetch: vi.fn() } },
+    );
+
+    expect(response.status).toBe(301);
+    expect(response.headers.get("Location")).toBe("/library");
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
+    expect(response.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+
   it.each([
     ["browser navigation", { Accept: "text/html" }, 404],
     ["crawler with a Pages HTML fallback", BOT_HEADERS, 200],
