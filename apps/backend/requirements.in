@@ -17,6 +17,7 @@ jinja2
 markdown
 motor>=3.7.0
 numpy
+Pillow>=12.3.0
 pyasn1>=0.6.4
 posthog
 pydantic[email]
@@ -34,7 +35,7 @@ starlette>=1.3.1
 tenacity
 uvicorn
 pypdf>=6.15.0
-pymupdf>=1.26.0
+pypdfium2>=5.13.0
 
 # Pinned directly (not otherwise a direct dependency) to force a resolved
 # transitive version high enough to clear a known CVE flagged by the

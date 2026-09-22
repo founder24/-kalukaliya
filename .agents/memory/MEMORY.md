@@ -1,5 +1,7 @@
 - [Syrabit dev setup](syrabit-dev-setup.md) — Replit dev environment setup details for this monorepo
+- [Syrabit PDFium ingestion](syrabit-pdfium-ingest.md) — use PDFium with explicit Pillow for license-safe extraction and OCR rendering
 - [Syrabit content architecture](syrabit-content-arch.md) — Chapter model, 3-section model (Notes/Q&A/Question Paper), content_type field, translation pipeline
+- [Content Editor browser fixture](content-editor-browser-fixture.md) — formatter reload tests must normalize notes_en into the chapter-list content field; image PYQs are separate chapter state
 - [Syrabit chat+auth pipeline bugs](syrabit-pipeline-bugs.md) — Fixed bugs: analytics 404s, conversation_id/session_id mismatch, logout null-token crash
 - [CF↔GCP audit](cf-gcp-audit.md) — Token perms, duplicate SM secrets, BACKEND_URL binding conflict, CF KV cache fix, bot rendering fix
 - [Syrabit chat latency fix](syrabit-chat-latency.md) — gemini-2.5-flash thinking phase (7-8s TTFB) fixed; model switch + thinkingBudget guard
@@ -98,3 +100,6 @@
 - [CF token self-edit limitation](cf-token-self-edit-limitation.md) — a token can never grant itself new scopes (9109 Unauthorized); scope-gap fixes need a manual dashboard edit by the account owner
 - [GitHub Actions runner context in job env](github-actions-runner-context-job-env.md) — job-level env can't use `runner` context; causes whole workflow to fail to start (0 jobs), not just a lint warning
 - [Dependabot stale manifest alerts](dependabot-stale-manifest-alerts.md) — alerts don't auto-close when their manifest file is deleted; dismiss via API with reason "inaccurate"; alerts endpoint needs Link-header pagination, not ?page=
+- [Cloudflare release convergence](cloudflare-release-convergence.md) — keep post-publish route assertions strict, retry only bounded edge propagation, and keep fixture-dependent auth validation explicitly opt-in
+- [Release evidence limits](release-evidence-limits.md) — GitHub connector can expose workflow/job status, but artifact/log archives may return 403; guarded auth requires the full disposable fixture set
+- [D1 migration test parser](d1-migration-test-parser.md) — local migration fixtures split on semicolons before stripping comments; SQL comments must not contain semicolons

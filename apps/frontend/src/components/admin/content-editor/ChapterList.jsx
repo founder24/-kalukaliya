@@ -2,7 +2,7 @@ import {
   Sparkles, Loader2, Eye, Edit2, Trash2,
   CheckCircle, FileText, Layers, Globe, AlertTriangle,
   BookOpen, Hash, Search, ChevronDown, ChevronUp,
-  Send, Clock,
+  Send, Clock, Wand2,
 } from 'lucide-react';
 import { useState } from 'react';
 import StatusBadge, { STATUS_FILTER_OPTIONS } from './StatusBadge';
@@ -26,6 +26,7 @@ export default function ChapterList({
   generatingNotes,
   onGenerateNotes, onDeleteChapter, onChangeChapterStatus,
   onViewChapter, onEditChapter,
+  onFormatChapter, formattingChapters = new Set(),
   onPublishChapter, publishingChapters = new Set(),
   selSubject, subjectData, onCreateNew,
   selectedIds, onToggleSelect, onToggleSelectAll,
@@ -194,6 +195,18 @@ export default function ChapterList({
                       ? <><Loader2 size={10} className="animate-spin" /> Generating…</>
                       : <><Sparkles size={10} /> {hasNotes ? 'Regen' : 'AI ⚡'}</>}
                   </button>
+                  {onFormatChapter && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onFormatChapter(ch.id, ch.title); }}
+                      data-testid={`ai-format-${ch.id}`}
+                      disabled={formattingChapters.has(ch.id)}
+                      className="flex items-center gap-1 h-6 px-2 rounded-lg text-[10px] font-semibold text-fuchsia-700 bg-fuchsia-50 border border-fuchsia-200 hover:bg-fuchsia-100 disabled:opacity-40 transition-all"
+                      title="Use AI to fix formulas, tables, and Markdown formatting"
+                    >
+                      {formattingChapters.has(ch.id) ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
+                      {formattingChapters.has(ch.id) ? 'Formatting…' : 'AI Format'}
+                    </button>
+                  )}
                   <button onClick={() => onViewChapter(ch)} className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-400" title="Preview lesson" data-testid={`open-chapter-${ch.id}`}><Eye size={13} /></button>
                   <button onClick={() => onEditChapter(ch)} data-testid={`edit-chapter-${ch.id}`}
                     className="p-1.5 rounded-lg hover:bg-violet-500/10 text-gray-400 hover:text-violet-400" title="Edit chapter"><Edit2 size={13} /></button>

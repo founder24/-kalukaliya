@@ -6,7 +6,6 @@ import { visualizer } from 'rollup-plugin-visualizer';
 import codemirrorStubPlugin from './vite-plugins/codemirror-stub.js';
 import sentryReplayStubPlugin from './vite-plugins/sentry-replay-stub.js';
 import modulepreloadInjectPlugin from './vite-plugins/modulepreload-inject.js';
-import preloadHeadersInjectPlugin from './vite-plugins/preload-headers-inject.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -626,10 +625,11 @@ export default defineConfig(({ mode }) => ({
     // build so it runs as the bundle is written instead of as a
     // separate post-build node invocation.
     modulepreloadInjectPlugin(),
-    // Task #79: post-build — write Link: rel=preload headers into
-    // dist/_headers using the hashed filenames from this build so
-    // Cloudflare can emit 103 Early Hints for the critical JS/CSS.
-    preloadHeadersInjectPlugin(),
+    // Do not emit hashed asset names in _headers. Cloudflare Early Hints can
+    // outlive the HTML response during edge convergence, so a stale Link
+    // header can make a fresh browser request bundles from the previous
+    // release. The HTML modulepreload links are release-local and are enough
+    // once the document has arrived.
   ],
 
   resolve: {

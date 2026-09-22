@@ -273,7 +273,7 @@ export default function ProfilePage() {
         />
         <AcademicDetails profile={profile} isDegreeProfile={isDegreeProfile} openEdit={openEdit}
           onProfileUpdate={handleProfileUpdate} />
-        <AiCredits stats={stats} />
+        <AiCredits stats={stats} profile={profile} />
         <ReferralProfileCard />
         <PrivacyControls profile={profile} onProfileUpdate={handleProfileUpdate} />
         <DangerZone

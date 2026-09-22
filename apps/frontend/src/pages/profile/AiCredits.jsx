@@ -2,7 +2,9 @@ import {
   Database, Zap, MessageSquare, BookMarked,
 } from 'lucide-react';
 
-export default function AiCredits({ stats }) {
+export default function AiCredits({ stats, profile }) {
+  const monthlyLimit = Number(profile?.monthly_chat_limit ?? profile?.credits_limit ?? 30);
+  const monthlyRemaining = Number(profile?.monthly_chats_remaining ?? profile?.credits_remaining ?? monthlyLimit);
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
       <div className="px-4 py-3 border-b border-border">
@@ -12,7 +14,7 @@ export default function AiCredits({ stats }) {
         <div className="grid grid-cols-2 gap-3">
           {[
             { icon: Database, label: 'Total Tokens', value: stats.total_tokens > 1000 ? `${(stats.total_tokens/1000).toFixed(0)}K` : stats.total_tokens, color: 'text-blue-600', bg: 'rgba(59,130,246,0.10)' },
-            { icon: Zap, label: 'Chat Rate Limit', value: '6/min', color: 'text-emerald-600', bg: 'rgba(16,185,129,0.10)' },
+            { icon: Zap, label: 'Chats this month', value: `${monthlyRemaining}/${monthlyLimit}`, color: 'text-emerald-600', bg: 'rgba(16,185,129,0.10)' },
             { icon: MessageSquare, label: 'Conversations', value: stats.conversations, color: 'text-violet-600', bg: 'rgba(139,92,246,0.10)' },
             { icon: BookMarked, label: 'Saved Subjects', value: stats.saved_subjects, color: 'text-pink-700', bg: 'rgba(244,63,94,0.10)' },
           ].map(({ icon: Icon, label, value, color, bg }) => (

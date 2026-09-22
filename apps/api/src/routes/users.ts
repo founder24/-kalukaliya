@@ -36,6 +36,11 @@ import {
   isBrowserAnonId,
 } from '../services/anonymous';
 import { getAnonQuotaUsage } from './chat';
+import {
+  currentQuotaMonthPeriod,
+  monthResetAt,
+  monthlyChatLimit,
+} from '../services/consumer-referrals';
 import type { Env } from '../types';
 
 export const usersRouter = new Hono<{ Bindings: Env }>();
@@ -49,10 +54,10 @@ const ACCOUNT_DELETION_GRACE_DAYS = 14;
 // Credit limits — authoritative, must match billing pipeline
 const CHAT_REQUESTS_PER_MINUTE = CHAT_RPM_LIMIT;
 const CREDITS_LIMITS: Record<string, number> = {
-  free: CHAT_REQUESTS_PER_MINUTE,
-  starter: CHAT_REQUESTS_PER_MINUTE,
-  pro: CHAT_REQUESTS_PER_MINUTE,
-  premium: CHAT_REQUESTS_PER_MINUTE,
+  free: 30,
+  starter: 100,
+  pro: 300,
+  premium: 600,
 };
 
 // ── Auth middleware ────────────────────────────────────────────────────────────
@@ -75,9 +80,15 @@ async function requireUser(
 
 // ── Build profile response (matches Cloud Run _build_profile_response) ─────────
 
-function buildProfileResponse(user: typeof users.$inferSelect): Record<string, unknown> {
+function buildProfileResponse(
+  user: typeof users.$inferSelect,
+  monthlyUsed = 0,
+  now = Math.floor(Date.now() / 1000),
+): Record<string, unknown> {
   const tier = user.subscriptionTier ?? 'free';
-  const creditsLimit = CREDITS_LIMITS[tier] ?? CHAT_REQUESTS_PER_MINUTE;
+  const creditsLimit = monthlyChatLimit(tier, user.referralUpgradeUntil, now)
+    || CREDITS_LIMITS[tier]
+    || 30;
   const creditsUsed  = user.creditsUsed ?? 0;
   const creditsRemaining = user.creditsRemaining != null
     ? user.creditsRemaining
@@ -115,6 +126,10 @@ function buildProfileResponse(user: typeof users.$inferSelect): Record<string, u
     preferred_language:    user.preferredLanguage,
     onboarding_done:       Boolean(user.onboardingDone),
     ads_opt_out:           Boolean(user.adsOptOut),
+    ads_free_until:        user.referralAdsFreeUntil ?? null,
+    referral_points:       user.referralPoints ?? 0,
+    referral_visitors_verified: user.referralVisitorsVerified ?? 0,
+    referral_upgrade_until: user.referralUpgradeUntil ?? null,
     saved_subjects:        savedSubjects,
     phone:                 user.phone ?? null,
     board_id:              user.boardId ?? null,
@@ -125,9 +140,13 @@ function buildProfileResponse(user: typeof users.$inferSelect): Record<string, u
     stream_name:           user.streamName ?? null,
     course_type:           user.courseType ?? null,
     selected_subjects:     selectedSubjects,
-    credits_used:          creditsUsed,
+    credits_used:          monthlyUsed,
     credits_limit:         creditsLimit,
-    credits_remaining:     creditsRemaining,
+    credits_remaining:     Math.max(0, creditsLimit - monthlyUsed),
+    monthly_chat_limit:    creditsLimit,
+    monthly_chats_used:    monthlyUsed,
+    monthly_chats_remaining: Math.max(0, creditsLimit - monthlyUsed),
+    monthly_reset_at:      new Date(monthResetAt(now) * 1000).toISOString(),
     status,
     deletion_hard_at:      deletionHardAt,
   };
@@ -146,7 +165,11 @@ async function getProfile(
   const user = await db.select().from(users).where(eq(users.id, id)).get();
   if (!user || user.deletedAt) return c.json({ detail: 'User not found' }, 404) as Response;
 
-  return c.json(buildProfileResponse(user)) as Response;
+  const now = Math.floor(Date.now() / 1000);
+  const monthlyUsage = await c.env.DB.prepare(
+    'SELECT count FROM monthly_quota_usage WHERE user_id = ? AND period = ?',
+  ).bind(id, currentQuotaMonthPeriod(now)).first<{ count: number }>();
+  return c.json(buildProfileResponse(user, monthlyUsage?.count ?? 0, now)) as Response;
 }
 
 usersRouter.get('/me',      getProfile);
@@ -383,8 +406,9 @@ usersRouter.get('/credits', async (c) => {
       const db = createDb(c.env.DB);
       const user = await db.select({
         subscriptionTier: users.subscriptionTier,
-        creditsRemaining: users.creditsRemaining,
-        creditsUsed: users.creditsUsed,
+        referralUpgradeUntil: users.referralUpgradeUntil,
+        referralAdsFreeUntil: users.referralAdsFreeUntil,
+        referralPoints: users.referralPoints,
       }).from(users).where(eq(users.id, payload.sub)).get();
 
       if (user) {
@@ -419,6 +443,35 @@ usersRouter.get('/credits', async (c) => {
   }
 
   const rpmLimit = CHAT_REQUESTS_PER_MINUTE;
+  let monthlyUsed = 0;
+  let monthlyLimit = 30;
+  let monthlyResetAt = monthResetAt();
+  let adsFreeUntil: number | null = null;
+  let referralPoints = 0;
+  if (authenticated && authenticatedUserId) {
+    const user = await c.env.DB.prepare(`
+      SELECT subscription_tier, referral_upgrade_until, referral_ads_free_until,
+             referral_points
+      FROM users WHERE id = ?
+    `).bind(authenticatedUserId).first<{
+      subscription_tier: string | null;
+      referral_upgrade_until: number | null;
+      referral_ads_free_until: number | null;
+      referral_points: number | null;
+    }>();
+    monthlyLimit = monthlyChatLimit(
+      user?.subscription_tier,
+      user?.referral_upgrade_until,
+    );
+    const currentPeriod = currentQuotaMonthPeriod();
+    const monthRow = await c.env.DB.prepare(
+      'SELECT count FROM monthly_quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(authenticatedUserId, currentPeriod).first<{ count: number }>();
+    monthlyUsed = monthRow?.count ?? 0;
+    monthlyResetAt = monthResetAt();
+    adsFreeUntil = user?.referral_ads_free_until ?? null;
+    referralPoints = user?.referral_points ?? 0;
+  }
   const nowMs = Date.now();
   const resetAt = (Math.floor(nowMs / 60_000) + 1) * 60_000;
   // The edge owns reservations for production chat requests. This explicit
@@ -443,6 +496,12 @@ usersRouter.get('/credits', async (c) => {
       as: languageQuota(),
     },
     tier,
+    monthly_chat_limit: monthlyLimit,
+    monthly_chats_used: monthlyUsed,
+    monthly_chats_remaining: Math.max(0, monthlyLimit - monthlyUsed),
+    monthly_reset_at: new Date(monthlyResetAt * 1000).toISOString(),
+    ads_free_until: adsFreeUntil,
+    referral_points: referralPoints,
     ...(anonymousId ? { anon_id: anonymousId } : {}),
   });
 });

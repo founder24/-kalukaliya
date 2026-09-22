@@ -284,6 +284,30 @@ describe("Pages worker crawler snapshots", () => {
     );
   });
 
+  it("proxies the dynamic public topic sitemap as XML instead of SPA HTML", async () => {
+    const backendFetch = vi.fn().mockResolvedValue(
+      new Response('<?xml version="1.0"?><urlset></urlset>', {
+        status: 200,
+        headers: { "Content-Type": "application/xml" },
+      }),
+    );
+    vi.stubGlobal("fetch", backendFetch);
+
+    const response = await worker.fetch(
+      new Request("https://syrabit.ai/sitemap-topics.xml"),
+      { ASSETS: { fetch: vi.fn() }, SEO_BACKEND_URL: "https://seo.example.test" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("application/xml");
+    expect(response.headers.get("X-Source")).toBe("sitemap-proxy");
+    expect(await response.text()).toContain("<urlset>");
+    expect(backendFetch).toHaveBeenCalledOnce();
+    expect(backendFetch.mock.calls[0][0]).toBe(
+      "https://seo.example.test/api/v1/seo/sitemap-topics.xml",
+    );
+  });
+
   it.each([
     ["browser navigation", { Accept: "text/html" }, 404],
     ["crawler with a Pages HTML fallback", BOT_HEADERS, 200],

@@ -272,6 +272,12 @@ async function main() {
 
   // 5b. Verify — single dist/ walk + headless hydration check.
   await record(
+    "verify:assets",
+    node(path.join(__dirname, "check-hashed-assets.mjs"), ["dist"], {
+      budgetMs: 30_000,
+    }),
+  );
+  await record(
     "verify",
     node(path.join(__dirname, "verify-all.mjs"), [], {
       budgetMs: 6 * 60_000,

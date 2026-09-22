@@ -28,11 +28,11 @@ from pathlib import Path
 from typing import Iterable
 from urllib.parse import urljoin
 
-import fitz
 import requests
 import urllib3
 from bs4 import BeautifulSoup
 from pymongo import ASCENDING, MongoClient
+from scripts.pdfium_compat import close_pdf, open_pdf, page_image, page_text
 
 AHSEC_CATALOG = "https://ahsec.assam.gov.in/index.php/syllabus-2"
 GU_CATALOG = "https://gauhati.ac.in/syllabus/"
@@ -327,19 +327,20 @@ def _parse_pdf(
     if not data.startswith(b"%PDF"):
         raise ValueError("response is not a PDF")
     checksum = hashlib.sha256(data).hexdigest()
-    with fitz.open(stream=data, filetype="pdf") as document:
-        pages = [page.get_text("text") for page in document]
+    document = open_pdf(data)
+    try:
+        pdf_pages = [document[index] for index in range(len(document))]
+        pages = [page_text(page) for page in pdf_pages]
         if not any(page.strip() for page in pages) and shutil.which("tesseract"):
             # A small number of official AHSEC notifications are image-only
             # scans. OCR them locally so every catalog PDF has searchable text.
             ocr_pages: list[str] = []
             with tempfile.TemporaryDirectory(prefix="syrabit-syllabus-ocr-") as tmp:
-                for page_number, page in enumerate(document):
+                for page_number, page in enumerate(pdf_pages):
                     image_path = Path(tmp) / f"page-{page_number + 1}.png"
-                    scale = min(1.5, 1800 / max(page.rect.width, 1))
-                    page.get_pixmap(
-                        matrix=fitz.Matrix(scale, scale), alpha=False
-                    ).save(image_path)
+                    width, _height = page.get_size()
+                    scale = min(1.5, 1800 / max(width, 1))
+                    page_image(page, scale).save(image_path)
                     try:
                         completed = subprocess.run(
                             [
@@ -362,7 +363,9 @@ def _parse_pdf(
                     except subprocess.TimeoutExpired:
                         ocr_pages.append("")
             pages = ocr_pages
-        page_count = len(document)
+        page_count = len(pdf_pages)
+    finally:
+        close_pdf(document)
     text = "\n".join(pages)
     text = re.sub(r"\x00", "", text)
     if not text.strip():

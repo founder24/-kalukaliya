@@ -76,7 +76,7 @@ export const AuthProvider = ({ children }) => {
           hydrateAdsOptOutFromServer(userData.ads_opt_out);
           // Set the plan before publishing the user so ad-bearing route
           // effects cannot run once with anonymous consent during hydration.
-          setAdsPlan(userData.plan);
+          setAdsPlan(userData.plan, userData.ads_free_until);
           setUser(userData);
         } else {
           setAdsPlan(null);
@@ -127,8 +127,8 @@ export const AuthProvider = ({ children }) => {
 
   // Mirror the signed-in user's plan into the ads module
   useEffect(() => {
-    setAdsPlan(user?.plan);
-  }, [user?.plan]);
+    setAdsPlan(user?.plan, user?.ads_free_until);
+  }, [user?.plan, user?.ads_free_until]);
 
 
   const login = async (email, password) => {
@@ -151,7 +151,7 @@ export const AuthProvider = ({ children }) => {
       });
       const userData = profileRes.data;
       hydrateAdsOptOutFromServer(userData?.ads_opt_out);
-      setAdsPlan(userData?.plan);
+      setAdsPlan(userData?.plan, userData?.ads_free_until);
       setUser(userData);
       try { Analytics.login(userData.id, userData.email); } catch {}
       return userData;
@@ -181,7 +181,7 @@ export const AuthProvider = ({ children }) => {
       });
       const userData = profileRes.data;
       hydrateAdsOptOutFromServer(userData?.ads_opt_out);
-      setAdsPlan(userData?.plan);
+      setAdsPlan(userData?.plan, userData?.ads_free_until);
       setUser(userData);
       try { Analytics.signup(userData.email, userData.plan); } catch {}
       return userData;

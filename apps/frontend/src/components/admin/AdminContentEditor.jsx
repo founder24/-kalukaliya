@@ -64,6 +64,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const [trackedJobIds, setTrackedJobIds] = useState([]);
   const [publishJobIds, setPublishJobIds] = useState([]);
   const [publishingChapters, setPublishingChapters] = useState(new Set());
+  const [formattingChapters, setFormattingChapters] = useState(new Set());
   const [chaptersLoading, setChaptersLoading] = useState(false);
 
   const subjectData = subjects.find(s => s.id === selSubject);
@@ -401,6 +402,49 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     } finally { setGeneratingNotes(prev => { const next = new Set(prev); next.delete(chapterId); return next; }); }
   };
 
+  const handleFormatChapter = useCallback(async (chapterId, chapterTitle) => {
+    setFormattingChapters(prev => new Set([...prev, chapterId]));
+    const tid = toast.loading(`Formatting "${chapterTitle}"…`);
+    try {
+      let chapter = chapters.find(ch => ch.id === chapterId);
+      if (!chapter?.content && !chapter?.notes_en) {
+        const response = await axios.get(`${API}/admin/content/chapter/${chapterId}`, authHeaders(adminToken));
+        chapter = response.data;
+      }
+      const source = chapter?.notes_en || chapter?.content_en || chapter?.content || '';
+      if (!source.trim()) {
+        toast.info('Add notes before using AI Format', { id: tid });
+        return;
+      }
+      const formatted = await axios.post(
+        `${API}/admin/content/format-text`,
+        { text: source },
+        authHeaders(adminToken),
+      );
+      const formattedText = formatted.data?.formatted_text;
+      if (!formattedText?.trim()) throw new Error('The formatter returned empty content');
+
+      await axios.patch(
+        `${API}/staff/content/chapter/${chapterId}`,
+        { notes_en: formattedText },
+        authHeaders(adminToken),
+      );
+      setChapters(prev => prev.map(ch => ch.id === chapterId
+        ? { ...ch, content: formattedText, notes_en: formattedText }
+        : ch));
+      await loadChapterCards(selSubject);
+      toast.success(`AI formatting applied to "${chapterTitle}"`, { id: tid });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || e?.message || 'AI formatting failed', { id: tid });
+    } finally {
+      setFormattingChapters(prev => {
+        const next = new Set(prev);
+        next.delete(chapterId);
+        return next;
+      });
+    }
+  }, [adminToken, chapters, loadChapterCards, selSubject]);
+
   const toggleSubjectSelect = (id) => {
     setSelectedSubjectIds(prev => {
       const next = new Set(prev);
@@ -659,8 +703,8 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     <SectionErrorBoundary name="Content Editor">
       <div className="h-full flex flex-col" style={{ background: '#f8f9fc' }}>
         <>
-          <div className="h-14 border-b border-gray-200 flex items-center justify-between px-6 bg-white">
-            <div className="flex items-center gap-2 min-w-0">
+          <div className="min-h-14 border-b border-gray-200 flex items-center justify-between gap-2 px-3 sm:px-4 md:px-6 py-2 bg-white">
+            <div className="flex items-center gap-2 min-w-0 overflow-hidden">
               {breadcrumb.length > 0 && (
                 <div className="flex items-center gap-1 text-sm text-gray-400 min-w-0 overflow-hidden">
                   {breadcrumb.map((b, i) => (
@@ -672,7 +716,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                 </div>
               )}
             </div>
-            <div className="relative flex-shrink-0 w-64">
+            <div className="relative flex-1 max-w-64 min-w-0">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search all subjects..." className="w-full h-9 pl-8 pr-3 rounded-xl text-sm text-gray-900 bg-gray-50 border border-gray-200 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-500/20" data-testid="search-subjects" />
             </div>
@@ -732,7 +776,66 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
               />
             </div>
           ) : (
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden">
+              <div className="md:hidden flex-shrink-0 p-3 border-b border-gray-200 bg-white">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Content hierarchy</p>
+                  {(selBoard || selClass || selStream || selSubject) && (
+                    <button
+                      type="button"
+                      onClick={() => { setSelSubject(null); setSelStream(null); setSelClass(null); setSelBoard(null); setEditView(null); }}
+                      className="text-[11px] text-violet-600 font-medium"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={selBoard || ''}
+                    onChange={(e) => { const value = e.target.value || null; setSelBoard(value); setSelClass(null); setSelStream(null); setSelSubject(null); }}
+                    className="h-10 min-w-0 px-2 rounded-lg text-xs text-gray-700 bg-gray-50 border border-gray-200 outline-none focus:border-violet-400"
+                    aria-label="Select board"
+                    data-testid="mobile-select-board"
+                  >
+                    <option value="">Board</option>
+                    {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                  <select
+                    value={selClass || ''}
+                    onChange={(e) => { const value = e.target.value || null; setSelClass(value); setSelStream(null); setSelSubject(null); }}
+                    disabled={!selBoard}
+                    className="h-10 min-w-0 px-2 rounded-lg text-xs text-gray-700 bg-gray-50 border border-gray-200 outline-none focus:border-violet-400 disabled:opacity-50"
+                    aria-label={`Select ${classPlaceholder.toLowerCase()}`}
+                    data-testid="mobile-select-class"
+                  >
+                    <option value="">{classPlaceholder}</option>
+                    {filteredClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <select
+                    value={selStream || ''}
+                    onChange={(e) => { const value = e.target.value || null; setSelStream(value); setSelSubject(null); }}
+                    disabled={!selClass}
+                    className="h-10 min-w-0 px-2 rounded-lg text-xs text-gray-700 bg-gray-50 border border-gray-200 outline-none focus:border-violet-400 disabled:opacity-50"
+                    aria-label={`Select ${streamPlaceholder.toLowerCase()}`}
+                    data-testid="mobile-select-stream"
+                  >
+                    <option value="">{streamPlaceholder}</option>
+                    {filteredStreams.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                  <select
+                    value={selSubject || ''}
+                    onChange={(e) => setSelSubject(e.target.value || null)}
+                    disabled={!selStream}
+                    className="h-10 min-w-0 px-2 rounded-lg text-xs text-gray-700 bg-gray-50 border border-gray-200 outline-none focus:border-violet-400 disabled:opacity-50"
+                    aria-label="Select subject"
+                    data-testid="mobile-select-subject"
+                  >
+                    <option value="">Subject</option>
+                    {baseSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              </div>
               <HierarchyTree
                 boards={boards} filteredClasses={filteredClasses} filteredStreams={filteredStreams}
                 selBoard={selBoard} setSelBoard={setSelBoard} selClass={selClass} setSelClass={setSelClass}
@@ -742,7 +845,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                 onDelete={handleDelete} onCreateBoard={handleCreateBoard} onCreateClass={handleCreateClass} onCreateStream={handleCreateStream}
                 onUpdateStatus={handleUpdateHierarchyStatus}
               />
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 min-w-0 min-h-0 overflow-y-auto">
                 {!selStream && !selSubject ? (
                   <div className="flex items-center justify-center h-full">
                     <div className="text-center max-w-md">
@@ -902,6 +1005,8 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                       chapterAssets={chapterAssets}
                       generatingNotes={generatingNotes}
                       onGenerateNotes={handleGenerateNotes} onDeleteChapter={handleDeleteChapter}
+                      onFormatChapter={handleFormatChapter}
+                      formattingChapters={formattingChapters}
                       onChangeChapterStatus={handleChapterStatusChange}
                       selectedIds={selectedChapterIds}
                       onToggleSelect={toggleChapterSelect}

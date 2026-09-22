@@ -45,6 +45,10 @@ import {
   currentQuotaMinutePeriod,
   trustedEdgeRateLimitUsage,
 } from '../services/anonymous';
+import {
+  currentQuotaMonthPeriod,
+  monthlyChatLimit,
+} from '../services/consumer-referrals';
 import type { Env } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -538,6 +542,8 @@ interface ChatRequestClaim {
   period?: string;
   is_anon?: number;
   quota_reserved?: number;
+  monthly_quota_reserved?: number;
+  monthly_period?: string;
   session_id: string | null;
   response_content: string | null;
   response_metadata: string | null;
@@ -548,7 +554,8 @@ async function getChatRequestClaim(
   requestId: string,
 ): Promise<ChatRequestClaim | null> {
   return d1.prepare(
-    `SELECT user_id, status, session_id, response_content, response_metadata
+    `SELECT user_id, status, session_id, response_content, response_metadata,
+            quota_reserved, monthly_quota_reserved, monthly_period
      FROM chat_request_claims
      WHERE request_id = ? AND expires_at > ?`,
   ).bind(requestId, Math.floor(Date.now() / 1000)).first<ChatRequestClaim>();
@@ -574,18 +581,23 @@ async function insertChatRequestClaim(
   isAnon: boolean,
   quotaReserved: boolean,
   period = currentQuotaMinutePeriod(),
+  monthlyQuotaReserved = false,
+  monthlyPeriod = currentQuotaMonthPeriod(),
 ): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
   const result = await d1.prepare(`
     INSERT OR IGNORE INTO chat_request_claims
-      (request_id, user_id, period, is_anon, quota_reserved, status, created_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?)
+      (request_id, user_id, period, is_anon, quota_reserved,
+       monthly_quota_reserved, monthly_period, status, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)
   `).bind(
     requestId,
     userId,
     period,
     isAnon ? 1 : 0,
     quotaReserved ? 1 : 0,
+    monthlyQuotaReserved ? 1 : 0,
+    monthlyPeriod,
     now,
     now + 24 * 3600,
   ).run();
@@ -636,6 +648,7 @@ async function releaseClaimQuotaReservation(
 ): Promise<void> {
   if (!requestId) {
     await releaseQuotaReservation(d1, userId, isAnon);
+    if (!isAnon) await releaseAuthMonthlyQuota(d1, userId);
     return;
   }
   const now = Math.floor(Date.now() / 1000);
@@ -658,8 +671,18 @@ async function releaseClaimQuotaReservation(
             WHERE request_id = ? AND user_id = ? AND status = 'reserved'
           )
       `).bind(now, userId, requestId, userId);
+  const monthlyStatement = d1.prepare(`
+    UPDATE monthly_quota_usage
+    SET count = count - 1, updated_at = ?
+    WHERE user_id = ? AND count > 0
+      AND period = (
+        SELECT monthly_period FROM chat_request_claims
+        WHERE request_id = ? AND user_id = ? AND monthly_quota_reserved = 1
+      )
+  `).bind(now, userId, requestId, userId);
   await d1.batch([
     quotaStatement,
+    ...(isAnon ? [] : [monthlyStatement]),
     d1.prepare(
       `DELETE FROM chat_request_claims
        WHERE request_id = ? AND user_id = ? AND status = 'reserved'`,
@@ -799,6 +822,54 @@ function waitForInFlightChatRequest(
 // ─────────────────────────────────────────────────────────────────────────────
 // Quota helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Reserve the restored authenticated monthly allowance. This is separate from
+ * the minute bucket so burst protection and the product entitlement cannot
+ * reset each other.
+ */
+export async function reserveAuthMonthlyQuota(
+  d1: D1Database,
+  userId: string,
+  tier: string,
+  referralUpgradeUntil: number | null,
+  role: string,
+  period = currentQuotaMonthPeriod(),
+): Promise<{ allowed: boolean; count: number; limit: number }> {
+  if (role === 'admin' || role === 'staff') {
+    return { allowed: true, count: 0, limit: 999_999 };
+  }
+  const limit = monthlyChatLimit(tier, referralUpgradeUntil);
+  const now = Math.floor(Date.now() / 1000);
+  const result = await d1.prepare(`
+    INSERT INTO monthly_quota_usage (user_id, period, count, updated_at)
+    VALUES (?, ?, 1, ?)
+    ON CONFLICT (user_id, period) DO UPDATE
+      SET count = monthly_quota_usage.count + 1, updated_at = excluded.updated_at
+      WHERE monthly_quota_usage.count < ?
+    RETURNING count
+  `).bind(userId, period, now, limit).first<{ count: number }>();
+  if (!result) {
+    const current = await d1.prepare(
+      'SELECT count FROM monthly_quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(userId, period).first<{ count: number }>();
+    return { allowed: false, count: current?.count ?? limit, limit };
+  }
+  return { allowed: true, count: result.count - 1, limit };
+}
+
+export async function releaseAuthMonthlyQuota(
+  d1: D1Database,
+  userId: string,
+  period = currentQuotaMonthPeriod(),
+): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  await d1.prepare(`
+    UPDATE monthly_quota_usage
+    SET count = count - 1, updated_at = ?
+    WHERE user_id = ? AND period = ? AND count > 0
+  `).bind(now, userId, period).run();
+}
 
 /**
  * Atomically reserve one quota slot for an authenticated user BEFORE invoking the LLM.
@@ -1767,6 +1838,7 @@ chatRouter.post('/stream', async (c) => {
   let authedUserId: string | null = null;
   let userTier = 'free';
   let userRole = 'student';
+  let referralUpgradeUntil: number | null = null;
   let isAnon   = true;
 
   const authStart = Date.now();
@@ -1779,12 +1851,18 @@ chatRouter.post('/stream', async (c) => {
         subscriptionTier: string | null;
         role: string | null;
         deletedAt: number | null;
+        referralUpgradeUntil: number | null;
       } | undefined;
       let sessionValid = false;
       try {
         const db = createDb(c.env.DB);
         row = await db
-          .select({ subscriptionTier: users.subscriptionTier, role: users.role, deletedAt: users.deletedAt })
+          .select({
+            subscriptionTier: users.subscriptionTier,
+            role: users.role,
+            deletedAt: users.deletedAt,
+            referralUpgradeUntil: users.referralUpgradeUntil,
+          })
           .from(users)
           .where(eq(users.id, payload.sub))
           .get();
@@ -1806,6 +1884,7 @@ chatRouter.post('/stream', async (c) => {
         userId       = payload.sub;
         userTier     = row.subscriptionTier ?? 'free';
         userRole     = row.role ?? 'student';
+        referralUpgradeUntil = row.referralUpgradeUntil ?? null;
         isAnon       = false;
       } else {
         userId = await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
@@ -1829,6 +1908,13 @@ chatRouter.post('/stream', async (c) => {
   let quotaLimit: number;
   let quotaAllowed: boolean;
   let ownsQuotaReservation = false;
+  let monthlyQuotaExhausted = false;
+  let monthlyQuotaReservation: {
+    allowed: boolean;
+    count: number;
+    limit: number;
+  } | null = null;
+  let ownsMonthlyQuotaReservation = false;
 
   const quotaStart = Date.now();
   const reservationPeriod = currentQuotaMinutePeriod();
@@ -1837,9 +1923,49 @@ chatRouter.post('/stream', async (c) => {
       c.req.raw,
       c.env.EDGE_SHARED_SECRET,
     );
-    const existingClaim = clientRequestId
-      ? await getChatRequestClaim(c.env.DB, clientRequestId)
-      : null;
+    let existingClaim: ChatRequestClaim | null = null;
+    let quotaReservation: {
+      allowed: boolean;
+      count: number;
+      limit: number;
+    } | null = null;
+
+    if (edgeRateLimitUsage) {
+      // The edge already owns the atomic quota decision. Only the optional
+      // idempotency claim needs a D1 read on this path.
+      existingClaim = clientRequestId
+        ? await getChatRequestClaim(c.env.DB, clientRequestId)
+        : null;
+      if (!isAnon) {
+        monthlyQuotaReservation = await reserveAuthMonthlyQuota(
+          c.env.DB,
+          userId,
+          userTier,
+          referralUpgradeUntil,
+          userRole,
+        );
+      }
+    } else {
+      // These reads do not depend on one another for a fresh request. Running
+      // them together removes one cross-region D1 round trip from the
+      // first-token path. If the request key already exists, release the
+      // temporary quota reservation before replaying/waiting below.
+      const claimPromise = clientRequestId
+        ? getChatRequestClaim(c.env.DB, clientRequestId)
+        : Promise.resolve(null);
+      const quotaPromise = !isAnon
+        ? reserveAuthQuota(c.env.DB, userId, userTier, userRole, reservationPeriod)
+        : reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId, reservationPeriod);
+      const monthlyPromise = !isAnon
+        ? reserveAuthMonthlyQuota(c.env.DB, userId, userTier, referralUpgradeUntil, userRole)
+        : Promise.resolve(null);
+      [existingClaim, quotaReservation, monthlyQuotaReservation] = await Promise.all([
+        claimPromise,
+        quotaPromise,
+        monthlyPromise,
+      ]);
+    }
+
     if (existingClaim && existingClaim.user_id !== userId) {
       c.header('X-Failure-Stage', 'request_validation');
       return c.json({
@@ -1851,9 +1977,25 @@ chatRouter.post('/stream', async (c) => {
     }
 
     if (existingClaim?.status === 'completed') {
+      if (quotaReservation?.allowed && userRole !== 'admin' && userRole !== 'staff') {
+        await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
+          .catch(releaseErr => console.error('[chat] duplicate claim quota release failed:', releaseErr));
+      }
+      if (monthlyQuotaReservation?.allowed && !isAnon && userRole !== 'admin' && userRole !== 'staff') {
+        await releaseAuthMonthlyQuota(c.env.DB, userId)
+          .catch(releaseErr => console.error('[chat] duplicate monthly quota release failed:', releaseErr));
+      }
       return replayCompletedChatRequest(existingClaim, serverRequestId);
     }
     if (existingClaim?.status === 'cancelled') {
+      if (quotaReservation?.allowed && userRole !== 'admin' && userRole !== 'staff') {
+        await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
+          .catch(releaseErr => console.error('[chat] duplicate claim quota release failed:', releaseErr));
+      }
+      if (monthlyQuotaReservation?.allowed && !isAnon && userRole !== 'admin' && userRole !== 'staff') {
+        await releaseAuthMonthlyQuota(c.env.DB, userId)
+          .catch(releaseErr => console.error('[chat] duplicate monthly quota release failed:', releaseErr));
+      }
       return c.json({
         detail: 'This chat request was cancelled.',
         error_code: 'chat_request_cancelled',
@@ -1863,6 +2005,14 @@ chatRouter.post('/stream', async (c) => {
     }
 
     if (existingClaim) {
+      if (quotaReservation?.allowed && userRole !== 'admin' && userRole !== 'staff') {
+        await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
+          .catch(releaseErr => console.error('[chat] duplicate claim quota release failed:', releaseErr));
+      }
+      if (monthlyQuotaReservation?.allowed && !isAnon && userRole !== 'admin' && userRole !== 'staff') {
+        await releaseAuthMonthlyQuota(c.env.DB, userId)
+          .catch(releaseErr => console.error('[chat] duplicate monthly quota release failed:', releaseErr));
+      }
       return waitForInFlightChatRequest(
         c.env.DB,
         clientRequestId!,
@@ -1874,15 +2024,28 @@ chatRouter.post('/stream', async (c) => {
       quotaCount = edgeRateLimitUsage.count;
       quotaLimit = edgeRateLimitUsage.limit;
     } else {
-      if (!isAnon) {
-        ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-          await reserveAuthQuota(c.env.DB, userId, userTier, userRole, reservationPeriod));
-      } else {
-        ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } =
-          await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId, reservationPeriod));
-      }
+      if (!quotaReservation) throw new Error('Quota reservation was not established');
+      ({ allowed: quotaAllowed, count: quotaCount, limit: quotaLimit } = quotaReservation);
       ownsQuotaReservation = quotaAllowed && userRole !== 'admin' && userRole !== 'staff';
     }
+
+    if (quotaAllowed && !isAnon && monthlyQuotaReservation && !monthlyQuotaReservation.allowed) {
+      if (ownsQuotaReservation) {
+        await releaseQuotaReservation(c.env.DB, userId, false, reservationPeriod);
+        ownsQuotaReservation = false;
+      }
+      quotaAllowed = false;
+      monthlyQuotaExhausted = true;
+      quotaCount = monthlyQuotaReservation.count;
+      quotaLimit = monthlyQuotaReservation.limit;
+    }
+    ownsMonthlyQuotaReservation = Boolean(
+      quotaAllowed
+      && !isAnon
+      && monthlyQuotaReservation?.allowed
+      && userRole !== 'admin'
+      && userRole !== 'staff',
+    );
 
     if (quotaAllowed && clientRequestId) {
       const inserted = await insertChatRequestClaim(
@@ -1892,11 +2055,17 @@ chatRouter.post('/stream', async (c) => {
         isAnon,
         ownsQuotaReservation,
         reservationPeriod,
+        ownsMonthlyQuotaReservation,
+        currentQuotaMonthPeriod(),
       );
       if (!inserted) {
         if (ownsQuotaReservation) {
           await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod);
           ownsQuotaReservation = false;
+        }
+        if (ownsMonthlyQuotaReservation) {
+          await releaseAuthMonthlyQuota(c.env.DB, userId);
+          ownsMonthlyQuotaReservation = false;
         }
         const racedClaim = await getChatRequestClaim(c.env.DB, clientRequestId);
         if (!racedClaim || racedClaim.user_id !== userId) {
@@ -1930,6 +2099,11 @@ chatRouter.post('/stream', async (c) => {
         .catch(deleteErr => console.error('[chat] claim compensation failed:', deleteErr));
       ownsQuotaReservation = false;
     }
+    if (ownsMonthlyQuotaReservation) {
+      await releaseAuthMonthlyQuota(c.env.DB, userId)
+        .catch(releaseErr => console.error('[chat] monthly quota compensation failed:', releaseErr));
+      ownsMonthlyQuotaReservation = false;
+    }
     c.header('X-Failure-Stage', 'quota');
     return c.json({
       detail: 'Chat quota service is temporarily unavailable. Please try again.',
@@ -1940,11 +2114,17 @@ chatRouter.post('/stream', async (c) => {
   }
 
   if (!quotaAllowed) {
+    if (monthlyQuotaReservation?.allowed && !isAnon && userRole !== 'admin' && userRole !== 'staff') {
+      await releaseAuthMonthlyQuota(c.env.DB, userId)
+        .catch(releaseErr => console.error('[chat] monthly quota release after minute limit failed:', releaseErr));
+    }
     c.header('X-Failure-Stage', 'quota');
     return c.json(
       {
-        detail: 'Rate limit reached. Please wait a minute before sending another message.',
-        error_code: 'chat_rpm_limit',
+        detail: monthlyQuotaExhausted
+          ? 'You have used this month’s chat allowance. Redeem referral points or try again next month.'
+          : 'Rate limit reached. Please wait a minute before sending another message.',
+        error_code: monthlyQuotaExhausted ? 'chat_monthly_limit' : 'chat_rpm_limit',
         quota: { used: quotaCount, limit: quotaLimit },
         request_id: serverRequestId,
         failure_stage: 'quota',

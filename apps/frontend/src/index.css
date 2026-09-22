@@ -1290,6 +1290,8 @@
 .mdx-editor-light [class*="_editorRoot"] { height: 100%; background: #ffffff !important; color: #1a1a1a !important; display: flex; flex-direction: column; }
 .mdx-editor-light [class*="_contentEditable"] { flex: 1; min-height: 200px; background: #ffffff !important; color: #1a1a1a !important; }
 .mdx-editor-light [class*="_toolbarRoot"] { background: #f4f4f5 !important; border-bottom: 1px solid rgba(0,0,0,0.09) !important; flex-shrink: 0; }
+.mdx-editor-light [class*="_toolbarRoot"] { overflow-x: auto; max-width: 100%; }
+.mdx-editor-light [class*="_toolbarContents"] { min-width: max-content; }
 .mdx-editor-light [class*="_toolbarToggleItem"],
 .mdx-editor-light button[class*="_toolbarButton"] { color: rgba(30,30,30,0.65) !important; }
 .mdx-editor-light [class*="_toolbarToggleItem"]:hover,
@@ -1314,6 +1316,13 @@
 .cms-editor-content img { width: 100%; height: auto; border-radius: 6px; margin: 0.5rem 0; }
 .cms-editor-content [data-editor-block-type="image"] { margin: 0; }
 .cms-preview-content img { width: 100%; height: auto; border-radius: 6px; margin: 0.5rem 0; }
+
+@media (max-width: 767px) {
+  .cms-editor-content { padding: 1rem 1.1rem; font-size: 0.9rem; }
+  .cms-editor-content h2 { font-size: 1.15rem; }
+  .cms-editor-content h3 { font-size: 1rem; }
+  .mdx-editor-light [class*="_toolbarRoot"] { scrollbar-width: thin; }
+}
 
 /* ── Mobile viewport & layout helpers ─────────────────────────────────────── */
 /* AppLayout main: adds bottom clearance above the fixed BottomNav (64px) plus
